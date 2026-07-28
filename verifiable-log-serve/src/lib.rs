@@ -49,6 +49,9 @@ pub mod server;
 
 pub use account::{verify_account, verify_account_in_bundle, AccountKeyVersion, AccountReport};
 pub use bundle::{AccountManifest, BinaryManifest, Bundle, Manifest, PublicKeyDoc};
+// Re-exported so consumers that pin the log key (pollis-core) can assert its
+// length without depending on `verifiable-log` directly.
+pub use verifiable_log::{STH_PUB_LEN, STH_SIG_LEN};
 pub use error::{Result, ServeError};
 pub use group::{verify_group, verify_group_in_bundle, GroupCommit, GroupReport};
 pub use layout::{

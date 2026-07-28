@@ -6,7 +6,7 @@
 //! as the `monitor` CLI does). Also exercises fork/regression rejection,
 //! tamper detection, and keygen round-trip.
 
-use ed25519_dalek::SigningKey;
+use verifiable_log::SigningKey;
 use verifiable_log::{
     is_equivocation, verify_consistency_proof, verify_inclusion_proof, verifying_key_from_hex,
     UniqueDataInvariant, VerifiableLog,
@@ -179,7 +179,7 @@ fn monitor_verify(bundle: &Bundle) -> bool {
 }
 
 fn signing_key() -> SigningKey {
-    SigningKey::from_bytes(&KEY)
+    SigningKey::from_seed(&KEY.into())
 }
 
 #[tokio::test]
@@ -441,7 +441,7 @@ fn keygen_output_roundtrips() {
     let g = keys::generate();
     let secret = hex::decode(&g.secret_hex).unwrap();
     let arr: [u8; 32] = secret.as_slice().try_into().unwrap();
-    let signing_key = SigningKey::from_bytes(&arr);
+    let signing_key = SigningKey::from_seed(&arr.into());
 
     // An STH signed by the emitted private key verifies against the emitted
     // public key.

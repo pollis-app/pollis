@@ -18,7 +18,7 @@ not reimplement any of it. It adds only: a DB reader, the commit-log tenant
    The auth token is read from the environment and never logged.
 2. **Appends every commit** to a `verifiable_log::VerifiableLog` with the
    `CommitLogInvariant` registered for the `mls-commit-log` tenant.
-3. **Signs Signed Tree Heads** with an Ed25519 key and **emits a JSON bundle**
+3. **Signs Signed Tree Heads** with an ML-DSA-44 key and **emits a JSON bundle**
    that the `monitor` CLI consumes byte-for-byte.
 
 ## Canonical leaf encoding (frozen contract extension)
@@ -78,6 +78,10 @@ clock**, so output is deterministic and testable.
 
 ```bash
 # Mint a throwaway dev keypair (hex). Real key custody is a later slice.
+# `VLOG_SIGNING_KEY` is still 32 hex-encoded bytes after the move to
+# ML-DSA-44 (#668): an ML-DSA-44 private key *is* its 32-byte seed, so key
+# custody is byte-identical to the Ed25519 era. Only the public key (1312
+# bytes) and the signature (2420) grew.
 cargo run -p verifiable-log-builder --bin builder -- keygen
 
 # Build a signed bundle from a local fixture DB (no network).
@@ -91,7 +95,7 @@ TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... VLOG_SIGNING_KEY=... \
   build --out bundle.json --timestamp 1700000000000
 
 # Build the released-binaries tree (binary transparency) from a JSON file of
-# BinaryRecords — its own tree, STH signed under the `…:sth:v1:binaries` context.
+# BinaryRecords — its own tree, STH signed under the `…:sth:v2:binaries` context.
 VLOG_SIGNING_KEY=<32-byte hex> \
   cargo run -p verifiable-log-builder --bin builder -- \
   build-binaries --binaries-in records.json --out binaries-bundle.json \
@@ -107,8 +111,8 @@ neither is present the build **refuses** rather than inventing a key.
 
 The builder now emits **three** tenants, each its own domain-separated tree: the
 `mls-commit-log` tenant (above), the `account-key` tenant (`--account-out`, signed
-under `…:sth:v1:account-keys`), and the `binaries` tenant (`build-binaries`, signed
-under `…:sth:v1:binaries`). See the [`binaries`](src/binaries.rs) module for the
+under `…:sth:v2:account-keys`), and the `binaries` tenant (`build-binaries`, signed
+under `…:sth:v2:binaries`). See the [`binaries`](src/binaries.rs) module for the
 `BinaryRecord` leaf encoding and the `BinaryInvariant` (no fork, monotonic release
 tags, payload/signed pairing).
 

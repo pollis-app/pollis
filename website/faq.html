@@ -322,7 +322,7 @@
             <p>Honest caveat: this proves the app matches what Pollis published, not yet that those bytes were built from the public source. Letting outsiders rebuild it byte-for-byte and confirm the match is still being worked on.</p>
           </div>
           <div class="dev">
-            <p>Binary transparency (shipped). Each released artifact's hashes plus its build recipe are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a pinned Ed25519 key (<code>175ebfef…7148</code>). <code>pollis-verify release &lt;tag&gt;</code> checks a build against the log, trusting only that key rather than Pollis's word.</p>
+            <p>Binary transparency (shipped). Each released artifact's hashes plus its build recipe are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a single pinned log key (post-quantum <strong>ML-DSA-44</strong>; the key itself is mid-rotation and is published on the <a href="artifacts.html">artifacts page</a>). <code>pollis-verify release &lt;tag&gt;</code> checks a build against the log, trusting only that key rather than Pollis's word.</p>
             <p>Not yet shipped: byte-for-byte reproducible builds, a second Pollis-independent signature anchor, and an in-app "verify this build" button.</p>
           </div>
         </div>

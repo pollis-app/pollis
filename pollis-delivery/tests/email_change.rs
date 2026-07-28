@@ -4,7 +4,7 @@
 //! Unlike the signup bootstrap (OTP-session-gated), these are DEVICE-SIGNED: the
 //! user is already authenticated, so each request carries the four `X-Pollis-*`
 //! signature headers and is verified against the seeded `user_device`
-//! `mls_signature_pub`. The OTP only proves control of the NEW mailbox.
+//! `mls_signature_pub_pq`. The OTP only proves control of the NEW mailbox.
 //!
 //! Coverage: the happy path, OTP wrong-code lockout, and the cross-user binding
 //! (a different signed user can't consume someone else's pending change).
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::Engine as _;
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use ml_dsa::{Keypair, MlDsa44, Signer, SigningKey, VerifyingKey};
 use http_body_util::BodyExt as _;
 use pollis_delivery::auth::canonical_message;
 use pollis_delivery::db::Db;
@@ -43,6 +43,7 @@ CREATE TABLE user_device (\
   cert_issued_at TEXT,\
   cert_identity_version INTEGER,\
   mls_signature_pub BLOB,\
+  mls_signature_pub_pq BLOB,\
   revoked_at TEXT\
 );";
 
@@ -50,10 +51,10 @@ fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
 }
 
-fn gen_signing_key() -> SigningKey {
-    let mut secret = [0u8; 32];
-    OsRng.fill_bytes(&mut secret);
-    SigningKey::from_bytes(&secret)
+fn gen_signing_key() -> SigningKey<MlDsa44> {
+    let mut seed = [0u8; 32];
+    OsRng.fill_bytes(&mut seed);
+    SigningKey::<MlDsa44>::from_seed(&seed.into())
 }
 
 async fn fresh_db() -> Arc<Db> {
@@ -79,7 +80,7 @@ fn dev_state(db: Arc<Db>) -> AppState {
 }
 
 /// Seed a `users` row + a live device with `vk` as its signing key.
-async fn seed_user(db: &Db, user_id: &str, email: &str, device_id: &str, vk: &VerifyingKey) {
+async fn seed_user(db: &Db, user_id: &str, email: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
     let conn = db.conn().unwrap();
     conn.execute(
         "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
@@ -88,8 +89,8 @@ async fn seed_user(db: &Db, user_id: &str, email: &str, device_id: &str, vk: &Ve
     .await
     .unwrap();
     conn.execute(
-        "INSERT INTO user_device (device_id, user_id, mls_signature_pub) VALUES (?1, ?2, ?3)",
-        libsql::params![device_id, user_id, vk.to_bytes().to_vec()],
+        "INSERT INTO user_device (device_id, user_id, mls_signature_pub_pq) VALUES (?1, ?2, ?3)",
+        libsql::params![device_id, user_id, vk.encode().to_vec()],
     )
     .await
     .unwrap();
@@ -116,12 +117,12 @@ fn signed_request(
     path: &str,
     user_id: &str,
     device_id: &str,
-    signing_key: &SigningKey,
+    signing_key: &SigningKey<MlDsa44>,
     body: &[u8],
 ) -> Request<Body> {
     let ts = now();
     let msg = canonical_message("POST", path, ts, body);
-    let sig = b64(&signing_key.sign(&msg).to_bytes());
+    let sig = b64(&signing_key.sign(&msg).encode());
     Request::builder()
         .method("POST")
         .uri(path)
@@ -139,7 +140,7 @@ async fn send_signed(
     path: &str,
     user_id: &str,
     device_id: &str,
-    sk: &SigningKey,
+    sk: &SigningKey<MlDsa44>,
     body: serde_json::Value,
 ) -> StatusCode {
     let bytes = serde_json::to_vec(&body).unwrap();

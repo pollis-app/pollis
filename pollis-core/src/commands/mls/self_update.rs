@@ -38,7 +38,7 @@ use crate::error::Result;
 use crate::state::AppState;
 
 use super::group_state::load_group_with_signer;
-use super::provider::{stored_group_ciphersuite, with_suite_provider, MlsProvider, CS_CLASSIC};
+use super::provider::{stored_group_ciphersuite, MlsProvider, PollisProvider};
 use super::reconcile::{publish_staged_commit, PublishOutcome};
 
 /// How long a device's leaf may go without rotating before [`self_update_if_due`]
@@ -191,12 +191,10 @@ pub async fn self_update_group(
             Some(db) => db,
             None => return Ok(false),
         };
-        let suite = stored_group_ciphersuite(db.conn(), conversation_id).unwrap_or(CS_CLASSIC);
         let generation = super::generation::local_generation(db.conn(), conversation_id);
-        with_suite_provider!(db.conn(), suite, |provider| {
-            stage_self_update(&provider, conversation_id, generation)
-        })?
-        .map(|staged| (generation, staged))
+        let provider = PollisProvider::new(db.conn());
+        stage_self_update(&provider, conversation_id, generation)?
+            .map(|staged| (generation, staged))
     };
     let (generation, (epoch_before, commit_bytes, group_info_bytes)) = match staged {
         Some(v) => v,

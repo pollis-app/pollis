@@ -14,9 +14,7 @@ use crate::error::Result;
 use crate::state::AppState;
 
 use super::key_packages::replenish_key_packages;
-use super::provider::{
-    welcome_ciphersuite, with_suite_provider, MlsProvider,
-};
+use super::provider::{welcome_ciphersuite, MlsProvider, PollisProvider};
 
 /// Internal: deserialise a TLS-encoded `MlsMessageOut` (welcome wire format)
 /// and persist the resulting MLS group state locally.
@@ -53,17 +51,17 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
     };
 
     // The joiner has no local group yet, so the suite comes off the Welcome
-    // itself. An unreadable/unknown code point is a hard failure, never a
-    // classic fallback: `PollisProvider` panics on a hybrid Welcome.
-    let suite = welcome_ciphersuite(&welcome).ok_or_else(|| {
+    // itself. An unreadable or unknown code point is a hard failure, never a
+    // classic fallback — joining under the wrong suite is not a downgrade, it
+    // is a group this device can never read.
+    welcome_ciphersuite(&welcome).ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!(
             "welcome names a ciphersuite this build does not implement"
         ))
     })?;
 
-    let raw_group_id = with_suite_provider!(db.conn(), suite, |provider| {
-        join_from_welcome(&provider, welcome)
-    })?;
+    let provider = PollisProvider::new(db.conn());
+    let raw_group_id = join_from_welcome(&provider, welcome)?;
     Ok(super::generation::split_mls_group_id(&raw_group_id))
 }
 

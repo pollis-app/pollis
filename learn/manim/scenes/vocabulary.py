@@ -48,6 +48,9 @@ config.background_color = BG
 
 # A real Ed25519 public key from the repo (the pinned transparency-log key), used
 # only to show what "a very large number, written in hex" actually looks like.
+# STALE: this is the log's retired Ed25519 key. The log now signs with
+# ML-DSA-44 (#668) and the new 2624-hex-char key does not fit this layout —
+# these scenes need re-rendering with an elided key once rotation completes.
 REAL_KEY = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
 
 

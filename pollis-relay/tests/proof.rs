@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::{Keypair, MlDsa44, SigningKey};
 use pollis_relay::client::{ClientIdentity, RelayClient};
 use pollis_relay::circuit::{CircuitFactory, Hop, SingleHopFactory};
 use pollis_relay::policy::{FinalAction, OverlayMode, PlannedRoute, RoutingPolicy};
@@ -39,15 +39,23 @@ const DEVICE: &str = "d_test";
 const ORIGIN_NAME: &str = "origin.test";
 const ISSUED_AT: u64 = 1_700_000_000;
 
-/// The device's Ed25519 signing key (what signs the handshake).
-fn client_signing_key() -> SigningKey {
-    SigningKey::from_bytes(&[7u8; 32])
+/// The device's classic leaf key. Bound by the cert and presented in the frame,
+/// but nothing verifies under it — a fixed pattern is enough.
+const DEVICE_ED_PUB: [u8; 32] = [7u8; 32];
+
+/// The device's ML-DSA-44 signing key (what signs the handshake).
+fn client_signing_key() -> SigningKey<MlDsa44> {
+    SigningKey::<MlDsa44>::from_seed(&[7u8; 32].into())
 }
 
 /// The user's account identity key — the test's "injected known account
-/// identity" (task §2). It certifies the device key into a cert chain.
-fn account_key() -> SigningKey {
-    SigningKey::from_bytes(&[3u8; 32])
+/// identity" (task §2). It certifies the device keys into a cert chain.
+fn account_key() -> SigningKey<MlDsa44> {
+    SigningKey::<MlDsa44>::from_seed(&[3u8; 32].into())
+}
+
+fn pq_pub(k: &SigningKey<MlDsa44>) -> Vec<u8> {
+    k.verifying_key().encode().to_vec()
 }
 
 /// A full client identity: device signing key + a valid cert chain minted by the
@@ -57,11 +65,18 @@ fn client_identity() -> Arc<ClientIdentity> {
     let cert = DeviceCertMaterial::mint(
         &account_key(),
         DEVICE,
-        &device.verifying_key().to_bytes(),
+        &DEVICE_ED_PUB,
+        &pq_pub(&device),
         1,
         ISSUED_AT,
     );
-    Arc::new(ClientIdentity::new(USER, DEVICE, device, cert))
+    Arc::new(ClientIdentity::new(
+        USER,
+        DEVICE,
+        DEVICE_ED_PUB,
+        device,
+        cert,
+    ))
 }
 
 // ---- test infrastructure ---------------------------------------------------
@@ -307,18 +322,29 @@ async fn t3_allowlist_rejects_unlisted_host() {
 fn t4_handshake_verification_unit() {
     let account = account_key();
     let device = client_signing_key();
-    let cert = DeviceCertMaterial::mint(&account, DEVICE, &device.verifying_key().to_bytes(), 1, ISSUED_AT);
+    let cert = DeviceCertMaterial::mint(
+        &account,
+        DEVICE,
+        &DEVICE_ED_PUB,
+        &pq_pub(&device),
+        1,
+        ISSUED_AT,
+    );
     let now = proto::now_unix();
 
     // Valid: signature under the presented device key + a cert chaining it to the
     // account. Verified OFFLINE — no resolver.
-    let good = proto::sign_handshake(&device, USER, DEVICE, cert.clone(), now, [1u8; 32]);
+    let good = proto::sign_handshake(&device, USER, DEVICE, DEVICE_ED_PUB, cert.clone(), now, [1u8; 32]);
     let v = proto::verify_handshake(&good, now).unwrap();
     assert_eq!(v.user_id, USER);
-    assert_eq!(v.account_id_pub, account.verifying_key().to_bytes());
+    assert_eq!(
+        v.account_fingerprint,
+        proto::account_fingerprint(&pq_pub(&account))
+    );
 
     // Expired (outside the skew window).
-    let expired = proto::sign_handshake(&device, USER, DEVICE, cert.clone(), now - 10_000, [1u8; 32]);
+    let expired =
+        proto::sign_handshake(&device, USER, DEVICE, DEVICE_ED_PUB, cert.clone(), now - 10_000, [1u8; 32]);
     assert_eq!(proto::verify_handshake(&expired, now).unwrap_err(), RejectReason::Unauthorized);
 
     // Forged: flip a signature byte.
@@ -362,15 +388,22 @@ async fn t4_relay_accepts_valid_rejects_forged() {
     // Forged: the presented device key is NOT the one the cert binds (the cert
     // was minted for a different signing key), so the offline chain fails →
     // rejected, no dial.
-    let bad_device = SigningKey::from_bytes(&[9u8; 32]);
+    let bad_device = SigningKey::<MlDsa44>::from_seed(&[9u8; 32].into());
     let wrong_cert = DeviceCertMaterial::mint(
         &account_key(),
         DEVICE,
-        &SigningKey::from_bytes(&[8u8; 32]).verifying_key().to_bytes(),
+        &DEVICE_ED_PUB,
+        &pq_pub(&SigningKey::<MlDsa44>::from_seed(&[8u8; 32].into())),
         1,
         ISSUED_AT,
     );
-    let bad_identity = Arc::new(ClientIdentity::new(USER, DEVICE, bad_device, wrong_cert));
+    let bad_identity = Arc::new(ClientIdentity::new(
+        USER,
+        DEVICE,
+        DEVICE_ED_PUB,
+        bad_device,
+        wrong_cert,
+    ));
     let err = RelayClient::connect(
         relay.addr,
         &relay.cert,

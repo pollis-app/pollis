@@ -56,7 +56,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 
 ### 4. pollis-verify (auditor CLI)
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)
-- **Pipeline:** `.github/workflows/verifier-release.yml` — triggered by a `pollis-verify-v*` tag push (a `workflow_dispatch` builds run artifacts only, no Release). Builds the standalone verifier binaries, each with a per-asset `.sha256` checksum file, with the **pinned Ed25519 public key** in the release body. Lets any analyst independently verify the transparency log.
+- **Pipeline:** `.github/workflows/verifier-release.yml` — triggered by a `pollis-verify-v*` tag push (a `workflow_dispatch` builds run artifacts only, no Release). Builds the standalone verifier binaries, each with a per-asset `.sha256` checksum file, with the **pinned log public key** in the release body (ML-DSA-44 since #668, and being rotated — while the rotation is in flight there is no key to pin and verifiers report *unverified*). Lets any analyst independently verify the transparency log.
 - **Ships to:** GitHub release assets. Subcommands: `remote` / `group` / `account` / `release` (verify the whole log, a conversation's commit chain, a user's key history, or a released version's binaries).
 
 ### (in development) Mobile app
@@ -74,6 +74,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 - **Rotating a DS secret** (Turso token, LiveKit key, etc. — no code change): update Doppler, then run the deploy workflow with **`force_restart: true`**. CF Containers do **not** restart on a secret-only change (the running instance keeps the old value until a new *image digest* deploys), so `force_restart` bumps `image_vars.BUILD_NONCE` to a unique value → new digest → the container rolls and re-reads the Secrets Store on restart (`worker/index.ts` `resolveSecretEnv` runs on every start). A normal code deploy rolls via the `GIT_SHA` change and needs no flag. (The `BUILD_NONCE` arg in the Dockerfile is a runtime no-op; self-hosters running the image directly ignore it.)
 - **Container lifecycle (why deploys are reliable):** the DS traps **SIGTERM** and exits within ~5s (`pollis-delivery/src/main.rs` `shutdown_signal`, with a hard-exit backstop). This matters because with `max_instances: 1` CF does **stop-first / drain-then-replace** — it SIGTERMs the old instance (grace up to 15 min) before starting the new one. The DS runs as **PID 1**, which ignores unhandled signals, so without the handler the old instance would squat the whole grace window and the swap/verify would stall (the original "container won't swap" bug). Stop-first is the correct strategy for a single-writer service — it never runs two writers — and a momentary overlap would be harmless anyway: the commit-log **CAS insert** (`commit.rs`: `INSERT … WHERE epoch = MAX(epoch)+1 … ON CONFLICT DO NOTHING` in an `IMMEDIATE` txn, backed by `UNIQUE(conversation_id, epoch)`) rejects any stale/out-of-order write. The ~1–3s deploy blip is retryable 503s; clients already retry.
 - **Required CI config** (per GH environment `delivery-dev` / `delivery-prod`): secrets `CLOUDFLARE_API_TOKEN` (scoped: Workers Scripts\:Edit + Containers + Secrets Store write — **not** the broad R2/DNS token), `CLOUDFLARE_ACCOUNT_ID`, `DOPPLER_TOKEN` (service token for that env's config); var `SECRETS_STORE_ID`.
+- **Header budget — any proxy in front of the DS needs ≥ 8 KiB (#668):** request auth signs with the device's ML-DSA-44 key, so `X-Pollis-Signature` is base64 of a 2420-byte signature — **~3228 characters**, up from 88 in the Ed25519 era. That fits every default on the current path (hyper's 16 KiB per-header limit, Cloudflare's 16 KiB total), so nothing needs changing today — but it is a hard constraint on anything inserted in front of the DS later (an nginx `large_client_header_buffers`, an ALB, a self-hoster's reverse proxy): **configure no header budget below 8 KiB**, or every authenticated write 400s/431s.
 - **Runs at:** **api.pollis.com** (prod) / **api-dev.pollis.com** (dev) via Worker custom domains (route change on the CF zone). Health: `/health`; build SHA: `/version`.
   - **History (#515):** replaced the old GHCR-build + VPS-Watchtower path (which silently no-op'd deploys for 11 days). Cut over 2026-07-08/09. The VPS `delivery`/`delivery-dev`/`watchtower` containers were kept stopped-but-present as a one-week rollback, then **torn down 2026-07-14** (#555): containers removed, local + GHCR delivery images deleted, stale nginx `api`/`api-dev` backups removed. The active nginx there had already dropped the api vhosts at cutover, and `api`/`api-dev.pollis.com` resolve to Cloudflare, so the VPS now runs the LiveKit stack only.
 - **Role:** sole writer to Turso; clients hold read-only tokens and write only via the DS (structural commit-log integrity, #419/#420). Also the authorized-secrets broker (`/v1/livekit/*`, `/v1/r2/presign`, `/v1/turso/token` — #393).
@@ -123,7 +124,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 | Workflow | Does |
 |---|---|
 | `attest-release.yml` | Backfills the binary-transparency attest step for an **already-published tag** — no rebuild (~2 min vs a ~40 min release). Deliberately duplicates `desktop-release.yml`'s built-in `attest-and-log` job: same `scripts/attest-binaries.sh`, the tag's commit timestamp, the published release assets. Idempotent — a tag already in the accumulator is a no-op. |
-| `rebuild-verify.yml` | The **third-party reproducer** (#484): rebuilds a released tag's Linux AppImage from public source with **no Pollis secrets** — runnable from a fork — and asserts the payload hash against the transparency log, trusting only the pinned Ed25519 log key. Log inclusion is verified in its own job (`verify-log-inclusion`), independent of the rebuild; bit-for-bit **reproduction** additionally needs the published build recipe supplied as non-secret repo `vars` (since #506 the only secret-shaped `option_env!` value left is the optional `LOG_DB_TOKEN` — see `docs/reproducible-builds-residuals.md`). |
+| `rebuild-verify.yml` | The **third-party reproducer** (#484): rebuilds a released tag's Linux AppImage from public source with **no Pollis secrets** — runnable from a fork — and asserts the payload hash against the transparency log, trusting only the pinned log key. Log inclusion is verified in its own job (`verify-log-inclusion`), independent of the rebuild; bit-for-bit **reproduction** additionally needs the published build recipe supplied as non-secret repo `vars` (since #506 the only secret-shaped `option_env!` value left is the optional `LOG_DB_TOKEN` — see `docs/reproducible-builds-residuals.md`). |
 
 ---
 
@@ -188,6 +189,22 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
     only then cut the client release. There is **no data migration** for this
     cutover — sealing was never previously on, so there are no unsealed rows to
     convert; new sends simply start sealing.
+  - **Ordering (post-quantum authentication, #668): the DS and the client ship
+    in the *same* cycle, DS first.** Three things move together. (1) Migration
+    `000011_device_pq_signature_pub.sql` adds the nullable
+    `user_device.mls_signature_pub_pq` column — migrate-then-ship means whichever
+    prod deploy runs first applies it, and it must be applied before either side
+    is live. (2) `POST /v1/auth/publish-device-cert` now takes
+    `mls_signature_pub_pq` and re-derives the **v2** cert payload over *both* leaf
+    keys, so an old DS rejects a new client's cert and an old client's body is
+    missing a field the new DS requires. (3) DS request auth verifies
+    `X-Pollis-Signature` as ML-DSA-44 against `mls_signature_pub_pq`, so a new
+    client's writes are unauthenticatable by an old DS and an old client's
+    Ed25519-signed writes are unauthenticatable by a new one. Deploy the DS
+    (dev → verify → prod, confirm `/version`), then cut the client release —
+    and do not leave the two versions straddling a release cycle. The PQ MLS
+    suite's code point also moved **in place** (`0x004D` → `0x0052`), so a
+    pre-#668 client cannot read a post-#668 group's traffic at all.
 - [ ] **Relay pool** — `pollis-relay` / `pollis-device-cert` change? rebuild the GHCR image (`relay-image.yml`) and roll the pool nodes (`docs/relay-operations.md`); verify each `GET /version` reports the new SHA. No auto-deploy exists, so this is always a manual roll.
 - [ ] **Mobile** — in development; not a released output yet, but note if a `pollis-core` change needs a `#[cfg]`/uniffi follow-up (`mobile-core-check.yml` gates gate-rot).
 - [ ] **pollis-verify CLI** — `verifiable-log*` change affecting verification? `verifier-release.yml` (`pollis-verify-v*` tag).

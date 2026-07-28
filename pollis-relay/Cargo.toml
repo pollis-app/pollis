@@ -3,7 +3,7 @@ name = "pollis-relay"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Pollis closed-overlay relay (v0): a generic anonymized-stream transport. The client shim speaks SOCKS5 CONNECT(host,port) on loopback; the relay authenticates the device (Ed25519, DS scheme), enforces a static first-party destination allowlist as policy, and pipes opaque bytes to the pinned host. Forwards sealed TLS/QUIC bytes only — never terminates the inner TLS, never sees plaintext or keys."
+description = "Pollis closed-overlay relay (v0): a generic anonymized-stream transport. The client shim speaks SOCKS5 CONNECT(host,port) on loopback; the relay authenticates the device (ML-DSA-44, DS scheme), enforces a static first-party destination allowlist as policy, and pipes opaque bytes to the pinned host. Forwards sealed TLS/QUIC bytes only — never terminates the inner TLS, never sees plaintext or keys."
 
 [lib]
 name = "pollis_relay"
@@ -24,9 +24,11 @@ rustls-pki-types = "1"
 # Self-signed relay QUIC identity (v0). Test certs are also generated in-test.
 # ring backend to avoid dragging in aws-lc-rs' C toolchain requirement.
 rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
-# Device-signature handshake, mirroring pollis-delivery/src/auth.rs: raw 32-byte
-# Ed25519 pubkey, 64-byte PureEdDSA signature over a canonical message.
-ed25519-dalek = "2"
+# Device-signature handshake, mirroring pollis-delivery/src/auth.rs: raw
+# ML-DSA-44 pubkey + signature over a canonical message. Post-quantum since #668
+# — a relay identity forged with a CRQC would deanonymize retroactively, so the
+# handshake cannot stay classical. Already in the lockfile via openmls.
+ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 # The OFFLINE device-cert primitive, shared verbatim with pollis-core so the
 # handshake verifies the exact chain pollis-core mints — no drift, no cycle.
 pollis-device-cert = { path = "../pollis-device-cert" }

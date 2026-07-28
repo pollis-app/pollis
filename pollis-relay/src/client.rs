@@ -5,26 +5,28 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use ed25519_dalek::SigningKey;
 use quinn::crypto::rustls::QuicClientConfig;
 use rustls::pki_types::CertificateDer;
 
-use crate::proto::{self, Connect, DeviceCertMaterial};
+use crate::proto::{self, Connect, DeviceCertMaterial, MlDsaSigningKey};
 use crate::stream::RelayStream;
 use crate::tls::{self, PinnedServerCertVerifier, RELAY_SERVER_NAME};
 
 /// The device identity a client authenticates with (design §9.4). Carries the
-/// device Ed25519 signing key AND the offline cert chain the relay verifies:
-/// `account_id_pub` + the `device_cert` binding this device's signing key to it
-/// (+ `identity_version` / `issued_at`). In `pollis-core` these come from the
-/// device's stored cert material (keystore + `user_device`); a device with no
-/// cert yet (pre-enrollment/OTP bootstrap) simply cannot build a
-/// [`ClientIdentity`], so its traffic stays direct (documented in
-/// `docs/relay-operations.md`).
+/// device's ML-DSA-44 signing key and its classic Ed25519 leaf public key, AND
+/// the offline cert chain the relay verifies: `account_id_pub` + the
+/// `device_cert` binding both leaf keys to it (+ `identity_version` /
+/// `issued_at`). In `pollis-core` these come from the device's stored cert
+/// material (keystore + `user_device`); a device with no cert yet
+/// (pre-enrollment/OTP bootstrap) simply cannot build a [`ClientIdentity`], so
+/// its traffic stays direct (documented in `docs/relay-operations.md`).
 pub struct ClientIdentity {
     pub user_id: String,
     pub device_id: String,
-    pub signing_key: SigningKey,
+    /// The classic leaf key. Presented so the cert payload reconstructs exactly;
+    /// nothing signs under it.
+    pub device_ed25519_pub: [u8; 32],
+    pub signing_key: MlDsaSigningKey,
     pub cert: DeviceCertMaterial,
 }
 
@@ -32,12 +34,14 @@ impl ClientIdentity {
     pub fn new(
         user_id: impl Into<String>,
         device_id: impl Into<String>,
-        signing_key: SigningKey,
+        device_ed25519_pub: [u8; 32],
+        signing_key: MlDsaSigningKey,
         cert: DeviceCertMaterial,
     ) -> Self {
         ClientIdentity {
             user_id: user_id.into(),
             device_id: device_id.into(),
+            device_ed25519_pub,
             signing_key,
             cert,
         }
@@ -92,6 +96,7 @@ impl RelayClient {
             &identity.signing_key,
             &identity.user_id,
             &identity.device_id,
+            identity.device_ed25519_pub,
             identity.cert.clone(),
             proto::now_unix(),
             nonce,

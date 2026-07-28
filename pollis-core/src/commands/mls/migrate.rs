@@ -58,7 +58,7 @@ use super::group_state::{
     create_mls_group_in_suite, fleet_is_fully_pq_capable, forget_local_mls_group_at,
     roster_is_fully_pq_capable,
 };
-use super::provider::{load_stored_group_at, with_suite_provider, CS_CLASSIC, CS_HYBRID};
+use super::provider::{load_stored_group_at, PollisProvider, CS_CLASSIC, CS_HYBRID};
 use super::reconcile::{
     desired_roster_user_ids, publish_staged_commit, registered_devices, stage_reconcile_commit,
     PublishOutcome,
@@ -201,18 +201,17 @@ pub(super) async fn migrate_to_hybrid_if_due(
         let Some(db) = guard.as_ref() else {
             return Ok(false);
         };
-        with_suite_provider!(db.conn(), CS_HYBRID, |provider| {
-            stage_successor_commit(
-                &provider,
-                conversation_id,
-                successor,
-                actor_user_id,
-                &actor_device_id,
-                &kp_tuples,
-                &roster_user_ids,
-                &valid_devices,
-            )
-        })
+        let provider = PollisProvider::new(db.conn());
+        stage_successor_commit(
+            &provider,
+            conversation_id,
+            successor,
+            actor_user_id,
+            &actor_device_id,
+            &kp_tuples,
+            &roster_user_ids,
+            &valid_devices,
+        )
     };
     // Every failure past the create must tear the successor down. A stored group
     // on a lineage that never opened is not merely wasted space: the
@@ -310,8 +309,9 @@ pub(super) async fn migrate_to_hybrid_if_due(
 /// `(welcomes, commit_bytes, group_info_bytes)` — or `None` when there is
 /// nothing to commit at all.
 ///
-/// Synchronous and suite-pinned to [`CS_HYBRID`]: the caller dispatches, because
-/// the classic provider panics rather than fails on a hybrid group.
+/// Synchronous and suite-pinned to [`CS_HYBRID`]: a migration exists only to
+/// move a conversation onto that suite, so the successor's suite is not a
+/// parameter.
 #[allow(clippy::too_many_arguments)]
 fn stage_successor_commit<C>(
     provider: &super::provider::MlsProvider<'_, C>,

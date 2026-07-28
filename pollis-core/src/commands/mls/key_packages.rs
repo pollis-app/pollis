@@ -17,8 +17,8 @@ use crate::state::AppState;
 
 use super::device::load_or_create_device_signer;
 use super::provider::{
-    make_credential, parse_credential_user_id, MlsProvider, PollisPqProvider, PollisProvider,
-    CS_CLASSIC, CS_HYBRID, SIGNATURE_SCHEME,
+    make_credential, parse_credential_user_id, signature_scheme, MlsProvider, PollisProvider,
+    CS_CLASSIC, CS_HYBRID,
 };
 
 /// The ciphersuites every P2+ device maintains a KeyPackage pool for. A hybrid-
@@ -61,14 +61,12 @@ fn kp_packages_json(pairs: &[(String, Vec<u8>)], ciphersuite: Ciphersuite) -> Ve
 /// Build one fresh `KeyPackage` in an explicit ciphersuite, returning
 /// `(ref_hex, tls_bytes)`.
 ///
-/// `suite` and `provider` must agree — `CS_CLASSIC` with `PollisProvider`,
-/// `CS_HYBRID` with `PollisPqProvider` — because each crypto backend implements
-/// only one of the two (see `provider.rs`). Passing a suite the backend does not
-/// implement surfaces as a `kp build` error rather than silently downgrading.
+/// The package's leaf is signed with the device's stable key **for `suite`'s
+/// signature scheme** (#668): Ed25519 for `CS_CLASSIC`, ML-DSA-44 for
+/// `CS_HYBRID`. Both keys are stable across rotations, so a device's whole pool
+/// in a given suite keeps presenting the same signing key.
 ///
-/// All packages a device ships share its stable signing key regardless of suite
-/// (see `load_or_create_device_signer`), so one `device_cert` still covers every
-/// package. Sync: the caller owns the local-DB guard.
+/// Sync: the caller owns the local-DB guard.
 pub(super) fn build_key_package_in_suite<C>(
     provider: &MlsProvider<'_, C>,
     user_id: &str,
@@ -78,14 +76,13 @@ pub(super) fn build_key_package_in_suite<C>(
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
+    let scheme = signature_scheme(suite);
     let (sig_keys, sig_pub_bytes) =
-        load_or_create_device_signer(provider, user_id, device_id)?;
+        load_or_create_device_signer(provider, user_id, device_id, scheme)?;
 
     let credential = make_credential(user_id, device_id);
-    let sig_pub = OpenMlsSignaturePublicKey::new(
-        sig_pub_bytes.into(),
-        SIGNATURE_SCHEME,
-    ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+    let sig_pub = OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), scheme)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
     let cred_with_key = CredentialWithKey {
         credential,
         signature_key: sig_pub.into(),
@@ -110,12 +107,6 @@ where
 /// Build one fresh `KeyPackage` for this device in `suite`, backed by the current
 /// local DB. Locks the local DB for the (sync) openmls work, dropping the guard
 /// before returning.
-///
-/// The provider is chosen by suite and that pairing is security-load-bearing
-/// (see `provider.rs`): `CS_CLASSIC` builds through `PollisProvider` (RustCrypto),
-/// `CS_HYBRID` through `PollisPqProvider` (libcrux). Selecting the wrong backend
-/// is a crash, not a downgrade — `RustCrypto` `unimplemented!()`-panics on X-Wing
-/// — so the match here is the client-side analogue of the DS's disjoint pools.
 async fn build_one_key_package_in_suite(
     state: &Arc<AppState>,
     user_id: &str,
@@ -126,13 +117,8 @@ async fn build_one_key_package_in_suite(
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
     })?;
-    if suite == CS_HYBRID {
-        let provider = PollisPqProvider::new(db.conn());
-        build_key_package_in_suite(&provider, user_id, device_id, suite)
-    } else {
-        let provider = PollisProvider::new(db.conn());
-        build_key_package_in_suite(&provider, user_id, device_id, suite)
-    }
+    let provider = PollisProvider::new(db.conn());
+    build_key_package_in_suite(&provider, user_id, device_id, suite)
 }
 
 /// Rotate key packages: delete unclaimed packages for this device from the
@@ -315,10 +301,8 @@ pub(super) async fn replenish_key_packages(
 ///
 /// Generic over the crypto backend rather than naming a concrete provider: the
 /// suite a KeyPackage was built for is inside the blob, so validating one built
-/// for a suite the passed backend does not implement is a *runtime* outcome.
-/// Pinning `&RustCrypto` here would make that outcome an `unimplemented!()`
-/// panic the moment #454's hybrid suite produces real KeyPackages. Callers pass
-/// `provider.crypto()`, which is the libcrux backend that covers both suites.
+/// for a suite the passed backend does not implement is a *runtime* outcome,
+/// and this signature keeps it one. Callers pass `provider.crypto()`.
 pub fn validate_key_package(
     kp_bytes: &[u8],
     expected_user_id: &str,

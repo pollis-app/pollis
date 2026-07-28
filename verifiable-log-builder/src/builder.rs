@@ -15,7 +15,8 @@
 //! share the STH/proof assembly ([`seal`]) but never share a tree — see the
 //! tenant modules for why.
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use serde::{Deserialize, Serialize};
 use verifiable_log::{
     ConsistencyProof, Entry, InclusionProof, Sth, VerifiableLog,
@@ -222,7 +223,7 @@ fn seal(
         });
     }
 
-    let public_key = hex::encode(signing_key.verifying_key().to_bytes());
+    let public_key = hex::encode(signing_key.verifying_key().encode());
 
     Ok(Bundle {
         public_key,

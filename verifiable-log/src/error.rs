@@ -40,14 +40,17 @@ pub enum Error {
     #[error("malformed hash: expected 32 bytes, got {0}")]
     BadHashLength(usize),
 
-    #[error("malformed signature: expected 64 bytes, got {0}")]
+    #[error("malformed signature: expected 2420 bytes, got {0}")]
     BadSignatureLength(usize),
 
-    #[error("malformed public key: expected 32 bytes, got {0}")]
+    #[error("malformed public key: expected 1312 bytes, got {0}")]
     BadPublicKeyLength(usize),
 
-    #[error("invalid ed25519 public key")]
+    #[error("invalid ML-DSA-44 public key")]
     BadPublicKey,
+
+    #[error("invalid ML-DSA-44 signature encoding")]
+    BadSignature,
 }
 
 /// Convenience alias used throughout the crate.

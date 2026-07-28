@@ -101,8 +101,8 @@ pub async fn establish_identity(
         (Ok(p), Ok(s), Ok(n), Ok(w)) => (p, s, n, w),
         _ => return bad_request("invalid base64 field"),
     };
-    if pub_bytes.len() != 32 {
-        return bad_request("account_id_pub must be 32 bytes");
+    if pub_bytes.len() != pollis_device_cert::MLDSA44_PUB_LEN {
+        return bad_request("account_id_pub must be an ML-DSA-44 verifying key");
     }
 
     let conn = match state.db.conn() {
@@ -270,15 +270,19 @@ pub async fn apply_register_device(
 #[derive(Deserialize)]
 pub struct PublishCertBody {
     pub device_id: String,
-    /// 64-byte Ed25519 device cert, base64 (STANDARD).
+    /// ML-DSA-44 device cert, base64 (STANDARD).
     pub device_cert: String,
     /// Unix seconds the cert was issued at (stored as TEXT — lossless u64 round
     /// trip for later verification, mirroring `device.rs`).
     pub cert_issued_at: i64,
     pub cert_identity_version: u32,
-    /// Raw 32-byte MLS signing pubkey, base64 (STANDARD) — the column the
+    /// Raw 32-byte Ed25519 MLS signing pubkey, base64 (STANDARD) — the column the
     /// device-signature gate verifies against.
     pub mls_signature_pub: String,
+    /// Raw ML-DSA-44 MLS signing pubkey, base64 (STANDARD). Bound by cert v2
+    /// alongside the classic key, so both must be presented to re-derive the
+    /// signed payload here.
+    pub mls_signature_pub_pq: String,
     /// The publishing user. IGNORED when a session is present (bound from the
     /// session instead). REQUIRED on the cert-validity-alone (subsequent-device)
     /// path, where there is no session to bind the user from — the cert
@@ -288,7 +292,7 @@ pub struct PublishCertBody {
 }
 
 /// POST /v1/auth/publish-device-cert — the PIVOT write. DUAL gate, in both cases
-/// the cert's Ed25519 signature is re-verified against the account's stored
+/// the cert's ML-DSA-44 signature is re-verified against the account's stored
 /// `account_id_pub` (a 409 if no identity is established yet) before the
 /// `user_device` cert columns are populated:
 ///
@@ -322,6 +326,10 @@ pub async fn publish_device_cert(
     let mls_sig_pub = match b64_decode(&parsed.mls_signature_pub) {
         Ok(b) => b,
         Err(_) => return bad_request("invalid mls_signature_pub"),
+    };
+    let mls_sig_pub_pq = match b64_decode(&parsed.mls_signature_pub_pq) {
+        Ok(b) => b,
+        Err(_) => return bad_request("invalid mls_signature_pub_pq"),
     };
     if parsed.cert_issued_at < 0 {
         return bad_request("cert_issued_at must be non-negative");
@@ -372,6 +380,7 @@ pub async fn publish_device_cert(
         issued_at,
         parsed.cert_identity_version,
         &mls_sig_pub,
+        &mls_sig_pub_pq,
     )
     .await
     {
@@ -416,6 +425,7 @@ pub async fn apply_publish_device_cert(
     issued_at: u64,
     cert_identity_version: u32,
     mls_sig_pub: &[u8],
+    mls_sig_pub_pq: &[u8],
 ) -> anyhow::Result<PublishCertOutcome> {
     // The account_id_pub the cert must chain to. Absent/NULL ⇒ identity not yet
     // established ⇒ out of order.
@@ -435,12 +445,13 @@ pub async fn apply_publish_device_cert(
         }
     };
 
-    // Cert-validity gate: the cert must be a valid Ed25519 signature by the
-    // account key over (device_id, mls_sig_pub, identity_version, issued_at).
+    // Cert-validity gate: the cert must be a valid ML-DSA-44 signature by the
+    // account key over (device_id, both leaf pubs, identity_version, issued_at).
     if !verify_device_cert(
         &account_id_pub,
         device_id,
         mls_sig_pub,
+        mls_sig_pub_pq,
         cert_identity_version,
         issued_at,
         cert_bytes,
@@ -454,13 +465,14 @@ pub async fn apply_publish_device_cert(
         .execute(
             "UPDATE user_device \
              SET device_cert = ?1, cert_issued_at = ?2, cert_identity_version = ?3, \
-                 mls_signature_pub = ?4 \
-             WHERE device_id = ?5 AND user_id = ?6",
+                 mls_signature_pub = ?4, mls_signature_pub_pq = ?5 \
+             WHERE device_id = ?6 AND user_id = ?7",
             libsql::params![
                 cert_bytes.to_vec(),
                 issued_at.to_string(),
                 cert_identity_version as i64,
                 mls_sig_pub.to_vec(),
+                mls_sig_pub_pq.to_vec(),
                 device_id.to_string(),
                 user_id.to_string(),
             ],

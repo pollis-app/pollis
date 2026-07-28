@@ -1,15 +1,31 @@
 # Post-Quantum Hybrid MLS — Design
 
-**Status: COMPLETE — P0 through P5 all shipped (§8).** The hybrid suite is reachable
-through a second, hybrid-only provider that classic traffic is *routed away from* for the
-security reasons in §7.3 (`pollis-core/src/commands/mls/provider.rs`); the ciphersuite is
-an explicit argument to the two functions that mint suite-bound material; every device
-publishes both key-package pools and the DS derives `user_device.pq_capable` from what
-lands; new groups are born on `CS_HYBRID` and existing ones migrate to it by successor
-generation — both behind the same two gates (full roster PQ-capable **and** the whole live
-fleet PQ-capable). What remains outside this design's scope, deliberately: post-quantum
-*signatures* (§2.4) and retiring classic key-package publication, which cannot begin until
-an app that no longer needs classic has full uptake.
+**Status: COMPLETE — P0 through P5 all shipped (§8); §2.4 has since been SUPERSEDED by
+#668.** The ciphersuite is an explicit argument to the two functions that mint suite-bound
+material; every device publishes both key-package pools and the DS derives
+`user_device.pq_capable` from what lands; new groups are born on `CS_HYBRID` and existing
+ones migrate to it by successor generation — both behind the same two gates (full roster
+PQ-capable **and** the whole live fleet PQ-capable). Two things this document argued for
+have since been overtaken; both are corrected in place below rather than deleted, because
+the reasoning is a record:
+
+- **The hybrid suite moved, in place.** #454 shipped `CS_HYBRID` as X-Wing / `0x004D`,
+  whose leaves still signed **Ed25519** — post-quantum in confidentiality only. #668 moved
+  the constant to `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` (`0x0052`),
+  which keeps *exactly the same* X-Wing KEM — so nothing in the HNDL argument below changes
+  — and replaces the leaf signature with **ML-DSA-44** (`SignatureScheme::MLDSA44`,
+  `0x0904`). The KDF moves SHA-256 → SHA-384 with the code point. §2.4 records why
+  signatures were deferred and why that recommendation was then overturned.
+- **The second crypto backend is gone.** #454 needed suite→provider *routing* (§7.3)
+  because only `openmls_libcrux_crypto` implemented `0x004D`. `0x0052` is implemented by
+  `openmls_rust_crypto`, and libcrux implements no ML-DSA suite at all, so **one backend
+  serves both suites** and there is nothing left to route away from
+  (`pollis-core/src/commands/mls/provider.rs`).
+
+The **classic** suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) is
+untouched by #668 and still signs Ed25519. What remains outside this design's scope,
+deliberately: retiring classic key-package publication, which cannot begin until an app
+that no longer needs classic has full uptake — tracked separately as **#669**.
 **Scope:** migrate Pollis's MLS key exchange from classical X25519 to a hybrid
 X25519 + ML-KEM-768 construction, transparently, without breaking existing
 groups, existing devices, or the "messages must work" doctrine.
@@ -30,34 +46,35 @@ the code as it is today.
 
 ## 0. TL;DR / recommendation
 
-- **The exposed asset is the MLS key exchange (HPKE/DHKEM), not the signatures.**
+- **The HNDL-exposed asset is the MLS key exchange (HPKE/DHKEM), not the signatures.**
   Harvest-now-decrypt-later (HNDL) breaks *confidentiality* by recording ciphertext
   and the KEM material that seals it, then recovering the shared secret once a
   cryptographically-relevant quantum computer (CRQC) exists. Signatures do **not**
   need PQ for HNDL — a forged signature in 2035 cannot retroactively decrypt a 2026
-  message. So we go hybrid **only on the KEM**, and keep Ed25519 signatures classical
-  for now. (§1, §2.4.)
+  message. So this design goes hybrid **only on the KEM** and deferred signatures.
+  That deferral was right about HNDL and wrong about the *other* reason to move
+  signatures early — long-lived verifiability — and #668 has since executed the move
+  to ML-DSA-44 anyway. (§1, §2.4.)
 
 - **Go hybrid, not PQ-only:** X25519 **+** ML-KEM-768, combined so the session key
   is secure if *either* primitive holds. This is the IETF/NIST-endorsed posture and
   it protects us against both a future CRQC *and* a not-yet-discovered flaw in the
   young ML-KEM implementation. The concrete instantiation is **X-Wing**
-  (`draft-connolly-cfrg-xwing-kem`) as the DHKEM, shipping today as the experimental
-  OpenMLS code point `0x004D` — a point we pin deliberately (§7). (§2.)
+  (`draft-connolly-cfrg-xwing-kem`) as the DHKEM — shipped by #454 under the experimental
+  OpenMLS code point `0x004D`, and carried unchanged into `0x0052` by #668 when the
+  signature moved (§7). (§2.)
 
-- **Feasibility, honestly: the pinned stack can already do this — the P0 spike proved
-  it end-to-end, headless, with stock cargo.** The hybrid suite
-  `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` (code point `0x004D`) already exists,
-  un-feature-gated, in the pinned `openmls_traits 0.5.0` `Ciphersuite` enum (added
-  upstream in openmls/openmls#1546, 2024-04). The only ever-missing piece was the
-  **crypto provider**, never OpenMLS itself: `openmls_rust_crypto 0.5.1` `unimplemented!()`
-  -panics on this suite (`src/provider.rs:61`), while `openmls_libcrux_crypto 0.3.1`
-  implements it (`src/crypto.rs:60`, via `hpke_rs_crypto`'s `KemAlgorithm::XWingDraft06`).
-  So the route is: keep `openmls = "0.8"` and take a direct dependency on
-  `openmls_libcrux_crypto = "0.3"` — **no version bump, no fork, no `[patch.crates-io]`.**
-  The catch: the only hybrid suite on offer is a ChaCha20-Poly1305 suite, so the AEAD
-  changes *with* the KEM (AES-128-GCM → ChaCha20-Poly1305, nominal level 128 → 256);
-  Ed25519 signatures are unchanged. (§7.)
+- **Feasibility, honestly: #454's KEM needed no version bump; #668's signatures needed a
+  git pin.** The X-Wing suite `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` (`0x004D`)
+  already existed, un-feature-gated, in `openmls_traits 0.5.0` (added upstream in
+  openmls/openmls#1546, 2024-04); the only missing piece was the **crypto provider**, and
+  `openmls_libcrux_crypto 0.3.1` supplied it. The PQ *signature* suites exist in **no
+  released version** — the released 0.8.1 has no `SignatureScheme::MLDSA44` at all — so
+  all five openmls crates are now pinned to an upstream `main` rev through one workspace
+  `[patch.crates-io]` (`Cargo.toml`), with `draft-ietf-mls-pq-ciphersuites` named on every
+  direct dependency. The AEAD still changes *with* the KEM (AES-128-GCM →
+  ChaCha20-Poly1305, nominal level 128 → 256), and since #668 the signature changes with
+  it too (Ed25519 → ML-DSA-44). (§7.)
 
 - **Recommendation: do it, in phases, gated behind the box's headless MLS harness.
   All phases are now DONE (§8)** — new groups are born hybrid, existing groups migrate,
@@ -65,12 +82,13 @@ the code as it is today.
   Never a flag day. Two things landed differently from the sketch here and are worth
   reading in §8: migration is *not* a ciphersuite-transition commit at an epoch boundary
   (RFC 9420 has no such commit) but a **successor group** under a generation counter; and
-  the crypto-provider change is a **route**, not a swap, because putting classic traffic
-  on libcrux would have been a security regression (§7.3).
-  The live risk is no longer availability but **code-point churn** — `0x004D` is an
-  experimental X-Wing draft-06 point that OpenMLS `main` has since moved behind a feature
-  flag and the IETF has since dropped; pin both dependency versions and budget
-  for a second suite migration when the IETF suites stabilise (§7). (§3, §8.)
+  the crypto-provider change landed as a **route**, not a swap, because putting classic
+  traffic on libcrux would have been a security regression (§7.3) — a route that #668
+  then dissolved by moving to a suite RustCrypto implements.
+  The live risk is no longer availability but **code-point churn** — `0x0052` is a
+  provisional `draft-ietf-mls-pq-ciphersuites` point, and its predecessor `0x004D` was
+  dropped by the same draft one revision earlier; pin the openmls rev and budget
+  for a further suite migration when the IETF suites stabilise (§7). (§3, §8.)
 
 ---
 
@@ -102,7 +120,7 @@ split cleanly:
 | **KeyPackage init keys / leaf HPKE keys** | HPKE(X25519) | **YES** | A recorded KeyPackage (`mls_key_package.key_package`, `000000_baseline.sql:121-127`) is the entry point to seal a Welcome to a joining device; breaking it breaks that device's initial secrets. |
 | **Welcome messages** | HPKE(X25519) | **YES** | `mls_welcome.welcome_data` is HPKE-sealed to the joiner's init key. Recorded now, opened later. |
 | **Voice frame key** | AES-128-GCM, derived via `MlsGroup::export_secret` (whitepaper §10.2) | **YES, transitively** | The voice key is exported from the MLS epoch secret. If the epoch secret falls to a broken X25519 tree, so does the voice key. AES-128 itself is only *weakened* by Grover (≈2⁶⁴ quantum work), not broken. |
-| **Ed25519 account identity + device signatures** | Ed25519 (`account_identity.rs`, `verify_device_cert` at `account_identity.rs:716`) | **NO (for HNDL)** | A signature authenticates; it does not seal. A future CRQC that forges Ed25519 enables *active* impersonation *going forward*, but cannot retroactively decrypt anything. See §2.4. |
+| **Account identity + device signatures** | ML-DSA-44 since #668 (`account_identity.rs`, `verify_device_cert` in `pollis-device-cert`); Ed25519 before it, and still Ed25519 on classic-suite leaves | **NO (for HNDL)** | A signature authenticates; it does not seal. A future CRQC that forges Ed25519 enables *active* impersonation *going forward*, but cannot retroactively decrypt anything. This row is why signatures were deferred — and, per §2.4, why "HNDL-exposed?" turned out to be the wrong question for the *long-lived-verifiability* assets (account keys, device certs, the transparency log). |
 | **PIN-wrapped local keys** | Argon2id + XChaCha20-Poly1305 (whitepaper §3) | **NO** | Symmetric; local; never on-wire. Not harvestable. |
 | **SQLCipher DB, attachment convergent encryption** | AES-256-GCM (whitepaper §7, §9) | **NO (practically)** | Symmetric AES-256; Grover halves the security level to 128 bits, which is fine. Not asymmetric, not Shor-breakable. |
 | **TURSO_TOKEN / R2 / LiveKit transport (TLS)** | TLS 1.3 | out of scope | Transport HNDL is the platform's problem, not the MLS protocol's. Noted, not addressed here. |
@@ -110,13 +128,14 @@ split cleanly:
 **Conclusion:** the crown jewel is the **HPKE/DHKEM key agreement inside MLS.** That —
 and only that — is what this design makes hybrid. Everything symmetric is already at
 or above the post-quantum-adequate 128-bit floor; everything signature-shaped is not
-an HNDL asset.
+an HNDL asset. (Signatures moved to ML-DSA-44 later, under #668, for a *different*
+threat — see §2.4.)
 
 ### 1.3 Why act now (the timeline)
 
 - **NIST finalised the PQ KEM standard (FIPS 203, ML-KEM) in August 2024.** ML-KEM is
   no longer a research artifact; it is the standard. The tooling to adopt it exists
-  (it is *literally in our Cargo.lock* — `libcrux-ml-kem`, `Cargo.lock:4042`).
+  (it is *literally in our Cargo.lock* — `libcrux-ml-kem`).
 - **CRQC timeline estimates cluster in the 2030s**, with meaningful probability mass
   earlier. The relevant number for Pollis is not "when will a CRQC exist" but
   **"what is the confidentiality lifetime of a message we send today?"** A message
@@ -144,7 +163,7 @@ honestly (§6).
 
 The MLS ciphersuite defines the HPKE KEM used for TreeKEM path secrets, KeyPackage
 init keys, and Welcome sealing. Today Pollis uses **DHKEM(X25519, HKDF-SHA256)**
-(RFC 9180), embedded in the suite constant at `provider.rs:57`. The hybrid target
+(RFC 9180), embedded in the `CS_CLASSIC` suite constant in `provider.rs`. The hybrid target
 replaces that KEM with a **combiner** that runs *both* X25519 and ML-KEM-768 and
 mixes their outputs so the resulting shared secret is secure if **either** component
 is secure:
@@ -157,31 +176,38 @@ Two concrete instantiations exist, and they are not mutually exclusive:
 
 1. **X-Wing** (`draft-connolly-cfrg-xwing-kem`) — a *general-purpose* hybrid KEM
    pairing X25519 + ML-KEM-768 with a fixed, security-proven combiner. This is what
-   `hpke-rs-libcrux` / `libcrux-kem` already implement (the crates are in our lock,
-   `Cargo.lock:4017-4029`). The MLS PQ ciphersuite drafts build their DHKEM on
-   X-Wing-shaped constructions.
+   `hpke-rs-libcrux` / `libcrux-kem` already implement (both crates are in our lock,
+   pulled in by `openmls_rust_crypto` → `hpke-rs`). The MLS PQ ciphersuite drafts build
+   their DHKEM on X-Wing-shaped constructions.
 2. **The MLS-specific PQ ciphersuite drafts** (`draft-ietf-mls-pq-ciphersuites`) — these
    register new MLS `Ciphersuite` code points that carry a hybrid KEM. This is the
    *right* long-term target because it means an interoperable, standard code point
-   rather than an experimental one. Note the drafts are still moving: the suite we ship
-   today (`0x004D`, X-Wing) is a 2024 experimental point that draft-06 (2026-07) has
-   since *dropped* in favour of new code points, so "standard" here is a moving target we
+   rather than an experimental one. Note the drafts are still moving: the suite #454
+   shipped (`0x004D`, X-Wing) is a 2024 experimental point that draft-06 (2026-07)
+   *dropped* in favour of new code points, so "standard" here is a moving target we
    track, not a settled destination (§7).
 
-**Choice: ship the X-Wing hybrid code point the pinned stack already carries (`0x004D`,
-§7), and track the standardising IETF suites for a later second migration.** ML-KEM-768
-(NIST security category 3, ≈AES-192-equivalent classical, comfortably PQ-adequate) is the
-sweet spot the drafts, Signal, and iMessage all landed on — not the smaller -512
-(category 1) nor the larger -1024. Pairing it with X25519 keeps the classical floor at the
-128-bit level the rest of Pollis's suite already sits at (whitepaper §6.1).
+**Choice as shipped: X-Wing, first under `0x004D` (#454), then under `0x0052` (#668).**
+ML-KEM-768 (NIST security category 3, ≈AES-192-equivalent classical, comfortably
+PQ-adequate) is the sweet spot the drafts, Signal, and iMessage all landed on — not the
+smaller -512 (category 1) nor the larger -1024. Pairing it with X25519 keeps the classical
+floor at the 128-bit level the rest of Pollis's suite already sits at (whitepaper §6.1).
+The move to `0x0052` — the draft's own point, spelled `MLKEM768X25519` rather than
+`XWING` — changed the *signature* (§2.4) and the KDF (SHA-256 → SHA-384), **not** the KEM:
+`0x0052` is the same `HpkeKemType::XWingKemDraft6` under a draft-registered code point, so
+everything §2.1–§2.2 argues about confidentiality carries over unmodified. That it also
+moved Pollis onto a draft code point rather than an OpenMLS-private one is a side benefit,
+not the reason.
 
 ### 2.2 Why hybrid and not PQ-only
 
 Two independent reasons, both of which matter for a security product:
 
 1. **Defence in depth against a young primitive.** ML-KEM's implementations are new.
-   `libcrux-ml-kem` is at version **0.0.8** (`Cargo.lock:4043`) — a pre-1.0,
-   rapidly-moving crate. A hybrid construction means an implementation bug or a
+   `libcrux-ml-kem` was at version **0.0.8** when #454 shipped and is at **0.0.10**
+   after #668 — a pre-1.0, rapidly-moving crate whose version we do not control
+   directly (it arrives transitively under `hpke-rs-libcrux` ← `libcrux-kem`, so the
+   openmls pin of §7.1 moves it). A hybrid construction means an implementation bug or a
    yet-undiscovered structural weakness in ML-KEM does **not** drop us below the
    classical X25519 security we have today. We can adopt an immature PQ primitive
    *without* regressing our current guarantees. This is exactly why Signal, Apple,
@@ -201,24 +227,35 @@ Grover, and the realistic cost of 2⁶⁴ *sequential-depth-bounded* quantum ope
 beyond any near-term CRQC.
 
 **One correction we make loudly, because it was wrong in an earlier draft: the hybrid
-suite is not AEAD-neutral.** The only hybrid suite the pinned stack offers is
-`MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` — there is no AES-GCM hybrid variant to
-select — so moving a group to hybrid *bundles* the AEAD change AES-128-GCM →
-ChaCha20-Poly1305 with the KEM change, and the suite's nominal security-level label moves
-128 → 256. This is not a regression: ChaCha20-Poly1305 is a 256-bit-key AEAD, at least as
-strong as AES-128-GCM against both classical and Grover attacks, and it is the AEAD Signal
-and WireGuard already lean on. What we *cannot* claim is "AEAD unchanged" — classic groups
-keep AES-128-GCM, hybrid groups run ChaCha20-Poly1305, and there is no knob to decouple
-the AEAD from the KEM. (Signatures *do* stay Ed25519 — §2.4 — that part of the argument
-holds.)
+suite is not AEAD-neutral.** Every hybrid suite on offer is a ChaCha20-Poly1305 suite —
+`MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` when #454 shipped, and
+`MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` since #668 — there is no AES-GCM
+hybrid variant to select, so moving a group to hybrid *bundles* the AEAD change
+AES-128-GCM → ChaCha20-Poly1305 with the KEM change. This is not a regression:
+ChaCha20-Poly1305 is a 256-bit-key AEAD, at least as strong as AES-128-GCM against both
+classical and Grover attacks, and it is the AEAD Signal and WireGuard already lean on.
+What we *cannot* claim is "AEAD unchanged" — classic groups keep AES-128-GCM, hybrid
+groups run ChaCha20-Poly1305, and there is no knob to decouple the AEAD from the KEM.
+(Nor can we claim signatures are unchanged any more: #668 bundled ML-DSA-44 into the same
+code point — §2.4. The suite's nominal security-level *label* moved 256 → 128 with that
+move, which is a labelling artifact of the draft's naming, not a downgrade: the KEM is
+byte-for-byte the same X-Wing and the AEAD is the same ChaCha20-Poly1305.)
 
-### 2.4 Signatures: keep them classical (for now) — argued
+### 2.4 Signatures: deferred here, then SUPERSEDED by #668
+
+> **Status: this section's recommendation no longer holds.** #454 deferred post-quantum
+> signatures for the reasons below, all of which remain sound *as far as they go*. #668
+> then moved authentication to **ML-DSA-44** (FIPS 204) anyway, because the deferral's
+> central argument does not cover the assets that must stay verifiable for decades. Both
+> halves are kept: the reasoning first, the supersession after.
+
+#### 2.4.1 The original argument (as written for #454)
 
 Ed25519 appears in three places: the MLS leaf signature (part of the ciphersuite,
-`provider.rs:57`), the per-device MLS signing key (`user_device.mls_signature_pub`,
+`provider.rs`), the per-device MLS signing key (`user_device.mls_signature_pub`,
 `000000_baseline.sql:156`), and the account-identity cross-signing cert
-(`account_identity.rs:693-756`). The MLS-suite drafts pair the hybrid KEM with a
-signature that may be classical **or** ML-DSA (Dilithium).
+(`account_identity.rs`). The MLS-suite drafts pair the hybrid KEM with a signature that
+may be classical **or** ML-DSA (Dilithium).
 
 **Recommendation: keep signatures classical (Ed25519) in Phase 1–3. Treat ML-DSA as a
 separate, later track.** Reasoning:
@@ -229,24 +266,94 @@ separate, later track.** Reasoning:
   to by rotating to PQ signatures *then*. It cannot retroactively decrypt a single
   2026 message. So the *urgency* that drives the KEM change simply is not present for
   signatures.
-- **ML-DSA is expensive and everywhere.** ML-DSA-65 public keys are ≈1.9 KB and
-  signatures ≈3.3 KB, versus 32 B / 64 B for Ed25519. Signatures sit on **every** leaf
+- **ML-DSA is expensive and everywhere.** An ML-DSA-44 public key is **1312 B** and a
+  signature **2420 B**, versus 32 B / 64 B for Ed25519. Signatures sit on **every** leaf
   node, **every** KeyPackage, and **every** commit. Making signatures PQ would inflate
   KeyPackages and commits far more than the KEM change does, and it would touch the
-  cross-signing cert format (`device_cert_signed_payload`, `account_identity.rs:651`),
-  the account-key transparency log leaf shape (`account_key_log`,
-  `000005_account_key_log.sql`), and the DS request-signing credential
-  (`ds_client.rs` signs with `mls_signature_pub`). That is a much larger, higher-risk
-  blast radius for a threat that is *not* HNDL.
+  cross-signing cert format (`device_cert_signed_payload`), the account-key transparency
+  log leaf shape (`account_key_log`, `000005_account_key_log.sql`), and the DS
+  request-signing credential (`ds_client.rs` signs with `mls_signature_pub`). That is a
+  much larger, higher-risk blast radius for a threat that is *not* HNDL.
 - **The honest framing:** signatures are a **store-now-forge-later** concern, not a
   harvest-now-*decrypt*-later concern, and the response to the former can be reactive
   (rotate when a CRQC is imminent) rather than pre-emptive. We design the schema so
   ML-DSA *can* be added later (§3.4 makes the key-material columns
   algorithm-tagged), but we do not pay its cost now.
 
-One caveat we state loudly (§6): keeping signatures classical means the migration does
+One caveat we state loudly (§6): keeping signatures classical means *this* migration does
 **not** make Pollis "fully post-quantum." It makes the *confidentiality* post-quantum,
-which is the part HNDL attacks. That distinction is the honest headline.
+which is the part HNDL attacks. That distinction was the honest headline for #454.
+
+#### 2.4.2 Why #668 superseded it
+
+The deferral rests on one load-bearing sentence: *a signature proves authenticity at
+verification time*, so it can be rotated reactively. That is true of a signature whose
+verification happens **once, now** — an MLS commit is validated as it is applied and never
+re-validated years later, and a stale forged commit buys an attacker nothing.
+
+It is **false** of every signature Pollis expects to be re-checked indefinitely, and Pollis
+has three of those:
+
+| Long-lived signature | Why "verify once, now" fails | Moved to |
+|---|---|---|
+| **Account identity key** (`account_identity.rs`) | It is the root of the device-cert chain and is *the* answer to "is this really that user's device?". It is re-verified on every new device, every enrollment, every relay handshake, for the life of the account. A forged account key is a permanent identity takeover, not a bounded window. | ML-DSA-44 |
+| **Device cert** (`pollis-device-cert`) | It is verified **offline, with zero I/O**, by parties that hold no database — notably the relay tier, deliberately kept out of the Turso metadata plane. There is no revocation lookup on that path to make a reactive rotation land. | ML-DSA-44, cert **v2** |
+| **Transparency-log STHs** (`verifiable-log`) | This is the decisive one. The whole product claim of the log is that its signed statements about **history** stay checkable *forever* — an auditor in 2035 re-verifying a 2026 STH is the intended use, not an edge case. A CRQC that can forge Ed25519 in 2035 can mint a consistent-looking 2026 head and destroy exactly the non-repudiation the log exists to provide. Here a forgery **is** retroactive. | ML-DSA-44, contexts bumped to `sth:v2` / `sth:v2:account-keys` / `sth:v2:binaries` |
+
+So the correct decomposition is not "KEM = urgent, signatures = reactive" but
+**"confidentiality of traffic = urgent (HNDL); authenticity of *history* = urgent
+(retroactive forgery); authenticity of *live protocol steps* = genuinely reactive."** #454
+got the first right and collapsed the second into the third. #668 splits them.
+
+The MLS leaf signature itself is in the third, genuinely-reactive bucket — it moved with
+`CS_HYBRID` because the ciphersuite bundles KEM, AEAD and signature into one code point
+and there is no draft suite that pairs a PQ KEM with Ed25519. That is a consequence of the
+suite move, not an independent argument.
+
+The cost side of the original argument was accurate and was simply **paid**, not avoided
+(measured numbers in §4.1): a hybrid KeyPackage went 2,659 → 8,670 B, roughly tripling.
+What made that affordable is that the two things the deferral warned about had already
+been fixed by the time it landed — periodic self-update (#666) keeps leaves merged, so
+per-commit cost is logarithmic in N rather than linear, and the fleet-completeness gate
+(§3.3) means only PQ-capable devices ever sit in a PQ group.
+
+#### 2.4.3 What #668 changed, concretely
+
+- **Suite, in place.** `CIPHERSUITE_HYBRID` moved from
+  `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` (`0x004D`) to
+  `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` (**`0x0052`**), with
+  `SignatureScheme::MLDSA44 = 0x0904`. Same X-Wing KEM; KDF SHA-256 → SHA-384.
+- **Account identity key** is ML-DSA-44. The **private** key *is* its 32-byte seed, so
+  the Secret-Key wrap, the PIN-wrapped keystore blob and the enrollment envelope are all
+  byte-identical to the Ed25519 era — private-key custody did not change at all. Only the
+  public half (32 → 1312 B) and the signature (64 → 2420 B) grew.
+- **Per-device MLS signing keys are per signature *scheme*, not per device.** A device in
+  groups of both suites holds **two** leaf keys at once — Ed25519 for classic-suite
+  leaves, ML-DSA-44 for PQ-suite leaves (`device::load_or_create_device_signer` takes the
+  scheme; `provider::signature_scheme(suite)` supplies it). New nullable Turso column
+  `user_device.mls_signature_pub_pq` (migration `000011_device_pq_signature_pub.sql`)
+  carries the PQ half; `mls_signature_pub` keeps the Ed25519 half unchanged.
+- **Device cert v2** (`pollis-device-cert-v2\x00`) certifies **both** device leaf keys in
+  one account-key signature, so no leaf is ever uncertified during the classic→PQ overlap.
+  The public-key length prefixes in the signed payload widened `u8` → `u16` (an ML-DSA-44
+  public key is 1312 bytes); `device_id` keeps its `u8` prefix.
+- **DS request auth.** `X-Pollis-Signature` is now an ML-DSA-44 signature made with the
+  device's PQ key and verified against `user_device.mls_signature_pub_pq`; the header grows
+  88 → ~3228 base64 chars (§3.5).
+- **Transparency-log STHs** are ML-DSA-44 under bumped domain-separated contexts
+  `pollis-verifiable-log:sth:v2`, `…:sth:v2:account-keys`, `…:sth:v2:binaries`.
+
+**Still Ed25519, deliberately:**
+
+- The **classic** MLS suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) and
+  the per-device Ed25519 leaf key that signs into it — retiring those is **#669**.
+- The **relay directory** signing key (`POLLIS_OVERLAY_DIRECTORY_KEY`,
+  `pollis-core/src/net/directory.rs`). The signed directory artifact is produced by a Node
+  Lambda and `node:crypto` has no ML-DSA, so this one cannot move until its signer can.
+  (The relay *handshake* itself did move — the device signs it with its ML-DSA-44 key.)
+
+With that, the §6 headline changes: authentication *is* post-quantum now, on every path
+except the two listed above. §6 states the new scope.
 
 ---
 
@@ -267,21 +374,34 @@ Introduce a second ciphersuite constant alongside the existing one, rather than
 replacing it:
 
 ```rust
-// provider.rs
+// provider.rs — as shipped, post-#668
 pub(crate) const CS_CLASSIC: Ciphersuite =
-    Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;      // today
+    Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;              // 0x0001
 pub(crate) const CS_HYBRID: Ciphersuite =
-    Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519;     // 0x004D, already in the pinned enum (§7)
+    Ciphersuite::MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44;    // 0x0052 (§7)
+
+/// The scheme a suite's leaves sign with: Ed25519 for classic, MLDSA44 for hybrid.
+pub(crate) fn signature_scheme(suite: Ciphersuite) -> SignatureScheme {
+    suite.signature_algorithm()
+}
 ```
 
-Every call site that currently hard-codes `CS` (`key_packages.rs`, `device.rs`,
-`group_state.rs`) becomes suite-aware. The device keeps a **stable signing key per
-suite** — note `load_or_create_device_signer` keys the signer on
-`CS.signature_algorithm()` (`device.rs:76-90`); since both suites keep Ed25519
-signatures, the *same* signing key and the *same* `device_cert` cover both suites' leaves.
-This is a happy consequence of the "signatures stay classical" decision: cross-signing,
-the DS auth credential (whichever scheme is live when this ships — §3.5), and the
-transparency log are all unchanged by this work.
+Every call site that previously hard-coded `CS` (`key_packages.rs`, `device.rs`,
+`group_state.rs`) becomes suite-aware. **The device keeps a stable signing key per
+signature *scheme*.** Under #454 that distinction was invisible — both suites signed
+Ed25519, so the nine signature-key-gen sites read one `SIGNATURE_SCHEME` constant and one
+signing key plus one `device_cert` covered every leaf (§7.5). #668 ended that: `CS_CLASSIC`
+leaves sign Ed25519, `CS_HYBRID` leaves sign ML-DSA-44, and a device in groups of both
+suites holds **both** keys at once — same `mls_kv` scope, one row per scheme, with the
+un-suffixed pre-#668 row kept in step for Ed25519 so a downgrade to a v1.7.0 build still
+finds the key its existing groups are signed with. Keying on the *scheme* rather than the
+suite is deliberate: it is the scheme that decides whether a stored key can verify a given
+leaf, and two suites sharing a scheme should share a key.
+
+So the "cross-signing, DS auth and the transparency log are all unchanged by this work"
+claim held for #454 and **does not hold now**: device certs went to v2 and certify both
+leaf keys, the DS auth credential moved to the PQ key, and the transparency log's STHs
+moved to ML-DSA-44 under `sth:v2` contexts. See §2.4.3, §3.4 and §3.5.
 
 ### 3.2 Rollout order (three fronts, staggered)
 
@@ -432,11 +552,21 @@ add migrations, so the number is claimed when the work lands, not reserved here)
   Set to 1 when a device publishes hybrid KeyPackages. Lets the reconcile path answer
   "is every member hybrid-capable?" cheaply. This is a hint, not a security boundary —
   the actual gate is "does a hybrid KP exist to claim," which fails safe on its own.
-- **Signature columns are left untouched** (Ed25519 stays), but we note the forward
-  path: if ML-DSA is ever added, `mls_signature_pub` and the `device_cert` columns
-  would gain an algorithm tag the same additive way. The account-key transparency log
-  (`account_key_log`, `000005_account_key_log.sql`) is likewise untouched by the KEM
-  change, since it records `account_id_pub` (Ed25519), not KEM keys.
+- **Signature columns were left untouched by the KEM change** (Ed25519 stayed), and the
+  forward path this bullet sketched — "if ML-DSA is ever added, the key columns gain an
+  algorithm tag the same additive way" — is exactly what #668 then did, one migration
+  later: **`000011_device_pq_signature_pub.sql`** adds the single nullable column
+  `user_device.mls_signature_pub_pq BLOB`. It is a *second column* rather than an
+  algorithm tag on the existing one because `mls_signature_pub` is simultaneously the DS
+  request-auth credential, read as a raw 32-byte Ed25519 key by every already-shipped
+  client — overwriting it with a 1312-byte ML-DSA key would have broken authentication for
+  the whole fleet the instant the migration ran. NULL means "this device predates #668":
+  such a row is skipped by `resign_stale_device_certs`, treated as `AbsentRetry` by
+  `verify_added_devices`, and self-heals the next time that device runs
+  `ensure_device_cert`. The account-key transparency log (`account_key_log`,
+  `000005_account_key_log.sql`) needed no migration either way — it records
+  `account_id_pub` as an opaque blob, so the Ed25519 → ML-DSA-44 account key changes its
+  *length*, not its shape.
 
 No migration drops or narrows anything, so a pre-hybrid desktop app continues to run
 against the migrated schema unmodified.
@@ -444,11 +574,20 @@ against the migrated schema unmodified.
 ### 3.5 Device key packages during the window
 
 `user_device.mls_signature_pub` (`000000_baseline.sql:156`) is the *signing* key, not
-a KEM key, and signing stays classical (§2.4), so this column does **not** change and
-the DS-auth path in `ds_client.rs` is unchanged *by this work* — whichever DS auth
-scheme is live when this ships (today's device-header signature, or the anonymous
-membership proofs of `docs/metadata-minimization-design.md` v1.5), the KEM change does
-not touch it; the two programs are orthogonal. The KEM material lives entirely inside the
+a KEM key, so **the KEM change does not touch it** and the DS-auth path in `ds_client.rs`
+is unchanged *by this work* — whichever DS auth scheme is live (the device-header
+signature, or the anonymous membership proofs of `docs/metadata-minimization-design.md`
+v1.5), the KEM change does not touch it; the two programs are orthogonal.
+
+**#668 did touch it, on its own terms.** The DS request credential moved from
+`mls_signature_pub` to `mls_signature_pub_pq`: `X-Pollis-Signature` is now an ML-DSA-44
+signature over the same canonical `METHOD | PATH | TIMESTAMP | HEX_SHA256_BODY` message,
+verified against the raw 1312-byte PQ key (`pollis-delivery/src/auth.rs`). The header
+grows **88 → ~3228 base64 chars** — the one genuinely user-invisible-but-measurable cost
+of the change, paid on every DS write. The ordering that makes this safe is that
+`publish-device-cert` is session/cert gated and **never** device-signature gated, so a
+device always has a reachable path to register its PQ key *before* it needs to sign with
+it. The KEM material lives entirely inside the
 per-suite KeyPackages (`mls_key_package.key_package`), which is where the ML-KEM public
 key rides. A device that is hybrid-capable simply maintains two KP pools; the
 `replenish_key_packages` top-up logic (`key_packages.rs:141`) runs once per suite. On
@@ -464,15 +603,32 @@ disciplined. The size delta is the dominant cost; the CPU delta is negligible.
 
 ### 4.1 Sizes: the real cost
 
+**KEM primitives** (the #454 cost, unchanged by #668 — `0x0052` carries the same X-Wing):
+
 | Item | X25519 (classic) | ML-KEM-768 | Hybrid (X25519 + ML-KEM-768) |
 |---|---|---|---|
 | KEM public key (in KeyPackage / leaf) | 32 B | 1184 B | ~1216 B |
 | KEM ciphertext (per HPKE seal, in Welcome / commit path secret) | 32 B | 1088 B | ~1120 B |
 | KEM private key (local only) | 32 B | 2400 B | ~2432 B |
 
+**Signature primitives** (the #668 cost, added on top — §2.4):
+
+| Item | Ed25519 | ML-DSA-44 |
+|---|---|---|
+| Public key (in every leaf, KeyPackage, device cert, account identity) | 32 B | **1312 B** |
+| Signature (on every leaf, KeyPackage, commit, cert, STH, DS request) | 64 B | **2420 B** |
+| Private key (local only) | 32 B seed | **32 B seed** — byte-identical custody |
+
+The private-key row is the one to notice: an ML-DSA-44 private key *is* its 32-byte seed,
+so every place Pollis stores or transports a private signing key — the Secret-Key wrap, the
+PIN-wrapped keystore blob, the enrollment envelope, openmls's own `SignatureKeyPair` — is
+unchanged in size and shape. All of the cost is on the public/verification side.
+
 Implications, mapped to Pollis's actual payloads. The per-message sizes below are
 **measured in-box**, `--release`, with `use_ratchet_tree_extension(true)` (as Pollis sets
-at `group_state.rs:508`), a single committer, TLS-serialised bytes:
+at `group_state.rs:508`), a single committer, TLS-serialised bytes. **They are #454-era
+numbers**, taken on the Ed25519-signed X-Wing suite (`0x004D`); §"the #668 signature cost"
+below carries them forward:
 
 | N | classic self-update / add / welcome | X-Wing self-update / add / welcome |
 |---|---|---|
@@ -500,10 +656,13 @@ at `group_state.rs:508`), a single committer, TLS-serialised bytes:
   matters; the linear copath cost is.
 - **KeyPackage size:** a hybrid KP carries a 1216-byte `hpke_init_key` (ML-KEM-768 public
   key 1184 B + X25519 32 B — the byte count the P0 spike observed, confirming real hybrid
-  encapsulation), landing the KP at ~1.5–2 KB. With TARGET=5 packages per suite per device
-  (`key_packages.rs:94`), a hybrid-capable device stores/publishes ~10 KB of hybrid KP
-  material in `mls_key_package` (base64-inflated ~33% over the DS wire,
-  `key_packages.rs:26-37`). Small in absolute terms.
+  encapsulation), which landed the #454 KP at **2,659 B**. Since #668 it also carries a
+  1312-byte ML-DSA-44 leaf key and **two** ML-DSA-44 signatures (the leaf node's and the
+  KeyPackage's), taking it to **8,670 B** against a classic KP's **307 B**. With TARGET=5
+  packages per suite per device (`key_packages.rs:94`), a hybrid-capable device
+  stores/publishes ~43 KB of hybrid KP material in `mls_key_package` (base64-inflated ~33%
+  over the DS wire, `key_packages.rs:26-37`). Still small in absolute terms, but no longer
+  negligible next to the commit.
 - **Welcome size:** a Welcome HPKE-seals the group secrets to each joiner and (with the
   ratchet-tree extension on) inlines the tree; at N=100 a hybrid Welcome is ~148 KB.
   `mls_welcome.welcome_data` (`000000_baseline.sql:128`) and the DS `/v1/...` welcome
@@ -530,28 +689,50 @@ at `group_state.rs:508`), a single committer, TLS-serialised bytes:
   `self_update_turns_linear_commit_growth_into_logarithmic`, which controls merge state
   exactly, and by the absolute small-roster ceilings in `flows/pq_migration.rs`
   (`MAX_HYBRID_COMMIT_BYTES`).
+- **The #668 signature cost: roughly ×3 on top, and the shape is unchanged.** Re-measured
+  after the move to ML-DSA-44 (`hybrid_payloads_stay_under_their_ceilings`, pollis-core's
+  MLS unit suite): **KeyPackage 8,670 B** (classic 307 B, and 2,659 B on the #454 suite),
+  **Welcome 15,241 B** at two members, and **14,839 B** for a commit into a merged
+  8-member group. All three roughly tripled. Crucially the *growth shape* did not change —
+  a signature is a per-leaf constant, not a per-copath-node cost, so
+  `self_update_turns_linear_commit_growth_into_logarithmic` still passes on both suites and
+  the "keep leaves merged" lever is still the one that matters. The absolute ceilings were
+  re-pinned about 1.4× above each measurement (12,288 B KeyPackage / 21,504 B Welcome /
+  20,480 B commit) — tight enough that a doubling fails the build, loose enough to survive
+  openmls padding and code-point churn. **The 20,480 B commit ceiling is the number to
+  watch now**, and `flows/pq_migration.rs`'s `MAX_HYBRID_COMMIT_BYTES` matches it exactly
+  so the flows harness and the unit suite cannot drift.
 
 ### 4.2 Latency: negligible
 
-ML-KEM-768 keygen/encaps/decaps in `libcrux-ml-kem` (a formally-verified, optimised
-implementation) run in **tens of microseconds** on desktop hardware — the same order as
-X25519, and orders of magnitude below Argon2id's deliberate ~250 ms unlock cost
-(whitepaper §3.1) or a single Turso round-trip. Hybrid KEM ops add one ML-KEM operation
-alongside the existing X25519 one; the CPU cost is in the noise next to the network. The
-MLS crypto already runs in the Rust core off the render thread
-(`PollisProvider`/`RustCrypto`, `provider.rs:37-53`), consistent with the CLAUDE.md
-"lean Rust for perf-critical paths" doctrine, so there is no GC/IPC penalty.
+ML-KEM-768 keygen/encaps/decaps run in **tens of microseconds** on desktop hardware — the
+same order as X25519, and orders of magnitude below Argon2id's deliberate ~250 ms unlock
+cost (whitepaper §3.1) or a single Turso round-trip. Hybrid KEM ops add one ML-KEM
+operation alongside the existing X25519 one; the CPU cost is in the noise next to the
+network. ML-DSA-44 sign/verify (#668) sit in the same regime — lattice arithmetic on
+kilobyte-scale operands, not the exponentiation-bound work that would show up in a
+round-trip budget. The MLS crypto already runs in the Rust core off the render thread
+(`PollisProvider`/`RustCrypto`, `provider.rs`), consistent with the CLAUDE.md
+"lean Rust for perf-critical paths" doctrine, so there is no GC/IPC penalty. **The cost of
+both changes is size, not time** — and, since #668, the ~3.1 KB `X-Pollis-Signature`
+header on every DS write (§3.5).
 
 ### 4.3 How we bound it
 
 - **Suite-scoped, not global:** classic groups keep classic (small) commits. Only
   hybrid groups pay the size cost, and only for the KEM-bearing fields.
-- **Keep signatures classical in Phase 1** (§2.4) so we do *not* stack ML-DSA's
+- ~~**Keep signatures classical in Phase 1** (§2.4) so we do *not* stack ML-DSA's
   multi-KB-per-signature cost — on *every* leaf and *every* commit — on top of the KEM
-  cost. That single decision is the biggest lever keeping commit/KeyPackage sizes down.
-  (The AEAD is *not* a lever we hold: the hybrid suite is ChaCha20-Poly1305 by
+  cost. That single decision is the biggest lever keeping commit/KeyPackage sizes down.~~
+  **Spent in #668.** This was the largest lever the design held, and it was deliberately
+  cashed in for the verifiability argument in §2.4.2: ML-DSA-44's 1312 B key + 2420 B
+  signature per leaf roughly tripled the KeyPackage, Welcome and commit (§4.1). It was
+  affordable *because* the other levers had already landed — self-update keeps the growth
+  logarithmic, and the fleet gate keeps the cost off classic groups entirely. With it
+  spent, "keep leaves merged" below is now the only structural lever left.
+  (The AEAD is *not* a lever we hold either: the hybrid suite is ChaCha20-Poly1305 by
   construction — §2.3 — but that swap is roughly size-neutral versus AES-128-GCM, so it
-  does not move the commit-size numbers; the KEM does.)
+  does not move the commit-size numbers; the KEM and the signature do.)
 - **Keep leaves merged, don't cap group size** (§4.1, resolved): the apparent linearity
   was unmerged leaves, not N. Periodic self-update (#666) is the lever — it restores
   `log2(N)` copath resolution — and no group-size threshold was introduced. Disabling the
@@ -564,11 +745,13 @@ MLS crypto already runs in the Rust core off the render thread
   across the suite boundary — it cannot control merge state at measurement time, so it is
   deliberately loose and the discriminating proof lives in the self-update test that can.
 
-Net: hybrid MLS costs Pollis **microseconds per op** and roughly **8× the classic commit
-in constant factor**, growing `log2(N)` in group size provided leaves stay merged — which
+Net: hybrid MLS costs Pollis **microseconds per op** and, on the KEM change alone, roughly
+**8× the classic commit in constant factor** — with #668's ML-DSA-44 signatures roughly
+tripling that again — growing `log2(N)` in group size provided leaves stay merged, which
 is what periodic self-update (#666) now guarantees. That is a defensible price for
-post-quantum confidentiality at any group size Pollis targets, and it holds as long as
-signatures stay classical (§2.4) and self-update keeps running.
+post-quantum confidentiality **and** post-quantum authenticity at any group size Pollis
+targets, and it holds as long as self-update keeps running. The constant factor is now
+pinned by absolute ceilings (§4.1) rather than argued.
 
 ---
 
@@ -622,10 +805,12 @@ suite boundary*. Add a payload-size assertion so a commit/Welcome that balloons 
 budget fails the run (§4.3).
 
 **S6 — External-join across suites.** A recovered device (Secret-Key path,
-`external_join_group`, `group_state.rs:196`) joins a group that has migrated to hybrid.
-Assert it fetches the hybrid GroupInfo, external-commits into the hybrid group, and its
-cross-signing cert still verifies (`verify_added_devices`, `device.rs:409`) — confirming
-the classic Ed25519 cert path is untouched by the KEM change (§3.1).
+`external_join_group`) joins a group that has migrated to hybrid. Assert it fetches the
+hybrid GroupInfo, external-commits into the hybrid group, and its cross-signing cert still
+verifies (`verify_added_devices`) — for #454 that confirmed the cert path was untouched by
+the KEM change; post-#668 it is the stronger assertion that the **v2** cert, which binds
+both the Ed25519 and the ML-DSA-44 leaf key in one ML-DSA-44 account-key signature,
+verifies the leaf key of whichever suite the device lands on (§2.4.3, §3.1).
 
 All six are pure `pollis-core` tests, runnable headless in-box on `ci/mls-test-gate`
 before anything reaches CI or the fleet.
@@ -641,9 +826,21 @@ before anything reaches CI or the fleet.
   would have to break *both* X25519 (classically hard, quantumly broken) *and*
   ML-KEM-768 (quantum-hard). Recorded post-migration ciphertext stays confidential.
   This is the entire HNDL defence, and it is real.
-- **Defence in depth for the transition itself:** because it is hybrid, adopting the
-  young `libcrux-ml-kem 0.0.8` cannot regress us below today's classical security even
-  if ML-KEM (or its implementation) has a flaw (§2.2).
+- **Defence in depth for the transition itself:** because the KEM is hybrid, adopting a
+  young ML-KEM implementation cannot regress us below today's classical security even
+  if ML-KEM (or its implementation) has a flaw (§2.2). Note this argument covers the KEM
+  **only**: ML-DSA-44 (#668) is *not* hybrid — the MLS suite carries one signature
+  algorithm, and there is no draft suite pairing a PQ KEM with a composite Ed25519+ML-DSA
+  signature. A structural break in ML-DSA-44 would therefore cost us authenticity on the
+  PQ suite outright, where a break in ML-KEM-768 would leave X25519 standing. That is a
+  genuine asymmetry in the posture and we state it rather than smoothing it over; the
+  mitigating facts are that a signature break is *detectable and reactive* (§2.4.1's
+  argument, which does hold for live protocol steps) and that ML-DSA-44 is a FIPS 204
+  standard, not a draft primitive.
+- **Post-quantum authenticity on the long-lived paths (#668):** account identity keys,
+  device certs and — the one that actually motivated the change — transparency-log STHs
+  are ML-DSA-44 signed, so a CRQC cannot retroactively forge a statement about history
+  that an auditor is meant to be able to re-check in 2035 (§2.4.2).
 
 **What it explicitly does NOT buy — stated to avoid overclaiming:**
 
@@ -654,19 +851,31 @@ before anything reaches CI or the fleet.
 - **It does not help if an endpoint is compromised.** A device with the unlocked keys,
   or malware in the trusted binary, reads plaintext regardless of KEM. HNDL is a
   *passive network* threat; endpoint compromise is a different axis (whitepaper §1.1).
-- **It does not make signatures/authentication post-quantum** (§2.4). A future CRQC
-  could forge Ed25519 and mount an *active* impersonation going forward. That is a
-  store-now-*forge*-later concern, addressable reactively; it is out of scope for this
-  HNDL-focused change, and we say so.
+- ~~**It does not make signatures/authentication post-quantum** (§2.4).~~ **Superseded by
+  #668** — but only partially, and the residue must still be stated. Post-quantum
+  authentication now covers MLS leaves on the PQ suite, account identity keys, device
+  certs, DS request auth and transparency-log STHs. It does **not** cover: (a) the classic
+  suite `0x0001`, whose leaves still sign Ed25519 until #669 retires it — so any group not
+  yet migrated is still classically authenticated; (b) the relay **directory** signing key
+  (`POLLIS_OVERLAY_DIRECTORY_KEY`), which stays Ed25519 because its signer is a Node
+  Lambda and `node:crypto` has no ML-DSA. Both are live Ed25519 surfaces today.
 - **It does not retroactively protect already-sent classic traffic.** Everything sent
   before a group migrates was sealed with X25519 and is, in principle, harvestable. The
   migration caps the *future* harvest window; it cannot un-harvest the past. This is
   intrinsic to HNDL and is the reason to start now (§1.3).
-- **It is not a "fully post-quantum messenger" claim.** The honest, defensible headline
-  is: **"post-quantum *confidentiality* for message content via hybrid X25519+ML-KEM
-  key exchange."** That is a genuine cutting-edge position — it puts Pollis level with
-  Signal's PQXDH and ahead of any messenger still fully classical on KEX — without the
-  overclaim that everything is quantum-proof.
+- **Nor does it retroactively protect already-*signed* history.** The mirror of the point
+  above, and the one #668 is racing: STHs signed with the old Ed25519 log key before the
+  rotation stay forgeable by a future CRQC. Bumping the STH contexts to `sth:v2` stops an
+  old head being replayed as a new one; it does not make the old heads post-quantum. Only
+  re-publishing history under the ML-DSA-44 key does, which is why the log key rotation is
+  a *rotation with republication*, not a swap.
+- **It is still not a "fully post-quantum messenger" claim.** The honest, defensible
+  headline is now: **"post-quantum *confidentiality* for message content via hybrid
+  X25519+ML-KEM key exchange, and post-quantum *authenticity* for identity, device certs
+  and the transparency log via ML-DSA-44"** — with the two Ed25519 residues above named.
+  That is a genuine cutting-edge position — it puts Pollis level with Signal's PQXDH on
+  KEX and ahead of it on signatures — without the overclaim that everything is
+  quantum-proof.
 
 Positioned this way it is a real flex *and* it survives an auditor reading the
 whitepaper's "Honest limits" tradition (whitepaper §6.9, §13). Overclaiming here would
@@ -676,12 +885,33 @@ be worse than not shipping.
 
 ## 7. Feasibility assessment — installed stack vs. what's needed
 
-**Honest bottom line: the pinned stack already ships the hybrid ciphersuite. The P0
-spike proved a full hybrid group flow end-to-end, headless, with stock cargo — no version
-bump, no fork, no `[patch.crates-io]`. The live risk is not availability; it is code-point
-churn, and it is managed by pinning.**
+**Honest bottom line (#454): the released stack already shipped the hybrid ciphersuite. The
+P0 spike proved a full hybrid group flow end-to-end, headless, with stock cargo — no
+version bump, no fork, no `[patch.crates-io]`. The live risk is not availability; it is
+code-point churn, and it is managed by pinning.**
 
-### 7.1 What the pinned tree can already do
+**Amended by #668:** the PQ *signature* suites exist in **no released openmls** — 0.8.1 has
+no `SignatureScheme::MLDSA44` and no ML-DSA ciphersuite at all — so `0x0052` is
+unreachable from crates.io and the "stock cargo" property no longer holds. All five openmls
+crates are now pinned to upstream `main` rev
+**`34222ef632c87df58baaa7614c8a72ac235c5f07`** through a single workspace
+`[patch.crates-io]` (`Cargo.toml`). It is one `[patch]` rather than five git dependencies
+so the pin lives in exactly one place and **no** crate in the workspace — dev-dependency
+graphs and transitive deps included — can resolve openmls back to the registry copy; a
+split graph would compile (two `openmls` crates, distinct types) and then fail confusingly
+at the boundary. `draft-ietf-mls-pq-ciphersuites` must be named on every openmls crate we
+depend on *directly*, because openmls's own feature chains it with `?/`, which only fires
+for the optional providers it pulls in and we pull the providers in ourselves. Also
+non-optional: the `0-8-1-storage-format` feature, because upstream changed how
+`ExtensionType`/`ProposalType`/`CredentialType` serialise into the storage provider and
+every device already running v1.7.0 has `mls_kv` rows in the old shape — there is no
+migration for MLS state, so a device that cannot deserialise its own tree has lost its
+groups, not a cache. Upgrading the rev is a **protocol-visible act**, not a dependency
+bump: the draft renumbers provisional code points between revisions and a code point change
+is a wire-format break for every group already on `0x0052`. **The live risk is unchanged in
+kind and larger in degree: code-point churn (§7.4).**
+
+### 7.1 What the pinned tree can already do (as of #454; see the amendment above)
 
 - The suite **exists in the pinned enum.** `openmls_traits 0.5.0` (already locked) defines
   `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519 = 0x004D` in its `Ciphersuite` enum,
@@ -701,9 +931,14 @@ churn, and it is managed by pinning.**
   offers an optional `libcrux-provider` feature, but it does nothing except pull in
   `dep:openmls_libcrux_crypto`; the direct dependency is equivalent and keeps the
   provenance of the provider visible in our own `Cargo.toml` rather than behind an
-  upstream feature flag. As shipped: `pollis-core/Cargo.toml`.
+  upstream feature flag. As shipped by #454: `pollis-core/Cargo.toml`.
+- **Superseded by #668:** the libcrux dependency is gone. `0x0052` is implemented by
+  `openmls_rust_crypto` — the provider Pollis already instantiated — while libcrux
+  implements no ML-DSA suite at all, so the whole "add a second provider" manoeuvre
+  dissolved along with the suite that motivated it. What replaced it is the workspace git
+  pin above.
 
-### 7.2 P0 is DONE — proven end-to-end, headless
+### 7.2 P0 is DONE — proven end-to-end, headless (on the #454 suite)
 
 A two-client throwaway crate on `openmls 0.8.1` + `openmls_libcrux_crypto 0.3.1`, stock
 cargo, no patches, ran the full flow — KeyPackage → Add → Welcome → join → application
@@ -717,9 +952,24 @@ bob decrypted: "hello pq world"
 ```
 
 The 1216-byte `hpke_init_key` is exactly ML-KEM-768 public key (1184) + X25519 (32),
-confirming real hybrid encapsulation — not a stubbed or classical-only path.
+confirming real hybrid encapsulation — not a stubbed or classical-only path. That
+`hpke_init_key` is unchanged under `0x0052`: the KEM did not move (§2.1).
 
-### 7.3 Provider integration: drop-in, but suite-routed on purpose
+### 7.3 Provider integration: suite-routed under #454, single-backend since #668
+
+> **Superseded.** Everything in this subsection describes the #454 state and is kept
+> because the *reasoning* — a supply-chain advisory can veto a crypto backend regardless of
+> its feature set — is the part worth remembering. As shipped today, one backend
+> (`openmls_rust_crypto::RustCrypto`) serves **both** suites, `openmls_libcrux_crypto` is
+> out of the dependency tree entirely, and there is no suite→provider dispatch:
+> `PollisProvider` is the only provider any path constructs
+> (`pollis-core/src/commands/mls/provider.rs`). The `with_suite_provider!` /
+> `with_group_provider!` / `with_lineage_provider!` macros that performed the dispatch are
+> deleted; two of the three had to deserialise the whole stored group just to read a suite
+> before they could dispatch, work every call site then repeated inside the body. The
+> routing invariant test `classic_provider_never_routes_to_libcrux` is now
+> `mls_backend_is_rustcrypto`, and **nine** libcrux `deny.toml` ignores were retired — not
+> by re-arguing reachability, but because the crates left the graph (see §7.3.1).
 
 - The provider is generic over its crypto half (`pollis-core/src/commands/mls/provider.rs`):
   `MlsProvider<C>` composes any backend `C` with the custom `MlsStore`.
@@ -767,66 +1017,114 @@ confirming real hybrid encapsulation — not a stubbed or classical-only path.
   consults `supports()`, so classic groups work today; but anything that *starts* calling
   `supports()` would break every classic group. P1a pins this with a regression test (§8).
 
+#### 7.3.1 How #668 closed the advisory ledger
+
+Worth recording because the outcome is the *good* one and it was not the plan. #454 carried
+nine libcrux ignores in `deny.toml`, in two clusters, each resting on a reachability
+argument:
+
+- **RUSTSEC-2026-0207 / -0208 / -0212** (`libcrux-sha3 0.0.8`, `libcrux-secrets 0.0.5`) came
+  in transitively through `hpke-rs 0.6.1` ← `openmls_rust_crypto`. The fixes shipped in
+  `hpke-rs 0.7.0`, which **no released openmls depends on** — but the #668 pin to openmls
+  `main` does, so the tree now builds `libcrux-sha3 0.0.10` and `libcrux-secrets 0.0.6`,
+  the patched versions. The git pin taken for the *signature* change happened to close
+  three advisories the released stack could not.
+- **RUSTSEC-2026-0211 / -0209 / -0210 / -0124 / -0075 / -0073** entered via
+  `openmls_libcrux_crypto 0.3.1`. Moving the PQ suite to `0x0052` removed that crate from
+  the graph, so all six went with it.
+
+That also retires the *code invariant* the first cluster's argument rested on: the only
+reason `PollisPqProvider` existed was to keep classic AES-GCM traffic away from libcrux's
+non-constant-time tag check. With one backend there is nothing to route. **If a
+libcrux-backed provider is ever reintroduced, every one of the six must be re-argued from
+scratch** — the `deny.toml` note says so explicitly, and the entries must not simply be
+resurrected.
+
 ### 7.4 The live risk: code-point churn, not availability
 
-The suite works today, but `0x004D` is a moving target and must be pinned as one:
+**This risk has already materialised once, exactly as predicted.** The section below was
+written about `0x004D`; one release later #668 moved off it. Everything it says now applies
+to `0x0052`, which is *also* provisional.
 
-- `0x004D` is an **experimental** 2024 OpenMLS code point (X-Wing draft-06). The IANA MLS
+- `0x004D` was an **experimental** 2024 OpenMLS code point (X-Wing draft-06). The IANA MLS
   ciphersuite registry has **zero** post-quantum entries; nothing here is standards-final.
 - `draft-ietf-mls-pq-ciphersuites-06` (2026-07-21) **dropped X-Wing**, moving to
   provisional code points `0x004E` / `0x004F` / `0x0052` built on
   `draft-irtf-cfrg-concrete-hybrid-kems`. WG state: "Waiting for WG Chair Go-Ahead."
 - OpenMLS `main` implements those new suites behind a new feature flag
   `draft-ietf-mls-pq-ciphersuites` (openmls/openmls#2046 merged 2026-06-11,
-  openmls/openmls#2118 2026-07-16) — **and has moved `0x004D` behind that same flag.** So
-  the next OpenMLS release is a **breaking change for this usage**: the suite we rely on
-  moves from always-on to feature-gated. **Pin the versions** (`openmls = "0.8"`,
-  `openmls_libcrux_crypto = "0.3"`, suite `0x004D`), and treat a future OpenMLS bump as a
-  **tracked migration**, not a routine dependency update — the bump is where `0x004D`
-  becomes conditional on the `draft-ietf-mls-pq-ciphersuites` feature.
-- The new draft suites are not a drop-in replacement yet either: openmls/openmls#2104
-  (open) notes they are currently implemented with SHA256 where the draft specifies
-  SHAKE256 — known-wrong and unreleased.
+  openmls/openmls#2118 2026-07-16) — **and moved `0x004D` behind that same flag.** So the
+  next OpenMLS release is a breaking change for the #454 usage: the suite it relied on
+  moves from always-on to feature-gated.
+- **Where that left us (#668).** Waiting for a release was not an option — the PQ
+  *signature* suites exist only on `main`, so §7's amendment pins the rev directly and
+  names `draft-ietf-mls-pq-ciphersuites` on every direct openmls dependency. Pollis is
+  therefore on a **provisional code point from an unreleased upstream**, deliberately, and
+  the mitigation is procedural: **treat any rev bump as a migration, not a version bump**,
+  and read the upstream diff for `types.rs` before moving it. A code point change is a
+  wire-format break for every group already on `0x0052`.
 
 **What this means for shipping.** Pollis is a closed fleet (one binary, one DS), so
-shipping a private/experimental code point is *tolerable* — every client and the DS move
-together, and there is no third-party interop to honour. But budget for a **second suite
-migration** when the IETF suites stabilise (`0x004E`/`0x004F`/`0x0052`, SHAKE256 fixed, WG
-go-ahead). Crucially, that is an argument **for** building the `mls_commit_log.generation`
-machinery (§3.2, §3.4) properly rather than against it: the same suite-generation lineage
-that carries classic → X-Wing carries X-Wing → the IETF suite later. **Built once, used
-twice.**
+shipping a provisional code point is *tolerable* — every client and the DS move together,
+and there is no third-party interop to honour. But budget for a **further suite migration**
+when the IETF suites are finalised (WG go-ahead, IANA registration). Crucially, that is an
+argument **for** building the `mls_commit_log.generation` machinery (§3.2, §3.4) properly
+rather than against it: the same suite-generation lineage that carries classic → PQ carries
+`0x0052` → whatever IANA eventually registers.
+
+**Why #668 needed none of that machinery, and why that is luck rather than design.** #668
+moved `CIPHERSUITE_HYBRID` **in place** — the constant changed, and there is no
+`0x004D` → `0x0052` migration anywhere in the tree. It got away with that only because the
+§3.3/§5-Phase-5 gates mean a group is born hybrid *only* once the whole live fleet is
+PQ-capable, so the classic→hybrid transition had not yet fired anywhere when the code point
+moved and no group was stranded on `0x004D`. Once hybrid groups actually exist in the
+fleet, that shortcut is gone: the next code-point change **is** a generation migration, and
+`welcome_ciphersuite` returning `None` for an unimplemented code point means "cannot join",
+never "fall back to classic". Do not read #668's in-place edit as a precedent.
 
 ### 7.5 In-tree work (our side), verified against `origin/main`
 
 - **Suite plumbing (P1b — DONE):** the 31 references to `CS` / `.ciphersuite()` split far
-  more cleanly than the raw count suggested. Both suites sign with Ed25519, so all 9
-  signature-key-gen sites are suite-INVARIANT and now read a `SIGNATURE_SCHEME` constant
-  rather than taking a suite parameter — a device keeps ONE signing key and one
+  more cleanly than the raw count suggested. Both suites signed with Ed25519, so all 9
+  signature-key-gen sites were suite-INVARIANT and read a `SIGNATURE_SCHEME` constant
+  rather than taking a suite parameter — a device kept ONE signing key and one
   `device_cert` across suites, which is the behaviour the cross-signing design already
   assumed. Only the two families that mint suite-bound material became parametrised:
   group creation (`create_mls_group_in_suite`) and KeyPackage construction
   (`build_key_package_in_suite`), each taking the suite alongside the provider that serves
   it. Parametrising the signature sites too would have been busywork encoding a
-  distinction that does not exist.
+  distinction that did not exist.
+  **#668 made that distinction real** and the busywork necessary: `SIGNATURE_SCHEME` became
+  the function `signature_scheme(suite)`, the nine sites now take the scheme they need from
+  the suite they operate in (or from the stored group), a device holds one signing key per
+  scheme, and `device_cert` v2 certifies both (§3.1, §2.4.3). The 2024-era judgement was
+  right for the facts it had; it was a bet on the suites' signature schemes staying equal,
+  and that bet is the thing #668 unwound.
 - **DS monotone-head rule** is enforced **solely** in `pollis-delivery/src/commit.rs`:
   `head_epoch` (`commit.rs:131`) and the conditional
   `INSERT ... WHERE ?2 = (SELECT COALESCE(MAX(epoch), -1) + 1 ...)` in `submit_commit`
   (`commit.rs:179-213`), keyed `(conversation_id, epoch)` by the `idx_mls_commit_unique`
   index. That single site is the one that widens to `(conversation, generation, epoch)`
   (§3.2, §3.4).
-- **Capability advertisement is genuinely new:** `user_device` advertises **no**
-  capabilities today (only `mls_signature_pub`), so `pq_capable` (§3.4) is a new
-  advertisement channel, not an extension of an existing one.
+- **Capability advertisement is genuinely new:** `user_device` advertised **no**
+  capabilities before this work (only `mls_signature_pub`), so `pq_capable` (§3.4) is a new
+  advertisement channel, not an extension of an existing one. It has since been joined by
+  `mls_signature_pub_pq` (#668), which is *also* a capability signal in practice: NULL
+  means "predates #668".
 - **The provider work (P1a)** generalises `PollisProvider` over its crypto backend and
-  adds a second alias, `PollisPqProvider`, wired to libcrux — it does **not** move the
-  classic suite off RustCrypto (§7.3). Behaviour on every production path is therefore
-  byte-identical; the gate is the whole existing suite passing, plus the `supports()`
+  added a second alias, `PollisPqProvider`, wired to libcrux — it did **not** move the
+  classic suite off RustCrypto (§7.3). Behaviour on every production path was therefore
+  byte-identical; the gate was the whole existing suite passing, plus the `supports()`
   regression test and the routing-invariant test from §7.3.
+  **#668 removed `PollisPqProvider` and the dispatch macros entirely** (§7.3): one backend,
+  no routing, and `MlsProvider<C>` stays generic over `C` purely so reintroducing a backend
+  remains a one-line change rather than a signature change everywhere.
 
 All of the in-tree work builds and tests against the classic suite today, and the crypto
-route is already proven (§7.2), so there is **no external gate left** — the long pole is
-now our own plumbing, not an upstream dependency.
+route is already proven (§7.2), so there was **no external gate left** for #454 — the long
+pole was our own plumbing, not an upstream dependency. #668 reopened exactly one external
+dependency: the PQ signature suites are unreleased, so the tree is pinned to an openmls
+`main` rev (§7).
 
 ---
 
@@ -841,16 +1139,24 @@ bump and no fork — keep `openmls = "0.8"`, add a direct dependency on
 (`0x004D`). The one dependency risk carried forward is code-point churn (§7.4): pin both
 versions, and treat a future OpenMLS bump as a tracked migration.
 **No remaining upstream gate.**
+**Superseded by #668:** the suite is now `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`
+(`0x0052`), the libcrux dependency is gone, and the openmls crates are pinned to an upstream
+`main` rev via `[patch.crates-io]` because the PQ signature suites are unreleased (§7).
 
-**Phase 1a — Provider routing: DONE.** ✅ Landed as *routing*, not the swap this phase
-originally proposed. `PollisProvider` (RustCrypto) serves `CS_CLASSIC` and `PollisPqProvider`
-(`openmls_libcrux_crypto`) serves `CS_HYBRID`, both over the custom `MlsStore`; the crate's
-bundled `Provider` type is not used (it hardcodes in-memory storage — §7.3). The swap was
-rejected because libcrux's AES-GCM decryption has an unpatched non-constant-time tag check
-(RUSTSEC-2026-0211), which would have put *classic* traffic on vulnerable code; the hybrid
-suite's AEAD is ChaCha20-Poly1305, which the advisory does not touch. The routing is
-therefore security-load-bearing and is pinned by `classic_provider_never_routes_to_libcrux`
-alongside the `supports()` self-contradiction regression test (§7.3).
+**Phase 1a — Provider routing: DONE, then REMOVED by #668.** ✅ Landed as *routing*, not
+the swap this phase originally proposed. `PollisProvider` (RustCrypto) served `CS_CLASSIC`
+and `PollisPqProvider` (`openmls_libcrux_crypto`) served `CS_HYBRID`, both over the custom
+`MlsStore`; the crate's bundled `Provider` type was not used (it hardcodes in-memory
+storage — §7.3). The swap was rejected because libcrux's AES-GCM decryption has an
+unpatched non-constant-time tag check (RUSTSEC-2026-0211), which would have put *classic*
+traffic on vulnerable code; the hybrid suite's AEAD is ChaCha20-Poly1305, which the
+advisory does not touch. The routing was therefore security-load-bearing and was pinned by
+`classic_provider_never_routes_to_libcrux` alongside the `supports()` self-contradiction
+regression test (§7.3).
+**#668 dissolved rather than routed around the problem:** `0x0052` is implemented by
+RustCrypto and by no libcrux provider, so the second backend, the dispatch macros, the
+cross-provider interop test and nine `deny.toml` ignores all left the tree together
+(§7.3.1). The routing invariant is now the simpler `mls_backend_is_rustcrypto`.
 
 **Phase 1b — Suite parametrisation: DONE.** ✅ `CS_CLASSIC` / `CS_HYBRID` introduced, every
 `CS` call site made suite-aware (the 31 references in §7.5), the additive migrations landed
@@ -865,10 +1171,11 @@ within budget (§4.3).
 **What shipped:**
 - `ensure_mls_key_package` (rotate) and `replenish_key_packages` (top-up) iterate
   `PUBLISHED_SUITES = [CS_CLASSIC, CS_HYBRID]`, building each pool through its
-  paired provider (`PollisProvider`/RustCrypto for classic,
-  `PollisPqProvider`/libcrux for hybrid) and rotating/topping-up **per suite** so
-  neither pool is ever silently drained. The rotation sends both pools in one
+  paired provider and rotating/topping-up **per suite** so neither pool is ever
+  silently drained. The rotation sends both pools in one
   `/v1/key-packages/replenish`; the DS already scopes its DELETE per suite.
+  (Post-#668 there is one provider for both, and what varies per suite is the leaf
+  signing key's *scheme* — §3.1.)
 - `pq_capable` is flipped to `1` by the DS `apply_publish_key_packages` /
   `apply_replenish_key_packages` **only** when the write carries a hybrid package —
   derived from what actually landed in `mls_key_package`, never a client-side
@@ -884,7 +1191,10 @@ within budget (§4.3).
   and `rotating_one_suite_leaves_the_other_pool_intact`;
   `claiming_hybrid_against_a_classic_only_pool_finds_nothing` (P1b, the classic-only
   → no-KP outcome) and the `the_two_suites_produce_structurally_different_key_packages`
-  KP-size pins (classic init key 32 B, hybrid 1216 B).
+  KP-size pins (classic init key 32 B, hybrid 1216 B). Post-#668 the two suites also
+  differ in signature scheme, pinned by `signature_scheme_per_suite`
+  (`mls/tests.rs`): Ed25519 for `CS_CLASSIC`, `MLDSA44` for `CS_HYBRID`, so a suite
+  swap cannot silently change which key a leaf is signed with.
 
 **Phase 3 — New groups hybrid (Front A): DONE.** ✅ `suite_for_new_group`
 (`mls/group_state.rs`) decides the suite at birth instead of `init_mls_group` passing a
@@ -928,8 +1238,11 @@ group classic.
 **Still open, deliberately:** classic KP publication is *not* retired — pre-migration
 lineages and any client that has not yet updated still need it, and dropping it is a
 multi-release additive→drop dance (CLAUDE.md) that cannot begin until an app that stopped
-*needing* classic has full uptake. AES-256 and ML-DSA remain *distinct future tracks*
-(§2.3, §2.4), off this HNDL critical path.
+*needing* classic has full uptake. That retirement is now tracked as **#669**, which is
+also what finally removes the last Ed25519 MLS leaf key. AES-256 remains a *distinct
+future track* (§2.3), off this HNDL critical path.
+**No longer open:** ML-DSA shipped as **#668** (§2.4), not as a future track. The reason it
+jumped the queue is in §2.4.2 — the transparency log, not MLS, is what made it urgent.
 
 **Cross-cutting acceptance invariants (all phases):**
 - No migration is ever a rename/drop/tightening (CLAUDE.md).
@@ -942,9 +1255,12 @@ multi-release additive→drop dance (CLAUDE.md) that cannot begin until an app t
 **Dependencies summary:** (1) ~~OpenMLS PQ ciphersuite upstream~~ — **resolved in P0**:
 the suite ships in the pinned `openmls_traits 0.5.0` and the libcrux provider (proven
 building and running headless) implements it, so no upstream availability gate remains.
-The residual dependency is *pinning discipline* against code-point churn (§7.4) — pin the
-OpenMLS and `openmls_libcrux_crypto` versions, and track a future OpenMLS bump as a
-migration. (2) DS write endpoints extended for suite-tagged KP claim/publish; (3) ~~a
+The residual dependency is *pinning discipline* against code-point churn (§7.4).
+**Reopened and re-resolved by #668:** the PQ *signature* suites exist in no release, so all
+five openmls crates are pinned to `main` rev `34222ef6` via one workspace
+`[patch.crates-io]`; the residual is unchanged in kind — treat a rev bump as a protocol
+migration, not a dependency update. (2) DS write endpoints extended for suite-tagged KP
+claim/publish; (3) ~~a
 coordination point with the machine-checked-correctness program~~ — **resolved in P4**:
 its M4 TLA+ spec (`specs/tla/CommitLog.tla`,
 `docs/machine-checked-correctness-design.md`) and the transparency-log verifier
@@ -958,6 +1274,12 @@ remains valid.
 ---
 
 ## 9. GitHub-issue-ready summary
+
+> **This is the #454 issue text as filed, kept verbatim as a record.** Where it says
+> signatures stay Ed25519, read §2.4: #668 superseded that. Where it names `0x004D`,
+> `openmls_libcrux_crypto` or `SIGNATURE_SCHEME`, read §7: the suite is `0x0052`, there is
+> one crypto backend, and the scheme is a function of the suite. The corrected end state is
+> summarised at the bottom of this section.
 
 **Title:** Post-quantum hybrid MLS — migrate key exchange to X25519 + ML-KEM-768 (HNDL defence)
 
@@ -1044,3 +1366,31 @@ OpenMLS bump as a tracked migration; budget a
 second suite migration when the IETF `draft-ietf-mls-pq-ciphersuites` suites
 (`0x004E`/`0x004F`/`0x0052`) stabilise. Also carry the group-size cost decision (commits
 are linear in N, ~8× classic — §4.1) into P3/P4.
+
+### 9.1 Corrected end state (post-#668)
+
+For anyone reading this document as a statement of *current* fact rather than as a record:
+
+| | As filed (#454) | As shipped today |
+|---|---|---|
+| PQ suite | `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519`, `0x004D` | `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`, **`0x0052`** |
+| PQ suite KEM | X-Wing (X25519 + ML-KEM-768) | **unchanged** — same X-Wing |
+| PQ suite AEAD | ChaCha20-Poly1305 | **unchanged** |
+| PQ suite KDF | SHA-256 | SHA-384 |
+| PQ suite signature | Ed25519 | **ML-DSA-44** (`SignatureScheme::MLDSA44`, `0x0904`) |
+| Classic suite | `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, `0x0001` | **unchanged**, still Ed25519 — retirement is **#669** |
+| Crypto backends | two, routed by suite (RustCrypto + libcrux) | **one** — `openmls_rust_crypto::RustCrypto` serves both |
+| openmls source | crates.io `0.8.1`, stock cargo | `[patch.crates-io]` to `main` rev `34222ef6`, five crates |
+| Device MLS signing key | one Ed25519 key per device | **one key per signature scheme**: Ed25519 (classic leaves) + ML-DSA-44 (PQ leaves) |
+| Device cert | v1, `u8` length prefixes, one key | **v2** (`pollis-device-cert-v2\x00`), `u16` prefixes, certifies **both** leaf keys |
+| Account identity key | Ed25519 | **ML-DSA-44** (private key is still a 32-byte seed) |
+| DS request auth | Ed25519 over `mls_signature_pub`, 88 b64 chars | **ML-DSA-44** over `mls_signature_pub_pq`, ~3228 b64 chars |
+| Transparency-log STH | Ed25519, `sth:v1*` contexts | **ML-DSA-44**, `sth:v2` / `sth:v2:account-keys` / `sth:v2:binaries` |
+| Relay directory key | Ed25519 | **unchanged** — the signer is a Node Lambda and `node:crypto` has no ML-DSA |
+| Turso schema | `000010` (KP `ciphersuite`, `user_device.pq_capable`) | + `000011_device_pq_signature_pub.sql` (`user_device.mls_signature_pub_pq`, nullable) |
+
+Honest scope, restated: **post-quantum confidentiality** for message content (hybrid
+X25519 + ML-KEM-768 KEM) **and post-quantum authenticity** for identity, device certs and
+the transparency log (ML-DSA-44) — with the classic suite and the relay directory key still
+Ed25519, no fix for metadata or endpoint compromise, and no retroactive protection of
+already-sent classic traffic or already-signed Ed25519 history (§6).

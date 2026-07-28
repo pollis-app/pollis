@@ -296,16 +296,18 @@ async fn reset_identity_resigns_device_cert() {
         )
     };
 
-    let (device_id, old_cert, old_cert_version, old_issued_at_str, mls_sig_pub): (
+    let (device_id, old_cert, old_cert_version, old_issued_at_str, mls_sig_pub, mls_sig_pub_pq): (
         String,
         Vec<u8>,
         i64,
         String,
         Vec<u8>,
+        Vec<u8>,
     ) = {
         let mut rows = conn
             .query(
-                "SELECT device_id, device_cert, cert_identity_version, cert_issued_at, mls_signature_pub \
+                "SELECT device_id, device_cert, cert_identity_version, cert_issued_at, \
+                        mls_signature_pub, mls_signature_pub_pq \
                  FROM user_device WHERE user_id = ?1 AND device_cert IS NOT NULL",
                 libsql::params![user_id.clone()],
             )
@@ -318,6 +320,7 @@ async fn reset_identity_resigns_device_cert() {
             row.get::<i64>(2).expect("cert_identity_version"),
             row.get::<Option<String>>(3).unwrap().expect("cert_issued_at"),
             row.get::<Option<Vec<u8>>>(4).unwrap().expect("mls_signature_pub"),
+            row.get::<Option<Vec<u8>>>(5).unwrap().expect("mls_signature_pub_pq"),
         )
     };
     let old_issued_at: u64 = old_issued_at_str.parse().expect("parse issued_at");
@@ -326,6 +329,7 @@ async fn reset_identity_resigns_device_cert() {
         &old_pub,
         &device_id,
         &mls_sig_pub,
+        &mls_sig_pub_pq,
         old_cert_version as u32,
         old_issued_at,
         &old_cert,
@@ -400,6 +404,7 @@ async fn reset_identity_resigns_device_cert() {
         &new_pub,
         &device_id,
         &mls_sig_pub,
+        &mls_sig_pub_pq,
         new_cert_version as u32,
         new_issued_at,
         &new_cert,
@@ -410,6 +415,7 @@ async fn reset_identity_resigns_device_cert() {
         &new_pub,
         &device_id,
         &mls_sig_pub,
+        &mls_sig_pub_pq,
         old_cert_version as u32,
         old_issued_at,
         &old_cert,
@@ -451,11 +457,13 @@ async fn unlock_resigns_stale_sibling_device_cert() {
     // works on whatever we wrote.
     let phantom_device_id = "phantom-sibling-device";
     let phantom_sig_pub = vec![0xABu8; 32];
-    let phantom_cert_placeholder = vec![0u8; 64];
+    let phantom_sig_pub_pq = vec![0xCDu8; pollis_lib::commands::account_identity::MLDSA44_PUB_LEN];
+    let phantom_cert_placeholder = vec![0u8; pollis_lib::commands::account_identity::MLDSA44_SIG_LEN];
     conn.execute(
         "INSERT INTO user_device \
-           (device_id, user_id, device_cert, cert_issued_at, cert_identity_version, mls_signature_pub) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+           (device_id, user_id, device_cert, cert_issued_at, cert_identity_version, \
+            mls_signature_pub, mls_signature_pub_pq) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         libsql::params![
             phantom_device_id,
             user_id.clone(),
@@ -463,6 +471,7 @@ async fn unlock_resigns_stale_sibling_device_cert() {
             "0".to_string(),
             0i64,
             phantom_sig_pub.clone(),
+            phantom_sig_pub_pq.clone(),
         ],
     )
     .await
@@ -489,6 +498,7 @@ async fn unlock_resigns_stale_sibling_device_cert() {
             &account_id_pub,
             phantom_device_id,
             &phantom_sig_pub,
+            &phantom_sig_pub_pq,
             0,
             0,
             &phantom_cert_placeholder,
@@ -544,6 +554,7 @@ async fn unlock_resigns_stale_sibling_device_cert() {
         &account_id_pub,
         phantom_device_id,
         &phantom_sig_pub,
+        &phantom_sig_pub_pq,
         new_cert_version as u32,
         new_issued_at,
         &new_cert,

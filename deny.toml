@@ -5,7 +5,8 @@
 #   advisories — fail on any RUSTSEC advisory in the dependency tree
 #   licenses   — fail on any license not on the allow-list below
 #   bans       — fail on undocumented duplicate crate versions
-#   sources    — fail on any crate sourced outside crates.io
+#   sources    — fail on any crate sourced outside crates.io, bar the one
+#                explicitly allowed git repo (openmls; see [sources] below)
 #
 # The graph is analysed with ALL features enabled so the media-on dependencies
 # (libwebrtc, livekit, cpal, openmls, libsql, axum, …) are covered, not just the
@@ -60,40 +61,28 @@ ignore = [
     { id = "RUSTSEC-2026-0194", reason = "quick-xml: all vulnerable instances are build-time (xcb/wayland-scanner codegen) or dev-only; no untrusted-XML runtime path; parents pin <0.41" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml: all vulnerable instances are build-time (xcb/wayland-scanner codegen) or dev-only; no untrusted-XML runtime path; parents pin <0.41" },
 
-    # libcrux crypto bugs in the MLS HPKE stack. Transitive:
-    # libcrux-sha3 0.0.8 / libcrux-secrets 0.0.5 <- hpke-rs 0.6.1 <-
-    # openmls_rust_crypto 0.5.1. The fixes (libcrux-sha3 0.0.10,
-    # libcrux-secrets 0.0.6) shipped only in hpke-rs 0.7.0 (2026-07-15), which
-    # openmls_rust_crypto 0.5.1 (latest release) does not yet depend on — it
-    # pins `hpke = ^0.6.0`, so 0.0.x-incompatible bumps are unreachable in place
-    # (`cargo update --precise` rejected). Re-evaluate when openmls releases a
-    # crate moving to hpke-rs 0.7. None are reachable on our MLS path:
-    { id = "RUSTSEC-2026-0207", reason = "libcrux-sha3 portable SHAKE incremental multi-squeeze: only wrong when squeezing across multiple calls with a non-RATE-divisible length; hpke-rs squeezes full output in one call and MLS default ciphersuites key-schedule on HKDF-SHA256, not SHAKE. Fix (0.0.10) gated behind hpke-rs 0.7 / openmls bump" },
-    { id = "RUSTSEC-2026-0208", reason = "libcrux-sha3 AVX2 x4 SHAKE-256 panic: the batched avx2::x4::shake256 API is exercised by ML-KEM/ML-DSA, not by hpke-rs HPKE on our non-PQ ciphersuites; worst case is a local panic, not a compromise. Fix (0.0.10) gated behind hpke-rs 0.7 / openmls bump" },
-    { id = "RUSTSEC-2026-0212", reason = "libcrux-secrets constant-time swap/select wrong on aarch64: a correctness bug in CT primitives; an incorrect result would surface as an MLS crypto failure, not a silent key leak. Fix (0.0.6) gated behind hpke-rs 0.7 / openmls bump" },
-
-    # A SECOND libcrux cluster, entering via `openmls_libcrux_crypto 0.3.1` —
-    # the post-quantum hybrid MLS work (#454). That crate is the ONLY released
-    # provider implementing MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519
-    # (RustCrypto `unimplemented!()`-panics on it), and it pulls
-    # libcrux-aead 0.0.6 with default features, so libcrux-aesgcm /
-    # -chacha20poly1305 / -ed25519 / -poly1305 land in the graph whether or not
-    # we call them.
+    # #454 carried NINE libcrux ignores in two clusters. #668 removed both, and
+    # neither by re-arguing reachability — the crates left the graph:
     #
-    # THE REACHABILITY ARGUMENT BELOW DEPENDS ON A CODE INVARIANT, not on luck:
-    # `PollisProvider` (every production path) is RustCrypto-backed and serves
-    # the classic AES-GCM suite; `PollisPqProvider` (libcrux) is constructed
-    # nowhere in production and serves only the ChaCha20-Poly1305 hybrid suite.
-    # See `pollis-core/src/commands/mls/provider.rs`. That split is pinned by
-    # `classic_provider_never_routes_to_libcrux` in `commands/mls/tests.rs`.
-    # If that test is ever deleted or the providers are merged, RUSTSEC-2026-0211
-    # below stops being ignorable and must be re-argued from scratch.
-    { id = "RUSTSEC-2026-0211", reason = "libcrux-aesgcm non-constant-time AES-GCM tag check: NOT REACHABLE. Pollis's AES-GCM traffic is served by openmls_rust_crypto's aes-gcm (subtle constant-time compare); libcrux is routed only to the ChaCha20-Poly1305 hybrid suite. Invariant pinned by classic_provider_never_routes_to_libcrux. No fix exists under this crate name (patched = []); the fix ships as the renamed libcrux-aes 0.0.9, which libcrux-aead 0.0.6 does not use" },
-    { id = "RUSTSEC-2026-0209", reason = "libcrux-aesgcm unenforced AAD length limit (NIST SP 800-38D 2^61 bytes): NOT REACHABLE — same routing argument as RUSTSEC-2026-0211, and MLS AAD is a bounded framing header of tens of bytes, ~2^57x under the limit. No fix under this crate name" },
-    { id = "RUSTSEC-2026-0210", reason = "libcrux-aesgcm unmaintained (renamed to libcrux-aes): informational. Forced by libcrux-aead 0.0.6's default features via openmls_libcrux_crypto 0.3.1; no released provider depends on the renamed crate yet. Re-evaluate when openmls_libcrux_crypto moves to libcrux-aes 0.0.9" },
-    { id = "RUSTSEC-2026-0124", reason = "libcrux-chacha20poly1305 panic on an overlong ciphertext buffer: reachable only from the hybrid suite, which no production path selects yet (#454 P2+). The trigger is a caller passing a buffer longer than the ciphertext; openmls sizes that buffer from the message itself, so it is a local panic on malformed input at worst, not a compromise. Revisit before any group is moved to the hybrid suite" },
-    { id = "RUSTSEC-2026-0075", reason = "libcrux-ed25519 all-zero key generation on catastrophic RNG failure: not reachable — device signing keys are generated by openmls_basic_credential's SignatureKeyPair on the RustCrypto path, and the failure mode requires the OS RNG to return all zeros, which the app already treats as fatal" },
-    { id = "RUSTSEC-2026-0073", reason = "libcrux-poly1305 panic in standalone MAC operations: the standalone MAC API is not used — Poly1305 is reached only inside the ChaCha20-Poly1305 AEAD, which no production path selects yet (#454 P2+). Worst case is a local panic, not a compromise" },
+    #   RUSTSEC-2026-0207 / -0208 / -0212 (libcrux-sha3 0.0.8, libcrux-secrets
+    #   0.0.5) were transitive through hpke-rs 0.6.1 <- openmls_rust_crypto. The
+    #   fixes shipped in hpke-rs 0.7.0, which no *released* openmls depends on;
+    #   the #668 pin to openmls main does, so we now build libcrux-sha3 0.0.10
+    #   and libcrux-secrets 0.0.6 — the patched versions.
+    #
+    #   RUSTSEC-2026-0211 / -0209 / -0210 / -0124 / -0075 / -0073 entered via
+    #   `openmls_libcrux_crypto 0.3.1`, which #454 needed because libcrux was the
+    #   only provider implementing its X-Wing suite `0x004D`. #668 moved the PQ
+    #   suite to `0x0052` (same X-Wing KEM, ML-DSA-44 signatures), which
+    #   RustCrypto implements — so the second backend is gone from the tree.
+    #
+    # That also retires the code invariant those ignores rested on: the reason
+    # `PollisPqProvider` had to exist at all was to keep classic AES-GCM traffic
+    # away from libcrux's non-constant-time tag check (-0211). With one backend
+    # there is nothing to route, and the test that pinned it
+    # (`classic_provider_never_routes_to_libcrux`) is now `mls_backend_is_rustcrypto`.
+    # If a libcrux-backed provider is ever reintroduced, every one of the six
+    # must be re-argued from scratch — do not resurrect these entries.
 
     # --- Unmaintained crates (informational RUSTSEC, no vulnerability). All are
     # transitive and forced by the desktop/GUI/media stack; no maintained
@@ -263,9 +252,23 @@ skip-tree = []
 # Sources — where crates are allowed to come from.
 # ---------------------------------------------------------------------------
 [sources]
-# The entire tree resolves to crates.io (verified: no `source = "git..."` and no
-# non-crates.io registry in Cargo.lock). Anything else fails the check.
+# Every crate resolves to crates.io with exactly one documented exception
+# (openmls, below). Anything else fails the check.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# openmls upstream `main`, via the `[patch.crates-io]` block in the workspace
+# Cargo.toml. #668 moves MLS authentication to ML-DSA-44, which needs the PQ
+# signature ciphersuite `0x0052` (`MLS_128_MLKEM768X25519_CHACHA20POLY1305_
+# SHA384_MLDSA44`). That code point exists in NO published openmls release, so
+# the patch is the only way to get it; it covers all five openmls crates
+# (openmls, openmls_traits, openmls_rust_crypto, openmls_basic_credential,
+# openmls_memory_storage) plus their internal helper crates, which is why the
+# whole repo is listed rather than a single crate.
+#
+# cargo-deny matches the repository URL only — the exact commit is pinned by
+# `rev = "34222ef632c87df58baaa7614c8a72ac235c5f07"` in Cargo.toml and recorded
+# in Cargo.lock, so this entry cannot silently follow upstream `main`. Moving
+# the rev is a reviewable Cargo.lock diff. Drop this entry the moment an
+# openmls release ships `0x0052`.
+allow-git = ["https://github.com/openmls/openmls"]

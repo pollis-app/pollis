@@ -15,7 +15,10 @@ path = "src/bin/monitor.rs"
 
 [dependencies]
 sha2 = "0.10"
-ed25519-dalek = "2.1"
+# STH signatures are ML-DSA-44 (#668) — the log's accountable commitment has to
+# outlive a cryptographically-relevant quantum computer, since an STH is the
+# anchor every inclusion/consistency proof is checked against.
+ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"
@@ -23,6 +26,6 @@ thiserror = "1"
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
-ed25519-dalek = "2.1"
+ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 serde_json = "1"
 hex = "0.4"

@@ -6,7 +6,7 @@ server has not forked, rolled back, or rewritten any conversation's history.
 
 The one rule that makes this meaningful:
 
-> **You trust only the log's published Ed25519 public key, the signed tree head,
+> **You trust only the log's published ML-DSA-44 public key, the signed tree head,
 > and the Merkle proofs checked against it.** Not the server, not the database,
 > not the host serving the files. If a single byte is tampered with, a signature
 > or proof check fails and the tool exits non-zero.
@@ -293,7 +293,7 @@ non-zero**. Same checks, same trust model — just no network.
 
 ## 7. Verify the keyless build provenance yourself — cosign + SLSA (no Pollis key)
 
-The transparency log above (steps 1–6) is anchored by **Pollis's own** Ed25519
+The transparency log above (steps 1–6) is anchored by **Pollis's own** ML-DSA-44
 key. Released artifacts carry a **second, independent** anchor that Pollis does
 **not** control: a keyless **cosign** signature and a **SLSA build-provenance**
 attestation, both bound to Pollis's **GitHub Actions OIDC identity** via

@@ -4,15 +4,15 @@
 //! These tests are the executable spec for the signing contract the pollis-core
 //! client must match: headers `X-Pollis-{User,Device,Timestamp,Signature}` over
 //! the canonical message `{METHOD}\n{PATH}\n{TS}\n{hex(sha256(body))}`, signed
-//! with the device's raw-32-byte-pubkey Ed25519 key (the same
-//! `user_device.mls_signature_pub` openmls produces).
+//! with the device's raw-1312-byte-pubkey ML-DSA-44 key (the same
+//! `user_device.mls_signature_pub_pq` openmls produces).
 
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::Engine as _;
-use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use ml_dsa::{Keypair, MlDsa44, Signer, SigningKey, VerifyingKey};
 use http_body_util::BodyExt as _;
 use pollis_delivery::auth::canonical_message;
 use pollis_delivery::db::Db;
@@ -20,13 +20,17 @@ use pollis_delivery::{build_router_with_state, AppState};
 use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
 
-/// Mint a fresh Ed25519 signing key from OS randomness. (`SigningKey::generate`
-/// needs ed25519-dalek's `rand_core` feature, which the lib doesn't enable;
-/// building from 32 random bytes is equivalent and feature-free.)
-fn gen_signing_key() -> SigningKey {
-    let mut secret = [0u8; 32];
-    OsRng.fill_bytes(&mut secret);
-    SigningKey::from_bytes(&secret)
+/// Mint a fresh ML-DSA-44 signing key from OS randomness. An ML-DSA private key
+/// IS its 32-byte seed, so 32 random bytes is the whole key.
+fn gen_signing_key() -> SigningKey<MlDsa44> {
+    let mut seed = [0u8; 32];
+    OsRng.fill_bytes(&mut seed);
+    SigningKey::<MlDsa44>::from_seed(&seed.into())
+}
+
+/// The raw 1312-byte encoding stored in `user_device.mls_signature_pub_pq`.
+fn pq_pub(vk: &VerifyingKey<MlDsa44>) -> Vec<u8> {
+    vk.encode().to_vec()
 }
 
 // Minimal schema: the commit-log table the DS writes, plus the `user_device`
@@ -96,6 +100,7 @@ CREATE TABLE user_device (\
   cert_issued_at TEXT,\
   cert_identity_version INTEGER,\
   mls_signature_pub BLOB,\
+  mls_signature_pub_pq BLOB,\
   revoked_at TEXT\
 );";
 
@@ -112,13 +117,13 @@ async fn fresh_db() -> Arc<Db> {
     Arc::new(db)
 }
 
-/// Seed a live (non-revoked) device row with the given raw 32-byte pubkey —
-/// exactly the bytes openmls `to_public_vec()` yields for Ed25519.
-async fn seed_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey) {
+/// Seed a live (non-revoked) device row with the given raw 1312-byte pubkey —
+/// exactly the bytes openmls `to_public_vec()` yields for ML-DSA-44.
+async fn seed_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
     let conn = db.conn().unwrap();
     conn.execute(
-        "INSERT INTO user_device (device_id, user_id, mls_signature_pub) VALUES (?1, ?2, ?3)",
-        libsql::params![device_id, user_id, vk.to_bytes().to_vec()],
+        "INSERT INTO user_device (device_id, user_id, mls_signature_pub_pq) VALUES (?1, ?2, ?3)",
+        libsql::params![device_id, user_id, pq_pub(vk)],
     )
     .await
     .unwrap();
@@ -138,12 +143,12 @@ async fn seed_group_membership(db: &Db, conversation_id: &str, user_id: &str) {
 }
 
 /// Seed a *revoked* device (revoked_at set) — auth must reject it.
-async fn seed_revoked_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey) {
+async fn seed_revoked_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
     let conn = db.conn().unwrap();
     conn.execute(
-        "INSERT INTO user_device (device_id, user_id, mls_signature_pub, revoked_at) \
+        "INSERT INTO user_device (device_id, user_id, mls_signature_pub_pq, revoked_at) \
          VALUES (?1, ?2, ?3, datetime('now'))",
-        libsql::params![device_id, user_id, vk.to_bytes().to_vec()],
+        libsql::params![device_id, user_id, pq_pub(vk)],
     )
     .await
     .unwrap();
@@ -167,14 +172,14 @@ fn signed_request(
     user_id: &str,
     device_id: &str,
     timestamp: i64,
-    signing_key: &SigningKey,
+    signing_key: &SigningKey<MlDsa44>,
     body: &[u8],
     sig_override: Option<&str>,
 ) -> Request<Body> {
     let msg = canonical_message("POST", "/v1/commits", timestamp, body);
     let sig_b64 = match sig_override {
         Some(s) => s.to_string(),
-        None => b64(&signing_key.sign(&msg).to_bytes()),
+        None => b64(&signing_key.sign(&msg).encode()),
     };
     Request::builder()
         .method("POST")
@@ -247,7 +252,7 @@ async fn tampered_signature_is_rejected_401() {
     let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
     let body = submit_body_json("conv1", 0, "alice");
     // A valid-length-but-wrong signature (all zero bytes).
-    let bad_sig = b64(&[0u8; 64]);
+    let bad_sig = b64(&[0u8; pollis_device_cert::MLDSA44_SIG_LEN]);
     let req = signed_request("alice", "dev-alice", now(), &sk, &body, Some(&bad_sig));
 
     assert_eq!(status_of(router, req).await, StatusCode::UNAUTHORIZED);
@@ -264,7 +269,7 @@ async fn signature_over_different_body_is_rejected_401() {
     let body_a = submit_body_json("conv1", 0, "alice");
     let body_b = submit_body_json("conv1", 0, "alice-different");
     let ts = now();
-    let sig = b64(&sk.sign(&canonical_message("POST", "/v1/commits", ts, &body_a)).to_bytes());
+    let sig = b64(&sk.sign(&canonical_message("POST", "/v1/commits", ts, &body_a)).encode());
     let req = Request::builder()
         .method("POST")
         .uri("/v1/commits")

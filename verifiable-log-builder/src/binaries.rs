@@ -25,13 +25,13 @@ pub const TENANT: &str = "binaries";
 
 /// Domain-separation context for the binaries tree's Signed Tree Heads.
 ///
-/// It extends the commit-log's frozen `pollis-verifiable-log:sth:v1` with a
+/// It extends the commit-log's frozen `pollis-verifiable-log:sth:v2` with a
 /// `:binaries` suffix, exactly as the account-key tree uses `:account-keys`. The
 /// commit-log and account-key contexts must NOT change (continuity of
 /// already-published STHs); this distinct context guarantees an STH signed for
 /// one tree fails verification against the others even though all three use the
 /// same Ed25519 key. Verified via [`verifiable_log::Sth::verify_with_context`].
-pub const STH_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v1:binaries";
+pub const STH_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v2:binaries";
 
 /// Which layer of a shipped file a [`BinaryRecord`] commits to.
 ///

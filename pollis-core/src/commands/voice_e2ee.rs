@@ -23,7 +23,7 @@ use livekit::e2ee::{
 use openmls::prelude::*;
 use openmls_traits::OpenMlsProvider;
 
-use crate::commands::mls::{with_group_provider, MlsProvider};
+use crate::commands::mls::MlsProvider;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
@@ -385,11 +385,8 @@ async fn derive_voice_key_for_group(
     // writes, which after a suite migration is the successor lineage (#454 P4).
     let generation =
         crate::commands::mls::generation::local_generation(db.conn(), mls_group_id);
-    // `export_secret` runs the group's KDF, so it must use the group's own
-    // crypto backend — hybrid groups derive their voice key under libcrux.
-    with_group_provider!(db.conn(), mls_group_id, |provider| {
-        export_voice_key(&provider, mls_group_id, generation)
-    })
+    let provider = crate::commands::mls::PollisProvider::new(db.conn());
+    export_voice_key(&provider, mls_group_id, generation)
 }
 
 /// Export the LiveKit frame key from the group's exporter secret. Suite-generic

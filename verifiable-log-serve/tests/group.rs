@@ -19,7 +19,8 @@
 
 use std::path::Path;
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use verifiable_log::{Entry, Sth, VerifiableLog};
 use verifiable_log_builder::CommitLeaf;
 use verifiable_log_serve::bundle::{Bundle, ConsistencyCheck, InclusionCheck};
@@ -57,7 +58,7 @@ fn blake_ish(s: &str) -> [u8; 32] {
 /// Build a static `/v1` tree under `root` from the given leaves, in the order
 /// supplied. Returns the bundle that was generated.
 fn build_tree(root: &Path, leaves: &[CommitLeaf]) -> Bundle {
-    let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+    let signing_key = SigningKey::from_seed(&[7u8; 32].into());
     let mut log = VerifiableLog::new();
     // Intentionally NO CommitLogInvariant: we want to plant forks/regressions.
     let entries: Vec<Entry> = leaves.iter().map(|l| l.to_entry().unwrap()).collect();
@@ -95,7 +96,7 @@ fn build_tree(root: &Path, leaves: &[CommitLeaf]) -> Bundle {
         .unwrap_or_default();
 
     let bundle = Bundle {
-        public_key: hex::encode(signing_key.verifying_key().to_bytes()),
+        public_key: hex::encode(signing_key.verifying_key().encode()),
         sths,
         entries,
         enforce_unique: vec!["mls-commit-log".to_string()],

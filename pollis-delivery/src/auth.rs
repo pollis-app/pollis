@@ -2,12 +2,18 @@
 //!
 //! Pollis has **no server-side session/token system**. The only server-side
 //! credential that maps to a `user_id` is the device's MLS signing key:
-//! `user_device.mls_signature_pub` — the device's raw 32-byte Ed25519 public
-//! key, the same key wrapped in `device_cert` and verified by pollis-core's
-//! `verify_device_cert`. So DS auth reuses that cross-signing device identity:
-//! the client **signs each write with its Ed25519 device private key**, and the
-//! DS verifies the signature against the registered public key. No new token
-//! table, no shared secret at rest.
+//! `user_device.mls_signature_pub_pq` — the device's raw 1312-byte ML-DSA-44
+//! public key, one of the two leaf keys wrapped in `device_cert` and verified by
+//! pollis-core's `verify_device_cert`. So DS auth reuses that cross-signing
+//! device identity: the client **signs each write with its ML-DSA-44 device
+//! private key**, and the DS verifies the signature against the registered
+//! public key. No new token table, no shared secret at rest.
+//!
+//! Request auth is post-quantum (#668) because a harvest-now-decrypt-later
+//! adversary who breaks Ed25519 later could otherwise forge writes against the
+//! captured `mls_signature_pub`. The classic key stays in `mls_signature_pub`
+//! for the classic MLS suite's leaves — it is simply no longer an auth
+//! credential.
 //!
 //! ## Signing contract (the client MUST produce exactly this)
 //!
@@ -18,7 +24,12 @@
 //! | `X-Pollis-User`       | `user_id` (the `users.id` / `mls` sender)        |
 //! | `X-Pollis-Device`     | `device_id` (the `user_device.device_id` ULID)   |
 //! | `X-Pollis-Timestamp`  | unix seconds, decimal ASCII                       |
-//! | `X-Pollis-Signature`  | base64 (STANDARD) of the 64-byte Ed25519 sig     |
+//! | `X-Pollis-Signature`  | base64 (STANDARD) of the 2420-byte ML-DSA-44 sig |
+//!
+//! The signature header is ~3228 base64 characters. That is well inside every
+//! default header-size limit on the path (hyper 16 KiB/header, Cloudflare 16
+//! KiB total) but it is the reason no proxy in front of the DS may be
+//! configured below an 8 KiB header budget.
 //!
 //! The signature is over this **canonical message** (a UTF-8 byte string, `\n`
 //! = 0x0A, no trailing newline):
@@ -37,12 +48,12 @@
 //!                         signature from being replayed over a *different*
 //!                         commit.
 //!
-//! The signature is **PureEdDSA (Ed25519)** over that message, produced by the
-//! device's MLS signing private key; the verifying key is the raw 32-byte
-//! `mls_signature_pub` stored in `user_device` — no length prefix, no TLS
-//! wrapper (that is exactly what openmls `SignatureKeyPair::to_public_vec()`
-//! returns for the `Ed25519` ciphersuite, and what pollis-core's
-//! `verify_device_cert` consumes).
+//! The signature is **ML-DSA-44** (deterministic, hedged variant disabled) over
+//! that message, produced by the device's PQ MLS signing private key; the
+//! verifying key is the raw 1312-byte `mls_signature_pub_pq` stored in
+//! `user_device` — no length prefix, no TLS wrapper (that is exactly what
+//! openmls `SignatureKeyPair::to_public_vec()` returns for the `MLDSA44`
+//! signature scheme, and what pollis-core's `verify_device_cert` consumes).
 //!
 //! ## Replay window
 //!
@@ -62,9 +73,14 @@
 //! [`AuthRejection::Unauthorized`]. We never let an error become acceptance.
 
 use axum::http::HeaderMap;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use libsql::Connection;
+use ml_dsa::{EncodedSignature, EncodedVerifyingKey, MlDsa44, Verifier};
 use sha2::{Digest, Sha256};
+
+use pollis_device_cert::{MLDSA44_PUB_LEN, MLDSA44_SIG_LEN};
+
+type Signature = ml_dsa::Signature<MlDsa44>;
+type VerifyingKey = ml_dsa::VerifyingKey<MlDsa44>;
 
 use crate::error::AuthRejection;
 
@@ -83,7 +99,7 @@ struct Credentials {
     user_id: String,
     device_id: String,
     timestamp: i64,
-    /// 64-byte Ed25519 signature, already base64-decoded.
+    /// 2420-byte ML-DSA-44 signature, already base64-decoded.
     signature: Signature,
 }
 
@@ -137,11 +153,14 @@ fn parse_credentials(headers: &HeaderMap, now: i64) -> Result<Credentials, AuthR
             .decode(signature_b64)
             .map_err(|_| AuthRejection::Unauthorized)?
     };
-    let sig_arr: [u8; 64] = sig_bytes
+    if sig_bytes.len() != MLDSA44_SIG_LEN {
+        return Err(AuthRejection::Unauthorized);
+    }
+    let encoded: &EncodedSignature<MlDsa44> = sig_bytes
         .as_slice()
         .try_into()
         .map_err(|_| AuthRejection::Unauthorized)?;
-    let signature = Signature::from_bytes(&sig_arr);
+    let signature = Signature::decode(encoded).ok_or(AuthRejection::Unauthorized)?;
 
     Ok(Credentials {
         user_id: user_id.to_string(),
@@ -151,12 +170,15 @@ fn parse_credentials(headers: &HeaderMap, now: i64) -> Result<Credentials, AuthR
     })
 }
 
-/// Look up the registered `mls_signature_pub` for `(user_id, device_id)`.
+/// Look up the registered `mls_signature_pub_pq` for `(user_id, device_id)`.
 ///
 /// Returns `Ok(Some(pub))` for a live, enrolled device; `Ok(None)` if the row
 /// is absent, revoked, or has a NULL/wrong-length pubkey — all of which the
-/// caller treats as "unknown device" → 401. A DB error propagates as `Err` and
-/// the caller still rejects (never fails open).
+/// caller treats as "unknown device" → 401. A NULL column specifically means a
+/// device that has not published a cert since #668; it must re-run
+/// `publish-device-cert` (which is session/cert gated, never device-signature
+/// gated, so it is always reachable) before it can authenticate a write. A DB
+/// error propagates as `Err` and the caller still rejects (never fails open).
 async fn lookup_device_pubkey(
     conn: &Connection,
     user_id: &str,
@@ -164,7 +186,7 @@ async fn lookup_device_pubkey(
 ) -> anyhow::Result<Option<VerifyingKey>> {
     let mut rows = conn
         .query(
-            "SELECT mls_signature_pub, revoked_at \
+            "SELECT mls_signature_pub_pq, revoked_at \
              FROM user_device WHERE device_id = ?1 AND user_id = ?2",
             libsql::params![device_id, user_id],
         )
@@ -188,14 +210,14 @@ async fn lookup_device_pubkey(
         None => return Ok(None),
     };
 
-    let arr: [u8; 32] = match pub_bytes.as_slice().try_into() {
-        Ok(a) => a,
+    if pub_bytes.len() != MLDSA44_PUB_LEN {
+        return Ok(None);
+    }
+    let encoded: &EncodedVerifyingKey<MlDsa44> = match pub_bytes.as_slice().try_into() {
+        Ok(e) => e,
         Err(_) => return Ok(None),
     };
-    match VerifyingKey::from_bytes(&arr) {
-        Ok(vk) => Ok(Some(vk)),
-        Err(_) => Ok(None),
-    }
+    Ok(Some(VerifyingKey::decode(encoded)))
 }
 
 /// Full verification of a write request.
@@ -203,8 +225,9 @@ async fn lookup_device_pubkey(
 /// On success returns the authenticated `user_id` so the caller can bind it to
 /// `body.sender_id`. The steps, in order, each rejecting on failure:
 ///   1. all four headers present, timestamp in window, signature decodes;
-///   2. the device's `mls_signature_pub` exists, is live (not revoked), 32-byte;
-///   3. the Ed25519 signature verifies over the canonical message.
+///   2. the device's `mls_signature_pub_pq` exists, is live (not revoked) and is
+///      exactly [`MLDSA44_PUB_LEN`] bytes;
+///   3. the ML-DSA-44 signature verifies over the canonical message.
 ///
 /// `now` is unix seconds; injected so tests can pin the clock.
 pub async fn verify_request(

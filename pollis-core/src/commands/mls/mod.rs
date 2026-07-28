@@ -11,9 +11,8 @@ mod group_state;
 pub mod invariants;
 mod key_packages;
 mod migrate;
-// `pub(crate)` because `with_group_provider!` is used outside this module (the
-// media-only voice key export) and a macro expands at its call site: the paths
-// its body names must be reachable from there, not just from here.
+// `pub(crate)` because the media-only voice key export builds its own provider
+// outside this module.
 pub(crate) mod provider;
 mod reconcile;
 mod self_update;
@@ -24,15 +23,15 @@ mod welcomes;
 pub use provider::{
     make_credential, parse_credential_device_id, parse_credential_user_id, PollisProvider,
 };
-// Suite dispatch for out-of-module MLS crypto (voice key export). Only the
-// `media` build has such a call site.
+// Out-of-module MLS crypto (voice key export). Only the `media` build has such
+// a call site.
 #[cfg(feature = "media")]
-pub(crate) use provider::{with_group_provider, MlsProvider};
+pub(crate) use provider::MlsProvider;
 
 // ── Per-device signing keys + cross-signing ──────────────────────────────────
 pub use device::{
-    ensure_device_cert, load_device_signing_key, load_or_create_device_signer,
-    resign_stale_device_certs,
+    ensure_device_cert, load_device_cert_pubs, load_device_pq_signing_key,
+    load_or_create_device_signer, resign_stale_device_certs,
 };
 
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────

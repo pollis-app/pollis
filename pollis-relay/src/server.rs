@@ -303,7 +303,7 @@ async fn handle_stream(
     // 2. Rate / concurrency limits, keyed on BOTH the source IP and the
     //    authenticated account (§11.5). The guard frees the concurrency slots
     //    when this stream ends.
-    let _circuit_guard = match inner.rate_limiter.admit(peer_ip, verified.account_id_pub) {
+    let _circuit_guard = match inner.rate_limiter.admit(peer_ip, verified.account_fingerprint) {
         Some(g) => g,
         None => {
             inner.stats.rejected.fetch_add(1, Ordering::Relaxed);

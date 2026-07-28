@@ -23,10 +23,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 ulid = "1"
-# Device-cert signature auth: verify the client's Ed25519 signature over a
-# canonical message that binds sha256(body). Same scheme/encoding pollis-core's
-# `verify_device_cert` uses (raw 32-byte pubkey, 64-byte PureEdDSA sig).
-ed25519-dalek = "2"
+# The OFFLINE device-cert primitive, shared verbatim with pollis-core so the
+# publish-time re-verification checks the exact chain pollis-core mints — one
+# source of truth for the wire format, no drift, no crate cycle.
+pollis-device-cert = { path = "../pollis-device-cert" }
+# Request-signature auth (#668): verify the client's ML-DSA-44 signature over a
+# canonical message that binds sha256(body). The DS request credential is
+# `user_device.mls_signature_pub_pq`. Also the device-cert signature scheme.
+ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 sha2 = "0.10"
 # Authorized-secrets broker (#393): mint LiveKit JWTs server-side (pure HS256,
 # no native dep) and HMAC for the R2 SigV4 query-string presign. Same crates as
@@ -47,7 +51,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 tempfile = "3"
 # Drive the real axum router in-process (tower::ServiceExt::oneshot) and mint
-# Ed25519 keypairs to sign test requests, mirroring pollis-core's device key.
+# ML-DSA-44 keypairs to sign test requests, mirroring pollis-core's device key.
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 rand_core = { version = "0.6", features = ["getrandom"] }

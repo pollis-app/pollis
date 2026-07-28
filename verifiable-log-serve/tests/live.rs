@@ -16,7 +16,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use verifiable_log::{Entry, Sth, VerifiableLog};
 use verifiable_log_builder::CommitLeaf;
 use verifiable_log_serve::bundle::{Bundle, ConsistencyCheck, InclusionCheck};
@@ -26,7 +27,7 @@ use verifiable_log_serve::{layout, DevServer, LiveServer, Manifest};
 const TS: u64 = 1_700_000_000_000;
 
 fn signing_key() -> SigningKey {
-    SigningKey::from_bytes(&[5u8; 32])
+    SigningKey::from_seed(&[5u8; 32].into())
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +173,7 @@ fn distinct_hash(s: &str) -> [u8; 32] {
 /// — so forks/regressions get published and it is the read-time verifier that
 /// must catch them. Optionally also writes the static `/v1` tree under `root`.
 fn plant_bundle(leaves: &[CommitLeaf], root: Option<&Path>) -> Bundle {
-    let key = SigningKey::from_bytes(&[7u8; 32]);
+    let key = SigningKey::from_seed(&[7u8; 32].into());
     let mut log = VerifiableLog::new();
     let entries: Vec<Entry> = leaves.iter().map(|l| l.to_entry().unwrap()).collect();
     for e in &entries {
@@ -209,7 +210,7 @@ fn plant_bundle(leaves: &[CommitLeaf], root: Option<&Path>) -> Bundle {
         .unwrap_or_default();
 
     let bundle = Bundle {
-        public_key: hex::encode(key.verifying_key().to_bytes()),
+        public_key: hex::encode(key.verifying_key().encode()),
         sths,
         entries,
         enforce_unique: vec!["mls-commit-log".to_string()],

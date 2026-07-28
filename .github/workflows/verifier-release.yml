@@ -93,10 +93,13 @@ jobs:
 
             Independently verify the public transparency log at
             **https://verify.pollis.com** — no trust in Pollis required beyond
-            the published Ed25519 public key.
+            the published log public key.
 
-            **Pinned public key:**
-            `175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148`
+            **Pinned public key:** the log's signing key is being rotated to
+            **ML-DSA-44** (#668) so that a signed statement about history stays
+            checkable long-term. Until every tree has been republished under the
+            new key, this build pins none, and `pollis-verify` reports
+            *unverified* rather than either trusting or alarming.
 
             ### Usage
             ```bash

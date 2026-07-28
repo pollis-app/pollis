@@ -187,6 +187,17 @@ operation + enclosing command as authoritative, verify line at implementation ti
   endpoint trusts a user_id/sender_id in the body** — the body's actor field must equal
   `caller_user_id`, else `403`. This is the property the client cannot bypass (the whole
   point of read-only Turso).
+  *As shipped* this is not a session token but a per-request **device signature**
+  (`pollis-delivery/src/auth.rs`): `X-Pollis-User` / `X-Pollis-Device` /
+  `X-Pollis-Timestamp` / `X-Pollis-Signature`, the last being the device's signature over
+  `{METHOD}\n{PATH}\n{TIMESTAMP}\n{HEX_SHA256_BODY}`, verified against the device's
+  registered MLS signing public key — same property, no token table. Since #668 that
+  signature is **ML-DSA-44** (FIPS 204), made with the device's PQ leaf key and verified
+  against `user_device.mls_signature_pub_pq`; it was Ed25519 against `mls_signature_pub`
+  before. The header is base64 of a 2420-byte signature — ~3228 characters, up from 88 —
+  which is inside every default limit on the current path but means no proxy in front of
+  the DS may run a header budget below 8 KiB. (Bootstrap/pre-enrollment writes, which
+  happen before a device has a published cert, still use the OTP-session bearer.)
 - **Validation:** the DS revalidates every authorization predicate against the live DB
   inside the same connection/transaction it writes with — never against client-supplied
   state. Membership/role checks are `SELECT ... WHERE` guards in the write statement or a
@@ -270,7 +281,7 @@ change (a single client GC'ing shared envelopes was already a latent bug per the
 | `POST /v1/key-packages` | `{packages: [{ref_hash, key_package}], device_id}` | caller publishes only for their own `(user_id, device_id)`; `device_id` belongs to caller | `INSERT OR IGNORE INTO mls_key_package` (user_id = caller) |
 | `POST /v1/key-packages/replenish` | `{packages: [...], device_id}` | same | DELETE stale unclaimed for caller's device + INSERT pool — **one transaction** |
 | `POST /v1/key-packages/claim` | `{target_user_id, target_device_id?}` | ANY authenticated caller (claim is how you add a peer — NOT owner-scoped) | `UPDATE mls_key_package SET claimed=1 WHERE ref_hash=(SELECT … WHERE user_id=target [AND device_id=target] AND claimed=0 ORDER BY created_at ASC LIMIT 1) RETURNING ref_hash, key_package`; `404 no_key_package` when the pool is empty |
-| `POST /v1/devices/cert` | `{device_id, device_cert, mls_signature_pub, cert_*}` | caller owns `device_id`; cert binds caller's identity | UPDATE `user_device WHERE device_id = ? AND user_id = caller` |
+| `POST /v1/devices/cert` | `{device_id, device_cert, mls_signature_pub, mls_signature_pub_pq, cert_*}` (the v2 cert binds **both** leaf keys in one ML-DSA-44 signature, so both must be presented to re-derive the signed payload) | caller owns `device_id`; cert binds caller's identity | UPDATE `user_device WHERE device_id = ? AND user_id = caller` |
 | `POST /v1/devices/register` | `{device_id}` | caller registers their own device | `INSERT OR IGNORE INTO user_device` (user_id = caller) |
 | `POST /v1/push-tokens` | `{token, device_id, platform}` | caller's device | INSERT `user_push_token` (user_id = caller) |
 | `POST /v1/welcomes/ack` | `{welcome_ids[]}` (or `{conversation_id, device_id}`) | caller is the `recipient_id` of those welcomes | UPDATE/DELETE `mls_welcome.delivered WHERE recipient_id = caller` |

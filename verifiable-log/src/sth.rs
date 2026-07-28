@@ -1,27 +1,50 @@
-//! Signed Tree Head (STH) — an Ed25519 signature over the tree's state at a
+//! Signed Tree Head (STH) — an ML-DSA-44 signature over the tree's state at a
 //! point in time. This is the log's accountable commitment: a monitor that
 //! collects STHs can detect equivocation, and inclusion/consistency proofs are
 //! checked relative to an STH's root.
+//!
+//! The scheme is post-quantum (#668) because an STH is the *only* thing an
+//! auditor trusts: forging one retroactively would let an operator present a
+//! rewritten history that still verifies. A signature that has to be sound
+//! decades after it was minted cannot be Ed25519.
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ml_dsa::{EncodedSignature, EncodedVerifyingKey, MlDsa44, Signer, Verifier};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::hash::{from_hex, to_hex, Hash};
 
+/// The log's signing key. An ML-DSA-44 private key IS its 32-byte seed, so key
+/// custody (a 32-byte hex env var / key file) is unchanged from the Ed25519 era.
+pub type SigningKey = ml_dsa::SigningKey<MlDsa44>;
+/// The published verifying key — 1312 bytes, served hex-encoded in
+/// `public_key.json`.
+pub type VerifyingKey = ml_dsa::VerifyingKey<MlDsa44>;
+type Signature = ml_dsa::Signature<MlDsa44>;
+
+/// Byte length of a hex-decoded [`VerifyingKey`].
+pub const STH_PUB_LEN: usize = 1312;
+/// Byte length of a hex-decoded STH signature.
+pub const STH_SIG_LEN: usize = 2420;
+
 /// Default domain-separation tag for the signed message, so an STH signature can
 /// never be confused with a signature over anything else. This is the **frozen**
-/// context for the original (MLS commit-log) tree — already-published STHs were
-/// signed under it, so it must never change.
+/// context for the original (MLS commit-log) tree.
+///
+/// `v2` (#668) is the ML-DSA-44 generation. The `v1` contexts belong to the
+/// Ed25519 era and are retired rather than reused: a v1 STH and a v2 STH over
+/// the same tree state must be unmistakable for one another, and a verifier
+/// holding a 1312-byte key must never even attempt a v1 preimage. Every tree is
+/// republished under v2 — a rebuild from source data, not a re-signing.
 ///
 /// A second (or third) tenant that wants its **own** tree must sign with a
 /// *different* context via [`Sth::create_with_context`] /
 /// [`Sth::verify_with_context`], so an STH minted for one log can never be
 /// replayed as another's. The concrete context strings live next to their
 /// tenants in the builder: the account-key directory signs under
-/// `…:sth:v1:account-keys`, and the released-binaries tree (binary transparency)
-/// under `…:sth:v1:binaries`. One key, three trees, three contexts.
-const STH_DOMAIN: &[u8] = b"pollis-verifiable-log:sth:v1";
+/// `…:sth:v2:account-keys`, and the released-binaries tree (binary transparency)
+/// under `…:sth:v2:binaries`. One key, three trees, three contexts.
+const STH_DOMAIN: &[u8] = b"pollis-verifiable-log:sth:v2";
 
 /// A Signed Tree Head. Wire shape (see `README.md`): all binary fields are
 /// lowercase hex. This is part of the frozen contract a future serve layer
@@ -34,7 +57,7 @@ pub struct Sth {
     pub root_hash: String,
     /// Caller-supplied timestamp (milliseconds since epoch, by convention).
     pub timestamp: u64,
-    /// Ed25519 signature over the canonical message, hex-encoded (64 bytes).
+    /// ML-DSA-44 signature over the canonical message, hex-encoded (2420 bytes).
     pub signature: String,
 }
 
@@ -120,39 +143,73 @@ pub fn is_equivocation(a: &Sth, b: &Sth) -> bool {
     a.tree_size == b.tree_size && a.root_hash != b.root_hash
 }
 
-/// Parse a hex-encoded Ed25519 public key (32 bytes).
+/// Parse a hex-encoded ML-DSA-44 public key ([`STH_PUB_LEN`] bytes).
 pub fn verifying_key_from_hex(s: &str) -> Result<VerifyingKey> {
     let bytes = hex::decode(s)?;
-    let arr: [u8; 32] = bytes
+    let encoded: &EncodedVerifyingKey<MlDsa44> = bytes
         .as_slice()
         .try_into()
         .map_err(|_| Error::BadPublicKeyLength(bytes.len()))?;
-    VerifyingKey::from_bytes(&arr).map_err(|_| Error::BadPublicKey)
+    Ok(VerifyingKey::decode(encoded))
+}
+
+/// Parse a 32-byte hex seed into the log's [`SigningKey`]. An ML-DSA private key
+/// IS its seed, so this is the whole key — the same custody shape the Ed25519
+/// era used.
+pub fn signing_key_from_seed_hex(s: &str) -> Result<SigningKey> {
+    let bytes = hex::decode(s.trim())?;
+    let seed: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| Error::BadPublicKeyLength(bytes.len()))?;
+    Ok(SigningKey::from_seed(&seed.into()))
 }
 
 fn to_hex_sig(sig: &Signature) -> String {
-    hex::encode(sig.to_bytes())
+    hex::encode(sig.encode())
 }
 
 fn sig_from_hex(s: &str) -> Result<Signature> {
     let bytes = hex::decode(s)?;
-    let arr: [u8; 64] = bytes
+    let encoded: &EncodedSignature<MlDsa44> = bytes
         .as_slice()
         .try_into()
         .map_err(|_| Error::BadSignatureLength(bytes.len()))?;
-    Ok(Signature::from_bytes(&arr))
+    Signature::decode(encoded).ok_or(Error::BadSignature)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ml_dsa::Keypair;
 
     const TS: u64 = 1_700_000_000_000;
-    const OTHER_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v1:account-keys";
-    const BINARIES_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v1:binaries";
+    const OTHER_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v2:account-keys";
+    const BINARIES_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v2:binaries";
 
     fn key() -> SigningKey {
-        SigningKey::from_bytes(&[7u8; 32])
+        SigningKey::from_seed(&[7u8; 32].into())
+    }
+
+    /// The published wire fields are exactly ML-DSA-44 sized. A verifier that
+    /// hard-codes these lengths (the website's JS checker does) must not drift.
+    #[test]
+    fn published_key_and_signature_are_ml_dsa_44_sized() {
+        let sth = Sth::create(&key(), 3, [1u8; 32], TS);
+        assert_eq!(sth.signature.len(), STH_SIG_LEN * 2);
+        let pub_hex = hex::encode(key().verifying_key().encode());
+        assert_eq!(pub_hex.len(), STH_PUB_LEN * 2);
+        assert!(verifying_key_from_hex(&pub_hex).is_ok());
+    }
+
+    /// An Ed25519-era key or signature can no longer be mistaken for a v2 one —
+    /// both are rejected on length before any verification is attempted.
+    #[test]
+    fn ed25519_sized_key_and_signature_are_rejected() {
+        assert!(verifying_key_from_hex(&hex::encode([0u8; 32])).is_err());
+        let mut sth = Sth::create(&key(), 3, [1u8; 32], TS);
+        sth.signature = hex::encode([0u8; 64]);
+        assert!(!sth.verify(&key().verifying_key()));
     }
 
     #[test]

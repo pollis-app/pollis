@@ -50,3 +50,31 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# OpenMLS is pinned to an upstream commit, not a crates.io release (#668).
+#
+# Post-quantum SIGNATURES live only on `main`, behind the
+# `draft-ietf-mls-pq-ciphersuites` feature: the released 0.8.1 has no
+# `SignatureScheme::MLDSA44` and no ML-DSA ciphersuite at all, so the suite this
+# repo now runs — MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44
+# (0x0052) — is unreachable from any published version. #454 hit the same
+# upstream gate for the KEM and could wait for a release; this one cannot,
+# because 0x0052 is provisional and the draft is still moving.
+#
+# It is a `[patch.crates-io]` rather than five git dependencies so the pin is
+# recorded in ONE place and no crate in the workspace — including dev-dependency
+# graphs and anything transitive — can resolve openmls back to the registry
+# copy. A split graph would compile (two `openmls` crates, distinct types) and
+# then fail in confusing ways at the boundary.
+#
+# Upgrading the rev is a protocol-visible act: the draft renumbers provisional
+# code points between revisions, and a code point change is a wire-format break
+# for every group already on 0x0052. Read the upstream diff for `types.rs`
+# before moving this, and treat any code point change as a migration, not a
+# version bump.
+[patch.crates-io]
+openmls = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+openmls_traits = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+openmls_rust_crypto = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+openmls_basic_credential = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+openmls_memory_storage = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }

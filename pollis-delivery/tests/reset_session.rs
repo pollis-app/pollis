@@ -67,6 +67,7 @@ CREATE TABLE user_device (\
   cert_issued_at TEXT,\
   cert_identity_version INTEGER,\
   mls_signature_pub BLOB,\
+  mls_signature_pub_pq BLOB,\
   revoked_at TEXT\
 );\
 CREATE TABLE groups (\
@@ -197,7 +198,7 @@ async fn login_established(state: &AppState, email: &str, device_id: &str) -> (S
         state,
         "/v1/auth/establish-identity",
         serde_json::json!({
-            "account_id_pub": b64(&[9u8; 32]),
+            "account_id_pub": b64(&[9u8; pollis_device_cert::MLDSA44_PUB_LEN]),
             "salt": b64(&[1u8; 32]),
             "nonce": b64(&[2u8; 12]),
             "wrapped_key": b64(&[3u8; 48]),
@@ -214,7 +215,7 @@ fn rotate_body(based_on_version: i64) -> serde_json::Value {
     let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
     serde_json::json!({
         "based_on_version": based_on_version,
-        "account_id_pub": b64(&[7u8; 32]),
+        "account_id_pub": b64(&[7u8; pollis_device_cert::MLDSA44_PUB_LEN]),
         "salt": b64(&[1u8; 16]),
         "nonce": b64(&[2u8; 12]),
         "wrapped_key": b64(&[3u8; 48]),

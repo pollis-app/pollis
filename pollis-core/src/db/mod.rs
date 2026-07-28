@@ -88,6 +88,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "key_package_ciphersuite",
         include_str!("migrations/000010_key_package_ciphersuite.sql"),
     ),
+    (
+        11,
+        "device_pq_signature_pub",
+        include_str!("migrations/000011_device_pq_signature_pub.sql"),
+    ),
 ];
 
 pub mod queries {

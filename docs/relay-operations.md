@@ -44,27 +44,31 @@ v0 achieves the separation by authenticating connecting devices with an **offlin
 device-certificate chain** — verified locally, with **zero I/O**, no Turso query,
 no network call per connection:
 
-- Each device already carries a **device cert**: a 64-byte Ed25519 signature by
-  the user's long-lived **account identity key** binding the device's MLS signing
-  public key to the account (`account_id_pub`). This is minted by
+- Each device already carries a **device cert**: a 2420-byte ML-DSA-44 signature
+  by the user's long-lived **account identity key** binding the device's MLS
+  signing public keys to the account (`account_id_pub`). Since #668 this is a
+  **v2** cert (domain `pollis-device-cert-v2\x00`): one signature certifies
+  **both** of a device's leaf keys — the classic suite's Ed25519 key and the PQ
+  suite's ML-DSA-44 key — so neither leaf is ever uncertified during the
+  classic→PQ overlap. It is minted by
   `pollis-core::commands::account_identity::sign_device_cert` and published to
   `user_device` at enrollment (`ensure_device_cert`). It is the same primitive
   clients already use to admit each other into MLS groups.
 - The primitive itself lives in a standalone, dependency-light crate
   **`pollis-device-cert`** (payload format + `verify_device_cert`, deps =
-  `ed25519-dalek` + std). `pollis-core` mints certs and re-exports the verifier;
+  `ml-dsa` + std). `pollis-core` mints certs and re-exports the verifier;
   `pollis-relay` depends on the same crate and verifies certs at its handshake.
   One source of truth, frozen by a golden test vector, so the mint and verify
   halves can never drift — and, critically, **`pollis-relay` does not depend on
   `pollis-core`** (which would be a cycle *and* would drag the metadata plane
   into the relay binary).
-- At the relay handshake the client **presents** its device signing key + the
-  cert chain (`account_id_pub`, `device_cert`, `identity_version`, `issued_at`).
-  The relay verifies two things, both offline:
+- At the relay handshake (wire **v3** since #668) the client **presents** both of
+  its device signing keys + the cert chain (`account_id_pub`, `device_cert`,
+  `identity_version`, `issued_at`). The relay verifies two things, both offline:
   1. **Possession** — the handshake signature checks out under the presented
-     device key (skew-bounded, nonce'd);
+     ML-DSA-44 device key (skew-bounded, nonce'd);
   2. **Membership** — `verify_device_cert` confirms the account key certified
-     that device key.
+     those device keys.
 
   Together: "a cryptographically self-consistent Pollis device." No lookup, no
   DB, no secret on the relay.
@@ -280,6 +284,20 @@ It refreshes near the directory's `expires_at` (and on-demand when the pool is
 exhausted), swapping the live pool with **no shim restart**. Each directory entry
 carries its own pinned cert, so per-node identities work automatically. When BOTH
 vars are set, this path supersedes `POLLIS_OVERLAY_RELAY` below.
+
+> **The directory-signing key stays Ed25519 — deliberately out of scope for the
+> post-quantum authentication migration (#668).** #668 moved every *identity*
+> signature (account key, device cert, relay handshake, DS request auth) to
+> ML-DSA-44, but the directory envelope is minted by a Node Lambda and
+> `node:crypto` has no ML-DSA implementation, so there is no way to sign it
+> post-quantum without pulling a third-party PQ signer into the reconciler's
+> zero-dependency minting path. The exposure is also different in kind: a
+> directory signature is only useful *live* — the envelope names which
+> first-party relays to dial right now, carries a short TTL (default one hour)
+> and is re-signed on every reconcile, and each entry is still pinned to its own
+> QUIC cert. Nothing about a captured envelope becomes forgeable-in-hindsight,
+> so there is no harvest-now/forge-later exposure of the kind that motivated
+> #668. Revisit once a vetted ML-DSA signer exists for the minting tier.
 
 **B. Static endpoint list (v0 / operator-provisioned hosts).** For a hand-managed
 pool with stable addresses:

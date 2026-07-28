@@ -7,7 +7,7 @@
 //! account tree is domain-separated from the commit log. Also exercises
 //! duplicate/regression rejection and tamper detection.
 
-use ed25519_dalek::SigningKey;
+use verifiable_log::SigningKey;
 use verifiable_log::{
     verify_consistency_proof, verify_inclusion_proof, verifying_key_from_hex, VerifiableLog,
 };
@@ -131,7 +131,7 @@ fn monitor_verify_account(bundle: &Bundle) -> bool {
 }
 
 fn signing_key() -> SigningKey {
-    SigningKey::from_bytes(&KEY)
+    SigningKey::from_seed(&KEY.into())
 }
 
 #[tokio::test]

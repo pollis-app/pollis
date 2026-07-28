@@ -95,12 +95,14 @@ depth:
 Pollis publishes an append-only Merkle log (RFC 6962 / RFC 9162, the same
 construction Certificate Transparency uses) covering **three** trees: every MLS
 commit, every account identity-key version, and every released binary. The
-verifier trusts **only** the log's published Ed25519 public key — not the server,
-the database, or the host serving the files. If a single byte is tampered with, a
+verifier trusts **only** the log's published public key — not the server, the
+database, or the host serving the files. If a single byte is tampered with, a
 signature or proof check fails and the tool exits non-zero.
 
-Pinned public key:
-`175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148`
+Pinned public key: **being rotated to ML-DSA-44** (#668), so a signed statement
+about history stays checkable on a horizon no single message needs. Until every
+tree is republished under the new key, no build pins one and `pollis-verify`
+reports *unverified* rather than trusting the served key.
 
 Grab a prebuilt `pollis-verify` from the
 [Releases](https://github.com/actuallydan/pollis/releases) page (tags

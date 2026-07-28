@@ -12,7 +12,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::Engine as _;
-use ed25519_dalek::{Signer, SigningKey};
+use ml_dsa::{Keypair, MlDsa44, Signer, SigningKey};
 use http_body_util::BodyExt as _;
 use pollis_delivery::db::Db;
 use pollis_delivery::otp::OtpConfig;
@@ -62,6 +62,7 @@ CREATE TABLE user_device (\
   cert_issued_at TEXT,\
   cert_identity_version INTEGER,\
   mls_signature_pub BLOB,\
+  mls_signature_pub_pq BLOB,\
   revoked_at TEXT\
 );\
 CREATE TABLE conversation_watermark (\
@@ -99,24 +100,38 @@ fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
 }
 
-fn gen_key() -> SigningKey {
+fn gen_key() -> SigningKey<MlDsa44> {
     let mut s = [0u8; 32];
     OsRng.fill_bytes(&mut s);
-    SigningKey::from_bytes(&s)
+    SigningKey::<MlDsa44>::from_seed(&s.into())
 }
 
-/// Build the canonical device-cert payload — byte-identical to the DS's
-/// `cert.rs` and pollis-core's `device_cert_signed_payload`.
-fn cert_payload(device_id: &str, mls_pub: &[u8], version: u32, issued_at: u64) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(b"pollis-device-cert-v1\x00");
-    out.push(device_id.len() as u8);
-    out.extend_from_slice(device_id.as_bytes());
-    out.push(mls_pub.len() as u8);
-    out.extend_from_slice(mls_pub);
-    out.extend_from_slice(&version.to_be_bytes());
-    out.extend_from_slice(&issued_at.to_be_bytes());
-    out
+/// The public half of an account key, as the wire carries it.
+fn pub_of(k: &SigningKey<MlDsa44>) -> Vec<u8> {
+    k.verifying_key().encode().to_vec()
+}
+
+/// Sign a device cert exactly as a client would.
+fn sign_cert(
+    account: &SigningKey<MlDsa44>,
+    device_id: &str,
+    mls_pub: &[u8],
+    mls_pub_pq: &[u8],
+    version: u32,
+    issued_at: u64,
+) -> Vec<u8> {
+    let payload = pollis_device_cert::device_cert_signed_payload(
+        device_id, mls_pub, mls_pub_pq, version, issued_at,
+    )
+    .expect("cert payload");
+    account.sign(&payload).encode().to_vec()
+}
+
+/// A device's two leaf public keys: the classic 32-byte one and an ML-DSA-44 one.
+fn device_pubs() -> ([u8; 32], Vec<u8>) {
+    let mut ed_pub = [0u8; 32];
+    OsRng.fill_bytes(&mut ed_pub);
+    (ed_pub, pub_of(&gen_key()))
 }
 
 async fn fresh_db() -> Arc<Db> {
@@ -341,7 +356,7 @@ async fn full_bootstrap_happy_path() {
 
     // establish-identity
     let account = gen_key();
-    let account_pub_b = account.verifying_key().to_bytes();
+    let account_pub_b = pub_of(&account);
     let (s, _) = send(
         &state,
         "/v1/auth/establish-identity",
@@ -368,19 +383,19 @@ async fn full_bootstrap_happy_path() {
     assert_eq!(s, StatusCode::OK, "register-device should succeed");
 
     // publish-device-cert (valid cert signed by the account key)
-    let mut mls_pub = [0u8; 32];
-    OsRng.fill_bytes(&mut mls_pub);
+    let (mls_pub, mls_pub_pq) = device_pubs();
     let issued_at: u64 = 1_700_000_000;
-    let cert = account.sign(&cert_payload(device_id, &mls_pub, 1, issued_at));
+    let cert = sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
     let (s, _) = send(
         &state,
         "/v1/auth/publish-device-cert",
         serde_json::json!({
             "device_id": device_id,
-            "device_cert": b64(&cert.to_bytes()),
+            "device_cert": b64(&cert),
             "cert_issued_at": issued_at as i64,
             "cert_identity_version": 1,
             "mls_signature_pub": b64(&mls_pub),
+            "mls_signature_pub_pq": b64(&mls_pub_pq),
         }),
         Some(&token),
     )
@@ -488,7 +503,7 @@ async fn establish_identity_is_cas_no_overwrite() {
     let user_id = v["user_id"].as_str().unwrap().to_string();
     let token = v["session_token"].as_str().unwrap().to_string();
 
-    let first = gen_key().verifying_key().to_bytes();
+    let first = pub_of(&gen_key());
     let establish = |pubk: Vec<u8>, tok: String| {
         let state = state.clone();
         async move {
@@ -512,7 +527,7 @@ async fn establish_identity_is_cas_no_overwrite() {
 
     // A second establish (e.g. a re-login trying to replace the account key) must
     // 409 and leave account_id_pub unchanged.
-    let second = gen_key().verifying_key().to_bytes();
+    let second = pub_of(&gen_key());
     let (s, _) = establish(second.to_vec(), token.clone()).await;
     assert_eq!(s, StatusCode::CONFLICT, "second establish must conflict");
     assert_eq!(
@@ -538,7 +553,7 @@ async fn session_binds_user_and_device() {
 
     // establish-identity with A's token writes A's row only — there is no body
     // user_id to point at B, and the write is bound to the session user.
-    let apub = gen_key().verifying_key().to_bytes();
+    let apub = pub_of(&gen_key());
     let (s, _) = send(
         &state,
         "/v1/auth/establish-identity",
@@ -584,7 +599,7 @@ async fn publish_cert_rejects_wrong_account_key() {
         &state,
         "/v1/auth/establish-identity",
         serde_json::json!({
-            "account_id_pub": b64(&account.verifying_key().to_bytes()),
+            "account_id_pub": b64(&pub_of(&account)),
             "salt": b64(&[1u8; 32]),
             "nonce": b64(&[2u8; 12]),
             "wrapped_key": b64(&[3u8; 48]),
@@ -600,22 +615,22 @@ async fn publish_cert_rejects_wrong_account_key() {
     )
     .await;
 
-    let mut mls_pub = [0u8; 32];
-    OsRng.fill_bytes(&mut mls_pub);
+    let (mls_pub, mls_pub_pq) = device_pubs();
     let issued_at: u64 = 1_700_000_000;
 
     // A cert signed by an ATTACKER key (not the account key) must be rejected.
     let attacker = gen_key();
-    let bad_cert = attacker.sign(&cert_payload(device_id, &mls_pub, 1, issued_at));
+    let bad_cert = sign_cert(&attacker, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
     let (s, _) = send(
         &state,
         "/v1/auth/publish-device-cert",
         serde_json::json!({
             "device_id": device_id,
-            "device_cert": b64(&bad_cert.to_bytes()),
+            "device_cert": b64(&bad_cert),
             "cert_issued_at": issued_at as i64,
             "cert_identity_version": 1,
             "mls_signature_pub": b64(&mls_pub),
+            "mls_signature_pub_pq": b64(&mls_pub_pq),
         }),
         Some(&token),
     )
@@ -623,16 +638,17 @@ async fn publish_cert_rejects_wrong_account_key() {
     assert_eq!(s, StatusCode::UNAUTHORIZED, "cert not signed by the account key must be rejected");
 
     // The session is NOT spent on a rejected cert — a valid cert still works.
-    let good_cert = account.sign(&cert_payload(device_id, &mls_pub, 1, issued_at));
+    let good_cert = sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
     let (s, _) = send(
         &state,
         "/v1/auth/publish-device-cert",
         serde_json::json!({
             "device_id": device_id,
-            "device_cert": b64(&good_cert.to_bytes()),
+            "device_cert": b64(&good_cert),
             "cert_issued_at": issued_at as i64,
             "cert_identity_version": 1,
             "mls_signature_pub": b64(&mls_pub),
+            "mls_signature_pub_pq": b64(&mls_pub_pq),
         }),
         Some(&token),
     )
@@ -650,7 +666,7 @@ async fn setup_registered_device(
     state: &AppState,
     email: &str,
     device_id: &str,
-    account: &SigningKey,
+    account: &SigningKey<MlDsa44>,
 ) -> String {
     let v = login(state, email, device_id).await;
     let user_id = v["user_id"].as_str().unwrap().to_string();
@@ -659,7 +675,7 @@ async fn setup_registered_device(
         state,
         "/v1/auth/establish-identity",
         serde_json::json!({
-            "account_id_pub": b64(&account.verifying_key().to_bytes()),
+            "account_id_pub": b64(&pub_of(&account)),
             "salt": b64(&[1u8; 32]),
             "nonce": b64(&[2u8; 12]),
             "wrapped_key": b64(&[3u8; 48]),
@@ -688,10 +704,9 @@ async fn publish_cert_validity_alone_no_session() {
     let account = gen_key();
     let user_id = setup_registered_device(&state, "sub@x.com", device_id, &account).await;
 
-    let mut mls_pub = [0u8; 32];
-    OsRng.fill_bytes(&mut mls_pub);
+    let (mls_pub, mls_pub_pq) = device_pubs();
     let issued_at: u64 = 1_700_000_000;
-    let cert = account.sign(&cert_payload(device_id, &mls_pub, 1, issued_at));
+    let cert = sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
 
     // No session header — the cert (signed by the established account key) is the
     // ONLY proof. user_id comes from the body.
@@ -701,10 +716,11 @@ async fn publish_cert_validity_alone_no_session() {
         serde_json::json!({
             "user_id": user_id,
             "device_id": device_id,
-            "device_cert": b64(&cert.to_bytes()),
+            "device_cert": b64(&cert),
             "cert_issued_at": issued_at as i64,
             "cert_identity_version": 1,
             "mls_signature_pub": b64(&mls_pub),
+            "mls_signature_pub_pq": b64(&mls_pub_pq),
         }),
         None,
     )
@@ -744,25 +760,25 @@ async fn publish_cert_validity_alone_rejects_wrong_account_key() {
     let account = gen_key();
     let user_id = setup_registered_device(&state, "sub2@x.com", device_id, &account).await;
 
-    let mut mls_pub = [0u8; 32];
-    OsRng.fill_bytes(&mut mls_pub);
+    let (mls_pub, mls_pub_pq) = device_pubs();
     let issued_at: u64 = 1_700_000_000;
 
     // A cert signed by an ATTACKER key, no session — must be rejected. This is
     // the load-bearing property: cert-validity-alone never accepts a cert that
     // doesn't chain to the account's stored account_id_pub.
     let attacker = gen_key();
-    let bad_cert = attacker.sign(&cert_payload(device_id, &mls_pub, 1, issued_at));
+    let bad_cert = sign_cert(&attacker, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
     let (s, _) = send(
         &state,
         "/v1/auth/publish-device-cert",
         serde_json::json!({
             "user_id": user_id,
             "device_id": device_id,
-            "device_cert": b64(&bad_cert.to_bytes()),
+            "device_cert": b64(&bad_cert),
             "cert_issued_at": issued_at as i64,
             "cert_identity_version": 1,
             "mls_signature_pub": b64(&mls_pub),
+            "mls_signature_pub_pq": b64(&mls_pub_pq),
         }),
         None,
     )
@@ -779,10 +795,11 @@ async fn publish_cert_validity_alone_rejects_wrong_account_key() {
         "/v1/auth/publish-device-cert",
         serde_json::json!({
             "device_id": device_id,
-            "device_cert": b64(&account.sign(&cert_payload(device_id, &mls_pub, 1, issued_at)).to_bytes()),
+            "device_cert": b64(&sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at)),
             "cert_issued_at": issued_at as i64,
             "cert_identity_version": 1,
             "mls_signature_pub": b64(&mls_pub),
+            "mls_signature_pub_pq": b64(&mls_pub_pq),
         }),
         None,
     )

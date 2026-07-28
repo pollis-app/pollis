@@ -1,9 +1,15 @@
 //! Account identity key management.
 //!
-//! Each user has a long-lived Ed25519 "account identity key" generated once
-//! at first-device signup. This key is distinct from per-device MLS signing
+//! Each user has a long-lived **ML-DSA-44** "account identity key" generated
+//! once at first-device signup. This key is distinct from per-device MLS signing
 //! keys — it represents the human, not any specific device, and is what
 //! lets every device of that user cross-sign each other into MLS groups.
+//!
+//! #668 moved this key from Ed25519 to ML-DSA-44. Only the *public* half (32 →
+//! 1312 bytes) and the *signature* (64 → 2420 bytes) changed size: an ML-DSA
+//! private key is canonically a 32-byte seed, exactly like an Ed25519 one, so
+//! the Secret-Key wrap, the PIN keystore blobs, the `account_recovery` row and
+//! the device-enrollment transfer are all byte-identical to before.
 //!
 //! The private key is:
 //!   1. Stored in the OS keystore on every device that holds a copy.
@@ -21,8 +27,8 @@ use std::sync::Arc;
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use hkdf::Hkdf;
+use ml_dsa::{Keypair, MlDsa44, Signer, SigningKey};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::Sha256;
@@ -57,7 +63,16 @@ const HKDF_INFO: &[u8] = b"pollis-account-key-wrap-v1";
 
 const SALT_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
-const ED25519_PRIVATE_LEN: usize = 32;
+
+/// Length of the account identity **private** key on the wire and at rest. An
+/// ML-DSA-44 private key is canonically its 32-byte seed — the same size the
+/// Ed25519 key had before #668, which is why every wrap/recovery/transfer path
+/// that carries these bytes is untouched by the migration.
+const ACCOUNT_SEED_LEN: usize = 32;
+
+/// The account identity signing key. Aliased so the (long) ML-DSA parameter set
+/// is named in exactly one place.
+pub type AccountSigningKey = SigningKey<MlDsa44>;
 
 // ── Secret Key formatting ────────────────────────────────────────────────────
 
@@ -174,9 +189,9 @@ pub fn unwrap_recovery_blob(
     nonce_arr.copy_from_slice(nonce);
 
     let plaintext = aes_gcm_decrypt(&wrap_key, &nonce_arr, wrapped_key)?;
-    if plaintext.len() != ED25519_PRIVATE_LEN {
+    if plaintext.len() != ACCOUNT_SEED_LEN {
         return Err(Error::Crypto(format!(
-            "unwrapped account_id_key has wrong length: {} (expected {ED25519_PRIVATE_LEN})",
+            "unwrapped account_id_key has wrong length: {} (expected {ACCOUNT_SEED_LEN})",
             plaintext.len()
         )));
     }
@@ -255,8 +270,8 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
 /// is held only locally (in `AppState.unlock`) and on the server only as
 /// `wrapped_key`, sealed under the user-held Secret Key.
 pub struct AccountIdentityMaterial {
-    /// Ed25519 account identity public key (32 bytes).
-    pub account_id_pub: [u8; 32],
+    /// ML-DSA-44 account identity public key (`MLDSA44_PUB_LEN` = 1312 bytes).
+    pub account_id_pub: Vec<u8>,
     /// `account_recovery` salt (HKDF salt for the Secret-Key-derived wrap key).
     pub salt: [u8; SALT_LEN],
     /// AES-GCM nonce for the wrapped private key.
@@ -267,7 +282,7 @@ pub struct AccountIdentityMaterial {
 
 /// Pure-crypto half of account-identity generation, with NO server write.
 ///
-/// Generates the Ed25519 account keypair + a one-time Secret Key, wraps the
+/// Generates the ML-DSA-44 account keypair + a one-time Secret Key, wraps the
 /// private key under the Secret-Key-derived KEK, and installs the private key
 /// plus a fresh `db_key` into `AppState.unlock` (the only on-disk copy is the
 /// server-side `account_recovery` blob, which is wrapped under the Secret Key).
@@ -283,10 +298,7 @@ pub async fn generate_account_identity_material(
 ) -> Result<(String, AccountIdentityMaterial)> {
     let mut rng = OsRng;
 
-    let signing_key = SigningKey::generate(&mut rng);
-    let verifying_key: VerifyingKey = signing_key.verifying_key();
-    let private_bytes: [u8; ED25519_PRIVATE_LEN] = signing_key.to_bytes();
-    let public_bytes: [u8; 32] = verifying_key.to_bytes();
+    let (private_bytes, public_bytes) = generate_account_keypair(&mut rng);
 
     let secret_key_display = generate_secret_key_string();
     let secret_key_body = normalize_secret_key(&secret_key_display)
@@ -311,6 +323,17 @@ pub async fn generate_account_identity_material(
             wrapped_key: wrapped,
         },
     ))
+}
+
+/// Draw a fresh account identity keypair, returned as `(32-byte seed, encoded
+/// 1312-byte public key)`. The seed — not the expanded key — is what every
+/// storage and transfer path carries.
+fn generate_account_keypair(rng: &mut OsRng) -> ([u8; ACCOUNT_SEED_LEN], Vec<u8>) {
+    let mut seed = [0u8; ACCOUNT_SEED_LEN];
+    rng.fill_bytes(&mut seed);
+    let signing_key = AccountSigningKey::from_seed(&seed.into());
+    let public_bytes = signing_key.verifying_key().encode().to_vec();
+    (seed, public_bytes)
 }
 
 /// Build an `UnlockState` carrying the supplied account identity
@@ -413,14 +436,10 @@ pub async fn has_matching_local_account_identity(
 }
 
 fn account_id_pub_matches(private_bytes: &[u8], remote_pub: &[u8]) -> bool {
-    if private_bytes.len() != ED25519_PRIVATE_LEN {
+    let Ok(signing_key) = signing_key_from_bytes(private_bytes) else {
         return false;
-    }
-    let mut arr = [0u8; ED25519_PRIVATE_LEN];
-    arr.copy_from_slice(private_bytes);
-    let signing_key = SigningKey::from_bytes(&arr);
-    let local_pub: [u8; 32] = signing_key.verifying_key().to_bytes();
-    local_pub.as_slice() == remote_pub
+    };
+    signing_key.verifying_key().encode().as_slice() == remote_pub
 }
 
 /// Delete every local copy of the account identity private key —
@@ -465,11 +484,8 @@ pub async fn wipe_local_account_identity(state: &AppState, user_id: &str) -> Res
 pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<String> {
     let mut rng = OsRng;
 
-    // 1. Generate a new Ed25519 keypair.
-    let signing_key = SigningKey::generate(&mut rng);
-    let verifying_key: VerifyingKey = signing_key.verifying_key();
-    let private_bytes: [u8; ED25519_PRIVATE_LEN] = signing_key.to_bytes();
-    let public_bytes: [u8; 32] = verifying_key.to_bytes();
+    // 1. Generate a new ML-DSA-44 keypair.
+    let (private_bytes, public_bytes) = generate_account_keypair(&mut rng);
 
     // 2. Generate a fresh Secret Key and wrap the new private key.
     let secret_key_display = generate_secret_key_string();
@@ -514,7 +530,7 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
         let b64 = base64::engine::general_purpose::STANDARD;
         let body = serde_json::json!({
             "based_on_version": based_on_version,
-            "account_id_pub": b64.encode(public_bytes),
+            "account_id_pub": b64.encode(&public_bytes),
             "salt": b64.encode(salt),
             "nonce": b64.encode(nonce),
             "wrapped_key": b64.encode(&wrapped),
@@ -587,7 +603,7 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
 /// Returns `Error::Crypto("locked")` when the wrapped slot is present
 /// but `AppState.unlock` is empty — the caller is expected to surface
 /// that to the frontend so it can prompt for the PIN.
-pub async fn load_account_id_key(state: &AppState, user_id: &str) -> Result<SigningKey> {
+pub async fn load_account_id_key(state: &AppState, user_id: &str) -> Result<AccountSigningKey> {
     {
         let guard = state.unlock.lock().await;
         if let Some(u) = guard.as_ref() {
@@ -618,52 +634,60 @@ pub async fn load_account_id_key(state: &AppState, user_id: &str) -> Result<Sign
     signing_key_from_bytes(&bytes)
 }
 
-fn signing_key_from_bytes(bytes: &[u8]) -> Result<SigningKey> {
-    if bytes.len() != ED25519_PRIVATE_LEN {
+fn signing_key_from_bytes(bytes: &[u8]) -> Result<AccountSigningKey> {
+    if bytes.len() != ACCOUNT_SEED_LEN {
         return Err(Error::Crypto(format!(
             "account_id_key has wrong length: {} (expected {})",
             bytes.len(),
-            ED25519_PRIVATE_LEN
+            ACCOUNT_SEED_LEN
         )));
     }
-    let mut arr = [0u8; ED25519_PRIVATE_LEN];
+    let mut arr = [0u8; ACCOUNT_SEED_LEN];
     arr.copy_from_slice(bytes);
-    Ok(SigningKey::from_bytes(&arr))
+    Ok(AccountSigningKey::from_seed(&arr.into()))
 }
 
 // ── Device certificate ───────────────────────────────────────────────────────
 
 // The device-cert PAYLOAD FORMAT and its VERIFICATION live in the standalone
-// `pollis-device-cert` crate (deps: ed25519-dalek + std only) so `pollis-relay`
-// can verify certs at its handshake without depending on `pollis-core` (which
-// would be a cycle — pollis-core already depends on pollis-relay). Re-exported
-// here so every existing caller — `device.rs`, `key_packages.rs`, the MLS accept
-// path, and the tests below — is unchanged. `sign_device_cert` stays here: it
-// needs `AppState`/keystore to load the account key, but it signs over the SAME
-// shared payload, so signer and verifier can never drift. See §11.1.
-pub use pollis_device_cert::{device_cert_signed_payload, verify_device_cert, DEVICE_CERT_DOMAIN};
+// `pollis-device-cert` crate (deps: ml-dsa + std only) so `pollis-relay` can
+// verify certs at its handshake without depending on `pollis-core` (which would
+// be a cycle — pollis-core already depends on pollis-relay). Re-exported here so
+// every existing caller — `device.rs`, `key_packages.rs`, the MLS accept path,
+// and the tests below — is unchanged. `sign_device_cert` stays here: it needs
+// `AppState`/keystore to load the account key, but it signs over the SAME shared
+// payload, so signer and verifier can never drift. See §11.1.
+pub use pollis_device_cert::{
+    device_cert_signed_payload, verify_device_cert, DEVICE_CERT_DOMAIN, MLDSA44_PUB_LEN,
+    MLDSA44_SIG_LEN,
+};
 
-/// Sign a device cert for this device using the loaded account identity
-/// key. The caller is responsible for persisting the returned signature,
-/// `issued_at`, `identity_version`, and `mls_signature_pub` in the remote
-/// `user_device` table so other clients can verify.
+/// Sign a device cert for this device using the loaded account identity key.
+///
+/// One cert covers **both** of the device's MLS leaf keys — the Ed25519 one used
+/// by the classic suite and the ML-DSA-44 one used by the PQ suite — so neither
+/// leaf is ever uncertified while a device is in groups of both suites (#668).
+/// The caller is responsible for persisting the returned signature, `issued_at`,
+/// `identity_version`, and both public keys in the remote `user_device` table so
+/// other clients can verify.
 pub async fn sign_device_cert(
     state: &AppState,
     user_id: &str,
     device_id: &str,
-    mls_signature_pub: &[u8],
+    ed25519_device_pub: &[u8],
+    mldsa_device_pub: &[u8],
     identity_version: u32,
     issued_at: u64,
 ) -> Result<Vec<u8>> {
     let signing_key = load_account_id_key(state, user_id).await?;
     let payload = device_cert_signed_payload(
         device_id,
-        mls_signature_pub,
+        ed25519_device_pub,
+        mldsa_device_pub,
         identity_version,
         issued_at,
     )?;
-    let signature: Signature = signing_key.sign(&payload);
-    Ok(signature.to_bytes().to_vec())
+    Ok(signing_key.sign(&payload).encode().to_vec())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -725,89 +749,144 @@ mod tests {
         let body = normalize_secret_key(&sk).unwrap();
         let wrap_key = derive_wrap_key(&body, &salt);
 
-        let plaintext = b"32-byte-ed25519-private-key-000";
+        let plaintext = b"32-byte-account-key-seed-0000000";
         let ct = aes_gcm_encrypt(&wrap_key, &nonce, plaintext).unwrap();
         let pt = aes_gcm_decrypt(&wrap_key, &nonce, &ct).unwrap();
         assert_eq!(pt, plaintext);
     }
 
+    /// A test device's two leaf public keys: `(ed25519_pub, mldsa_pub)`.
+    fn device_pubs(seed: u8) -> ([u8; 32], Vec<u8>) {
+        let mldsa = AccountSigningKey::from_seed(&[seed; 32].into())
+            .verifying_key()
+            .encode()
+            .to_vec();
+        ([seed; 32], mldsa)
+    }
+
     /// Cross-crate consistency: the byte format `sign_device_cert` mints in
     /// (account key signs `device_cert_signed_payload`) is IDENTICAL to the
     /// golden vector `pollis-device-cert` freezes and `pollis-relay` verifies at
-    /// its handshake. Same fixed inputs ⇒ same 64-byte cert. If this and
+    /// its handshake. Same fixed inputs ⇒ same 2420-byte cert. If this and
     /// `pollis_device_cert`'s `golden_vector_is_frozen` ever disagree, the mint
     /// and verify halves have drifted.
     #[test]
     fn sign_device_cert_matches_shared_golden_vector() {
-        let account = SigningKey::from_bytes(&[42u8; 32]);
+        let account = AccountSigningKey::from_seed(&[42u8; 32].into());
         let device_id = "01HXGOLDENVECTORDEVICE0001";
-        let device_pub = SigningKey::from_bytes(&[7u8; 32]).verifying_key().to_bytes();
+        let ed_pub = [7u8; 32];
+        let pq_pub = AccountSigningKey::from_seed(&[8u8; 32].into())
+            .verifying_key()
+            .encode()
+            .to_vec();
 
         // This is exactly what `sign_device_cert` does after loading the account
         // key: sign the shared payload.
-        let payload = device_cert_signed_payload(device_id, &device_pub, 3, 1_800_000_000).unwrap();
-        let cert: Signature = account.sign(&payload);
+        let payload =
+            device_cert_signed_payload(device_id, &ed_pub, &pq_pub, 3, 1_800_000_000).unwrap();
+        let cert = account.sign(&payload).encode().to_vec();
 
-        let expected = "af1b7e28940c1bdc67201d9d91bd9263c02f456929a7bc2f6ce35a7398d725616842eed1734cd16a41836edc45b7a722c670b018f0786a573ec42bdf0cd4cd03";
-        let got: String = cert.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
-        assert_eq!(got, expected, "pollis-core mint format drifted from the shared golden vector");
+        // The same fingerprint `pollis_device_cert::tests::golden_vector_is_frozen`
+        // pins. ML-DSA blobs are kilobytes, so both sides pin a digest of the
+        // bytes rather than the bytes themselves.
+        assert_eq!(
+            fnv1a_128_hex(&cert),
+            "6a63116689699b97746e47352a07d857",
+            "pollis-core mint format drifted from the shared golden vector"
+        );
 
         // And it verifies through the shared (re-exported) verifier.
-        verify_device_cert(&account.verifying_key().to_bytes(), device_id, &device_pub, 3, 1_800_000_000, &cert.to_bytes())
-            .expect("golden cert must verify under the shared verifier");
+        verify_device_cert(
+            &account.verifying_key().encode(),
+            device_id,
+            &ed_pub,
+            &pq_pub,
+            3,
+            1_800_000_000,
+            &cert,
+        )
+        .expect("golden cert must verify under the shared verifier");
+    }
+
+    /// Mirror of `pollis_device_cert`'s test-only fingerprint. Deliberately
+    /// duplicated (8 lines) rather than exported: the whole point of the golden
+    /// vector is that the two crates arrive at the same constant independently.
+    fn fnv1a_128_hex(bytes: &[u8]) -> String {
+        const OFFSET: u128 = 0x6c62272e07bb014262b821756295c58d;
+        const PRIME: u128 = 0x0000000001000000000000000000013b;
+        let mut hash = OFFSET;
+        for b in bytes {
+            hash ^= u128::from(*b);
+            hash = hash.wrapping_mul(PRIME);
+        }
+        hash.to_be_bytes().iter().map(|b| format!("{b:02x}")).collect()
     }
 
     #[test]
     fn device_cert_roundtrip() {
-        let mut rng = OsRng;
-        let signing = SigningKey::generate(&mut rng);
-        let account_pub = signing.verifying_key().to_bytes();
+        let signing = AccountSigningKey::from_seed(&rand::random::<[u8; 32]>().into());
+        let account_pub = signing.verifying_key().encode();
 
         let device_id = "01HXABCDEFGHJKMNPQRSTVWXYZ";
-        let mls_sig_pub: [u8; 32] = rand::random();
-        let payload = device_cert_signed_payload(device_id, &mls_sig_pub, 1, 1_700_000_000).unwrap();
-        let sig: Signature = signing.sign(&payload);
+        let (ed_pub, pq_pub) = device_pubs(9);
+        let payload =
+            device_cert_signed_payload(device_id, &ed_pub, &pq_pub, 1, 1_700_000_000).unwrap();
+        let sig = signing.sign(&payload).encode();
 
         verify_device_cert(
             &account_pub,
             device_id,
-            &mls_sig_pub,
+            &ed_pub,
+            &pq_pub,
             1,
             1_700_000_000,
-            &sig.to_bytes(),
+            &sig,
         )
         .expect("cert should verify with matching inputs");
     }
 
     #[test]
     fn device_cert_rejects_tampered_fields() {
-        let mut rng = OsRng;
-        let signing = SigningKey::generate(&mut rng);
-        let account_pub = signing.verifying_key().to_bytes();
+        let signing = AccountSigningKey::from_seed(&rand::random::<[u8; 32]>().into());
+        let account_pub = signing.verifying_key().encode();
 
         let device_id = "01HXABCDEFGHJKMNPQRSTVWXYZ";
-        let mls_sig_pub: [u8; 32] = rand::random();
-        let payload = device_cert_signed_payload(device_id, &mls_sig_pub, 1, 1_700_000_000).unwrap();
-        let sig = signing.sign(&payload);
-        let sig_bytes = sig.to_bytes();
+        let (ed_pub, pq_pub) = device_pubs(9);
+        let payload =
+            device_cert_signed_payload(device_id, &ed_pub, &pq_pub, 1, 1_700_000_000).unwrap();
+        let sig_bytes = signing.sign(&payload).encode();
 
         // Wrong device_id.
         assert!(verify_device_cert(
             &account_pub,
             "01HXZZZZZZZZZZZZZZZZZZZZZZ",
-            &mls_sig_pub,
+            &ed_pub,
+            &pq_pub,
             1,
             1_700_000_000,
             &sig_bytes,
         )
         .is_err());
 
-        // Wrong mls_sig_pub.
-        let other_pub: [u8; 32] = rand::random();
+        // Wrong Ed25519 leaf key (the classic-suite half of the binding).
+        let (other_ed, other_pq) = device_pubs(11);
         assert!(verify_device_cert(
             &account_pub,
             device_id,
-            &other_pub,
+            &other_ed,
+            &pq_pub,
+            1,
+            1_700_000_000,
+            &sig_bytes,
+        )
+        .is_err());
+
+        // Wrong ML-DSA leaf key (the PQ-suite half).
+        assert!(verify_device_cert(
+            &account_pub,
+            device_id,
+            &ed_pub,
+            &other_pq,
             1,
             1_700_000_000,
             &sig_bytes,
@@ -818,7 +897,8 @@ mod tests {
         assert!(verify_device_cert(
             &account_pub,
             device_id,
-            &mls_sig_pub,
+            &ed_pub,
+            &pq_pub,
             2,
             1_700_000_000,
             &sig_bytes,
@@ -829,7 +909,8 @@ mod tests {
         assert!(verify_device_cert(
             &account_pub,
             device_id,
-            &mls_sig_pub,
+            &ed_pub,
+            &pq_pub,
             1,
             1_700_000_001,
             &sig_bytes,
@@ -839,24 +920,38 @@ mod tests {
 
     #[test]
     fn device_cert_rejects_wrong_account_key() {
-        let mut rng = OsRng;
-        let legitimate = SigningKey::generate(&mut rng);
-        let attacker = SigningKey::generate(&mut rng);
+        let legitimate = AccountSigningKey::from_seed(&rand::random::<[u8; 32]>().into());
+        let attacker = AccountSigningKey::from_seed(&rand::random::<[u8; 32]>().into());
 
         let device_id = "01HXABCDEFGHJKMNPQRSTVWXYZ";
-        let mls_sig_pub: [u8; 32] = rand::random();
-        let payload = device_cert_signed_payload(device_id, &mls_sig_pub, 1, 1_700_000_000).unwrap();
-        let sig = attacker.sign(&payload);
+        let (ed_pub, pq_pub) = device_pubs(9);
+        let payload =
+            device_cert_signed_payload(device_id, &ed_pub, &pq_pub, 1, 1_700_000_000).unwrap();
+        let sig = attacker.sign(&payload).encode();
 
         let res = verify_device_cert(
-            &legitimate.verifying_key().to_bytes(),
+            &legitimate.verifying_key().encode(),
             device_id,
-            &mls_sig_pub,
+            &ed_pub,
+            &pq_pub,
             1,
             1_700_000_000,
-            &sig.to_bytes(),
+            &sig,
         );
         assert!(res.is_err());
+    }
+
+    /// The private key stays a 32-byte seed across the Ed25519 → ML-DSA-44 move,
+    /// which is what lets the Secret-Key wrap, the PIN keystore blob and the
+    /// device-enrollment transfer carry it unchanged. A regression here would
+    /// silently break every one of those at-rest formats.
+    #[test]
+    fn account_private_key_is_still_a_32_byte_seed() {
+        let mut rng = OsRng;
+        let (seed, public_bytes) = generate_account_keypair(&mut rng);
+        assert_eq!(seed.len(), 32);
+        assert_eq!(public_bytes.len(), MLDSA44_PUB_LEN);
+        assert!(account_id_pub_matches(&seed, &public_bytes));
     }
 
     #[test]
@@ -872,7 +967,7 @@ mod tests {
         rng.fill_bytes(&mut nonce);
 
         let wrap_key = derive_wrap_key(&body, &salt);
-        let private = [0x17u8; ED25519_PRIVATE_LEN];
+        let private = [0x17u8; ACCOUNT_SEED_LEN];
         let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private).unwrap();
 
         // User types it back with noise — should still unwrap.
@@ -893,7 +988,7 @@ mod tests {
         rng.fill_bytes(&mut nonce);
 
         let wrap_key = derive_wrap_key(&normalize_secret_key(&sk1).unwrap(), &salt);
-        let private = [0xaau8; ED25519_PRIVATE_LEN];
+        let private = [0xaau8; ACCOUNT_SEED_LEN];
         let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private).unwrap();
 
         assert!(unwrap_recovery_blob(&sk2, &salt, &nonce, &wrapped).is_err());

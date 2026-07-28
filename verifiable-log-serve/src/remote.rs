@@ -703,7 +703,7 @@ mod overlay_proxy_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use ed25519_dalek::SigningKey;
+    use ml_dsa::{Keypair, MlDsa44, SigningKey};
     use pollis_relay::circuit::{Hop, SingleHopFactory};
     use pollis_relay::client::ClientIdentity;
     use pollis_relay::proto::DeviceCertMaterial;
@@ -717,16 +717,26 @@ mod overlay_proxy_tests {
     /// A client identity carrying a device key + a valid offline cert chain —
     /// exactly what a real client presents to the relay.
     fn identity() -> Arc<ClientIdentity> {
-        let device = SigningKey::from_bytes(&[11u8; 32]);
-        let account = SigningKey::from_bytes(&[12u8; 32]);
+        // The classic leaf key is only carried by the frame — the cert binds it,
+        // nothing verifies under it — so a fixed pattern stands in for it.
+        const DEVICE_ED_PUB: [u8; 32] = [11u8; 32];
+        let device = SigningKey::<MlDsa44>::from_seed(&[11u8; 32].into());
+        let account = SigningKey::<MlDsa44>::from_seed(&[12u8; 32].into());
         let cert = DeviceCertMaterial::mint(
             &account,
             "d_verify_test",
-            &device.verifying_key().to_bytes(),
+            &DEVICE_ED_PUB,
+            &device.verifying_key().encode(),
             1,
             1_700_000_000,
         );
-        Arc::new(ClientIdentity::new("u_verify_test", "d_verify_test", device, cert))
+        Arc::new(ClientIdentity::new(
+            "u_verify_test",
+            "d_verify_test",
+            DEVICE_ED_PUB,
+            device,
+            cert,
+        ))
     }
 
     /// Spawn an in-process relay that allows `ORIGIN_NAME` and resolves it to

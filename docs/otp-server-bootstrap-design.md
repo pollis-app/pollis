@@ -11,9 +11,10 @@ Goal B signs every DS write with the device's MLS key. But a handful of writes
 *establish* that credential, so they can't be signed by it (chicken-and-egg):
 account creation, account-identity establishment (`account_id_pub` + `account_key_log` v1),
 device registration, and the **first device-cert publish** (which populates the
-very `mls_signature_pub` the DS verifies against). And the OTP itself is currently
-generated/validated/emailed **entirely client-side** (`state.otp_store` HashMap +
-a baked-in Resend key).
+very `mls_signature_pub_pq` the DS verifies against — `mls_signature_pub` until
+#668 moved request auth to the device's ML-DSA-44 leaf key). And the OTP itself
+is currently generated/validated/emailed **entirely client-side**
+(`state.otp_store` HashMap + a baked-in Resend key).
 
 ## Pre-signing-key vs post-signing-key (the pivot)
 ```
@@ -23,25 +24,25 @@ generate_account_identity:
   UPDATE users.account_id_pub, v=1            PRE
   INSERT account_key_log v=1                  PRE
   INSERT account_recovery                     PRE
-register_device → INSERT user_device          PRE  (mls_signature_pub NULL)
+register_device → INSERT user_device          PRE  (both sig pubs NULL)
 set_pin (client-only key wrapping)            client-only
-ensure_device_cert → UPDATE mls_signature_pub PIVOT (establishes the credential)
+ensure_device_cert → UPDATE both sig pubs     PIVOT (establishes the credential)
 initialize_identity → key-package publish     POST (first device-SIGNED DS call)
 ```
 Everything up to and including the cert publish is OTP-session-gated; everything
 after uses the existing device-signature path.
 
 ## The secret/public boundary (STAYS client-side, never sent raw)
-- `account_id_key` **private** (Ed25519, the human's cross-signing identity) — keystore (PIN-wrapped) + `state.unlock`; the server only ever holds it **wrapped under the Secret Key** in `account_recovery`.
+- `account_id_key` **private** (**ML-DSA-44** since #668, the human's cross-signing identity) — keystore (PIN-wrapped) + `state.unlock`; the server only ever holds it **wrapped under the Secret Key** in `account_recovery`. An ML-DSA-44 private key is canonically its 32-byte seed, exactly like the Ed25519 one it replaced, so the PIN-wrapped keystore blob, the `account_recovery` `wrapped_key`, and the sibling-approval enrollment envelope are all **byte-identical in size** to before — only the *public* half grew (32 → 1312).
 - The **Secret Key** (shown once), the **db_key** (PIN-wrapped), and the **MLS device signing key** — all client-only.
-- Sent to the server: only public/wrapped material — `account_id_pub`, `mls_signature_pub`, the account-key-signed `device_cert`, and `{salt, nonce, wrapped_key}`.
+- Sent to the server: only public/wrapped material — `account_id_pub`, both leaf pubs (`mls_signature_pub` Ed25519 + `mls_signature_pub_pq` ML-DSA-44), the account-key-signed `device_cert`, and `{salt, nonce, wrapped_key}`.
 
 ## Proposed DS surface (new `pollis-delivery/src/otp.rs` + `session.rs`)
 1. **`POST /v1/auth/request-otp`** `{email}` — DS generates the OTP, stores it server-side (salted hash + TTL + attempt counter), emails via Resend (key in **DS env**). Always 200 (anti-enumeration). Per-email resend throttle + **per-IP throttle** (`pollis-delivery/src/ratelimit.rs`, client IP from `CF-Connecting-IP`; also applied to verify-otp — the email-bomb / cross-email-enumeration defense, #345).
 2. **`POST /v1/auth/verify-otp`** `{email, code, account_id_pub?}` — **constant-time compare, attempt-limited (lockout at 5; deleted on lockout, and consumed on success only *after* the account-write + session mint succeed — validate-then-consume, so a transient/config DB failure returns 5xx and the same code still verifies on retry rather than being burned, #518)** — *fixes the current unlimited-guess bug*. Creates/loads the account (`INSERT users` moves here), issues a short-lived **OTP-session token** bound to `(user_id, email, device_id)`. Returns `{user_id, is_new_account, has_identity, session_token, expires_at}`.
 3. **`POST /v1/auth/establish-identity`** (session-gated, signup only) — `UPDATE users SET account_id_pub, identity_version=1 WHERE id=:session AND account_id_pub IS NULL` (CAS — never overwrite) + `INSERT account_key_log v1` + `INSERT account_recovery`, one transaction. 409 if identity already exists.
 4. **`POST /v1/auth/register-device`** (session-gated) — `INSERT user_device` + watermark seeds; `user_id` bound from session.
-5. **`POST /v1/auth/publish-device-cert`** (gate: **session + cert-validity**) — `UPDATE user_device` cert columns + `mls_signature_pub`; the DS also Ed25519-verifies the cert against the stored `account_id_pub` (port `verify_device_cert` into the DS). Invalidate the session on success.
+5. **`POST /v1/auth/publish-device-cert`** (gate: **session + cert-validity**) — `UPDATE user_device` cert columns + `mls_signature_pub` **and** `mls_signature_pub_pq`; the DS also ML-DSA-44-verifies the v2 cert (which binds both leaf keys) against the stored `account_id_pub` (port `verify_device_cert` into the DS). Invalidate the session on success. **This endpoint is never gated by a device signature** — that asymmetry is what made #668 safe to ship: a device can always register its ML-DSA-44 key here *before* it has to sign anything with it, so there is no chicken-and-egg at the Ed25519→PQ auth cutover.
 
 **Session token:** opaque random 256-bit bearer (not a JWT), stored **hashed** server-side, TTL ~10 min, capability = "bootstrap writes for this user_id only" (handlers bind user_id from the session, never the body — same property as `resolve_actor`). New `verify_session` auth mode in `pollis-delivery/src/auth.rs` alongside `verify_request`.
 

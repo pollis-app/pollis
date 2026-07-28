@@ -9,14 +9,15 @@
 
 use std::path::Path;
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use verifiable_log::{Entry, Sth, UniqueDataInvariant, VerifiableLog};
 use verifiable_log_serve::bundle::{Bundle, ConsistencyCheck, InclusionCheck};
 use verifiable_log_serve::{layout, remote, DevServer};
 
 /// Build a small, valid signed bundle in the frozen wire shape.
 fn build_fixture() -> Bundle {
-    let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+    let signing_key = SigningKey::from_seed(&[9u8; 32].into());
     let mut log = VerifiableLog::new();
     log.register_invariant("commits", Box::new(UniqueDataInvariant));
 
@@ -54,7 +55,7 @@ fn build_fixture() -> Bundle {
     }];
 
     Bundle {
-        public_key: hex::encode(signing_key.verifying_key().to_bytes()),
+        public_key: hex::encode(signing_key.verifying_key().encode()),
         sths,
         entries,
         enforce_unique: vec!["commits".to_string()],

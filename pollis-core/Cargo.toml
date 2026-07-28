@@ -65,6 +65,10 @@ async-trait = "0.1"
 libsql = { version = "0.9", features = ["remote"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+# The account identity key and every Pollis-owned signature moved to ML-DSA-44
+# in #668. `ed25519-dalek` stays for the classic MLS suite's leaf keys and the
+# DS request-auth device key, both of which remain Ed25519 until #669.
+ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 curve25519-dalek = "4"
 hkdf = "0.12"
 sha2 = "0.10"
@@ -137,37 +141,51 @@ axum = { version = "0.8", features = ["ws"] }
 # Zero-copy frame fan-out on the screenshare WS (see the axum note above): share
 # the decoded `Arc<Vec<u8>>` into a `Bytes` instead of copying per subscriber.
 bytes = "1"
-openmls = "0.8"
-openmls_traits = "0.5"
-# The crypto backend for the CLASSIC suite Pollis ships today, and the only one
-# any production path constructs (`PollisProvider`). Its `aes-gcm` compares
-# authentication tags in constant time via `subtle` — see the libcrux note below
-# for why that decides the split.
-openmls_rust_crypto = "0.5"
-# The crypto backend for the POST-QUANTUM HYBRID suite only (`PollisPqProvider`,
-# #454). It is the sole released provider implementing X-Wing; RustCrypto
-# `unimplemented!()`-panics on that suite.
+# `draft-ietf-mls-pq-ciphersuites` is what makes the PQ code points exist at all:
+# it gates `SignatureScheme::MLDSA44`, the X-Wing suite #454 ships, and the
+# ML-DSA suite #668 moves authentication to. It has to be named on every openmls
+# crate we depend on DIRECTLY — openmls's own feature chains it with `?/`, which
+# only fires for the providers it pulls in as optional deps, and we pull the
+# providers in ourselves. The workspace `[patch.crates-io]` explains the pin.
 #
-# It is deliberately NOT used for the classic suite even though it supports it:
-# the classic AEAD is AES-128-GCM and libcrux's AES-GCM has an UNPATCHED
-# non-constant-time tag check (RUSTSEC-2026-0211, `libcrux-aesgcm <= 0.0.8`; the
-# fix ships only as the renamed `libcrux-aes` 0.0.9, which `libcrux-aead 0.0.6`
-# — and therefore this crate — does not use). Routing today's message decrypts
-# through it would be a side-channel regression. The hybrid suite is
-# ChaCha20-Poly1305-based, so that advisory does not reach it. `deny.toml`
-# records the reachability argument for each libcrux advisory.
+# `0-8-1-storage-format` is not optional for us. Upstream changed how
+# `ExtensionType`, `ProposalType` and `CredentialType` serialise into the
+# storage provider — explicit `storage_tag`s instead of serde's variant order —
+# and every device already running v1.7.0 has `mls_kv` rows written in the old
+# shape. There is no migration for MLS state: a device that cannot deserialise
+# its own tree has lost its groups, not just a cache. So we keep writing the
+# format the shipped clients wrote. The feature exists for exactly this case.
+openmls = { version = "0.8", features = [
+  "draft-ietf-mls-pq-ciphersuites",
+  "0-8-1-storage-format",
+] }
+openmls_traits = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites"] }
+# The crypto backend for BOTH suites Pollis ships (`PollisProvider`). Its
+# `aes-gcm` compares authentication tags in constant time via `subtle`.
 #
-# We compose its `CryptoProvider` with our own SQLite-backed `MlsStore`; we
+# #454 also depended on `openmls_libcrux_crypto`, because its hybrid suite was
+# X-Wing / `0x004D` and libcrux was the only provider implementing it — while
+# the classic suite had to stay on RustCrypto, since libcrux's AES-GCM has an
+# unpatched non-constant-time tag check (RUSTSEC-2026-0211). #668 moved the
+# hybrid suite to `0x0052`, which keeps the same X-Wing KEM but signs ML-DSA-44;
+# RustCrypto implements it and libcrux implements no ML-DSA suite at all. So the
+# second backend is gone, and with it a dozen libcrux advisories `deny.toml` had
+# to carry reachability arguments for.
+#
+# We compose its `RustCrypto` with our own SQLite-backed `MlsStore`; we
 # deliberately do NOT use its bundled `Provider`, which hardcodes in-memory
 # storage and would silently drop all MLS group state on restart.
-openmls_libcrux_crypto = "0.3"
+openmls_rust_crypto = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites"] }
 # `test-utils` exposes `SignatureKeyPair::private()` — the ONLY accessor for the
 # raw device signing seed. The overlay relay handshake (`net::overlay`) must sign
 # with the SAME Ed25519 device key the cert chain certifies, so it needs the seed
 # to build an `ed25519_dalek::SigningKey`. The feature adds a getter only — no
 # extra crates, no behavioral change (openmls_basic_credential's `test-utils` =
 # [] gates just `fn private`).
-openmls_basic_credential = { version = "0.5", features = ["test-utils"] }
+openmls_basic_credential = { version = "0.5", features = [
+  "test-utils",
+  "draft-ietf-mls-pq-ciphersuites",
+] }
 gethostname = "1.1.0"
 # Account-key transparency: reuse the SAME shared URL-based verifier the
 # `pollis-verify` auditor CLI runs (account::verify_account), so the client's
@@ -207,7 +225,7 @@ webrtc-audio-processing = { version = "2", features = ["bundled"], optional = tr
 # See the note above the [dependencies] table — mobile vendors OpenSSL,
 # desktop links the system one.
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
-rusqlite = { version = "0.31", features = ["bundled-sqlcipher-vendored-openssl"] }
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl"] }
 
 # iOS-only: Keychain Services so the file-backed keystore's master key lives in
 # the iOS Keychain (SEP-encrypted at rest, ThisDeviceOnly → excluded from
@@ -271,7 +289,7 @@ windows = { version = "0.62", features = [
 # native LiveKit SDK (@livekit/react-native — issue #185) and drops voice, so a
 # mobile build turns `media` off (`--no-default-features`) to reach the stubs.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
-rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
 nix = { version = "0.30", features = ["term"] }
 libc = "0.2"
 
