@@ -7,7 +7,8 @@
 
 use std::process::Command;
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use verifiable_log::{
     is_equivocation, proof, Entry, InvariantViolation, Sth, TenantInvariant, UniqueDataInvariant,
     VerifiableLog,
@@ -15,7 +16,7 @@ use verifiable_log::{
 
 /// Deterministic signing key — no RNG, so the whole suite is reproducible.
 fn test_key() -> SigningKey {
-    SigningKey::from_bytes(&[42u8; 32])
+    SigningKey::from_seed(&[42u8; 32].into())
 }
 
 fn build_log(n: usize) -> VerifiableLog {
@@ -51,7 +52,7 @@ fn sth_signature_verifies_and_rejects_wrong_key() {
     let sth = log.signed_tree_head(&test_key(), 1234);
     assert!(sth.verify(&test_key().verifying_key()));
 
-    let other = SigningKey::from_bytes(&[7u8; 32]);
+    let other = SigningKey::from_seed(&[7u8; 32].into());
     assert!(!sth.verify(&other.verifying_key()));
 }
 

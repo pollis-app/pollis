@@ -17,7 +17,8 @@
 
 use std::path::Path;
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use verifiable_log_builder::source::{AccountKeyRow, CommitRow};
 use verifiable_log_builder::{build_account_bundle, build_bundle};
 use verifiable_log_serve::bundle::Bundle;
@@ -26,7 +27,7 @@ use verifiable_log_serve::{account, group, layout, remote, DevServer};
 const TS: u64 = 1_700_000_000_000;
 
 fn signing_key() -> SigningKey {
-    SigningKey::from_bytes(&[9u8; 32])
+    SigningKey::from_seed(&[9u8; 32].into())
 }
 
 /// Two conversations, a few commits each, in seq order.

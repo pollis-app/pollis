@@ -172,7 +172,7 @@ impl VerifiableLog {
 
     /// Produce a Signed Tree Head over the current tree. `timestamp` is
     /// supplied by the caller — the core never reads the clock.
-    pub fn signed_tree_head(&self, signing_key: &ed25519_dalek::SigningKey, timestamp: u64) -> Sth {
+    pub fn signed_tree_head(&self, signing_key: &crate::sth::SigningKey, timestamp: u64) -> Sth {
         Sth::create(signing_key, self.size() as u64, self.root(), timestamp)
     }
 

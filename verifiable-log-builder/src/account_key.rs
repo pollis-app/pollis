@@ -22,12 +22,12 @@ pub const TENANT: &str = "account-key";
 
 /// Domain-separation context for the account-key tree's Signed Tree Heads.
 ///
-/// It extends the commit-log's frozen `pollis-verifiable-log:sth:v1` with an
+/// It extends the commit-log's frozen `pollis-verifiable-log:sth:v2` with an
 /// `:account-keys` suffix. The commit-log context must NOT change (continuity of
 /// already-published STHs); this distinct context guarantees an STH signed for
 /// one tree fails verification against the other even though both use the same
 /// Ed25519 key. Verified via [`verifiable_log::Sth::verify_with_context`].
-pub const STH_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v1:account-keys";
+pub const STH_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v2:account-keys";
 
 /// The canonical, frozen leaf payload committing to a single account
 /// identity-key version: which public key was authoritative for `user_id` at

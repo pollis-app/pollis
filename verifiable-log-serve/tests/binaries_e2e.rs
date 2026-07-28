@@ -23,7 +23,8 @@
 
 use std::path::Path;
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use verifiable_log::{Entry, Sth, VerifiableLog};
 use verifiable_log_builder::account_key::STH_CONTEXT as ACCOUNT_STH_CONTEXT;
 use verifiable_log_builder::binaries::{self, BinaryRecord, Layer, Toolchain};
@@ -34,7 +35,7 @@ use verifiable_log_serve::{layout, release, remote, DevServer};
 const TS: u64 = 1_700_000_000_000;
 
 fn signing_key() -> SigningKey {
-    SigningKey::from_bytes(&[9u8; 32])
+    SigningKey::from_seed(&[9u8; 32].into())
 }
 
 fn toolchain() -> Toolchain {
@@ -235,7 +236,7 @@ fn forked_tree_fails_the_verifiers_independent_replay() {
         .collect();
 
     let bundle = Bundle {
-        public_key: hex::encode(key.verifying_key().to_bytes()),
+        public_key: hex::encode(key.verifying_key().encode()),
         sths: vec![sth],
         entries,
         enforce_unique: vec![binaries::TENANT.to_string()],

@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use serde::{Deserialize, Serialize};
 
 use verifiable_log::{
@@ -233,8 +234,8 @@ fn run_verify(path: &PathBuf) -> Result<bool, Box<dyn std::error::Error>> {
 /// Build a small multi-tenant log and serialize a known-good fixture.
 fn gen_example(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     // Deterministic key so the fixture is reproducible.
-    let signing_key = SigningKey::from_bytes(&[7u8; 32]);
-    let public_key = hex::encode(signing_key.verifying_key().to_bytes());
+    let signing_key = SigningKey::from_seed(&[7u8; 32].into());
+    let public_key = hex::encode(signing_key.verifying_key().encode());
 
     let mut log = VerifiableLog::new();
     log.register_invariant("commits", Box::new(UniqueDataInvariant));

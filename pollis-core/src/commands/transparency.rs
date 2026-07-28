@@ -36,15 +36,24 @@ use verifiable_log_serve::{AccountKeyVersion, AccountReport};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// The transparency log's pinned Ed25519 public key (lowercase hex, 32 bytes).
+/// The transparency log's pinned ML-DSA-44 public key (lowercase hex, 1312
+/// bytes), or `None` while the key rotation is in flight.
 ///
 /// Cross-checked against the auditor release notes / `docs/transparency.md` —
 /// this is the key the static `/v1/account-keys/public_key.json` MUST carry. A
 /// served key that differs is treated as a hostile host (hard ALARM), since any
 /// key can sign a self-consistent forged tree. Pinning it here is what makes the
 /// signature check mean anything.
-pub const PINNED_LOG_PUBLIC_KEY: &str =
-    "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148";
+///
+/// `None` today because #668 moved the STH signature from Ed25519 to ML-DSA-44:
+/// the v2 key does not exist until the operator mints it and republishes all
+/// three trees, so there is nothing yet to pin. Pinning the retired Ed25519 key
+/// instead would make every audit a false ALARM. An absent pin can only ever
+/// WITHHOLD trust — [`check_pin`] resolves it to
+/// [`AuditStatus::Unavailable`]/[`BuildVerifyStatus::Unavailable`], never `Ok`
+/// and never `Alarm`. Set it to `Some(<hex>)` in the same change that ships the
+/// republished v2 log.
+pub const PINNED_LOG_PUBLIC_KEY: Option<&str> = None;
 
 /// Default base URL of the published transparency log.
 const DEFAULT_TRANSPARENCY_URL: &str = "https://verify.pollis.com";
@@ -177,7 +186,13 @@ pub async fn self_audit_account_key(
     let overlay = state.overlay_handle();
     match fetch_and_verify(overlay.as_deref(), &base, &my_user_id).await {
         Ok((report, served_key)) => {
-            Ok(derive_self_audit(&report, &served_key, &my_pub_hex, my_version))
+            Ok(derive_self_audit(
+                &report,
+                &served_key,
+                PINNED_LOG_PUBLIC_KEY,
+                &my_pub_hex,
+                my_version,
+            ))
         }
         Err(detail) => Ok(SelfAuditReport {
             status: AuditStatus::Unavailable,
@@ -209,7 +224,13 @@ pub async fn audit_peer_account_key(
                 (Some(h), Some(v)) => Some((h.as_str(), v)),
                 _ => None,
             };
-            Ok(derive_peer_audit(&report, &served_key, &peer_user_id, pin))
+            Ok(derive_peer_audit(
+                &report,
+                &served_key,
+                PINNED_LOG_PUBLIC_KEY,
+                &peer_user_id,
+                pin,
+            ))
         }
         Err(detail) => Ok(PeerAuditReport {
             status: AuditStatus::Unavailable,
@@ -269,17 +290,22 @@ pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport
     // self-audit guards against. A served key ≠ the pin is the loud case.
     let overlay = state.overlay_handle();
     match fetch_served_binaries_public_key(overlay.as_deref(), &base).await {
-        Ok(served) if !served_key_matches_pin(&served) => {
-            return Ok(BuildVerifyReport {
-                status: BuildVerifyStatus::Mismatch,
-                detail: pin_mismatch_detail(&served),
-                version,
-                commit,
-                my_payload_sha256: my_hash,
-                report: None,
-            });
-        }
-        Ok(_) => {}
+        Ok(served) => match check_pin(&served, PINNED_LOG_PUBLIC_KEY) {
+            PinCheck::Match => {}
+            PinCheck::Mismatch => {
+                return Ok(BuildVerifyReport {
+                    status: BuildVerifyStatus::Mismatch,
+                    detail: pin_mismatch_detail(&served, PINNED_LOG_PUBLIC_KEY),
+                    version,
+                    commit,
+                    my_payload_sha256: my_hash,
+                    report: None,
+                });
+            }
+            PinCheck::RotationPending => {
+                return Ok(mk_unavailable(PIN_PENDING_DETAIL.to_string(), my_hash));
+            }
+        },
         Err(detail) => return Ok(mk_unavailable(detail, my_hash)),
     }
 
@@ -539,6 +565,7 @@ async fn load_pinned_key(
 pub fn derive_self_audit(
     report: &AccountReport,
     served_public_key: &str,
+    log_pin: Option<&str>,
     my_account_id_pub: &str,
     my_identity_version: i64,
 ) -> SelfAuditReport {
@@ -552,8 +579,17 @@ pub fn derive_self_audit(
 
     // Pin first: an unpinned key invalidates every signature check below, so a
     // mismatch is a hard alarm regardless of how the served tree verifies.
-    if !served_key_matches_pin(served_public_key) {
-        return mk(AuditStatus::Alarm, pin_mismatch_detail(served_public_key));
+    match check_pin(served_public_key, log_pin) {
+        PinCheck::Match => {}
+        PinCheck::Mismatch => {
+            return mk(
+                AuditStatus::Alarm,
+                pin_mismatch_detail(served_public_key, log_pin),
+            );
+        }
+        PinCheck::RotationPending => {
+            return mk(AuditStatus::Unavailable, PIN_PENDING_DETAIL.to_string());
+        }
     }
 
     // A head/proof we can't verify is worth nothing — alarm.
@@ -626,6 +662,7 @@ pub fn derive_self_audit(
 pub fn derive_peer_audit(
     report: &AccountReport,
     served_public_key: &str,
+    log_pin: Option<&str>,
     peer_user_id: &str,
     pinned: Option<(&str, i64)>,
 ) -> PeerAuditReport {
@@ -638,8 +675,18 @@ pub fn derive_peer_audit(
         report: Some(report.clone()),
     };
 
-    if !served_key_matches_pin(served_public_key) {
-        return mk(AuditStatus::Alarm, pin_mismatch_detail(served_public_key), false);
+    match check_pin(served_public_key, log_pin) {
+        PinCheck::Match => {}
+        PinCheck::Mismatch => {
+            return mk(
+                AuditStatus::Alarm,
+                pin_mismatch_detail(served_public_key, log_pin),
+                false,
+            );
+        }
+        PinCheck::RotationPending => {
+            return mk(AuditStatus::Unavailable, PIN_PENDING_DETAIL.to_string(), false);
+        }
     }
     if !report.chain_valid {
         return mk(
@@ -817,10 +864,30 @@ pub fn derive_build_verify(
     }
 }
 
-/// True iff the served key equals the pinned key (case-insensitive hex).
-fn served_key_matches_pin(served: &str) -> bool {
-    served.eq_ignore_ascii_case(PINNED_LOG_PUBLIC_KEY)
+/// Outcome of comparing the served log key against the build's pin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinCheck {
+    /// Served key equals the pin — proceed.
+    Match,
+    /// Served key differs from the pin — hostile host, hard alarm.
+    Mismatch,
+    /// This build carries no pin (key rotation in flight). Withhold trust
+    /// without crying wolf: report "couldn't check", never "failed".
+    RotationPending,
 }
+
+/// Compare the served key against `pin` (case-insensitive hex).
+fn check_pin(served: &str, pin: Option<&str>) -> PinCheck {
+    match pin {
+        None => PinCheck::RotationPending,
+        Some(p) if served.eq_ignore_ascii_case(p) => PinCheck::Match,
+        Some(_) => PinCheck::Mismatch,
+    }
+}
+
+/// Detail shown when this build carries no log pin.
+const PIN_PENDING_DETAIL: &str =
+    "this build pins no transparency-log key yet (the log's signing key is being rotated to      ML-DSA-44), so the published tree cannot be checked against anything — treating it as      unverified rather than trusted";
 
 /// The chain's latest published key version (highest `identity_version`). `keys`
 /// is already in `seq` order; `max_by_key` is defensive against source ordering.
@@ -847,11 +914,11 @@ fn first_release_violation(report: &ReleaseReport, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn pin_mismatch_detail(served: &str) -> String {
+fn pin_mismatch_detail(served: &str, pin: Option<&str>) -> String {
     format!(
         "the log served public key {} but this build pins {} — refusing to trust the served tree",
         short_hex(served),
-        short_hex(PINNED_LOG_PUBLIC_KEY)
+        short_hex(pin.unwrap_or("(none)"))
     )
 }
 
@@ -873,6 +940,12 @@ fn short_hex(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in for the build's transparency-log pin. The real
+    /// [`PINNED_LOG_PUBLIC_KEY`] is `None` while the key rotates to ML-DSA-44,
+    /// so these tests inject their own pin — the derivation logic is what is
+    /// under test, not the constant's current value.
+    const LOG_PIN: &str = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148";
 
     const KEY_A: &str = "aa00000000000000000000000000000000000000000000000000000000000000";
     const KEY_B: &str = "bb00000000000000000000000000000000000000000000000000000000000000";
@@ -908,21 +981,21 @@ mod tests {
     #[test]
     fn self_ok_when_latest_matches_my_key() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, PINNED_LOG_PUBLIC_KEY, KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Ok);
     }
 
     #[test]
     fn self_ok_is_case_insensitive_on_key() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, PINNED_LOG_PUBLIC_KEY, &KEY_A.to_uppercase(), 1);
+        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), &KEY_A.to_uppercase(), 1);
         assert_eq!(out.status, AuditStatus::Ok);
     }
 
     #[test]
     fn self_pending_when_history_empty() {
         let r = report(vec![], true);
-        let out = derive_self_audit(&r, PINNED_LOG_PUBLIC_KEY, KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
@@ -930,7 +1003,7 @@ mod tests {
     fn self_pending_when_my_version_newer_than_published() {
         // Published latest is v1; this device already rotated to v2.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, PINNED_LOG_PUBLIC_KEY, KEY_B, 2);
+        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_B, 2);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
@@ -938,7 +1011,7 @@ mod tests {
     fn self_alarm_when_same_version_different_key() {
         // Selective targeting: log shows a different key at my current version.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, PINNED_LOG_PUBLIC_KEY, KEY_B, 1);
+        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_B, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
@@ -946,22 +1019,50 @@ mod tests {
     fn self_alarm_when_published_version_higher() {
         // The log shows a rotation this device never performed.
         let r = report(vec![version(1, 0, KEY_A), version(2, 1, KEY_B)], true);
-        let out = derive_self_audit(&r, PINNED_LOG_PUBLIC_KEY, KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn self_alarm_on_pin_mismatch_even_if_chain_valid() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, KEY_B, KEY_A, 1);
+        let out = derive_self_audit(&r, KEY_B, Some(LOG_PIN), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn self_alarm_on_invalid_chain() {
         let r = report(vec![version(1, 0, KEY_A)], false);
-        let out = derive_self_audit(&r, PINNED_LOG_PUBLIC_KEY, KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
+    }
+
+    /// A build with no pin (key rotation in flight, #668) must WITHHOLD trust,
+    /// not grant it and not cry wolf: `Unavailable` even when the served tree is
+    /// internally perfect, and `Unavailable` rather than `Alarm` when it is not.
+    #[test]
+    fn no_pin_withholds_trust_without_alarming() {
+        let good = report(vec![version(1, 0, KEY_A)], true);
+        let out = derive_self_audit(&good, KEY_A, None, KEY_A, 1);
+        assert_eq!(out.status, AuditStatus::Unavailable);
+
+        let bad = report(vec![version(1, 0, KEY_A)], false);
+        let out = derive_self_audit(&bad, KEY_B, None, KEY_A, 1);
+        assert_eq!(out.status, AuditStatus::Unavailable);
+
+        let out = derive_peer_audit(&good, KEY_A, None, "peer", Some((KEY_A, 1)));
+        assert_eq!(out.status, AuditStatus::Unavailable);
+    }
+
+    /// The shipping constant stays `None` for exactly as long as the log's
+    /// ML-DSA-44 key is unminted. When it IS set it must be a full 1312-byte hex
+    /// key — a leftover 32-byte Ed25519 pin would match nothing the v2 log serves.
+    #[test]
+    fn shipping_pin_is_either_absent_or_ml_dsa_sized() {
+        if let Some(pin) = PINNED_LOG_PUBLIC_KEY {
+            assert_eq!(pin.len(), verifiable_log_serve::STH_PUB_LEN * 2);
+            assert!(pin.chars().all(|c| c.is_ascii_hexdigit()));
+        }
     }
 
     // ── peer-audit ────────────────────────────────────────────────────────
@@ -969,7 +1070,7 @@ mod tests {
     #[test]
     fn peer_ok_when_pinned_key_present() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, PINNED_LOG_PUBLIC_KEY, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Ok);
         assert!(!out.key_rotated);
     }
@@ -977,7 +1078,7 @@ mod tests {
     #[test]
     fn peer_ok_notes_rotation_when_newer_version_exists() {
         let r = report(vec![version(1, 0, KEY_A), version(2, 1, KEY_B)], true);
-        let out = derive_peer_audit(&r, PINNED_LOG_PUBLIC_KEY, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Ok);
         assert!(out.key_rotated);
     }
@@ -986,35 +1087,35 @@ mod tests {
     fn peer_alarm_when_pinned_key_absent_from_history() {
         // The server showed us KEY_Z but the published history only has KEY_A.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, PINNED_LOG_PUBLIC_KEY, "peer", Some((KEY_Z, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_Z, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn peer_pending_when_no_local_pin() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, PINNED_LOG_PUBLIC_KEY, "peer", None);
+        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", None);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
     #[test]
     fn peer_pending_when_peer_never_published() {
         let r = report(vec![], true);
-        let out = derive_peer_audit(&r, PINNED_LOG_PUBLIC_KEY, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
     #[test]
     fn peer_alarm_on_pin_mismatch() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, KEY_B, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, KEY_B, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn peer_alarm_on_invalid_chain() {
         let r = report(vec![version(1, 0, KEY_A)], false);
-        let out = derive_peer_audit(&r, PINNED_LOG_PUBLIC_KEY, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 

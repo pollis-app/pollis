@@ -17,7 +17,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use ed25519_dalek::SigningKey;
+use ml_dsa::Keypair;
+use verifiable_log::SigningKey;
 use verifiable_log::{
     verify_consistency_proof, verify_inclusion_proof, verifying_key_from_hex, VerifiableLog,
 };
@@ -33,7 +34,7 @@ const TS: u64 = 1_700_000_000_000;
 const KEY_HEX: &str = "0909090909090909090909090909090909090909090909090909090909090909";
 
 fn signing_key() -> SigningKey {
-    SigningKey::from_bytes(&[9u8; 32])
+    SigningKey::from_seed(&[9u8; 32].into())
 }
 
 fn toolchain() -> Toolchain {
@@ -199,7 +200,7 @@ fn build_binaries_mode_emits_wellformed_signed_bundle() {
     // The head is signed by the pinned key we handed the CLI.
     assert_eq!(
         bundle.public_key,
-        hex::encode(signing_key().verifying_key().to_bytes())
+        hex::encode(signing_key().verifying_key().encode())
     );
 
     assert!(

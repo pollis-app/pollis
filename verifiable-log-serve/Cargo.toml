@@ -38,13 +38,11 @@ tiny_http = "0.12"
 # agent dial through the closed-overlay SOCKS5 shim so the transparency VERIFY
 # path hides the client IP from the first-party host (design §14.4).
 ureq = { version = "2", default-features = false, features = ["tls", "socks-proxy"] }
-# Live mode: hold the Ed25519 signing key and drive the async libSQL read.
-ed25519-dalek = "2.1"
+# Live mode: hold the ML-DSA-44 STH signing key and drive the async libSQL read.
+ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
-# The relay handshake the remote-fetch tests drive is ML-DSA-44 signed (#668).
-ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 tempfile = "3"
 hex = "0.4"
 verifiable-log = { path = "../verifiable-log" }
