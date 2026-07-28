@@ -33,7 +33,6 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use ml_dsa::Keypair;
 use verifiable_log::SigningKey;
 use tiny_http::{Method, Request, Response, Server};
 use verifiable_log_builder::{build_bundle, source};

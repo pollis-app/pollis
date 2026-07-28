@@ -17,7 +17,6 @@
 
 use std::path::Path;
 
-use ml_dsa::Keypair;
 use verifiable_log::SigningKey;
 use verifiable_log_builder::source::{AccountKeyRow, CommitRow};
 use verifiable_log_builder::{build_account_bundle, build_bundle};

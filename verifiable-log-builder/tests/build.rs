@@ -6,7 +6,6 @@
 //! as the `monitor` CLI does). Also exercises fork/regression rejection,
 //! tamper detection, and keygen round-trip.
 
-use ml_dsa::Keypair;
 use verifiable_log::SigningKey;
 use verifiable_log::{
     is_equivocation, verify_consistency_proof, verify_inclusion_proof, verifying_key_from_hex,
