@@ -33,6 +33,14 @@ locals {
 # These are four near-identical static blocks rather than a for_each because
 # Terraform cannot assign a provider dynamically per module instance. Adding a
 # region = an entry in region_state_map + an alias in providers.tf + a block here.
+#
+# DO NOT add `depends_on = [terraform_data.jurisdiction_guard]` here. A module-level
+# depends_on defers EVERY data source inside that module to apply time, and when
+# allowed_regions changes the guard's output is unknown at plan time — so
+# data.aws_availability_zones goes unknown, local.azs with it, and aws_subnet.public
+# plans as destroy-then-create on the LIVE region, taking the running nodes' subnets
+# with it. The guard needs no ordering edge: its preconditions fail the whole plan on
+# their own, which is the actual jurisdiction guarantee.
 
 module "relay_region_us_east_1" {
   source = "./modules/relay-region"
@@ -53,8 +61,6 @@ module "relay_region_us_east_1" {
   relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
-
-  depends_on = [terraform_data.jurisdiction_guard]
 }
 
 module "relay_region_us_east_2" {
@@ -76,8 +82,6 @@ module "relay_region_us_east_2" {
   relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
-
-  depends_on = [terraform_data.jurisdiction_guard]
 }
 
 module "relay_region_us_west_1" {
@@ -102,8 +106,6 @@ module "relay_region_us_west_1" {
   relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
-
-  depends_on = [terraform_data.jurisdiction_guard]
 }
 
 module "relay_region_us_west_2" {
@@ -125,8 +127,6 @@ module "relay_region_us_west_2" {
   relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
-
-  depends_on = [terraform_data.jurisdiction_guard]
 }
 
 # The original single-region pool was `module.relay_region` keyed by region, with
