@@ -1,111 +1,87 @@
-//! Device-certificate verification — a verbatim port of pollis-core's
-//! `account_identity::{device_cert_signed_payload, verify_device_cert}`.
+//! Device-certificate verification — a thin `bool`-returning wrapper over the
+//! shared [`pollis_device_cert`] primitive.
 //!
 //! The first device-cert publish (`POST /v1/auth/publish-device-cert`) is the
 //! PIVOT write that establishes the very `mls_signature_pub` the device-signature
 //! gate ([`crate::auth`]) verifies against — so it cannot be device-signed. Its
 //! gate is instead **OTP-session + cert-validity**: the DS re-verifies the cert's
-//! Ed25519 signature against the account's stored `account_id_pub` here, exactly
-//! as every other client does before accepting a device into an MLS group. The
-//! signed payload layout and domain separator MUST stay byte-for-byte identical
-//! to pollis-core, or a cert the client signed would fail to verify here.
-
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-/// Domain separator baked into every device cert signature. Identical to
-/// pollis-core's `DEVICE_CERT_DOMAIN` — bump in lock-step if the format changes.
-const DEVICE_CERT_DOMAIN: &[u8] = b"pollis-device-cert-v1\x00";
-
-/// Build the canonical byte string a device cert signs over. Mirrors
-/// pollis-core's `device_cert_signed_payload` exactly:
-///
-///   domain_separator (22 bytes, trailing NUL included)
-///   u8  device_id_len     ||  device_id bytes
-///   u8  mls_sig_pub_len   ||  mls_sig_pub bytes
-///   u32 identity_version  (big-endian)
-///   u64 issued_at         (big-endian, unix seconds)
-fn device_cert_signed_payload(
-    device_id: &str,
-    mls_signature_pub: &[u8],
-    identity_version: u32,
-    issued_at: u64,
-) -> Option<Vec<u8>> {
-    if device_id.len() > u8::MAX as usize || mls_signature_pub.len() > u8::MAX as usize {
-        return None;
-    }
-    let mut out = Vec::with_capacity(
-        DEVICE_CERT_DOMAIN.len() + 1 + device_id.len() + 1 + mls_signature_pub.len() + 4 + 8,
-    );
-    out.extend_from_slice(DEVICE_CERT_DOMAIN);
-    out.push(device_id.len() as u8);
-    out.extend_from_slice(device_id.as_bytes());
-    out.push(mls_signature_pub.len() as u8);
-    out.extend_from_slice(mls_signature_pub);
-    out.extend_from_slice(&identity_version.to_be_bytes());
-    out.extend_from_slice(&issued_at.to_be_bytes());
-    Some(out)
-}
+//! ML-DSA-44 signature against the account's stored `account_id_pub` here,
+//! exactly as every other client does before accepting a device into an MLS
+//! group.
+//!
+//! This used to be a hand-copied port of the payload layout, kept in sync with
+//! pollis-core by comment alone. It is now a delegation: the cert format lives in
+//! exactly one crate, which both the client that mints certs and the two servers
+//! that verify them depend on, so the layout cannot drift. (No crate cycle —
+//! `pollis-device-cert` has no dependency on either side.)
 
 /// Verify a device cert against a user's published `account_id_pub`. Returns
-/// `true` iff the 64-byte Ed25519 signature is valid over the canonical payload.
-/// Any malformed input (wrong key/sig length, undecodable key) is `false` — we
-/// never accept on error.
+/// `true` iff the ML-DSA-44 signature is valid over the canonical payload
+/// binding BOTH of the device's leaf signing keys. Any malformed input (wrong
+/// key/sig length, over-long field) is `false` — we never accept on error.
 pub fn verify_device_cert(
     account_id_pub: &[u8],
     device_id: &str,
     mls_signature_pub: &[u8],
+    mls_signature_pub_pq: &[u8],
     identity_version: u32,
     issued_at: u64,
     cert_bytes: &[u8],
 ) -> bool {
-    let pk_arr: [u8; 32] = match account_id_pub.try_into() {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-    let sig_arr: [u8; 64] = match cert_bytes.try_into() {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-    let verifying_key = match VerifyingKey::from_bytes(&pk_arr) {
-        Ok(vk) => vk,
-        Err(_) => return false,
-    };
-    let signature = Signature::from_bytes(&sig_arr);
-    let payload =
-        match device_cert_signed_payload(device_id, mls_signature_pub, identity_version, issued_at) {
-            Some(p) => p,
-            None => return false,
-        };
-    verifying_key.verify(&payload, &signature).is_ok()
+    pollis_device_cert::verify_device_cert(
+        account_id_pub,
+        device_id,
+        mls_signature_pub,
+        mls_signature_pub_pq,
+        identity_version,
+        issued_at,
+        cert_bytes,
+    )
+    .is_ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::{Signer, SigningKey};
+    use ml_dsa::{Keypair, MlDsa44, Signer, SigningKey};
     use rand_core::{OsRng, RngCore as _};
 
-    fn key() -> SigningKey {
+    fn key() -> SigningKey<MlDsa44> {
         let mut s = [0u8; 32];
         OsRng.fill_bytes(&mut s);
-        SigningKey::from_bytes(&s)
+        SigningKey::<MlDsa44>::from_seed(&s.into())
+    }
+
+    /// The two leaf keys the cert binds: a 32-byte classic one and a real
+    /// ML-DSA-44 verifying key.
+    fn device_pubs() -> ([u8; 32], Vec<u8>) {
+        let mut ed_pub = [0u8; 32];
+        OsRng.fill_bytes(&mut ed_pub);
+        (ed_pub, key().verifying_key().encode().to_vec())
     }
 
     #[test]
     fn valid_cert_verifies() {
         let account = key();
         let device_id = "01HXABCDEFGHJKMNPQRSTVWXYZ";
-        let mut mls_pub = [0u8; 32];
-        OsRng.fill_bytes(&mut mls_pub);
-        let payload = device_cert_signed_payload(device_id, &mls_pub, 1, 1_700_000_000).unwrap();
-        let sig = account.sign(&payload);
-        assert!(verify_device_cert(
-            &account.verifying_key().to_bytes(),
+        let (ed_pub, pq_pub) = device_pubs();
+        let payload = pollis_device_cert::device_cert_signed_payload(
             device_id,
-            &mls_pub,
+            &ed_pub,
+            &pq_pub,
             1,
             1_700_000_000,
-            &sig.to_bytes(),
+        )
+        .unwrap();
+        let sig = account.sign(&payload);
+        assert!(verify_device_cert(
+            &account.verifying_key().encode(),
+            device_id,
+            &ed_pub,
+            &pq_pub,
+            1,
+            1_700_000_000,
+            &sig.encode(),
         ));
     }
 
@@ -114,17 +90,61 @@ mod tests {
         let legit = key();
         let attacker = key();
         let device_id = "01HXABCDEFGHJKMNPQRSTVWXYZ";
-        let mut mls_pub = [0u8; 32];
-        OsRng.fill_bytes(&mut mls_pub);
-        let payload = device_cert_signed_payload(device_id, &mls_pub, 1, 1_700_000_000).unwrap();
-        let sig = attacker.sign(&payload);
-        assert!(!verify_device_cert(
-            &legit.verifying_key().to_bytes(),
+        let (ed_pub, pq_pub) = device_pubs();
+        let payload = pollis_device_cert::device_cert_signed_payload(
             device_id,
-            &mls_pub,
+            &ed_pub,
+            &pq_pub,
             1,
             1_700_000_000,
-            &sig.to_bytes(),
+        )
+        .unwrap();
+        let sig = attacker.sign(&payload);
+        assert!(!verify_device_cert(
+            &legit.verifying_key().encode(),
+            device_id,
+            &ed_pub,
+            &pq_pub,
+            1,
+            1_700_000_000,
+            &sig.encode(),
+        ));
+    }
+
+    #[test]
+    fn swapped_leaf_key_rejected() {
+        // Cert v2 binds both leaf keys; substituting either one must fail.
+        let account = key();
+        let device_id = "01HXABCDEFGHJKMNPQRSTVWXYZ";
+        let (ed_pub, pq_pub) = device_pubs();
+        let (other_ed_pub, other_pq_pub) = device_pubs();
+        let payload = pollis_device_cert::device_cert_signed_payload(
+            device_id,
+            &ed_pub,
+            &pq_pub,
+            1,
+            1_700_000_000,
+        )
+        .unwrap();
+        let sig = account.sign(&payload).encode();
+        let account_pub = account.verifying_key().encode();
+        assert!(!verify_device_cert(
+            &account_pub,
+            device_id,
+            &other_ed_pub,
+            &pq_pub,
+            1,
+            1_700_000_000,
+            &sig,
+        ));
+        assert!(!verify_device_cert(
+            &account_pub,
+            device_id,
+            &ed_pub,
+            &other_pq_pub,
+            1,
+            1_700_000_000,
+            &sig,
         ));
     }
 }

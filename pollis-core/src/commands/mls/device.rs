@@ -178,13 +178,8 @@ where
 /// built from it, so the handshake signature verifies under the key the offline
 /// cert chain binds to the account. Requires the local DB to be open.
 ///
-/// Pinned to Ed25519, not to a suite. The certified device identity is one key
-/// covering every MLS suite the device acts in, and it is the key three
-/// non-MLS protocols already carry on the wire in fixed-width fields — DS
-/// request auth, the device cert, and the relay handshake. #668 moves the
-/// hybrid suite's *leaf* signatures to ML-DSA-44 (see
-/// [`load_or_create_device_signer`]); moving the certified identity is P3-P6 of
-/// the same ticket, because it is a wire-format change in all three.
+/// Pinned to Ed25519, not to a suite. This is the DS request-auth credential
+/// (`user_device.mls_signature_pub`), which #668 leaves on Ed25519 — see P5.
 ///
 /// Ed25519's openmls `SignatureKeyPair` holds its private half as exactly the
 /// 32-byte seed — `SignatureKeyPair::private()` (the `test-utils` accessor)
@@ -203,6 +198,51 @@ pub fn load_device_signing_key(
         ))
     })?;
     Ok((ed25519_dalek::SigningKey::from_bytes(&seed), pub_bytes))
+}
+
+/// Load this device's stable ML-DSA-44 MLS signing key as an
+/// `ml_dsa::SigningKey<MlDsa44>` — the PQ suite's leaf key, and (since #668 P6)
+/// the key the relay handshake's possession signature is made with.
+///
+/// Like Ed25519, openmls stores an ML-DSA private key as exactly its 32-byte
+/// seed (`openmls_rust_crypto`'s `signature_key_gen` calls `to_seed()`), so the
+/// same `private()`-to-seed recovery works. Returns `(signing_key, pub_bytes)`;
+/// `pub_bytes` is the 1312-byte `mls_signature_pub_pq`.
+pub fn load_device_pq_signing_key(
+    provider: &PollisProvider<'_>,
+    user_id: &str,
+    device_id: &str,
+) -> crate::error::Result<(ml_dsa::SigningKey<ml_dsa::MlDsa44>, Vec<u8>)> {
+    let (kp, pub_bytes) =
+        load_or_create_device_signer(provider, user_id, device_id, SignatureScheme::MLDSA44)?;
+    let seed: [u8; 32] = kp.private().try_into().map_err(|_| {
+        crate::error::Error::Other(anyhow::anyhow!(
+            "device ML-DSA signing key is not a 32-byte seed"
+        ))
+    })?;
+    Ok((
+        ml_dsa::SigningKey::<ml_dsa::MlDsa44>::from_seed(&seed.into()),
+        pub_bytes,
+    ))
+}
+
+/// Both of this device's certified leaf public keys, `(ed25519, ml_dsa_44)`,
+/// creating either if missing.
+///
+/// A device cert covers BOTH (#668 P4): the classic suite's leaves are Ed25519
+/// and the PQ suite's are ML-DSA-44, and a device in groups of both suites holds
+/// both keys at once. Certifying only one would leave the other leaf
+/// uncertified, which is exactly what cross-signing exists to prevent.
+pub fn load_device_cert_pubs(
+    provider: &PollisProvider<'_>,
+    user_id: &str,
+    device_id: &str,
+) -> crate::error::Result<(Vec<u8>, Vec<u8>)> {
+    let (_, ed_pub) =
+        load_or_create_device_signer(provider, user_id, device_id, SignatureScheme::ED25519)?;
+    let (_, pq_pub) =
+        load_or_create_device_signer(provider, user_id, device_id, SignatureScheme::MLDSA44)?;
+    Ok((ed_pub, pq_pub))
 }
 
 // ── Device cross-signing ─────────────────────────────────────────────────────
@@ -228,19 +268,17 @@ pub async fn ensure_device_cert(
         return Ok(false);
     }
 
-    // 1. Load or create the stable per-device MLS signing keypair and
-    //    capture its public bytes. Sync openmls work inside a scope.
-    let sig_pub_bytes = {
+    // 1. Load or create BOTH stable per-device MLS signing keypairs and capture
+    //    their public bytes. Cert v2 (#668) binds both, so a device is never
+    //    holding an uncertified leaf key during the classic→PQ overlap. Sync
+    //    openmls work inside a scope.
+    let (sig_pub_bytes, pq_sig_pub_bytes) = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
-        // The certified device identity, so Ed25519 — not the suite's leaf
-        // scheme. See `load_device_signing_key`.
         let provider = PollisProvider::new(db.conn());
-        let (_sig_keys, sig_pub_bytes) =
-            load_or_create_device_signer(&provider, user_id, device_id, SignatureScheme::ED25519)?;
-        sig_pub_bytes
+        load_device_cert_pubs(&provider, user_id, device_id)?
     };
 
     // 2. Read the current identity_version for this user from the remote
@@ -276,6 +314,7 @@ pub async fn ensure_device_cert(
         user_id,
         device_id,
         &sig_pub_bytes,
+        &pq_sig_pub_bytes,
         identity_version,
         issued_at,
     )
@@ -314,6 +353,7 @@ pub async fn ensure_device_cert(
         "cert_issued_at": issued_at as i64,
         "cert_identity_version": identity_version,
         "mls_signature_pub": b64.encode(&sig_pub_bytes),
+        "mls_signature_pub_pq": b64.encode(&pq_sig_pub_bytes),
     });
     match bootstrap_session {
         Some(token) => {
@@ -408,12 +448,18 @@ pub async fn resign_stale_device_certs(
         }
     };
 
-    let devices: Vec<(String, Vec<u8>)> = {
+    // Both leaf pubs are needed to rebuild the cert v2 payload. A row whose
+    // `mls_signature_pub_pq` is still NULL predates #668 and cannot be re-signed
+    // into a v2 cert — it is skipped here and gets its cert when that device next
+    // runs `ensure_device_cert`, exactly like the pre-existing NULL-`mls_signature_pub`
+    // case above it.
+    let devices: Vec<(String, Vec<u8>, Vec<u8>)> = {
         let mut rows = conn
             .query(
-                "SELECT device_id, mls_signature_pub FROM user_device \
+                "SELECT device_id, mls_signature_pub, mls_signature_pub_pq FROM user_device \
                  WHERE user_id = ?1 \
                    AND mls_signature_pub IS NOT NULL \
+                   AND mls_signature_pub_pq IS NOT NULL \
                    AND (cert_identity_version IS NULL \
                         OR cert_identity_version < ?2)",
                 libsql::params![user_id, identity_version as i64],
@@ -423,7 +469,8 @@ pub async fn resign_stale_device_certs(
         while let Some(row) = rows.next().await? {
             let did: String = row.get(0)?;
             let pub_bytes: Vec<u8> = row.get(1)?;
-            out.push((did, pub_bytes));
+            let pq_pub_bytes: Vec<u8> = row.get(2)?;
+            out.push((did, pub_bytes, pq_pub_bytes));
         }
         out
     };
@@ -433,7 +480,7 @@ pub async fn resign_stale_device_certs(
     // re-sign never touches `mls_signature_pub` — only the cert columns — so it
     // cannot change a device's DS-auth credential.
     let mut signed: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(devices.len());
-    for (device_id, sig_pub_bytes) in devices {
+    for (device_id, sig_pub_bytes, pq_sig_pub_bytes) in devices {
         let issued_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -444,6 +491,7 @@ pub async fn resign_stale_device_certs(
             user_id,
             &device_id,
             &sig_pub_bytes,
+            &pq_sig_pub_bytes,
             identity_version,
             issued_at,
         )
@@ -558,7 +606,7 @@ pub(super) async fn verify_added_devices(
         let mut rows = conn
             .query(
                 "SELECT device_cert, cert_issued_at, cert_identity_version, \
-                        mls_signature_pub, revoked_at \
+                        mls_signature_pub, revoked_at, mls_signature_pub_pq \
                  FROM user_device WHERE device_id = ?1 AND user_id = ?2",
                 libsql::params![did.as_str(), target_user_id],
             )
@@ -583,6 +631,7 @@ pub(super) async fn verify_added_devices(
         let cert_identity_version: Option<i64> = row.get::<Option<i64>>(2).ok().flatten();
         let mls_sig_pub: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(3).ok().flatten();
         let revoked_at: Option<String> = row.get::<Option<String>>(4).ok().flatten();
+        let mls_sig_pub_pq: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(5).ok().flatten();
         drop(rows);
 
         // Tombstone wins — a revoked device is unambiguously not allowed
@@ -594,9 +643,9 @@ pub(super) async fn verify_added_devices(
             return Ok(VerifyOutcome::Revoked);
         }
 
-        let (cert, issued_at_str, cert_identity_version, mls_sig_pub) =
-            match (cert, issued_at_str, cert_identity_version, mls_sig_pub) {
-                (Some(c), Some(t), Some(v), Some(p)) => (c, t, v, p),
+        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) =
+            match (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) {
+                (Some(c), Some(t), Some(v), Some(p), Some(q)) => (c, t, v, p, q),
                 _ => {
                     // Cert columns NULL on a non-revoked row is the
                     // "device row inserted but cert publish hasn't landed
@@ -624,6 +673,7 @@ pub(super) async fn verify_added_devices(
             &account_id_pub,
             did,
             &mls_sig_pub,
+            &mls_sig_pub_pq,
             cert_identity_version as u32,
             issued_at,
             &cert,

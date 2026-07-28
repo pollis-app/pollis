@@ -65,6 +65,10 @@ async-trait = "0.1"
 libsql = { version = "0.9", features = ["remote"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+# The account identity key and every Pollis-owned signature moved to ML-DSA-44
+# in #668. `ed25519-dalek` stays for the classic MLS suite's leaf keys and the
+# DS request-auth device key, both of which remain Ed25519 until #669.
+ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 curve25519-dalek = "4"
 hkdf = "0.12"
 sha2 = "0.10"

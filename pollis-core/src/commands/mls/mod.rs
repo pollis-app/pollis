@@ -30,8 +30,8 @@ pub(crate) use provider::MlsProvider;
 
 // ── Per-device signing keys + cross-signing ──────────────────────────────────
 pub use device::{
-    ensure_device_cert, load_device_signing_key, load_or_create_device_signer,
-    resign_stale_device_certs,
+    ensure_device_cert, load_device_cert_pubs, load_device_pq_signing_key, load_device_signing_key,
+    load_or_create_device_signer, resign_stale_device_certs,
 };
 
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────

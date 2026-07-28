@@ -500,7 +500,9 @@ pub async fn approve_device_enrollment(
     //    ephemeral pub via ECDH + HKDF + AES-256-GCM.
     let signing_key =
         crate::commands::account_identity::load_account_id_key(state, &user_id).await?;
-    let account_id_private = signing_key.to_bytes();
+    // The ML-DSA-44 private key IS its 32-byte seed, so the enrollment transfer
+    // envelope is byte-identical in size to the Ed25519 one it replaced.
+    let account_id_private = signing_key.to_seed().to_vec();
 
     let wrapped = {
         let mut rng = OsRng;

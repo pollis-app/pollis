@@ -1,0 +1,19 @@
+-- Post-quantum authentication (#668, phase P4) — give every device somewhere to
+-- publish its ML-DSA-44 leaf signing key, alongside the Ed25519 one it already
+-- publishes.
+--
+-- Device cert v2 binds BOTH leaf keys, so both must be readable by any client
+-- that re-verifies the chain (`verify_added_devices`) and by the relay's offline
+-- handshake check. They are separate columns rather than one overloaded blob
+-- because `mls_signature_pub` is ALSO the DS request-auth credential
+-- (`pollis-delivery/src/auth.rs` reads it as a raw 32-byte Ed25519 key);
+-- overwriting it with a 1312-byte ML-DSA key would break authentication for
+-- every already-shipped client the instant this migration ran.
+--
+-- Additive + backward-compatible (CLAUDE.md migration rule): one nullable ADD
+-- COLUMN. NULL means "this device predates #668" — such a row is skipped by
+-- `resign_stale_device_certs` and treated as AbsentRetry by
+-- `verify_added_devices`, and self-heals the next time that device runs
+-- `ensure_device_cert`. A previously-shipped app mentions the column nowhere and
+-- keeps working unchanged.
+ALTER TABLE user_device ADD COLUMN mls_signature_pub_pq BLOB;

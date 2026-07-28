@@ -6692,6 +6692,7 @@ dependencies = [
  "libsql",
  "libwebrtc",
  "livekit",
+ "ml-dsa",
  "nix 0.30.1",
  "nnnoiseless",
  "openmls",
@@ -6738,6 +6739,8 @@ dependencies = [
  "http-body-util",
  "jsonwebtoken 9.3.1",
  "libsql",
+ "ml-dsa",
+ "pollis-device-cert",
  "rand 0.8.6",
  "rand_core 0.6.4",
  "reqwest 0.12.28",
@@ -6757,7 +6760,7 @@ dependencies = [
 name = "pollis-device-cert"
 version = "1.1.0"
 dependencies = [
- "ed25519-dalek",
+ "ml-dsa",
 ]
 
 [[package]]
@@ -6767,8 +6770,8 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
- "ed25519-dalek",
  "getrandom 0.2.17",
+ "ml-dsa",
  "pollis-device-cert",
  "quinn",
  "rcgen",
@@ -10544,6 +10547,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "libsql",
+ "ml-dsa",
  "pollis-relay",
  "serde",
  "serde_json",

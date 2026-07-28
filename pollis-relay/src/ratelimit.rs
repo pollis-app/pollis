@@ -1,7 +1,7 @@
 //! In-memory abuse control for the relay (design §11.5, §14 Slice 2a).
 //!
 //! Two knobs per key, applied to BOTH the source IP and the authenticated
-//! account (`account_id_pub`):
+//! account (`sha256(account_id_pub)`, see `proto::account_fingerprint`):
 //!   1. a **new-circuit token bucket** (rate) — smooths bursts of stream opens;
 //!   2. a **concurrent-circuit cap** — bounds simultaneously-open pipes.
 //!

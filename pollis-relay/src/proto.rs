@@ -9,18 +9,19 @@
 //!
 //! ```text
 //! ┌──────────────── Handshake (client → relay) ────────────────┐
-//! │ u8   version            (== PROTOCOL_VERSION)              │
-//! │ u8   msg_type           (== MSG_HANDSHAKE)                 │
-//! │ u16  user_id_len | user_id bytes            (UTF-8)        │
-//! │ u16  device_id_len | device_id bytes        (UTF-8)       │
-//! │ [32] device_signing_pub (Ed25519, PRESENTED not resolved) │
-//! │ [32] account_id_pub     (Ed25519 account identity key)    │
-//! │ u32  identity_version   (big-endian)                      │
-//! │ u64  issued_at          (big-endian, unix seconds)        │
-//! │ [64] device_cert        (account key's sig over the chain)│
-//! │ i64  timestamp          (unix seconds, big-endian)        │
-//! │ u8   nonce_len (== 32) | nonce bytes                      │
-//! │ [64] signature          (device key, over the canonical)  │
+//! │ u8     version          (== PROTOCOL_VERSION)              │
+//! │ u8     msg_type         (== MSG_HANDSHAKE)                 │
+//! │ u16    user_id_len | user_id bytes          (UTF-8)        │
+//! │ u16    device_id_len | device_id bytes      (UTF-8)        │
+//! │ [32]   device_ed25519_pub (classic leaf, PRESENTED)        │
+//! │ [1312] device_mldsa_pub   (ML-DSA-44 leaf, PRESENTED)      │
+//! │ [1312] account_id_pub     (ML-DSA-44 account identity key) │
+//! │ u32    identity_version   (big-endian)                     │
+//! │ u64    issued_at          (big-endian, unix seconds)       │
+//! │ [2420] device_cert        (account key's sig over the chain)│
+//! │ i64    timestamp          (unix seconds, big-endian)       │
+//! │ u8     nonce_len (== 32) | nonce bytes                     │
+//! │ [2420] signature          (device ML-DSA key, canonical)   │
 //! └────────────────────────────────────────────────────────────┘
 //! ┌──────────────── Connect (client → relay) ──────────────────┐
 //! │ u8   version            (== PROTOCOL_VERSION)              │
@@ -51,15 +52,21 @@
 //! independent checks, both must pass:
 //!
 //! 1. **Possession.** The handshake `signature` verifies, under the presented
-//!    `device_signing_pub`, over the canonical message (skew-bounded, nonce'd):
+//!    `device_mldsa_pub`, over the canonical message (skew-bounded, nonce'd):
 //!    ```text
-//!    pollis-relay-v2\n{user_id}\n{device_id}\n{timestamp}\n{sha256_hex(nonce)}
+//!    pollis-relay-v3\n{user_id}\n{device_id}\n{timestamp}\n{sha256_hex(nonce)}
 //!    ```
 //!    ⇒ the connecting party holds that device signing private key.
 //! 2. **Membership.** [`pollis_device_cert::verify_device_cert`] confirms
-//!    `device_cert` is the account key `account_id_pub`'s signature binding
-//!    `device_signing_pub` to this `device_id` at `identity_version` / `issued_at`
-//!    ⇒ that device key was certified by the account.
+//!    `device_cert` is the account key `account_id_pub`'s signature binding BOTH
+//!    presented leaf keys to this `device_id` at `identity_version` / `issued_at`
+//!    ⇒ those device keys were certified by the account.
+//!
+//! Every signature in the chain is ML-DSA-44 as of #668, so a store-now-decrypt-
+//! later adversary with a CRQC cannot forge a relay identity retroactively. The
+//! Ed25519 leaf key is still carried and still bound by the cert — it remains the
+//! classic MLS suite's leaf key until #669 retires that suite — but nothing in
+//! this handshake verifies under it.
 //!
 //! Together: "a cryptographically self-consistent Pollis device." v0 does NOT
 //! anchor `account_id_pub` to the account-key transparency log (that needs a
@@ -67,20 +74,28 @@
 //! Because destinations are allowlisted to first-party hosts only (§1.2), "a
 //! well-formed device, rate-limited" is sufficient anti-abuse for v0.
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ml_dsa::{EncodedSignature, EncodedVerifyingKey, Keypair, MlDsa44, Signer, Verifier};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-/// Wire protocol version. Bumped from 1 → 2 for the cert-chain handshake (Slice
-/// 2a): the frame now carries the presented device key + the account cert chain.
-pub const PROTOCOL_VERSION: u8 = 2;
+pub use pollis_device_cert::{MLDSA44_PUB_LEN, MLDSA44_SIG_LEN};
+
+/// An ML-DSA-44 signing key — the device key that proves possession, and the
+/// account key that mints certs. Re-exported so callers need not depend on
+/// `ml-dsa` directly to name the type.
+pub type MlDsaSigningKey = ml_dsa::SigningKey<MlDsa44>;
+
+/// Wire protocol version. Bumped 2 → 3 for post-quantum authentication (#668):
+/// the account key, the device cert and the possession signature are all
+/// ML-DSA-44, none of which fit v2's fixed-width Ed25519 slots.
+pub const PROTOCOL_VERSION: u8 = 3;
 
 /// ALPN for the outer relay-hop QUIC transport. Bumped alongside
-/// [`PROTOCOL_VERSION`] so a v1 client cannot silently half-speak to a v2 relay.
-pub const ALPN: &[u8] = b"pollis-relay/2";
+/// [`PROTOCOL_VERSION`] so a v2 client cannot silently half-speak to a v3 relay.
+pub const ALPN: &[u8] = b"pollis-relay/3";
 
 /// Domain-separation prefix for the handshake canonical message.
-pub const HANDSHAKE_DOMAIN: &str = "pollis-relay-v2";
+pub const HANDSHAKE_DOMAIN: &str = "pollis-relay-v3";
 
 /// Accepted clock skew, in seconds, on either side of the relay clock. Matches
 /// the DS replay window (`pollis-delivery` `REPLAY_WINDOW_SECS`).
@@ -160,11 +175,11 @@ impl RejectReason {
 /// `pollis-core/src/commands/mls/device.rs`).
 #[derive(Debug, Clone)]
 pub struct DeviceCertMaterial {
-    /// The user's Ed25519 account identity public key (32 bytes).
-    pub account_id_pub: [u8; 32],
-    /// The 64-byte cert: the account key's signature binding this device's
-    /// signing key to `account_id_pub`.
-    pub device_cert: [u8; 64],
+    /// The user's ML-DSA-44 account identity public key ([`MLDSA44_PUB_LEN`]).
+    pub account_id_pub: Vec<u8>,
+    /// The cert ([`MLDSA44_SIG_LEN`]): the account key's signature binding this
+    /// device's two leaf signing keys to `account_id_pub`.
+    pub device_cert: Vec<u8>,
     /// Account-key version the cert was minted under.
     pub identity_version: u32,
     /// Unix seconds the cert was issued.
@@ -179,23 +194,24 @@ impl DeviceCertMaterial {
     /// `pollis-core::commands::account_identity::sign_device_cert`, which signs
     /// the SAME shared payload.
     pub fn mint(
-        account: &SigningKey,
+        account: &MlDsaSigningKey,
         device_id: &str,
-        device_signing_pub: &[u8; 32],
+        device_ed25519_pub: &[u8; 32],
+        device_mldsa_pub: &[u8],
         identity_version: u32,
         issued_at: u64,
     ) -> DeviceCertMaterial {
         let payload = pollis_device_cert::device_cert_signed_payload(
             device_id,
-            device_signing_pub,
+            device_ed25519_pub,
+            device_mldsa_pub,
             identity_version,
             issued_at,
         )
-        .expect("device_id / signing pub within cert length bounds");
-        let sig: Signature = account.sign(&payload);
+        .expect("device_id / signing pubs within cert length bounds");
         DeviceCertMaterial {
-            account_id_pub: account.verifying_key().to_bytes(),
-            device_cert: sig.to_bytes(),
+            account_id_pub: account.verifying_key().encode().to_vec(),
+            device_cert: account.sign(&payload).encode().to_vec(),
             identity_version,
             issued_at,
         }
@@ -207,14 +223,18 @@ impl DeviceCertMaterial {
 pub struct Handshake {
     pub user_id: String,
     pub device_id: String,
-    /// The device's Ed25519 signing public key, PRESENTED in-band. The handshake
+    /// The device's classic Ed25519 leaf key, PRESENTED in-band. The cert binds
+    /// it, but nothing here verifies under it — it is carried so the cert payload
+    /// can be reconstructed byte-for-byte. (In Pollis: `user_device.mls_signature_pub`.)
+    pub device_ed25519_pub: [u8; 32],
+    /// The device's ML-DSA-44 leaf key, PRESENTED in-band. The handshake
     /// `signature` is verified against it; the `device_cert` chains it to the
-    /// account. (In Pollis this is `user_device.mls_signature_pub`.)
-    pub device_signing_pub: [u8; 32],
+    /// account. (In Pollis: `user_device.mls_signature_pub_pq`.)
+    pub device_mldsa_pub: Vec<u8>,
     pub cert: DeviceCertMaterial,
     pub timestamp: i64,
     pub nonce: [u8; NONCE_LEN],
-    pub signature: [u8; 64],
+    pub signature: Vec<u8>,
 }
 
 /// The target-selection frame: an arbitrary `host:port`. The relay — not the
@@ -226,11 +246,22 @@ pub struct Connect {
 }
 
 /// What a verified handshake yields the relay: the authenticated `user_id` plus
-/// the `account_id_pub` the rate limiter keys per-account limits on.
+/// the account fingerprint the rate limiter keys per-account limits on.
 #[derive(Debug, Clone)]
 pub struct VerifiedClient {
     pub user_id: String,
-    pub account_id_pub: [u8; 32],
+    /// `sha256(account_id_pub)`. The rate limiter only ever needs a stable,
+    /// collision-resistant handle for "the same account", and the ML-DSA-44
+    /// account key is 1312 bytes — hashing keeps the limiter's key a cheap
+    /// `Copy` 32 bytes instead of a per-connection heap allocation.
+    pub account_fingerprint: [u8; 32],
+}
+
+/// Fingerprint an account identity public key for rate-limiting purposes.
+pub fn account_fingerprint(account_id_pub: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(account_id_pub);
+    hasher.finalize().into()
 }
 
 /// Lowercase hex, no separators (avoids a `hex` dependency for one digest).
@@ -254,26 +285,27 @@ pub fn handshake_canonical_bytes(user_id: &str, device_id: &str, timestamp: i64,
 }
 
 /// Produce a signed handshake for `(user_id, device_id)` at `timestamp` with a
-/// fresh `nonce`, signed by the device's Ed25519 private key, carrying the
-/// device's account cert chain.
+/// fresh `nonce`, signed by the device's ML-DSA-44 private key, carrying both
+/// presented leaf keys and the device's account cert chain.
 pub fn sign_handshake(
-    signing_key: &SigningKey,
+    signing_key: &MlDsaSigningKey,
     user_id: &str,
     device_id: &str,
+    device_ed25519_pub: [u8; 32],
     cert: DeviceCertMaterial,
     timestamp: i64,
     nonce: [u8; NONCE_LEN],
 ) -> Handshake {
     let msg = handshake_canonical_bytes(user_id, device_id, timestamp, &nonce);
-    let signature: Signature = signing_key.sign(&msg);
     Handshake {
         user_id: user_id.to_string(),
         device_id: device_id.to_string(),
-        device_signing_pub: signing_key.verifying_key().to_bytes(),
+        device_ed25519_pub,
+        device_mldsa_pub: signing_key.verifying_key().encode().to_vec(),
         cert,
         timestamp,
         nonce,
-        signature: signature.to_bytes(),
+        signature: signing_key.sign(&msg).encode().to_vec(),
     }
 }
 
@@ -291,10 +323,20 @@ pub fn verify_handshake(hs: &Handshake, now: i64) -> Result<VerifiedClient, Reje
     }
 
     // (a) Possession: the handshake signature is valid under the presented key.
-    let device_key =
-        VerifyingKey::from_bytes(&hs.device_signing_pub).map_err(|_| RejectReason::Unauthorized)?;
+    let encoded_key: &EncodedVerifyingKey<MlDsa44> = hs
+        .device_mldsa_pub
+        .as_slice()
+        .try_into()
+        .map_err(|_| RejectReason::Unauthorized)?;
+    let encoded_sig: &EncodedSignature<MlDsa44> = hs
+        .signature
+        .as_slice()
+        .try_into()
+        .map_err(|_| RejectReason::Unauthorized)?;
+    let device_key = ml_dsa::VerifyingKey::<MlDsa44>::decode(encoded_key);
+    let signature =
+        ml_dsa::Signature::<MlDsa44>::decode(encoded_sig).ok_or(RejectReason::Unauthorized)?;
     let msg = handshake_canonical_bytes(&hs.user_id, &hs.device_id, hs.timestamp, &hs.nonce);
-    let signature = Signature::from_bytes(&hs.signature);
     device_key
         .verify(&msg, &signature)
         .map_err(|_| RejectReason::Unauthorized)?;
@@ -303,7 +345,8 @@ pub fn verify_handshake(hs: &Handshake, now: i64) -> Result<VerifiedClient, Reje
     pollis_device_cert::verify_device_cert(
         &hs.cert.account_id_pub,
         &hs.device_id,
-        &hs.device_signing_pub,
+        &hs.device_ed25519_pub,
+        &hs.device_mldsa_pub,
         hs.cert.identity_version,
         hs.cert.issued_at,
         &hs.cert.device_cert,
@@ -312,7 +355,7 @@ pub fn verify_handshake(hs: &Handshake, now: i64) -> Result<VerifiedClient, Reje
 
     Ok(VerifiedClient {
         user_id: hs.user_id.clone(),
-        account_id_pub: hs.cert.account_id_pub,
+        account_fingerprint: account_fingerprint(&hs.cert.account_id_pub),
     })
 }
 
@@ -352,7 +395,18 @@ pub async fn write_handshake<W: AsyncWrite + Unpin>(w: &mut W, hs: &Handshake) -
     w.write_u8(MSG_HANDSHAKE).await?;
     write_string(w, &hs.user_id).await?;
     write_string(w, &hs.device_id).await?;
-    w.write_all(&hs.device_signing_pub).await?;
+    // Every post-quantum field is fixed-width on the wire, so a peer cannot use a
+    // length prefix to steer the relay's allocations. Reject wrong-sized material
+    // here rather than emitting a frame no v3 reader could parse.
+    if hs.device_mldsa_pub.len() != MLDSA44_PUB_LEN
+        || hs.cert.account_id_pub.len() != MLDSA44_PUB_LEN
+        || hs.cert.device_cert.len() != MLDSA44_SIG_LEN
+        || hs.signature.len() != MLDSA44_SIG_LEN
+    {
+        return Err(ProtoError::Malformed("bad post-quantum field length"));
+    }
+    w.write_all(&hs.device_ed25519_pub).await?;
+    w.write_all(&hs.device_mldsa_pub).await?;
     w.write_all(&hs.cert.account_id_pub).await?;
     w.write_u32(hs.cert.identity_version).await?;
     w.write_u64(hs.cert.issued_at).await?;
@@ -377,13 +431,15 @@ pub async fn read_handshake<R: AsyncRead + Unpin>(r: &mut R) -> Result<Handshake
     }
     let user_id = read_string(r).await?;
     let device_id = read_string(r).await?;
-    let mut device_signing_pub = [0u8; 32];
-    r.read_exact(&mut device_signing_pub).await?;
-    let mut account_id_pub = [0u8; 32];
+    let mut device_ed25519_pub = [0u8; 32];
+    r.read_exact(&mut device_ed25519_pub).await?;
+    let mut device_mldsa_pub = vec![0u8; MLDSA44_PUB_LEN];
+    r.read_exact(&mut device_mldsa_pub).await?;
+    let mut account_id_pub = vec![0u8; MLDSA44_PUB_LEN];
     r.read_exact(&mut account_id_pub).await?;
     let identity_version = r.read_u32().await?;
     let issued_at = r.read_u64().await?;
-    let mut device_cert = [0u8; 64];
+    let mut device_cert = vec![0u8; MLDSA44_SIG_LEN];
     r.read_exact(&mut device_cert).await?;
     let timestamp = r.read_i64().await?;
     let nonce_len = r.read_u8().await? as usize;
@@ -392,12 +448,13 @@ pub async fn read_handshake<R: AsyncRead + Unpin>(r: &mut R) -> Result<Handshake
     }
     let mut nonce = [0u8; NONCE_LEN];
     r.read_exact(&mut nonce).await?;
-    let mut signature = [0u8; 64];
+    let mut signature = vec![0u8; MLDSA44_SIG_LEN];
     r.read_exact(&mut signature).await?;
     Ok(Handshake {
         user_id,
         device_id,
-        device_signing_pub,
+        device_ed25519_pub,
+        device_mldsa_pub,
         cert: DeviceCertMaterial {
             account_id_pub,
             device_cert,
@@ -477,16 +534,34 @@ pub async fn read_response<R: AsyncRead + Unpin>(r: &mut R) -> Result<(), ProtoE
 mod tests {
     use super::*;
 
+    /// Deterministic ML-DSA-44 key from a one-byte seed pattern, so every test
+    /// key is reproducible and distinct.
+    fn key(seed_byte: u8) -> MlDsaSigningKey {
+        MlDsaSigningKey::from_seed(&[seed_byte; 32].into())
+    }
+
+    fn pq_pub(k: &MlDsaSigningKey) -> Vec<u8> {
+        k.verifying_key().encode().to_vec()
+    }
+
+    /// The classic leaf key is only carried, never verified under, so tests can
+    /// stand in an arbitrary 32-byte value for it.
+    const ED_PUB: [u8; 32] = [3u8; 32];
+
     #[test]
     fn valid_chain_accepts() {
-        let account = SigningKey::from_bytes(&[5u8; 32]);
-        let device = SigningKey::from_bytes(&[6u8; 32]);
-        let cert = DeviceCertMaterial::mint(&account, "d1", &device.verifying_key().to_bytes(), 1, 1_700_000_000);
+        let account = key(5);
+        let device = key(6);
+        let cert =
+            DeviceCertMaterial::mint(&account, "d1", &ED_PUB, &pq_pub(&device), 1, 1_700_000_000);
         let now = now_unix();
-        let hs = sign_handshake(&device, "u1", "d1", cert, now, [1u8; 32]);
+        let hs = sign_handshake(&device, "u1", "d1", ED_PUB, cert, now, [1u8; 32]);
         let v = verify_handshake(&hs, now).expect("valid chain");
         assert_eq!(v.user_id, "u1");
-        assert_eq!(v.account_id_pub, account.verifying_key().to_bytes());
+        assert_eq!(
+            v.account_fingerprint,
+            account_fingerprint(&pq_pub(&account))
+        );
     }
 
     #[test]
@@ -494,15 +569,15 @@ mod tests {
         // Device key NOT certified by the presented account: the attacker signs a
         // cert with the WRONG (their own) account key but claims the victim's
         // account_id_pub.
-        let victim_account = SigningKey::from_bytes(&[5u8; 32]);
-        let attacker_account = SigningKey::from_bytes(&[9u8; 32]);
-        let device = SigningKey::from_bytes(&[6u8; 32]);
+        let victim_account = key(5);
+        let attacker_account = key(9);
+        let device = key(6);
         let mut cert =
-            DeviceCertMaterial::mint(&attacker_account, "d1", &device.verifying_key().to_bytes(), 1, 1);
+            DeviceCertMaterial::mint(&attacker_account, "d1", &ED_PUB, &pq_pub(&device), 1, 1);
         // Claim the victim's account id, but the signature is the attacker's.
-        cert.account_id_pub = victim_account.verifying_key().to_bytes();
+        cert.account_id_pub = pq_pub(&victim_account);
         let now = now_unix();
-        let hs = sign_handshake(&device, "u1", "d1", cert, now, [1u8; 32]);
+        let hs = sign_handshake(&device, "u1", "d1", ED_PUB, cert, now, [1u8; 32]);
         assert_eq!(verify_handshake(&hs, now).unwrap_err(), RejectReason::Unauthorized);
     }
 
@@ -510,30 +585,65 @@ mod tests {
     fn cert_for_other_device_key_rejected() {
         // A valid cert, but the handshake is signed by a DIFFERENT device key than
         // the cert binds — possession and membership refer to different keys.
-        let account = SigningKey::from_bytes(&[5u8; 32]);
-        let real_device = SigningKey::from_bytes(&[6u8; 32]);
-        let other_device = SigningKey::from_bytes(&[7u8; 32]);
-        let cert = DeviceCertMaterial::mint(&account, "d1", &real_device.verifying_key().to_bytes(), 1, 1);
+        let account = key(5);
+        let real_device = key(6);
+        let other_device = key(7);
+        let cert = DeviceCertMaterial::mint(&account, "d1", &ED_PUB, &pq_pub(&real_device), 1, 1);
         let now = now_unix();
         // Sign with other_device; its pub is presented, but the cert binds real_device.
-        let hs = sign_handshake(&other_device, "u1", "d1", cert, now, [1u8; 32]);
+        let hs = sign_handshake(&other_device, "u1", "d1", ED_PUB, cert, now, [1u8; 32]);
+        assert_eq!(verify_handshake(&hs, now).unwrap_err(), RejectReason::Unauthorized);
+    }
+
+    #[test]
+    fn swapped_classic_leaf_key_rejected() {
+        // The classic leaf key is bound by the cert too (cert v2, #668), so
+        // presenting a different one breaks membership even though possession of
+        // the ML-DSA key is genuine.
+        let account = key(5);
+        let device = key(6);
+        let cert = DeviceCertMaterial::mint(&account, "d1", &ED_PUB, &pq_pub(&device), 1, 1);
+        let now = now_unix();
+        let hs = sign_handshake(&device, "u1", "d1", [4u8; 32], cert, now, [1u8; 32]);
         assert_eq!(verify_handshake(&hs, now).unwrap_err(), RejectReason::Unauthorized);
     }
 
     #[test]
     fn expired_and_forged_signature_rejected() {
-        let account = SigningKey::from_bytes(&[5u8; 32]);
-        let device = SigningKey::from_bytes(&[6u8; 32]);
-        let cert = DeviceCertMaterial::mint(&account, "d1", &device.verifying_key().to_bytes(), 1, 1);
+        let account = key(5);
+        let device = key(6);
+        let cert = DeviceCertMaterial::mint(&account, "d1", &ED_PUB, &pq_pub(&device), 1, 1);
         let now = now_unix();
 
         // Expired.
-        let expired = sign_handshake(&device, "u1", "d1", cert.clone(), now - 10_000, [1u8; 32]);
+        let expired =
+            sign_handshake(&device, "u1", "d1", ED_PUB, cert.clone(), now - 10_000, [1u8; 32]);
         assert_eq!(verify_handshake(&expired, now).unwrap_err(), RejectReason::Unauthorized);
 
         // Forged signature byte.
-        let mut forged = sign_handshake(&device, "u1", "d1", cert, now, [1u8; 32]);
+        let mut forged = sign_handshake(&device, "u1", "d1", ED_PUB, cert, now, [1u8; 32]);
         forged.signature[0] ^= 0xFF;
         assert_eq!(verify_handshake(&forged, now).unwrap_err(), RejectReason::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn frame_roundtrips() {
+        let account = key(5);
+        let device = key(6);
+        let cert = DeviceCertMaterial::mint(&account, "d1", &ED_PUB, &pq_pub(&device), 2, 99);
+        let now = now_unix();
+        let hs = sign_handshake(&device, "u1", "d1", ED_PUB, cert, now, [1u8; 32]);
+
+        let mut buf = Vec::new();
+        write_handshake(&mut buf, &hs).await.expect("write");
+        let read = read_handshake(&mut buf.as_slice()).await.expect("read");
+
+        assert_eq!(read.user_id, hs.user_id);
+        assert_eq!(read.device_ed25519_pub, hs.device_ed25519_pub);
+        assert_eq!(read.device_mldsa_pub, hs.device_mldsa_pub);
+        assert_eq!(read.cert.account_id_pub, hs.cert.account_id_pub);
+        assert_eq!(read.cert.device_cert, hs.cert.device_cert);
+        assert_eq!(read.signature, hs.signature);
+        verify_handshake(&read, now).expect("roundtripped frame still verifies");
     }
 }

@@ -21,6 +21,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use hyper::client::connect::{Connected, Connection};
+use ml_dsa::Keypair;
 use hyper::Uri;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
@@ -356,38 +357,49 @@ async fn build_client_identity(state: &Arc<AppState>) -> anyhow::Result<ClientId
     let account_key = crate::commands::account_identity::load_account_id_key(state, &user_id)
         .await
         .map_err(|e| anyhow::anyhow!("overlay: account identity unavailable ({e})"))?;
-    let account_id_pub = account_key.verifying_key().to_bytes();
+    let account_id_pub = account_key.verifying_key().encode().to_vec();
 
-    // Device signing key (local DB / openmls storage) — the key the cert chain
-    // certifies and `ds_client` signs with. Scoped so the !Send provider drops
+    // Device signing keys (local DB / openmls storage) — the keys the cert chain
+    // certifies. The ML-DSA-44 one signs the handshake; the Ed25519 one is only
+    // carried, because the cert binds both. Scoped so the !Send provider drops
     // before any await.
-    let (device_signing, device_pub) = {
+    let (device_signing, ed_pub, pq_pub) = {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("overlay: not signed in (local DB closed)"))?;
-        // Device-identity only: Ed25519 signing is the same in both suites, so
-        // this is deliberately not suite-dispatched.
         let provider = crate::commands::mls::PollisProvider::new(db.conn());
-        crate::commands::mls::load_device_signing_key(&provider, &user_id, &device_id)
-            .map_err(|e| anyhow::anyhow!("overlay: device signing key unavailable ({e})"))?
+        let (ed_pub, pq_pub) =
+            crate::commands::mls::load_device_cert_pubs(&provider, &user_id, &device_id)
+                .map_err(|e| anyhow::anyhow!("overlay: device signing keys unavailable ({e})"))?;
+        let (device_signing, _) =
+            crate::commands::mls::load_device_pq_signing_key(&provider, &user_id, &device_id)
+                .map_err(|e| anyhow::anyhow!("overlay: device PQ signing key unavailable ({e})"))?;
+        (device_signing, ed_pub, pq_pub)
     };
-    let device_pub: [u8; 32] = device_pub
+    let ed_pub: [u8; 32] = ed_pub
         .as_slice()
         .try_into()
-        .map_err(|_| anyhow::anyhow!("overlay: device signing pub is not 32 bytes"))?;
+        .map_err(|_| anyhow::anyhow!("overlay: device Ed25519 signing pub is not 32 bytes"))?;
 
     let issued_at = now_unix_secs();
     let cert = DeviceCertMaterial::mint(
         &account_key,
         &device_id,
-        &device_pub,
+        &ed_pub,
+        &pq_pub,
         OVERLAY_CERT_IDENTITY_VERSION,
         issued_at,
     );
     debug_assert_eq!(cert.account_id_pub, account_id_pub);
 
-    Ok(ClientIdentity::new(user_id, device_id, device_signing, cert))
+    Ok(ClientIdentity::new(
+        user_id,
+        device_id,
+        ed_pub,
+        device_signing,
+        cert,
+    ))
 }
 
 /// The user this device signs as, mirroring `ds_client::current_user_id`: prefer
@@ -919,14 +931,18 @@ mod tests {
     const ORIGIN_NAME: &str = "origin.test";
     const ISSUED_AT: u64 = 1_700_000_000;
 
-    /// The device signing key (signs the relay handshake).
-    fn signing_key() -> SigningKey {
-        SigningKey::from_bytes(&[11u8; 32])
+    /// The device's classic leaf key. Only carried by the handshake — the cert
+    /// binds it, nothing signs under it — so a fixed byte pattern is enough.
+    const DEVICE_ED_PUB: [u8; 32] = [11u8; 32];
+
+    /// The device ML-DSA-44 signing key (signs the relay handshake).
+    fn signing_key() -> ml_dsa::SigningKey<ml_dsa::MlDsa44> {
+        ml_dsa::SigningKey::<ml_dsa::MlDsa44>::from_seed(&[11u8; 32].into())
     }
 
     /// The account identity key that certifies the device into a cert chain.
-    fn account_key() -> SigningKey {
-        SigningKey::from_bytes(&[12u8; 32])
+    fn account_key() -> ml_dsa::SigningKey<ml_dsa::MlDsa44> {
+        ml_dsa::SigningKey::<ml_dsa::MlDsa44>::from_seed(&[12u8; 32].into())
     }
 
     /// A client identity carrying the device key + a valid offline cert chain —
@@ -937,11 +953,18 @@ mod tests {
         let cert = DeviceCertMaterial::mint(
             &account_key(),
             DEVICE,
-            &device.verifying_key().to_bytes(),
+            &DEVICE_ED_PUB,
+            &device.verifying_key().encode(),
             1,
             ISSUED_AT,
         );
-        Arc::new(ClientIdentity::new(USER, DEVICE, device, cert))
+        Arc::new(ClientIdentity::new(
+            USER,
+            DEVICE,
+            DEVICE_ED_PUB,
+            device,
+            cert,
+        ))
     }
 
     fn cfg(mode: OverlayMode, relay: Option<&str>) -> Config {
@@ -1322,7 +1345,7 @@ mod tests {
         *state.unlock.lock().await = Some(UnlockState {
             user_id: USER.to_string(),
             db_key: Zeroizing::new(vec![7u8; 32]),
-            account_id_key: Zeroizing::new(account_key().to_bytes().to_vec()),
+            account_id_key: Zeroizing::new(account_key().to_seed().to_vec()),
         });
         *state.device_id.lock().await = Some(DEVICE.to_string());
         *state.local_db.lock().await = Some(crate::db::local::LocalDb::open_in_memory().unwrap());

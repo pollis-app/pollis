@@ -1748,7 +1748,7 @@ async fn delivery_establish_identity(
         (Some(p), Some(s), Some(n), Some(w)) => (p, s, n, w),
         _ => return ds_bad_request(),
     };
-    if pub_bytes.len() != 32 {
+    if pub_bytes.len() != pollis_lib::commands::account_identity::MLDSA44_PUB_LEN {
         return ds_bad_request();
     }
     let conn = match state.main.conn().await {
@@ -1840,6 +1840,10 @@ async fn delivery_publish_device_cert(
         Some(b) => b,
         None => return ds_bad_request(),
     };
+    let mls_sig_pub_pq = match b64d(&parsed.mls_signature_pub_pq) {
+        Some(b) => b,
+        None => return ds_bad_request(),
+    };
     if parsed.cert_issued_at < 0 {
         return ds_bad_request();
     }
@@ -1881,6 +1885,7 @@ async fn delivery_publish_device_cert(
         issued_at,
         parsed.cert_identity_version,
         &mls_sig_pub,
+        &mls_sig_pub_pq,
     )
     .await
     {
