@@ -10,9 +10,9 @@ Source: `pollis-core/src/commands/mls.rs`
 - **Commit**: an MLS operation that changes the group tree (add/remove members). Serialized to `mls_commit_log`.
 - **Welcome**: an MLS message that lets a new member join at a specific epoch. Serialized to `mls_welcome`.
 - **GroupInfo**: a snapshot of the group tree at a specific epoch. Stored in `mls_group_info`. Used for external-join.
-- **KeyPackage**: a one-time-use cryptographic token published by each device. Consumed when the device is added to a group. Since #454 P2 each device publishes TWO disjoint pools — a classic (`CS_CLASSIC`) pool and a post-quantum hybrid (`CS_HYBRID`) pool — so a peer adding it can claim in whichever suite the new group uses. `ensure_mls_key_package`/`replenish_key_packages` build both pools through the one `PollisProvider` (RustCrypto serves both suites since #668), signing each suite's leaf with that suite's scheme, and rotate/top-up each independently.
+- **KeyPackage**: a one-time-use cryptographic token published by each device. Consumed when the device is added to a group. Each device publishes ONE pool, in `CS_PQ`. #454 P2 published TWO disjoint pools — classic and post-quantum hybrid — so that a peer on either suite could always claim one; #669 retired the classic pool with the classic suite. `ensure_mls_key_package` rotates the pool on login and `replenish_key_packages` tops it up, both through the one `PollisProvider`, signing each leaf with the suite's scheme (ML-DSA-44).
 - **External Join**: a device adds itself to a group using published GroupInfo, without needing a Welcome from an existing member.
-- **Ciphersuite**: fixed per group at creation — RFC 9420 does not permit changing it in place (see **Suite generations** below for how a group moves anyway). Pollis runs two: `CS_CLASSIC` (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, code point `0x0001`) and `CS_HYBRID` (`MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`, code point `0x0052`, KEM = X-Wing = X25519 + ML-KEM-768, signature = ML-DSA-44). #668 moved `CS_HYBRID` in place from `0x004D`, which was post-quantum in *confidentiality* only: the KEM is unchanged, the signature is not. The point is provisional (`draft-ietf-mls-pq-ciphersuites` has renumbered once already) and moving it again is a wire break for every group on the suite — treat it as a migration, see `docs/pq-hybrid-mls-design.md` §7. Which suite a new group gets is decided by `suite_for_new_group` (see **Suite selection** below), not by a constant. Since #454 P1b the suite is an explicit argument to the only two functions that mint suite-bound material — `create_mls_group_in_suite` and `build_key_package_in_suite`; since #668 one backend (`PollisProvider`, RustCrypto) serves both, so there is no suite→provider routing. Signing is per-suite (`provider::signature_scheme`): `CS_CLASSIC` leaves sign Ed25519, `CS_HYBRID` leaves sign ML-DSA-44, so a device holds ONE signing key **per scheme** (`load_or_create_device_signer`, scheme-scoped) — published as `user_device.mls_signature_pub` and `mls_signature_pub_pq`, and both bound by the single v2 `device_cert` so no leaf is ever uncertified. A key package's suite is stored in `mls_key_package.ciphersuite` so the DS can serve a claim from the right pool without parsing the blob. A device that has published a hybrid pool is flagged `user_device.pq_capable = 1` — set by the DS publish/replenish endpoints from the pool that actually landed (never a client-side UPDATE), so the flag can never disagree with the device's real hybrid readiness.
+- **Ciphersuite**: fixed per group at creation — RFC 9420 does not permit changing it in place (see **Suite generations** below for how a group moves anyway). Pollis runs exactly one: `CS_PQ` (`MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`, code point `0x0052`, KEM = X-Wing = X25519 + ML-KEM-768, signature = ML-DSA-44). #454 introduced it as a *second* suite beside the classic `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) so a fleet mid-upgrade could still add each other; #668 moved it in place from `0x004D`, which was post-quantum in *confidentiality* only (same KEM, Ed25519 leaves); #669 deleted the classic suite — and with it the code that chose between the two — so `CS_HYBRID` was renamed `CS_PQ` and is now the sole suite. The point is provisional (`draft-ietf-mls-pq-ciphersuites` has renumbered once already) and moving it again is a wire break for every group on the suite — treat it as a migration, see `docs/pq-hybrid-mls-design.md` §7. Every new group is born on `CS_PQ` (`init_mls_group`); there is no selection step. The suite is still an explicit argument to the only two functions that mint suite-bound material — `create_mls_group_in_suite` and `build_key_package_in_suite` (#454 P1b) — so a code-point change stays a one-constant edit; one backend (`PollisProvider`, RustCrypto) serves it, so there is no suite→provider routing. Signing is still a function of the suite (`provider::signature_scheme`) rather than a constant, because a stored group persisted under an older code point must be read under *its* scheme; `CS_PQ` leaves sign ML-DSA-44. A device holds ONE signing key **per scheme** (`load_or_create_device_signer`, scheme-scoped) — published as `user_device.mls_signature_pub` (Ed25519) and `mls_signature_pub_pq` (ML-DSA-44), and both bound by the single v2 `device_cert` so no leaf is ever uncertified. A key package's suite is still stored in `mls_key_package.ciphersuite` and claims still narrow on it: the DS cannot read the suite out of the opaque blob, and the column is what keeps a package published under a retired code point from ever being served for a current group. `user_device.pq_capable` is **dead** since #669 — nothing reads or writes it (see [database.md](./database.md#user_device-migration-11--13--post-baseline-000011)).
 
 ## Key Functions
 
@@ -24,10 +24,9 @@ Source: `pollis-core/src/commands/mls.rs`
 | `poll_mls_welcomes_inner` | mls.rs | Fetches and applies pending Welcome messages |
 | `apply_welcome` | mls.rs | Deserializes and applies a single Welcome |
 | `publish_group_info` | mls.rs | Exports and stores current GroupInfo for external-join |
-| `ensure_mls_key_package` | mls.rs | Rotates this device's pools: publishes 5 fresh KeyPackages per suite (classic + hybrid) in one replenish, per-suite scoped |
-| `init_mls_group` | mls.rs | Creates a new MLS group in the suite `suite_for_new_group` picks (classic unless both PQ gates pass) |
-| `suite_for_new_group` | mls/group_state.rs | The two-gate PQ decision: roster all `pq_capable` **and** fleet complete → `CS_HYBRID`, else `CS_CLASSIC` |
-| `migrate_to_hybrid_if_due` | mls/migrate.rs | Sweep-driven: stands up the hybrid **successor group** for a classic conversation once both gates pass |
+| `ensure_mls_key_package` | mls.rs | Rotates this device's pool: publishes 5 fresh `CS_PQ` KeyPackages |
+| `init_mls_group` | mls.rs | Creates a new MLS group — always in `CS_PQ` (#669) |
+| `migrate_to_current_suite_if_due` | mls/migrate.rs | Sweep-driven: stands up a `CS_PQ` **successor group** for any conversation whose stored suite is not `CS_PQ` |
 | `self_update_if_due` | mls/self_update.rs | Sweep-driven leaf rotation for PCS — join + every 7 days ± jitter, ≤3 conversations per sweep (#666) |
 | `has_local_group` | mls.rs | Checks if a local MLS group exists for a conversation |
 
@@ -239,38 +238,45 @@ races, and duplicate deliveries. All are additive to the flows above.
   is the server half of the client-side membership gate above; together they make
   "a removed member climbs back via external-join" unrepresentable on both sides.
 
-## Post-quantum suite: selection, migration, retirement (#454)
+## Post-quantum suite: birth, migration, retirement (#454, #669)
 
 ### Which suite a new group gets
 
-`suite_for_new_group` (`mls/group_state.rs`) returns `CS_HYBRID` only when **both**
-gates pass, and `CS_CLASSIC` otherwise — including when a gate cannot be evaluated,
-so it fails toward availability rather than toward a group nobody can join:
+`CS_PQ`, always (`init_mls_group`). There is no decision to make and no code that
+makes one.
 
-1. **Roster gate** — every registered device of every user on the *desired* roster
-   (`roster_is_fully_pq_capable`; the roster includes pending `group_invite` rows,
-   since those are pre-added) is `pq_capable = 1`. No revoked/dormancy filter here,
-   deliberately: it mirrors reconcile's own device query, so the gate can never be
-   laxer than the set reconcile will actually try to add.
-2. **Fleet gate** — deployment-wide, no unrevoked `user_device` with `last_seen`
-   inside `FLEET_DORMANCY_DAYS` (90) is still classic-only
-   (`fleet_is_fully_pq_capable`). The roster gate alone is nearly vacuous: a group
-   cannot see *tomorrow's* invitees, and a hybrid group that later has to admit a
-   classic-only device has only two options, both bad (skip it, or downgrade the
-   group). The dormancy window is what makes "the whole fleet has updated" a
-   reachable condition instead of one hostage to a laptop in a drawer.
+**Why there used to be.** #454 shipped the PQ suite *alongside* the classic one and
+`suite_for_new_group` (`mls/group_state.rs`) chose between them behind two gates: a
+**roster gate** (every registered device on the desired roster, pending
+`group_invite` rows included, had `pq_capable = 1`) and a deployment-wide **fleet
+gate** (no unrevoked `user_device` seen within `FLEET_DORMANCY_DAYS` = 90 was still
+classic-only). The roster gate alone was nearly vacuous — a group cannot see
+*tomorrow's* invitees, and a PQ group that later has to admit a classic-only device
+has only two options, both bad (skip it, or downgrade the group) — and the dormancy
+window was what made "the whole fleet has updated" a reachable condition rather than
+one hostage to a laptop in a drawer. Both gates failed toward availability.
 
-`pq_capable` is **DS-derived, never client-asserted**: `devices.rs::mark_pq_capable`
-flips it to 1 when a hybrid KeyPackage pool actually lands. Since
-`replenish_key_packages` publishes both pools, any live current-build client
-re-flags itself on its next sweep.
+**Why it dissolved.** #669 retired the classic suite outright: with one suite there
+is no classic-only device to strand, so the gates have nothing left to protect
+against. `suite_for_new_group`, `roster_is_fully_pq_capable`,
+`fleet_is_fully_pq_capable`, `FLEET_DORMANCY_DAYS` and the `may_birth_hybrid`
+predicate (with its I7 Kani harnesses) are all deleted, and `mark_pq_capable` with
+them — nothing sets or reads `user_device.pq_capable` any more. The hard cutover was
+available because the deployment has no active users; #669's own issue text assumed
+it would have to wait out a 90-day fleet turnover, and that premise is what went
+away, not the reasoning above.
 
 ### Suite generations — how an existing group moves
 
 RFC 9420 has no "rekey to another suite" commit, so a migration is not an operation
-on the group. `migrate_to_hybrid_if_due` (`mls/migrate.rs`, ≤`MAX_MIGRATIONS_PER_SWEEP`
-= 2 per sweep) stands up a **successor group** in `CS_HYBRID`, moves the roster in by
-Welcome, and retires the predecessor.
+on the group. `migrate_to_current_suite_if_due` (`mls/migrate.rs`,
+≤`MAX_MIGRATIONS_PER_SWEEP` = 2 per sweep) stands up a **successor group** in
+`CS_PQ`, moves the roster in by Welcome, and retires the predecessor. It fires for
+any conversation whose stored suite is not `CS_PQ` — #454 wrote it as
+"classic → hybrid", #669 generalised the trigger rather than deleting the path,
+because `CS_PQ`'s code point is provisional and a renumber is exactly this
+migration again with a different constant. In the steady state it is one local read
+returning "nothing to do".
 
 - Ordering key is the pair `(generation, epoch)`, compared **lexicographically** —
   the successor restarts at epoch 0, so a per-column max would read the migration
@@ -286,16 +292,19 @@ Welcome, and retires the predecessor.
   material is dropped **last**, and only after the predecessor is drained to its
   head — it is the only thing that can still open pre-boundary envelopes, since
   `max_past_epochs = 0`.
-- Migration takes the **same two gates** as birth ("one switch, one meaning"), and
-  aborts before creating anything if a single roster device cannot supply a hybrid
-  KeyPackage. A mixed fleet is a no-op that retries, never a partial move.
-- Forward-only: traffic sealed under `CS_CLASSIC` before the boundary stays sealed
-  under `CS_CLASSIC`. Nothing is re-encrypted.
+- **No stranding**: before it creates anything, the migration claims a KeyPackage in
+  the target suite for *every* roster device and aborts on the first miss — move
+  everyone or nobody. A partial move would leave a device on the roster but never in
+  the tree, unable to read its own conversation. #454 additionally gated on
+  `pq_capable` (roster and fleet-wide); #669 dropped both reads, because the flag was
+  only ever a *predictor* of this claim and the claim is the direct test.
+- Forward-only: traffic sealed under the predecessor's suite before the boundary
+  stays sealed under it. Nothing is re-encrypted.
 
-Covered end-to-end by `src-tauri/tests/flows/pq_migration.rs` (birth, both gates in
-isolation, suite-boundary eviction of a stolen pre-migration leaf, dropped-Welcome
-recovery by external join) and by the `model` fuzzer, which crosses the boundary
-mid-run and asserts no client is stranded on a retired lineage.
+Covered end-to-end by `src-tauri/tests/flows/pq_migration.rs` (suite-boundary
+eviction of a stolen pre-migration leaf, dropped-Welcome recovery by external join)
+and by the `model` fuzzer, which crosses the boundary mid-run and asserts no client
+is stranded on a retired lineage.
 
 ### Self-update (#666)
 
@@ -308,7 +317,8 @@ offline does not heal until one of them opens the app.
 
 Two things depend on it. **PCS**: without it, a compromised leaf stays readable
 until membership happens to change. **Commit size**: unmerged leaves dominate a
-hybrid UpdatePath (`kem_output` is 1120 B hybrid vs 32 B classic), so without
+`CS_PQ` UpdatePath (`kem_output` is 1120 B under X-Wing vs 32 B under the retired
+classic suite's DHKEM), so without
 self-update commit growth is linear in unmerged leaves — measured at 8→16 members,
 +10.6 KB unmerged vs +2.4 KB merged.
 
@@ -319,7 +329,7 @@ When a new device (deviceC) enrolls for an existing user:
 1. **Approval path**: existing device approves → wraps `account_id_key` for deviceC
 2. **DeviceC's `finalize_enrollment`**:
    - Publishes device cert (`ensure_device_cert`)
-   - Publishes 5 KeyPackages per suite — classic + hybrid (`ensure_mls_key_package`), flipping `pq_capable` on once the hybrid pool lands
+   - Publishes 5 `CS_PQ` KeyPackages (`ensure_mls_key_package`)
    - External-joins every group the user belongs to (`external_join_group`)
 3. **Other devices** process deviceC's external-join commits on next read/send
 

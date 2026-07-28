@@ -211,12 +211,12 @@ that class of bug.
 - `device_name` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
 - `last_seen` TEXT NOT NULL DEFAULT now
-- `device_cert` BLOB _(migration 13; since #668 a **v2** cert — a 2420-byte ML-DSA-44 signature by `account_id_pub` binding BOTH leaf keys below, so neither is uncertified during the classic→PQ overlap)_
+- `device_cert` BLOB _(migration 13; since #668 a **v2** cert — a 2420-byte ML-DSA-44 signature by `account_id_pub` binding BOTH leaf keys below, so neither is uncertified. It was the classic→PQ overlap that needed that; #669 ended the overlap but the cert format and both keys are unchanged)_
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
-- `mls_signature_pub` BLOB _(migration 13; the device's raw 32-byte **Ed25519** MLS leaf key — the one `CS_CLASSIC` leaves sign with. No longer the DS request-auth credential since #668.)_
-- `mls_signature_pub_pq` BLOB _(post-baseline 000011, #668; the device's raw 1312-byte **ML-DSA-44** MLS leaf key — the one `CS_HYBRID` leaves sign with, and the credential `X-Pollis-Signature` is verified against (`pollis-delivery/src/auth.rs`). A separate column and not an overload of `mls_signature_pub`: overwriting that one with a 1312-byte key would break auth for every already-shipped client the instant the migration ran. Nullable — NULL means the device predates #668; such a row is skipped by `resign_stale_device_certs`, treated as `AbsentRetry` by `verify_added_devices`, and self-heals on that device's next `ensure_device_cert`.)_
-- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? Since #454 P2 the DS publish/replenish endpoints set it to 1 when a device publishes a hybrid KeyPackage pool — derived server-side from what landed in `mls_key_package`, never a client UPDATE. Since #454 P5 this column is read two ways: per-roster, by `roster_is_fully_pq_capable`; and **deployment-wide**, by `fleet_is_fully_pq_capable`, which requires that no row with `revoked_at IS NULL` and `last_seen` inside 90 days still has `pq_capable = 0`. Both must pass before any group is born hybrid or migrated — see `.codesight/wiki/mls.md`.)_
+- `mls_signature_pub` BLOB _(migration 13; the device's raw 32-byte **Ed25519** MLS leaf key — the one the retired classic suite's leaves signed with. No longer the DS request-auth credential since #668, and since #669 no live suite mints a leaf under it; still generated, still published, and still bound by the v2 cert, because `load_or_create_device_signer` is keyed by signature *scheme* and a group persisted under an older code point must stay readable.)_
+- `mls_signature_pub_pq` BLOB _(post-baseline 000011, #668; the device's raw 1312-byte **ML-DSA-44** MLS leaf key — the one `CS_PQ` leaves sign with, and the credential `X-Pollis-Signature` is verified against (`pollis-delivery/src/auth.rs`). A separate column and not an overload of `mls_signature_pub`: overwriting that one with a 1312-byte key would break auth for every already-shipped client the instant the migration ran. Nullable — NULL means the device predates #668; such a row is skipped by `resign_stale_device_certs`, treated as `AbsentRetry` by `verify_added_devices`, and self-heals on that device's next `ensure_device_cert`.)_
+- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; **DEAD since #669** — retired in place, not dropped, because migrations must stay additive. Nothing writes it (`devices.rs::mark_pq_capable` and both `UPDATE user_device SET pq_capable = 1` statements are gone) and nothing reads it. Under #454 P2 the DS publish/replenish endpoints set it to 1 when a device published a hybrid KeyPackage pool — server-derived from what landed in `mls_key_package`, never a client UPDATE — and #454 P5 read it two ways: per-roster by `roster_is_fully_pq_capable`, and deployment-wide by `fleet_is_fully_pq_capable` (no row with `revoked_at IS NULL` and `last_seen` inside 90 days still at 0). Both had to pass before a group was born on or migrated to the hybrid suite. #669 retired the classic suite, so there is no classic-only device for the flag to distinguish; all three readers are deleted — see `.codesight/wiki/mls.md`.)_
 
 ### mls_key_package _(migration 3 + 11 + post-baseline 000010)_
 - `ref_hash` TEXT PK _(KeyPackageRef hash, hex)_
@@ -225,7 +225,7 @@ that class of bug.
 - `claimed` INTEGER NOT NULL DEFAULT 0
 - `created_at` TEXT NOT NULL DEFAULT now
 - `device_id` TEXT _(migration 11)_
-- `ciphersuite` INTEGER NOT NULL DEFAULT 1 _(post-baseline 000010; MLS code point, 1 = classic. A column and not derived-on-read because `key_package` is an opaque TLS blob the DS must not parse. Claims narrow on it, so the classic and hybrid pools stay disjoint — see `pollis-delivery/src/devices.rs`.)_
+- `ciphersuite` INTEGER NOT NULL DEFAULT 1 _(post-baseline 000010; MLS code point. Still written and still queried after #669 — every package now carries `0x0052` (`CIPHERSUITE_PQ`), which is also what the DS assumes when a publish/claim request omits the field (it defaulted to the classic `1` before #669). A column and not derived-on-read because `key_package` is an opaque TLS blob the DS must not parse. Claims narrow on it: under #454 that kept the classic and hybrid pools disjoint, and it still keeps a package published under a retired code point from being served for a current group — see `pollis-delivery/src/devices.rs`. The SQL default of 1 is left as-is because migrations must stay additive; no live writer relies on it.)_
 
 ### mls_commit_log _(migration 3 + 14)_
 - `seq` INTEGER PK AUTOINCREMENT
@@ -240,9 +240,12 @@ that class of bug.
 - UNIQUE INDEX `idx_mls_commit_conv_gen_epoch` on `(conversation_id, generation, epoch)` _(migration 000004, replacing `idx_mls_commit_conv_epoch`)_
 
 **Suite generations (#454 P4).** MLS binds the ciphersuite into the group, so a
-classic conversation cannot be switched to the PQ-hybrid suite in place: the
-migration stands up a *successor* group for the same conversation and moves the
-roster into it by Welcome. A successor restarts at MLS epoch 0, so the monotone
+conversation cannot be switched to another suite in place: the migration stands up
+a *successor* group for the same conversation and moves the roster into it by
+Welcome. #454 used this to move classic conversations onto the PQ suite; since #669
+retired the classic suite it is the mechanism for moving off a **retired code
+point** — `0x0052` is provisional and the draft has renumbered once already. A
+successor restarts at MLS epoch 0, so the monotone
 key widens from `(conversation_id, epoch)` to `(conversation_id, generation,
 epoch)`, ordered **lexicographically**. Every row that exists today is
 generation 0, and a pre-hybrid client — which sends no generation field — is a

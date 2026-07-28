@@ -8,8 +8,15 @@
 //!
 //! Coverage: a valid claim returns the right bytes (device-scoped and
 //! user-scoped), concurrent claims of a single-package pool yield exactly one
-//! winner — the rest see no package (never a double-claim) — and the classic and
-//! post-quantum-hybrid suite pools never contaminate each other (#454 P1b).
+//! winner — the rest see no package (never a double-claim) — and pools in
+//! different suites never contaminate each other (#454 P1b).
+//!
+//! #669 left only one suite in production, but the `ciphersuite` column and its
+//! scoping stay: a group persisted under an older code point can only be added
+//! to with a package in *that* suite, and `CS_PQ`'s code point is provisional.
+//! So the cross-suite tests below use [`CIPHERSUITE_LEGACY`], which is no longer
+//! a suite the fleet speaks — it stands in for "some suite that is not the
+//! current one", which is the case the column exists to handle.
 
 use std::sync::Arc;
 
@@ -17,14 +24,21 @@ use pollis_delivery::db::Db;
 use pollis_delivery::devices::{
     apply_claim_key_package, apply_publish_key_packages, apply_replenish_key_packages,
     ClaimKeyPackageBody, ClaimOutcome, KeyPackageEntry, PublishKeyPackagesBody,
-    ReplenishKeyPackagesBody, CIPHERSUITE_CLASSIC, CIPHERSUITE_HYBRID,
+    ReplenishKeyPackagesBody, CIPHERSUITE_PQ,
 };
 use pollis_delivery::writes::WriteOutcome;
+
+/// MLS code point `0x0001` — the suite Pollis shipped before #454, retired by
+/// #669. Defined here rather than in the DS because the DS has no reason to name
+/// it any more; the tests do, as a concrete "not the current suite".
+const CIPHERSUITE_LEGACY: i64 = 0x0001;
 
 // Minimal slices of `mls_key_package` + `user_device` — the columns these writes
 // read/touch. No `users` FK (foreign_keys=OFF in the local test DB) so the test
 // is self-contained. `user_device.pq_capable` mirrors migration `000010`: NOT
-// NULL DEFAULT 0, so a device is classic-only until a hybrid publish flips it.
+// NULL DEFAULT 0. #669 retired that flag in place — nothing reads or writes it
+// any more — but the column is still in the shipped schema (a DROP needs a
+// multi-release dance), so it stays here and is asserted to stay 0.
 const SCHEMA: &str = "\
 CREATE TABLE mls_key_package (\
   ref_hash    TEXT PRIMARY KEY,\
@@ -52,7 +66,8 @@ async fn fresh_db() -> Arc<Db> {
     Arc::new(db)
 }
 
-/// Insert one unclaimed key package. `created_at` is supplied explicitly so the
+/// Insert one unclaimed key package in the current suite — an ordinary package
+/// as a shipped client publishes it. `created_at` is supplied explicitly so the
 /// claim's `ORDER BY created_at ASC` is deterministic across rows.
 async fn insert_kp(
     db: &Db,
@@ -62,12 +77,21 @@ async fn insert_kp(
     key_package: &[u8],
     created_at: &str,
 ) {
-    insert_kp_in_suite(db, ref_hash, user_id, device_id, key_package, created_at, None).await;
+    insert_kp_in_suite(
+        db,
+        ref_hash,
+        user_id,
+        device_id,
+        key_package,
+        created_at,
+        Some(CIPHERSUITE_PQ),
+    )
+    .await;
 }
 
 /// Insert one unclaimed key package, optionally naming its ciphersuite. `None`
-/// omits the column entirely — the pre-#454 INSERT, which must land on the
-/// classic default (migration `000010`).
+/// omits the column entirely — the pre-#454 INSERT, which must take the column
+/// default from migration `000010`.
 async fn insert_kp_in_suite(
     db: &Db,
     ref_hash: &str,
@@ -238,7 +262,7 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     assert_eq!(row.get::<i64>(0).unwrap(), 1);
 }
 
-// ── #454 P1b: the classic and hybrid pools are disjoint ──────────────────────
+// ── #454 P1b: pools in different suites are disjoint ─────────────────────────
 
 /// Publish one package for `(user, device)`, optionally naming its suite —
 /// `None` reproduces exactly what every currently deployed client sends.
@@ -260,7 +284,7 @@ async fn publish_one(db: &Db, user: &str, device: &str, ref_hash: &str, suite: O
     }
 }
 
-/// Register a device row so `pq_capable` has somewhere to be flipped.
+/// Register a device row, so `pq_capable` has somewhere it *could* be flipped.
 async fn insert_device(db: &Db, user: &str, device: &str) {
     db.conn()
         .unwrap()
@@ -272,7 +296,7 @@ async fn insert_device(db: &Db, user: &str, device: &str) {
         .unwrap();
 }
 
-/// Read a device's `pq_capable` flag.
+/// Read a device's retired `pq_capable` flag.
 async fn pq_capable(db: &Db, user: &str, device: &str) -> i64 {
     let conn = db.conn().unwrap();
     let mut rows = conn
@@ -328,98 +352,123 @@ async fn stored_suite(db: &Db, ref_hash: &str) -> i64 {
     rows.next().await.unwrap().expect("row exists").get::<i64>(0).unwrap()
 }
 
-/// A publish that names no suite must land as classic, and a claim that names no
-/// suite must still find it. This is the entire backward-compatibility contract
-/// with already-shipped clients, which send neither field.
+/// A publish that names no suite lands on the CURRENT suite, and a claim that
+/// names no suite finds it.
+///
+/// #454 read an absent field as classic, because the clients that omitted it
+/// predated the hybrid suite. #669 inverts that: there is one suite left, so an
+/// omitted field can only mean "the one everybody is on". The alternative —
+/// defaulting to a retired code point — would file every untagged publish into a
+/// pool nothing will ever claim from, which is a device that silently cannot be
+/// added to any group.
 #[tokio::test(flavor = "multi_thread")]
-async fn publish_and_claim_without_a_suite_behave_exactly_as_before() {
+async fn publish_and_claim_without_a_suite_land_on_the_current_suite() {
     let db = fresh_db().await;
-    publish_one(&db, "bob", "dev1", "ref-legacy", None).await;
-    assert_eq!(stored_suite(&db, "ref-legacy").await, CIPHERSUITE_CLASSIC);
+    publish_one(&db, "bob", "dev1", "ref-untagged", None).await;
+    assert_eq!(stored_suite(&db, "ref-untagged").await, CIPHERSUITE_PQ);
 
     let conn = db.conn().unwrap();
     match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
-        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-legacy"),
+        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-untagged"),
         ClaimOutcome::NoKeyPackage => panic!("an untagged package must stay claimable"),
     }
 }
 
 /// A row written the pre-#454 way — no `ciphersuite` in the INSERT at all —
-/// takes the column default and is therefore classic, so it is reachable by both
-/// the implicit and the explicitly-classic claim. Pins the migration default
-/// from the DS's side.
+/// takes the column DEFAULT, which is `1`, and is therefore NOT in the current
+/// suite.
+///
+/// This is the trap the DS must never fall into: the column default and the
+/// current suite disagree, and they have to, because a `DEFAULT` change is a
+/// tightening migration the shipped app cannot take. Every write path therefore
+/// names the suite explicitly rather than letting the default decide — pinned
+/// here by showing the defaulted row is reachable ONLY as the legacy suite.
 #[tokio::test(flavor = "multi_thread")]
-async fn pre_migration_rows_default_to_classic() {
+async fn rows_written_without_the_column_take_the_schema_default_not_the_current_suite() {
     let db = fresh_db().await;
     insert_kp_in_suite(&db, "ref-old", "bob", "dev1", b"old", "2024-01-01 00:00:00", None).await;
-    assert_eq!(stored_suite(&db, "ref-old").await, CIPHERSUITE_CLASSIC);
+    assert_eq!(stored_suite(&db, "ref-old").await, CIPHERSUITE_LEGACY);
 
     let conn = db.conn().unwrap();
-    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_CLASSIC))
+    assert!(
+        matches!(
+            apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap(),
+            ClaimOutcome::NoKeyPackage
+        ),
+        "a defaulted row is not in the current suite and must not answer a current-suite claim"
+    );
+    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
         .await
         .unwrap()
     {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-old"),
-        ClaimOutcome::NoKeyPackage => panic!("a defaulted row must be claimable as classic"),
+        ClaimOutcome::NoKeyPackage => panic!("a defaulted row must be claimable as the legacy suite"),
     }
 }
 
 /// Asking for a suite the target has no package in is the ORDINARY
 /// no-package-available outcome — not an error, and above all not a package from
-/// the other suite. #454 P4 leans on this to keep "a hybrid group cannot contain
-/// a classic-only member" unrepresentable: the add path simply finds nothing.
+/// another suite. #454 P4 leans on this to keep "a post-quantum group cannot
+/// contain a member who is not" unrepresentable: the add path simply finds
+/// nothing and reports the device skipped.
 #[tokio::test(flavor = "multi_thread")]
-async fn claiming_hybrid_against_a_classic_only_pool_finds_nothing() {
+async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
     let db = fresh_db().await;
-    publish_one(&db, "bob", "dev1", "ref-classic", Some(CIPHERSUITE_CLASSIC)).await;
+    publish_one(&db, "bob", "dev1", "ref-legacy", Some(CIPHERSUITE_LEGACY)).await;
     let conn = db.conn().unwrap();
 
-    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_HYBRID))
+    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_PQ))
         .await
         .unwrap()
     {
         ClaimOutcome::NoKeyPackage => {}
         ClaimOutcome::Claimed { ref_hash, .. } => {
-            panic!("a hybrid claim must never be served a classic package (got {ref_hash})")
+            panic!("a PQ claim must never be served an off-suite package (got {ref_hash})")
         }
     }
 
-    // …and the classic package is untouched by that failed hybrid claim.
-    match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
-        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-classic"),
-        ClaimOutcome::NoKeyPackage => panic!("the classic package must still be claimable"),
-    }
-}
-
-/// With BOTH pools published for one device, each claim draws from its own pool
-/// and leaves the other intact. This is the real point of the column: two suites
-/// coexisting on one device without cross-contamination in either direction.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_two_suite_pools_do_not_contaminate_each_other() {
-    let db = fresh_db().await;
-    publish_one(&db, "bob", "dev1", "ref-classic", Some(CIPHERSUITE_CLASSIC)).await;
-    publish_one(&db, "bob", "dev1", "ref-hybrid", Some(CIPHERSUITE_HYBRID)).await;
-    assert_eq!(stored_suite(&db, "ref-hybrid").await, CIPHERSUITE_HYBRID);
-    let conn = db.conn().unwrap();
-
-    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_HYBRID))
+    // …and the off-suite package is untouched by that failed claim.
+    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
         .await
         .unwrap()
     {
-        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-hybrid"),
-        ClaimOutcome::NoKeyPackage => panic!("the hybrid pool must serve the hybrid claim"),
+        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-legacy"),
+        ClaimOutcome::NoKeyPackage => panic!("the legacy package must still be claimable"),
+    }
+}
+
+/// With pools in BOTH suites published for one device, each claim draws from its
+/// own pool and leaves the other intact. This is the real point of the column:
+/// two suites coexisting on one device without cross-contamination in either
+/// direction — the state a device is in for exactly as long as a code-point
+/// migration takes.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_two_suite_pools_do_not_contaminate_each_other() {
+    let db = fresh_db().await;
+    publish_one(&db, "bob", "dev1", "ref-legacy", Some(CIPHERSUITE_LEGACY)).await;
+    publish_one(&db, "bob", "dev1", "ref-pq", Some(CIPHERSUITE_PQ)).await;
+    assert_eq!(stored_suite(&db, "ref-pq").await, CIPHERSUITE_PQ);
+    let conn = db.conn().unwrap();
+
+    // A suite-less claim means the current suite, so it must draw the PQ one.
+    match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
+        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-pq"),
+        ClaimOutcome::NoKeyPackage => panic!("the PQ pool must serve a suite-less claim"),
     }
 
-    // The classic pool is untouched — including for a suite-less legacy claim.
-    match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
-        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-classic"),
-        ClaimOutcome::NoKeyPackage => panic!("the classic pool must be unaffected"),
+    // The legacy pool is untouched by it.
+    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
+        .await
+        .unwrap()
+    {
+        ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-legacy"),
+        ClaimOutcome::NoKeyPackage => panic!("the legacy pool must be unaffected"),
     }
 
     // Both pools are now drained; neither claim resurrects the other's package.
     let conn = db.conn().unwrap();
     assert!(matches!(
-        apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_HYBRID))
+        apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
             .await
             .unwrap(),
         ClaimOutcome::NoKeyPackage
@@ -430,44 +479,57 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
     ));
 }
 
-// ── #454 P2: pq_capable is derived from the hybrid pool, per-suite rotation ───
+// ── #669: pq_capable is retired; per-suite rotation is not ───────────────────
 
-/// Publishing a hybrid pool is what makes a device `pq_capable` — and ONLY a
-/// hybrid pool does. The DS derives the flag from what actually landed in
-/// `mls_key_package`, never from a client assertion, so the flag and the pool can
-/// never disagree. A classic-only publish must leave it off.
+/// **`pq_capable` is dead, and publishing must not resurrect it.**
+///
+/// #454 had the DS derive the flag from what actually landed in
+/// `mls_key_package`, so it could answer "may this conversation be born hybrid?"
+/// without trusting a client assertion. #669 deleted every reader of that
+/// question — there is one suite, so the answer is always yes — and deleting the
+/// readers while leaving the writer would be worse than useless: a column that
+/// looks maintained, is not, and invites the next person to read it.
+///
+/// The column itself stays (migration `000010`; a DROP needs a multi-release
+/// dance and buys nothing). What must not stay is a write to it.
 #[tokio::test(flavor = "multi_thread")]
-async fn publishing_a_hybrid_pool_flips_pq_capable_and_classic_does_not() {
+async fn publishing_no_longer_derives_the_retired_pq_capable_flag() {
     let db = fresh_db().await;
     insert_device(&db, "bob", "dev1").await;
-    assert_eq!(pq_capable(&db, "bob", "dev1").await, 0, "a fresh device is classic-only");
+    assert_eq!(pq_capable(&db, "bob", "dev1").await, 0, "a fresh device row defaults to 0");
 
-    // A classic publish must NOT set the flag.
-    publish_one(&db, "bob", "dev1", "ref-classic", Some(CIPHERSUITE_CLASSIC)).await;
+    // The publish that used to flip it.
+    publish_one(&db, "bob", "dev1", "ref-pq", Some(CIPHERSUITE_PQ)).await;
     assert_eq!(
         pq_capable(&db, "bob", "dev1").await,
         0,
-        "a classic-only publish must never advertise PQ capability"
+        "a PQ publish must no longer touch the retired flag"
     );
 
-    // A hybrid publish flips it on.
-    publish_one(&db, "bob", "dev1", "ref-hybrid", Some(CIPHERSUITE_HYBRID)).await;
+    // Nor does the rotation path, which carried its own copy of the write.
+    let conn = db.conn().unwrap();
+    apply_replenish_key_packages(
+        &conn,
+        Some("bob"),
+        &replenish_body("bob", "dev1", CIPHERSUITE_PQ, &["r1", "r2"]),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         pq_capable(&db, "bob", "dev1").await,
-        1,
-        "publishing a hybrid pool must flip pq_capable on"
+        0,
+        "replenish must no longer touch the retired flag either"
     );
-
-    // Scoped to the publishing device only — a sibling device stays classic.
-    insert_device(&db, "bob", "dev2").await;
-    publish_one(&db, "bob", "dev2", "ref-classic-2", Some(CIPHERSUITE_CLASSIC)).await;
-    assert_eq!(pq_capable(&db, "bob", "dev2").await, 0, "the flag is per device");
 }
 
-/// A rotation (`replenish`) of ONE suite must leave the OTHER suite's pool intact.
-/// The DS scopes its DELETE to the suites present in the request, so a classic
-/// rotation cannot drain the hybrid pool (or vice versa) — the invariant the P2
-/// client relies on when it rotates both pools in one call.
+/// A rotation (`replenish`) of ONE suite must leave the OTHER suite's pool
+/// intact. The DS scopes its DELETE to the suites present in the request.
+///
+/// #669 leaves the client rotating a single pool, so in the steady state this
+/// scoping has nothing to protect — which is exactly why it is worth pinning.
+/// The moment `CS_PQ`'s provisional code point moves, a device is briefly in two
+/// pools at once, and a rotation of the new one that silently drained the old
+/// one would strand every group not yet migrated.
 #[tokio::test(flavor = "multi_thread")]
 async fn rotating_one_suite_leaves_the_other_pool_intact() {
     let db = fresh_db().await;
@@ -478,42 +540,41 @@ async fn rotating_one_suite_leaves_the_other_pool_intact() {
     apply_replenish_key_packages(
         &conn,
         Some("bob"),
-        &replenish_body("bob", "dev1", CIPHERSUITE_CLASSIC, &["c1", "c2"]),
+        &replenish_body("bob", "dev1", CIPHERSUITE_LEGACY, &["c1", "c2"]),
     )
     .await
     .unwrap();
     apply_replenish_key_packages(
         &conn,
         Some("bob"),
-        &replenish_body("bob", "dev1", CIPHERSUITE_HYBRID, &["h1", "h2"]),
+        &replenish_body("bob", "dev1", CIPHERSUITE_PQ, &["h1", "h2"]),
     )
     .await
     .unwrap();
-    assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_CLASSIC).await, 2);
-    assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_HYBRID).await, 2);
-    assert_eq!(pq_capable(&db, "bob", "dev1").await, 1, "the hybrid seed made it pq_capable");
+    assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_LEGACY).await, 2);
+    assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_PQ).await, 2);
 
-    // Rotate ONLY the classic pool. The hybrid pool must survive untouched.
+    // Rotate ONLY the legacy pool. The PQ pool must survive untouched.
     apply_replenish_key_packages(
         &conn,
         Some("bob"),
-        &replenish_body("bob", "dev1", CIPHERSUITE_CLASSIC, &["c3", "c4", "c5"]),
+        &replenish_body("bob", "dev1", CIPHERSUITE_LEGACY, &["c3", "c4", "c5"]),
     )
     .await
     .unwrap();
     assert_eq!(
-        unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_CLASSIC).await,
+        unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_LEGACY).await,
         3,
-        "the classic pool was replaced by the new rotation"
+        "the legacy pool was replaced by the new rotation"
     );
     assert_eq!(
-        unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_HYBRID).await,
+        unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_PQ).await,
         2,
-        "a classic rotation must NOT drain the hybrid pool"
+        "a legacy rotation must NOT drain the PQ pool"
     );
 
-    // The old classic refs are gone (rotated out); the hybrid refs remain.
-    assert_eq!(stored_suite(&db, "h1").await, CIPHERSUITE_HYBRID);
+    // The old legacy refs are gone (rotated out); the PQ refs remain.
+    assert_eq!(stored_suite(&db, "h1").await, CIPHERSUITE_PQ);
     let conn = db.conn().unwrap();
     let mut rows = conn
         .query(
@@ -525,6 +586,6 @@ async fn rotating_one_suite_leaves_the_other_pool_intact() {
     assert_eq!(
         rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
         0,
-        "the superseded classic packages were deleted"
+        "the superseded legacy packages were deleted"
     );
 }

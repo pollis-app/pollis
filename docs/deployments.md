@@ -205,6 +205,18 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
     and do not leave the two versions straddling a release cycle. The PQ MLS
     suite's code point also moved **in place** (`0x004D` → `0x0052`), so a
     pre-#668 client cannot read a post-#668 group's traffic at all.
+  - **Ordering (classic suite retirement, #669): DS first, then the client, same
+    cycle.** There is **no migration** — no column added, none dropped;
+    `user_device.pq_capable` is retired in place and `mls_key_package.ciphersuite`
+    keeps its SQL default of `1`, because migrations must stay additive. What
+    changes on the wire is the DS's fallback: a publish or claim that omits the
+    `ciphersuite` field now defaults to `CIPHERSUITE_PQ` (`0x0052`) instead of the
+    classic `1`. Post-#669 clients always send the field explicitly, so the
+    fallback only bites requests from an older client, which would land its classic
+    pool in the PQ bucket. Deploy the DS (dev → verify → prod, confirm `/version`),
+    then cut the client release. This was a hard cutover rather than a fleet-turnover
+    wait because the deployment has no active users; on a fleet with real users the
+    #454 capability gates would still be required.
 - [ ] **Relay pool** — `pollis-relay` / `pollis-device-cert` change? rebuild the GHCR image (`relay-image.yml`) and roll the pool nodes (`docs/relay-operations.md`); verify each `GET /version` reports the new SHA. No auto-deploy exists, so this is always a manual roll.
 - [ ] **Mobile** — in development; not a released output yet, but note if a `pollis-core` change needs a `#[cfg]`/uniffi follow-up (`mobile-core-check.yml` gates gate-rot).
 - [ ] **pollis-verify CLI** — `verifiable-log*` change affecting verification? `verifier-release.yml` (`pollis-verify-v*` tag).

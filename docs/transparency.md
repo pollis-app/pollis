@@ -128,9 +128,12 @@ commits are replayed (the publicly-auditable mirror of the live DB's
 - **A lineage opens at epoch 0** — the first commit of a generation higher than any
   seen before must be at epoch 0.
 
-The `generation` term is the post-quantum suite lineage (#454 P4). MLS binds the
-ciphersuite at group creation, so migrating a conversation to the hybrid suite is not
-a commit — it stands up a *successor* group whose epoch counter restarts at 0. A
+The `generation` term is the suite lineage (#454 P4). MLS binds the ciphersuite at
+group creation, so moving a conversation off a retired code point onto the current
+suite is not a commit — it stands up a *successor* group whose epoch counter restarts
+at 0. (#454 introduced this to carry conversations from the classic suite to the
+post-quantum one; #669 retired the classic suite, but the mechanism stays, because
+the PQ suite's own code point is provisional and may yet be renumbered.) A
 scalar epoch key would read every honest migration as a regression; ordering the pair
 lexicographically fixes that, because the successor's epoch 0 sorts above the retired
 lineage's last epoch on the higher generation. Rule three exists because rule two

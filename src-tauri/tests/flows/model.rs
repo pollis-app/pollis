@@ -77,23 +77,26 @@
 //!                       roster, rotates on the timer, and — since #454 P4 — opens
 //!                       or joins the next suite generation. It is the only op
 //!                       that can move a group across the suite boundary.
-//! - `Op::Upgrade`     → `ensure_mls_key_package` on the pre-PQ *holdout* device
-//!                       (#454 P5), i.e. "the deployment's last old client
-//!                       updated". Flips the fleet gate open exactly once.
+//! - `Op::Upgrade`     → the new build ships: the harness's current-suite pin
+//!                       comes off and every actor's `ensure_mls_key_package`
+//!                       republishes its pool, after which the owner's sweep
+//!                       moves the group. Meaningful once, in a legacy-born case.
 //! - `Op::Fault(v)`    → `arm_ds_fault` before the NEXT commit-producing op.
 //!
-//! ## The suite boundary (#454 P4/P5)
+//! ## The suite boundary (#454 P4, #669)
 //!
-//! Half the generated cases are born CLASSIC — a bystander holdout device holds
-//! the fleet gate shut — and cross to the hybrid suite mid-sequence when the
-//! generator draws `Upgrade` and a subsequent `Sweep`. A migration stands up a
-//! *successor group* at generation N+1 and moves the roster across by Welcome, so
-//! it is the single most disruptive thing that can happen to a member: every
-//! offline stint, fault, removal and rotation in the sequence can now interleave
-//! with it. The oracle is unchanged, which is the point — a boundary crossing must
-//! be invisible to the delivery invariant. Assertion 5 additionally pins that the
-//! crossing happened when and only when the gates said it could, and that no
-//! member was left behind on the retired lineage.
+//! Half the generated cases are born on `SUITE_LEGACY` — the harness pins the
+//! current suite to the retired code point before anyone signs up — and cross to
+//! the build's own suite mid-sequence when the generator draws `Upgrade`. That
+//! models the one way production can still reach a non-current group: `CS_PQ`'s
+//! code point is provisional and `draft-ietf-mls-pq-ciphersuites` has renumbered
+//! once already. A migration stands up a *successor group* at generation N+1 and
+//! moves the roster across by Welcome, so it is the single most disruptive thing
+//! that can happen to a member: every offline stint, fault, removal and rotation
+//! in the sequence can now interleave with it. The oracle is unchanged, which is
+//! the point — a boundary crossing must be invisible to the delivery invariant.
+//! Assertion 5 additionally pins that the crossing happened when and only when it
+//! could, and that no member was left behind on the retired lineage.
 //!
 //! Ops are guarded against the shadow model (no Send from a non-member, no Remove
 //! of an absent actor, no Add of a present one) by **skipping** them in execution
@@ -149,8 +152,9 @@ use proptest::test_runner::{Config, TestCaseError, TestRunner};
 use serial_test::serial;
 
 use crate::harness::{
-    arm_ds_fault, clear_ds_fault, downgrade_to_classic_only, ds_head_epoch, ds_head_generation,
-    local_generation_of, max_commit_bytes, upgrade_to_hybrid, wipe, DsFault, TestClient,
+    arm_ds_fault, clear_ds_fault, ds_head_epoch, ds_head_generation, local_generation_of,
+    max_commit_bytes, republish_key_packages, set_current_suite, wipe, DsFault, TestClient,
+    SUITE_LEGACY,
 };
 
 // ─── tunables (CI budget knobs) ──────────────────────────────────────────────
@@ -180,7 +184,7 @@ const MAX_OPS: usize = 12;
 /// rather than linear, on BOTH suites — is
 /// `pollis-core`'s `self_update_turns_linear_commit_growth_into_logarithmic`,
 /// which controls merge state exactly and compares marginal cost. Absolute
-/// hybrid ceilings for fixed small rosters live in `flows/pq_migration.rs`.
+/// fixed-roster ceilings live in `flows/pq_migration.rs`.
 fn commit_size_ceiling(nactors: usize) -> usize {
     8 * 1024 + 4 * 1024 * nactors
 }
@@ -199,8 +203,8 @@ const PROBE_ROUNDS: usize = 2;
 
 /// How many cases actually crossed the suite boundary. Whether a case crosses is
 /// up to the generator (it has to draw `Upgrade`, and the case has to be
-/// classic-born), so a run in which nothing crossed would satisfy assertion 5
-/// vacuously and report green while testing none of #454 P4. The driver reads
+/// legacy-born), so a run in which nothing crossed would satisfy assertion 5
+/// vacuously and report green while testing none of the migration path. The driver reads
 /// this at the end and fails if it is zero.
 static BOUNDARY_CROSSINGS: AtomicUsize = AtomicUsize::new(0);
 
@@ -238,8 +242,9 @@ enum Op {
     /// hangs off `catch_up_all_mls_groups`' epoch hook. Distinct from `Sync` so a
     /// generated sequence can place a boundary crossing anywhere in the churn.
     Sweep(u8),
-    /// The deployment's last pre-PQ device updates, completing the fleet (#454
-    /// P5). Only meaningful in a classic-born case, and only once.
+    /// The new build ships: the current-suite pin comes off and every actor
+    /// republishes its KeyPackage pool. Only meaningful in a legacy-born case,
+    /// and only once.
     Upgrade,
     /// Arm a landing DS fault (index into `fault_variant`) for the next
     /// commit-producing op.
@@ -270,11 +275,10 @@ fn op_strategy(npool: u8) -> impl Strategy<Value = Op> {
     ]
 }
 
-/// A case is `(start_classic, ops)`: half the cases are born on the classic suite
-/// with one pre-PQ holdout device keeping the fleet gate shut, so an `Op::Upgrade`
-/// followed by any `Op::Sweep` moves the group across the suite boundary in the
-/// middle of the generated churn. The other half are born hybrid and must never
-/// migrate at all.
+/// A case is `(start_legacy, ops)`: half the cases are born on the retired code
+/// point, so an `Op::Upgrade` moves the group across the suite boundary in the
+/// middle of the generated churn. The other half are born on the build's own
+/// suite and must never migrate at all.
 fn ops_strategy() -> impl Strategy<Value = (bool, Vec<Op>)> {
     (
         any::<bool>(),
@@ -339,25 +343,21 @@ fn fail_msg(ops: &[Op], detail: &str) -> String {
 
 // ─── the generated-case body ─────────────────────────────────────────────────
 
-async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(), String> {
+async fn run_case(ops: &[Op], nactors: usize, start_legacy: bool) -> Result<(), String> {
     // Fresh remote + no armed fault so cases can't bleed across the shared world.
+    // `wipe` also clears any current-suite pin a previous case left behind.
     wipe().await;
     clear_ds_fault();
 
-    // The pre-PQ holdout (#454 P5). While one live device anywhere in the
-    // deployment is classic-only the fleet gate is shut, so every group is born
-    // on the classic suite and nothing may migrate. It is a *bystander* — never
-    // on any roster, never swept — because every `TestClient` runs today's binary
-    // and would republish its hybrid pool (and flip `pq_capable` back on) the
-    // moment it acted. `Op::Upgrade` is that device finally updating.
-    let holdout = if start_classic {
-        let mut c = TestClient::new().await;
-        let p = c.sign_up("holdout@test.local").await;
-        downgrade_to_classic_only(&p.id).await;
-        Some(c)
-    } else {
-        None
-    };
+    // A legacy-born case runs the whole world on the retired code point until
+    // `Op::Upgrade`: everyone signs up publishing KeyPackages in `SUITE_LEGACY`
+    // and the group is born there, exactly as a fleet on a superseded draft
+    // number would be. There is no holdout device any more — #669 deleted the
+    // fleet gate along with the classic suite, so the only thing that can hold a
+    // migration back is a roster device that has not republished.
+    if start_legacy {
+        set_current_suite(Some(SUITE_LEGACY));
+    }
 
     // A pool of `nactors` pre-signed-up clients (index 0 = owner/committer) + one
     // group channel. Emails are generated so the pool can scale (the marathon
@@ -390,9 +390,10 @@ async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(),
     let mut messages: Vec<(String, BTreeSet<usize>, usize)> = Vec::new();
     let mut pending_fault: Option<DsFault> = None;
     let mut msg_seq: usize = 0;
-    // Has the holdout updated? Once it has, the fleet is complete and the group
-    // is *obliged* to migrate at the next sweep by any member.
-    let mut fleet_complete = !start_classic;
+    // Has the new build shipped? Once it has, every roster device has a
+    // KeyPackage in the current suite and the group is *obliged* to migrate at
+    // the next sweep by any member.
+    let mut upgraded = !start_legacy;
     // A logical clock that ticks once per op, so `joined_at` and each message's
     // `sent_at` are ordered and "continuous membership since M" is decidable.
     let mut clock: usize = 0;
@@ -511,12 +512,26 @@ async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(),
                 }
             }
             Op::Upgrade => {
-                // Idempotent by construction, but skip the round-trip once done.
-                let Some(h) = holdout.as_ref().filter(|_| !fleet_complete) else {
+                if upgraded {
                     continue;
-                };
-                upgrade_to_hybrid(h).await;
-                fleet_complete = true;
+                }
+                // The new build ships. Republishing is per-device and drops the
+                // device's unclaimed packages in the retired suite, so between
+                // the first republish and the migration the predecessor group
+                // can no longer admit anyone — drive the owner's sweep right
+                // here so that window is empty rather than interleaved with the
+                // generated ops. Two rounds because the first drains the
+                // predecessor to head and the migration is a compare-and-swap
+                // against that head.
+                set_current_suite(None);
+                for c in &clients {
+                    republish_key_packages(c).await;
+                }
+                for _ in 0..2 {
+                    clients[0].poll().await;
+                    clients[0].sweep().await;
+                }
+                upgraded = true;
             }
             Op::Fault(v) => {
                 pending_fault = Some(fault_variant(v));
@@ -529,11 +544,12 @@ async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(),
     clear_ds_fault();
 
     // ── force convergence ───────────────────────────────────────────────────
-    // When the fleet completed, drive the sweep explicitly so EVERY such case
-    // crosses the suite boundary — not only the ones whose generator happened to
-    // draw a `Sweep` after the `Upgrade`. The crossing is the thing under test;
-    // leaving it to chance would silently thin the coverage.
-    if fleet_complete && start_classic {
+    // When the new build shipped, drive every member's sweep explicitly so EVERY
+    // such case lands the whole roster on the successor — not only the ones whose
+    // generator happened to draw a `Sweep` per member after the `Upgrade`. The
+    // crossing is the thing under test; leaving it to chance would silently thin
+    // the coverage.
+    if upgraded && start_legacy {
         for _ in 0..2 {
             for &i in &ever {
                 clients[i].poll().await;
@@ -647,19 +663,19 @@ async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(),
         }
     }
 
-    // ── Assertion 5: the suite boundary (#454 P4 + P5) ────────────────────────
+    // ── Assertion 5: the suite boundary (#454 P4, #669) ───────────────────────
     // Three claims, one read of the DS head generation:
-    //  * a hybrid-born group never migrates — there is nowhere better to go, and a
-    //    spurious generation bump would be pure churn plus a re-Welcome of the
-    //    whole roster;
-    //  * a classic-born group whose fleet is still incomplete never migrates —
-    //    that is the P5 gate, and breaking it strands the holdout;
-    //  * a classic-born group whose fleet HAS completed must migrate, and every
+    //  * a group born on the current suite never migrates — there is nowhere
+    //    better to go, and a spurious generation bump would be pure churn plus a
+    //    re-Welcome of the whole roster;
+    //  * a legacy-born group whose fleet has not republished never migrates —
+    //    that is the no-stranding gate, the one #669 kept;
+    //  * a legacy-born group whose fleet HAS republished must migrate, and every
     //    current member must land on the same generation. A member left behind on
     //    the retired lineage is the stranding failure in its purest form: the
     //    predecessor accepts no further commits, so it is a permanent stall.
     let head_generation = ds_head_generation(&group_id).await;
-    let expected_generation = i64::from(start_classic && fleet_complete);
+    let expected_generation = i64::from(start_legacy && upgraded);
     if expected_generation > 0 {
         BOUNDARY_CROSSINGS.fetch_add(1, Ordering::Relaxed);
     }
@@ -668,9 +684,9 @@ async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(),
             ops,
             &format!(
                 "SUITE GENERATION: head is {head_generation}, expected {expected_generation} \
-                 (born {}, fleet {})",
-                if start_classic { "classic" } else { "hybrid" },
-                if fleet_complete { "complete" } else { "incomplete" },
+                 (born {}, build {})",
+                if start_legacy { "legacy" } else { "current" },
+                if upgraded { "shipped" } else { "not shipped" },
             ),
         ));
     }
@@ -689,7 +705,7 @@ async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(),
     }
 
     // ── Assertion 6: payload size (§4.3) ──────────────────────────────────────
-    // A hybrid encapsulation is ~35× an X25519 one, so the boundary is exactly
+    // An X-Wing encapsulation is ~35× an X25519 one, so the boundary is exactly
     // where a size regression would hide. See `commit_size_ceiling` for what this
     // does and does not claim.
     let ceiling = commit_size_ceiling(nactors);
@@ -708,7 +724,10 @@ async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(),
     // Keep clients alive through the assertions (see harness docs: an early drop
     // can close a client's local DB mid-assertion).
     drop(clients);
-    drop(holdout);
+    // A case that never drew `Upgrade` still has the pin on. `wipe` clears it at
+    // the head of the next case, but the LAST case would otherwise leave the
+    // process pinned for whatever runs after it.
+    set_current_suite(None);
     Ok(())
 }
 
@@ -735,8 +754,8 @@ fn model_based_convergence_is_bulletproof() {
 
     let rt = runtime();
     let mut runner = TestRunner::new(config);
-    let result = runner.run(&ops_strategy(), |(start_classic, ops)| {
-        rt.block_on(run_case(&ops, NACTORS, start_classic))
+    let result = runner.run(&ops_strategy(), |(start_legacy, ops)| {
+        rt.block_on(run_case(&ops, NACTORS, start_legacy))
             .map_err(|detail| TestCaseError::fail(detail))?;
         Ok(())
     });
@@ -751,14 +770,14 @@ fn model_based_convergence_is_bulletproof() {
     // Coverage, not correctness: assertion 5 is satisfied trivially by a case that
     // never migrates, so a run where the generator drew no `Upgrade` at all would
     // be green without exercising the suite boundary once. Roughly a quarter of
-    // cases cross (classic-born AND drawing `Upgrade`), so zero out of
+    // cases cross (legacy-born AND drawing `Upgrade`), so zero out of
     // `DEFAULT_CASES` is a generator regression, not bad luck.
     let crossings = BOUNDARY_CROSSINGS.swap(0, Ordering::Relaxed);
-    eprintln!("[model] {cases} cases, {crossings} crossed the PQ suite boundary");
+    eprintln!("[model] {cases} cases, {crossings} crossed the suite boundary");
     assert!(
         crossings > 0,
-        "no generated case crossed the PQ suite boundary in {cases} cases — #454 P4's \
-         migration went completely untested and assertion 5 passed vacuously"
+        "no generated case crossed the suite boundary in {cases} cases — the migration \
+         path went completely untested and assertion 5 passed vacuously"
     );
 }
 
@@ -815,9 +834,9 @@ fn model_marathon_convergence() {
 
     let rt = runtime();
     let mut runner = TestRunner::new(config);
-    // The marathon always starts CLASSIC: one very long sequence gets exactly one
-    // shot at the suite boundary, and a hybrid-born run would spend all of it on
-    // the side of the boundary the short fuzzer already covers cheaply.
+    // The marathon always starts LEGACY: one very long sequence gets exactly one
+    // shot at the suite boundary, and a current-suite-born run would spend all of
+    // it on the side of the boundary the short fuzzer already covers cheaply.
     let strat = proptest::collection::vec(op_strategy(actors as u8), ops_n..=ops_n);
     let result = runner.run(&strat, |ops| {
         rt.block_on(run_case(&ops, actors, true))
