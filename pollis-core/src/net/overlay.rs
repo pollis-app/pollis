@@ -913,7 +913,6 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use ed25519_dalek::SigningKey;
     use pollis_relay::circuit::{Hop, SingleHopFactory};
     use pollis_relay::client::ClientIdentity;
     use pollis_relay::proto::DeviceCertMaterial;

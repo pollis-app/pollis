@@ -67,6 +67,7 @@ CREATE TABLE user_device (\
   cert_issued_at TEXT,\
   cert_identity_version INTEGER,\
   mls_signature_pub BLOB,\
+  mls_signature_pub_pq BLOB,\
   revoked_at TEXT\
 );\
 CREATE TABLE groups (\

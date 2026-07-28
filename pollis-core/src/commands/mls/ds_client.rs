@@ -1,8 +1,8 @@
 //! Signed HTTP client for the Delivery Service's authenticated write endpoints.
 //!
 //! Pollis has no server-side session/token system: the only credential that maps
-//! to a `user_id` server-side is the device's stable MLS signing key
-//! (`user_device.mls_signature_pub`). So every write the client routes through
+//! to a `user_id` server-side is the device's stable PQ MLS signing key
+//! (`user_device.mls_signature_pub_pq`). So every write the client routes through
 //! the Delivery Service (DS) is signed with that key, and the DS verifies the
 //! signature against the registered public half (see
 //! `pollis_delivery::auth::verify_request`).
@@ -14,9 +14,9 @@
 //! | `X-Pollis-User`       | current `users.id`                               |
 //! | `X-Pollis-Device`     | current `user_device.device_id` ULID             |
 //! | `X-Pollis-Timestamp`  | unix seconds, decimal ASCII                       |
-//! | `X-Pollis-Signature`  | base64 (STANDARD) of the 64-byte Ed25519 sig     |
+//! | `X-Pollis-Signature`  | base64 (STANDARD) of the 2420-byte ML-DSA-44 sig |
 //!
-//! The signature is PureEdDSA over the canonical message
+//! The signature is ML-DSA-44 over the canonical message
 //! `{METHOD}\n{PATH}\n{TIMESTAMP}\n{lowercase hex sha256(body)}` — byte-for-byte
 //! what `pollis_delivery::auth::canonical_message` reconstructs and verifies.
 //! When the DS has auth disabled (`POLLIS_DS_REQUIRE_AUTH=false`) the headers are
@@ -123,14 +123,15 @@ pub async fn ds_post(
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("not signed in for DS request signing")))?;
-        // The certified device identity, so Ed25519 — not any MLS suite's leaf
-        // scheme. See `device::load_device_signing_key`.
+        // The certified device identity's PQ half (#668). Both leaf keys are
+        // covered by the device cert; request auth uses the ML-DSA-44 one so a
+        // future break of Ed25519 cannot forge writes from captured traffic.
         let provider = PollisProvider::new(db.conn());
         let (signer, _pub_bytes) = load_or_create_device_signer(
             &provider,
             &user_id,
             &device_id,
-            openmls::prelude::SignatureScheme::ED25519,
+            openmls::prelude::SignatureScheme::MLDSA44,
         )?;
         let sig = signer
             .sign(&message)

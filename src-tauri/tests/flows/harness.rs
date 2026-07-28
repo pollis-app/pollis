@@ -2445,13 +2445,13 @@ pub(crate) async fn signed_post_status(client: &TestClient, path: &str, body: &[
         let guard = client.state.local_db.lock().await;
         let db = guard.as_ref().expect("client local db open");
         let provider = pollis_lib::commands::mls::PollisProvider::new(db.conn());
-        // DS request auth is still Ed25519 — the certified device identity, not
-        // an MLS leaf key. #668 P5 moves it to ML-DSA-44.
+        // DS request auth signs with the certified device identity's ML-DSA-44
+        // half (#668 P5), mirroring `ds_client::ds_post`.
         let (signer, _pub) = pollis_lib::commands::mls::load_or_create_device_signer(
             &provider,
             &user_id,
             &device_id,
-            openmls::prelude::SignatureScheme::ED25519,
+            openmls::prelude::SignatureScheme::MLDSA44,
         )
         .expect("load device signer");
         let sig = signer.sign(&message).expect("sign request");
