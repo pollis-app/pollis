@@ -5,7 +5,8 @@
 #   advisories — fail on any RUSTSEC advisory in the dependency tree
 #   licenses   — fail on any license not on the allow-list below
 #   bans       — fail on undocumented duplicate crate versions
-#   sources    — fail on any crate sourced outside crates.io
+#   sources    — fail on any crate sourced outside crates.io, bar the one
+#                explicitly allowed git repo (openmls; see [sources] below)
 #
 # The graph is analysed with ALL features enabled so the media-on dependencies
 # (libwebrtc, livekit, cpal, openmls, libsql, axum, …) are covered, not just the
@@ -251,9 +252,23 @@ skip-tree = []
 # Sources — where crates are allowed to come from.
 # ---------------------------------------------------------------------------
 [sources]
-# The entire tree resolves to crates.io (verified: no `source = "git..."` and no
-# non-crates.io registry in Cargo.lock). Anything else fails the check.
+# Every crate resolves to crates.io with exactly one documented exception
+# (openmls, below). Anything else fails the check.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# openmls upstream `main`, via the `[patch.crates-io]` block in the workspace
+# Cargo.toml. #668 moves MLS authentication to ML-DSA-44, which needs the PQ
+# signature ciphersuite `0x0052` (`MLS_128_MLKEM768X25519_CHACHA20POLY1305_
+# SHA384_MLDSA44`). That code point exists in NO published openmls release, so
+# the patch is the only way to get it; it covers all five openmls crates
+# (openmls, openmls_traits, openmls_rust_crypto, openmls_basic_credential,
+# openmls_memory_storage) plus their internal helper crates, which is why the
+# whole repo is listed rather than a single crate.
+#
+# cargo-deny matches the repository URL only — the exact commit is pinned by
+# `rev = "34222ef632c87df58baaa7614c8a72ac235c5f07"` in Cargo.toml and recorded
+# in Cargo.lock, so this entry cannot silently follow upstream `main`. Moving
+# the rev is a reviewable Cargo.lock diff. Drop this entry the moment an
+# openmls release ships `0x0052`.
+allow-git = ["https://github.com/openmls/openmls"]
