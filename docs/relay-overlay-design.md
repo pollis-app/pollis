@@ -112,7 +112,7 @@ Any user-facing copy that says "anonymous" or "untraceable" is false and must be
 
 A framing error to pre-empt hard, because it is the most tempting piece of marketing and the most damaging if made.
 
-**What actually proves Pollis isn't lying about end-to-end encryption** is that anyone can verify the *running code matches the published source*: verifiable / reproducible builds plus the existing append-only, Ed25519-signed **transparency logs** at `verify.pollis.com` (`docs/security-whitepaper.md` §6.9). A skeptic can replay the MLS commit log and the account-key directory and prove the server hasn't forked history or swapped a key, trusting only the log's pinned public key — not the server, not Turso, not the host (`docs/transparency.md`). *That* is the substrate of the E2EE claim: the crypto is in code you can audit, running as published.
+**What actually proves Pollis isn't lying about end-to-end encryption** is that anyone can verify the *running code matches the published source*: verifiable / reproducible builds plus the existing append-only, signed **transparency logs** at `verify.pollis.com` — ML-DSA-44-signed tree heads since #668 (`docs/security-whitepaper.md` §6.9). A skeptic can replay the MLS commit log and the account-key directory and prove the server hasn't forked history or swapped a key, trusting only the log's pinned public key — not the server, not Turso, not the host (`docs/transparency.md`). *That* is the substrate of the E2EE claim: the crypto is in code you can audit, running as published.
 
 The relay proves **none** of that. A relay forwards already-encrypted bytes. It says nothing about whether the client encrypted them correctly, whether the build matches source, or whether the server is honest about key history. A perfectly functioning relay in front of a backdoored client would give you private *metadata* delivery of a *broken* E2EE system.
 
@@ -310,7 +310,7 @@ Today every service address is a field on `Config` (`config.rs:4-25`), resolved 
 
 ### 9.4 Relay authentication (reuse what exists)
 
-The DS already gates writes with **device-certificate-signature auth** (`pollis-delivery/src/lib.rs` "Write authentication"; `pollis-delivery/src/auth.rs`; and the broker reuses `crate::writes::gate`, `docs/secrets-broker.md` §Auth model). The relay can reuse the **same device-signature scheme** to (a) authenticate that a connecting client is a real Pollis device (anti-abuse, rate-limiting, anti-Sybil signal) and (b) let relays present a first-party attestation. No new auth scheme — the identity substrate (Ed25519 device keys, `user_device.mls_signature_pub`) is already there.
+The DS already gates writes with **device-certificate-signature auth** (`pollis-delivery/src/lib.rs` "Write authentication"; `pollis-delivery/src/auth.rs`; and the broker reuses `crate::writes::gate`, `docs/secrets-broker.md` §Auth model). The relay can reuse the **same device-signature scheme** to (a) authenticate that a connecting client is a real Pollis device (anti-abuse, rate-limiting, anti-Sybil signal) and (b) let relays present a first-party attestation. No new auth scheme — the identity substrate (the device's MLS signing keys, `user_device.mls_signature_pub` / `mls_signature_pub_pq`) is already there. Since #668 both the DS request signature and the relay handshake proof are **ML-DSA-44** (FIPS 204) rather than Ed25519, made with the device's PQ leaf key; the classic Ed25519 leaf key is still certified by the device cert but is no longer an authentication credential.
 
 ---
 
@@ -505,7 +505,10 @@ removes the per-call-`Client::new()` anti-pattern (connection-pool win for free)
     tier out of the metadata plane, §11.1) — extracted into the shared `pollis-device-cert` crate so
     `pollis-core` (mints) and `pollis-relay` (verifies) share one frozen format with no crate cycle;
     the handshake now carries `account_id_pub` + `device_cert` + `identity_version` + `issued_at`
-    (protocol v2), replacing the Slice-1 in-memory key resolver. Plus: TOML config file, generated /
+    (protocol v2 — bumped to **v3** by #668, which made the account key, the device cert and the
+    handshake possession proof all ML-DSA-44), replacing the Slice-1 in-memory key resolver. The
+    offline, zero-I/O property is unchanged; only the cert version and the field sizes moved. Plus:
+    TOML config file, generated /
     persisted QUIC identity, graceful shutdown (drain on SIGTERM/SIGINT), and per-account / per-IP
     rate + concurrency limits (`Rejected(RateLimited)`). Operational-separation commitment written up
     in **`docs/relay-operations.md`**. Bootstrap/OTP traffic (a device with no cert yet) cannot
@@ -521,7 +524,11 @@ removes the per-call-`Client::new()` anti-pattern (connection-pool win for free)
     for free). Fail-closed is preserved end to end: a rejected/unreachable directory yields an empty
     pool → `prefer` direct, `strict` degrade, never a silent unverified send. The directory FETCH is
     deliberately direct (it bootstraps the pool it cannot yet route through; integrity comes from the
-    signature, not the transport). The static `POLLIS_OVERLAY_RELAY` path (Slice 2a) remains the
+    signature, not the transport). The directory-signing key stays **Ed25519** after #668: the
+    envelope is minted by a Node Lambda and `node:crypto` has no ML-DSA implementation, and a
+    directory signature is only useful live (short TTL, re-signed each reconcile, every entry still
+    pinned to its own QUIC cert) so there is no harvest-now/forge-later exposure — see
+    `docs/relay-operations.md` §Step 3. The static `POLLIS_OVERLAY_RELAY` path (Slice 2a) remains the
     operator/hand-provisioned fallback; the directory supersedes it when both vars are set.
 - **Slice 3 — one-hop latency measurement** against the §6.4 budget (de-risk item 3), on the real
   control plane, before any "ship v0" call.

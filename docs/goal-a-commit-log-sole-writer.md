@@ -169,10 +169,14 @@ main→log copy, no dual-write window. The only cutover work is ordering/runbook
 **Auth (all endpoints, gated by `POLLIS_DS_REQUIRE_AUTH` exactly like `/v1/commits`):**
 4 headers `X-Pollis-User` / `X-Pollis-Device` / `X-Pollis-Timestamp` /
 `X-Pollis-Signature`; canonical message `{METHOD}\n{PATH}\n{TIMESTAMP}\n{lowercase
-hex sha256(body)}`; Ed25519 over it with the device signer
-(`commands::mls::device::load_or_create_device_signer`), pubkey =
-`user_device.mls_signature_pub` (DS looks this up in the **main** DB, not the log
-DB). Reuse `pollis_delivery::auth::verify_request` — it returns the authenticated
+hex sha256(body)}`; **ML-DSA-44** over it with the device's PQ signer
+(`commands::mls::device::load_or_create_device_signer` at
+`SignatureScheme::MLDSA44`), pubkey = `user_device.mls_signature_pub_pq` (DS looks
+this up in the **main** DB, not the log DB). Ed25519 until #668, which moved
+request auth to the PQ leaf key so a later break of Ed25519 cannot forge writes
+against a captured `mls_signature_pub`; the signature header grows to ~3228 base64
+chars, so no proxy in front of the DS may run below an 8 KiB header budget.
+Reuse `pollis_delivery::auth::verify_request` — it returns the authenticated
 `user_id`. **The authenticated user must equal the actor/owner the write targets.**
 
 Client seam pattern (all): mirror `submit_commit` — when

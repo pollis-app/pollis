@@ -44,7 +44,7 @@ Source: `pollis-core/src/db/migrations/000000_baseline.sql` + numbered migration
 - `identity_key` TEXT _(legacy, unused)_
 - `avatar_url` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
-- `account_id_pub` BLOB _(Ed25519 pub key, added migration 13)_
+- `account_id_pub` BLOB _(ML-DSA-44 pub key, 1312 bytes since #668 — was 32-byte Ed25519; added migration 13)_
 - `identity_version` INTEGER NOT NULL DEFAULT 1 _(increments on reset, migration 13)_
 
 ### groups
@@ -205,16 +205,17 @@ of truth for who is currently in a voice channel. The shadow table drifted
 on every crash/force-kill/network blip; querying LiveKit directly closed
 that class of bug.
 
-### user_device _(migration 11 + 13)_
+### user_device _(migration 11 + 13 + post-baseline 000011)_
 - `device_id` TEXT PK
 - `user_id` TEXT NOT NULL FK users
 - `device_name` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
 - `last_seen` TEXT NOT NULL DEFAULT now
-- `device_cert` BLOB _(migration 13)_
+- `device_cert` BLOB _(migration 13; since #668 a **v2** cert — a 2420-byte ML-DSA-44 signature by `account_id_pub` binding BOTH leaf keys below, so neither is uncertified during the classic→PQ overlap)_
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
-- `mls_signature_pub` BLOB _(migration 13)_
+- `mls_signature_pub` BLOB _(migration 13; the device's raw 32-byte **Ed25519** MLS leaf key — the one `CS_CLASSIC` leaves sign with. No longer the DS request-auth credential since #668.)_
+- `mls_signature_pub_pq` BLOB _(post-baseline 000011, #668; the device's raw 1312-byte **ML-DSA-44** MLS leaf key — the one `CS_HYBRID` leaves sign with, and the credential `X-Pollis-Signature` is verified against (`pollis-delivery/src/auth.rs`). A separate column and not an overload of `mls_signature_pub`: overwriting that one with a 1312-byte key would break auth for every already-shipped client the instant the migration ran. Nullable — NULL means the device predates #668; such a row is skipped by `resign_stale_device_certs`, treated as `AbsentRetry` by `verify_added_devices`, and self-heals on that device's next `ensure_device_cert`.)_
 - `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? Since #454 P2 the DS publish/replenish endpoints set it to 1 when a device publishes a hybrid KeyPackage pool — derived server-side from what landed in `mls_key_package`, never a client UPDATE. Since #454 P5 this column is read two ways: per-roster, by `roster_is_fully_pq_capable`; and **deployment-wide**, by `fleet_is_fully_pq_capable`, which requires that no row with `revoked_at IS NULL` and `last_seen` inside 90 days still has `pq_capable = 0`. Both must pass before any group is born hybrid or migrated — see `.codesight/wiki/mls.md`.)_
 
 ### mls_key_package _(migration 3 + 11 + post-baseline 000010)_
@@ -377,7 +378,7 @@ updated or deleted; mirrors `mls_commit_log`'s shape (an AUTOINCREMENT `seq` for
 global ordering + a UNIQUE index enforcing the per-subject invariant).
 - `seq` INTEGER PK AUTOINCREMENT _(stable global ordering, the log leaf order)_
 - `user_id` TEXT NOT NULL
-- `account_id_pub` BLOB NOT NULL _(Ed25519 pub authoritative at this version)_
+- `account_id_pub` BLOB NOT NULL _(ML-DSA-44 pub authoritative at this version)_
 - `identity_version` INTEGER NOT NULL
 - `created_at` TEXT NOT NULL DEFAULT now
 - UNIQUE INDEX `idx_account_key_log_user_version` on `(user_id, identity_version)` — one row per version per user; a duplicate INSERT conflicts rather than silently forking the history.

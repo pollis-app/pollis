@@ -64,7 +64,7 @@ Per-user slots, keyed by `{slot}_{user_id}`:
 
 - `device_id_{user_id}` — unchanged. Plain bytes, the device ULID.
 - `db_key_wrapped_{user_id}` — NEW. The SQLCipher key for `pollis_{user_id}.db`, wrapped under PIN-derived material. Blob format below.
-- `account_id_key_wrapped_{user_id}` — NEW. The Ed25519 account identity key (currently stored raw at `account_id_key_{user_id}`), wrapped under PIN-derived material.
+- `account_id_key_wrapped_{user_id}` — NEW. The account identity key (currently stored raw at `account_id_key_{user_id}`), wrapped under PIN-derived material. Since #668 the key is **ML-DSA-44**, but its private half is canonically a 32-byte seed — exactly what an Ed25519 private key was — so the wrapped material is 32 bytes as before and **the blob format and every size below are unchanged**.
 - `pin_meta_{user_id}` — NEW. Non-secret PIN metadata: version byte, Argon2 params, salt, failed-attempt counter, last-attempt timestamp. Same blob format as the wrapped-key blobs but the ciphertext is a fixed magic string so the app can prove the PIN decrypts correctly without unwrapping the big keys first.
 
 Removed slots:
