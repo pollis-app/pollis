@@ -62,7 +62,31 @@ jobs:
         with:
           key: verifier-${{ matrix.target }}
 
+      # The tag is the only thing an auditor holding a binary can correlate
+      # against, so it must be the thing the binary reports (#670). Nothing
+      # writes the tag into the manifest — so assert they agree and fail the
+      # release if they don't, rather than shipping a binary that misreports
+      # its own version. Skipped on workflow_dispatch, which has no tag.
+      - name: Assert the crate version matches the release tag
+        if: startsWith(github.ref, 'refs/tags/pollis-verify-v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="verifiable-log-serve"))')"
+          tag="${GITHUB_REF_NAME#pollis-verify-v}"
+          if [ "$manifest" != "$tag" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match verifiable-log-serve version ${manifest} — bump the version in verifiable-log-serve/Cargo.toml (see #670)"
+            exit 1
+          fi
+          echo "version ${manifest} matches tag ${GITHUB_REF_NAME}"
+
       - name: Build verifier
+        # POLLIS_VERIFY_GIT_SHA annotates `--version` with the commit the recipe
+        # in the binaries tree pins. Absent (a plain `cargo build`), the binary
+        # reports "source build" instead of naming a commit it can't vouch for.
+        env:
+          POLLIS_VERIFY_GIT_SHA: ${{ github.sha }}
         run: cargo build --release --locked -p verifiable-log-serve --bin pollis-verify --target ${{ matrix.target }}
 
       - name: Package binary + checksum

@@ -1,6 +1,13 @@
 [package]
 name = "verifiable-log-serve"
-version.workspace = true
+# Deliberately NOT `version.workspace = true` (#670). This crate ships
+# `pollis-verify`, whose whole value is that an auditor can say which bytes they
+# are running — so `--version` has to name the `pollis-verify-v*` release tag,
+# not the workspace's frozen `1.1.0` placeholder (that field has never tracked
+# anything; the desktop app's real version is a git tag). Bump this in the PR
+# that cuts a release: `verifier-release.yml` fails the release if the tag and
+# this number ever disagree.
+version = "0.5.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Serve layer for the verifiable log (Key Transparency #330): turns a signed monitor bundle into an immutable static artifact tree, a dev HTTP server, and a fetch-over-HTTP remote verifier. Slice 3."

@@ -85,7 +85,15 @@ jobs:
       # Build pollis-verify FROM THE TAG'S OWN SOURCE (no prebuilt binary to
       # trust) so the verifier code is itself part of what is being verified.
       - name: Build pollis-verify from source
-        run: cargo build --release --locked -p verifiable-log-serve --bin pollis-verify
+        # Stamp the commit actually checked out — this job builds at `inputs.tag`,
+        # not at the workflow's own ref, so `github.sha` would name the wrong
+        # tree. The rebuild log is auditor-facing evidence, so the verifier it
+        # used should be identifiable too (#670).
+        run: |
+          set -euo pipefail
+          POLLIS_VERIFY_GIT_SHA="$(git rev-parse HEAD)" \
+            cargo build --release --locked -p verifiable-log-serve --bin pollis-verify
+          ./target/release/pollis-verify --version
 
       # Trust anchor: assert the log key the server serves is the pinned key
       # BEFORE trusting any verdict computed against it. A host that substituted
