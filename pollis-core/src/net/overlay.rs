@@ -149,9 +149,11 @@ struct RelayEndpoint {
 /// device's [`ClientIdentity`] and dial the configured relay, returning the
 /// resulting byte pipe (over which the caller runs its own TLS to the real host).
 ///
-/// **Identity (design §9.4).** The `ClientIdentity` carries the device Ed25519
+/// **Identity (design §9.4).** The `ClientIdentity` carries the device ML-DSA-44
 /// signing key — the SAME key `ds_client` signs DS writes with and that
-/// `user_device.mls_signature_pub` records — plus the offline cert chain
+/// `user_device.mls_signature_pub_pq` records (#668; before that it was the
+/// Ed25519 key in `mls_signature_pub`, which is still carried and still bound by
+/// the cert, but nothing signs under it) — plus the offline cert chain
 /// (`account_id_pub` + `device_cert` + `version`/`issued_at`) the relay verifies
 /// with zero I/O. Both halves are loaded from LOCAL state: the device signing key
 /// from the open local DB (openmls storage), and the cert is minted on the spot

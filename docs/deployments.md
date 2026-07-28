@@ -190,8 +190,9 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
     only then cut the client release. There is **no data migration** for this
     cutover — sealing was never previously on, so there are no unsealed rows to
     convert; new sends simply start sealing.
-  - **Ordering (post-quantum authentication, #668): the DS and the client ship
-    in the *same* cycle, DS first.** Three things move together. (1) Migration
+  - **Ordering (post-quantum authentication, #668): the DS, the relay pool and
+    the client ship in the *same* cycle — DS first, relay pool before the
+    client.** Four things move together. (1) Migration
     `000011_device_pq_signature_pub.sql` adds the nullable
     `user_device.mls_signature_pub_pq` column — migrate-then-ship means whichever
     prod deploy runs first applies it, and it must be applied before either side
@@ -201,11 +202,24 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
     missing a field the new DS requires. (3) DS request auth verifies
     `X-Pollis-Signature` as ML-DSA-44 against `mls_signature_pub_pq`, so a new
     client's writes are unauthenticatable by an old DS and an old client's
-    Ed25519-signed writes are unauthenticatable by a new one. Deploy the DS
-    (dev → verify → prod, confirm `/version`), then cut the client release —
-    and do not leave the two versions straddling a release cycle. The PQ MLS
-    suite's code point also moved **in place** (`0x004D` → `0x0052`), so a
-    pre-#668 client cannot read a post-#668 group's traffic at all.
+    Ed25519-signed writes are unauthenticatable by a new one. (4) **The relay
+    handshake is a fourth moving part, and it is easy to miss because it is not
+    the DS.** The frame swapped its fixed-width Ed25519 slots for ML-DSA-44 ones
+    (`[32]`/`[64]` → `[1312]`/`[2420]`), so `PROTOCOL_VERSION` went 2 → 3, ALPN
+    `pollis-relay/2` → `/3`, and `HANDSHAKE_DOMAIN` `pollis-relay-v2` → `-v3`.
+    Because ALPN is negotiated before a single handshake byte is written, a
+    version straddle fails *closed and fast* rather than hanging — but it still
+    means a post-#668 client cannot use a pre-#668 node **at all**. Roll every
+    pool node onto the new image and confirm each `GET /version` before cutting
+    the client release. Nodes pull `:latest` at boot, so a node only picks the
+    change up when it is replaced: on the hydra pool, terminate the stale
+    instances rather than waiting for the rotation to get to them, or the pool
+    will sit split-brain for up to a full rotation interval.
+    Deploy the DS (dev → verify → prod, confirm `/version`), roll the relays,
+    then cut the client release — and do not leave the versions straddling a
+    release cycle. The PQ MLS suite's code point also moved **in place**
+    (`0x004D` → `0x0052`), so a pre-#668 client cannot read a post-#668 group's
+    traffic at all.
   - **Ordering (classic suite retirement, #669): DS first, then the client, same
     cycle.** There is **no migration** — no column added, none dropped;
     `user_device.pq_capable` is retired in place and `mls_key_package.ciphersuite`
