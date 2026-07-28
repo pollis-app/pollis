@@ -163,9 +163,19 @@ aws ssm put-parameter --region us-west-2 --overwrite --type String \
   --name "$(terraform output -raw placement_param)" --value '{"drawn_at":0,"placement":{}}'
 aws lambda invoke --function-name "$(terraform output -raw reconciler_function_name)" /dev/stdout
 ```
-A rotation terminates nodes in regions that lost a slot and launches replacements
-where the draw sent them, so expect a brief dip in healthy nodes — the client
-fails over across the directory while it happens.
+A rotation **hands over rather than cuts over**: regions that won slots scale up
+first, and a region that lost one is drained only on a later reconcile, once
+enough incoming nodes answer `/version`. Expect the pool to run *over* its target
+for a few minutes during a rotation, not under it. This matters because with a
+small pool across four regions a draw sharing no region with the current placement
+is routine (~1 in 10 at three nodes), and zeroing the losers in the same pass would
+cold-start the entire pool — several minutes with nothing serving, on a 24-hour
+timer. Deferring is safe because every reconcile is idempotent; if the incoming
+nodes never come up, the old ones simply keep serving.
+
+The placement parameter is validated on read, so a hand-edited draw with negative
+or non-integer counts is re-drawn over rather than trusted — untrusted, it would
+make every `UpdateAutoScalingGroup` call throw with no way back out.
 
 ### Add / remove a region
 1. Confirm the region's US state is acceptable under `state_denylist` (currently

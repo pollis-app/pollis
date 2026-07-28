@@ -32,7 +32,7 @@ import { SSMClient, GetParameterCommand, PutParameterCommand } from "@aws-sdk/cl
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { CloudWatchClient, PutMetricDataCommand } from "@aws-sdk/client-cloudwatch";
 import { createPrivateKey, sign } from "node:crypto";
-import { readDesiredTotal, drawPlacement, placementNeedsRedraw, placementTotal, clamp } from "./placement.mjs";
+import { readDesiredTotal, drawPlacement, placementNeedsRedraw, placementTotal, mayDrain, clamp } from "./placement.mjs";
 
 // --- Config from the Lambda environment (set by Terraform) -------------------
 
@@ -64,18 +64,34 @@ export const handler = async () => {
   const certB64 = await readParam(IDENTITY_CERT_PARAM, true);
 
   const unhealthyByRegion = {};
+  const pendingScaleDown = {};
 
   for (const [region, asgName] of Object.entries(REGIONS)) {
     try {
       // 0 is a legitimate target: this region simply lost the draw this rotation.
       const target = placement[region] ?? 0;
-      await setDesiredCapacity(region, asgName, target);
+      const group = await describeGroup(region, asgName);
+      const currentDesired = group?.DesiredCapacity ?? 0;
 
-      const nodes = await discoverInServiceNodes(region, asgName);
+      // Scale UP now, unconditionally — the pool can only hand over to nodes that
+      // exist. Scale DOWN is deferred to after the health check (see drainLosing
+      // Regions): with 3 nodes over 4 regions, roughly one rotation in ten draws
+      // a placement disjoint from the current one, and zeroing the old regions in
+      // the same pass would cold-start the ENTIRE pool at once. A node takes
+      // minutes to boot and pull its image, so that is a real outage, on a timer.
+      if (target > currentDesired) {
+        await setDesiredCapacity(region, asgName, target);
+      } else if (target < currentDesired) {
+        pendingScaleDown[region] = { asgName, target, currentDesired };
+      }
+
+      const nodes = await instancesOf(region, group);
       const { healthy, unhealthy } = await healthCheck(nodes);
       perRegionHealthy[region] = healthy.length;
       unhealthyByRegion[region] = unhealthy;
 
+      // Every healthy node is advertised, including ones in a region that is on
+      // its way out — during a handover both the old and new nodes serve.
       for (const { ip } of healthy) {
         relays.push({ addr: `${ip}:${RELAY_PORT}`, region, cert_b64: certB64 });
       }
@@ -84,6 +100,8 @@ export const handler = async () => {
       console.error(`reconcile failed for ${region}:`, err);
     }
   }
+
+  reconcileFailures += await drainLosingRegions(pendingScaleDown, perRegionHealthy, placement);
 
   // Self-heal: an instance that's InService (EC2-reachable) but whose relay
   // container is dead answers no /version, so the ASG's EC2 health check would
@@ -105,7 +123,7 @@ export const handler = async () => {
   if (totalUnhealthy > 0 && totalHealthy > 0) {
     for (const [region, unhealthy] of Object.entries(unhealthyByRegion)) {
       if (unhealthy.length > 0) {
-        await markUnhealthy(region, unhealthy);
+        reconcileFailures += await markUnhealthy(region, unhealthy);
       }
     }
   } else if (totalUnhealthy > 0) {
@@ -136,11 +154,23 @@ async function resolvePlacement() {
   const total = clamp(await readDesiredTotalFromSsm(), NODE_FLOOR, NODE_MAX);
   const now = Math.floor(Date.now() / 1000);
 
+  // Only a genuinely ABSENT parameter means "never drawn". Any other failure —
+  // throttling, a 5xx, KMS — must abort the reconcile, because treating it as
+  // "no placement recorded yet" would re-randomize the whole pool on a transient
+  // blip. Unparseable JSON is left to the redraw predicate, which reports it as
+  // malformed and draws over it (that one IS recoverable, and wedging on it would
+  // need a human).
   let current = null;
   try {
     current = JSON.parse(await readParam(PLACEMENT_PARAM, false));
   } catch (err) {
-    console.error("failed to read placement parameter, will re-draw:", err);
+    if (err?.name === "ParameterNotFound") {
+      console.log("no placement parameter yet — first draw");
+    } else if (err instanceof SyntaxError) {
+      console.error("placement parameter is not valid JSON, will re-draw over it:", err);
+    } else {
+      throw new Error(`failed to read the placement parameter: ${err?.message ?? err}`, { cause: err });
+    }
   }
 
   const reason = placementNeedsRedraw(current, {
@@ -163,13 +193,13 @@ async function resolvePlacement() {
   return placement;
 }
 
+// Deliberately does NOT catch. Falling back to the floor on a read failure looks
+// identical to an operator having scaled the pool down, so the rotation predicate
+// would re-draw and the pool would shrink — then grow and re-draw again on the
+// next successful read. One transient SSM error would cost two full unscheduled
+// rotations. Throwing leaves the pool untouched and trips the Errors alarm.
 async function readDesiredTotalFromSsm() {
-  try {
-    return readDesiredTotal(await readParam(DESIRED_STATE_PARAM, false), NODE_FLOOR);
-  } catch (err) {
-    console.error("failed to read desired-state, falling back to the floor:", err);
-    return NODE_FLOOR;
-  }
+  return readDesiredTotal(await readParam(DESIRED_STATE_PARAM, false));
 }
 
 // --- Directory assembly + signing (§3 frozen contract) -----------------------
@@ -213,6 +243,50 @@ async function publishDirectory(relays) {
 
 // --- ASG reconcile -----------------------------------------------------------
 
+// Drain the regions the draw moved away from — but only once the pool can stand
+// without them, so a rotation is a handover rather than a cutover.
+//
+// Deferring is safe precisely because every reconcile is idempotent: the next
+// tick re-reads the same persisted draw, finds the same regions over capacity,
+// and drains them as soon as the incoming nodes answer /version. The cost of
+// waiting is a few minutes of running both sets; the cost of not waiting is the
+// whole pool cold-starting at once. Nothing here can strand capacity forever —
+// if the new nodes never come up, the old ones keep serving, which is the
+// failure mode we want.
+async function drainLosingRegions(pending, perRegionHealthy, placement) {
+  const draining = Object.keys(pending);
+  if (draining.length === 0) {
+    return 0;
+  }
+
+  const { ok, retainedHealthy, required } = mayDrain({
+    draining,
+    perRegionHealthy,
+    poolTotal: placementTotal(placement),
+    nodeFloor: NODE_FLOOR,
+  });
+
+  if (!ok) {
+    console.log(
+      `deferring scale-down of ${draining.join(", ")}: ${retainedHealthy} healthy node(s) outside them, need ${required}. ` +
+        "A later reconcile will drain them once the incoming nodes answer /version.",
+    );
+    return 0;
+  }
+
+  let failures = 0;
+  for (const [region, { asgName, target, currentDesired }] of Object.entries(pending)) {
+    try {
+      await setDesiredCapacity(region, asgName, target);
+      console.log(`${region}: drained ${currentDesired} -> ${target} (${retainedHealthy} healthy elsewhere)`);
+    } catch (err) {
+      failures += 1;
+      console.error(`${region}: failed to scale down to ${target}:`, err);
+    }
+  }
+  return failures;
+}
+
 async function setDesiredCapacity(region, asgName, target) {
   const asg = new AutoScalingClient({ region });
   await asg.send(new UpdateAutoScalingGroupCommand({
@@ -222,17 +296,23 @@ async function setDesiredCapacity(region, asgName, target) {
   console.log(`${region}: set ASG ${asgName} desired capacity -> ${target}`);
 }
 
-async function discoverInServiceNodes(region, asgName) {
+// Split out of the old discoverInServiceNodes so the group is described ONCE per
+// region: the scale-up/scale-down decision needs the current DesiredCapacity, and
+// re-describing to get it would double the API calls and let the two reads
+// disagree mid-reconcile.
+async function describeGroup(region, asgName) {
   const asg = new AutoScalingClient({ region });
-  const ec2 = new EC2Client({ region });
-
   const groups = await asg.send(new DescribeAutoScalingGroupsCommand({
     AutoScalingGroupNames: [asgName],
   }));
-  const group = groups.AutoScalingGroups?.[0];
+  return groups.AutoScalingGroups?.[0];
+}
+
+async function instancesOf(region, group) {
   if (!group) {
     return [];
   }
+  const ec2 = new EC2Client({ region });
 
   const instanceIds = (group.Instances ?? [])
     .filter((i) => i.LifecycleState === "InService")
@@ -259,8 +339,14 @@ async function discoverInServiceNodes(region, asgName) {
 // Flag failed nodes as Unhealthy so the ASG replaces them. Scoped to the app=
 // pollis-relay ASGs by the reconciler's IAM policy. ShouldRespectGracePeriod keeps
 // a freshly-launched node (still pulling the image) from being killed mid-boot.
+// Returns the number of instances it FAILED to flag. Self-heal that silently
+// stops working is indistinguishable from a pool with nothing wrong: if the IAM
+// condition stops matching or the call is throttled, dead nodes linger, bill, and
+// serve nothing, with no metric moving. Counting the failures puts them on
+// ReconcileFailures, which is alarmed.
 async function markUnhealthy(region, unhealthyNodes) {
   const asg = new AutoScalingClient({ region });
+  let failures = 0;
   for (const { instanceId } of unhealthyNodes) {
     try {
       await asg.send(new SetInstanceHealthCommand({
@@ -270,9 +356,11 @@ async function markUnhealthy(region, unhealthyNodes) {
       }));
       console.log(`${region}: marked ${instanceId} Unhealthy (no /version) — ASG will replace it`);
     } catch (err) {
+      failures += 1;
       console.error(`${region}: failed to mark ${instanceId} unhealthy:`, err);
     }
   }
+  return failures;
 }
 
 // --- Health check ------------------------------------------------------------
