@@ -35,16 +35,21 @@ output "reconciler_function_name" {
 }
 
 output "desired_state_param" {
-  description = "Edit this SSM param to scale the pool: aws ssm put-parameter --name <this> --type String --overwrite --value '{\"us-west-2\":3}'"
+  description = "Edit this SSM param to scale the pool: aws ssm put-parameter --name <this> --type String --overwrite --value '{\"total\":3}'. Regions are NOT set here — the reconciler draws them."
   value       = aws_ssm_parameter.desired_state.name
 }
 
+output "placement_param" {
+  description = "Read this SSM param to see where the current random draw put the pool, and when it was drawn: aws ssm get-parameter --name <this> --query Parameter.Value --output text"
+  value       = aws_ssm_parameter.placement.name
+}
+
 output "allowed_regions" {
-  description = "Regions that passed the §4 jurisdiction filter and host relays."
+  description = "Regions that passed the §4 jurisdiction filter. The reconciler draws node placement from exactly this set."
   value       = local.allowed_regions
 }
 
 output "asg_names" {
-  description = "Per-region Auto Scaling Group names."
-  value       = { for r, m in module.relay_region : r => m.asg_name }
+  description = "Per-region Auto Scaling Group names. Every allowed region has one, standing by at desired capacity 0 until a draw sends nodes there."
+  value       = local.managed_regions
 }

@@ -13,7 +13,7 @@ variable "primary_region" {
 }
 
 variable "managed_regions" {
-  description = "region -> ASG name the reconciler drives."
+  description = "region -> ASG name the reconciler drives. This IS the set the random placement draws from — every allowed region appears here, whether or not it currently holds nodes."
   type        = map(string)
 }
 
@@ -26,6 +26,15 @@ variable "desired_state_param" {
 }
 
 variable "desired_state_param_arn" {
+  type = string
+}
+
+variable "placement_param" {
+  description = "SSM param holding the current random region draw ({drawn_at, placement}). The reconciler is the only writer."
+  type        = string
+}
+
+variable "placement_param_arn" {
   type = string
 }
 
@@ -67,11 +76,18 @@ variable "health_port" {
 }
 
 variable "node_floor" {
-  type = number
+  description = "Pool-wide minimum node count. The reconciler clamps desired-state up to it, and the healthy-nodes alarm fires below it."
+  type        = number
 }
 
 variable "node_max" {
-  type = number
+  description = "Pool-wide maximum node count. The reconciler clamps desired-state down to it."
+  type        = number
+}
+
+variable "rotation_interval_hours" {
+  description = "How often the reconciler re-draws the random region placement."
+  type        = number
 }
 
 variable "alarm_email_addresses" {

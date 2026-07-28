@@ -180,8 +180,11 @@ identity).
 The steps below are the **manual VPS/host** roll. For a **hands-off AWS pool** that
 provisions the nodes, hosts a signed relay directory, and self-heals/scales with no
 human in the loop, use **the hydra** (`infra/relay-hydra/`, #616) instead — it wraps
-the same image + config in Terraform + a reconciler Lambda. The manual steps here
-remain the reference for the config shape and the per-node contract.
+the same image + config in Terraform + a reconciler Lambda, and it draws each node's
+AWS region at random from the allowed US set on a rotation interval — the pool moves
+without any client change, because the client pins the shared identity cert and not
+an address (see "Relay pool & failover" above). The manual steps here remain the
+reference for the config shape and the per-node contract.
 
 Everything below is turnkey from this repo **except provisioning the hosts and
 DNS** — spinning up the VMs and pointing names at them is the operator's ops (the

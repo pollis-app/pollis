@@ -1,6 +1,7 @@
-# The reconciler: a Node 20 Lambda on an EventBridge schedule that converges the
-# pool to desired-state, health-checks nodes, and re-signs + publishes the
-# directory. Least-privilege IAM; a handful of CloudWatch alarms (no dashboards).
+# The reconciler: a Node 24 Lambda on an EventBridge schedule that converges the
+# pool to desired-state, draws the random region placement, health-checks nodes,
+# and re-signs + publishes the directory. Least-privilege IAM; a handful of
+# CloudWatch alarms (no dashboards).
 
 terraform {
   required_providers {
@@ -18,6 +19,7 @@ locals {
 }
 
 # ── Package (zero deps: SDK v3 + node:crypto are in the runtime) ─────────────
+# Zips the whole reconciler/ directory, so index.mjs + placement.mjs both ship.
 
 data "archive_file" "reconciler" {
   type        = "zip"
@@ -78,11 +80,19 @@ data "aws_iam_policy_document" "reconciler" {
     resources = ["*"]
   }
 
-  # Read the desired-state + the signing/identity secrets.
+  # Read the desired-state, the current placement, and the signing/identity secrets.
   statement {
     sid       = "ReadParams"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = concat(var.secret_param_arns, [var.desired_state_param_arn])
+    resources = concat(var.secret_param_arns, [var.desired_state_param_arn, var.placement_param_arn])
+  }
+
+  # Persist a fresh random draw. Scoped to the placement parameter ALONE — the
+  # reconciler must never be able to rewrite desired-state or any secret.
+  statement {
+    sid       = "WritePlacement"
+    actions   = ["ssm:PutParameter"]
+    resources = [var.placement_param_arn]
   }
 
   statement {
@@ -131,9 +141,13 @@ resource "aws_cloudwatch_log_group" "reconciler" {
 }
 
 resource "aws_lambda_function" "reconciler" {
-  function_name    = local.function_name
-  role             = aws_iam_role.reconciler.arn
-  runtime          = "nodejs20.x"
+  function_name = local.function_name
+  role          = aws_iam_role.reconciler.arn
+  # Node 20 reached EOL 2026-04-30 and Lambda stopped patching it the same day
+  # (create blocked 2027-02-01, update blocked 2027-03-03). Node 24 is the current
+  # active-LTS Lambda runtime, supported to ~April 2028 — chosen over 22 (EOL
+  # 2027-04) so this doesn't come round again inside a year.
+  runtime          = "nodejs24.x"
   handler          = "index.handler"
   filename         = data.archive_file.reconciler.output_path
   source_code_hash = data.archive_file.reconciler.output_base64sha256
@@ -143,18 +157,20 @@ resource "aws_lambda_function" "reconciler" {
 
   environment {
     variables = {
-      MANAGED_REGIONS       = jsonencode(var.managed_regions)
-      DESIRED_STATE_PARAM   = var.desired_state_param
-      SIGNING_KEY_PARAM     = var.signing_key_param
-      IDENTITY_CERT_PARAM   = var.identity_cert_param
-      DIRECTORY_BUCKET      = var.directory_bucket
-      DIRECTORY_KEY         = var.directory_object_key
-      RELAY_PORT            = tostring(var.relay_port)
-      HEALTH_PORT           = tostring(var.health_port)
-      NODE_FLOOR            = tostring(var.node_floor)
-      NODE_MAX              = tostring(var.node_max)
-      DIRECTORY_TTL_SECONDS = tostring(var.directory_ttl_seconds)
-      METRIC_NAMESPACE      = local.metric_ns
+      MANAGED_REGIONS         = jsonencode(var.managed_regions)
+      DESIRED_STATE_PARAM     = var.desired_state_param
+      PLACEMENT_PARAM         = var.placement_param
+      SIGNING_KEY_PARAM       = var.signing_key_param
+      IDENTITY_CERT_PARAM     = var.identity_cert_param
+      DIRECTORY_BUCKET        = var.directory_bucket
+      DIRECTORY_KEY           = var.directory_object_key
+      RELAY_PORT              = tostring(var.relay_port)
+      HEALTH_PORT             = tostring(var.health_port)
+      NODE_FLOOR              = tostring(var.node_floor)
+      NODE_MAX                = tostring(var.node_max)
+      ROTATION_INTERVAL_HOURS = tostring(var.rotation_interval_hours)
+      DIRECTORY_TTL_SECONDS   = tostring(var.directory_ttl_seconds)
+      METRIC_NAMESPACE        = local.metric_ns
     }
   }
 
@@ -259,22 +275,29 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   tags                = { app = "pollis-relay" }
 }
 
-# Per-region: healthy node count fell to zero (missing data also breaches — no
-# metric emitted means the reconciler isn't running).
-resource "aws_cloudwatch_metric_alarm" "healthy_nodes" {
-  for_each = var.managed_regions
-
-  alarm_name          = "${local.function_name}-healthy-nodes-${each.key}"
+# POOL-WIDE healthy node count fell below the floor (missing data also breaches —
+# no metric emitted means the reconciler isn't running).
+#
+# Deliberately pool-wide, not per-region. Random placement means an individual
+# region legitimately holds zero nodes for a whole rotation, so the old
+# per-region alarm would page on every draw that skipped a region — and with a
+# shard now standing by in all four regions, most draws skip at least one.
+resource "aws_cloudwatch_metric_alarm" "healthy_nodes_total" {
+  alarm_name          = "${local.function_name}-healthy-nodes-total"
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = 3
-  metric_name         = "HealthyNodes"
+  metric_name         = "HealthyNodesTotal"
   namespace           = local.metric_ns
   period              = 300
   statistic           = "Minimum"
-  threshold           = 1
+  threshold           = var.node_floor
   treat_missing_data  = "breaching"
-  dimensions          = { Region = each.key }
   alarm_actions       = [aws_sns_topic.alarms.arn]
   ok_actions          = [aws_sns_topic.alarms.arn]
   tags                = { app = "pollis-relay" }
 }
+
+# This replaces the previous per-region `aws_cloudwatch_metric_alarm.healthy_nodes`
+# (for_each over managed_regions). Dropping that block from the config is enough —
+# Terraform destroys it on the next apply. Leaving it in place would have meant an
+# alarm stuck in ALARM for every region the draw happened to skip.
