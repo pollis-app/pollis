@@ -199,40 +199,6 @@ pub fn classify(current_epoch: u64, next_row_epoch: Option<u64>) -> ReplayStep {
     }
 }
 
-// ─── I7: the suite a brand-new group is born in (#454 P5) ────────────────────
-
-/// Whether a brand-new MLS group may be created in the PQ hybrid suite.
-///
-/// Both gates must hold:
-/// * `roster_capable` — every registered device of every user on the
-///   conversation's desired roster has published a hybrid KeyPackage pool.
-/// * `fleet_complete` — no live device anywhere in the deployment (unrevoked and
-///   seen recently) is still classic-only. This is #454 P5's "classic retirement
-///   only after measured full-hybrid uptake", evaluated per group creation.
-///
-/// The roster gate alone is NOT sufficient, and assuming it was is the hole this
-/// predicate closes. `init_mls_group` runs while the conversation's roster is
-/// *only its creator*, so a PQ-capable creator passed the roster gate trivially
-/// and every new group was born hybrid. A classic-only device invited seconds
-/// later has no hybrid KeyPackage, so reconcile SKIPS it — never downgrading —
-/// and it sits on the roster, never in the tree, permanently unable to read its
-/// own conversation. Rebuilding that live group in the classic suite is no
-/// escape: that is exactly the downgrade the suite routing exists to prevent.
-///
-/// So the question a new group actually has to answer is not "can today's roster
-/// take hybrid" but "can whoever is invited tomorrow", and the only sound answer
-/// is fleet-wide. Until the fleet is fully hybrid, new groups start classic and
-/// #454 P4's migration upgrades each one at an epoch boundary once its own roster
-/// is capable; after fleet completion new groups are born hybrid and never
-/// migrate at all.
-///
-/// Fails toward AVAILABILITY: either gate false — including a failed read, which
-/// callers surface as `false` — yields classic, a group anyone can join and P4 can
-/// always upgrade. The opposite mistake is unrecoverable.
-pub fn may_birth_hybrid(roster_capable: bool, fleet_complete: bool) -> bool {
-    roster_capable && fleet_complete
-}
-
 // ─── Kani proof harnesses ────────────────────────────────────────────────────
 #[cfg(kani)]
 mod proofs {
@@ -358,47 +324,6 @@ mod proofs {
 
         if let JoinRecovery::ExternalJoin = join_recovery_mutant(welcome_pending, may_rejoin) {
             assert!(!welcome_pending);
-        }
-    }
-
-    // ── I7: birth suite for a new group (#454 P5) ────────────────────────────
-
-    /// I7: a new group is born hybrid ONLY when the roster AND the whole live
-    /// fleet are hybrid-capable — the exhaustive 2-bit truth table. This is what
-    /// makes "a member permanently locked out of a group it is on the roster of"
-    /// unrepresentable: a classic-only device anywhere in the fleet forces every
-    /// new group onto the classic suite, which it can always join.
-    #[kani::proof]
-    fn i7_birth_hybrid_requires_a_complete_fleet() {
-        let roster_capable: bool = kani::any();
-        let fleet_complete: bool = kani::any();
-
-        if may_birth_hybrid(roster_capable, fleet_complete) {
-            // The headline: hybrid is never chosen while any live device is
-            // still classic-only.
-            assert!(fleet_complete);
-            assert!(roster_capable);
-        }
-    }
-
-    /// Negative harness: the pre-P5 gate, which consulted the roster only. Since
-    /// a brand-new conversation's roster is just its creator, that admits hybrid
-    /// on a fleet still running classic-only clients — the lockout. `should_panic`:
-    /// Kani must find it.
-    fn may_birth_hybrid_mutant(roster_capable: bool, _fleet_complete: bool) -> bool {
-        // BUG: the roster of a group being created is only its creator, so this
-        // says nothing about the device invited one second later.
-        roster_capable
-    }
-
-    #[kani::proof]
-    #[kani::should_panic]
-    fn i7_mutant_refuted() {
-        let roster_capable: bool = kani::any();
-        let fleet_complete: bool = kani::any();
-
-        if may_birth_hybrid_mutant(roster_capable, fleet_complete) {
-            assert!(fleet_complete);
         }
     }
 
@@ -580,37 +505,6 @@ mod tests {
                     assert!(
                         !welcome_pending,
                         "external-join must never run while a Welcome is pending"
-                    );
-                }
-            }
-        }
-    }
-
-    /// I7 (#454 P5): a new group goes hybrid only when the roster AND the live
-    /// fleet are hybrid-capable. The roster-only gate this replaces was
-    /// vacuously true at group creation — the roster is just the creator — so it
-    /// born every group hybrid and locked out the first classic-only invitee.
-    #[test]
-    fn birth_suite_requires_a_complete_fleet_not_just_the_roster() {
-        // The only combination that earns hybrid.
-        assert!(may_birth_hybrid(true, true));
-
-        // A capable roster on an incomplete fleet is exactly the trap: the group
-        // is created with one member, so "the roster is capable" is nearly free,
-        // and the classic-only device invited a second later would have no way in.
-        assert!(!may_birth_hybrid(true, false));
-
-        // And an incapable roster never goes hybrid, fleet or no fleet.
-        assert!(!may_birth_hybrid(false, true));
-        assert!(!may_birth_hybrid(false, false));
-
-        // The headline property over the whole 2-bit space.
-        for roster_capable in [false, true] {
-            for fleet_complete in [false, true] {
-                if may_birth_hybrid(roster_capable, fleet_complete) {
-                    assert!(
-                        fleet_complete,
-                        "a group must never be born hybrid while a live device is classic-only"
                     );
                 }
             }

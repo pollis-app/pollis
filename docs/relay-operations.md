@@ -48,9 +48,11 @@ no network call per connection:
   by the user's long-lived **account identity key** binding the device's MLS
   signing public keys to the account (`account_id_pub`). Since #668 this is a
   **v2** cert (domain `pollis-device-cert-v2\x00`): one signature certifies
-  **both** of a device's leaf keys — the classic suite's Ed25519 key and the PQ
-  suite's ML-DSA-44 key — so neither leaf is ever uncertified during the
-  classic→PQ overlap. It is minted by
+  **both** of a device's MLS signing keys — the Ed25519 key and the ML-DSA-44 key
+  — so neither was ever uncertified during the classic→PQ overlap. #669 ended the
+  overlap by retiring the classic suite; the cert format and both keys are
+  unchanged, so a device stays admissible under either signature scheme. It is
+  minted by
   `pollis-core::commands::account_identity::sign_device_cert` and published to
   `user_device` at enrollment (`ensure_device_cert`). It is the same primitive
   clients already use to admit each other into MLS groups.

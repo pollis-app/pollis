@@ -2256,6 +2256,11 @@ pub(crate) async fn wipe() {
     wipe_remote(&w.remote, &w.log)
         .await
         .expect("wipe test turso");
+    // The current-suite pin is process-global (see `set_current_suite`), so a
+    // scenario that panics between pinning and clearing would otherwise hand the
+    // next test a world running on a retired code point. Resetting here rather
+    // than in each scenario's teardown means no test can forget.
+    set_current_suite(None);
 }
 
 /// The WRITABLE main-DB handle — the very one the in-process DS writes through.
@@ -3391,54 +3396,48 @@ pub(crate) async fn envelope_ciphertexts(conversation_id: &str) -> Vec<Vec<u8>> 
     out
 }
 
-// ─── Suite generations / PQ migration (#454 P4 + P5) ────────────────────────
+// ─── Suite generations / suite migration (#454 P4, #669) ────────────────────
 
-/// Turn every device of `user_id` back into a **classic-only** client, the way a
-/// device running a pre-PQ build looks to the server: no hybrid KeyPackages in
-/// the pool, and `pq_capable = 0`.
+/// MLS code point `0x0001` (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`) —
+/// the suite Pollis shipped before #454, retired by #669.
 ///
-/// Stands in for an app version, which the harness cannot vary — every
-/// `TestClient` runs today's binary and publishes both pools on login. The two
-/// writes are exactly the server-side state a pre-PQ device produces, and they
-/// go through the WRITABLE handle because they model the DS's own bookkeeping
-/// (`pollis_delivery::devices::mark_pq_capable` is what sets the flag), not a
-/// client write.
+/// The migration scenarios need *a* suite that is not the current one, and this
+/// is the honest choice: it is the only other suite this build's provider
+/// implements, and it differs from `CS_PQ` in every dimension (KEM, AEAD, KDF,
+/// signature scheme), so a group born on it exercises the boundary rather than a
+/// relabelling.
+pub(crate) const SUITE_LEGACY: u16 = 0x0001;
+
+/// Pin the suite this process treats as current, or `None` for the build's own
+/// (`CS_PQ`).
 ///
-/// Asserts it actually changed something: silently downgrading nobody would make
-/// every fleet-gate assertion below vacuous.
-pub(crate) async fn downgrade_to_classic_only(user_id: &str) {
-    let remote = writable_remote().await;
-    let conn = remote.conn().await.expect("remote conn for downgrade");
-    conn.execute(
-        "DELETE FROM mls_key_package WHERE user_id = ?1 AND ciphersuite = ?2",
-        libsql::params![
-            user_id.to_string(),
-            pollis_delivery::devices::CIPHERSUITE_HYBRID
-        ],
-    )
-    .await
-    .expect("delete hybrid key packages");
-    let affected = conn
-        .execute(
-            "UPDATE user_device SET pq_capable = 0 WHERE user_id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await
-        .expect("clear pq_capable");
-    assert!(
-        affected > 0,
-        "downgrade_to_classic_only: {user_id} has no registered device to downgrade — \
-         the scenario's setup is wrong"
-    );
+/// #669 left production with exactly one suite, which means the only way a group
+/// can end up on a *non*-current suite is a change to the `CS_PQ` constant — a
+/// renumber of the provisional `draft-ietf-mls-pq-ciphersuites` code point, which
+/// has already happened once. A test cannot wait for that, so `pollis-core`
+/// exposes the constant as a `test-harness`-only seam and this is the handle on
+/// it: pin `SUITE_LEGACY` before the fleet signs up to get a world running on the
+/// old number, then clear it and let each client's next login
+/// ([`republish_key_packages`]) and sweep carry the world across, which is
+/// exactly the two steps a real renumber would take.
+///
+/// Global, not per-client, because a code point is a property of the *build* —
+/// there is no production world in which two clients disagree about it. Flows
+/// tests are `#[serial]`, and [`wipe`] clears it, so a scenario that panics
+/// mid-migration cannot leak its pin into the next one.
+pub(crate) fn set_current_suite(code_point: Option<u16>) {
+    pollis_lib::commands::mls::set_current_suite_override(code_point);
 }
 
-/// The upgrade a classic-only user gets by updating their app: republish both
-/// KeyPackage pools, which lands a hybrid pool and flips `pq_capable` back on
-/// server-side.
+/// Republish this device's KeyPackage pool in whatever suite is current now.
 ///
 /// This is production's own `ensure_mls_key_package`, the same call
-/// `initialize_identity` makes at login — not a harness shortcut.
-pub(crate) async fn upgrade_to_hybrid(client: &TestClient) {
+/// `initialize_identity` makes at login — not a harness shortcut. It is what a
+/// user does by updating their app and signing in, and it is the *first* of the
+/// two steps that carry a fleet onto a new code point: until every roster device
+/// has a KeyPackage in the target suite, `migrate_to_current_suite_if_due`
+/// refuses to move the group at all rather than leave one behind.
+pub(crate) async fn republish_key_packages(client: &TestClient) {
     let user_id = client.user_id().to_string();
     let device_id = client
         .state
@@ -3449,31 +3448,7 @@ pub(crate) async fn upgrade_to_hybrid(client: &TestClient) {
         .expect("client device_id set");
     pollis_lib::commands::mls::ensure_mls_key_package(&client.state, &user_id, &device_id)
         .await
-        .expect("republish key package pools");
-}
-
-/// Backdate every device of `user_id` past the fleet-completion dormancy window
-/// (`group_state::FLEET_DORMANCY_DAYS`, 90 days), so it stops counting against
-/// fleet completion.
-///
-/// Lets a scenario separate the two gates on going hybrid, which a live
-/// classic-only device fails simultaneously: a dormant classic-only device fails
-/// the *roster* gate for conversations it is in while leaving the *fleet* gate
-/// satisfied.
-pub(crate) async fn backdate_last_seen(user_id: &str, days: i64) {
-    let remote = writable_remote().await;
-    let conn = remote.conn().await.expect("remote conn for backdate");
-    let affected = conn
-        .execute(
-            "UPDATE user_device SET last_seen = datetime('now', ?2) WHERE user_id = ?1",
-            libsql::params![user_id.to_string(), format!("-{days} days")],
-        )
-        .await
-        .expect("backdate last_seen");
-    assert!(
-        affected > 0,
-        "backdate_last_seen: {user_id} has no registered device — setup is wrong"
-    );
+        .expect("republish key package pool");
 }
 
 /// This device's local suite generation for `conversation_id` (#454 P4) — which

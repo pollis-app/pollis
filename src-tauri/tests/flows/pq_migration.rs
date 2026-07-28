@@ -1,46 +1,61 @@
-//! #454 P4 + P5 — a live conversation crossing the classic→hybrid suite
-//! boundary, end to end through the real command pipeline.
+//! #454 P4 + #669 — a live conversation crossing a ciphersuite boundary, end to
+//! end through the real command pipeline.
 //!
 //! MLS binds the ciphersuite at group creation and RFC 9420 offers no way to
-//! change it, so "going post-quantum" is not an operation on a group: it stands
-//! up a **successor group** in [`CS_HYBRID`] for the same conversation and moves
+//! change it, so moving a conversation to another suite is not an operation on
+//! the group: it stands up a **successor group** in the current suite and moves
 //! the roster across by Welcome (`pollis-core/src/commands/mls/migrate.rs`). The
 //! commit log's monotone key is therefore `(conversation, generation, epoch)`,
 //! and the successor restarts at epoch 0 of generation 1.
 //!
-//! Two things have to be true at once for that to be shippable rather than
-//! merely correct, and these scenarios are split along exactly that line:
+//! ## Why these scenarios still exist, and what they now simulate
 //!
-//! * **Nobody is stranded.** A hybrid group can only ever admit hybrid
-//!   KeyPackages, so a device that has not upgraded has no way into one and no
-//!   way back — reconcile skips it rather than downgrade the group, which is the
-//!   right call and also a permanent lockout. So going hybrid is gated twice: on
-//!   the conversation's own roster, and on the whole live fleet (#454 P5).
-//!   Scenarios S2 and S3 pin each gate independently.
-//! * **Nothing is lost, and the boundary actually buys something.** A member who
-//!   was offline across the migration must still read every message from before
-//!   it (S2), a member with no successor Welcome must still recover into the new
-//!   lineage (S6), and an adversary holding pre-migration key material must be
-//!   evicted at the boundary — with the successor's Welcome structurally proving
-//!   ML-KEM was what moved the group secrets across (S4).
+//! #454 wrote them for the classic→hybrid transition and #669 finished it: there
+//! is one suite now, so nothing in production is waiting to migrate and two of
+//! the original scenarios (the fleet gate and the `pq_capable` roster gate) test
+//! machinery that no longer exists. What survives is the part that is *not*
+//! about the classic suite at all — `CS_PQ`'s code point is provisional,
+//! `draft-ietf-mls-pq-ciphersuites` has renumbered once already, and a renumber
+//! is a wire break for every existing group. Migration is what carries them
+//! across, and the day it runs it has to be right first time.
+//!
+//! So the trigger is simulated the way production would experience it: the
+//! harness pins the *current suite* to `SUITE_LEGACY` before the fleet signs up
+//! (a world running on the old code point), then clears the pin (the new build
+//! ships) and lets each client's own `ensure_mls_key_package` and sweep carry it
+//! across. Nothing about the migration path is stubbed — only the calendar.
+//!
+//! The four claims, one per scenario:
+//!
+//! * **A group already on the current suite never migrates** (S1) — there is
+//!   nowhere better to go, and a spurious successor would re-Welcome the whole
+//!   roster for nothing.
+//! * **Nobody is stranded** (S3). A group can only admit KeyPackages in its own
+//!   suite, so a successor built before every roster device has republished
+//!   would leave one outside with no way in and no way back. The migration must
+//!   refuse to start rather than move everyone else.
+//! * **Nothing is lost across the boundary** (S2) — a member offline for the
+//!   whole transition must still read everything sent before it — and a member
+//!   whose successor Welcome never arrives must still recover into the new
+//!   lineage (S6).
+//! * **The boundary actually buys something** (S4): an adversary holding
+//!   pre-migration key material is evicted at it, with the successor's Welcome
+//!   structurally proving ML-KEM carried the group secrets across.
 //!
 //! S5, the marathon fuzzer across the boundary, lives in `flows/model.rs` with
 //! the rest of the model-based suite.
 
 use crate::harness::{
-    arm_ds_fault, backdate_last_seen, downgrade_to_classic_only, ds_group_info_suite,
-    ds_head_generation, local_generation_of, max_commit_bytes, steal_leaf, upgrade_to_hybrid,
-    welcome_blobs, wipe, DsFault, TestClient,
+    arm_ds_fault, ds_group_info_suite, ds_head_generation, local_generation_of, max_commit_bytes,
+    republish_key_packages, set_current_suite, steal_leaf, welcome_blobs, wipe, DsFault,
+    TestClient, SUITE_LEGACY,
 };
 use serial_test::serial;
 
-/// `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` — the classic suite every
-/// group runs today.
-const SUITE_CLASSIC: u16 = 0x0001;
-/// `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` — the PQ suite.
-/// #668 moved this from `0x004D`; the KEM is the same X-Wing, the signature is
-/// now ML-DSA-44.
-const SUITE_HYBRID: u16 = 0x0052;
+/// `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` — the one suite
+/// production ships since #669. #668 moved it from `0x004D`; the KEM is the same
+/// X-Wing, the signature is now ML-DSA-44.
+const SUITE_PQ: u16 = 0x0052;
 
 /// X25519 HPKE encapsulation: one ephemeral public key.
 const KEM_OUTPUT_X25519: usize = 32;
@@ -50,16 +65,16 @@ const KEM_OUTPUT_X25519: usize = 32;
 /// labelled as such.
 const KEM_OUTPUT_XWING: usize = 1120;
 
-/// Ceiling for a single commit on the hybrid suite, in bytes.
+/// Ceiling for a single commit on the PQ suite, in bytes.
 ///
-/// A PQ commit runs an order of magnitude above its classic counterpart — every
-/// HPKE encapsulation in the tree carries an ML-KEM-768 ciphertext, and since
-/// #668 every leaf carries a 1,312 B ML-DSA-44 key and every signature is
-/// 2,420 B — so the number is large. But it must still be a *number*, because the
-/// failure this guards is commits that grow without bound. Matches the 20 KiB
-/// ceiling `hybrid_payloads_stay_under_their_ceilings` pins for an 8-member
-/// merged commit in `pollis-core`'s unit suite.
-const MAX_HYBRID_COMMIT_BYTES: usize = 20_480;
+/// A PQ commit runs an order of magnitude above a classic one — every HPKE
+/// encapsulation in the tree carries an ML-KEM-768 ciphertext, and since #668
+/// every leaf carries a 1,312 B ML-DSA-44 key and every signature is 2,420 B —
+/// so the number is large. But it must still be a *number*, because the failure
+/// this guards is commits that grow without bound. Matches the 20 KiB ceiling
+/// `pq_payloads_stay_under_their_ceilings` pins for an 8-member merged commit in
+/// `pollis-core`'s unit suite.
+const MAX_COMMIT_BYTES: usize = 20_480;
 
 async fn contents(client: &TestClient, channel_id: &str) -> Vec<String> {
     client
@@ -139,20 +154,33 @@ async fn newest_welcome_shape(conversation_id: &str) -> (u16, usize) {
     welcome_suite_and_kem_output(last)
 }
 
-// ─── S1 — a complete fleet births hybrid groups outright ─────────────────────
-
-/// **Invalid state it attacks:** a fully-upgraded fleet that still creates
-/// classic groups and then has to migrate every one of them — paying the
-/// successor-lineage cost forever for a transition that is already over.
+/// The whole world moves onto the build's own suite: the pin comes off (the new
+/// build ships) and every client republishes its pool at its next login.
 ///
-/// With every live device hybrid-capable, a brand-new group is born on the
-/// hybrid suite at **generation 0** and never migrates at all. The assertions are
-/// on server-visible bytes — the published GroupInfo's ciphersuite and the
-/// Welcome's `kem_output` length — so this proves ML-KEM actually carried the
-/// group secrets to bob, not that a client believes it did.
+/// Both halves are production paths. The order matters and is production's own:
+/// a device that has not republished has no KeyPackage in the target suite, and
+/// migration refuses to move a group with such a device on its roster.
+async fn ship_the_new_build(clients: [&TestClient; 2]) {
+    set_current_suite(None);
+    for client in clients {
+        republish_key_packages(client).await;
+    }
+}
+
+// ─── S1 — a group on the current suite never migrates ────────────────────────
+
+/// **Invalid state it attacks:** a fleet that creates groups on some other suite
+/// and then has to migrate every one of them — paying the successor-lineage cost
+/// forever for a transition that is already over.
+///
+/// With no suite pin in play this is simply today's production world: a
+/// brand-new group is born on `CS_PQ` at **generation 0** and never migrates at
+/// all. The assertions are on server-visible bytes — the published GroupInfo's
+/// ciphersuite and the Welcome's `kem_output` length — so this proves ML-KEM
+/// actually carried the group secrets to bob, not that a client believes it did.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn a_complete_fleet_births_hybrid_groups() {
+async fn a_new_group_is_born_on_the_current_suite() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -162,13 +190,13 @@ async fn a_complete_fleet_births_hybrid_groups() {
     let bob_p = bob.sign_up("bob@test.local").await;
     let carol_p = carol.sign_up("carol@test.local").await;
 
-    let group_id = alice.create_group("BornHybrid").await;
+    let group_id = alice.create_group("BornCurrent").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
     assert_eq!(
         ds_group_info_suite(&group_id).await,
-        SUITE_HYBRID,
-        "with the whole fleet hybrid-capable, a new group must be born hybrid"
+        SUITE_PQ,
+        "since #669 every new group is born on the one suite the build ships"
     );
 
     alice.invite(&group_id, &bob_p.username).await;
@@ -185,32 +213,32 @@ async fn a_complete_fleet_births_hybrid_groups() {
 
     // The structural claim: bob's group secrets crossed under ML-KEM-768.
     let (welcome_suite, kem_output) = newest_welcome_shape(&group_id).await;
-    assert_eq!(welcome_suite, SUITE_HYBRID, "bob's Welcome must be hybrid");
+    assert_eq!(welcome_suite, SUITE_PQ, "bob's Welcome must be on the PQ suite");
     assert_eq!(
         kem_output, KEM_OUTPUT_XWING,
-        "a hybrid Welcome's kem_output must be an ML-KEM-768 ciphertext (1088) plus the \
+        "a PQ Welcome's kem_output must be an ML-KEM-768 ciphertext (1088) plus the \
          X25519 ephemeral (32) — {kem_output} bytes means the key exchange is not hybrid"
     );
 
-    // Traffic works in both directions on the hybrid suite.
-    alice.send_channel_message(&channel_id, "hybrid-a-to-b").await;
+    // Traffic works in both directions.
+    alice.send_channel_message(&channel_id, "pq-a-to-b").await;
     bob.sweep().await;
     assert!(
-        contents(&bob, &channel_id).await.contains(&"hybrid-a-to-b".to_string()),
-        "bob must decrypt alice's message on the hybrid suite"
+        contents(&bob, &channel_id).await.contains(&"pq-a-to-b".to_string()),
+        "bob must decrypt alice's message on the PQ suite"
     );
 
-    bob.send_channel_message(&channel_id, "hybrid-b-to-a").await;
+    bob.send_channel_message(&channel_id, "pq-b-to-a").await;
     alice.sweep().await;
     assert!(
-        contents(&alice, &channel_id).await.contains(&"hybrid-b-to-a".to_string()),
-        "alice must decrypt bob's message on the hybrid suite"
+        contents(&alice, &channel_id).await.contains(&"pq-b-to-a".to_string()),
+        "alice must decrypt bob's message on the PQ suite"
     );
 
-    // Membership churn on the hybrid suite: carol joins, reads, and is removed.
-    // A hybrid add draws from carol's X-Wing KeyPackage pool and a hybrid remove
-    // re-keys her copath under X-Wing — both are the paths that would surface a
-    // provider-routing mistake as a hard failure rather than a silent downgrade.
+    // Membership churn: carol joins, reads, and is removed. An add draws from
+    // carol's X-Wing KeyPackage pool and a remove re-keys her copath under
+    // X-Wing — both are the paths that would surface a suite mistake as a hard
+    // failure rather than a silent downgrade.
     alice.invite(&group_id, &carol_p.username).await;
     let carol_invite = carol
         .first_pending_invite()
@@ -222,40 +250,40 @@ async fn a_complete_fleet_births_hybrid_groups() {
     carol.accept_invite(&carol_invite).await;
     carol.poll().await;
     carol.sweep().await;
-    alice.send_channel_message(&channel_id, "hybrid-with-carol").await;
+    alice.send_channel_message(&channel_id, "pq-with-carol").await;
     carol.sweep().await;
     assert!(
-        contents(&carol, &channel_id).await.contains(&"hybrid-with-carol".to_string()),
-        "carol must decrypt on the hybrid suite after joining it"
+        contents(&carol, &channel_id).await.contains(&"pq-with-carol".to_string()),
+        "carol must decrypt on the PQ suite after joining it"
     );
 
     alice.remove_member(&group_id, &carol_p.id).await;
     alice.sweep().await;
     bob.sweep().await;
-    alice.send_channel_message(&channel_id, "hybrid-after-carol").await;
+    alice.send_channel_message(&channel_id, "pq-after-carol").await;
     bob.sweep().await;
     assert!(
-        contents(&bob, &channel_id).await.contains(&"hybrid-after-carol".to_string()),
-        "the survivors must keep reading after a hybrid remove re-keys the tree"
+        contents(&bob, &channel_id).await.contains(&"pq-after-carol".to_string()),
+        "the survivors must keep reading after a remove re-keys the tree"
     );
     assert!(
-        !contents(&carol, &channel_id).await.contains(&"hybrid-after-carol".to_string()),
+        !contents(&carol, &channel_id).await.contains(&"pq-after-carol".to_string()),
         "a removed member must not decrypt traffic sealed after its removal"
     );
 
-    // (The voice-key path — `export_secret` agreeing byte-for-byte across the two
-    // providers on the hybrid suite — is proved in `pollis-core`'s MLS unit tests;
-    // `voice_e2ee` is media-gated and cannot build in the headless harness.)
+    // (The voice-key path — `export_secret` agreeing byte-for-byte across
+    // devices — is proved in `pollis-core`'s MLS unit tests; `voice_e2ee` is
+    // media-gated and cannot build in the headless harness.)
 
-    // Born hybrid means never migrated: still generation 0, one lineage.
+    // Born current means never migrated: still generation 0, one lineage.
     assert_eq!(
         ds_head_generation(&group_id).await,
         0,
-        "a group born hybrid must never open a successor lineage"
+        "a group born on the current suite must never open a successor lineage"
     );
     assert!(
-        max_commit_bytes(&group_id).await <= MAX_HYBRID_COMMIT_BYTES,
-        "hybrid commits must stay under the {MAX_HYBRID_COMMIT_BYTES}-byte budget, got {}",
+        max_commit_bytes(&group_id).await <= MAX_COMMIT_BYTES,
+        "commits must stay under the {MAX_COMMIT_BYTES}-byte budget, got {}",
         max_commit_bytes(&group_id).await
     );
 
@@ -264,46 +292,37 @@ async fn a_complete_fleet_births_hybrid_groups() {
     drop(carol);
 }
 
-// ─── S2 — the FLEET gate, and a group spanning the boundary ──────────────────
+// ─── S2 — a group spanning the boundary loses nothing ────────────────────────
 
-/// **Invalid state it attacks:** two of them, and they are the same bug seen from
-/// each side.
+/// **Invalid state it attacks:** a member who was offline across the migration
+/// losing the messages sent before it.
 ///
-/// First, a group that goes hybrid while a classic-only device still exists
-/// anywhere in the fleet. That device is one invite away from a permanent
-/// lockout — it has no hybrid KeyPackage, so reconcile can only skip it, and
-/// rebuilding the group classic to let it in is precisely the downgrade the
-/// suite routing exists to prevent. Carol is never on this group's roster, so
-/// only the fleet-wide gate can hold the migration back.
-///
-/// Second, a member who was offline across the migration losing the messages
-/// sent before it. The successor lineage restarts at epoch 0 with fresh keys and
+/// The successor lineage restarts at epoch 0 with fresh keys and
 /// `max_past_epochs = 0` discards the predecessor's ratchet the moment the group
 /// advances, so "drain the old lineage completely, then adopt" is the only order
-/// that works — bob asserts it by reading pre-boundary and post-boundary traffic
-/// in one pass.
+/// that works. Bob asserts it by reading pre-boundary and post-boundary traffic
+/// in one pass, having been offline for the entire transition — he republishes
+/// his pool (his app updates), then goes dark until well after alice has moved
+/// the group.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn the_fleet_gate_holds_until_the_last_classic_device_upgrades() {
+async fn a_member_offline_across_the_boundary_loses_nothing() {
     wipe().await;
+
+    // The world runs on the old code point.
+    set_current_suite(Some(SUITE_LEGACY));
 
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
-    let mut carol = TestClient::new().await;
     alice.sign_up("alice@test.local").await;
     let bob_p = bob.sign_up("bob@test.local").await;
-    let carol_p = carol.sign_up("carol@test.local").await;
-
-    // Carol runs a pre-PQ build. She is a bystander — never on this group's
-    // roster — so she can only be blocking the migration through the FLEET gate.
-    downgrade_to_classic_only(&carol_p.id).await;
 
     let group_id = alice.create_group("SpansTheBoundary").await;
     let channel_id = alice.general_channel_id(&group_id).await;
     assert_eq!(
         ds_group_info_suite(&group_id).await,
-        SUITE_CLASSIC,
-        "one classic-only device in the fleet must keep new groups classic"
+        SUITE_LEGACY,
+        "a group born while the old code point is current must be on it"
     );
 
     alice.invite(&group_id, &bob_p.username).await;
@@ -327,29 +346,29 @@ async fn the_fleet_gate_holds_until_the_last_classic_device_upgrades() {
     );
     alice.send_channel_message(&channel_id, "before-bob-missed").await;
 
-    // Alice's roster is fully capable, but carol is not — so no migration.
+    // Nothing has changed yet, so nothing may migrate: a spurious successor here
+    // would be churn plus a re-Welcome of the whole roster.
     alice.sweep().await;
     assert_eq!(
         ds_head_generation(&group_id).await,
         0,
-        "the fleet gate must hold the migration back while carol is classic-only, \
-         even though this group's own roster is fully hybrid-capable"
+        "a group already on the current suite must not open a successor lineage"
     );
-    assert_eq!(ds_group_info_suite(&group_id).await, SUITE_CLASSIC);
 
-    // Carol updates her app. The fleet is complete; the gate opens.
-    upgrade_to_hybrid(&carol).await;
+    // The new build ships. Both clients republish at their next login; bob then
+    // goes dark.
+    ship_the_new_build([&alice, &bob]).await;
     alice.sweep().await;
 
     assert_eq!(
         ds_head_generation(&group_id).await,
         1,
-        "with the fleet complete, the next sweep must open the successor lineage"
+        "with every roster device republished, the next sweep must open the successor lineage"
     );
     assert_eq!(
         ds_group_info_suite(&group_id).await,
-        SUITE_HYBRID,
-        "the published GroupInfo must now describe the hybrid successor"
+        SUITE_PQ,
+        "the published GroupInfo must now describe the successor's suite"
     );
     assert_eq!(
         local_generation_of(&alice, &group_id).await,
@@ -389,43 +408,42 @@ async fn the_fleet_gate_holds_until_the_last_classic_device_upgrades() {
     );
 
     assert!(
-        max_commit_bytes(&group_id).await <= MAX_HYBRID_COMMIT_BYTES,
-        "commits must stay under the {MAX_HYBRID_COMMIT_BYTES}-byte budget across the \
-         boundary, got {}",
+        max_commit_bytes(&group_id).await <= MAX_COMMIT_BYTES,
+        "commits must stay under the {MAX_COMMIT_BYTES}-byte budget across the boundary, got {}",
         max_commit_bytes(&group_id).await
     );
 
     drop(alice);
     drop(bob);
-    drop(carol);
 }
 
-// ─── S3 — the ROSTER gate, isolated from the fleet gate ──────────────────────
+// ─── S3 — the no-stranding gate ──────────────────────────────────────────────
 
 /// **Invalid state it attacks:** a group that migrates out from under one of its
-/// own roster. Dave is on this conversation's desired roster with no hybrid
-/// KeyPackage, so a successor would be built without him and he would never get
-/// in — reconcile only ever *skips* a device it cannot add at the group's suite.
+/// own roster. Dave is on this conversation's desired roster with no KeyPackage
+/// in the target suite, so a successor built now would be built without him and
+/// he would never get in — reconcile only ever *skips* a device it cannot add at
+/// the group's suite, and rebuilding the successor on the retired suite to let
+/// him in is the downgrade this whole mechanism exists to prevent.
 ///
-/// The two gates normally fail together — a live classic-only device breaks the
-/// fleet count as well as any roster it is on — so this scenario prises them
-/// apart by putting dave *past the dormancy window*. The fleet gate then excludes
-/// him and is satisfied; only the roster gate is left holding the migration, and
-/// it must hold it alone.
+/// This is the one gate #669 kept. #454 additionally gated on `pq_capable`, a
+/// server-derived count of devices that had published a hybrid pool, both for
+/// the roster and fleet-wide; those were a *predictor* of the claim below,
+/// needed because a classic-only device could be invited after the migration and
+/// stranded then rather than now. With one suite there is no such device, and
+/// the claim itself is the direct test the flags stood in for.
 ///
 /// Dave is a pending invitee rather than a joined member for a mundane reason:
 /// `desired_roster_user_ids` counts pending invites (they are given a leaf at
 /// invite time so they can join unattended), and a client that never runs is the
-/// only way the harness can hold a device classic-only. Every `TestClient` is
-/// today's binary, so the moment one sweeps, its replenish republishes the hybrid
-/// pool and the DS flips `pq_capable` straight back on.
-///
-/// Then dave updates, and the migration must fire and carry the group across with
-/// bob's history intact.
+/// cleanest way to hold one device on the old code point while the rest of the
+/// world moves.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn the_roster_gate_holds_the_migration_on_its_own() {
+async fn the_migration_waits_for_every_roster_device_to_republish() {
     wipe().await;
+
+    set_current_suite(Some(SUITE_LEGACY));
 
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
@@ -434,13 +452,9 @@ async fn the_roster_gate_holds_the_migration_on_its_own() {
     let bob_p = bob.sign_up("bob@test.local").await;
     let dave_p = dave.sign_up("dave@test.local").await;
 
-    // Dave is the deployment's last pre-PQ device. While he is live the fleet gate
-    // is shut, so the group is born classic and nothing migrates.
-    downgrade_to_classic_only(&dave_p.id).await;
-
-    let group_id = alice.create_group("RosterGate").await;
+    let group_id = alice.create_group("NoStranding").await;
     let channel_id = alice.general_channel_id(&group_id).await;
-    assert_eq!(ds_group_info_suite(&group_id).await, SUITE_CLASSIC);
+    assert_eq!(ds_group_info_suite(&group_id).await, SUITE_LEGACY);
 
     alice.invite(&group_id, &bob_p.username).await;
     let invite_id = bob
@@ -454,53 +468,56 @@ async fn the_roster_gate_holds_the_migration_on_its_own() {
     bob.poll().await;
     bob.sweep().await;
 
-    alice.send_channel_message(&channel_id, "classic-era").await;
+    alice.send_channel_message(&channel_id, "old-suite-era").await;
     bob.sweep().await;
     assert!(
-        contents(&bob, &channel_id).await.contains(&"classic-era".to_string()),
-        "bob must be a working member of the classic group first"
+        contents(&bob, &channel_id).await.contains(&"old-suite-era".to_string()),
+        "bob must be a working member of the predecessor group first"
     );
 
     // Put dave on THIS conversation's roster. He never accepts, so his client
-    // never runs and he stays classic-only — but reconcile has already given his
-    // device a leaf in the classic tree, and a successor built now would leave it
-    // behind.
+    // never runs and never republishes — but reconcile has already given his
+    // device a leaf in the predecessor tree, and a successor built now would
+    // leave it behind.
     alice.invite(&group_id, &dave_p.username).await;
 
-    // Push dave past the dormancy window: the FLEET gate now ignores him
-    // entirely, so if the migration fires here it can only be because the roster
-    // gate is not doing its job.
-    backdate_last_seen(&dave_p.id, 200).await;
+    // The new build ships to alice and bob, but not to dave.
+    ship_the_new_build([&alice, &bob]).await;
     alice.sweep().await;
     assert_eq!(
         ds_head_generation(&group_id).await,
         0,
-        "the roster gate must hold the migration back on its own — dave is on this \
-         roster with no hybrid KeyPackage, so a successor would strand him"
+        "the migration must refuse to start — dave is on this roster with no KeyPackage \
+         in the target suite, so a successor would strand him"
+    );
+    assert_eq!(
+        ds_group_info_suite(&group_id).await,
+        SUITE_LEGACY,
+        "and the group must still be on the suite it can still admit dave into"
     );
 
-    // Dave updates his app. Both gates now pass.
-    upgrade_to_hybrid(&dave).await;
+    // Dave updates too. Every roster device can now be carried across.
+    republish_key_packages(&dave).await;
     alice.sweep().await;
     assert_eq!(
         ds_head_generation(&group_id).await,
         1,
-        "once every roster device can take hybrid, the migration must fire"
+        "once every roster device has republished, the migration must fire"
     );
 
     // Bob crosses with his history and keeps working.
-    alice.send_channel_message(&channel_id, "hybrid-era").await;
+    alice.send_channel_message(&channel_id, "new-suite-era").await;
     bob.poll().await;
     bob.sweep().await;
     let bobs = contents(&bob, &channel_id).await;
     assert!(
-        bobs.contains(&"classic-era".to_string()) && bobs.contains(&"hybrid-era".to_string()),
-        "bob must keep his classic-era history and read hybrid-era traffic, got: {bobs:?}"
+        bobs.contains(&"old-suite-era".to_string()) && bobs.contains(&"new-suite-era".to_string()),
+        "bob must keep his pre-boundary history and read post-boundary traffic, got: {bobs:?}"
     );
     assert_eq!(local_generation_of(&bob, &group_id).await, 1);
 
-    // And dave — the device the gate was protecting — can still take the invite up
-    // and land in the successor, which is the whole point of having waited.
+    // And dave — the device the gate was protecting — can still take the invite
+    // up and land in the successor, which is the whole point of having waited.
     let dave_invite = dave
         .first_pending_invite()
         .await
@@ -515,8 +532,8 @@ async fn the_roster_gate_holds_the_migration_on_its_own() {
     dave.sweep().await;
     assert!(
         contents(&dave, &channel_id).await.contains(&"dave-is-in".to_string()),
-        "the device the roster gate held the migration for must end up inside the \
-         successor, not stranded outside it"
+        "the device the gate held the migration for must end up inside the successor, \
+         not stranded outside it"
     );
 
     drop(alice);
@@ -527,13 +544,13 @@ async fn the_roster_gate_holds_the_migration_on_its_own() {
 // ─── S4 — the boundary evicts a pre-migration compromise ─────────────────────
 
 /// **Invalid state it attacks:** a migration that is cosmetic — the group is
-/// relabelled hybrid but the successor's key material is derivable from the
-/// predecessor's, so an adversary holding a stolen leaf keeps reading straight
-/// through the transition.
+/// relabelled onto the new suite but the successor's key material is derivable
+/// from the predecessor's, so an adversary holding a stolen leaf keeps reading
+/// straight through the transition.
 ///
-/// The attacker exfiltrates bob's entire MLS state while the group is classic,
-/// and is *proved* to be a real compromise by reading a pre-boundary message.
-/// The migration then stands up a successor whose group secrets are distributed
+/// The attacker exfiltrates bob's entire MLS state before the boundary, and is
+/// *proved* to be a real compromise by reading a pre-boundary message. The
+/// migration then stands up a successor whose group secrets are distributed
 /// under fresh X-Wing KeyPackages that the stolen state never held — so the
 /// attacker is evicted at the boundary.
 ///
@@ -548,15 +565,12 @@ async fn the_roster_gate_holds_the_migration_on_its_own() {
 async fn the_suite_boundary_evicts_a_stolen_pre_migration_leaf() {
     wipe().await;
 
+    set_current_suite(Some(SUITE_LEGACY));
+
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
-    let mut carol = TestClient::new().await;
     alice.sign_up("alice@test.local").await;
     let bob_p = bob.sign_up("bob@test.local").await;
-    let carol_p = carol.sign_up("carol@test.local").await;
-
-    // Carol holds the fleet gate shut so the group starts classic.
-    downgrade_to_classic_only(&carol_p.id).await;
 
     let group_id = alice.create_group("HarvestThenMigrate").await;
     let channel_id = alice.general_channel_id(&group_id).await;
@@ -587,19 +601,19 @@ async fn the_suite_boundary_evicts_a_stolen_pre_migration_leaf() {
     bob.sweep().await;
 
     // Migrate.
-    upgrade_to_hybrid(&carol).await;
+    ship_the_new_build([&alice, &bob]).await;
     alice.sweep().await;
     assert_eq!(ds_head_generation(&group_id).await, 1, "the migration must land");
     bob.poll().await;
     bob.sweep().await;
     assert_eq!(local_generation_of(&bob, &group_id).await, 1);
 
-    // The successor's Welcome is what moved the roster across. It must be hybrid,
-    // and its encapsulation must actually be ML-KEM.
+    // The successor's Welcome is what moved the roster across. It must be on the
+    // new suite, and its encapsulation must actually be ML-KEM.
     let (welcome_suite, kem_output) = newest_welcome_shape(&group_id).await;
     assert_eq!(
-        welcome_suite, SUITE_HYBRID,
-        "the successor's Welcome must be on the hybrid suite"
+        welcome_suite, SUITE_PQ,
+        "the successor's Welcome must be on the PQ suite"
     );
     assert_eq!(
         kem_output, KEM_OUTPUT_XWING,
@@ -624,7 +638,6 @@ async fn the_suite_boundary_evicts_a_stolen_pre_migration_leaf() {
 
     drop(alice);
     drop(bob);
-    drop(carol);
 }
 
 // ─── S6 — recovering into the successor with no Welcome ──────────────────────
@@ -640,26 +653,23 @@ async fn the_suite_boundary_evicts_a_stolen_pre_migration_leaf() {
 /// is proof the successor exists — and external-joins it instead
 /// (`maybe_advance_generation`, path 2).
 ///
-/// This is also where the design doc's "does the cross-signing cert survive the
-/// KEM change" question gets answered, and it is answered by consequence rather
-/// than by a separate assertion: an externally-joined device whose Ed25519 cert
-/// failed `verify_added_devices` is removed by the next reconcile, so alice could
-/// not then decrypt bob's message and bob would not appear exactly once on the
-/// roster. Both are asserted below. The signature path is untouched by #454 —
-/// only the KEM changed — and this is the scenario that would notice if it were.
+/// This is also where "does the cross-signing cert survive the suite change"
+/// gets answered, and it is answered by consequence rather than by a separate
+/// assertion: an externally-joined device whose device cert failed
+/// `verify_added_devices` is removed by the next reconcile, so alice could not
+/// then decrypt bob's message and bob would not appear exactly once on the
+/// roster. Both are asserted below.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn a_dropped_successor_welcome_recovers_by_external_join() {
     wipe().await;
 
+    set_current_suite(Some(SUITE_LEGACY));
+
     let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
-    let mut carol = TestClient::new().await;
     alice.sign_up("alice@test.local").await;
     let bob_p = bob.sign_up("bob@test.local").await;
-    let carol_p = carol.sign_up("carol@test.local").await;
-
-    downgrade_to_classic_only(&carol_p.id).await;
 
     let group_id = alice.create_group("DroppedSuccessorWelcome").await;
     let channel_id = alice.general_channel_id(&group_id).await;
@@ -675,11 +685,11 @@ async fn a_dropped_successor_welcome_recovers_by_external_join() {
     bob.poll().await;
     bob.sweep().await;
 
-    alice.send_channel_message(&channel_id, "classic-era").await;
+    alice.send_channel_message(&channel_id, "old-suite-era").await;
     bob.sweep().await;
 
-    // Open the fleet gate, then lose bob's successor Welcome on the way out.
-    upgrade_to_hybrid(&carol).await;
+    // Ship the new build, then lose bob's successor Welcome on the way out.
+    ship_the_new_build([&alice, &bob]).await;
     arm_ds_fault(DsFault::DropWelcome);
     alice.sweep().await;
     assert_eq!(
@@ -699,10 +709,10 @@ async fn a_dropped_successor_welcome_recovers_by_external_join() {
 
     // A recovered member is a working member, in both directions.
     alice.sweep().await;
-    alice.send_channel_message(&channel_id, "hybrid-era").await;
+    alice.send_channel_message(&channel_id, "new-suite-era").await;
     bob.sweep().await;
     assert!(
-        contents(&bob, &channel_id).await.contains(&"hybrid-era".to_string()),
+        contents(&bob, &channel_id).await.contains(&"new-suite-era".to_string()),
         "bob must decrypt post-recovery traffic on the successor lineage"
     );
 
@@ -713,9 +723,9 @@ async fn a_dropped_successor_welcome_recovers_by_external_join() {
         "alice must decrypt bob's message — a duplicate leaf would have forked the successor"
     );
 
-    // He kept his classic-era history through the recovery.
+    // He kept his pre-boundary history through the recovery.
     assert!(
-        contents(&bob, &channel_id).await.contains(&"classic-era".to_string()),
+        contents(&bob, &channel_id).await.contains(&"old-suite-era".to_string()),
         "external-joining the successor must not cost bob the history he already had"
     );
 
@@ -729,5 +739,4 @@ async fn a_dropped_successor_welcome_recovers_by_external_join() {
 
     drop(alice);
     drop(bob);
-    drop(carol);
 }

@@ -17,7 +17,7 @@ use crate::state::AppState;
 use super::generation::mls_group_id;
 use super::provider::{
     load_stored_group, parse_credential_device_id, parse_credential_user_id, signature_scheme,
-    store_only, MlsProvider, PollisProvider, CS_HYBRID,
+    store_only, MlsProvider, PollisProvider,
 };
 
 /// Result of the compare-and-swap commit submission in `reconcile_group_mls_impl`.
@@ -305,10 +305,11 @@ pub struct ReconcileOutcome {
     pub skipped_self_removal: bool,
     /// `(user_id, device_id)` pairs that belong on the roster but could not be
     /// added because they have published no KeyPackage in the group's
-    /// ciphersuite — a classic-only client facing a hybrid group (#454 P3).
+    /// ciphersuite — since #669 that means a device that has not republished its
+    /// pool since the group's suite stopped being the current one.
     ///
     /// Reported rather than silently dropped: these devices will not receive
-    /// messages until they run a client that publishes a hybrid pool, and
+    /// messages until they run a client that publishes a pool in that suite, and
     /// downgrading the group to admit them is never an option.
     pub skipped_no_suite_kp: Vec<(String, String)>,
 }
@@ -613,8 +614,9 @@ pub(super) async fn registered_devices(
 /// online simultaneously.
 ///
 /// The single definition of "desired roster". `reconcile_group_mls_impl` diffs
-/// the tree against it and `suite_for_new_group` decides a new group's
-/// ciphersuite from it; the two must never disagree about who belongs.
+/// the tree against it, and `migrate` moves exactly this set into a successor
+/// group; the two must never disagree about who belongs, or a migration would
+/// strand whoever the diff would have added.
 pub(super) async fn desired_roster_user_ids(
     conn: &libsql::Connection,
     conversation_id: &str,
@@ -911,9 +913,11 @@ pub async fn reconcile_group_mls_impl(
     // skipped (the DS replies 404 → `Ok(None)`).
     //
     // The claim is scoped to the GROUP's ciphersuite, never a fixed one. This is
-    // what makes "a hybrid group can never contain a member without a hybrid
-    // KeyPackage" hold: a device that has published no KP in the group's suite
-    // has nothing to claim, so it is skipped rather than downgraded in.
+    // what makes "a group can never contain a member without a KeyPackage in
+    // that group's suite" hold: a device that has published no KP in the group's
+    // suite has nothing to claim, so it is skipped rather than downgraded in.
+    // #669 left exactly one suite in production, but a group awaiting migration
+    // is still on its predecessor's, so the claim stays group-scoped.
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
     let mut skipped_no_suite_kp: Vec<(String, String)> = Vec::new();
     for (uid, did) in &devices_to_claim {
@@ -924,8 +928,9 @@ pub async fn reconcile_group_mls_impl(
             Some(kp) => kp_tuples.push((uid.clone(), did.clone(), kp)),
             None => {
                 eprintln!(
-                    "[mls] reconcile: no {} KeyPackage for {uid}:{did} — skipping (never downgrading)",
-                    if group_suite == CS_HYBRID { "hybrid" } else { "classic" },
+                    "[mls] reconcile: no KeyPackage in suite 0x{:04x} for {uid}:{did} — \
+                     skipping (never downgrading)",
+                    u16::from(group_suite),
                 );
                 skipped_no_suite_kp.push((uid.clone(), did.clone()));
             }

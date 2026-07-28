@@ -160,7 +160,7 @@ async fn sweep_conversation(
 ///
 /// Best-effort and capped: `budget` is shared across the sweep, so a device that
 /// is suddenly eligible in twenty conversations migrates a couple per launch
-/// rather than firing twenty add-everyone hybrid commits at once.
+/// rather than firing twenty add-everyone commits at once.
 async fn migrate_backstop(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -170,7 +170,7 @@ async fn migrate_backstop(
     if *budget >= super::migrate::MAX_MIGRATIONS_PER_SWEEP {
         return;
     }
-    match super::migrate::migrate_to_hybrid_if_due(state, conversation_id, user_id).await {
+    match super::migrate::migrate_to_current_suite_if_due(state, conversation_id, user_id).await {
         // Only a landed migration spends budget: an ineligible conversation did
         // no work, and a lost race left it eligible for the next sweep to retry.
         Ok(true) => {
@@ -178,7 +178,7 @@ async fn migrate_backstop(
         }
         Ok(false) => {}
         Err(e) => {
-            eprintln!("[mls-sweep] hybrid migration for {conversation_id}: {e}");
+            eprintln!("[mls-sweep] suite migration for {conversation_id}: {e}");
         }
     }
 }

@@ -19,7 +19,12 @@ use pollis_lib::commands::mls::{
 };
 use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 
-const CS: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+/// The suite production runs on since #669 — X-Wing KEM, ChaCha20-Poly1305,
+/// SHA-384, ML-DSA-44 leaf signatures. These tests build their groups with
+/// openmls directly rather than through `init_mls_group`, so the suite is named
+/// here; naming the retired classic one would exercise a code path no shipped
+/// build can reach.
+const CS: Ciphersuite = Ciphersuite::MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44;
 
 // ── Device abstraction ──────────────────────────────────────────────────────
 

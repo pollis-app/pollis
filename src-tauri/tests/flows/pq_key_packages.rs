@@ -1,21 +1,26 @@
-//! #454 P2 — hybrid key packages, end to end through the real command pipeline.
+//! Key packages, end to end through the real command pipeline.
 //!
-//! A hybrid-capable device (every P2 build) publishes TWO KeyPackage pools on
-//! login — `CS_CLASSIC` and `CS_HYBRID`, both through `PollisProvider` since
-//! #668 collapsed the two crypto backends into one — and advertises
-//! `user_device.pq_capable = 1` once the
-//! hybrid pool has actually landed. This exercises that through
-//! `sign_up` → `initialize_identity` → `ensure_mls_key_package` against the real
-//! in-process Delivery Service, then asserts the mixed-fleet invariant: an old
-//! app (no suite field) claiming a classic KP still works and never touches the
-//! hybrid pool. No group goes hybrid in P2 — that is P3/P4.
+//! #454 P2 published TWO KeyPackage pools on login — classic and hybrid — and
+//! had the DS derive `user_device.pq_capable` from whichever actually landed,
+//! because a fleet mid-upgrade contained devices that could serve only one of
+//! them. #669 retired the classic suite: there is one pool, one suite, and no
+//! capability flag.
+//!
+//! This exercises that through `sign_up` → `initialize_identity` →
+//! `ensure_mls_key_package` against the real in-process Delivery Service, and
+//! asserts the two things the collapse must not break: the pool is published in
+//! the current suite, and a claim that names no suite draws from it rather than
+//! from a pool nobody publishes any more.
 
 use crate::harness::{wipe, world, TestClient};
 use pollis_delivery::devices::{
-    apply_claim_key_package, ClaimKeyPackageBody, ClaimOutcome, CIPHERSUITE_CLASSIC,
-    CIPHERSUITE_HYBRID,
+    apply_claim_key_package, ClaimKeyPackageBody, ClaimOutcome, CIPHERSUITE_PQ,
 };
 use serial_test::serial;
+
+/// MLS code point `0x0001` — the suite Pollis shipped before #454, retired by
+/// #669. Named here only to assert that nothing publishes into it any more.
+const CIPHERSUITE_LEGACY: i64 = 0x0001;
 
 /// This user's (single) device id, read from the row the bootstrap registered.
 async fn device_id_of(user_id: &str) -> String {
@@ -49,6 +54,8 @@ async fn unclaimed_count(user_id: &str, device_id: &str, suite: i64) -> i64 {
     rows.next().await.expect("rows").expect("count row").get::<i64>(0).expect("count")
 }
 
+/// The retired `user_device.pq_capable` flag. Still a column (dropping it needs
+/// a multi-release dance); no longer written by anything.
 async fn pq_capable(device_id: &str) -> i64 {
     let conn = world().await.remote.conn().await.expect("remote conn");
     let mut rows = conn
@@ -61,11 +68,17 @@ async fn pq_capable(device_id: &str) -> i64 {
     rows.next().await.expect("rows").expect("device row").get::<i64>(0).expect("pq_capable")
 }
 
-/// A P2 device advertises both pools and flips `pq_capable` on — and a classic
-/// claim (the mixed-fleet, no-migration add) still works after it has both pools.
+/// Login publishes ONE pool, in the post-quantum suite, and a suite-less claim
+/// finds it.
+///
+/// The failure this guards against is silent and total: a device whose pool
+/// lands in a suite nobody claims from is a device that can never be added to a
+/// group, and every symptom of that shows up somewhere else entirely (an invite
+/// that "does nothing", a member missing from a tree). Counting both pools makes
+/// the mistake visible here instead.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn hybrid_device_advertises_both_pools_and_pq_capable() {
+async fn login_publishes_one_pool_in_the_current_suite() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -73,48 +86,46 @@ async fn hybrid_device_advertises_both_pools_and_pq_capable() {
     let user_id = profile.id.clone();
     let device_id = device_id_of(&user_id).await;
 
-    // `ensure_mls_key_package` published TARGET (5) of EACH suite on login.
+    // `ensure_mls_key_package` published TARGET (5) in the one suite.
     assert_eq!(
-        unclaimed_count(&user_id, &device_id, CIPHERSUITE_CLASSIC).await,
+        unclaimed_count(&user_id, &device_id, CIPHERSUITE_PQ).await,
         5,
-        "the classic pool must be published"
+        "the post-quantum pool must be published"
     );
     assert_eq!(
-        unclaimed_count(&user_id, &device_id, CIPHERSUITE_HYBRID).await,
-        5,
-        "the hybrid pool must be published alongside it"
+        unclaimed_count(&user_id, &device_id, CIPHERSUITE_LEGACY).await,
+        0,
+        "#669 retired the classic pool — nothing may still publish into it"
     );
 
-    // The capability flag flipped ON — and only because the hybrid pool actually
-    // landed (the DS derives it from the published packages, not a client claim).
-    assert_eq!(pq_capable(&device_id).await, 1, "pq_capable must be set once the hybrid pool is published");
+    // The capability flag is retired: publishing must not derive it any more.
+    assert_eq!(
+        pq_capable(&device_id).await,
+        0,
+        "pq_capable is retired in place; no write path may still set it"
+    );
 
-    // Mixed fleet: an OLD app claims a CLASSIC key package (no suite field on the
-    // wire → classic default). This is the "no-migration" add path and must still
-    // work unchanged now that the device also carries a hybrid pool…
+    // A claim that names no suite means "the current suite" and must find the
+    // pool. This is the wire-compatibility hinge: #454 read an absent field as
+    // classic, and keeping that reading would have made every untagged claim
+    // miss.
     let conn = world().await.remote.conn().await.expect("remote conn");
-    let classic_claim = ClaimKeyPackageBody {
+    let untagged_claim = ClaimKeyPackageBody {
         target_user_id: user_id.clone(),
         target_device_id: Some(device_id.clone()),
         ciphersuite: None,
     };
-    match apply_claim_key_package(&conn, &classic_claim).await.expect("claim") {
+    match apply_claim_key_package(&conn, &untagged_claim).await.expect("claim") {
         ClaimOutcome::Claimed { .. } => {}
         ClaimOutcome::NoKeyPackage => {
-            panic!("an old-app classic claim must still succeed when both pools are present")
+            panic!("a suite-less claim must draw from the current suite's pool")
         }
     }
 
-    // …and it drew from the classic pool ONLY — the hybrid pool is untouched.
     assert_eq!(
-        unclaimed_count(&user_id, &device_id, CIPHERSUITE_CLASSIC).await,
+        unclaimed_count(&user_id, &device_id, CIPHERSUITE_PQ).await,
         4,
-        "the classic claim consumed exactly one classic KP"
-    );
-    assert_eq!(
-        unclaimed_count(&user_id, &device_id, CIPHERSUITE_HYBRID).await,
-        5,
-        "a classic claim must never touch the hybrid pool"
+        "the claim consumed exactly one package"
     );
 
     drop(alice);

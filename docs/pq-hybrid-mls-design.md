@@ -1,13 +1,12 @@
 # Post-Quantum Hybrid MLS — Design
 
 **Status: COMPLETE — P0 through P5 all shipped (§8); §2.4 has since been SUPERSEDED by
-#668.** The ciphersuite is an explicit argument to the two functions that mint suite-bound
-material; every device publishes both key-package pools and the DS derives
-`user_device.pq_capable` from what lands; new groups are born on `CS_HYBRID` and existing
-ones migrate to it by successor generation — both behind the same two gates (full roster
-PQ-capable **and** the whole live fleet PQ-capable). Two things this document argued for
-have since been overtaken; both are corrected in place below rather than deleted, because
-the reasoning is a record:
+#668, and the dual-suite half of §3 by #669.** The ciphersuite is still an explicit
+argument to the two functions that mint suite-bound material, and an existing group still
+moves suite by successor generation. What is gone is the *second* suite: every device
+publishes one key-package pool and every new group is born on `CS_PQ`, with no gate to
+pass. Three things this document argued for have since been overtaken; all are corrected
+in place below rather than deleted, because the reasoning is a record:
 
 - **The hybrid suite moved, in place.** #454 shipped `CS_HYBRID` as X-Wing / `0x004D`,
   whose leaves still signed **Ed25519** — post-quantum in confidentiality only. #668 moved
@@ -21,11 +20,19 @@ the reasoning is a record:
   `openmls_rust_crypto`, and libcrux implements no ML-DSA suite at all, so **one backend
   serves both suites** and there is nothing left to route away from
   (`pollis-core/src/commands/mls/provider.rs`).
+- **The dual-suite model is gone; the migration machinery is not.** #669 retired the
+  classic suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) outright.
+  `CS_CLASSIC` is deleted, `CS_HYBRID` is renamed **`CS_PQ`**, devices publish one
+  key-package pool, `init_mls_group` always births on `CS_PQ`, and the whole
+  suite-*selection* apparatus this document designed — `suite_for_new_group`, the roster
+  and fleet `pq_capable` gates, `FLEET_DORMANCY_DAYS`, the `may_birth_hybrid` predicate
+  and its I7 Kani harnesses — is deleted with it. §3.2's Front C survives, generalised:
+  `migrate_to_hybrid_if_due` is renamed **`migrate_to_current_suite_if_due`** and triggers
+  on `group.ciphersuite() != CS_PQ` rather than `== CS_CLASSIC`, because `0x0052` is a
+  provisional code point (§7.4) and the next renumber is this same migration with a
+  different constant. See §3.3 for why the gates were sound and what dissolved the premise
+  they rested on.
 
-The **classic** suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) is
-untouched by #668 and still signs Ed25519. What remains outside this design's scope,
-deliberately: retiring classic key-package publication, which cannot begin until an app
-that no longer needs classic has full uptake — tracked separately as **#669**.
 **Scope:** migrate Pollis's MLS key exchange from classical X25519 to a hybrid
 X25519 + ML-KEM-768 construction, transparently, without breaking existing
 groups, existing devices, or the "messages must work" doctrine.
@@ -78,7 +85,8 @@ the code as it is today.
 
 - **Recommendation: do it, in phases, gated behind the box's headless MLS harness.
   All phases are now DONE (§8)** — new groups are born hybrid, existing groups migrate,
-  and key packages publish in **both** suites so an old-app device is never un-addable.
+  and key packages published in **both** suites so an old-app device was never un-addable
+  during the overlap (#669 has since ended the overlap and dropped the classic pool).
   Never a flag day. Two things landed differently from the sketch here and are worth
   reading in §8: migration is *not* a ciphersuite-transition commit at an epoch boundary
   (RFC 9420 has no such commit) but a **successor group** under a generation counter; and
@@ -120,7 +128,7 @@ split cleanly:
 | **KeyPackage init keys / leaf HPKE keys** | HPKE(X25519) | **YES** | A recorded KeyPackage (`mls_key_package.key_package`, `000000_baseline.sql:121-127`) is the entry point to seal a Welcome to a joining device; breaking it breaks that device's initial secrets. |
 | **Welcome messages** | HPKE(X25519) | **YES** | `mls_welcome.welcome_data` is HPKE-sealed to the joiner's init key. Recorded now, opened later. |
 | **Voice frame key** | AES-128-GCM, derived via `MlsGroup::export_secret` (whitepaper §10.2) | **YES, transitively** | The voice key is exported from the MLS epoch secret. If the epoch secret falls to a broken X25519 tree, so does the voice key. AES-128 itself is only *weakened* by Grover (≈2⁶⁴ quantum work), not broken. |
-| **Account identity + device signatures** | ML-DSA-44 since #668 (`account_identity.rs`, `verify_device_cert` in `pollis-device-cert`); Ed25519 before it, and still Ed25519 on classic-suite leaves | **NO (for HNDL)** | A signature authenticates; it does not seal. A future CRQC that forges Ed25519 enables *active* impersonation *going forward*, but cannot retroactively decrypt anything. This row is why signatures were deferred — and, per §2.4, why "HNDL-exposed?" turned out to be the wrong question for the *long-lived-verifiability* assets (account keys, device certs, the transparency log). |
+| **Account identity + device signatures** | ML-DSA-44 since #668 (`account_identity.rs`, `verify_device_cert` in `pollis-device-cert`); Ed25519 before it, and Ed25519 on classic-suite leaves until #669 retired that suite | **NO (for HNDL)** | A signature authenticates; it does not seal. A future CRQC that forges Ed25519 enables *active* impersonation *going forward*, but cannot retroactively decrypt anything. This row is why signatures were deferred — and, per §2.4, why "HNDL-exposed?" turned out to be the wrong question for the *long-lived-verifiability* assets (account keys, device certs, the transparency log). |
 | **PIN-wrapped local keys** | Argon2id + XChaCha20-Poly1305 (whitepaper §3) | **NO** | Symmetric; local; never on-wire. Not harvestable. |
 | **SQLCipher DB, attachment convergent encryption** | AES-256-GCM (whitepaper §7, §9) | **NO (practically)** | Symmetric AES-256; Grover halves the security level to 128 bits, which is fine. Not asymmetric, not Shor-breakable. |
 | **TURSO_TOKEN / R2 / LiveKit transport (TLS)** | TLS 1.3 | out of scope | Transport HNDL is the platform's problem, not the MLS protocol's. Noted, not addressed here. |
@@ -162,8 +170,9 @@ honestly (§6).
 ### 2.1 The primitive: X25519 + ML-KEM-768, combined
 
 The MLS ciphersuite defines the HPKE KEM used for TreeKEM path secrets, KeyPackage
-init keys, and Welcome sealing. Today Pollis uses **DHKEM(X25519, HKDF-SHA256)**
-(RFC 9180), embedded in the `CS_CLASSIC` suite constant in `provider.rs`. The hybrid target
+init keys, and Welcome sealing. When this was written Pollis used **DHKEM(X25519,
+HKDF-SHA256)** (RFC 9180), embedded in the `CS_CLASSIC` suite constant in `provider.rs`
+— the suite #669 has since retired. The hybrid target
 replaces that KEM with a **combiner** that runs *both* X25519 and ML-KEM-768 and
 mixes their outputs so the resulting shared secret is secure if **either** component
 is secure:
@@ -234,8 +243,11 @@ hybrid variant to select, so moving a group to hybrid *bundles* the AEAD change
 AES-128-GCM → ChaCha20-Poly1305 with the KEM change. This is not a regression:
 ChaCha20-Poly1305 is a 256-bit-key AEAD, at least as strong as AES-128-GCM against both
 classical and Grover attacks, and it is the AEAD Signal and WireGuard already lean on.
-What we *cannot* claim is "AEAD unchanged" — classic groups keep AES-128-GCM, hybrid
+What we *cannot* claim is "AEAD unchanged" — classic groups kept AES-128-GCM, hybrid
 groups run ChaCha20-Poly1305, and there is no knob to decouple the AEAD from the KEM.
+(Since #669 retired the classic suite there are no AES-128-GCM MLS groups left to be
+born; the AES-256-GCM uses above — SQLCipher and attachments — are unaffected, as they
+were never suite-bound.)
 (Nor can we claim signatures are unchanged any more: #668 bundled ML-DSA-44 into the same
 code point — §2.4. The suite's nominal security-level *label* moved 256 → 128 with that
 move, which is a labelling artifact of the draft's naming, not a downgrade: the KEM is
@@ -315,7 +327,10 @@ The cost side of the original argument was accurate and was simply **paid**, not
 What made that affordable is that the two things the deferral warned about had already
 been fixed by the time it landed — periodic self-update (#666) keeps leaves merged, so
 per-commit cost is logarithmic in N rather than linear, and the fleet-completeness gate
-(§3.3) means only PQ-capable devices ever sit in a PQ group.
+(§3.3) meant only PQ-capable devices ever sat in a PQ group. #669 has since deleted that
+gate along with the classic suite; what replaces it is not a weaker guarantee but a
+narrower one — every device is in a PQ group because there is no other kind, and a
+migration that cannot claim a target-suite KeyPackage for every roster device aborts.
 
 #### 2.4.3 What #668 changed, concretely
 
@@ -345,8 +360,12 @@ per-commit cost is logarithmic in N rather than linear, and the fleet-completene
 
 **Still Ed25519, deliberately:**
 
-- The **classic** MLS suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) and
-  the per-device Ed25519 leaf key that signs into it — retiring those is **#669**.
+- ~~The **classic** MLS suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`0x0001`) and
+  the per-device Ed25519 leaf key that signs into it — retiring those is **#669**.~~
+  **Done: #669 retired the suite.** No live suite mints an Ed25519 leaf. The per-device
+  Ed25519 key itself is *not* gone — it is still generated, published to
+  `user_device.mls_signature_pub` and bound by the v2 device cert, because the scheme is
+  what decides whether a stored key can verify a leaf persisted under an older code point.
 - The **relay directory** signing key (`POLLIS_OVERLAY_DIRECTORY_KEY`,
   `pollis-core/src/net/directory.rs`). The signed directory artifact is produced by a Node
   Lambda and `node:crypto` has no ML-DSA, so this one cannot move until its signer can.
@@ -370,11 +389,34 @@ and it must never drop a message for a current member ("messages must work").
 
 ### 3.1 The dual-suite model
 
+> **Superseded by #669 — one suite, and the constant it left behind.** The dual-suite
+> model below was the whole point of this section and it did its job; it is recorded, not
+> deleted, because the *shape* it left is what remains. As shipped after #669:
+>
+> ```rust
+> // provider.rs — as shipped, post-#669
+> pub(crate) const CS_PQ: Ciphersuite =
+>     Ciphersuite::MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44;   // 0x0052 (§7)
+>
+> /// The scheme a suite's leaves sign with. Still a function of the suite, not a
+> /// constant: a group persisted under an older code point must be read under its
+> /// own scheme.
+> pub(crate) fn signature_scheme(suite: Ciphersuite) -> SignatureScheme {
+>     suite.signature_algorithm()
+> }
+> ```
+>
+> `CS_CLASSIC` is deleted and `CS_HYBRID` is renamed `CS_PQ`. What survives is the
+> *parametrisation* — the suite is still an argument to `create_mls_group_in_suite` and
+> `build_key_package_in_suite`, and `signature_scheme` is still a function rather than a
+> constant — because that is what makes the next code-point move (§7.4) a one-constant
+> edit instead of the rewrite this section describes.
+
 Introduce a second ciphersuite constant alongside the existing one, rather than
 replacing it:
 
 ```rust
-// provider.rs — as shipped, post-#668
+// provider.rs — as shipped under #454, post-#668, pre-#669
 pub(crate) const CS_CLASSIC: Ciphersuite =
     Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;              // 0x0001
 pub(crate) const CS_HYBRID: Ciphersuite =
@@ -404,6 +446,14 @@ leaf keys, the DS auth credential moved to the PQ key, and the transparency log'
 moved to ML-DSA-44 under `sth:v2` contexts. See §2.4.3, §3.4 and §3.5.
 
 ### 3.2 Rollout order (three fronts, staggered)
+
+> **Where the three fronts stand after #669.** Front A has no staggering left: every new
+> group is born on `CS_PQ` unconditionally, and the deployment-measurement question below
+> ("enough of the fleet") no longer has to be answered. Front B is one pool, not two — the
+> classic pool is gone, and with it the mixed-fleet claim logic it existed to serve. Front
+> C is the part that survives on its own merits, generalised from "classic → hybrid" to
+> "anything that is not `CS_PQ` → `CS_PQ`"; everything it says below about generations,
+> the CAS and the epoch-0 accept rule is current.
 
 **Front A — new groups on hybrid.** Once a hybrid-capable app version is deployed to
 "enough" of the fleet (measured, not guessed — see acceptance criteria §8), new groups
@@ -466,6 +516,30 @@ decrypted and persisted locally are unaffected (they live in the local plaintext
 
 ### 3.3 The mixed-fleet interop rule (so nothing drops)
 
+> **SUPERSEDED by #669 — the premise, not the reasoning.** Everything below is a correct
+> account of what a *mixed* fleet requires, and it shipped and worked. #669 removed the
+> mixed fleet: the classic suite is retired, `CS_CLASSIC` is deleted, and there is no
+> longer a classic-only device that a hybrid group could fail to admit. With that, the
+> whole capability apparatus this section justified — `roster_is_fully_pq_capable`,
+> `fleet_is_fully_pq_capable`, `FLEET_DORMANCY_DAYS`, `may_birth_hybrid` and its I7 Kani
+> harnesses, and `devices.rs::mark_pq_capable` together with both writes to
+> `user_device.pq_capable` — is deleted rather than left dormant.
+>
+> **Why a hard cutover was allowed.** #669's own issue text assumed retirement would have
+> to wait out the 90-day fleet turnover this section describes. It does not, because the
+> deployment has zero active users: there is no old app in the field to strand, so the
+> gradual path had nothing left to protect. That is a property of *this* deployment at
+> *this* moment, not a correction to the argument — a fleet with real users would still
+> need every word below.
+>
+> **What the no-stranding guarantee rests on now.** The acceptance criterion is unchanged:
+> a migrated group can never contain a member who could not follow it across. It is now
+> enforced directly, by the step that claims a KeyPackage in the *target* suite for every
+> roster device before anything is created and aborts on the first miss — move everyone or
+> nobody. `pq_capable` was only ever a server-side *predictor* of that claim; the claim
+> itself is the direct test, and it is the layer the "lowest useful layer" bullet below
+> already names.
+
 The governing doctrine (CLAUDE.md "Messages must work"): a current member must be able
 to read every message sent while they were a member. The transition must not violate
 this for a member whose app is old. The rule that guarantees it:
@@ -504,7 +578,8 @@ CLAUDE.md "invalid states unrepresentable" principle):
   roster is hybrid-capable. An old app simply keeps living in the classic world until
   it updates.
 - **When the last laggard updates**, the next sweep migrates the group — as shipped,
-  migration is driven only by the cold-launch sweep (`migrate_to_hybrid_if_due`, bounded
+  migration is driven only by the cold-launch sweep (`migrate_to_hybrid_if_due`, renamed
+  `migrate_to_current_suite_if_due` by #669, bounded
   to `MAX_MIGRATIONS_PER_SWEEP = 2`), not by a natural commit, so an idle group heals the
   next time any member opens the app. The "no periodic self-update" gap in whitepaper §6.7
   was **not** closed as a side benefit of this; it was closed on its own terms by #666,
@@ -531,6 +606,11 @@ add migrations, so the number is claimed when the work lands, not reserved here)
   correct by default. The DS claim path (`ds_claim_key_package`) gains a suite
   parameter and claims a KP of the requested suite; an old app ignores the column and
   claims as it does today. Additive and backward-compatible.
+  **Post-#669:** the column stays and is still queried — every package now carries
+  `0x0052`, and the DS's default for a request that omits the field moved from the
+  classic point to `CIPHERSUITE_PQ`. With one suite it no longer separates two live
+  pools, but it is what keeps a package published under a *retired* code point from
+  being served for a current group, which is precisely the case §7.4 says to expect.
 - **`mls_commit_log` gets a suite-generation column** (the Front-C lineage mechanism,
   §3.2). `ALTER TABLE mls_commit_log ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;`
   Every existing row is generation 0, correct by default. The DS head rule
@@ -552,6 +632,11 @@ add migrations, so the number is claimed when the work lands, not reserved here)
   Set to 1 when a device publishes hybrid KeyPackages. Lets the reconcile path answer
   "is every member hybrid-capable?" cheaply. This is a hint, not a security boundary —
   the actual gate is "does a hybrid KP exist to claim," which fails safe on its own.
+  **Post-#669 the column is dead**, and the sentence above is why removing it cost
+  nothing: it was always a cheap *predictor* of the KP claim, never the gate. It is
+  **retired in place, not dropped** — migrations must stay additive (CLAUDE.md), so the
+  column remains with nothing reading or writing it, rather than being removed by a
+  narrowing migration.
 - **Signature columns were left untouched by the KEM change** (Ed25519 stayed), and the
   forward path this bullet sketched — "if ML-DSA is ever added, the key columns gain an
   algorithm tag the same additive way" — is exactly what #668 then did, one migration
@@ -593,6 +678,12 @@ key rides. A device that is hybrid-capable simply maintains two KP pools; the
 `replenish_key_packages` top-up logic (`key_packages.rs:141`) runs once per suite. On
 login, `ensure_mls_key_package` rotates both pools; the classic pool is retained for the
 entire overlap window so no old-app peer ever fails to add this device.
+
+**#669 ended the window.** `PUBLISHED_SUITES` — the two-element array the paragraph above
+describes — is gone. A device publishes and tops up exactly one pool, in `CS_PQ`, and
+`replenish_key_packages` counts only that suite. Nothing else in this section changes: the
+KEM material still rides inside the KeyPackage blob, and `mls_signature_pub_pq` is still
+the DS request credential.
 
 ---
 
@@ -719,8 +810,10 @@ header on every DS write (§3.5).
 
 ### 4.3 How we bound it
 
-- **Suite-scoped, not global:** classic groups keep classic (small) commits. Only
-  hybrid groups pay the size cost, and only for the KEM-bearing fields.
+- ~~**Suite-scoped, not global:** classic groups keep classic (small) commits. Only
+  hybrid groups pay the size cost, and only for the KEM-bearing fields.~~ **Gone with
+  #669** — with one suite, every group pays the size cost, so this is no longer a lever
+  the design holds. It still bounds *which fields* grow: only the KEM-bearing ones.
 - ~~**Keep signatures classical in Phase 1** (§2.4) so we do *not* stack ML-DSA's
   multi-KB-per-signature cost — on *every* leaf and *every* commit — on top of the KEM
   cost. That single decision is the biggest lever keeping commit/KeyPackage sizes down.~~
@@ -728,7 +821,8 @@ header on every DS write (§3.5).
   cashed in for the verifiability argument in §2.4.2: ML-DSA-44's 1312 B key + 2420 B
   signature per leaf roughly tripled the KeyPackage, Welcome and commit (§4.1). It was
   affordable *because* the other levers had already landed — self-update keeps the growth
-  logarithmic, and the fleet gate keeps the cost off classic groups entirely. With it
+  logarithmic, and the fleet gate kept the cost off classic groups entirely (that second
+  half expired with #669: there are no classic groups to keep it off). With it
   spent, "keep leaves merged" below is now the only structural lever left.
   (The AEAD is *not* a lever we hold either: the hybrid suite is ChaCha20-Poly1305 by
   construction — §2.3 — but that swap is roughly size-neutral versus AES-128-GCM, so it
@@ -756,6 +850,13 @@ pinned by absolute ceilings (§4.1) rather than argued.
 ---
 
 ## 5. Testing in-box
+
+> **Read the scenarios below as the #454 acceptance plan.** They are written around a
+> mixed fleet; #669 retired the classic suite, so the mixed-fleet cases (S3, and the
+> classic half of S2 and the marathon schedule) describe a state that can no longer be
+> constructed. What survives unchanged is the shape of the suite-transition tests — a
+> successor lineage, a boundary a message must not fall through — which still applies to
+> any future move off `0x0052`.
 
 The box builds and gates `pollis-core` headless
 (`cargo test -p pollis --no-default-features --features test-harness --test flows`,
@@ -854,11 +955,12 @@ before anything reaches CI or the fleet.
 - ~~**It does not make signatures/authentication post-quantum** (§2.4).~~ **Superseded by
   #668** — but only partially, and the residue must still be stated. Post-quantum
   authentication now covers MLS leaves on the PQ suite, account identity keys, device
-  certs, DS request auth and transparency-log STHs. It does **not** cover: (a) the classic
-  suite `0x0001`, whose leaves still sign Ed25519 until #669 retires it — so any group not
-  yet migrated is still classically authenticated; (b) the relay **directory** signing key
+  certs, DS request auth and transparency-log STHs. It did **not** cover, when #668
+  landed: (a) the classic suite `0x0001`, whose leaves signed Ed25519 — so any group not
+  yet migrated was still classically authenticated; (b) the relay **directory** signing key
   (`POLLIS_OVERLAY_DIRECTORY_KEY`), which stays Ed25519 because its signer is a Node
-  Lambda and `node:crypto` has no ML-DSA. Both are live Ed25519 surfaces today.
+  Lambda and `node:crypto` has no ML-DSA. **#669 closed (a)** by retiring the suite: every
+  MLS leaf in existence is now ML-DSA-44. (b) remains the one live Ed25519 surface.
 - **It does not retroactively protect already-sent classic traffic.** Everything sent
   before a group migrates was sealed with X25519 and is, in principle, harvestable. The
   migration caps the *future* harvest window; it cannot un-harvest the past. This is
@@ -1130,6 +1232,14 @@ dependency: the PQ signature suites are unreleased, so the tree is pinned to an 
 
 ## 8. Phased roadmap, acceptance criteria, dependencies
 
+> **Read this section as a record of what each phase shipped, not as current state.** Two
+> later tickets moved the ground under it: #668 (signatures, suite code point, one crypto
+> backend — §2.4, §7.3) and **#669** (the classic suite retired outright — §3.3). Where a
+> phase below names `CS_CLASSIC`, `PUBLISHED_SUITES`, `suite_for_new_group`, `pq_capable`
+> or `migrate_to_hybrid_if_due`, none of those exist today under those names or at all;
+> Phase 5 spells out exactly what #669 removed and why it did not need the multi-release
+> dance this roadmap budgeted for.
+
 **Phase 0 — Spike: COMPLETE.** ✅ The crypto route is pinned and proven. A throwaway
 two-client crate on `openmls 0.8.1` + `openmls_libcrux_crypto 0.3.1` (stock cargo, no
 patch) created a hybrid `0x004D` group and round-tripped an application message plus an
@@ -1225,8 +1335,8 @@ and asserts no client is stranded on a retired lineage plus a pool-scaled commit
 balloon detector. A `BOUNDARY_CROSSINGS` counter fails the driver if no generated case
 actually crossed, so the invariant cannot pass vacuously.
 
-**Phase 5 — Fleet completion: DONE (gate), classic retirement NOT started.** ✅ What
-shipped is the **fleet-completeness gate**, not the retirement: `fleet_is_fully_pq_capable`
+**Phase 5 — Fleet completion: DONE (gate); classic retirement since DONE by #669.** ✅ What
+this phase shipped is the **fleet-completeness gate**, not the retirement: `fleet_is_fully_pq_capable`
 requires that deployment-wide no `user_device` with `revoked_at IS NULL` and `last_seen`
 within `FLEET_DORMANCY_DAYS` (90) still has `pq_capable = 0`, and it gates **birth and
 migration alike** — one switch, one meaning. The per-roster rule of §3.3 is necessary but
@@ -1235,11 +1345,19 @@ classic-only device has only two options, both bad. The dormancy window is what 
 "the fleet has updated" a reachable condition rather than one hostage to a laptop in a
 drawer; the gate fails *toward availability*, so a check that cannot be evaluated keeps the
 group classic.
-**Still open, deliberately:** classic KP publication is *not* retired — pre-migration
-lineages and any client that has not yet updated still need it, and dropping it is a
-multi-release additive→drop dance (CLAUDE.md) that cannot begin until an app that stopped
-*needing* classic has full uptake. That retirement is now tracked as **#669**, which is
-also what finally removes the last Ed25519 MLS leaf key. AES-256 remains a *distinct
+**Left open here, deliberately, and since closed by #669:** as of this phase, classic KP
+publication was *not* retired — pre-migration lineages and any client that had not yet
+updated still needed it, and the retirement was expected to require a multi-release
+additive→drop dance (CLAUDE.md) that could not begin until an app that stopped *needing*
+classic had full uptake. **#669 did it as a hard cutover instead**, because the deployment
+has zero active users: there is no un-updated app in the field, so there was no uptake to
+wait for. `CS_CLASSIC` and `PUBLISHED_SUITES` are deleted, one pool publishes, the gate
+this phase built is deleted with the suite it gated, and *no* migration was needed — the
+`pq_capable` column is retired in place rather than dropped, keeping migrations additive.
+The one thing #669 did **not** do is remove the last Ed25519 MLS leaf key: the device still
+mints and publishes `mls_signature_pub` beside `mls_signature_pub_pq`, both bound by the v2
+cert, because `load_or_create_device_signer` is keyed by signature *scheme* and a group
+persisted under an older code point must stay readable. AES-256 remains a *distinct
 future track* (§2.3), off this HNDL critical path.
 **No longer open:** ML-DSA shipped as **#668** (§2.4), not as a future track. The reason it
 jumped the queue is in §2.4.2 — the transparency log, not MLS, is what made it urgent.
@@ -1278,8 +1396,10 @@ remains valid.
 > **This is the #454 issue text as filed, kept verbatim as a record.** Where it says
 > signatures stay Ed25519, read §2.4: #668 superseded that. Where it names `0x004D`,
 > `openmls_libcrux_crypto` or `SIGNATURE_SCHEME`, read §7: the suite is `0x0052`, there is
-> one crypto backend, and the scheme is a function of the suite. The corrected end state is
-> summarised at the bottom of this section.
+> one crypto backend, and the scheme is a function of the suite. Where it says *dual-suite*
+> — two key-package pools, a capability gate, an overlap window — read §3.3: #669 retired
+> the classic suite, so there is one pool, no gate, and no overlap. The corrected end state
+> is summarised at the bottom of this section.
 
 **Title:** Post-quantum hybrid MLS — migrate key exchange to X25519 + ML-KEM-768 (HNDL defence)
 
@@ -1367,7 +1487,7 @@ second suite migration when the IETF `draft-ietf-mls-pq-ciphersuites` suites
 (`0x004E`/`0x004F`/`0x0052`) stabilise. Also carry the group-size cost decision (commits
 are linear in N, ~8× classic — §4.1) into P3/P4.
 
-### 9.1 Corrected end state (post-#668)
+### 9.1 Corrected end state (post-#668, post-#669)
 
 For anyone reading this document as a statement of *current* fact rather than as a record:
 
@@ -1378,10 +1498,15 @@ For anyone reading this document as a statement of *current* fact rather than as
 | PQ suite AEAD | ChaCha20-Poly1305 | **unchanged** |
 | PQ suite KDF | SHA-256 | SHA-384 |
 | PQ suite signature | Ed25519 | **ML-DSA-44** (`SignatureScheme::MLDSA44`, `0x0904`) |
-| Classic suite | `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, `0x0001` | **unchanged**, still Ed25519 — retirement is **#669** |
-| Crypto backends | two, routed by suite (RustCrypto + libcrux) | **one** — `openmls_rust_crypto::RustCrypto` serves both |
+| Classic suite | `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, `0x0001` | **RETIRED (#669)** — `CS_CLASSIC` deleted, `CS_HYBRID` renamed `CS_PQ` |
+| Suites in use | two | **one** (`CS_PQ`) |
+| Suite at group birth | `suite_for_new_group`, behind roster + fleet `pq_capable` gates | **always `CS_PQ`** — every gate deleted with the suite it gated |
+| KeyPackage pools per device | two (`PUBLISHED_SUITES`), 5 each | **one**, 5 in `CS_PQ` |
+| `user_device.pq_capable` | DS-derived, read by both gates | **dead** — no reader, no writer; retired in place, column not dropped |
+| Suite migration | `migrate_to_hybrid_if_due`, classic → hybrid, behind both gates | `migrate_to_current_suite_if_due`, anything ≠ `CS_PQ` → `CS_PQ`, no gates; no-stranding enforced by the target-suite KP claim |
+| Crypto backends | two, routed by suite (RustCrypto + libcrux) | **one** — `openmls_rust_crypto::RustCrypto` |
 | openmls source | crates.io `0.8.1`, stock cargo | `[patch.crates-io]` to `main` rev `34222ef6`, five crates |
-| Device MLS signing key | one Ed25519 key per device | **one key per signature scheme**: Ed25519 (classic leaves) + ML-DSA-44 (PQ leaves) |
+| Device MLS signing key | one Ed25519 key per device | **one key per signature scheme**: ML-DSA-44 for every live leaf; the Ed25519 key is still minted, published and certified, but no live suite signs leaves with it |
 | Device cert | v1, `u8` length prefixes, one key | **v2** (`pollis-device-cert-v2\x00`), `u16` prefixes, certifies **both** leaf keys |
 | Account identity key | Ed25519 | **ML-DSA-44** (private key is still a 32-byte seed) |
 | DS request auth | Ed25519 over `mls_signature_pub`, 88 b64 chars | **ML-DSA-44** over `mls_signature_pub_pq`, ~3228 b64 chars |
@@ -1391,6 +1516,8 @@ For anyone reading this document as a statement of *current* fact rather than as
 
 Honest scope, restated: **post-quantum confidentiality** for message content (hybrid
 X25519 + ML-KEM-768 KEM) **and post-quantum authenticity** for identity, device certs and
-the transparency log (ML-DSA-44) — with the classic suite and the relay directory key still
-Ed25519, no fix for metadata or endpoint compromise, and no retroactive protection of
-already-sent classic traffic or already-signed Ed25519 history (§6).
+the transparency log (ML-DSA-44) — with the relay directory key still Ed25519, no fix for
+metadata or endpoint compromise, and no retroactive protection of already-sent classic
+traffic or already-signed Ed25519 history (§6). Retiring the classic suite does not change
+that last clause: a migration is forward-only, and traffic sealed under a retired suite
+stays sealed under it.

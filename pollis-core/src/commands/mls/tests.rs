@@ -12,8 +12,24 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 // single-file module) can keep referencing them by short name.
 use super::group_state::{create_mls_group_in_suite, load_group_with_signer};
 use super::key_packages::build_key_package_in_suite;
-use super::provider::{signature_scheme, MlsProvider, PollisProvider, CS_CLASSIC, CS_HYBRID};
+use super::provider::{signature_scheme, MlsProvider, PollisProvider, CS_PQ};
 use super::self_update::stage_self_update;
+
+/// A suite that is deliberately **not** [`CS_PQ`], used only by the tests.
+///
+/// #669 retired the classic suite from production, so there is no second suite
+/// to ship — but "a stored group whose suite is not the current one" is a state
+/// the code must still handle, because `CS_PQ`'s code point is provisional and
+/// `draft-ietf-mls-pq-ciphersuites` has renumbered once already. `migrate`, the
+/// suite-mismatch refusal in `stage_reconcile_commit`, `stored_group_ciphersuite`
+/// and `welcome_ciphersuite` all exist for that day; without a second suite in
+/// the test tree they would be untestable, and untestable code rots.
+///
+/// `0x0001` is the natural choice: it is the suite Pollis actually shipped
+/// before #454, so a group on it is a state that genuinely existed, and it is
+/// unlike `CS_PQ` in every dimension (KEM, AEAD, KDF, signature scheme) — which
+/// makes an accidental "these two happen to agree" pass impossible.
+const CS_LEGACY: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
 /// Create an in-memory SQLite DB with the `mls_kv` table.
 fn make_db() -> rusqlite::Connection {
@@ -43,13 +59,13 @@ fn create_group(
     user_id: &str,
 ) -> SignatureKeyPair {
     let provider = PollisProvider::new(conn);
-    let sig_keys = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
+    let sig_keys = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
     sig_keys.store(provider.storage()).unwrap();
 
     let credential = make_credential(user_id, &test_device_id(user_id));
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS_CLASSIC.signature_algorithm(),
+        CS_PQ.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -58,7 +74,7 @@ fn create_group(
 
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
     let config = MlsGroupCreateConfig::builder()
-        .ciphersuite(CS_CLASSIC)
+        .ciphersuite(CS_PQ)
         .use_ratchet_tree_extension(true)
         .build();
 
@@ -71,13 +87,13 @@ fn create_group(
 /// Generate a key package for `user_id` in `conn` and return the TLS bytes.
 fn gen_key_package(conn: &rusqlite::Connection, user_id: &str) -> Vec<u8> {
     let provider = PollisProvider::new(conn);
-    let sig_keys = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
+    let sig_keys = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
     sig_keys.store(provider.storage()).unwrap();
 
     let credential = make_credential(user_id, &test_device_id(user_id));
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS_CLASSIC.signature_algorithm(),
+        CS_PQ.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -85,7 +101,7 @@ fn gen_key_package(conn: &rusqlite::Connection, user_id: &str) -> Vec<u8> {
     };
 
     let bundle = KeyPackage::builder()
-        .build(CS_CLASSIC, &provider, &sig_keys, cred_with_key)
+        .build(CS_PQ, &provider, &sig_keys, cred_with_key)
         .unwrap();
 
     bundle.key_package().tls_serialize_detached().unwrap()
@@ -699,13 +715,13 @@ fn create_group_with_device(
     device_id: &str,
 ) -> SignatureKeyPair {
     let provider = PollisProvider::new(conn);
-    let sig_keys = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
+    let sig_keys = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
     sig_keys.store(provider.storage()).unwrap();
 
     let credential = make_credential(user_id, device_id);
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS_CLASSIC.signature_algorithm(),
+        CS_PQ.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -714,7 +730,7 @@ fn create_group_with_device(
 
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
     let config = MlsGroupCreateConfig::builder()
-        .ciphersuite(CS_CLASSIC)
+        .ciphersuite(CS_PQ)
         .use_ratchet_tree_extension(true)
         .build();
 
@@ -731,13 +747,13 @@ fn gen_key_package_with_device(
     device_id: &str,
 ) -> Vec<u8> {
     let provider = PollisProvider::new(conn);
-    let sig_keys = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
+    let sig_keys = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
     sig_keys.store(provider.storage()).unwrap();
 
     let credential = make_credential(user_id, device_id);
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS_CLASSIC.signature_algorithm(),
+        CS_PQ.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -745,7 +761,7 @@ fn gen_key_package_with_device(
     };
 
     let bundle = KeyPackage::builder()
-        .build(CS_CLASSIC, &provider, &sig_keys, cred_with_key)
+        .build(CS_PQ, &provider, &sig_keys, cred_with_key)
         .unwrap();
 
     bundle.key_package().tls_serialize_detached().unwrap()
@@ -767,7 +783,7 @@ fn gen_key_package_with_existing_signer(
     let credential = make_credential(user_id, device_id);
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS_CLASSIC.signature_algorithm(),
+        CS_PQ.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -775,7 +791,7 @@ fn gen_key_package_with_existing_signer(
     };
 
     let bundle = KeyPackage::builder()
-        .build(CS_CLASSIC, &provider, sig_keys, cred_with_key)
+        .build(CS_PQ, &provider, sig_keys, cred_with_key)
         .unwrap();
 
     bundle.key_package().tls_serialize_detached().unwrap()
@@ -1031,7 +1047,7 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     // enrollments (simulates `load_or_create_device_signer`).
     let bob_signer = {
         let provider = PollisProvider::new(&bob_db);
-        let sk = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
+        let sk = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
         sk.store(provider.storage()).unwrap();
         sk
     };
@@ -1058,7 +1074,7 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     let bob_db_v2 = make_db();
     let bob_signer_v2 = {
         let provider = PollisProvider::new(&bob_db_v2);
-        let sk = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
+        let sk = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
         sk.store(provider.storage()).unwrap();
         sk
     };
@@ -1571,19 +1587,19 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
     {
         let provider = PollisProvider::new(&alice_db);
         assert!(
-            provider.crypto().supported_ciphersuites().contains(&CS_HYBRID),
+            provider.crypto().supported_ciphersuites().contains(&CS_PQ),
             "the shipped provider must advertise the PQ suite"
         );
     }
 
-    // Bob builds a KeyPackage on the CS_HYBRID suite.
+    // Bob builds a KeyPackage on the CS_PQ suite.
     let (bob_kp_bytes, bob_hpke_init_len, bob_sig_pub_len) = {
         let provider = PollisProvider::new(&bob_db);
-        let sig = SignatureKeyPair::new(CS_HYBRID.signature_algorithm()).unwrap();
+        let sig = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
         sig.store(provider.storage()).unwrap();
         let sig_pub = OpenMlsSignaturePublicKey::new(
             sig.to_public_vec().into(),
-            CS_HYBRID.signature_algorithm(),
+            CS_PQ.signature_algorithm(),
         )
         .unwrap();
         let cwk = CredentialWithKey {
@@ -1591,7 +1607,7 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
             signature_key: sig_pub.into(),
         };
         let bundle = KeyPackage::builder()
-            .build(CS_HYBRID, &provider, &sig, cwk)
+            .build(CS_PQ, &provider, &sig, cwk)
             .unwrap();
         let init_len = bundle.key_package().hpke_init_key().as_slice().len();
         let sig_pub_len = bundle
@@ -1623,13 +1639,13 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
     );
 
     // Alice creates the group on the hybrid suite and adds Bob.
-    let alice_sig = SignatureKeyPair::new(CS_HYBRID.signature_algorithm()).unwrap();
+    let alice_sig = SignatureKeyPair::new(CS_PQ.signature_algorithm()).unwrap();
     let (welcome_bytes, mut alice_group) = {
         let provider = PollisProvider::new(&alice_db);
         alice_sig.store(provider.storage()).unwrap();
         let sig_pub = OpenMlsSignaturePublicKey::new(
             alice_sig.to_public_vec().into(),
-            CS_HYBRID.signature_algorithm(),
+            CS_PQ.signature_algorithm(),
         )
         .unwrap();
         let cwk = CredentialWithKey {
@@ -1637,7 +1653,7 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
             signature_key: sig_pub.into(),
         };
         let config = MlsGroupCreateConfig::builder()
-            .ciphersuite(CS_HYBRID)
+            .ciphersuite(CS_PQ)
             .use_ratchet_tree_extension(true)
             .build();
         let group_id = GroupId::from_slice(b"01JTEST0000000000XWINGHYBRD");
@@ -1683,7 +1699,7 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
                 .unwrap()
                 .into_group(&provider)
                 .unwrap();
-        assert_eq!(bob_group.ciphersuite(), CS_HYBRID);
+        assert_eq!(bob_group.ciphersuite(), CS_PQ);
 
         let ct = {
             let provider = PollisProvider::new(&alice_db);
@@ -1712,18 +1728,18 @@ fn pq_suite_reachable_and_genuinely_post_quantum() {
     }
 }
 
-/// T4. `validate_key_package` must not panic on a hybrid KeyPackage.
+/// T4. `validate_key_package` must not panic on a post-quantum KeyPackage.
 ///
 /// `validate_key_package` used to take a concrete `&RustCrypto`. That backend
 /// `unimplemented!()`-PANICS on the X-Wing suite, so the moment #454 P2 mints
-/// real hybrid KeyPackages, validating one would have aborted the process
+/// real post-quantum KeyPackages, validating one would have aborted the process
 /// rather than returning an error. The signature is now generic over
-/// `OpenMlsCrypto`, so each caller passes the backend that matches the suite it
-/// is serving — `PollisProvider` for classic, `PollisProvider` for hybrid.
+/// `OpenMlsCrypto`, so a KeyPackage in a suite the passed backend does not
+/// implement is a runtime `Err` and not an abort.
 ///
 /// Asserts the returned `KeyPackageRef` equals the one openmls computes, so this
 /// proves validation actually happened rather than merely not crashing, and pins
-/// the credential-mismatch path as a normal `Err` on both suites.
+/// the credential-mismatch path as a normal `Err` on either suite.
 fn validate_key_package_round_trip(provider: &impl OpenMlsProvider, suite: Ciphersuite) {
     let sig = SignatureKeyPair::new(suite.signature_algorithm()).unwrap();
     sig.store(provider.storage()).unwrap();
@@ -1740,7 +1756,7 @@ fn validate_key_package_round_trip(provider: &impl OpenMlsProvider, suite: Ciphe
     let kp_bytes = bundle.key_package().tls_serialize_detached().unwrap();
     let expected_ref = bundle.key_package().hash_ref(provider.crypto()).unwrap();
 
-    // The call that would have panicked under RustCrypto on the hybrid suite.
+    // The call that would have panicked under RustCrypto on the X-Wing suite.
     let got = validate_key_package(&kp_bytes, "alice", provider.crypto())
         .unwrap_or_else(|e| panic!("validate failed on {suite:?}: {e}"));
     assert_eq!(
@@ -1756,12 +1772,12 @@ fn validate_key_package_round_trip(provider: &impl OpenMlsProvider, suite: Ciphe
 }
 
 #[test]
-fn validate_key_package_handles_both_suites() {
-    let classic_db = make_db();
-    validate_key_package_round_trip(&PollisProvider::new(&classic_db), CS_CLASSIC);
+fn validate_key_package_handles_any_suite() {
+    let legacy_db = make_db();
+    validate_key_package_round_trip(&PollisProvider::new(&legacy_db), CS_LEGACY);
 
-    let hybrid_db = make_db();
-    validate_key_package_round_trip(&PollisProvider::new(&hybrid_db), CS_HYBRID);
+    let pq_db = make_db();
+    validate_key_package_round_trip(&PollisProvider::new(&pq_db), CS_PQ);
 }
 
 /// **One backend, and it stays RustCrypto.**
@@ -1772,12 +1788,12 @@ fn validate_key_package_handles_both_suites() {
 /// well-meaning "simplify the two providers into one" would have turned that
 /// reason into a lie.
 ///
-/// #668 removed `openmls_libcrux_crypto` from the tree, so the advisory is gone
-/// from `deny.toml` rather than argued away. What is worth pinning now is the
-/// weaker but still load-bearing fact underneath: the single provider every
-/// path constructs is RustCrypto-backed, and the classic suite it serves is
-/// AES-GCM — so reintroducing a backend is a decision that has to face this
-/// test, not a silent type change.
+/// #668 removed `openmls_libcrux_crypto` from the tree and #669 removed the
+/// second suite, so the advisory is gone from `deny.toml` rather than argued
+/// away. What is worth pinning now is the weaker but still load-bearing fact
+/// underneath: the single provider every path constructs is RustCrypto-backed,
+/// so reintroducing a backend is a decision that has to face this test rather
+/// than a silent type change.
 ///
 /// Type-level, so it cannot be satisfied by accident at runtime.
 #[test]
@@ -1793,36 +1809,44 @@ fn mls_backend_is_rustcrypto() {
         "PollisProvider must stay RustCrypto-backed; got {}",
         backend_of(&provider)
     );
-    assert_eq!(
-        CS_CLASSIC.aead_algorithm(),
-        AeadType::Aes128Gcm,
-        "the classic suite is AES-GCM — check the advisory status of any \
-         AES-GCM implementation before routing it to a different backend"
-    );
 
-    // One backend must serve BOTH suites, or the deleted dispatch has to come
-    // back. This is the property that made #668's collapse possible at all.
+    // The one backend must advertise the one suite. Asserted rather than
+    // assumed because `CS_PQ` is a provisional code point: bumping it to a
+    // value the pinned openmls does not implement would otherwise surface as
+    // every group operation failing at runtime instead of here.
     let advertised = provider.crypto().supported_ciphersuites();
     assert!(
-        advertised.contains(&CS_CLASSIC) && advertised.contains(&CS_HYBRID),
-        "RustCrypto must advertise both Pollis suites; got {advertised:?}"
+        advertised.contains(&CS_PQ),
+        "RustCrypto must advertise the Pollis suite; got {advertised:?}"
+    );
+
+    // The suite Pollis ships is ChaCha20-Poly1305, not AES-GCM. Pinned because
+    // it is the reason the AES-GCM advisory that shaped #454's provider routing
+    // (RUSTSEC-2026-0211) no longer touches any Pollis traffic: a change back to
+    // an AES-GCM suite has to re-open that question, and should fail here first.
+    assert_eq!(
+        CS_PQ.aead_algorithm(),
+        AeadType::ChaCha20Poly1305,
+        "the shipped suite must stay ChaCha20-Poly1305"
     );
 }
 
 // ── The ciphersuite is a real parameter, not a constant (#454 P1b) ──────────
 
-/// The signature scheme is per-suite since #668, and these are the two answers
-/// every call site depends on.
+/// The signature scheme is derived from the suite, not a constant.
 ///
-/// It was a single constant under #454, when both suites signed Ed25519 and a
-/// device presented one signing key everywhere. Pinning both values here means
-/// a suite swap that quietly changed a scheme — which would change which stored
-/// key a leaf is signed with, and therefore whether the device can still open
-/// its own groups — fails first and loudly.
+/// It genuinely was a single constant under #454, when both suites signed
+/// Ed25519 and a device presented one signing key everywhere; #668 made it a
+/// real function. #669 leaves only one suite in production, which makes this
+/// look collapsible again — it is not. `signature_scheme` is read off a *stored
+/// group* on every decrypt and commit path, and a group persisted before a code
+/// point change is still on its old suite until `migrate` moves it. A leaf
+/// signed with the wrong stored key is a device that can no longer open its own
+/// groups, so both answers are pinned here.
 #[test]
 fn signature_scheme_per_suite() {
-    assert_eq!(signature_scheme(CS_CLASSIC), SignatureScheme::ED25519);
-    assert_eq!(signature_scheme(CS_HYBRID), SignatureScheme::MLDSA44);
+    assert_eq!(signature_scheme(CS_LEGACY), SignatureScheme::ED25519);
+    assert_eq!(signature_scheme(CS_PQ), SignatureScheme::MLDSA44);
 }
 
 /// Drive a full two-party flow — create group, build KeyPackage, validate, add,
@@ -1909,61 +1933,69 @@ fn suite_seam_round_trip<CA, CB>(
     }
 }
 
-/// The classic suite still round-trips through the (now parametrised) seams,
-/// and reports the classic code point. This is the suite a group falls back to
-/// whenever any roster device is still classic-only (`suite_for_new_group`),
-/// and the suite every pre-#454-P3 group is already in.
+/// A suite that is not `CS_PQ` still round-trips through the production seams.
+///
+/// This is what proves the parametrisation is real rather than decorative now
+/// that production only ever passes one value. `CS_PQ`'s code point is
+/// provisional, so the day it renumbers, every one of these seams —
+/// `create_mls_group_in_suite`, `build_key_package_in_suite`,
+/// `load_group_with_signer`, `validate_key_package` — has to keep working
+/// against groups already stored under the old number. If that ever stops being
+/// true, `migrate` has nothing to migrate *from*.
 #[test]
-fn classic_suite_round_trips_through_the_production_seams() {
+fn a_non_current_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();
     let bob_db = make_db();
     let alice = PollisProvider::new(&alice_db);
     let bob = PollisProvider::new(&bob_db);
 
-    suite_seam_round_trip(&alice, &bob, CS_CLASSIC, "01JTESTSEAMCLASSIC00000000");
-    assert_eq!(u16::from(CS_CLASSIC), 0x0001);
+    suite_seam_round_trip(&alice, &bob, CS_LEGACY, "01JTESTSEAMLEGACY000000000");
+    assert_eq!(u16::from(CS_LEGACY), 0x0001);
 }
 
-/// The seam is REAL, not cosmetic: passing `CS_HYBRID` produces a genuinely
+/// The seam is REAL, not cosmetic: passing `CS_PQ` produces a genuinely
 /// post-quantum group through the same production functions.
 ///
-/// Since #454 P3 this is the suite `init_mls_group` selects whenever every
-/// device on the new conversation's roster is `pq_capable`.
+/// Since #669 this is the suite `init_mls_group` gives every new conversation,
+/// with no gate and no alternative.
 ///
 /// The code point is asserted literally because it is the wire contract: the DS
-/// stores it as the `key_packages.ciphersuite` routing label
-/// (`CIPHERSUITE_HYBRID`), so a silent change here would strand every published
-/// pool. #668 moved it from `0x004D` to `0x0052`.
+/// stores it as the `mls_key_package.ciphersuite` label (`CIPHERSUITE_PQ`), so a
+/// silent change here would strand every published pool. #454 minted it as
+/// `0x004D`, #668 moved it to `0x0052`, and the draft may renumber it again —
+/// which is a deliberate, `migrate`-shaped change, never a quiet one.
 #[test]
-fn hybrid_suite_round_trips_through_the_production_seams() {
+fn pq_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();
     let bob_db = make_db();
     let alice = PollisProvider::new(&alice_db);
     let bob = PollisProvider::new(&bob_db);
 
-    suite_seam_round_trip(&alice, &bob, CS_HYBRID, "01JTESTSEAMHYBRID000000000");
-    assert_eq!(u16::from(CS_HYBRID), 0x0052);
+    suite_seam_round_trip(&alice, &bob, CS_PQ, "01JTESTSEAMPQ00000000000000");
+    assert_eq!(u16::from(CS_PQ), 0x0052);
 }
 
-/// The two suites are genuinely different key exchanges, which is the entire
-/// point of #454. Asserted structurally on the KeyPackage the production builder
-/// emits: X25519 alone is a 32-byte HPKE init key, X-Wing is ML-KEM-768's 1184
-/// plus X25519's 32.
+/// The suite argument selects a genuinely different key exchange, which is the
+/// entire point of #454. Asserted structurally on the KeyPackage the production
+/// builder emits: X25519 alone is a 32-byte HPKE init key, X-Wing is
+/// ML-KEM-768's 1184 plus X25519's 32.
+///
+/// Reads as a tautology and is not: it is the only thing standing between
+/// "Pollis is post-quantum" and a `CS_PQ` that silently resolves to a classical
+/// KEM. The number 1216 is the claim.
 #[test]
-fn the_two_suites_produce_structurally_different_key_packages() {
-    let classic_db = make_db();
-    let hybrid_db = make_db();
+fn the_suite_parameter_selects_a_different_key_exchange() {
+    let legacy_db = make_db();
+    let pq_db = make_db();
 
-    let classic = PollisProvider::new(&classic_db);
-    let (_, classic_kp) =
-        build_key_package_in_suite(&classic, "bob", "bob_dev", CS_CLASSIC).unwrap();
-    let hybrid = PollisProvider::new(&hybrid_db);
+    let legacy = PollisProvider::new(&legacy_db);
+    let (_, legacy_kp) =
+        build_key_package_in_suite(&legacy, "bob", "bob_dev", CS_LEGACY).unwrap();
+    let hybrid = PollisProvider::new(&pq_db);
     let (_, hybrid_kp) =
-        build_key_package_in_suite(&hybrid, "bob", "bob_dev", CS_HYBRID).unwrap();
+        build_key_package_in_suite(&hybrid, "bob", "bob_dev", CS_PQ).unwrap();
 
-    // Each package is validated by the backend that serves its suite — the
-    // classic one cannot validate an X-Wing package, it would have to implement
-    // X-Wing to do so.
+    // Each package is validated by the backend that serves its suite.
     fn init_key_len(bytes: &[u8], crypto: &impl openmls_traits::crypto::OpenMlsCrypto) -> usize {
         let mut reader: &[u8] = bytes;
         KeyPackageIn::tls_deserialize(&mut reader)
@@ -1976,9 +2008,9 @@ fn the_two_suites_produce_structurally_different_key_packages() {
     }
 
     assert_eq!(
-        init_key_len(&classic_kp, classic.crypto()),
+        init_key_len(&legacy_kp, legacy.crypto()),
         32,
-        "the classic init key is a bare X25519 public key"
+        "the legacy init key is a bare X25519 public key"
     );
     assert_eq!(
         init_key_len(&hybrid_kp, hybrid.crypto()),
@@ -1995,15 +2027,14 @@ fn the_two_suites_produce_structurally_different_key_packages() {
 ///
 /// #454 needed this to break a circularity in suite→backend dispatch: you would
 /// otherwise need a provider to learn which provider to use. #668 collapsed the
-/// backends to one, so nothing dispatches on the answer any more — but callers
-/// that must know a group's suite *before* touching crypto still exist (suite
-/// selection, migration, the `pq_capable` gate), so the property is still load-
-/// bearing and still worth pinning.
+/// backends to one and #669 the suites, so nothing dispatches on the answer any
+/// more — but `migrate` still has to ask "is this group on the current suite?"
+/// before it can answer "must it move?", and it asks by reading storage.
 #[test]
 fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
     for (suite, conv) in [
-        (CS_CLASSIC, "01JTESTSUITEREADCLASSIC000"),
-        (CS_HYBRID, "01JTESTSUITEREADHYBRID0000"),
+        (CS_LEGACY, "01JTESTSUITEREADLEGACY0000"),
+        (CS_PQ, "01JTESTSUITEREADPQ00000000"),
     ] {
         let db = make_db();
         create_mls_group_in_suite(&PollisProvider::new(&db), conv, 0, "alice", "alice_dev", suite)
@@ -2026,8 +2057,8 @@ fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
 #[test]
 fn welcome_suite_is_readable_on_both_suites() {
     for (suite, conv) in [
-        (CS_CLASSIC, "01JTESTWELCOMESUITECLASSIC"),
-        (CS_HYBRID, "01JTESTWELCOMESUITEHYBRID0"),
+        (CS_LEGACY, "01JTESTWELCOMESUITELEGACY0"),
+        (CS_PQ, "01JTESTWELCOMESUITEPQ00000"),
     ] {
         let alice_db = make_db();
         let bob_db = make_db();
@@ -2077,49 +2108,53 @@ where
 }
 
 /// #454's acceptance criterion, encoded as an invalid state that cannot be
-/// created: **a hybrid group can never contain a member without a hybrid
-/// KeyPackage.**
+/// created: **a post-quantum group can never contain a member whose KeyPackage
+/// is not post-quantum.**
 ///
 /// Pollis blocks this at three depths, and the deepest one is the protocol
 /// itself. `reconcile` claims KeyPackages scoped to the group's own suite (so a
-/// classic-only device has nothing to claim and is reported in
-/// `ReconcileOutcome::skipped_no_suite_kp`), `stage_reconcile_commit`
-/// re-checks the claimed package's suite against the group's because the DS is
-/// untrusted, and — asserted here — openmls itself refuses the add. There is no
-/// code path, and no compromised server, that can silently downgrade a hybrid
-/// conversation by grafting in a classic leaf.
+/// device with nothing in that suite has nothing to claim and is reported in
+/// `ReconcileOutcome::skipped_no_suite_kp`), `stage_reconcile_commit` re-checks
+/// the claimed package's suite against the group's because the DS is untrusted,
+/// and — asserted here — openmls itself refuses the add.
+///
+/// #669 retired the classic suite, which removes the *fleet* that could have
+/// offered such a package but not the *attack*: the DS is untrusted, and a
+/// hostile one handing back a package in a weaker suite is exactly the
+/// downgrade this forbids. `CS_LEGACY` stands in for whatever that package
+/// claims to be.
 #[test]
-fn a_hybrid_group_cannot_admit_a_classic_key_package() {
+fn a_group_cannot_admit_a_key_package_from_another_suite() {
     let alice_db = make_db();
     let bob_db = make_db();
 
     let alice = PollisProvider::new(&alice_db);
-    create_mls_group_in_suite(&alice, "01JTESTNODOWNGRADE00000000", 0, "alice", "alice_dev", CS_HYBRID)
+    create_mls_group_in_suite(&alice, "01JTESTNODOWNGRADE00000000", 0, "alice", "alice_dev", CS_PQ)
         .unwrap();
     let (mut alice_group, alice_sig) =
         load_group_with_signer(&alice, "01JTESTNODOWNGRADE00000000", 0).unwrap();
-    assert_eq!(alice_group.ciphersuite(), CS_HYBRID);
+    assert_eq!(alice_group.ciphersuite(), CS_PQ);
 
-    // Bob is on an un-upgraded client: his only KeyPackage is classic.
+    // The package the untrusted DS hands back is in a different, weaker suite.
     let bob = PollisProvider::new(&bob_db);
     let (_, bob_kp_bytes) =
-        build_key_package_in_suite(&bob, "bob", "bob_dev", CS_CLASSIC).unwrap();
+        build_key_package_in_suite(&bob, "bob", "bob_dev", CS_LEGACY).unwrap();
     let mut reader: &[u8] = &bob_kp_bytes;
     let bob_kp = KeyPackageIn::tls_deserialize(&mut reader)
         .unwrap()
         .validate(alice.crypto(), ProtocolVersion::Mls10)
-        .expect("a classic package is well-formed; it is the SUITE that must reject it");
-    assert_eq!(bob_kp.ciphersuite(), CS_CLASSIC);
+        .expect("the package is well-formed; it is the SUITE that must reject it");
+    assert_eq!(bob_kp.ciphersuite(), CS_LEGACY);
 
     let err = alice_group
         .add_members(&alice, &alice_sig, &[bob_kp])
-        .expect_err("adding a classic leaf to a hybrid group must be impossible");
-    eprintln!("[test] hybrid group rejected the classic KeyPackage: {err}");
+        .expect_err("adding an off-suite leaf to a PQ group must be impossible");
+    eprintln!("[test] PQ group rejected the off-suite KeyPackage: {err}");
 
     // The rejected add must leave nothing staged — a failed downgrade attempt
     // cannot wedge the group.
     alice_group.clear_pending_commit(alice.storage()).unwrap();
-    assert_eq!(alice_group.ciphersuite(), CS_HYBRID, "the group stays hybrid");
+    assert_eq!(alice_group.ciphersuite(), CS_PQ, "the group stays post-quantum");
 }
 
 // ── #666: self-update, unmerged leaves, and commit growth ────────────────────
@@ -2142,12 +2177,14 @@ fn a_hybrid_group_cannot_admit_a_classic_key_package() {
 /// 8.7→11.1 KB).
 ///
 /// Deliberately a ratio and not a byte ceiling: the *shape* is the invariant,
-/// and it must hold on both suites even though a post-quantum encapsulation is
-/// ~35× larger than X25519's. Absolute ceilings live in
-/// [`hybrid_payloads_stay_under_their_ceilings`].
+/// and it must hold whatever the suite, even though a post-quantum
+/// encapsulation is ~35× larger than X25519's. Running it on `CS_LEGACY` as
+/// well is what makes that a property of TreeKEM rather than a coincidence of
+/// one set of key sizes. Absolute ceilings live in
+/// [`pq_payloads_stay_under_their_ceilings`].
 #[test]
 fn self_update_turns_linear_commit_growth_into_logarithmic() {
-    for suite in [CS_CLASSIC, CS_HYBRID] {
+    for suite in [CS_LEGACY, CS_PQ] {
         let (small_unmerged, small_merged) = commit_growth_probe(suite, 8, "01JT666GROWTHSMALL00000000");
         let (large_unmerged, large_merged) = commit_growth_probe(suite, 16, "01JT666GROWTHLARGE00000000");
 
@@ -2315,7 +2352,7 @@ fn a_self_update_replaces_our_own_leaf_key() {
     let db = make_db();
     let provider = PollisProvider::new(&db);
     let conv = "01JT666LEAFROTATES00000000";
-    create_mls_group_in_suite(&provider, conv, 0, "alice", "alice_dev", CS_HYBRID).unwrap();
+    create_mls_group_in_suite(&provider, conv, 0, "alice", "alice_dev", CS_PQ).unwrap();
 
     // openmls keeps the raw key bytes crate-private, so compare the key itself.
     let leaf_key_of = |p: &PollisProvider| {
@@ -2371,28 +2408,29 @@ fn self_update_jitter_is_stable_and_bounded() {
 /// return to unmerged leaves should surface here as a failing number, not as a
 /// support ticket about a group that stopped working at forty members.
 ///
-/// Measured after #668: KeyPackage 8,670 B (classic: 307 B), Welcome 15,241 B,
+/// Measured after #668: KeyPackage 8,670 B (classical: 307 B), Welcome 15,241 B,
 /// and a commit into a merged 8-member group 14,839 B. Moving the signature to
 /// ML-DSA-44 roughly tripled all three — a KeyPackage carries one leaf key and
 /// two signatures, so it alone went 2,659 → 8,670 B. Ceilings sit ~1.4× above
 /// each: tight enough that a doubling fails, loose enough to survive openmls
-/// padding and version churn. The classic KeyPackage is printed alongside so the
-/// multiplier the post-quantum suite costs stays visible and honest.
+/// padding and version churn. A classical KeyPackage is built alongside purely
+/// to print the multiplier, so the price of post-quantum stays visible and
+/// honest rather than becoming a number nobody remembers the baseline for.
 #[test]
-fn hybrid_payloads_stay_under_their_ceilings() {
-    // A KeyPackage is published per device per suite and claimed on every add,
-    // so it is the most-transferred hybrid object there is.
+fn pq_payloads_stay_under_their_ceilings() {
+    // A KeyPackage is published per device and claimed on every add, so it is
+    // the most-transferred post-quantum object there is.
     let kp_db = make_db();
     let (_, hybrid_kp) =
-        build_key_package_in_suite(&PollisProvider::new(&kp_db), "alice", "alice_dev", CS_HYBRID)
+        build_key_package_in_suite(&PollisProvider::new(&kp_db), "alice", "alice_dev", CS_PQ)
             .unwrap();
-    let classic_db = make_db();
-    let (_, classic_kp) =
-        build_key_package_in_suite(&PollisProvider::new(&classic_db), "alice", "alice_dev", CS_CLASSIC)
+    let legacy_db = make_db();
+    let (_, legacy_kp) =
+        build_key_package_in_suite(&PollisProvider::new(&legacy_db), "alice", "alice_dev", CS_LEGACY)
             .unwrap();
     eprintln!(
-        "[test] KeyPackage: classic {} B, hybrid {} B",
-        classic_kp.len(),
+        "[test] KeyPackage: classical {} B, post-quantum {} B",
+        legacy_kp.len(),
         hybrid_kp.len()
     );
     assert!(hybrid_kp.len() < 12_288, "hybrid KeyPackage: {} B", hybrid_kp.len());
@@ -2403,7 +2441,7 @@ fn hybrid_payloads_stay_under_their_ceilings() {
     let welcome = welcome_for_suite(
         &PollisProvider::new(&wa),
         &PollisProvider::new(&wb),
-        CS_HYBRID,
+        CS_PQ,
         "01JT454CEILINGWELCOME00000",
     );
     eprintln!("[test] hybrid Welcome (2 members): {} B", welcome.len());
@@ -2412,7 +2450,7 @@ fn hybrid_payloads_stay_under_their_ceilings() {
     // The commit is the payload that scales, so it is the one with a real
     // ceiling. Measured in the state the fleet actually runs in — every leaf
     // merged, because every member self-updates on join (#666).
-    let (unmerged, merged) = commit_growth_probe(CS_HYBRID, 8, "01JT454CEILINGCOMMIT000000");
+    let (unmerged, merged) = commit_growth_probe(CS_PQ, 8, "01JT454CEILINGCOMMIT000000");
     eprintln!("[test] hybrid commit at 8 members: {unmerged} B unmerged, {merged} B merged");
     assert!(merged < 20_480, "hybrid commit at 8 members: {merged} B");
 }

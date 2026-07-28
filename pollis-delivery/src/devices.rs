@@ -76,34 +76,22 @@ fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
 
 // ── Key-package entries ──────────────────────────────────────────────────────
 
-/// The MLS code point of `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` — the
-/// suite every Pollis group has ever used, and the default for any request that
-/// does not name one.
-///
-/// Every currently deployed client omits the suite field entirely, and every row
-/// written before the `ciphersuite` column existed carries this value from the
-/// column default (migration `000010`), so defaulting here keeps old clients on
-/// exactly the behaviour they have today.
-pub const CIPHERSUITE_CLASSIC: i64 = 0x0001;
-
 /// The MLS code point of `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`
-/// — the post-quantum suite. A device that publishes a pool in this suite is, by
-/// that act, `pq_capable`: it holds PQ KeyPackage private keys and can join a PQ
-/// group. Publishing PQ packages is therefore what flips `user_device.pq_capable`
-/// on (see [`mark_pq_capable`]).
+/// — the post-quantum suite, and since #669 the only suite Pollis uses. It is
+/// also the default for any request that does not name one.
 ///
-/// Like [`CIPHERSUITE_CLASSIC`] the DS only uses this as a routing/label value; it
-/// never parses the opaque `key_package` blob to confirm the suite.
+/// The DS only ever uses this as a routing/label value; it never parses the
+/// opaque `key_package` blob to confirm the suite.
 ///
-/// #454 shipped this as `0x004D` (X-Wing KEM, Ed25519 signatures); #668 moved it
-/// to `0x0052`, which keeps the same X-Wing KEM but signs ML-DSA-44, so the
-/// authentication half is post-quantum too. Both are provisional
-/// `draft-ietf-mls-pq-ciphersuites` code points and the draft may renumber them
-/// again — this constant and `CS_HYBRID` in `pollis-core` must move together,
-/// because the client tags its published pool with exactly what the DS matches
-/// on. Pools published under the old point are simply never claimed and age out;
-/// changing it in place was safe only because #668 landed with no active users.
-pub const CIPHERSUITE_HYBRID: i64 = 0x0052;
+/// #454 shipped this as `0x004D` (X-Wing KEM, Ed25519 signatures) alongside the
+/// classic `0x0001`; #668 moved it to `0x0052`, which keeps the same X-Wing KEM
+/// but signs ML-DSA-44, so the authentication half is post-quantum too; #669
+/// retired `0x0001`. These are provisional `draft-ietf-mls-pq-ciphersuites` code
+/// points and the draft may renumber them again — this constant and `CS_PQ` in
+/// `pollis-core` must move together, because the client tags its published pool
+/// with exactly what the DS matches on. Pools published under the old point are
+/// simply never claimed and age out.
+pub const CIPHERSUITE_PQ: i64 = 0x0052;
 
 /// One published key package: its hex hash-ref and the TLS-serialized
 /// `KeyPackage` bytes, base64 (STANDARD) since they are binary.
@@ -113,7 +101,7 @@ pub struct KeyPackageEntry {
     /// base64 (STANDARD) of the TLS-serialized `KeyPackage`.
     pub key_package: String,
     /// MLS ciphersuite code point this package was built with. Optional: absent
-    /// means [`CIPHERSUITE_CLASSIC`], which is what every pre-#454 client sends.
+    /// means [`CIPHERSUITE_PQ`], the only suite in use.
     ///
     /// Client-supplied, so this is a ROUTING HINT and nothing more — the real
     /// suite lives inside the opaque `key_package` blob and MLS rejects a
@@ -124,39 +112,10 @@ pub struct KeyPackageEntry {
 }
 
 impl KeyPackageEntry {
-    /// The suite to persist for this package, defaulting to classic.
+    /// The suite to persist for this package, defaulting to the current one.
     fn suite(&self) -> i64 {
-        self.ciphersuite.unwrap_or(CIPHERSUITE_CLASSIC)
+        self.ciphersuite.unwrap_or(CIPHERSUITE_PQ)
     }
-}
-
-/// Flip `user_device.pq_capable` on for `(actor, device_id)` when this write
-/// published at least one hybrid package. Publishing a hybrid pool is the ONLY
-/// thing that sets the flag (the replenish path runs the same UPDATE inside its
-/// transaction): a device advertises post-quantum capability by the *fact of having published a
-/// hybrid KeyPackage pool*, not by a client-asserted claim — so the server derives
-/// it from what actually landed in `mls_key_package`, keeping the flag and the
-/// pool from ever disagreeing (invalid-states-unrepresentable; CLAUDE.md forbids a
-/// client-side `user_device` UPDATE, so publication is the seam that earns it).
-///
-/// Monotonic on purpose: a later classic-only top-up never clears it — a device
-/// does not lose hybrid capability by replenishing its classic pool. Scoped
-/// `user_id = actor`, so a caller can only ever mark its own device. A no-op when
-/// no suite in the batch is hybrid.
-async fn mark_pq_capable(
-    conn: &Connection,
-    actor: &str,
-    device_id: &str,
-    suites: impl IntoIterator<Item = i64>,
-) -> anyhow::Result<()> {
-    if suites.into_iter().any(|s| s == CIPHERSUITE_HYBRID) {
-        conn.execute(
-            "UPDATE user_device SET pq_capable = 1 WHERE user_id = ?1 AND device_id = ?2",
-            libsql::params![actor.to_string(), device_id.to_string()],
-        )
-        .await?;
-    }
-    Ok(())
 }
 
 // ── POST /v1/key-packages ────────────────────────────────────────────────────
@@ -230,8 +189,6 @@ pub async fn apply_publish_key_packages(
         )
         .await?;
     }
-    // A hybrid pool having landed is what makes the device pq_capable.
-    mark_pq_capable(conn, &actor, &body.device_id, body.packages.iter().map(|p| p.suite())).await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -330,17 +287,6 @@ pub async fn apply_replenish_key_packages(
         )
         .await?;
     }
-    // In the same transaction as the pool it rotated in: a hybrid rotation makes
-    // the device pq_capable, and the flag flips atomically with the pool landing
-    // so the two can never be observed disagreeing. Monotonic — a classic-only
-    // rotation leaves an already-set flag alone.
-    if suites.contains(&CIPHERSUITE_HYBRID) {
-        tx.execute(
-            "UPDATE user_device SET pq_capable = 1 WHERE user_id = ?1 AND device_id = ?2",
-            libsql::params![actor.clone(), body.device_id.clone()],
-        )
-        .await?;
-    }
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
@@ -360,15 +306,15 @@ pub struct ClaimKeyPackageBody {
     #[serde(default)]
     pub target_device_id: Option<String>,
     /// Narrow the claim to packages published in this MLS ciphersuite. Optional:
-    /// absent means [`CIPHERSUITE_CLASSIC`], so a pre-#454 client — which never
-    /// sends the field — gets exactly the package it gets today.
+    /// absent means [`CIPHERSUITE_PQ`], the only suite in use.
     ///
-    /// The suite pools do not contaminate each other. Asking for a suite the
-    /// target has no unclaimed package in yields [`ClaimOutcome::NoKeyPackage`],
-    /// the same ordinary control-flow result as an exhausted pool — never a
-    /// package in the wrong suite. That is what lets #454 P4 state "a hybrid
-    /// group cannot contain a classic-only member" as a precondition instead of
-    /// discovering it when an Add commit fails.
+    /// Suite pools do not contaminate each other. Asking for a suite the target
+    /// has no unclaimed package in yields [`ClaimOutcome::NoKeyPackage`], the
+    /// same ordinary control-flow result as an exhausted pool — never a package
+    /// in the wrong suite. Since #669 there is one live pool, but the narrowing
+    /// is what keeps a stale package from a retired code point from being handed
+    /// out as if it were current, and it is how a future renumber stays a query
+    /// rather than a guess.
     #[serde(default)]
     pub ciphersuite: Option<i64>,
 }
@@ -448,8 +394,11 @@ pub fn claim_outcome_response(outcome: ClaimOutcome) -> Response {
 /// the OLDEST unclaimed package (`ORDER BY created_at ASC LIMIT 1`) matching the
 /// target — `user_id` only, or `user_id AND device_id` when a device is named —
 /// and flips its `claimed` flag in one statement. The match is additionally
-/// narrowed to the requested ciphersuite (classic when unspecified), so the
-/// suite pools stay disjoint.
+/// narrowed to the requested ciphersuite, so the suite pools stay disjoint. An
+/// absent `ciphersuite` means the *current* suite ([`CIPHERSUITE_PQ`]) — #454
+/// read it as classic, and #669 flipped it when the classic suite was retired,
+/// so an old client's untagged claim now lands in the only pool anyone
+/// publishes.
 ///
 /// Atomicity: the `WHERE claimed = 0` subquery is re-evaluated under the single
 /// libsql writer at statement-execution time, so two concurrent claims of the
@@ -460,9 +409,7 @@ pub async fn apply_claim_key_package(
     conn: &Connection,
     body: &ClaimKeyPackageBody,
 ) -> anyhow::Result<ClaimOutcome> {
-    // Absent suite = classic, so an old client's claim selects from exactly the
-    // rows it selected before the column existed (every one of which is classic).
-    let suite = body.ciphersuite.unwrap_or(CIPHERSUITE_CLASSIC);
+    let suite = body.ciphersuite.unwrap_or(CIPHERSUITE_PQ);
     let mut rows = match &body.target_device_id {
         Some(device_id) => {
             conn.query(

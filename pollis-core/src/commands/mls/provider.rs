@@ -1,14 +1,13 @@
 //! MLS provider and credential helpers.
 //!
 //! Houses `PollisProvider` (the OpenMls provider wiring crypto + storage), the
-//! ciphersuite constants, and the credential format used in MLS leaves.
+//! ciphersuite constant, and the credential format used in MLS leaves.
 //!
-//! One backend serves both suites (#668), so there is no suite→provider
-//! dispatch: every MLS operation runs through `PollisProvider`. What *is*
-//! per-suite is the signature scheme — [`CS_CLASSIC`] signs with Ed25519,
-//! [`CS_HYBRID`] with ML-DSA-44 — so anything that loads or creates a signing
-//! key takes the scheme from the suite (or from the stored group) rather than
-//! from a constant.
+//! There is exactly one suite ([`CS_PQ`]) and one backend, so nothing here
+//! dispatches: every MLS operation runs through `PollisProvider` and every leaf
+//! signs ML-DSA-44. #454 introduced a second suite so a fleet mid-upgrade could
+//! still talk, and #669 retired the first one once that was done; the code that
+//! chose between them is gone rather than pinned to a winner.
 
 use openmls::prelude::*;
 use openmls_rust_crypto::RustCrypto;
@@ -66,7 +65,7 @@ where
     }
 }
 
-/// **The provider every path uses**, for both suites. Backed by
+/// **The provider every path uses.** Backed by
 /// `openmls_rust_crypto::RustCrypto`.
 ///
 /// #454 needed a second backend: its hybrid suite was X-Wing / `0x004D`, which
@@ -78,7 +77,7 @@ where
 /// check.
 ///
 /// #668 dissolved the problem rather than routing around it. The suite it moves
-/// to — `0x0052`, see [`CS_HYBRID`] — keeps X-Wing as its KEM but pairs it with
+/// to — `0x0052`, see [`CS_PQ`] — keeps X-Wing as its KEM but pairs it with
 /// ChaCha20-Poly1305 and ML-DSA-44, and RustCrypto implements it while libcrux
 /// implements no ML-DSA suite at all. `openmls_libcrux_crypto` is therefore out
 /// of the dependency tree entirely, and with it the advisory: there is nothing
@@ -100,51 +99,95 @@ impl<'a> PollisProvider<'a> {
 
 // ── Ciphersuites ──────────────────────────────────────────────────────────────
 
-/// The suite every Pollis group uses today: MLS code point `0x0001` —
-/// X25519 + AES-128-GCM + SHA-256 + Ed25519. Served by [`PollisProvider`].
-///
-/// Every production call site passes this explicitly rather than relying on a
-/// default, so "which suite is this group / key package?" is answerable by
-/// reading the call and not by tracing a constant.
-pub(crate) const CS_CLASSIC: Ciphersuite =
-    Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
-
-/// The post-quantum suite: MLS code point `0x0052` — X-Wing (X25519 +
+/// **The** Pollis ciphersuite: MLS code point `0x0052` — X-Wing (X25519 +
 /// ML-KEM-768) + ChaCha20-Poly1305 + SHA-384 + **ML-DSA-44**. Served by
-/// [`PollisProvider`].
+/// [`PollisProvider`]. Post-quantum in both confidentiality and authentication.
 ///
-/// #454 shipped this constant as X-Wing / `0x004D`, which is post-quantum in
-/// *confidentiality* only: its leaves still signed with Ed25519, so a quantum
-/// adversary could forge group membership even though it could not read the
-/// traffic. #668 moves it to `0x0052`, which keeps exactly the same KEM
+/// It got here in two steps. #454 added it alongside the classic suite
+/// (`0x0001`, X25519 + AES-128-GCM + SHA-256 + Ed25519) as `0x004D`, which was
+/// post-quantum in *confidentiality* only — its leaves still signed Ed25519, so
+/// a quantum adversary could forge group membership even though it could not
+/// read the traffic. #668 moved it to `0x0052`, keeping exactly the same KEM
 /// (`HpkeKemType::XWingKemDraft6`, so the hybrid secrecy #454 argued for is
-/// unchanged) and replaces the signature with ML-DSA-44.
+/// unchanged) and replacing the signature with ML-DSA-44. #669 then retired the
+/// classic suite, which is why this is a constant and not a choice.
+///
+/// The KEM is a *hybrid* of X25519 and ML-KEM-768, so the suite is no weaker
+/// than X25519 even if ML-KEM falls. That is the property worth remembering: PQ
+/// here is additive, never a substitution of new maths for old.
 ///
 /// The code point is provisional — `draft-ietf-mls-pq-ciphersuites` has already
 /// renumbered once (`-06` dropped the standalone X-Wing code point in favour of
 /// `0x004E`/`0x004F`/`0x0052`), and it may renumber again. A code point change
 /// is a wire-format break for every group already on this suite, so treat it as
-/// a migration, not a version bump; see the `[patch.crates-io]` note in the
-/// workspace `Cargo.toml` and `docs/pq-hybrid-mls-design.md` §7.
-///
-/// The name stays `CS_HYBRID` because the property it names is still true and
-/// still the point: the KEM is a hybrid of X25519 and ML-KEM-768, so the suite
-/// is no weaker than X25519 even if ML-KEM falls.
-pub(crate) const CS_HYBRID: Ciphersuite =
+/// a migration, not a version bump: change this constant and every group
+/// migrates itself onto it via `super::migrate`, which is suite-agnostic and
+/// exists for exactly this. See the `[patch.crates-io]` note in the workspace
+/// `Cargo.toml` and `docs/pq-hybrid-mls-design.md` §7.
+pub(crate) const CS_PQ: Ciphersuite =
     Ciphersuite::MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44;
+
+/// The suite this build births groups on and publishes KeyPackages in.
+///
+/// [`CS_PQ`], always, in every shipped build — this is a function and not a
+/// `use` of the constant for one reason: `migrate` fires on a group whose stored
+/// suite is not the current one, and in production that state arises *only* from
+/// changing `CS_PQ` and shipping. A test cannot wait for a draft to renumber, so
+/// the `test-harness` build lets the flows suite move the current suite under a
+/// running fleet and watch the migration it triggers. Without that seam the
+/// entire successor-lineage mechanism — the part of Pollis that has to work
+/// perfectly on the one day it ever runs — would ship untested.
+///
+/// The override is deliberately global rather than per-client: a code point is a
+/// property of the *build*, and a world where two clients disagree about the
+/// current suite is not a state production can reach.
+#[cfg(not(feature = "test-harness"))]
+#[inline]
+pub(crate) fn current_suite() -> Ciphersuite {
+    CS_PQ
+}
+
+/// `0` means "no override" — the current suite is [`CS_PQ`]. Any other value is
+/// an MLS code point the harness has pinned.
+#[cfg(feature = "test-harness")]
+static CURRENT_SUITE_OVERRIDE: std::sync::atomic::AtomicU16 =
+    std::sync::atomic::AtomicU16::new(0);
+
+#[cfg(feature = "test-harness")]
+pub(crate) fn current_suite() -> Ciphersuite {
+    match CURRENT_SUITE_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => CS_PQ,
+        code => Ciphersuite::try_from(code).expect("test-harness: unknown ciphersuite override"),
+    }
+}
+
+/// Pin the suite this process treats as current, or `None` to restore [`CS_PQ`].
+///
+/// Test-harness only. Models a code-point change the way production would
+/// experience one: set it before the fleet signs up to get a world running on
+/// the old number, then clear it and let each client's next login and sweep
+/// carry it across — the same two steps (`ensure_mls_key_package`, then
+/// `migrate_to_current_suite_if_due`) a real renumber would take.
+#[cfg(feature = "test-harness")]
+pub fn set_current_suite_override(code_point: Option<u16>) {
+    CURRENT_SUITE_OVERRIDE.store(
+        code_point.unwrap_or(0),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
 
 /// The signature scheme a suite's leaves sign with.
 ///
-/// Under #454 this was a constant, because both suites signed Ed25519 — a
-/// device presented one signing key everywhere and the device cert certified
-/// exactly that key. #668 ends that: [`CS_CLASSIC`] still signs Ed25519 and
-/// [`CS_HYBRID`] signs ML-DSA-44, so a device holds one signing key *per
-/// scheme* (see `device::load_or_create_device_signer`).
+/// Still a function of the suite rather than the constant `MLDSA44`, because
+/// the suite is the authority: it is read off a *stored group* on every
+/// decrypt/commit path, and a group persisted before a code-point change is
+/// still on its old suite until `super::migrate` moves it. Hard-coding the
+/// scheme would silently sign that group's leaves with the wrong key.
 ///
 /// A thin wrapper over `Ciphersuite::signature_algorithm()` on purpose — it
-/// gives the call sites a name to point at, and `signature_scheme_per_suite` in
-/// `tests.rs` pins the two answers so a suite swap cannot silently change which
-/// key a leaf is signed with.
+/// gives the call sites a name to point at, and `signature_scheme_of_suite` in
+/// `tests.rs` pins the answer so a suite swap cannot silently change which key
+/// a leaf is signed with.
 pub(crate) fn signature_scheme(suite: Ciphersuite) -> SignatureScheme {
     suite.signature_algorithm()
 }
