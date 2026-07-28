@@ -1,9 +1,9 @@
 //! Suite generations — the client half of #454 P4.
 //!
 //! MLS binds the ciphersuite into the group at creation and offers no in-band
-//! way to change it, so upgrading a live conversation to the post-quantum hybrid
-//! suite cannot be a commit. It is a **successor group**: a second MLS group for
-//! the same conversation, in the new suite, whose roster is moved across by
+//! way to change it, so moving a live conversation onto another suite cannot be
+//! a commit. It is a **successor group**: a second MLS group for the same
+//! conversation, in the new suite, whose roster is moved across by
 //! Welcome. The successor restarts at MLS epoch 0, which is why the canonical
 //! log's monotone key widened from `(conversation, epoch)` to
 //! `(conversation, generation, epoch)`, ordered lexicographically — see
@@ -27,7 +27,7 @@
 //! *coexist locally*, which buys three properties outright:
 //!
 //! 1. A migrator whose commit loses the race rolls back by deleting the
-//!    successor. Its classic group is untouched — no rebuild, no lost keys.
+//!    successor. Its predecessor is untouched — no rebuild, no lost keys.
 //! 2. A joiner can apply a successor Welcome the moment it arrives and still
 //!    drain its predecessor afterwards, because applying the Welcome no longer
 //!    clobbers anything. Nothing has to be sequenced inside `apply_welcome`.
