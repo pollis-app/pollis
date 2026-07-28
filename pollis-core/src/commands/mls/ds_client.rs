@@ -171,8 +171,9 @@ pub async fn ds_post(
 /// `ciphersuite` names the suite pool to claim from; the DS never returns a
 /// package from another suite, so a suite the target cannot serve comes back as
 /// `Ok(None)` rather than a silently downgraded package. Passed explicitly so
-/// the choice is visible at the call site; every caller passes `CS_CLASSIC`
-/// until #454 P2.
+/// the choice is visible at the call site — and it is not always `CS_PQ`, even
+/// since #669: a caller adding a device to a group that has not yet migrated
+/// must claim in *that group's* suite or the add will be rejected.
 pub async fn ds_claim_key_package(
     state: &Arc<AppState>,
     target_user_id: &str,

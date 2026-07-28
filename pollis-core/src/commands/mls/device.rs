@@ -26,15 +26,17 @@ const DEVICE_SIG_PUB_SCOPE: &str = "PollisDeviceSigPub";
 /// scheme.
 ///
 /// Scheme-scoped since #668. Up to v1.7.0 both suites signed Ed25519, so one
-/// row per `(user, device)` was the whole story; now [`CS_CLASSIC`] leaves sign
-/// Ed25519 and [`CS_HYBRID`] leaves sign ML-DSA-44, and a device that is in
-/// groups of both suites holds both keys at once. Keying on the scheme rather
-/// than the suite is deliberate — it is the scheme that determines whether a
-/// stored key can verify a given leaf, and two suites sharing a scheme should
-/// share a key.
+/// row per `(user, device)` was the whole story; now [`CS_PQ`] leaves sign
+/// ML-DSA-44 while pre-#668 groups still sign Ed25519, and a device holding
+/// both is holding two keys at once. #669 retired the classic suite but not
+/// this: a device only stops needing its Ed25519 key once every group it is in
+/// has actually been migrated, which is a per-group event, not a release.
 ///
-/// [`CS_CLASSIC`]: super::provider::CS_CLASSIC
-/// [`CS_HYBRID`]: super::provider::CS_HYBRID
+/// Keying on the scheme rather than the suite is deliberate — it is the scheme
+/// that determines whether a stored key can verify a given leaf, and two suites
+/// sharing a scheme should share a key.
+///
+/// [`CS_PQ`]: super::provider::CS_PQ
 fn device_sig_pub_kv_key(user_id: &str, device_id: &str, scheme: SignatureScheme) -> Vec<u8> {
     format!("{user_id}:{device_id}:{}", scheme as u16).into_bytes()
 }
@@ -119,12 +121,13 @@ fn store_stable_device_sig_pub_bytes(
 /// gets signed into the `device_cert` in `user_device`.
 ///
 /// **Stable per signature scheme, not per device** (#668). Until v1.7.0 both
-/// suites signed Ed25519 and a device had exactly one signing key; now
-/// `CS_CLASSIC` leaves sign Ed25519 and `CS_HYBRID` leaves sign ML-DSA-44, and
-/// a leaf can only be signed by a key of its suite's scheme. A device in groups
-/// of both suites therefore holds both keys — same `mls_kv`, different rows.
-/// Callers pass the scheme they need, which they get from the suite they are
-/// operating in (`provider::signature_scheme`) or from the stored group.
+/// suites signed Ed25519 and a device had exactly one signing key; now `CS_PQ`
+/// leaves sign ML-DSA-44 while any group still on a pre-#668 suite signs
+/// Ed25519, and a leaf can only be signed by a key of its suite's scheme. A
+/// device in groups of both therefore holds both keys — same `mls_kv`,
+/// different rows. Callers pass the scheme they need, which they get from the
+/// suite they are operating in (`provider::signature_scheme`) or from the
+/// stored group.
 pub fn load_or_create_device_signer<C>(
     provider: &MlsProvider<'_, C>,
     user_id: &str,
