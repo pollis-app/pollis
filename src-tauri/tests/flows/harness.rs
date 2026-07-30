@@ -431,11 +431,12 @@ async fn delivery_submit(
     }
 }
 
-/// `GET /v1/commits/:conversation_id?since=[&user_id=&device_id=]` — serve the
-/// contiguous commit log, and (when `user_id`+`device_id` are present) record the
-/// reporting device's catch-up high-water + run the event-driven retention prune
-/// (#539). Mirrors production `pollis_delivery::commits`: reads are open, the
-/// record+prune is best-effort. Membership is read on MAIN, the log on LOG.
+/// `GET /v1/commits/:conversation_id?since=[&generation=]` — serve the
+/// contiguous commit log. Mirrors production `pollis_delivery::commits`: reads
+/// are open and side-effect-free. The catch-up high-water report that feeds the
+/// retention floor is the SEPARATE authenticated `POST /v1/commits/since`
+/// ([`delivery_report_commit_since`]) — recording it off unsigned query params
+/// here was the #681 log-wipe primitive.
 #[derive(serde::Deserialize)]
 struct HarnessSince {
     #[serde(default)]
@@ -443,10 +444,6 @@ struct HarnessSince {
     /// The suite generation being caught up on (#454 P4); absent → 0.
     #[serde(default)]
     generation: i64,
-    #[serde(default)]
-    user_id: Option<String>,
-    #[serde(default)]
-    device_id: Option<String>,
 }
 
 async fn delivery_commits_get(
@@ -459,31 +456,6 @@ async fn delivery_commits_get(
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("conn: {e}")),
     };
-
-    if let (Some(user_id), Some(device_id)) = (q.user_id.as_deref(), q.device_id.as_deref()) {
-        if !user_id.is_empty() && !device_id.is_empty() {
-            if pollis_delivery::commit::record_commit_since(
-                &conn,
-                &conversation_id,
-                user_id,
-                device_id,
-                q.generation,
-                q.since,
-            )
-            .await
-            .is_ok()
-            {
-                if let Ok(main_conn) = state.main.conn().await {
-                    let _ = pollis_delivery::commit::prune_commit_log(
-                        &main_conn,
-                        &conn,
-                        &conversation_id,
-                    )
-                    .await;
-                }
-            }
-        }
-    }
 
     let head =
         match pollis_delivery::commit::head_epoch_in(&conn, &conversation_id, q.generation).await {
@@ -516,6 +488,81 @@ async fn delivery_commits_get(
         }),
     )
         .into_response()
+}
+
+/// `POST /v1/commits/since` — the AUTHENTICATED catch-up high-water report
+/// (#681). Mirrors production `pollis_delivery::report_commit_since`: verify the
+/// device signature over the raw body (auth is always on in this harness), take
+/// the `(user_id, device_id)` from the VERIFIED signature — never the body — then
+/// record + prune (best-effort). Membership is read on MAIN, the log on LOG.
+#[derive(serde::Deserialize)]
+struct HarnessCommitSinceReport {
+    conversation_id: String,
+    #[serde(default)]
+    generation: i64,
+    since: i64,
+}
+
+async fn delivery_report_commit_since(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    // Auth is enforced in the flows harness, so the report MUST be signed — the
+    // identity comes from the verified signature, not the body.
+    let (user_id, device_id) = {
+        let conn = match state.main.conn().await {
+            Ok(c) => c,
+            Err(e) => return ds_internal_error(format!("conn: {e}")),
+        };
+        match pollis_delivery::auth::verify_request_identity(
+            &conn,
+            &headers,
+            method.as_str(),
+            uri.path(),
+            &body,
+            pollis_delivery::auth::now_unix(),
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(rej) => return rej.into_response(),
+        }
+    };
+
+    let parsed: HarnessCommitSinceReport = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+
+    let conn = match state.log.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    if pollis_delivery::commit::record_commit_since(
+        &conn,
+        &parsed.conversation_id,
+        &user_id,
+        &device_id,
+        parsed.generation,
+        parsed.since,
+    )
+    .await
+    .is_ok()
+    {
+        if let Ok(main_conn) = state.main.conn().await {
+            let _ = pollis_delivery::commit::prune_commit_log(
+                &main_conn,
+                &conn,
+                &parsed.conversation_id,
+            )
+            .await;
+        }
+    }
+    ds_ok()
 }
 
 /// `POST /v1/group-info` (W4) — republish GroupInfo, authed user must be a
@@ -2061,6 +2108,10 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
             rt.block_on(async move {
                 let router = axum::Router::new()
                     .route("/v1/commits", axum::routing::post(delivery_submit))
+                    .route(
+                        "/v1/commits/since",
+                        axum::routing::post(delivery_report_commit_since),
+                    )
                     .route(
                         "/v1/commits/:conversation_id",
                         axum::routing::get(delivery_commits_get),

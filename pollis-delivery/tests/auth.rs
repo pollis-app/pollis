@@ -49,6 +49,15 @@ CREATE TABLE mls_commit_log (\
   generation INTEGER NOT NULL DEFAULT 0\
 );\
 CREATE UNIQUE INDEX idx_mls_commit_conv_gen_epoch ON mls_commit_log (conversation_id, generation, epoch);\
+CREATE TABLE mls_commit_since (\
+  conversation_id TEXT NOT NULL,\
+  user_id TEXT NOT NULL,\
+  device_id TEXT NOT NULL,\
+  since_epoch INTEGER NOT NULL,\
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
+  generation INTEGER NOT NULL DEFAULT 0,\
+  PRIMARY KEY (conversation_id, user_id, device_id)\
+);\
 CREATE TABLE mls_group_info (\
   conversation_id TEXT PRIMARY KEY,\
   epoch INTEGER NOT NULL,\
@@ -191,6 +200,57 @@ fn signed_request(
         .header("X-Pollis-Signature", sig_b64)
         .body(Body::from(body.to_vec()))
         .unwrap()
+}
+
+/// A signed POST to an arbitrary path (the retention-report endpoint uses
+/// `/v1/commits/since`, not `/v1/commits`), signing over the exact body bytes.
+fn signed_post(
+    path: &str,
+    user_id: &str,
+    device_id: &str,
+    timestamp: i64,
+    signing_key: &SigningKey<MlDsa44>,
+    body: &[u8],
+) -> Request<Body> {
+    let msg = canonical_message("POST", path, timestamp, body);
+    let sig_b64 = b64(&signing_key.sign(&msg).encode());
+    Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("content-type", "application/json")
+        .header("X-Pollis-User", user_id)
+        .header("X-Pollis-Device", device_id)
+        .header("X-Pollis-Timestamp", timestamp.to_string())
+        .header("X-Pollis-Signature", sig_b64)
+        .body(Body::from(body.to_vec()))
+        .unwrap()
+}
+
+fn since_body_json(conv: &str, generation: i64, since: i64) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "conversation_id": conv,
+        "generation": generation,
+        "since": since,
+    }))
+    .unwrap()
+}
+
+/// The `(generation, since_epoch)` recorded for a device, or `None` if no report
+/// was recorded — the observable the #681 report-auth tests assert on.
+async fn recorded_since(db: &Db, conv: &str, device_id: &str) -> Option<(i64, i64)> {
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT generation, since_epoch FROM mls_commit_since \
+             WHERE conversation_id = ?1 AND device_id = ?2",
+            libsql::params![conv, device_id],
+        )
+        .await
+        .unwrap();
+    match rows.next().await.unwrap() {
+        Some(r) => Some((r.get::<i64>(0).unwrap(), r.get::<i64>(1).unwrap())),
+        None => None,
+    }
 }
 
 async fn status_of(router: axum::Router, req: Request<Body>) -> StatusCode {
@@ -356,6 +416,90 @@ async fn sender_id_mismatch_is_forbidden_403() {
     let req = signed_request("alice", "dev-alice", now(), &sk, &body, None);
 
     assert_eq!(status_of(router, req).await, StatusCode::FORBIDDEN);
+}
+
+// ── Retention high-water report auth (#681) ───────────────────────────────────
+
+/// A validly-signed `POST /v1/commits/since` is accepted AND recorded as the
+/// signing device's retention high-water. This is the authenticated replacement
+/// for the old unsigned GET side-effect.
+#[tokio::test(flavor = "multi_thread")]
+async fn signed_commit_since_report_is_recorded() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    let body = since_body_json("conv1", 0, 7);
+    let req = signed_post("/v1/commits/since", "alice", "dev-alice", now(), &sk, &body);
+
+    assert_eq!(status_of(router, req).await, StatusCode::OK);
+    assert_eq!(
+        recorded_since(&db, "conv1", "dev-alice").await,
+        Some((0, 7)),
+        "a signed report is recorded as the device's high-water"
+    );
+}
+
+/// An UNAUTHENTICATED report is ignored — the recorded high-water is UNCHANGED,
+/// not merely the request rejected. This is the core #681 fix: nobody can raise
+/// the retention floor on a device's behalf without its signature. (Dropping the
+/// report only ever leaves the floor MORE conservative — it can never widen
+/// pruning.)
+#[tokio::test(flavor = "multi_thread")]
+async fn unauthenticated_commit_since_report_is_ignored() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    // A truthful prior high-water for alice's device.
+    pollis_delivery::commit::record_commit_since(&db.conn().unwrap(), "conv1", "alice", "dev-alice", 0, 5)
+        .await
+        .unwrap();
+
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    // No signature headers, but a body that WOULD raise the high-water to 999.
+    let body = serde_json::to_vec(&serde_json::json!({
+        "conversation_id": "conv1",
+        "generation": 0,
+        "since": 999,
+        "user_id": "alice",
+        "device_id": "dev-alice",
+    }))
+    .unwrap();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/commits/since")
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .unwrap();
+
+    assert_eq!(status_of(router, req).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        recorded_since(&db, "conv1", "dev-alice").await,
+        Some((0, 5)),
+        "an unauthenticated report must NOT move the recorded high-water"
+    );
+}
+
+/// A signed report from a REVOKED device is rejected (auth refuses a revoked
+/// device — I5), and nothing is recorded. A revoked device can never rejoin, so
+/// it must not be able to influence the retention floor either.
+#[tokio::test(flavor = "multi_thread")]
+async fn revoked_device_commit_since_report_is_rejected() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_revoked_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    let body = since_body_json("conv1", 0, 7);
+    let req = signed_post("/v1/commits/since", "alice", "dev-alice", now(), &sk, &body);
+
+    assert_eq!(status_of(router, req).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        recorded_since(&db, "conv1", "dev-alice").await,
+        None,
+        "a revoked device's report is not recorded"
+    );
 }
 
 // ── Auth OFF (default) ────────────────────────────────────────────────────────

@@ -379,22 +379,30 @@ pub async fn ds_post_signed_or_session_ok(
 }
 
 /// Report this device's applied MLS `since` epoch for a conversation to the DS
-/// commits endpoint (`GET /v1/commits/{conv}?generation=&since=&user_id=&device_id=`),
-/// the signal the server-side retention floor is the MIN of across current members
-/// (#539, I4 Tier 1). `since` is the client's current local epoch — it still
-/// needs every commit `>= since`, so a truthful report can only ever PROTECT its
-/// own history from pruning.
+/// (`POST /v1/commits/since`), the signal the server-side retention floor is the
+/// MIN of across current members (#539, I4 Tier 1). `since` is the client's
+/// current local epoch — it still needs every commit `>= since`, so a truthful
+/// report can only ever PROTECT its own history from pruning.
+///
+/// **Device-SIGNED** (via [`ds_post`]). The report is a write — it raises the
+/// retention floor — so it must be authenticated as the device it claims to be.
+/// It used to be an unauthenticated `GET /v1/commits/{conv}?...&user_id&device_id`,
+/// which let anyone raise the floor for any device and, chained with the
+/// unclamped prune floor, wipe a conversation's whole commit log (#681). The
+/// reported `(conversation_id, generation, since)` now lives in the signed JSON
+/// body, so the signature's `sha256(body)` binding authenticates the values
+/// themselves — a signed empty-body GET with them in the query string could not.
+/// `user_id`/`device_id` are included for the DS's no-auth (dev/test) path only;
+/// when the DS enforces auth it derives both from the verified signature.
 ///
 /// `generation` scopes that position to one suite lineage (#454 P4). The DS keeps
 /// the pair monotone lexicographically, which is what stops a migrated device's
 /// report — epoch 0 of generation `N + 1`, numerically *below* the retired
 /// lineage's last epoch — from reading as a regression and being dropped.
 ///
-/// Reads are open on the DS, so this is an unauthenticated GET. Fully best-effort
-/// and EVENT-DRIVEN (fires once per catch-up, never polls): any failure — no DS
-/// URL, no device context, a network error — is swallowed, leaving the floor
-/// conservatively low (Tier 2's hard cap still bounds storage). A short timeout
-/// keeps it off the catch-up critical path.
+/// Fully best-effort and EVENT-DRIVEN (fires once per catch-up, never polls): any
+/// failure — no DS URL, not signed in yet, a network error — is swallowed,
+/// leaving the floor conservatively low (Tier 2's hard cap still bounds storage).
 pub async fn ds_report_commit_since(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -402,27 +410,20 @@ pub async fn ds_report_commit_since(
     generation: i64,
     since: i64,
 ) {
-    let base = match state.config.pollis_delivery_url.as_deref() {
-        Some(b) => b.trim_end_matches('/').to_string(),
-        None => return,
-    };
     let device_id = match state.device_id.lock().await.clone() {
         Some(d) => d,
         None => return,
     };
-    let url = format!("{base}/v1/commits/{conversation_id}");
-    let overlay = state.overlay_handle();
-    let _ = crate::net::overlay::http_client(overlay.as_deref())
-        .get(&url)
-        .query(&[
-            ("generation", generation.to_string()),
-            ("since", since.to_string()),
-            ("user_id", user_id.to_string()),
-            ("device_id", device_id),
-        ])
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await;
+    let body = serde_json::json!({
+        "conversation_id": conversation_id,
+        "generation": generation,
+        "since": since,
+        // Consulted only on the DS's no-auth dev/test path; ignored (but still
+        // signature-bound) when the DS enforces auth.
+        "user_id": user_id,
+        "device_id": device_id,
+    });
+    let _ = ds_post(state, "/v1/commits/since", &body).await;
 }
 
 /// Resolve the DS base URL or error if it isn't configured. Shared by the

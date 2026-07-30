@@ -238,6 +238,27 @@ pub async fn verify_request(
     body: &[u8],
     now: i64,
 ) -> Result<String, AuthRejection> {
+    Ok(verify_request_identity(conn, headers, method, path, body, now)
+        .await?
+        .0)
+}
+
+/// [`verify_request`] returning BOTH halves of the authenticated identity —
+/// `(user_id, device_id)`. Handlers that record something keyed on the specific
+/// DEVICE (e.g. the retention high-water in `record_commit_since`, #681) need the
+/// authenticated `device_id`, not just the user, and must take it from the
+/// VERIFIED signature rather than from an unauthenticated request field. Both
+/// values are the exact ones the signature was checked against — the pubkey was
+/// looked up by `(user_id, device_id)` and a revoked/unknown device never gets
+/// past [`lookup_device_pubkey`].
+pub async fn verify_request_identity(
+    conn: &Connection,
+    headers: &HeaderMap,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    now: i64,
+) -> Result<(String, String), AuthRejection> {
     let creds = parse_credentials(headers, now)?;
 
     let verifying_key = match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
@@ -251,7 +272,7 @@ pub async fn verify_request(
         .verify(&message, &creds.signature)
         .map_err(|_| AuthRejection::Unauthorized)?;
 
-    Ok(creds.user_id)
+    Ok((creds.user_id, creds.device_id))
 }
 
 /// Current unix time in seconds.
