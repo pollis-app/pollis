@@ -67,11 +67,46 @@ When device A commits a membership change:
 2. A `membership_changed` LiveKit event notifies online devices (convenience, not required). Like every realtime wake-up ping it carries **no sender/actor identity** — just the routing handle (see "Metadata-minimized signalling" below)
 3. Other devices call `process_pending_commits_inner` which:
    - Fetches commits from `mls_commit_log` at `epoch >= local_epoch`
-   - Applies them sequentially
+   - Applies them sequentially via `apply_one_commit`
    - If no local group exists → external-joins using published GroupInfo
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
    - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → `GET /v1/commits/:id?since=`) so the server can compute the commit-log **retention floor** (#539, below)
+
+### Commit-apply recovery: no silent wedge (#680)
+
+`apply_one_commit` returns either `Applied` (the local epoch advanced) or
+`Recover(RecoverReason)` — never a bare "stop" that a caller could mistake for
+"caught up". Every failure to advance is a **recoverable** state that
+delete-and-rejoins (external-join), and the caller keys recovery off the explicit
+reason, not off the group merely being absent. This closes the four former `Stop`
+sites (`MlsGroup::load` None/Err, `tls_deserialize`, `try_into_protocol_message`,
+`merge_staged_commit`) that used to wedge a group that existed locally but could
+never advance.
+
+Classification matches the **real openmls error enums**, never their `Display`
+strings (`classify_process_message_error`): a string match silently reclassifies
+the moment openmls rewords a message or moves a case, and the group wedges with no
+signal. An error this code does not recognise falls to `RecoverReason::Unclassified`
+and still recovers — so a future openmls bump surfaces loudly (caught by the
+classification unit tests) instead of wedging.
+
+- **Own commit fanned back (#411):** at the pinned openmls rev, our own commit
+  echoed by the DS is returned as *content* (`OwnPrivateMessage` for Pollis's
+  PrivateMessage-framed handshake, or `OwnPendingCommit` if it were PublicMessage),
+  **not** an error. `apply_one_commit` merges the pending commit to adopt it. The
+  pre-#680 code only matched the old `"created by this client"` error string, so at
+  this rev the own commit fell through unmerged, was miscounted as applied, and the
+  dangling-pending clear then discarded the landed commit — stranding the committer
+  at a phantom epoch.
+- **Eviction / fork / corrupt / merge failure:** delete the local group and
+  external-join at head (gated by `may_rejoin` — a removed/revoked device stays
+  out). Messages sealed at the jumped-over epoch fall under accepted loss #1
+  (messages sent before you (re)joined the tree).
+
+Regression harness: `commands/mls/tests.rs` (classifier + per-Stop-site real-MLS
+recovery + own-commit convergence) and `tests/flows/adversarial.rs`
+(`corrupt_commit_recovers_instead_of_wedging`).
 
 ### Commit-log retention (I4, #539)
 
