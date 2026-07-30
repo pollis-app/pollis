@@ -41,10 +41,10 @@ Source: `pollis-core/src/commands/mls.rs`
 Steps:
 1. **Build roster** from `group_member` + `group_invite` (or `dm_channel_member`)
 2. **TOFU-pin every roster peer's `account_id_pub`** via `batch_check_and_pin_account_keys` (one Turso query). First-seen keys are pinned silently; an existing pin that no longer matches the server flips `verified=0`, refreshes the pin in place, and emits a `KeyChanged` realtime event. The actor's own user id is excluded. This closes the historical group MITM hole — see `.codesight/wiki/safety.md`.
-3. **Find devices** with unclaimed KeyPackages for roster users
+3. **Find devices** with unclaimed KeyPackages for roster users — filtered to `revoked_at IS NULL`, so a revoked device's leftover KeyPackages are never claimed
 4. **Peek at tree** to see who's already a member (avoids wasting KPs)
 5. **Claim KPs** only for devices not in the tree
-6. **Diff**: desired set vs actual tree → compute adds and removes
+6. **Diff**: desired set vs actual tree → compute adds and removes. The desired set (`desired_set`) is the union of two sources — devices with an available KeyPackage (the adds) and existing leaves whose user is still on the roster (the retentions, which is what stops the committer evicting itself). **Both** are gated on `valid_devices`, the `revoked_at IS NULL` snapshot from `registered_devices`. Gating only the retention half was #679: a revoked device rode back in through its own leftover KeyPackage, so it never reached `to_remove` and its leaf survived. `valid_devices = None` (snapshot unreadable) disables the gate; `Some(empty)` means nothing is valid — the two are deliberately different states, so a transient `user_device` read failure cannot empty a group.
 7. **Build and stage commit** with both add and remove proposals — do NOT `merge_pending_commit` yet
 8. **Submit the commit bundle to the DS on a fresh connection**: commit + GroupInfo + Welcome(s) are one **atomic** `POST /v1/commits` — the DS writes all three in a single libsql transaction (see "MLS durability hardening" below), so a recipient never sees a commit with no matching Welcome
 9. **On success**: `merge_pending_commit` locally → advance the local epoch
@@ -67,11 +67,46 @@ When device A commits a membership change:
 2. A `membership_changed` LiveKit event notifies online devices (convenience, not required). Like every realtime wake-up ping it carries **no sender/actor identity** — just the routing handle (see "Metadata-minimized signalling" below)
 3. Other devices call `process_pending_commits_inner` which:
    - Fetches commits from `mls_commit_log` at `epoch >= local_epoch`
-   - Applies them sequentially
+   - Applies them sequentially via `apply_one_commit`
    - If no local group exists → external-joins using published GroupInfo
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
    - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → **device-signed** `POST /v1/commits/since`) so the server can compute the commit-log **retention floor** (#539, below). The report is authenticated (#681): it raises the floor, so it must be bound to the reporting device — reads (`GET /v1/commits/:id`) stay open, but recording a high-water does not. The report is fully best-effort and bounded by a short (5s) timeout inside `ds_report_commit_since`, so a black-holed DS can never stall catch-up — nor the suite-migration path (`migrate.rs`), which awaits it inline
+
+### Commit-apply recovery: no silent wedge (#680)
+
+`apply_one_commit` returns either `Applied` (the local epoch advanced) or
+`Recover(RecoverReason)` — never a bare "stop" that a caller could mistake for
+"caught up". Every failure to advance is a **recoverable** state that
+delete-and-rejoins (external-join), and the caller keys recovery off the explicit
+reason, not off the group merely being absent. This closes the four former `Stop`
+sites (`MlsGroup::load` None/Err, `tls_deserialize`, `try_into_protocol_message`,
+`merge_staged_commit`) that used to wedge a group that existed locally but could
+never advance.
+
+Classification matches the **real openmls error enums**, never their `Display`
+strings (`classify_process_message_error`): a string match silently reclassifies
+the moment openmls rewords a message or moves a case, and the group wedges with no
+signal. An error this code does not recognise falls to `RecoverReason::Unclassified`
+and still recovers — so a future openmls bump surfaces loudly (caught by the
+classification unit tests) instead of wedging.
+
+- **Own commit fanned back (#411):** at the pinned openmls rev, our own commit
+  echoed by the DS is returned as *content* (`OwnPrivateMessage` for Pollis's
+  PrivateMessage-framed handshake, or `OwnPendingCommit` if it were PublicMessage),
+  **not** an error. `apply_one_commit` merges the pending commit to adopt it. The
+  pre-#680 code only matched the old `"created by this client"` error string, so at
+  this rev the own commit fell through unmerged, was miscounted as applied, and the
+  dangling-pending clear then discarded the landed commit — stranding the committer
+  at a phantom epoch.
+- **Eviction / fork / corrupt / merge failure:** delete the local group and
+  external-join at head (gated by `may_rejoin` — a removed/revoked device stays
+  out). Messages sealed at the jumped-over epoch fall under accepted loss #1
+  (messages sent before you (re)joined the tree).
+
+Regression harness: `commands/mls/tests.rs` (classifier + per-Stop-site real-MLS
+recovery + own-commit convergence) and `tests/flows/adversarial.rs`
+(`corrupt_commit_recovers_instead_of_wedging`).
 
 ### Commit-log retention (I4, #539)
 

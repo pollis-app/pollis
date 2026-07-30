@@ -16,9 +16,9 @@
 //! leaf would fail the decrypt assertions — those are the load-bearing checks.
 
 use crate::harness::{
-    arm_ds_fault, drop_commit_row, ds_fault_armed, ds_head_epoch, ds_prune_commit_log,
-    force_high_water_for_all_members, prune_commits_below, steal_leaf, wipe, writable_remote,
-    DsFault, TestClient,
+    arm_ds_fault, corrupt_commit_row, drop_commit_row, ds_fault_armed, ds_head_epoch,
+    ds_prune_commit_log, force_high_water_for_all_members, prune_commits_below, steal_leaf, wipe,
+    writable_remote, DsFault, TestClient,
 };
 use serial_test::serial;
 
@@ -1480,7 +1480,16 @@ async fn removed_then_rerostered_member_recovers_via_external_join() {
 
 /// **Invalid state it attacks:** a revoked device climbing back into a group it
 /// was removed from (invariant: a device whose `user_device` row is tombstoned
-/// must stay out). The device drives EVERY recovery entry point a client has —
+/// must stay out).
+///
+/// **Scope note (#679):** this scenario revokes the device *and* removes the
+/// member, so the leaf is pruned by the explicit `remove_member`. It therefore
+/// does NOT cover "revocation prunes the leaf on its own" — that is
+/// [`revoking_one_device_prunes_its_leaf_with_no_roster_change`]. Do not read a
+/// pass here as evidence that revocation itself works; it passed throughout the
+/// entire lifetime of the #679 bug.
+///
+/// The device drives EVERY recovery entry point a client has —
 /// `process_pending_commits` and `get_channel_messages` — and each must fail
 /// CLEANLY: a no-op, never a panic, never a wedge of the rest of the group.
 ///
@@ -1731,4 +1740,254 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
 
     drop(alice);
     drop(bob);
+}
+
+// ─── Scenario 5b — revocation ALONE must prune the leaf (#679) ───────────────
+
+/// **Invalid state it attacks:** a device whose `user_device` row is tombstoned
+/// (`revoked_at`) still holding a leaf in a live MLS group.
+///
+/// **Why this is not covered by [`revoked_device_locked_out_of_every_recovery_path`]:**
+/// that scenario tombstones the device *and* calls `remove_member`, so the leaf
+/// is pruned by the explicit roster removal — it would pass even if revocation
+/// were a complete no-op, which is exactly what #679 turned out to be. This test
+/// removes the roster change entirely: the user stays a member in good standing,
+/// only one of their DEVICES is revoked, and the reconcile backstop must prune
+/// that device's leaf on its own.
+///
+/// The regression it pins: `revoke_device` tombstones rather than hard-deletes
+/// (migration 000004, #372), but `registered_devices` filtered on neither, so the
+/// tombstoned row still counted as "registered", stayed in `desired`, and never
+/// reached `to_remove`. Revocation was cosmetic — the revoked device went on
+/// decrypting every subsequent message.
+///
+/// **Asserted loudly:** the load-bearing check is the *observable* one — the
+/// revoked device cannot decrypt a message sent after revocation, while a
+/// third-party member still can (proving the group stayed live and we did not
+/// pass by wedging everyone). A silent no-op cannot satisfy both halves.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("RevokeDevice").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // Bob is the victim: his device gets revoked but he STAYS in the roster.
+    // Carol is the control — an untouched member who must keep decrypting, so a
+    // "pass" can never be earned by wedging the whole group.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    bob.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    // BASELINE — bob is a real, decrypting member holding a real leaf reached by
+    // a real key exchange. If this fails, nothing below proves anything.
+    alice.send_channel_message(&channel_id, "before-revoke").await;
+    bob.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&bob, &channel_id)
+            .await
+            .contains(&"before-revoke".to_string()),
+        "SETUP FAILED: bob never became a decrypting member, so this test cannot \
+         demonstrate anything about revocation"
+    );
+
+    // Revoke bob's device: tombstone the `user_device` row exactly as
+    // `revoke_device` does. Deliberately NO `remove_member` and NO roster change
+    // — that single omission is what separates this test from
+    // `revoked_device_locked_out_of_every_recovery_path`, and it is the entire
+    // bug: with a roster change the leaf is pruned by the removal, so the
+    // revocation path is never exercised.
+    {
+        let remote = writable_remote().await;
+        let conn = remote.conn().await.expect("remote conn");
+        let affected = conn
+            .execute(
+                "UPDATE user_device SET revoked_at = datetime('now') \
+                 WHERE user_id = ?1 AND revoked_at IS NULL",
+                libsql::params![bob_p.id.clone()],
+            )
+            .await
+            .expect("tombstone bob's device");
+        assert_eq!(affected, 1, "exactly one device row tombstoned");
+    }
+
+    // The roster is deliberately UNCHANGED. This assertion is the test's scope
+    // guarantee: if a future edit adds a `remove_member`, this fires and the test
+    // stops silently degrading into a duplicate of the removal scenario.
+    assert!(
+        alice.group_member_ids(&group_id).await.contains(&bob_p.id),
+        "bob must still be a roster member — only his DEVICE was revoked; without \
+         this, the leaf would be pruned by the removal and #679 would go untested"
+    );
+
+    // The reconcile backstop inside the sweep is now the ONLY thing that can
+    // prune bob's leaf. This is the step that did nothing before #679.
+    alice.sweep().await;
+    alice.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    alice.send_channel_message(&channel_id, "after-revoke").await;
+
+    // Control: the group is still live for everyone who belongs.
+    carol.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&carol, &channel_id)
+            .await
+            .contains(&"after-revoke".to_string()),
+        "carol is an unaffected member and must still receive messages — pruning a \
+         revoked device must not wedge the group"
+    );
+
+    // THE INVARIANT. Give the revoked device every chance to climb back in: both
+    // recovery entry points, then a decrypt attempt.
+    bob.process_commits_for(&channel_id).await;
+    bob.sweep().await;
+    bob.process_commits_for(&channel_id).await;
+    let bob_view = contents(&bob, &channel_id).await;
+    assert!(
+        !bob_view.contains(&"after-revoke".to_string()),
+        "REVOCATION LEAK (#679): bob's REVOKED device decrypted a message sent after \
+         revocation, with no roster change to prune its leaf. Revocation is cosmetic — \
+         the device keeps reading every future message and keeps deriving the call media \
+         key. bob view={bob_view:?}"
+    );
+
+    // And bob is STILL a roster member, so the eviction really was device-scoped
+    // rather than a removal in disguise.
+    assert!(
+        alice.group_member_ids(&group_id).await.contains(&bob_p.id),
+        "bob's leaf must be pruned WITHOUT removing him from the roster"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
+// ─── Scenario — #680: a commit that can't be applied wedges the group ─────────
+
+/// **Invalid state it attacks (issue #680):** "the group exists locally but can
+/// never advance." A commit whose bytes a replaying member cannot deserialize used
+/// to hit one of four `apply_one_commit` `Stop` arms; the caller did `Stop =>
+/// break` and only recovered when the local group was ABSENT, so a member whose
+/// group still EXISTED but was stuck at a stale epoch wedged there forever — no
+/// external-join, no signal, silently mistaken for "caught up".
+///
+/// This is the `MlsMessageIn::tls_deserialize` wedge site (group_state.rs). A real
+/// member's commit lands normally; its persisted bytes are then corrupted in the
+/// log (a disk-bitrot / replication-fault shape, the deserialize-wedge analogue of
+/// [`drop_commit_row`]) while its epoch column is left intact — so a returning
+/// member still classifies it as the next commit to APPLY, reaches the deserialize
+/// step, and fails there.
+///
+/// **Must FAIL before #680 and PASS after.** On pre-#680 code bob wedges at the
+/// corrupt epoch (`Stop => break`, group still present so the `!group_exists`
+/// backstop never fires) and can never decrypt post-corruption traffic. After
+/// #680 the deserialize failure is an explicit `Recover(MalformedCommit)`: bob
+/// drops the stale group and external-joins onto the head, converging with the
+/// rest of the group.
+///
+/// **Accepted loss (documented, CLAUDE.md loss #1):** the corrupt commit's own
+/// epoch is jumped over via external-join, so any message sealed AT that epoch is
+/// unrecoverable for bob — the same class as "messages sent before you joined the
+/// (rebuilt) MLS tree." Everything bob had already ratcheted past before the
+/// corruption (M1 at his join epoch, decrypted by the interleave hook) survives,
+/// and all post-recovery traffic is delivered.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn corrupt_commit_recovers_instead_of_wedging() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+    let dave_p = dave.sign_up("dave@test.local").await;
+
+    let group_id = alice.create_group("Wedge").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // Bob joins, catches up to his join epoch, then goes offline.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+
+    // A message at bob's join epoch — his interleave hook decrypts this on return,
+    // BEFORE the replay reaches the corrupt commit, so it must survive.
+    alice.send_channel_message(&channel_id, "M1-at-join-epoch").await;
+
+    // The NEXT commit (carol's add) lands at the current head epoch. Read it off
+    // the log rather than counting commits — a join costs the add plus the joiner's
+    // own #666 post-join self-update, so a census would silently drift.
+    let corrupt_epoch = ds_head_epoch(&group_id).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+
+    // Churn on so the corrupt row is INTERIOR — a higher epoch above it means the
+    // replay classifies it as "apply this commit", not "nothing new yet".
+    join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
+    let head_before = ds_head_epoch(&group_id).await;
+    assert!(
+        head_before > corrupt_epoch + 1,
+        "the dave add must sit above the corrupt epoch {corrupt_epoch} (head {head_before})"
+    );
+
+    // Corrupt the carol-add commit's bytes. Its epoch column is untouched, so the
+    // replay reaches `apply_one_commit` and fails at `tls_deserialize`.
+    corrupt_commit_row(&group_id, corrupt_epoch).await;
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        head_before,
+        "corrupting a row's bytes must not change the head"
+    );
+
+    // Bob comes back. His hook decrypts M1 at epoch 1; the replay then hits the
+    // corrupt commit. Pre-#680 he wedges here; post-#680 he external-joins onto
+    // the head.
+    let bob_after_return = contents(&bob, &channel_id).await;
+    assert!(
+        bob_after_return.contains(&"M1-at-join-epoch".to_string()),
+        "bob must retain the message at his join epoch (decrypted before the corrupt \
+         commit is hit), got: {bob_after_return:?}"
+    );
+
+    // Alice applies bob's recovery external-join, then sends fresh traffic.
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "after-recovery").await;
+
+    // LOAD-BEARING — the #680 invariant made observable: bob's group exists AND
+    // advanced. A wedged bob (group present, stuck at the corrupt epoch) would
+    // fail both checks.
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        members.contains(&bob_p.id),
+        "bob must be a current member after corrupt-commit recovery, got: {members:?}"
+    );
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"after-recovery".to_string()),
+        "bob must decrypt post-recovery traffic — he wedged on the corrupt commit otherwise \
+         (the 'exists locally but can never advance' state #680 makes unreachable)"
+    );
+
+    // Whole group converges on the head: dave (a continuous member) reads it too.
+    dave.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&dave, &channel_id).await.contains(&"after-recovery".to_string()),
+        "dave must decrypt post-recovery traffic — the group forked at the corrupt commit otherwise"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+    drop(dave);
 }

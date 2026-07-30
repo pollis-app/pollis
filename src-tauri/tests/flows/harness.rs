@@ -2369,6 +2369,42 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
     );
 }
 
+/// Post-hoc commit-BYTES corruption for the #680 deserialize-wedge scenario.
+///
+/// The analogue of [`drop_commit_row`], but instead of removing the row it
+/// TRUNCATES its `commit_data` blob (a disk-bitrot / replication-fault shape) while
+/// leaving the `epoch` column intact. A member replaying from below therefore
+/// still classifies the row as the next commit to APPLY (the epoch-gap check
+/// passes — the epoch is untouched), reaches `apply_one_commit`, and fails at
+/// `MlsMessageIn::tls_deserialize`. On pre-#680 code that was a `Stop` that wedged
+/// the member permanently (the group exists locally yet can never advance); after
+/// #680 it is an explicit `Recover(MalformedCommit)` that external-joins onto the
+/// head.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+/// Asserts exactly one row was corrupted — a silent no-op would prove nothing.
+pub(crate) async fn corrupt_commit_row(conversation_id: &str, epoch: i64) {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for corrupt_commit_row");
+    // Truncate to a two-byte stub: too short to be a valid TLS-serialised
+    // MlsMessageOut, so `tls_deserialize` fails outright.
+    let affected = conn
+        .execute(
+            "UPDATE mls_commit_log SET commit_data = X'0001' \
+             WHERE conversation_id = ?1 AND epoch = ?2 \
+               AND generation = (SELECT COALESCE(MAX(generation), 0) FROM mls_commit_log \
+                                  WHERE conversation_id = ?1)",
+            libsql::params![conversation_id.to_string(), epoch],
+        )
+        .await
+        .expect("corrupt commit row");
+    assert_eq!(
+        affected, 1,
+        "corrupt_commit_row: expected exactly ONE commit at epoch {epoch} for \
+         {conversation_id} to corrupt, changed {affected} — the scenario's setup is wrong"
+    );
+}
+
 /// Prune the commit log below `floor` (EXCLUSIVE) via the REAL DS retention
 /// DELETE (`pollis_delivery::commit::delete_commits_below`) — the exact statement
 /// the event-driven prune runs (#539). Models a Tier-2 prune whose floor has
