@@ -41,10 +41,10 @@ Source: `pollis-core/src/commands/mls.rs`
 Steps:
 1. **Build roster** from `group_member` + `group_invite` (or `dm_channel_member`)
 2. **TOFU-pin every roster peer's `account_id_pub`** via `batch_check_and_pin_account_keys` (one Turso query). First-seen keys are pinned silently; an existing pin that no longer matches the server flips `verified=0`, refreshes the pin in place, and emits a `KeyChanged` realtime event. The actor's own user id is excluded. This closes the historical group MITM hole — see `.codesight/wiki/safety.md`.
-3. **Find devices** with unclaimed KeyPackages for roster users
+3. **Find devices** with unclaimed KeyPackages for roster users — filtered to `revoked_at IS NULL`, so a revoked device's leftover KeyPackages are never claimed
 4. **Peek at tree** to see who's already a member (avoids wasting KPs)
 5. **Claim KPs** only for devices not in the tree
-6. **Diff**: desired set vs actual tree → compute adds and removes
+6. **Diff**: desired set vs actual tree → compute adds and removes. The desired set (`desired_set`) is the union of two sources — devices with an available KeyPackage (the adds) and existing leaves whose user is still on the roster (the retentions, which is what stops the committer evicting itself). **Both** are gated on `valid_devices`, the `revoked_at IS NULL` snapshot from `registered_devices`. Gating only the retention half was #679: a revoked device rode back in through its own leftover KeyPackage, so it never reached `to_remove` and its leaf survived. `valid_devices = None` (snapshot unreadable) disables the gate; `Some(empty)` means nothing is valid — the two are deliberately different states, so a transient `user_device` read failure cannot empty a group.
 7. **Build and stage commit** with both add and remove proposals — do NOT `merge_pending_commit` yet
 8. **Submit the commit bundle to the DS on a fresh connection**: commit + GroupInfo + Welcome(s) are one **atomic** `POST /v1/commits` — the DS writes all three in a single libsql transaction (see "MLS durability hardening" below), so a recipient never sees a commit with no matching Welcome
 9. **On success**: `merge_pending_commit` locally → advance the local epoch
