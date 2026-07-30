@@ -1380,12 +1380,21 @@ pub async fn revoke_device(
     Ok(())
 }
 
-/// Whether the current device (`state.device_id`) is still registered in
-/// `user_device` for `user_id`. `false` means this device was revoked and the
-/// caller should log out. Authoritative + spoof-resistant: a forged
-/// `device_revoked` inbox nudge cannot force a logout unless the device's row
-/// is genuinely gone. Returns `true` when the device id isn't known yet (early
-/// boot) so it never logs out a device that simply hasn't initialized.
+/// Whether the current device (`state.device_id`) is still an ACTIVE device of
+/// `user_id`. `false` means this device was revoked (or removed) and the caller
+/// should log out. Authoritative + spoof-resistant: a forged `device_revoked`
+/// inbox nudge cannot force a logout unless the device is genuinely gone.
+/// Returns `true` when the device id isn't known yet (early boot) so it never
+/// logs out a device that simply hasn't initialized.
+///
+/// The `revoked_at IS NULL` predicate is load-bearing (#685). Since #372
+/// revocation is a TOMBSTONE, not a hard delete — the row is deliberately
+/// retained so `verify_added_devices` can tell "revoked, drop rejoin" from
+/// "lagging, keep commits", and so historical certs stay verifiable. A bare
+/// existence check therefore returns `true` for a revoked device, which silently
+/// disabled the entire graceful sign-out path: `revoke_device` publishes a
+/// `device_revoked` nudge specifically so each device re-checks here and only
+/// the revoked one logs out, and that check could never fail.
 pub async fn is_current_device_registered(
     state: &Arc<AppState>,
     user_id: String,
@@ -1397,7 +1406,8 @@ pub async fn is_current_device_registered(
     let conn = state.remote_db.conn().await?;
     let mut rows = conn
         .query(
-            "SELECT 1 FROM user_device WHERE user_id = ?1 AND device_id = ?2",
+            "SELECT 1 FROM user_device \
+             WHERE user_id = ?1 AND device_id = ?2 AND revoked_at IS NULL",
             libsql::params![user_id, device_id],
         )
         .await?;

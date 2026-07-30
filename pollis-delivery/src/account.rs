@@ -502,8 +502,16 @@ pub async fn revoke_device(
     outcome_response(apply_revoke_device(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// DELETE the revoked device's unclaimed key packages, then tombstone its row —
-/// one transaction, both `WHERE user_id = actor`.
+/// DELETE the revoked device's unclaimed key packages and its conversation
+/// watermarks, then tombstone its row — one transaction, all `WHERE user_id =
+/// actor`.
+///
+/// The watermark DELETE is the "invalid states unrepresentable" half of #685: a
+/// revoked device can never fetch again, so a `conversation_watermark` row for it
+/// is a cursor that can never advance. The envelope-GC reads filter revoked
+/// devices out at read time, but leaving the rows behind means the invalid state
+/// still exists in the table and every future reader has to remember to exclude
+/// it. Deleting it here removes it at the chokepoint instead.
 pub async fn apply_revoke_device(
     conn: &Connection,
     authed: Option<&str>,
@@ -516,6 +524,11 @@ pub async fn apply_revoke_device(
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
+        libsql::params![actor.clone(), body.device_id.clone()],
+    )
+    .await?;
+    tx.execute(
+        "DELETE FROM conversation_watermark WHERE user_id = ?1 AND device_id = ?2",
         libsql::params![actor.clone(), body.device_id.clone()],
     )
     .await?;

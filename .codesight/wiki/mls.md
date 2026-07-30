@@ -391,6 +391,8 @@ When a new device (deviceC) enrolls for an existing user:
 
 The approver does NOT reconcile during approval (deviceC has no KPs yet at that point). DeviceC handles its own group joining via external-join.
 
+**Cert re-signing on identity rotation.** When the account identity key rotates (`account_identity::reset_identity`, and opportunistically on `pin::unlock`), every `user_device` row certed under the old key is stale and re-signed by `resign_stale_device_certs` (`mls/device.rs`). The candidate query (`stale_cert_candidates`) skips **revoked** rows (`revoked_at IS NULL`, #685): a revoked device can never rejoin the tree, so re-signing its cert is wasted work and would resurrect a valid-looking cert for a deliberately-retired device. (It also skips rows with a NULL leaf pub, which get their cert when that device next runs `ensure_device_cert`.)
+
 ## Voice Key Export
 
 Voice channels reuse the same MLS group as the channel's messages. The shared per-room symmetric key is derived from the MLS exporter secret at the current epoch:

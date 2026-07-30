@@ -68,13 +68,21 @@ use crate::writes::{
 };
 use crate::AppState;
 
-// ── Envelope GC SQL (mirrors pollis-core's ingest.rs, byte-for-byte) ─────────
+// ── Envelope GC SQL ──────────────────────────────────────────────────────────
 //
 // Envelope cleanup: TTL gate OR watermark gate (OR'd — either alone deletes).
 // The watermark gate is keyed on (user, device): a multi-device user whose other
 // device hasn't synced keeps envelopes alive until every device catches up or the
-// 30-day TTL expires. Copied verbatim from `pollis_core::commands::messages::ingest`
-// so moving the *trigger* behind the DS does not change deletion behavior.
+// 30-day TTL expires.
+//
+// The member-device roster is filtered by `ud.revoked_at IS NULL` (#685): a
+// revoked device can never rejoin the MLS tree (I5), so it must not count toward
+// the roster the watermark gate is measured against. Without the filter a revoked
+// device's stale — or entirely absent — watermark row wedges cleanup: either it
+// pins `MIN(cw.last_fetched_at)` to an old cursor, or its missing row breaks the
+// `COUNT(ud) = COUNT(cw)` "every device reported" check and disables pruning
+// outright. This mirrors `commit::current_member_devices`, which excludes revoked
+// devices from the commit-log retention floor for the same reason.
 
 const CLEANUP_CHANNEL_ENVELOPES: &str = "\
 DELETE FROM message_envelope
@@ -89,7 +97,7 @@ DELETE FROM message_envelope
               END
        FROM group_member gm
        JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
-       JOIN user_device ud ON ud.user_id = gm.user_id
+       JOIN user_device ud ON ud.user_id = gm.user_id AND ud.revoked_at IS NULL
        LEFT JOIN conversation_watermark cw
               ON cw.conversation_id = ?1
              AND cw.user_id = ud.user_id
@@ -109,7 +117,7 @@ DELETE FROM message_envelope
                 ELSE NULL
               END
        FROM dm_channel_member dcm
-       JOIN user_device ud ON ud.user_id = dcm.user_id
+       JOIN user_device ud ON ud.user_id = dcm.user_id AND ud.revoked_at IS NULL
        LEFT JOIN conversation_watermark cw
               ON cw.conversation_id = ?1
              AND cw.user_id = ud.user_id
@@ -944,5 +952,198 @@ mod timestamp_tests {
         assert_eq!(sent_at_after(now.clone(), Some(behind)), now);
         assert_eq!(sent_at_after(now.clone(), None), now);
         assert_eq!(sent_at_after(now.clone(), Some("not-a-timestamp".into())), now);
+    }
+}
+
+#[cfg(test)]
+mod gc_sql_tests {
+    //! Part A of #685: the envelope-GC cleanup SQL must not let a REVOKED device
+    //! wedge deletion. A revoked device can never rejoin the tree, so it must not
+    //! count toward the roster the watermark gate is measured against. These tests
+    //! drive the private `CLEANUP_CHANNEL_ENVELOPES` / `CLEANUP_DM_ENVELOPES`
+    //! constants directly against a real (in-memory) libsql DB.
+    //!
+    //! Both retention failure modes are covered for each conversation shape:
+    //!   * **stale watermark row present** — the revoked device's old
+    //!     `last_fetched_at` pins `MIN(cw)` down, so an envelope above the LIVE
+    //!     device's cursor is (wrongly) kept.
+    //!   * **no watermark row at all** — the revoked device has no `cw` row, so
+    //!     `COUNT(ud) != COUNT(cw)` and the CASE returns NULL, disabling the
+    //!     watermark gate entirely.
+    //!
+    //! All timestamps use SQLite's `datetime()` format on BOTH `sent_at` and
+    //! `last_fetched_at` so the lexical comparison the gate performs is
+    //! unambiguous, and every value sits well inside the 30-day TTL so the TTL
+    //! gate never masks the watermark behaviour under test.
+
+    use super::*;
+
+    const SCHEMA: &str = "\
+CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
+CREATE TABLE user_device (user_id TEXT NOT NULL, device_id TEXT NOT NULL, revoked_at TEXT);\
+CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL);\
+CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
+CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);\
+CREATE TABLE conversation_watermark (\
+  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, last_fetched_at TEXT NOT NULL);";
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute_batch(SCHEMA).await.unwrap();
+        conn
+    }
+
+    async fn add_device(conn: &Connection, user: &str, device: &str, revoked: bool) {
+        conn.execute(
+            "INSERT INTO user_device (user_id, device_id, revoked_at) \
+             VALUES (?1, ?2, CASE WHEN ?3 THEN datetime('now') ELSE NULL END)",
+            libsql::params![user.to_string(), device.to_string(), revoked as i64],
+        )
+        .await
+        .unwrap();
+    }
+
+    /// Seed a watermark row whose `last_fetched_at` is `datetime('now', offset)`.
+    async fn seed_watermark(conn: &Connection, conv: &str, user: &str, device: &str, offset: &str) {
+        conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
+             VALUES (?1, ?2, ?3, datetime('now', ?4))",
+            libsql::params![conv.to_string(), user.to_string(), device.to_string(), offset.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    /// Insert one envelope at `datetime('now', offset)`.
+    async fn add_envelope(conn: &Connection, id: &str, conv: &str, offset: &str) {
+        conn.execute(
+            "INSERT INTO message_envelope (id, conversation_id, sent_at) \
+             VALUES (?1, ?2, datetime('now', ?3))",
+            libsql::params![id.to_string(), conv.to_string(), offset.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn envelope_count(conn: &Connection, conv: &str) -> i64 {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM message_envelope WHERE conversation_id = ?1",
+                libsql::params![conv.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+    }
+
+    // ── Channel ──────────────────────────────────────────────────────────────
+
+    async fn channel_fixture(conn: &Connection) {
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice')", ())
+            .await
+            .unwrap();
+        conn.execute("INSERT INTO channels (id, group_id) VALUES ('c1', 'g1')", ())
+            .await
+            .unwrap();
+    }
+
+    /// A revoked device with a STALE watermark row must not keep an envelope the
+    /// live device has already read past.
+    #[tokio::test]
+    async fn channel_stale_revoked_watermark_does_not_pin_gc() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        add_device(&conn, "alice", "a-live", false).await;
+        add_device(&conn, "alice", "a-old", true).await;
+        // Live cursor is recent; the revoked device is stuck 10 days back.
+        seed_watermark(&conn, "c1", "alice", "a-live", "-1 day").await;
+        seed_watermark(&conn, "c1", "alice", "a-old", "-10 days").await;
+        // The envelope sits between them: above the stale cursor, below the live one.
+        add_envelope(&conn, "e1", "c1", "-5 days").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            0,
+            "envelope below the LIVE device's cursor must be pruned; the revoked \
+             device's stale watermark must not pin MIN(cw) (#685)"
+        );
+    }
+
+    /// A revoked device with NO watermark row must not disable pruning via the
+    /// `COUNT(ud) != COUNT(cw)` "every device reported" check.
+    #[tokio::test]
+    async fn channel_missing_revoked_watermark_does_not_disable_gc() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        add_device(&conn, "alice", "a-live", false).await;
+        add_device(&conn, "alice", "a-old", true).await;
+        // Only the live device has a watermark; the revoked device has none.
+        seed_watermark(&conn, "c1", "alice", "a-live", "-1 day").await;
+        add_envelope(&conn, "e1", "c1", "-5 days").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            0,
+            "with the revoked device excluded, COUNT(ud) == COUNT(cw) and the \
+             watermark gate prunes; its absent row must not disable GC (#685)"
+        );
+    }
+
+    // ── DM ───────────────────────────────────────────────────────────────────
+
+    async fn dm_fixture(conn: &Connection) {
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'alice')", ())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dm_stale_revoked_watermark_does_not_pin_gc() {
+        let conn = conn().await;
+        dm_fixture(&conn).await;
+        add_device(&conn, "alice", "a-live", false).await;
+        add_device(&conn, "alice", "a-old", true).await;
+        seed_watermark(&conn, "d1", "alice", "a-live", "-1 day").await;
+        seed_watermark(&conn, "d1", "alice", "a-old", "-10 days").await;
+        add_envelope(&conn, "e1", "d1", "-5 days").await;
+
+        conn.execute(CLEANUP_DM_ENVELOPES, libsql::params!["d1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "d1").await,
+            0,
+            "DM: the revoked device's stale watermark must not pin MIN(cw) (#685)"
+        );
+    }
+
+    #[tokio::test]
+    async fn dm_missing_revoked_watermark_does_not_disable_gc() {
+        let conn = conn().await;
+        dm_fixture(&conn).await;
+        add_device(&conn, "alice", "a-live", false).await;
+        add_device(&conn, "alice", "a-old", true).await;
+        seed_watermark(&conn, "d1", "alice", "a-live", "-1 day").await;
+        add_envelope(&conn, "e1", "d1", "-5 days").await;
+
+        conn.execute(CLEANUP_DM_ENVELOPES, libsql::params!["d1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "d1").await,
+            0,
+            "DM: the revoked device's absent watermark must not disable GC (#685)"
+        );
     }
 }

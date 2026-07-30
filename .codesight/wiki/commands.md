@@ -91,6 +91,7 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `reset_identity_and_recover(user_id, email)` — soft recovery; `reset_identity` populates `AppState.unlock` with the new keypair before this command's local-DB cleanup runs.
 - `finalize_device_enrollment(user_id)` — call after `set_pin` completes. Publishes the device cert + a fresh MLS key package, then external-joins every existing group / DM the device isn't in yet. Idempotent for fresh signup.
 - `list_user_devices(user_id)` → `DeviceInfo[]`
+- `is_current_device_registered(user_id)` → `bool`. The authoritative re-check behind the `device_revoked` inbox nudge: the nudge is per-user so it reaches every device, and only the one that answers `false` signs out (a forged nudge can't evict a valid device). `false` requires an ACTIVE row — revocation is a tombstone, so this filters `revoked_at IS NULL` (#685). Returns `true` when the device id isn't known yet, so early boot never self-logs-out.
 - `reset_identity(user_id)` → new secret key
 
 ## livekit (`commands/livekit.rs`)

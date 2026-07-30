@@ -35,7 +35,7 @@ pub use provider::set_current_suite_override;
 // ── Per-device signing keys + cross-signing ──────────────────────────────────
 pub use device::{
     ensure_device_cert, load_device_cert_pubs, load_device_pq_signing_key,
-    load_or_create_device_signer, resign_stale_device_certs,
+    load_or_create_device_signer, resign_stale_device_certs, stale_cert_candidates,
 };
 
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────

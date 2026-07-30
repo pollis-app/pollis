@@ -1873,6 +1873,131 @@ async fn revoking_one_device_prunes_its_leaf_with_no_roster_change() {
     drop(carol);
 }
 
+/// Count remaining envelopes for a conversation via a direct libsql query on the
+/// writable world handle (a client's own `remote_db` is a read-only view).
+async fn gc_envelope_count(conversation_id: &str) -> i64 {
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM message_envelope WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("count query");
+    rows.next().await.expect("row").expect("some row").get::<i64>(0).expect("count")
+}
+
+/// #685 — a REVOKED device must not wedge envelope GC. A revoked device can never
+/// rejoin the tree, so it is not part of the roster the watermark gate is measured
+/// against; counting it there is the bug.
+///
+/// **The mechanism.** Envelope cleanup deletes an envelope once `sent_at` is below
+/// `MIN(cw.last_fetched_at)` across every current member device — but only when
+/// `COUNT(device) == COUNT(watermark)`, i.e. every device has reported. Bob has a
+/// second device that was revoked before it ever synced this channel, so it has NO
+/// `conversation_watermark` row. Pre-#685 that revoked device was still counted, so
+/// `COUNT(device) != COUNT(watermark)`, the CASE returned NULL, and the watermark
+/// gate was disabled ENTIRELY — an envelope every live device had long since read
+/// stayed on the server forever (this is the harsher of the two failure modes; the
+/// stale-row mode is covered in the unit + integration layers).
+///
+/// **Asserted the way the GC suite asserts** ([`envelope_cleanup_ttl_or_watermark`]
+/// in `messages.rs`): the *observable* raw row count. `old-msg` — young (TTL cannot
+/// fire) and read past by both live devices — must be pruned, while `new-msg` (equal
+/// to the watermark) survives. A control assertion confirms the group stays live, so
+/// a "pass" can never be earned by wedging everyone.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn revoked_device_does_not_wedge_envelope_gc() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("GcRevoke").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+
+    let remote = writable_remote().await;
+
+    // Give bob a SECOND device that is revoked and has never synced this channel
+    // (no watermark row) — the server-side state the DS's revoke endpoint leaves
+    // behind for a device retired before it caught up. This is the row that,
+    // pre-#685, disabled pruning for the whole channel.
+    {
+        let conn = remote.conn().await.expect("remote conn");
+        let affected = conn
+            .execute(
+                "INSERT INTO user_device (device_id, user_id, revoked_at) \
+                 VALUES ('bob-ghost', ?1, datetime('now'))",
+                libsql::params![bob_p.id.clone()],
+            )
+            .await
+            .expect("insert revoked ghost device");
+        assert_eq!(affected, 1, "exactly one revoked device row inserted");
+    }
+
+    // Reset the add-member-seeded watermarks so the lag pattern is exactly what
+    // this test establishes (mirrors the `clear_watermarks` step in
+    // `envelope_cleanup_ttl_or_watermark`).
+    remote
+        .conn()
+        .await
+        .expect("remote conn")
+        .execute(
+            "DELETE FROM conversation_watermark WHERE conversation_id = ?1",
+            libsql::params![channel_id.clone()],
+        )
+        .await
+        .expect("clear watermarks");
+
+    // old-msg: the envelope that must be pruned once every LIVE device reads past it.
+    alice.send_channel_message(&channel_id, "old-msg").await;
+    alice.fetch_channel_messages(&channel_id).await;
+    bob.fetch_channel_messages(&channel_id).await;
+
+    // A strictly-later message; once every live device fetches it, their
+    // watermarks advance above old-msg.
+    alice.send_channel_message(&channel_id, "new-msg").await;
+    alice.fetch_channel_messages(&channel_id).await;
+
+    // Setup check: bob has not fetched new-msg yet, so the slowest live watermark
+    // is still at old-msg and nothing is pruned regardless of the fix.
+    assert_eq!(
+        gc_envelope_count(&channel_id).await,
+        2,
+        "SETUP: both envelopes present before every live device catches up"
+    );
+
+    // Bob catches up — now BOTH live devices sit at new-msg. This fetch triggers
+    // GC. The revoked ghost has no watermark: pre-#685 it disabled the gate and
+    // old-msg survived; with #685 it is excluded and old-msg is pruned.
+    bob.fetch_channel_messages(&channel_id).await;
+    // One more trigger to be independent of which fetch runs the cleanup.
+    alice.fetch_channel_messages(&channel_id).await;
+
+    assert_eq!(
+        gc_envelope_count(&channel_id).await,
+        1,
+        "GC WEDGED (#685): a revoked device with no watermark disabled envelope \
+         pruning — old-msg, read past by every LIVE device, was never deleted. Only \
+         new-msg (equal to the watermark) should remain."
+    );
+
+    // Control: the group is still live for a real member — the pass was not earned
+    // by wedging everyone.
+    assert!(
+        contents(&alice, &channel_id).await.contains(&"new-msg".to_string()),
+        "alice must still read new-msg — GC must not have broken the live channel"
+    );
+
+    drop(alice);
+    drop(bob);
+}
+
 // ─── Scenario — #680: a commit that can't be applied wedges the group ─────────
 
 /// **Invalid state it attacks (issue #680):** "the group exists locally but can
