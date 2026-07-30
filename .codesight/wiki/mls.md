@@ -71,7 +71,7 @@ When device A commits a membership change:
    - If no local group exists → external-joins using published GroupInfo
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
-   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → **device-signed** `POST /v1/commits/since`) so the server can compute the commit-log **retention floor** (#539, below). The report is authenticated (#681): it raises the floor, so it must be bound to the reporting device — reads (`GET /v1/commits/:id`) stay open, but recording a high-water does not
+   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → **device-signed** `POST /v1/commits/since`) so the server can compute the commit-log **retention floor** (#539, below). The report is authenticated (#681): it raises the floor, so it must be bound to the reporting device — reads (`GET /v1/commits/:id`) stay open, but recording a high-water does not. The report is fully best-effort and bounded by a short (5s) timeout inside `ds_report_commit_since`, so a black-holed DS can never stall catch-up — nor the suite-migration path (`migrate.rs`), which awaits it inline
 
 ### Commit-log retention (I4, #539)
 
