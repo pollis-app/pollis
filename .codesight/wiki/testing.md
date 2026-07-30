@@ -89,6 +89,15 @@ One simulated device for one user. Owns:
 - `Arc<AppState>` — wired with an `InMemoryKeystore` and the shared `RemoteDb`.
 - `profile: Option<UserProfile>` — populated after `sign_up`.
 
+**Two devices of the same user SHARE local state.** `LocalDb::open_for_user` derives
+the path as `pollis_{user_id}.db`, keyed on user_id only, so a `TestClient` built by
+`enroll_second_device` opens the *same* local SQLite file — and therefore the same MLS
+state — as the primary. It never gets its own leaf in the tree, and `contents()` on it
+just reads plaintext the primary already decrypted. Any assertion of the form "this
+user's *other* device cannot decrypt X" is therefore **vacuous** here and will pass or
+fail for reasons unrelated to MLS. Use a second *user* when you need genuinely separate
+local state and a real second leaf. (Found while writing the #679 regression test.)
+
 ### `invoke<T>`
 
 Wraps `tauri::test::get_ipc_response` in `spawn_blocking` (it uses `std::sync::mpsc` internally so it cannot run on the async runtime directly). Takes a webview, command name, and JSON args; returns the command's `Result<T, String>`.
@@ -141,6 +150,19 @@ Rules of thumb:
 - Always `#[serial]` — the wipe races otherwise.
 - Always `flavor = "multi_thread"` — single-threaded tokio deadlocks because `spawn_blocking` needs worker threads.
 - `drop(client)` at the end forces the borrow checker to keep the client alive through the final assertions; without it, a client may be dropped early in some builds, closing its local DB mid-assertion.
+
+## libsql local DBs cannot go in pollis-core's `--lib` tests
+
+libsql's local backend calls `sqlite3_config` on first use, which returns
+`SQLITE_MISUSE` (21) once rusqlite/SQLCipher — what `LocalDb` uses — has already run
+`sqlite3_initialize` in the same process. A lib test that opens a local libsql DB
+therefore **passes under a filter and panics in the full suite**, depending only on
+whether it shares its binary with a test that touched the local DB.
+
+Put remote-DB (libsql) query tests in `pollis-core/tests/` instead — an integration
+binary gets its own process and never loads rusqlite. See
+`pollis-core/tests/revoked_device_reconcile.rs`. This is why pollis-core had no
+`user_device` query coverage before #679.
 
 ## Extending the harness
 
@@ -235,6 +257,19 @@ pipeline — a fork, wedge, or squatted duplicate leaf fails the decrypt checks.
   checks are the *observable* lockout (he can't decrypt any post-removal message,
   and is absent from the roster) plus the group staying live for carol — a silent
   gate no-op is never accepted as a pass, and a wedge would fail carol's check.
+  **Scope note:** it revokes *and* removes, so the leaf is pruned by the explicit
+  `remove_member` — it proves recovery paths stay shut, not that revocation itself
+  prunes anything. That is its sibling below.
+- **`revoking_one_device_prunes_its_leaf_with_no_roster_change`** (#679) — the
+  no-roster-change half. Bob is asserted to be a genuinely decrypting member first,
+  then his `user_device` row is tombstoned with **no `remove_member`** — that single
+  omission is the whole test, since any roster change prunes the leaf by removal and
+  never exercises revocation. Alice sweeps (the reconcile backstop, whose
+  `local_tree_has_stale_leaf` pre-check and `desired` set both read
+  `registered_devices`), and bob must stop decrypting while carol, untouched, still
+  can. A final check asserts bob is **still a roster member**, so the eviction was
+  device-scoped rather than a removal in disguise. Uses three distinct users on
+  purpose — see the shared-local-state warning under `TestClient`.
 - **`cross_channel_sibling_message_is_not_stranded`** — regression for the
   cross-channel epoch strand. Carol is a continuous member of a group with two text
   channels A and B. Alice sends `mB0` on B (carol hasn't fetched B), then adds bob
