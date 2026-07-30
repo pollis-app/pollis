@@ -379,22 +379,39 @@ pub async fn ds_post_signed_or_session_ok(
 }
 
 /// Report this device's applied MLS `since` epoch for a conversation to the DS
-/// commits endpoint (`GET /v1/commits/{conv}?generation=&since=&user_id=&device_id=`),
-/// the signal the server-side retention floor is the MIN of across current members
-/// (#539, I4 Tier 1). `since` is the client's current local epoch — it still
-/// needs every commit `>= since`, so a truthful report can only ever PROTECT its
-/// own history from pruning.
+/// (`POST /v1/commits/since`), the signal the server-side retention floor is the
+/// MIN of across current members (#539, I4 Tier 1). `since` is the client's
+/// current local epoch — it still needs every commit `>= since`, so a truthful
+/// report can only ever PROTECT its own history from pruning.
+///
+/// **Device-SIGNED** (via [`ds_post`]). The report is a write — it raises the
+/// retention floor — so it must be authenticated as the device it claims to be.
+/// It used to be an unauthenticated `GET /v1/commits/{conv}?...&user_id&device_id`,
+/// which let anyone raise the floor for any device and, chained with the
+/// unclamped prune floor, wipe a conversation's whole commit log (#681). The
+/// reported `(conversation_id, generation, since)` now lives in the signed JSON
+/// body, so the signature's `sha256(body)` binding authenticates the values
+/// themselves — a signed empty-body GET with them in the query string could not.
+/// `user_id`/`device_id` are included for the DS's no-auth (dev/test) path only;
+/// when the DS enforces auth it derives both from the verified signature.
 ///
 /// `generation` scopes that position to one suite lineage (#454 P4). The DS keeps
 /// the pair monotone lexicographically, which is what stops a migrated device's
 /// report — epoch 0 of generation `N + 1`, numerically *below* the retired
 /// lineage's last epoch — from reading as a regression and being dropped.
 ///
-/// Reads are open on the DS, so this is an unauthenticated GET. Fully best-effort
-/// and EVENT-DRIVEN (fires once per catch-up, never polls): any failure — no DS
-/// URL, no device context, a network error — is swallowed, leaving the floor
-/// conservatively low (Tier 2's hard cap still bounds storage). A short timeout
-/// keeps it off the catch-up critical path.
+/// Fully best-effort and EVENT-DRIVEN (fires once per catch-up, never polls): any
+/// failure — no DS URL, not signed in yet, a network error — is swallowed,
+/// leaving the floor conservatively low (Tier 2's hard cap still bounds storage).
+///
+/// A short [`REPORT_TIMEOUT`] keeps it off the catch-up critical path: the report
+/// is best-effort by design, so it must NEVER block the caller — one call site is
+/// `await`ed inline on the suite-migration path (`migrate.rs`), where a
+/// black-holed DS or a stalled overlay relay would otherwise hang migration
+/// indefinitely. The bound lives HERE, wrapping the whole signed round-trip
+/// (`ds_post` sets no timeout, and neither does the shared reqwest client — its
+/// no-timeout default is deliberate, so long-lived media/streaming requests are
+/// never cut off), so no future call site can forget it.
 pub async fn ds_report_commit_since(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -402,28 +419,33 @@ pub async fn ds_report_commit_since(
     generation: i64,
     since: i64,
 ) {
-    let base = match state.config.pollis_delivery_url.as_deref() {
-        Some(b) => b.trim_end_matches('/').to_string(),
-        None => return,
-    };
     let device_id = match state.device_id.lock().await.clone() {
         Some(d) => d,
         None => return,
     };
-    let url = format!("{base}/v1/commits/{conversation_id}");
-    let overlay = state.overlay_handle();
-    let _ = crate::net::overlay::http_client(overlay.as_deref())
-        .get(&url)
-        .query(&[
-            ("generation", generation.to_string()),
-            ("since", since.to_string()),
-            ("user_id", user_id.to_string()),
-            ("device_id", device_id),
-        ])
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await;
+    let body = serde_json::json!({
+        "conversation_id": conversation_id,
+        "generation": generation,
+        "since": since,
+        // Consulted only on the DS's no-auth dev/test path; ignored (but still
+        // signature-bound) when the DS enforces auth.
+        "user_id": user_id,
+        "device_id": device_id,
+    });
+    // Bound the whole signed round-trip. A timeout resolves to `Err(_)` and is
+    // swallowed exactly like any other failure — the report is dropped and the
+    // floor stays conservative.
+    let _ = tokio::time::timeout(
+        REPORT_TIMEOUT,
+        ds_post(state, "/v1/commits/since", &body),
+    )
+    .await;
 }
+
+/// Upper bound on a single best-effort high-water report's round-trip. Short by
+/// design: it sits on the catch-up (and inline suite-migration) path, so it must
+/// give up quickly rather than stall real work behind an unreachable DS.
+const REPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Resolve the DS base URL or error if it isn't configured. Shared by the
 /// unauthenticated + session-bearer bootstrap clients below.
@@ -498,4 +520,70 @@ pub async fn ds_post_session_ok(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A hanging DS — one that accepts the TCP connection but never sends a
+    /// response — must not hang the caller. `ds_report_commit_since` wraps its
+    /// signed round-trip in [`REPORT_TIMEOUT`] precisely because the shared
+    /// reqwest client (`net::overlay::http_client`) and `ds_post` both set NO
+    /// timeout of their own, so without the wrap the request would wait forever
+    /// — and one call site (`migrate.rs`) awaits the report INLINE on the
+    /// suite-migration path, so an unreachable DS would freeze migration.
+    ///
+    /// This pins the exact bound the function applies: `timeout(REPORT_TIMEOUT,
+    /// <hanging POST>)` returns `Err(Elapsed)` in about `REPORT_TIMEOUT`, rather
+    /// than pending indefinitely. The control assertion proves the target is
+    /// genuinely hanging (not instantly refused), so the treatment is really
+    /// exercising the bound.
+    #[tokio::test]
+    async fn report_round_trip_is_bounded_against_a_hanging_ds() {
+        // Accept connections and hold them open forever without replying.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+
+        let client = crate::net::overlay::http_client(None);
+        let url = format!("http://{addr}/v1/commits/since");
+
+        // Control: 200ms in, the request has neither completed nor failed — the
+        // target is truly hanging, so the treatment below exercises the bound
+        // rather than a fast connection-refused.
+        let quick = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            client.post(&url).body("{}").send(),
+        )
+        .await;
+        assert!(
+            quick.is_err(),
+            "hanging DS should not resolve in 200ms — got {quick:?}"
+        );
+
+        // Treatment: the exact bound ds_report_commit_since applies. It must
+        // RETURN (as Err(Elapsed)) rather than hang, and do so around
+        // REPORT_TIMEOUT, not far beyond it.
+        let start = std::time::Instant::now();
+        let bounded = tokio::time::timeout(
+            REPORT_TIMEOUT,
+            client.post(&url).body("{}").send(),
+        )
+        .await;
+        let elapsed = start.elapsed();
+        assert!(
+            bounded.is_err(),
+            "REPORT_TIMEOUT must bound a hanging DS round-trip, got {bounded:?}"
+        );
+        assert!(
+            elapsed < REPORT_TIMEOUT * 2,
+            "bound should fire near REPORT_TIMEOUT ({REPORT_TIMEOUT:?}), took {elapsed:?}"
+        );
+    }
 }

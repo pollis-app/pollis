@@ -71,7 +71,7 @@ When device A commits a membership change:
    - If no local group exists → external-joins using published GroupInfo
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
-   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → `GET /v1/commits/:id?since=`) so the server can compute the commit-log **retention floor** (#539, below)
+   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → **device-signed** `POST /v1/commits/since`) so the server can compute the commit-log **retention floor** (#539, below). The report is authenticated (#681): it raises the floor, so it must be bound to the reporting device — reads (`GET /v1/commits/:id`) stay open, but recording a high-water does not. The report is fully best-effort and bounded by a short (5s) timeout inside `ds_report_commit_since`, so a black-holed DS can never stall catch-up — nor the suite-migration path (`migrate.rs`), which awaits it inline
 
 ### Commit-apply recovery: no silent wedge (#680)
 
@@ -122,6 +122,18 @@ on return (`invariants::classify` → `GapRecover`) and external-joins at head,
 forfeiting only the pruned-gap messages (accepted loss #1). `may_rejoin` (I5) still
 blocks a removed/revoked device from that rejoin. See
 [database.md](./database.md#mls_commit_since-commit-log-db-migration-000003-539).
+
+The epoch floor (`prune_floor`) is **clamped to `head − 1`** (#681): the reported
+`since` values it derives Tier 1 from are untrusted, so a report above the real head
+must never drive the floor at/above `head` and delete the whole live log — the head
+commit (`epoch = head − 1`) is always retained, keeping the head reading true and the
+group advanceable. This mirrors `closed_generation_floor`'s `.min(head_generation)`
+(the live lineage is never retired wholesale). The report auth (above) and this clamp
+are the two halves of #681: together an unauthenticated, per-conversation commit-log
+wipe. Coverage: `prune_floor` clamp property + omit-clamp mutant (Kani, `commit.rs`);
+`pollis-delivery/tests/retention.rs` (bogus high-water cannot wipe); the report
+endpoint's signed/unsigned/revoked cases (`pollis-delivery/tests/auth.rs`); and the
+E2E `forged_retention_high_water_cannot_wipe_the_live_log` (`flows/adversarial.rs`).
 
 The bare `process_pending_commits_inner` / `_locked` variants are the raw commit replay used internally by the interleaved catch-up (via `process_pending_commits_inner_with_hook`). Callers that ADVANCE the epoch — the **commit-INITIATION** paths and the recovery converge alike — must NOT use the bare variant directly. The **commit-INITIATION** paths — send, edit, invite (add), remove — must NOT use the bare variant: advancing this device to head before its own op discards the ratchet keys for the current epoch (`max_past_epochs = 0`), so a current-epoch inbound message this device hasn't fetched yet would be **stranded** by its own commit (issue #440, the *committer strand*). They instead run the interleaved ingesting catch-up **before** advancing — see "Pre-op ingest-before-advance" below.
 
@@ -272,6 +284,15 @@ races, and duplicate deliveries. All are additive to the flows above.
   (`writes::is_member`) before accepting — mirroring `/v1/group-info`'s gate. This
   is the server half of the client-side membership gate above; together they make
   "a removed member climbs back via external-join" unrepresentable on both sides.
+- **Authenticated retention report + head-clamped floor (#681).** The catch-up
+  high-water report is a **device-signed** `POST /v1/commits/since`
+  (`auth::verify_request_identity`, same four `X-Pollis-*` headers as
+  `POST /v1/commits`, refuses a revoked device) instead of an unsigned `GET`
+  side-effect — nobody can raise the floor on another device's behalf. Paired with
+  `prune_floor`'s clamp to `head − 1`, this closes what was a remote,
+  unauthenticated, per-conversation commit-log wipe. Reads stay open; an
+  unauthenticated report is dropped, which only ever leaves the floor conservative
+  (an unreported member disables Tier 1).
 
 ## Post-quantum suite: birth, migration, retirement (#454, #669)
 
