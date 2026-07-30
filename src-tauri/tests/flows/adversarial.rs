@@ -16,8 +16,8 @@
 //! leaf would fail the decrypt assertions — those are the load-bearing checks.
 
 use crate::harness::{
-    arm_ds_fault, drop_commit_row, ds_fault_armed, ds_head_epoch, prune_commits_below, steal_leaf,
-    wipe, writable_remote, DsFault, TestClient,
+    arm_ds_fault, corrupt_commit_row, drop_commit_row, ds_fault_armed, ds_head_epoch,
+    prune_commits_below, steal_leaf, wipe, writable_remote, DsFault, TestClient,
 };
 use serial_test::serial;
 
@@ -1628,4 +1628,123 @@ async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
 
     drop(alice);
     drop(bob);
+}
+
+// ─── Scenario — #680: a commit that can't be applied wedges the group ─────────
+
+/// **Invalid state it attacks (issue #680):** "the group exists locally but can
+/// never advance." A commit whose bytes a replaying member cannot deserialize used
+/// to hit one of four `apply_one_commit` `Stop` arms; the caller did `Stop =>
+/// break` and only recovered when the local group was ABSENT, so a member whose
+/// group still EXISTED but was stuck at a stale epoch wedged there forever — no
+/// external-join, no signal, silently mistaken for "caught up".
+///
+/// This is the `MlsMessageIn::tls_deserialize` wedge site (group_state.rs). A real
+/// member's commit lands normally; its persisted bytes are then corrupted in the
+/// log (a disk-bitrot / replication-fault shape, the deserialize-wedge analogue of
+/// [`drop_commit_row`]) while its epoch column is left intact — so a returning
+/// member still classifies it as the next commit to APPLY, reaches the deserialize
+/// step, and fails there.
+///
+/// **Must FAIL before #680 and PASS after.** On pre-#680 code bob wedges at the
+/// corrupt epoch (`Stop => break`, group still present so the `!group_exists`
+/// backstop never fires) and can never decrypt post-corruption traffic. After
+/// #680 the deserialize failure is an explicit `Recover(MalformedCommit)`: bob
+/// drops the stale group and external-joins onto the head, converging with the
+/// rest of the group.
+///
+/// **Accepted loss (documented, CLAUDE.md loss #1):** the corrupt commit's own
+/// epoch is jumped over via external-join, so any message sealed AT that epoch is
+/// unrecoverable for bob — the same class as "messages sent before you joined the
+/// (rebuilt) MLS tree." Everything bob had already ratcheted past before the
+/// corruption (M1 at his join epoch, decrypted by the interleave hook) survives,
+/// and all post-recovery traffic is delivered.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn corrupt_commit_recovers_instead_of_wedging() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+    let dave_p = dave.sign_up("dave@test.local").await;
+
+    let group_id = alice.create_group("Wedge").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // Bob joins, catches up to his join epoch, then goes offline.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+
+    // A message at bob's join epoch — his interleave hook decrypts this on return,
+    // BEFORE the replay reaches the corrupt commit, so it must survive.
+    alice.send_channel_message(&channel_id, "M1-at-join-epoch").await;
+
+    // The NEXT commit (carol's add) lands at the current head epoch. Read it off
+    // the log rather than counting commits — a join costs the add plus the joiner's
+    // own #666 post-join self-update, so a census would silently drift.
+    let corrupt_epoch = ds_head_epoch(&group_id).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+
+    // Churn on so the corrupt row is INTERIOR — a higher epoch above it means the
+    // replay classifies it as "apply this commit", not "nothing new yet".
+    join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
+    let head_before = ds_head_epoch(&group_id).await;
+    assert!(
+        head_before > corrupt_epoch + 1,
+        "the dave add must sit above the corrupt epoch {corrupt_epoch} (head {head_before})"
+    );
+
+    // Corrupt the carol-add commit's bytes. Its epoch column is untouched, so the
+    // replay reaches `apply_one_commit` and fails at `tls_deserialize`.
+    corrupt_commit_row(&group_id, corrupt_epoch).await;
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        head_before,
+        "corrupting a row's bytes must not change the head"
+    );
+
+    // Bob comes back. His hook decrypts M1 at epoch 1; the replay then hits the
+    // corrupt commit. Pre-#680 he wedges here; post-#680 he external-joins onto
+    // the head.
+    let bob_after_return = contents(&bob, &channel_id).await;
+    assert!(
+        bob_after_return.contains(&"M1-at-join-epoch".to_string()),
+        "bob must retain the message at his join epoch (decrypted before the corrupt \
+         commit is hit), got: {bob_after_return:?}"
+    );
+
+    // Alice applies bob's recovery external-join, then sends fresh traffic.
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "after-recovery").await;
+
+    // LOAD-BEARING — the #680 invariant made observable: bob's group exists AND
+    // advanced. A wedged bob (group present, stuck at the corrupt epoch) would
+    // fail both checks.
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        members.contains(&bob_p.id),
+        "bob must be a current member after corrupt-commit recovery, got: {members:?}"
+    );
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"after-recovery".to_string()),
+        "bob must decrypt post-recovery traffic — he wedged on the corrupt commit otherwise \
+         (the 'exists locally but can never advance' state #680 makes unreachable)"
+    );
+
+    // Whole group converges on the head: dave (a continuous member) reads it too.
+    dave.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&dave, &channel_id).await.contains(&"after-recovery".to_string()),
+        "dave must decrypt post-recovery traffic — the group forked at the corrupt commit otherwise"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+    drop(dave);
 }
