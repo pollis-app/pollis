@@ -2396,6 +2396,74 @@ pub(crate) async fn prune_commits_below(conversation_id: &str, floor: i64) -> u6
     pruned
 }
 
+/// Record a catch-up high-water at `since` for EVERY current member device of a
+/// conversation, straight onto the DS DBs — a test stand-in for a forged/buggy
+/// high-water that has already been recorded (the #681 attack's EFFECT; the
+/// monotone store makes such a value sticky). Covering the whole roster is what
+/// makes it dangerous: the floor then reads "fully reported" and Tier 1 is driven
+/// off the injected value, so with `since` far above head only the retention
+/// floor's head clamp stands between it and a full commit-log wipe. Membership is
+/// read off MAIN exactly as `pollis_delivery::commit::prune_commit_log` does.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+pub(crate) async fn force_high_water_for_all_members(conversation_id: &str, since: i64) {
+    let w = world().await;
+    let main_conn = w.remote.conn().await.expect("main conn for force_high_water");
+    let log_conn = w.log.conn().await.expect("log conn for force_high_water");
+    let generation = pollis_delivery::commit::head_generation(&log_conn, conversation_id)
+        .await
+        .expect("head_generation");
+    let mut rows = main_conn
+        .query(
+            "SELECT DISTINCT ud.device_id, ud.user_id FROM user_device ud \
+             WHERE ud.revoked_at IS NULL AND ud.user_id IN ( \
+                 SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1 \
+                 UNION SELECT user_id FROM group_member WHERE group_id = ?1 \
+                 UNION SELECT gm.user_id FROM channels c \
+                     JOIN group_member gm ON gm.group_id = c.group_id WHERE c.id = ?1 )",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("member devices");
+    let mut devices = Vec::new();
+    while let Some(r) = rows.next().await.expect("member device row") {
+        devices.push((r.get::<String>(0).unwrap(), r.get::<String>(1).unwrap()));
+    }
+    assert!(
+        !devices.is_empty(),
+        "force_high_water_for_all_members: no member devices for {conversation_id}"
+    );
+    for (device_id, user_id) in devices {
+        pollis_delivery::commit::record_commit_since(
+            &log_conn,
+            conversation_id,
+            &user_id,
+            &device_id,
+            generation,
+            since,
+        )
+        .await
+        .expect("record forced high-water");
+    }
+}
+
+/// Run the REAL event-driven retention prune for a conversation
+/// (`pollis_delivery::commit::prune_commit_log`) against the live DS DBs — the
+/// exact call the DS makes on a commit append / catch-up report — and return its
+/// report. Membership on MAIN, log on LOG, as production splits them.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+pub(crate) async fn ds_prune_commit_log(
+    conversation_id: &str,
+) -> pollis_delivery::commit::PruneReport {
+    let w = world().await;
+    let main_conn = w.remote.conn().await.expect("main conn for ds_prune_commit_log");
+    let log_conn = w.log.conn().await.expect("log conn for ds_prune_commit_log");
+    pollis_delivery::commit::prune_commit_log(&main_conn, &log_conn, conversation_id)
+        .await
+        .expect("prune_commit_log")
+}
+
 /// The Delivery Service's head epoch for a conversation — `MAX(epoch) + 1` over
 /// the commit log — read straight from the LOG DB via
 /// `pollis_delivery::commit::head_epoch`. Convergence assertions use this to

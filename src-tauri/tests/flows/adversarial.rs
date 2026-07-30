@@ -16,8 +16,9 @@
 //! leaf would fail the decrypt assertions — those are the load-bearing checks.
 
 use crate::harness::{
-    arm_ds_fault, drop_commit_row, ds_fault_armed, ds_head_epoch, prune_commits_below, steal_leaf,
-    wipe, writable_remote, DsFault, TestClient,
+    arm_ds_fault, drop_commit_row, ds_fault_armed, ds_head_epoch, ds_prune_commit_log,
+    force_high_water_for_all_members, prune_commits_below, steal_leaf, wipe, writable_remote,
+    DsFault, TestClient,
 };
 use serial_test::serial;
 
@@ -917,6 +918,103 @@ async fn commit_log_prune_recovers_via_external_join() {
     drop(alice);
     drop(bob);
     drop(carol);
+    drop(dave);
+}
+
+// ─── Scenario 2d — a forged retention high-water cannot wipe the live log (#681) ─
+
+/// **Invariant it exercises:** the retention floor's head clamp (#681, Half 1) —
+/// the client-side complement to `pollis-delivery/tests/retention.rs`'s
+/// `bogus_high_water_above_head_cannot_wipe_the_live_log`. A catch-up high-water
+/// is client-REPORTED and therefore untrusted: a report far above the real head
+/// must NOT drive the retention floor at/above head and delete the whole commit
+/// log. If it did, EVERY member — even one sitting exactly at head — would be
+/// unable to advance, and anyone who could not external-join would lose history.
+/// The clamp retains the head commit, so the group stays advanceable.
+///
+/// This is the E2E complement to the #681 unit/integration coverage: those prove
+/// `prune_floor` never returns a floor at/above head and that a bogus high-water
+/// cannot delete the live log at the DB layer; this proves a real client can
+/// still ADVANCE afterward. The forged high-water is injected directly (its
+/// authenticated report path is now closed by Half 2 — that is the point), then
+/// the DS runs its REAL event-driven prune and the assertions run through the
+/// real client pipeline.
+///
+/// Pre-fix the prune wiped the log and reset the head to 0, freezing the group —
+/// so the `head unchanged` assertion (and the subsequent add/convergence) fail;
+/// the identical `prune_floor` wipe is demonstrated fail-before at the unit and
+/// integration layers.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn forged_retention_high_water_cannot_wipe_the_live_log() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let dave_p = dave.sign_up("dave@test.local").await;
+
+    let group_id = alice.create_group("Retention").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // A non-trivial head: bob joins (commits), then a message everyone decrypts.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    alice.send_channel_message(&channel_id, "M1").await;
+    bob.process_commits_for(&channel_id).await;
+    assert!(contents(&bob, &channel_id).await.contains(&"M1".to_string()));
+
+    let head_before = ds_head_epoch(&group_id).await;
+    assert!(
+        head_before > 1,
+        "the group must have a real commit history, head is {head_before}"
+    );
+
+    // A forged high-water astronomically above the real head, for the WHOLE
+    // roster — the pre-#681 unauthenticated report's sticky, recorded effect.
+    force_high_water_for_all_members(&group_id, head_before + 100_000).await;
+
+    // The DS runs its real event-driven retention prune off those high-waters.
+    let report = ds_prune_commit_log(&group_id).await;
+
+    // The clamp holds: the floor never reaches head, so the head commit survives.
+    assert!(
+        report.floor < head_before,
+        "the floor {} must stay below head {head_before} — a forged report must not wipe the log",
+        report.floor
+    );
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        head_before,
+        "a forged high-water must not reset the conversation head (the log-wipe)"
+    );
+
+    // The group is still advanceable through the REAL client path: a fresh member
+    // add lands and every current member converges on it. Pre-fix the wiped log
+    // would have frozen the group (its head reset to 0, rejecting further commits).
+    join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
+    alice.send_channel_message(&channel_id, "after-clamp").await;
+    bob.process_commits_for(&channel_id).await;
+    dave.process_commits_for(&channel_id).await;
+
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        members.contains(&dave_p.id),
+        "dave's add must land after the prune, got: {members:?}"
+    );
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"after-clamp".to_string()),
+        "bob must still advance after a forged high-water — he wedged otherwise"
+    );
+    assert!(
+        contents(&dave, &channel_id).await.contains(&"after-clamp".to_string()),
+        "dave must converge on the post-prune head"
+    );
+
+    drop(alice);
+    drop(bob);
     drop(dave);
 }
 
