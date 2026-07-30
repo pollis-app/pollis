@@ -940,10 +940,15 @@ async fn commit_log_prune_recovers_via_external_join() {
 /// the DS runs its REAL event-driven prune and the assertions run through the
 /// real client pipeline.
 ///
-/// Pre-fix the prune wiped the log and reset the head to 0, freezing the group —
-/// so the `head unchanged` assertion (and the subsequent add/convergence) fail;
-/// the identical `prune_floor` wipe is demonstrated fail-before at the unit and
-/// integration layers.
+/// Verified fail-before: reverting ONLY the `prune_floor` clamp (keeping the
+/// harness and this test intact) drives the floor to `head + 100_000 - SLACK`,
+/// far above head, so the real `ds_prune_commit_log` deletes the whole log. The
+/// `report.floor < head_before` assertion fires first (observed: "the floor 99994
+/// must stay below head 2"), with the head-reset and add/convergence assertions
+/// behind it. With the clamp restored the same run passes. The identical
+/// `prune_floor` wipe is demonstrated fail-before at the unit and integration
+/// layers too (`floor_never_reaches_head_even_for_a_bogus_report`,
+/// `bogus_high_water_above_head_cannot_wipe_the_live_log`).
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn forged_retention_high_water_cannot_wipe_the_live_log() {
