@@ -1,6 +1,24 @@
-# Frontend Audit — Proposed Changes
+# Frontend Audit — Proposed Changes (SUPERSEDED SNAPSHOT)
 
 > Generated 2026-03-27. No code has been changed. These are proposals only.
+
+> **⚠️ SUPERSEDED — historical snapshot. Verify against the code before acting on anything here.**
+>
+> - **"Zustand" below is wrong.** `frontend/src/stores/` is not Zustand — the
+>   stores are MobX singletons built with `makeAutoObservable` (`appStore.ts`,
+>   `presenceStore.ts`, …), read inside `observer()` components, with React Query
+>   as the source of truth for remote data. See CLAUDE.md → "Frontend data".
+>   Read every "Zustand" in this file as "the MobX `appStore`". The *structural*
+>   points (duplicated fields, pass-through live state, unread store slices) still
+>   translate; the reactivity/subscription reasoning does not.
+> - **Every `file:line` reference is against the 2026-03-27 tree** and has drifted.
+>   E.g. §2.1 cites `AppShell.tsx` lines 46–54 and §5.2 calls that file "323
+>   lines"; it is now well over 500 lines and that effect has moved. §2.1 also
+>   asserts `setGroups`/`setChannels` are "called only here" — they are now also
+>   called from `hooks/queries/useGroups.ts`, so the proposed deletion is no
+>   longer safe as written.
+> - Some findings were actioned, some were not; the file was never updated to
+>   record which. Treat it as a list of *questions to re-ask*, not a to-do list.
 
 ---
 

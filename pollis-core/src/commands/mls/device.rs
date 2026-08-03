@@ -372,15 +372,61 @@ pub async fn ensure_device_cert(
     Ok(true)
 }
 
+/// The stale-cert candidate set for `user_id` at account identity version
+/// `identity_version`: the `(device_id, mls_signature_pub, mls_signature_pub_pq)`
+/// of every `user_device` row that still needs re-signing.
+///
+/// "Stale" means `cert_identity_version IS NULL` or
+/// `cert_identity_version < identity_version` — the cert was signed under a
+/// previous account key and no longer chains to the currently-published
+/// `account_id_pub`.
+///
+/// Excluded:
+///   - **revoked** rows (`revoked_at IS NOT NULL`, #685) — a revoked device can
+///     never rejoin the tree, so re-signing its cert is wasted work and would
+///     resurrect a valid-looking cert for a deliberately-retired device;
+///   - rows with a NULL leaf pub (`mls_signature_pub` or `mls_signature_pub_pq`)
+///     — registered devices that never finished `ensure_device_cert` (or predate
+///     the #668 v2 cert), which get their cert when that device next comes online.
+///
+/// Extracted (and `pub` for the integration test) so the predicate is testable
+/// against a real libsql DB without the account-key signing + DS write the rest
+/// of [`resign_stale_device_certs`] performs. It must live in an integration
+/// binary, not a `--lib` test: libsql's local backend calls `sqlite3_config` on
+/// first use, which fails once rusqlite/SQLCipher has already initialised SQLite
+/// in the same process (see `tests/resign_stale_certs.rs`).
+pub async fn stale_cert_candidates(
+    conn: &libsql::Connection,
+    user_id: &str,
+    identity_version: i64,
+) -> crate::error::Result<Vec<(String, Vec<u8>, Vec<u8>)>> {
+    let mut rows = conn
+        .query(
+            "SELECT device_id, mls_signature_pub, mls_signature_pub_pq FROM user_device \
+             WHERE user_id = ?1 \
+               AND revoked_at IS NULL \
+               AND mls_signature_pub IS NOT NULL \
+               AND mls_signature_pub_pq IS NOT NULL \
+               AND (cert_identity_version IS NULL \
+                    OR cert_identity_version < ?2)",
+            libsql::params![user_id, identity_version],
+        )
+        .await?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let did: String = row.get(0)?;
+        let pub_bytes: Vec<u8> = row.get(1)?;
+        let pq_pub_bytes: Vec<u8> = row.get(2)?;
+        out.push((did, pub_bytes, pq_pub_bytes));
+    }
+    Ok(out)
+}
+
 /// Re-sign every stale `user_device` row for `user_id` with the user's
 /// current account identity key, stamping each row's `device_cert`,
 /// `cert_issued_at`, and `cert_identity_version` to match
-/// `users.identity_version`.
-///
-/// "Stale" means `cert_identity_version IS NULL` or
-/// `cert_identity_version < users.identity_version` — i.e. the cert
-/// was signed under a previous account key and no longer chains to the
-/// currently-published `account_id_pub`.
+/// `users.identity_version`. Staleness (and the revoked / NULL-leaf-pub
+/// exclusions) is defined by [`stale_cert_candidates`].
 ///
 /// Called in two places:
 ///   1. `account_identity::reset_identity`, immediately after a
@@ -392,10 +438,6 @@ pub async fn ensure_device_cert(
 ///      fail cross-signing verification on every other client until
 ///      it logs in. Re-signing on unlock means existing fleets
 ///      self-heal as users come online, without a separate sweep.
-///
-/// Skips rows whose `mls_signature_pub` is NULL — those are devices
-/// that were registered but never finished `ensure_device_cert`, and
-/// will get their cert when they next come online.
 ///
 /// Returns the number of rows re-signed.
 pub async fn resign_stale_device_certs(
@@ -421,32 +463,7 @@ pub async fn resign_stale_device_certs(
         }
     };
 
-    // Both leaf pubs are needed to rebuild the cert v2 payload. A row whose
-    // `mls_signature_pub_pq` is still NULL predates #668 and cannot be re-signed
-    // into a v2 cert — it is skipped here and gets its cert when that device next
-    // runs `ensure_device_cert`, exactly like the pre-existing NULL-`mls_signature_pub`
-    // case above it.
-    let devices: Vec<(String, Vec<u8>, Vec<u8>)> = {
-        let mut rows = conn
-            .query(
-                "SELECT device_id, mls_signature_pub, mls_signature_pub_pq FROM user_device \
-                 WHERE user_id = ?1 \
-                   AND mls_signature_pub IS NOT NULL \
-                   AND mls_signature_pub_pq IS NOT NULL \
-                   AND (cert_identity_version IS NULL \
-                        OR cert_identity_version < ?2)",
-                libsql::params![user_id, identity_version as i64],
-            )
-            .await?;
-        let mut out = Vec::new();
-        while let Some(row) = rows.next().await? {
-            let did: String = row.get(0)?;
-            let pub_bytes: Vec<u8> = row.get(1)?;
-            let pq_pub_bytes: Vec<u8> = row.get(2)?;
-            out.push((did, pub_bytes, pq_pub_bytes));
-        }
-        out
-    };
+    let devices = stale_cert_candidates(&conn, user_id, identity_version as i64).await?;
 
     // Sign every stale device's cert with the account identity key (held only in
     // the OS keystore) BEFORE any remote write, collecting the cert columns. The

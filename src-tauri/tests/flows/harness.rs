@@ -431,11 +431,12 @@ async fn delivery_submit(
     }
 }
 
-/// `GET /v1/commits/:conversation_id?since=[&user_id=&device_id=]` — serve the
-/// contiguous commit log, and (when `user_id`+`device_id` are present) record the
-/// reporting device's catch-up high-water + run the event-driven retention prune
-/// (#539). Mirrors production `pollis_delivery::commits`: reads are open, the
-/// record+prune is best-effort. Membership is read on MAIN, the log on LOG.
+/// `GET /v1/commits/:conversation_id?since=[&generation=]` — serve the
+/// contiguous commit log. Mirrors production `pollis_delivery::commits`: reads
+/// are open and side-effect-free. The catch-up high-water report that feeds the
+/// retention floor is the SEPARATE authenticated `POST /v1/commits/since`
+/// ([`delivery_report_commit_since`]) — recording it off unsigned query params
+/// here was the #681 log-wipe primitive.
 #[derive(serde::Deserialize)]
 struct HarnessSince {
     #[serde(default)]
@@ -443,10 +444,6 @@ struct HarnessSince {
     /// The suite generation being caught up on (#454 P4); absent → 0.
     #[serde(default)]
     generation: i64,
-    #[serde(default)]
-    user_id: Option<String>,
-    #[serde(default)]
-    device_id: Option<String>,
 }
 
 async fn delivery_commits_get(
@@ -459,31 +456,6 @@ async fn delivery_commits_get(
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("conn: {e}")),
     };
-
-    if let (Some(user_id), Some(device_id)) = (q.user_id.as_deref(), q.device_id.as_deref()) {
-        if !user_id.is_empty() && !device_id.is_empty() {
-            if pollis_delivery::commit::record_commit_since(
-                &conn,
-                &conversation_id,
-                user_id,
-                device_id,
-                q.generation,
-                q.since,
-            )
-            .await
-            .is_ok()
-            {
-                if let Ok(main_conn) = state.main.conn().await {
-                    let _ = pollis_delivery::commit::prune_commit_log(
-                        &main_conn,
-                        &conn,
-                        &conversation_id,
-                    )
-                    .await;
-                }
-            }
-        }
-    }
 
     let head =
         match pollis_delivery::commit::head_epoch_in(&conn, &conversation_id, q.generation).await {
@@ -516,6 +488,81 @@ async fn delivery_commits_get(
         }),
     )
         .into_response()
+}
+
+/// `POST /v1/commits/since` — the AUTHENTICATED catch-up high-water report
+/// (#681). Mirrors production `pollis_delivery::report_commit_since`: verify the
+/// device signature over the raw body (auth is always on in this harness), take
+/// the `(user_id, device_id)` from the VERIFIED signature — never the body — then
+/// record + prune (best-effort). Membership is read on MAIN, the log on LOG.
+#[derive(serde::Deserialize)]
+struct HarnessCommitSinceReport {
+    conversation_id: String,
+    #[serde(default)]
+    generation: i64,
+    since: i64,
+}
+
+async fn delivery_report_commit_since(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    // Auth is enforced in the flows harness, so the report MUST be signed — the
+    // identity comes from the verified signature, not the body.
+    let (user_id, device_id) = {
+        let conn = match state.main.conn().await {
+            Ok(c) => c,
+            Err(e) => return ds_internal_error(format!("conn: {e}")),
+        };
+        match pollis_delivery::auth::verify_request_identity(
+            &conn,
+            &headers,
+            method.as_str(),
+            uri.path(),
+            &body,
+            pollis_delivery::auth::now_unix(),
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(rej) => return rej.into_response(),
+        }
+    };
+
+    let parsed: HarnessCommitSinceReport = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+
+    let conn = match state.log.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    if pollis_delivery::commit::record_commit_since(
+        &conn,
+        &parsed.conversation_id,
+        &user_id,
+        &device_id,
+        parsed.generation,
+        parsed.since,
+    )
+    .await
+    .is_ok()
+    {
+        if let Ok(main_conn) = state.main.conn().await {
+            let _ = pollis_delivery::commit::prune_commit_log(
+                &main_conn,
+                &conn,
+                &parsed.conversation_id,
+            )
+            .await;
+        }
+    }
+    ds_ok()
 }
 
 /// `POST /v1/group-info` (W4) — republish GroupInfo, authed user must be a
@@ -2062,6 +2109,10 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                 let router = axum::Router::new()
                     .route("/v1/commits", axum::routing::post(delivery_submit))
                     .route(
+                        "/v1/commits/since",
+                        axum::routing::post(delivery_report_commit_since),
+                    )
+                    .route(
                         "/v1/commits/:conversation_id",
                         axum::routing::get(delivery_commits_get),
                     )
@@ -2318,6 +2369,42 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
     );
 }
 
+/// Post-hoc commit-BYTES corruption for the #680 deserialize-wedge scenario.
+///
+/// The analogue of [`drop_commit_row`], but instead of removing the row it
+/// TRUNCATES its `commit_data` blob (a disk-bitrot / replication-fault shape) while
+/// leaving the `epoch` column intact. A member replaying from below therefore
+/// still classifies the row as the next commit to APPLY (the epoch-gap check
+/// passes — the epoch is untouched), reaches `apply_one_commit`, and fails at
+/// `MlsMessageIn::tls_deserialize`. On pre-#680 code that was a `Stop` that wedged
+/// the member permanently (the group exists locally yet can never advance); after
+/// #680 it is an explicit `Recover(MalformedCommit)` that external-joins onto the
+/// head.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+/// Asserts exactly one row was corrupted — a silent no-op would prove nothing.
+pub(crate) async fn corrupt_commit_row(conversation_id: &str, epoch: i64) {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for corrupt_commit_row");
+    // Truncate to a two-byte stub: too short to be a valid TLS-serialised
+    // MlsMessageOut, so `tls_deserialize` fails outright.
+    let affected = conn
+        .execute(
+            "UPDATE mls_commit_log SET commit_data = X'0001' \
+             WHERE conversation_id = ?1 AND epoch = ?2 \
+               AND generation = (SELECT COALESCE(MAX(generation), 0) FROM mls_commit_log \
+                                  WHERE conversation_id = ?1)",
+            libsql::params![conversation_id.to_string(), epoch],
+        )
+        .await
+        .expect("corrupt commit row");
+    assert_eq!(
+        affected, 1,
+        "corrupt_commit_row: expected exactly ONE commit at epoch {epoch} for \
+         {conversation_id} to corrupt, changed {affected} — the scenario's setup is wrong"
+    );
+}
+
 /// Prune the commit log below `floor` (EXCLUSIVE) via the REAL DS retention
 /// DELETE (`pollis_delivery::commit::delete_commits_below`) — the exact statement
 /// the event-driven prune runs (#539). Models a Tier-2 prune whose floor has
@@ -2343,6 +2430,74 @@ pub(crate) async fn prune_commits_below(conversation_id: &str, floor: i64) -> u6
          {floor} for {conversation_id}, pruned 0 — the scenario's setup is wrong"
     );
     pruned
+}
+
+/// Record a catch-up high-water at `since` for EVERY current member device of a
+/// conversation, straight onto the DS DBs — a test stand-in for a forged/buggy
+/// high-water that has already been recorded (the #681 attack's EFFECT; the
+/// monotone store makes such a value sticky). Covering the whole roster is what
+/// makes it dangerous: the floor then reads "fully reported" and Tier 1 is driven
+/// off the injected value, so with `since` far above head only the retention
+/// floor's head clamp stands between it and a full commit-log wipe. Membership is
+/// read off MAIN exactly as `pollis_delivery::commit::prune_commit_log` does.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+pub(crate) async fn force_high_water_for_all_members(conversation_id: &str, since: i64) {
+    let w = world().await;
+    let main_conn = w.remote.conn().await.expect("main conn for force_high_water");
+    let log_conn = w.log.conn().await.expect("log conn for force_high_water");
+    let generation = pollis_delivery::commit::head_generation(&log_conn, conversation_id)
+        .await
+        .expect("head_generation");
+    let mut rows = main_conn
+        .query(
+            "SELECT DISTINCT ud.device_id, ud.user_id FROM user_device ud \
+             WHERE ud.revoked_at IS NULL AND ud.user_id IN ( \
+                 SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1 \
+                 UNION SELECT user_id FROM group_member WHERE group_id = ?1 \
+                 UNION SELECT gm.user_id FROM channels c \
+                     JOIN group_member gm ON gm.group_id = c.group_id WHERE c.id = ?1 )",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("member devices");
+    let mut devices = Vec::new();
+    while let Some(r) = rows.next().await.expect("member device row") {
+        devices.push((r.get::<String>(0).unwrap(), r.get::<String>(1).unwrap()));
+    }
+    assert!(
+        !devices.is_empty(),
+        "force_high_water_for_all_members: no member devices for {conversation_id}"
+    );
+    for (device_id, user_id) in devices {
+        pollis_delivery::commit::record_commit_since(
+            &log_conn,
+            conversation_id,
+            &user_id,
+            &device_id,
+            generation,
+            since,
+        )
+        .await
+        .expect("record forced high-water");
+    }
+}
+
+/// Run the REAL event-driven retention prune for a conversation
+/// (`pollis_delivery::commit::prune_commit_log`) against the live DS DBs — the
+/// exact call the DS makes on a commit append / catch-up report — and return its
+/// report. Membership on MAIN, log on LOG, as production splits them.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+pub(crate) async fn ds_prune_commit_log(
+    conversation_id: &str,
+) -> pollis_delivery::commit::PruneReport {
+    let w = world().await;
+    let main_conn = w.remote.conn().await.expect("main conn for ds_prune_commit_log");
+    let log_conn = w.log.conn().await.expect("log conn for ds_prune_commit_log");
+    pollis_delivery::commit::prune_commit_log(&main_conn, &log_conn, conversation_id)
+        .await
+        .expect("prune_commit_log")
 }
 
 /// The Delivery Service's head epoch for a conversation — `MAX(epoch) + 1` over

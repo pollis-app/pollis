@@ -10,8 +10,6 @@
  * Both return the picked absolute path(s), or null on cancel.
  */
 
-import { electron, hasElectron } from "./runtime";
-
 export interface DialogFilter {
   name: string;
   extensions: string[];
@@ -34,9 +32,6 @@ export interface SaveDialogOptions {
 export async function dialogOpen(
   opts?: OpenDialogOptions,
 ): Promise<string | string[] | null> {
-  if (hasElectron()) {
-    return electron().dialogOpen(opts);
-  }
   const mod = await import("@tauri-apps/plugin-dialog");
   // Cast: Tauri returns `string | string[] | null` depending on multiple.
   return mod.open(opts as never) as Promise<string | string[] | null>;
@@ -45,9 +40,6 @@ export async function dialogOpen(
 export async function dialogSave(
   opts?: SaveDialogOptions,
 ): Promise<string | null> {
-  if (hasElectron()) {
-    return electron().dialogSave(opts);
-  }
   const mod = await import("@tauri-apps/plugin-dialog");
   return mod.save(opts as never) as Promise<string | null>;
 }

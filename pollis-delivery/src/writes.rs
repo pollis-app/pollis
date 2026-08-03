@@ -59,7 +59,12 @@ pub(crate) async fn gate(
         return Ok(Ok(None));
     }
     let conn = state.db.conn()?;
-    match auth::verify_request(
+    // Cached pubkey lookup (#658): this gate is the single chokepoint every
+    // device-signed endpoint funnels through, so caching here is what removes
+    // the per-request Turso round trip fleet-wide. Signature verification is
+    // unchanged.
+    match auth::verify_request_cached(
+        &state.device_keys,
         &conn,
         headers,
         method.as_str(),

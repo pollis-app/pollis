@@ -20,7 +20,8 @@ locals {
   signing_key_param   = "${local.param_prefix}/signing-key"   # SecureString: Ed25519 private PKCS8 PEM
   identity_key_param  = "${local.param_prefix}/identity-key"  # SecureString: base64(raw) QUIC identity key
   identity_cert_param = "${local.param_prefix}/identity-cert" # SecureString: base64(DER) QUIC leaf cert
-  desired_state_param = "${local.param_prefix}/desired-state" # String: {region: count}
+  desired_state_param = "${local.param_prefix}/desired-state" # String: {"total": N}
+  placement_param     = "${local.param_prefix}/placement"     # String: the reconciler's current random draw
 
   # Conventional ARNs (the params exist by name; no data-source dependency so
   # `plan` works before the mint scripts have run).
@@ -31,15 +32,38 @@ locals {
     "${local.param_arn_prefix}${local.identity_cert_param}",
   ]
   desired_state_param_arn = "${local.param_arn_prefix}${local.desired_state_param}"
+  placement_param_arn     = "${local.param_arn_prefix}${local.placement_param}"
 }
 
-# Desired-state IS Terraform-managed (non-secret) and seeded from the input map.
+# Desired-state IS Terraform-managed (non-secret) and seeded from pool_node_count.
 # After apply the reconciler and human operators own the value; Terraform ignores
 # drift so scaling edits (aws ssm put-parameter --overwrite) persist across applies.
+#
+# NOTE for the existing prod pool: because of ignore_changes this apply does NOT
+# rewrite the live value, which is still the pre-multi-region {"us-west-2": 3}.
+# The reconciler reads that legacy shape and sums it into a pool total, so the
+# upgrade needs no manual SSM edit — see readDesiredTotal() in reconciler/placement.mjs.
 resource "aws_ssm_parameter" "desired_state" {
   name  = local.desired_state_param
   type  = "String"
-  value = jsonencode(var.region_node_counts)
+  value = jsonencode({ total = var.pool_node_count })
+
+  tags = { app = "pollis-relay" }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+# The current random region draw, owned entirely by the reconciler at runtime.
+# Terraform only creates it (so IAM can reference a parameter that exists) and
+# then never touches the value. Persisting the draw is what makes placement STABLE
+# between rotations: without it, every 2-minute reconcile would re-randomize and
+# churn the whole pool continuously.
+resource "aws_ssm_parameter" "placement" {
+  name  = local.placement_param
+  type  = "String"
+  value = jsonencode({ drawn_at = 0, placement = {} })
 
   tags = { app = "pollis-relay" }
 

@@ -490,7 +490,16 @@ pub async fn resign_device_certs(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_resign_device_certs(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_resign_device_certs(&conn, authed.as_deref(), &parsed).await?;
+    // Whole-fleet cert rewrite → evict the whole user's cached pubkeys (#658).
+    // Today this UPDATE deliberately leaves `mls_signature_pub_pq` alone, so no
+    // cached key can actually be wrong; the eviction is here so that stays true
+    // if the statement ever grows to touch the key columns, and it costs one
+    // re-read on an operation that happens once per identity rotation.
+    if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        state.device_keys.invalidate_user(&owner);
+    }
+    outcome_response(outcome)
 }
 
 /// UPDATE each device's cert columns, every statement scoped

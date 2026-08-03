@@ -85,6 +85,13 @@ pub struct AppState {
     pub ratelimit: ratelimit::RateLimiter,
     /// Per-IP rate-limit tunables (DS env).
     pub ratelimit_config: ratelimit::RateLimitConfig,
+    /// In-memory device-pubkey cache for the device-signature auth path (#658).
+    /// Shallow-`Clone` (shared `Arc`), so every `AppState` clone — i.e. every
+    /// request — sees the same map, and an eviction from any handler is
+    /// immediately visible to the auth gate. See [`auth::DeviceKeyCache`] for
+    /// the invalidation contract and the `max_instances: 1` assumption it rests
+    /// on.
+    pub device_keys: auth::DeviceKeyCache,
 }
 
 impl AppState {
@@ -109,6 +116,7 @@ impl AppState {
             broker: broker::BrokerConfig::default(),
             ratelimit: ratelimit::RateLimiter::default(),
             ratelimit_config: ratelimit::RateLimitConfig::default(),
+            device_keys: auth::DeviceKeyCache::default(),
         }
     }
 
@@ -180,6 +188,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/version", get(version))
         .route("/v1/commits", post(submit))
+        .route("/v1/commits/since", post(report_commit_since))
         .route("/v1/commits/:conversation_id", get(commits))
         .route("/v1/group-info", post(writes::group_info))
         .route("/v1/welcomes/ack", post(writes::welcomes_ack))
@@ -335,7 +344,8 @@ async fn submit(
     // taken from the matched URI (no query on this route).
     let authed_user = if state.require_auth {
         let conn = state.db.conn()?;
-        match auth::verify_request(
+        match auth::verify_request_cached(
+            &state.device_keys,
             &conn,
             &headers,
             method.as_str(),
@@ -414,55 +424,27 @@ struct Since {
     /// the `head` it reads back are unchanged.
     #[serde(default)]
     generation: i64,
-    /// When both are present, `since` is recorded as this device's catch-up
-    /// high-water — the signal the retention floor is computed from (#539). The
-    /// caller reports the epoch it is catching up FROM (its current local epoch),
-    /// so it still needs every commit `>= since`.
-    #[serde(default)]
-    user_id: Option<String>,
-    #[serde(default)]
-    device_id: Option<String>,
 }
 
-/// GET /v1/commits/:conversation_id?since=N[&generation=G][&user_id=&device_id=]
-/// — the contiguous commit log of generation G (default 0) from epoch N (default
-/// 0) to that lineage's head. Reads are open (unauthenticated). When
-/// `user_id`+`device_id` are supplied, `(generation, since)` is also recorded as
-/// that device's catch-up high-water and an EVENT-DRIVEN retention prune runs
-/// (#539, I4) — both best-effort so the read never fails on them.
+/// GET /v1/commits/:conversation_id?since=N[&generation=G] — the contiguous
+/// commit log of generation G (default 0) from epoch N (default 0) to that
+/// lineage's head. Reads are open (unauthenticated) and have NO side effects.
+///
+/// The catch-up high-water report that FEEDS the retention floor is a SEPARATE,
+/// AUTHENTICATED write — `POST /v1/commits/since` ([`report_commit_since`]).
+/// Recording it here off unsigned `user_id`/`device_id` query params (as this
+/// handler used to) let anyone raise the floor on behalf of any device, which —
+/// chained with an unclamped [`commit::prune_floor`] — was a remote,
+/// unauthenticated, per-conversation commit-log wipe (#681). Any stray
+/// `user_id`/`device_id` query params an older client still appends are simply
+/// ignored now; its report is dropped, which only ever leaves the floor MORE
+/// conservative (an unreported member disables Tier 1).
 async fn commits(
     State(state): State<AppState>,
     Path(conversation_id): Path<String>,
     Query(q): Query<Since>,
 ) -> Result<impl IntoResponse, AppError> {
     let conn = state.log_db.conn()?;
-
-    // Record the reporting device's high-water, then re-compute + apply the floor.
-    // The floor is the MIN applied epoch across current members (Tier 1), so a
-    // fresh report can only RAISE the floor for a conversation whose slowest
-    // member just advanced. Best-effort: a failure here must not fail the read.
-    if let (Some(user_id), Some(device_id)) = (q.user_id.as_deref(), q.device_id.as_deref()) {
-        if !user_id.is_empty() && !device_id.is_empty() {
-            if let Err(e) = commit::record_commit_since(
-                &conn,
-                &conversation_id,
-                user_id,
-                device_id,
-                q.generation,
-                q.since,
-            )
-            .await
-            {
-                tracing::warn!(error = %e, conversation_id = %conversation_id, "record commit-since failed");
-            } else if let Ok(main_conn) = state.db.conn() {
-                if let Err(e) =
-                    commit::prune_commit_log(&main_conn, &conn, &conversation_id).await
-                {
-                    tracing::warn!(error = %e, conversation_id = %conversation_id, "commit-log prune (on catch-up) failed");
-                }
-            }
-        }
-    }
 
     // `head` is the head of the lineage the caller ASKED for — that is what it
     // must drain — while `head_generation` is how it learns a newer one exists.
@@ -475,4 +457,122 @@ async fn commits(
         head_generation,
         commits,
     }))
+}
+
+/// Body of `POST /v1/commits/since` — a device's catch-up high-water report.
+/// `(generation, since)` is the position it is caught up FROM; it still needs
+/// every commit `>= since` in that lineage. `user_id`/`device_id` are consulted
+/// ONLY on the no-auth (dev/test) path; when auth is enforced the identity comes
+/// from the verified signature and these are ignored.
+#[derive(Deserialize)]
+struct CommitSinceReport {
+    conversation_id: String,
+    #[serde(default)]
+    generation: i64,
+    since: i64,
+    #[serde(default)]
+    user_id: Option<String>,
+    #[serde(default)]
+    device_id: Option<String>,
+}
+
+/// POST /v1/commits/since — record the signing device's catch-up high-water and
+/// run the EVENT-DRIVEN retention prune (#539, I4). This is a WRITE: it raises
+/// the retention floor, so it is AUTHENTICATED as the device it claims to be,
+/// exactly like `POST /v1/commits` — reuse [`auth::verify_request_identity`], the
+/// four `X-Pollis-*` headers, and its refusal to authenticate a revoked device.
+///
+/// The report is bound to the device by signature, so nobody can raise the floor
+/// on another device's behalf (#681). An unauthenticated report is REJECTED
+/// (401) rather than served: there is no read to protect on this endpoint (the
+/// open read is `GET /v1/commits`), and dropping the report only ever leaves the
+/// floor conservative — a device we cannot authenticate stays UNREPORTED, which
+/// disables Tier 1 for the roster, so a rejected report can never WIDEN pruning.
+///
+/// Takes the raw [`Bytes`] because the signature binds `sha256(body)` — the
+/// reported `(conversation_id, generation, since)` is authenticated by that hash,
+/// which a signed empty-body GET with the values in the query string could not
+/// have provided.
+async fn report_commit_since(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    // Authenticate first, over the RAW body, so a forged report can't reach the
+    // DB. `(user_id, device_id)` come from the verified signature — never from
+    // the body — when auth is on.
+    let authed = if state.require_auth {
+        let conn = state.db.conn()?;
+        match auth::verify_request_identity_cached(
+            &state.device_keys,
+            &conn,
+            &headers,
+            method.as_str(),
+            uri.path(),
+            &body,
+            auth::now_unix(),
+        )
+        .await
+        {
+            Ok(id) => Some(id),
+            Err(rej) => return Ok(rej.into_response()),
+        }
+    } else {
+        None
+    };
+
+    let parsed: CommitSinceReport = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => {
+            return Ok((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "invalid body" })),
+            )
+                .into_response())
+        }
+    };
+
+    // Resolve the reporting identity. Auth on: the verified signer, and the body
+    // may only report as itself. Auth off (dev/test): the body-declared identity,
+    // mirroring how `submit` trusts `sender_id` on the no-auth path.
+    let (user_id, device_id) = match &authed {
+        Some((u, d)) => (u.clone(), d.clone()),
+        None => match (parsed.user_id.clone(), parsed.device_id.clone()) {
+            (Some(u), Some(d)) if !u.is_empty() && !d.is_empty() => (u, d),
+            // No identity to attribute the report to → nothing to record.
+            _ => return Ok(StatusCode::OK.into_response()),
+        },
+    };
+    if let Some((authed_user, _)) = &authed {
+        if let Some(claimed) = parsed.user_id.as_deref() {
+            if !claimed.is_empty() && claimed != authed_user {
+                return Ok(AuthRejection::Forbidden.into_response());
+            }
+        }
+    }
+
+    // Record the high-water, then re-compute + apply the floor. Best-effort: a
+    // failure here must not fail the request. Membership is read on MAIN, the
+    // log + high-waters on LOG.
+    let conn = state.log_db.conn()?;
+    if let Err(e) = commit::record_commit_since(
+        &conn,
+        &parsed.conversation_id,
+        &user_id,
+        &device_id,
+        parsed.generation,
+        parsed.since,
+    )
+    .await
+    {
+        tracing::warn!(error = %e, conversation_id = %parsed.conversation_id, "record commit-since failed");
+    } else if let Ok(main_conn) = state.db.conn() {
+        if let Err(e) = commit::prune_commit_log(&main_conn, &conn, &parsed.conversation_id).await {
+            tracing::warn!(error = %e, conversation_id = %parsed.conversation_id, "commit-log prune (on catch-up) failed");
+        }
+    }
+
+    Ok(StatusCode::OK.into_response())
 }
