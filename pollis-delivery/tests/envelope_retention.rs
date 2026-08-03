@@ -34,6 +34,11 @@
 //!     — which is exactly what the pruning tested above empties. Part F runs the
 //!     real GC first, then the real delete, and proves the tombstone still clears
 //!     every surviving cursor.
+//!   * **Part G (#689)** — the GC *trigger* is the DS-internal sweep
+//!     `sweep_envelope_gc`, not a member's ingest path. One sweep collects a
+//!     conversation every member device has caught up on — with no ingest and no
+//!     per-conversation endpoint call — and spares one with an uncollected
+//!     recipient.
 //!
 //! The mirror-image failures are covered as unit tests in
 //! `pollis_delivery::messages` (the raw `CLEANUP_*` SQL and the floor query) and
@@ -42,7 +47,7 @@
 use pollis_delivery::account::{apply_revoke_device, RevokeDeviceBody};
 use pollis_delivery::db::Db;
 use pollis_delivery::messages::{
-    apply_delete_message, apply_envelope_gc, DeleteMessageBody, EnvelopeGcBody,
+    apply_delete_message, apply_envelope_gc, sweep_envelope_gc, DeleteMessageBody, EnvelopeGcBody,
 };
 use pollis_delivery::profile::{apply_add_dm_member, apply_create_dm, AddDmMemberBody, CreateDmBody};
 use pollis_delivery::groups::{apply_approve_join_request, ApproveJoinRequestBody};
@@ -785,5 +790,68 @@ async fn tombstone_is_not_pushed_forward_by_watermarks_behind_the_ds_clock() {
         "with every cursor behind the DS clock the tombstone must keep plain \
          wall-clock now ({before} ..= {after}), got {tombstone_sent_at} — the \
          floor only ever pushes forward when something is already ahead"
+    );
+}
+
+// ── Part G (#689) — the server-side sweep is the GC trigger ───────────────────
+//
+// GC used to fire only from whichever member device happened to ingest. This
+// pins the new trigger: the DS-internal sweep collects a conversation every
+// member device has caught up on WITHOUT any member calling the per-conversation
+// endpoint, and spares one with an uncollected recipient. It fails on the old
+// trigger (nothing drives GC when no member ingests) and passes on the sweep.
+
+/// The sweep collects quiet-but-collected conversations and spares uncollected
+/// ones — driving neither ingest nor the `/v1/envelopes/gc` endpoint. Covers a
+/// channel AND a DM so it also proves the sweep classifies both predicates.
+#[tokio::test]
+async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
+    let db = fresh().await;
+    db.conn()
+        .unwrap()
+        .execute_batch(
+            // A channel every member device has caught up on.
+            "INSERT INTO group_member (group_id, user_id) VALUES ('gA', 'alice');\
+             INSERT INTO channels (id, group_id) VALUES ('cA', 'gA');\
+             INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) \
+               VALUES ('dB', 'bob', 'bob', datetime('now'));\
+             INSERT INTO group_member (group_id, user_id) VALUES ('gC', 'carol');\
+             INSERT INTO channels (id, group_id) VALUES ('cC', 'gC');",
+        )
+        .await
+        .unwrap();
+
+    // cA — channel, its one device caught up past the envelope.
+    add_device(&db, "alice", "aA", false).await;
+    seed_watermark(&db, "cA", "alice", "aA", "-1 day").await;
+    add_envelope(&db, "eA", "cA", "-5 days").await;
+
+    // dB — DM, its one device caught up past the envelope.
+    add_device(&db, "bob", "bB", false).await;
+    seed_watermark(&db, "dB", "bob", "bB", "-1 day").await;
+    add_envelope(&db, "eB", "dB", "-5 days").await;
+
+    // cC — channel with an uncollected recipient: carol's device never reported.
+    add_device(&db, "carol", "cC-dev", false).await;
+    add_envelope(&db, "eC", "cC", "-5 days").await;
+
+    // No member ingests, no endpoint call — the sweep is the sole trigger.
+    let visited = sweep_envelope_gc(&db.conn().unwrap()).await.unwrap();
+
+    assert_eq!(visited, 3, "the sweep visits every conversation that still has envelopes");
+    assert_eq!(
+        envelope_count(&db, "cA").await,
+        0,
+        "a quiet channel every device has caught up on must be swept, with no ingest"
+    );
+    assert_eq!(
+        envelope_count(&db, "dB").await,
+        0,
+        "a quiet DM every device has caught up on must be swept (DM predicate)"
+    );
+    assert_eq!(
+        envelope_count(&db, "cC").await,
+        1,
+        "a conversation with an uncollected recipient must NOT be swept"
     );
 }

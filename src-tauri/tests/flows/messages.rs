@@ -782,10 +782,22 @@ async fn clear_watermarks(
     .expect("clear watermarks");
 }
 
-/// Exercises the envelope-cleanup gate in `get_channel_messages`. There is now
-/// exactly ONE gate — the all-member-devices-caught-up delivery watermark — and
-/// the scenario drives three cases, each time triggering cleanup by having a
-/// member fetch:
+/// Run the server-side envelope-GC sweep against the shared test DB. GC is no
+/// longer fired from the client ingest path (#689) — it is the DS's own periodic
+/// sweep — so tests drive that sweep directly, standing in for the DS task. The
+/// deletion predicate is unchanged; only what triggers it moved.
+async fn run_gc_sweep(remote: &Arc<pollis_lib::db::remote::RemoteDb>) {
+    let conn = remote.conn().await.expect("remote conn");
+    pollis_delivery::messages::sweep_envelope_gc(&conn)
+        .await
+        .expect("gc sweep");
+}
+
+/// Exercises the envelope-cleanup gate. There is now exactly ONE gate — the
+/// all-member-devices-caught-up delivery watermark — and the scenario drives
+/// three cases. Member fetches advance watermarks (via `/v1/watermarks/advance`);
+/// GC itself is triggered by the server-side sweep (#689), which the test drives
+/// with `run_gc_sweep` since GC no longer rides the client ingest path:
 ///
 /// - **Negative**: young envelope, only the sender has fetched. The gate cannot
 ///   fire (bob has no watermark row, so the CASE returns NULL) — envelope stays.
@@ -838,10 +850,11 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     clear_watermarks(&remote, &channel_id).await;
 
     alice.send_channel_message(&channel_id, "neg-hello").await;
-    // Alice fetches — triggers cleanup. Bob has not fetched. The cleanup
-    // subquery requires every current member device to have a watermark row; bob
-    // does not, so the gate returns NULL — envelope stays.
+    // Alice fetches — advancing only her watermark; bob has not fetched. The GC
+    // sweep's subquery requires every current member device to have a watermark
+    // row; bob does not, so the gate returns NULL — envelope stays.
     alice.fetch_channel_messages(&channel_id).await;
+    run_gc_sweep(&remote).await;
     assert_eq!(
         envelope_count(&remote, &channel_id).await,
         1,
@@ -859,9 +872,9 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     alice.fetch_channel_messages(&channel_id).await;
     bob.fetch_channel_messages(&channel_id).await;
     // Both watermarks now sit at sent_at("neg-hello-2"), strictly greater
-    // than sent_at("neg-hello"). The next cleanup trigger evicts the older
-    // envelope but leaves the newer one (whose sent_at equals MIN).
-    alice.fetch_channel_messages(&channel_id).await;
+    // than sent_at("neg-hello"). The GC sweep evicts the older envelope but
+    // leaves the newer one (whose sent_at equals MIN).
+    run_gc_sweep(&remote).await;
     assert_eq!(
         envelope_count(&remote, &channel_id).await,
         1,
@@ -884,6 +897,7 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     // Bob is still owed these messages, so age alone must not remove them.
     clear_watermarks(&remote, &channel_id).await;
     alice.fetch_channel_messages(&channel_id).await;
+    run_gc_sweep(&remote).await;
     assert_eq!(
         envelope_count(&remote, &channel_id).await,
         ancient,
@@ -901,7 +915,7 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     alice.send_channel_message(&channel_id, "fresh").await;
     alice.fetch_channel_messages(&channel_id).await;
     bob.fetch_channel_messages(&channel_id).await;
-    alice.fetch_channel_messages(&channel_id).await;
+    run_gc_sweep(&remote).await;
     assert_eq!(
         envelope_count(&remote, &channel_id).await,
         1,

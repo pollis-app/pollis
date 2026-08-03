@@ -1972,12 +1972,18 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
         "SETUP: both envelopes present before every live device catches up"
     );
 
-    // Bob catches up — now BOTH live devices sit at new-msg. This fetch triggers
-    // GC. The revoked ghost has no watermark: pre-#685 it disabled the gate and
-    // old-msg survived; with #685 it is excluded and old-msg is pruned.
+    // Bob catches up — now BOTH live devices' watermarks sit at new-msg. The GC
+    // sweep (the server-side trigger, #689) then prunes: the revoked ghost has no
+    // watermark, so pre-#685 it disabled the gate and old-msg would survive; with
+    // #685 it is excluded and old-msg is pruned. GC no longer rides the ingest
+    // path, so the sweep is what drives it.
     bob.fetch_channel_messages(&channel_id).await;
-    // One more trigger to be independent of which fetch runs the cleanup.
-    alice.fetch_channel_messages(&channel_id).await;
+    {
+        let conn = remote.conn().await.expect("remote conn");
+        pollis_delivery::messages::sweep_envelope_gc(&conn)
+            .await
+            .expect("gc sweep");
+    }
 
     assert_eq!(
         gc_envelope_count(&channel_id).await,

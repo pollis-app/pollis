@@ -73,6 +73,11 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Detach the envelope-GC trigger from member activity (#689): a DS-internal
+    // task sweeps every conversation on a fixed cadence. Started before the
+    // router so it also runs on a scale-to-zero wake.
+    spawn_envelope_gc_sweep(Arc::clone(&db));
+
     let app = build_router_with_log_db(db, log_db);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
@@ -85,6 +90,48 @@ async fn main() -> Result<()> {
         .await
         .context("server error")?;
     Ok(())
+}
+
+/// Spawn the envelope-GC sweep (#689) — the server-side GC *trigger*.
+///
+/// Envelope GC's deletion predicate is many-member correct (bounded by the
+/// slowest member device's watermark, invariant I3), but it used to *fire* only
+/// from whichever member device happened to ingest. A conversation whose members
+/// all went quiet therefore never ran GC, and a chatty one ran it far more than
+/// needed. This sweeps every conversation with envelopes on a fixed cadence,
+/// decoupling the trigger from member activity. The predicate is untouched.
+///
+/// A timer — not an event — because the state that makes envelopes collectible
+/// (the slowest device's watermark advancing, or the roster shrinking on a
+/// revocation) can settle with no further request to hang an event on, and the
+/// quiet-conversation case has by definition no event to fire on. It runs inside
+/// the sole-writer DS process (no new infra, secrets, or routes), and because the
+/// first tick fires immediately it also catches up on every scale-to-zero wake.
+/// Cadence via `POLLIS_DS_GC_SWEEP_SECS` (default 3600); `0` disables it.
+fn spawn_envelope_gc_sweep(db: Arc<Db>) {
+    let secs: u64 = std::env::var("POLLIS_DS_GC_SWEEP_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3600);
+    if secs == 0 {
+        tracing::info!("pollis-delivery: envelope-GC sweep disabled (POLLIS_DS_GC_SWEEP_SECS=0)");
+        return;
+    }
+    tracing::info!("pollis-delivery: envelope-GC sweep every {secs}s");
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(secs));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            match db.conn() {
+                Ok(conn) => match pollis_delivery::messages::sweep_envelope_gc(&conn).await {
+                    Ok(n) => tracing::debug!("envelope-GC sweep visited {n} conversation(s)"),
+                    Err(e) => tracing::warn!("envelope-GC sweep failed: {e}"),
+                },
+                Err(e) => tracing::warn!("envelope-GC sweep: DB connection failed: {e}"),
+            }
+        }
+    });
 }
 
 /// Resolve when the process is asked to terminate — SIGTERM (orchestrator) or

@@ -44,11 +44,12 @@
 //!     reaction (`user_id` is bound to the authenticated user).
 //!   - watermark: the row is per `(conversation, user, device)`; the user may
 //!     only advance their own.
-//!   - envelope GC: the user is a member. The deletion *decision* is many-member
-//!     correct regardless of who triggers it — it is bounded by the MIN watermark
-//!     over the whole current member-device roster and never by wall-clock age
-//!     (invariant I3). See the TODO on [`apply_envelope_gc`] for the residual
-//!     *trigger* concern, which is liveness-only.
+//!   - envelope GC: the deletion *decision* is many-member correct regardless of
+//!     who triggers it — bounded by the MIN watermark over the whole current
+//!     member-device roster and never by wall-clock age (invariant I3). The
+//!     *trigger* is the DS-internal sweep [`sweep_envelope_gc`] (#689), not a
+//!     member's ingest path; the per-conversation [`apply_envelope_gc`] endpoint
+//!     runs the same watermark-gated cleanup for one conversation on demand.
 //!
 //! On the no-auth path (`authed == None`, only reachable when the DS runs with
 //! `POLLIS_DS_REQUIRE_AUTH` off) the membership/identity checks are skipped and
@@ -863,8 +864,8 @@ pub async fn envelope_gc(
     outcome_response(apply_envelope_gc(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Run the watermark-gated envelope GC for a conversation. Authz: the actor is
-/// a current member.
+/// Run the watermark-gated envelope GC for a SINGLE conversation on demand.
+/// Authz: the actor is a current member (skipped on the no-auth path).
 ///
 /// The deletion predicate is bounded by the SLOWEST current member device and by
 /// nothing else — see the [`CLEANUP_CHANNEL_ENVELOPES`] block comment. The
@@ -875,11 +876,10 @@ pub async fn envelope_gc(
 /// *decision* is the same no matter who fires it — so a single eager device can
 /// never delete another device's mail, whatever the trigger.
 ///
-/// TODO(#419): the *trigger* is still "whichever member happens to ingest calls
-/// `/v1/envelopes/gc`", which is a liveness concern only: a conversation whose
-/// members all stop ingesting simply retains envelopes longer than necessary. It
-/// can no longer cause loss, so it is tracked separately from this fix. When it
-/// is revisited, the predicate must stay watermark-bounded.
+/// This is the per-conversation form. The GC *trigger* is now the DS-internal
+/// sweep [`sweep_envelope_gc`] (#689): GC no longer rides a member's ingest path,
+/// so a conversation whose members all went quiet is still collected. Both share
+/// the one cleanup chokepoint [`cleanup_conversation_envelopes`].
 pub async fn apply_envelope_gc(
     conn: &Connection,
     authed: Option<&str>,
@@ -892,14 +892,70 @@ pub async fn apply_envelope_gc(
     if authed.is_some() && !is_member(conn, &body.conversation_id, &actor).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    let sql = if body.is_dm {
+    cleanup_conversation_envelopes(conn, &body.conversation_id, body.is_dm).await?;
+    Ok(WriteOutcome::Ok)
+}
+
+/// Run the watermark-gated cleanup for ONE conversation. Pure DB effect, no
+/// authz — callers gate. The single place the `CLEANUP_*` predicate is executed,
+/// shared by the per-conversation [`apply_envelope_gc`] endpoint and the
+/// server-side [`sweep_envelope_gc`], so the two can never drift.
+async fn cleanup_conversation_envelopes(
+    conn: &Connection,
+    conversation_id: &str,
+    is_dm: bool,
+) -> anyhow::Result<()> {
+    let sql = if is_dm {
         CLEANUP_DM_ENVELOPES
     } else {
         CLEANUP_CHANNEL_ENVELOPES
     };
-    conn.execute(sql, libsql::params![body.conversation_id.clone()])
+    conn.execute(sql, libsql::params![conversation_id.to_string()])
         .await?;
-    Ok(WriteOutcome::Ok)
+    Ok(())
+}
+
+/// The server-side envelope-GC trigger (#689): sweep every conversation that
+/// still has envelopes and run the watermark-gated cleanup for each. Returns the
+/// number of conversations visited.
+///
+/// This replaces the old trigger — "whichever member device happens to ingest
+/// calls `/v1/envelopes/gc`" — which never fired for a conversation whose members
+/// all went quiet and fired far more often than needed for a chatty one. Nothing
+/// about *which rows qualify* changes: retention stays bounded by the slowest
+/// member device (invariant I3), only *what drives* GC moves off the member
+/// ingest path.
+///
+/// A conversation is a DM iff its id appears in `dm_channel_member` (mirroring
+/// [`is_member`]); every other id is a group/channel. Running the wrong predicate
+/// is a no-op — its roster join yields zero rows, `COUNT(ud) = COUNT(cw) = 0`, the
+/// CASE returns NULL and `sent_at < NULL` deletes nothing — so a misclassified id
+/// can never over-delete.
+pub async fn sweep_envelope_gc(conn: &Connection) -> anyhow::Result<usize> {
+    // Only conversations that still hold envelopes are worth visiting; steady
+    // state this set is small.
+    let mut conversations: Vec<String> = Vec::new();
+    {
+        let mut rows = conn
+            .query("SELECT DISTINCT conversation_id FROM message_envelope", ())
+            .await?;
+        while let Some(row) = rows.next().await? {
+            conversations.push(row.get::<String>(0)?);
+        }
+    }
+    for conversation_id in &conversations {
+        let is_dm = {
+            let mut rows = conn
+                .query(
+                    "SELECT 1 FROM dm_channel_member WHERE dm_channel_id = ?1 LIMIT 1",
+                    libsql::params![conversation_id.clone()],
+                )
+                .await?;
+            rows.next().await?.is_some()
+        };
+        cleanup_conversation_envelopes(conn, conversation_id, is_dm).await?;
+    }
+    Ok(conversations.len())
 }
 
 // ── POST /v1/attachments/register  &  /v1/attachments/delete ─────────────────
@@ -1691,6 +1747,57 @@ CREATE TABLE conversation_watermark (\
             1,
             "excluding revoked devices must never leave a roster that deletes by \
              virtue of being empty"
+        );
+    }
+
+    // ── The server-side sweep is the trigger (#689) ──────────────────────────
+
+    /// The GC trigger is a DS-internal sweep, not a member's ingest path. With NO
+    /// member calling the per-conversation endpoint, one sweep collects every
+    /// conversation whose devices have all caught up — a channel AND a DM (proving
+    /// it classifies both predicates) — while sparing one with an uncollected
+    /// recipient. On the old trigger nothing drives GC when no member ingests, so
+    /// the quiet-but-collected conversations would survive.
+    #[tokio::test]
+    async fn sweep_collects_quiet_conversations_without_any_ingest() {
+        let conn = conn().await;
+
+        // A channel whose one member device has caught up. Distinct users per
+        // conversation: `user_device` is global, so a member's device in one
+        // conversation counts toward every conversation they belong to.
+        channel_fixture(&conn).await;
+        add_device(&conn, "alice", "a1", false).await;
+        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
+        add_envelope(&conn, "eA", "c1", "-5 days").await;
+
+        // A DM whose one member device has caught up (exercises the DM predicate).
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'dave')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "dave", "d-dev", false).await;
+        seed_watermark(&conn, "d1", "dave", "d-dev", "-1 day").await;
+        add_envelope(&conn, "eD", "d1", "-5 days").await;
+
+        // A channel with an uncollected recipient: bob's device never reported.
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g2', 'bob')", ())
+            .await
+            .unwrap();
+        conn.execute("INSERT INTO channels (id, group_id) VALUES ('c2', 'g2')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "bob", "b1", false).await;
+        add_envelope(&conn, "eB", "c2", "-5 days").await;
+
+        // No member ingests; the sweep is the sole trigger.
+        let visited = sweep_envelope_gc(&conn).await.unwrap();
+
+        assert_eq!(visited, 3, "the sweep visits every conversation that still has envelopes");
+        assert_eq!(envelope_count(&conn, "c1").await, 0, "quiet channel, all caught up → swept");
+        assert_eq!(envelope_count(&conn, "d1").await, 0, "quiet DM, all caught up → swept");
+        assert_eq!(
+            envelope_count(&conn, "c2").await,
+            1,
+            "a conversation with an uncollected recipient must NOT be swept"
         );
     }
 }
