@@ -52,7 +52,7 @@ the invariant that makes it unrepresentable.
 | F3 | ~~**Message dropped before delivery**~~ — **FIXED** | was `sent_at < now-30d` **OR** all-devices-caught-up; the OR'd TTL deleted undelivered envelopes on its own. TTL arm removed — envelope GC is now gated on the all-member-devices watermark alone (`pollis-delivery/src/messages.rs`) | was direct data loss for any member absent > 30d. Regressions pinned in `messages::gc_sql_tests`, `pollis-delivery/tests/envelope_retention.rs` (Part E), `flows::messages` |
 | F4 | **Fragile delivery accounting** | delivery tracked by `sent_at` vs per-device `conversation_watermark` timestamp — clock skew, equal timestamps, coarse acks | timestamp ≠ a reliable cursor (**still open** — the monotonic-seq cursor of I3 is not yet built; the F3 fix bounds retention by that timestamp watermark) |
 | F5 | **Welcome dropped before delivery** | `mls_welcome.delivered` flag + delete paths; no retention floor | a new device can miss its only Welcome |
-| F6 | ~~**Retention ignores absent members**~~ — **FIXED for envelopes** | the envelope floor is the MIN `last_fetched_at` over every current member device (revoked devices excluded, #685), no longer gated by a TTL | F3's TTL was the leak; it is gone. Commit/Welcome floors (I4) tracked separately |
+| F6 | ~~**Retention ignores absent members**~~ — **FIXED for envelopes** | the envelope floor is the MIN `last_fetched_at` over every current member device (revoked devices excluded #685, devices silent past N months excluded #720), no longer gated by a TTL | F3's TTL was the leak; it is gone. The #720 liveness bound adds a *third* accepted loss (a device dormant past the window) — see I3. Commit/Welcome floors (I4) tracked separately |
 | F7 | **Schema divergence: test vs prod** | two apply paths — test harness uses `POST_BASELINE_MIGRATIONS` on a *fresh* DB; prod uses `db-apply.sh` (version-tracked) on the *long-lived* DB. Version numbers collide with the old lineage | prod missing `000005_account_key_log`, `000006_push_token` while all tests pass |
 
 ## Target invariants & where they're enforced
@@ -121,15 +121,33 @@ the invariant that makes it unrepresentable.
   apply (belt-and-suspenders over I1). A commit that doesn't extend the head is
   rejected, not stored.
 
-### I3 — Delivery is a monotonic per-(member-device) cursor; retention is bounded by the slowest member, never a TTL
+### I3 — Delivery is a monotonic per-(member-device) cursor; retention is bounded by the slowest *live* member, never a TTL
 - Replace `sent_at` watermarks with a **monotonic per-conversation message
   sequence** + a **per-(user,device) cursor** ("consumed up to seq K").
 - A message row is retained until **every current member-device's cursor has
   passed it**. **No TTL** ever deletes an unconsumed message (kills F3, F4, F6).
 - A member who *leaves* releases their hold (they're no longer current); a
   *new* member starts at their join epoch (caveat (a) preserved).
-- *Result:* "message deleted before a current member received it" is
-  unrepresentable.
+- **Device-liveness bound (#720).** Retention is additionally bounded by device
+  *liveness*: a member device that has not **reported** a watermark within a
+  configured window (`POLLIS_DS_WATERMARK_STALE_MONTHS`, default 6 months) stops
+  pinning and is excluded from the floor, mirroring the revoked-device exclusion
+  (#685). The bound is on the device's own **last report**
+  (`conversation_watermark.reported_at`, a server-stamped wall-clock time),
+  **never on the message's age or the cursor value** — that distinction is what
+  keeps it from being the F3 TTL: a device that reported yesterday pins every
+  envelope below its cursor, however ancient. Coming back and reporting makes the
+  device live again immediately (reversible; it does not revoke the device or
+  remove it from any roster). Enforced in the SQL predicate
+  (`pollis-delivery/src/messages.rs` `CLEANUP_*` `?2` arm), NOT the shared roster
+  macro, so envelope-GC and commit-log rosters stay in parity (I5) while envelope
+  retention carries this extra, envelope-only bound.
+- *Result:* "message deleted before a current *live* member received it" is
+  unrepresentable. The one thing this adds is a **third accepted loss** (beyond
+  pre-join history and a new empty device): a device dormant past the window that
+  later returns may find gaps — a deliberate storage/correctness trade held behind
+  a conservative window whose *value* is the owner's product call
+  (`docs/metadata-retention-policy.md` §1).
 
 ### I4 — Commits and Welcomes are retained until every member-device has consumed them
 - Same floor as I3 applied to `mls_commit_log` and `mls_welcome`: never prune

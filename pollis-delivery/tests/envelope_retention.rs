@@ -47,7 +47,8 @@
 use pollis_delivery::account::{apply_revoke_device, RevokeDeviceBody};
 use pollis_delivery::db::Db;
 use pollis_delivery::messages::{
-    apply_delete_message, apply_envelope_gc, sweep_envelope_gc, DeleteMessageBody, EnvelopeGcBody,
+    apply_advance_watermark, apply_delete_message, apply_envelope_gc, sweep_envelope_gc,
+    DeleteMessageBody, EnvelopeGcBody, WatermarkBody,
 };
 use pollis_delivery::profile::{apply_add_dm_member, apply_create_dm, AddDmMemberBody, CreateDmBody};
 use pollis_delivery::groups::{apply_approve_join_request, ApproveJoinRequestBody};
@@ -73,10 +74,16 @@ CREATE TABLE group_join_request (\
   reviewed_by TEXT, reviewed_at TEXT, status TEXT NOT NULL DEFAULT 'pending');\
 CREATE TABLE conversation_watermark (\
   conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));\
+  last_fetched_at TEXT NOT NULL, reported_at TEXT, \
+  PRIMARY KEY (conversation_id, user_id, device_id));\
 CREATE TABLE mls_key_package (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL);\
 CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NULL, \
   PRIMARY KEY (content_hash, message_id));";
+
+/// The device-liveness staleness window these tests drive GC with (#720). Wide
+/// enough that legacy fixtures (which seed `reported_at = NULL`, treated as live)
+/// are never excluded; the #720 tests set `reported_at` and probe the boundary.
+const STALE: &str = "-6 months";
 
 async fn fresh() -> Db {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -106,6 +113,35 @@ async fn seed_watermark(db: &Db, conv: &str, user: &str, device: &str, offset: &
             "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
              VALUES (?1, ?2, ?3, datetime('now', ?4))",
             libsql::params![conv.to_string(), user.to_string(), device.to_string(), offset.to_string()],
+        )
+        .await
+        .unwrap();
+}
+
+/// Seed a watermark with an explicit `reported_at` (the #720 liveness signal),
+/// independent of the message cursor. `cursor`/`reported` are `datetime('now', …)`
+/// offsets.
+async fn seed_watermark_reported(
+    db: &Db,
+    conv: &str,
+    user: &str,
+    device: &str,
+    cursor: &str,
+    reported: &str,
+) {
+    db.conn()
+        .unwrap()
+        .execute(
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
+             VALUES (?1, ?2, ?3, datetime('now', ?4), datetime('now', ?5))",
+            libsql::params![
+                conv.to_string(),
+                user.to_string(),
+                device.to_string(),
+                cursor.to_string(),
+                reported.to_string()
+            ],
         )
         .await
         .unwrap();
@@ -178,7 +214,7 @@ async fn channel_gc_ignores_revoked_device_with_no_watermark() {
         is_dm: false,
         actor_id: Some("alice".into()),
     };
-    let out = apply_envelope_gc(&db.conn().unwrap(), None, &body).await.unwrap();
+    let out = apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
 
     assert_eq!(
@@ -211,7 +247,7 @@ async fn dm_gc_ignores_stale_revoked_watermark() {
         is_dm: true,
         actor_id: Some("alice".into()),
     };
-    apply_envelope_gc(&db.conn().unwrap(), None, &body).await.unwrap();
+    apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
 
     assert_eq!(
         envelope_count(&db, "d1").await,
@@ -410,7 +446,7 @@ async fn gc_channel(db: &Db) {
         is_dm: false,
         actor_id: Some("alice".into()),
     };
-    let out = apply_envelope_gc(&db.conn().unwrap(), None, &body).await.unwrap();
+    let out = apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
@@ -838,7 +874,7 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
     add_envelope(&db, "eC", "cC", "-5 days").await;
 
     // No member ingests, no endpoint call — the sweep is the sole trigger.
-    let visited = sweep_envelope_gc(&db.conn().unwrap()).await.unwrap();
+    let visited = sweep_envelope_gc(&db.conn().unwrap(), STALE).await.unwrap().visited;
 
     assert_eq!(visited, 3, "the sweep visits every conversation that still has envelopes");
     assert_eq!(
@@ -856,4 +892,185 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
         1,
         "a conversation with an uncollected recipient must NOT be swept"
     );
+}
+
+// ─── Part H (#720 — device-liveness bound) ───────────────────────────────────
+//
+// The envelope floor is now bounded by member watermarks AND by device liveness:
+// a member device that has not REPORTED a watermark within the staleness window
+// stops pinning retention (`apply_advance_watermark` stamps `reported_at`; the
+// `CLEANUP_*` `?2` arm excludes the stale). These drive the REAL handlers, and
+// each asserts a COLLECTION the pre-#720 watermark-only predicate never performs,
+// so each fails against the pre-change code.
+
+/// A device that reported a watermark long ago and then went silent stops pinning
+/// once every LIVE device has read past the envelope. Real handler path.
+/// Pre-#720 bob's ancient cursor pins `MIN(cw)` below the envelope forever.
+#[tokio::test]
+async fn dormant_device_stops_pinning_via_endpoint() {
+    let db = fresh().await;
+    db.conn()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
+             INSERT INTO channels (id, group_id) VALUES ('c1', 'g1');",
+        )
+        .await
+        .unwrap();
+    add_device(&db, "alice", "a1", false).await;
+    add_device(&db, "bob", "b1", false).await;
+    seed_watermark_reported(&db, "c1", "alice", "a1", "-1 day", "-1 day").await;
+    seed_watermark_reported(&db, "c1", "bob", "b1", "-500 days", "-400 days").await;
+    add_envelope(&db, "e1", "c1", "-100 days").await;
+
+    let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
+    apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+
+    assert_eq!(
+        envelope_count(&db, "c1").await,
+        0,
+        "a device silent past the window stops pinning; the envelope every LIVE \
+         device read past is collected (#720)"
+    );
+}
+
+/// **Reversibility.** A dormant device that comes back and reports a watermark —
+/// even one whose cursor is still behind the envelope — is live again IMMEDIATELY
+/// and re-pins. This drives the real `apply_advance_watermark`, proving it stamps
+/// `reported_at` and flips the device back into the roster.
+#[tokio::test]
+async fn a_returning_device_reports_and_pins_again() {
+    // Control: bob dormant, does NOT report → the envelope is collected.
+    {
+        let db = fresh().await;
+        db.conn().unwrap().execute_batch(
+            "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
+             INSERT INTO channels (id, group_id) VALUES ('c1', 'g1');",
+        ).await.unwrap();
+        add_device(&db, "alice", "a1", false).await;
+        add_device(&db, "bob", "b1", false).await;
+        seed_watermark_reported(&db, "c1", "alice", "a1", "-1 day", "-1 day").await;
+        seed_watermark_reported(&db, "c1", "bob", "b1", "-500 days", "-400 days").await;
+        add_envelope(&db, "e1", "c1", "-100 days").await;
+
+        let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
+        apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+        assert_eq!(envelope_count(&db, "c1").await, 0, "dormant → collected (control)");
+    }
+    // Comeback: bob reports a watermark BEFORE GC. Its cursor stays behind the
+    // envelope, but `reported_at` is now fresh → bob is live → it re-pins.
+    {
+        let db = fresh().await;
+        db.conn().unwrap().execute_batch(
+            "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
+             INSERT INTO channels (id, group_id) VALUES ('c1', 'g1');",
+        ).await.unwrap();
+        add_device(&db, "alice", "a1", false).await;
+        add_device(&db, "bob", "b1", false).await;
+        seed_watermark_reported(&db, "c1", "alice", "a1", "-1 day", "-1 day").await;
+        seed_watermark_reported(&db, "c1", "bob", "b1", "-500 days", "-400 days").await;
+        add_envelope(&db, "e1", "c1", "-100 days").await;
+
+        // Bob comes back and reports — a cursor still BEHIND the envelope (-200d).
+        // The monotone guard keeps the max cursor, but `reported_at` jumps to now.
+        let wm = WatermarkBody {
+            conversation_id: "c1".into(),
+            user_id: Some("bob".into()),
+            device_id: "b1".into(),
+            last_fetched_at: past_datetime(&db, "-200 days").await,
+        };
+        apply_advance_watermark(&db.conn().unwrap(), None, &wm).await.unwrap();
+
+        let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
+        apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+
+        assert_eq!(
+            envelope_count(&db, "c1").await,
+            1,
+            "reporting a watermark makes a stale device live again immediately, so \
+             it re-pins the envelope below its cursor (#720 reversibility)"
+        );
+    }
+}
+
+/// The sweep and the per-conversation endpoint apply the SAME liveness predicate
+/// (both flow through `cleanup_conversation_envelopes`), so they agree on the
+/// same dormant-device fixture: BOTH collect the envelope. Two GC paths with two
+/// different predicates is exactly the invalid state this repo forbids (#720
+/// checkbox 3). Pre-#720 both KEEP the envelope, so the collection assertion also
+/// fails against the pre-change code.
+#[tokio::test]
+async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
+    async fn seeded(conv: &str) -> Db {
+        let db = fresh().await;
+        db.conn().unwrap().execute_batch(&format!(
+            "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
+             INSERT INTO channels (id, group_id) VALUES ('{conv}', 'g1');",
+        )).await.unwrap();
+        add_device(&db, "alice", "a1", false).await;
+        add_device(&db, "bob", "b1", false).await;
+        seed_watermark_reported(&db, conv, "alice", "a1", "-1 day", "-1 day").await;
+        seed_watermark_reported(&db, conv, "bob", "b1", "-500 days", "-400 days").await;
+        add_envelope(&db, "e1", conv, "-100 days").await;
+        db
+    }
+
+    // Endpoint path.
+    let via_endpoint = seeded("c1").await;
+    let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
+    apply_envelope_gc(&via_endpoint.conn().unwrap(), None, &body, STALE).await.unwrap();
+    let endpoint_count = envelope_count(&via_endpoint, "c1").await;
+
+    // Sweep path — same fixture, no endpoint call, no ingest.
+    let via_sweep = seeded("c1").await;
+    sweep_envelope_gc(&via_sweep.conn().unwrap(), STALE).await.unwrap();
+    let sweep_count = envelope_count(&via_sweep, "c1").await;
+
+    assert_eq!(endpoint_count, sweep_count, "sweep and endpoint must agree on the bound (#720)");
+    assert_eq!(endpoint_count, 0, "both must collect the dormant-pinned envelope (fails pre-#720)");
+}
+
+/// The sweep gathers the identity-free growth snapshot on its walk (#720 checkbox
+/// 1): counts and the worst offender's shape, reflecting POST-cleanup survivors.
+#[tokio::test]
+async fn sweep_reports_identity_free_growth_metrics() {
+    let db = fresh().await;
+    db.conn().unwrap().execute_batch(
+        "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
+         INSERT INTO channels (id, group_id) VALUES ('big', 'g1');\
+         INSERT INTO channels (id, group_id) VALUES ('small', 'g1');",
+    ).await.unwrap();
+    // Alice never reported anywhere → COUNT(ud) != COUNT(cw) → nothing collected,
+    // so every envelope survives and the snapshot sees them all.
+    add_device(&db, "alice", "a1", false).await;
+    add_envelope(&db, "b1", "big", "-10 days").await;
+    add_envelope(&db, "b2", "big", "-9 days").await;
+    add_envelope(&db, "b3", "big", "-8 days").await;
+    add_envelope(&db, "s1", "small", "-2 days").await;
+
+    let report = sweep_envelope_gc(&db.conn().unwrap(), STALE).await.unwrap();
+    let m = report.metrics;
+
+    assert_eq!(m.total_envelopes, 4, "total surviving envelopes across conversations");
+    assert_eq!(m.conversations_with_envelopes, 2, "two conversations hold envelopes");
+    assert_eq!(m.largest_conversation_envelopes, 3, "the worst offender holds three (no id)");
+    assert!(
+        m.oldest_sent_at.is_some() && m.largest_conversation_oldest_sent_at.is_some(),
+        "oldest timestamps are surfaced (a timestamp is not an identifier)"
+    );
+}
+
+/// Read a `datetime('now', offset)` value back as a string, so a watermark body
+/// can carry a cursor at a known relative age in the DB's own clock/format.
+async fn past_datetime(db: &Db, offset: &str) -> String {
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query("SELECT datetime('now', ?1)", libsql::params![offset.to_string()])
+        .await
+        .unwrap();
+    rows.next().await.unwrap().unwrap().get::<String>(0).unwrap()
 }

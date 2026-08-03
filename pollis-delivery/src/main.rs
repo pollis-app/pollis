@@ -27,7 +27,10 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use pollis_delivery::{build_router_with_log_db, db::Db};
+use pollis_delivery::messages::{
+    watermark_stale_modifier, RetentionMetricsHandle, RetentionSnapshot,
+};
+use pollis_delivery::{build_app_state, build_router_with_state, db::Db};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -73,12 +76,17 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Build the state first so the sweep and the router share one
+    // `retention_metrics` cell: the sweep writes the growth snapshot, the
+    // `/v1/retention/metrics` endpoint serves it (#720 checkbox 1).
+    let state = build_app_state(Arc::clone(&db), log_db);
+
     // Detach the envelope-GC trigger from member activity (#689): a DS-internal
     // task sweeps every conversation on a fixed cadence. Started before the
     // router so it also runs on a scale-to-zero wake.
-    spawn_envelope_gc_sweep(Arc::clone(&db));
+    spawn_envelope_gc_sweep(Arc::clone(&db), state.retention_metrics.clone());
 
-    let app = build_router_with_log_db(db, log_db);
+    let app = build_router_with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
@@ -108,7 +116,11 @@ async fn main() -> Result<()> {
 /// the sole-writer DS process (no new infra, secrets, or routes), and because the
 /// first tick fires immediately it also catches up on every scale-to-zero wake.
 /// Cadence via `POLLIS_DS_GC_SWEEP_SECS` (default 3600); `0` disables it.
-fn spawn_envelope_gc_sweep(db: Arc<Db>) {
+///
+/// The sweep also carries the #720 device-liveness window
+/// (`watermark_stale_modifier`) and, on the same walk, gathers the identity-free
+/// growth snapshot it stores in `metrics` and logs (#720 checkbox 1).
+fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
     let secs: u64 = std::env::var("POLLIS_DS_GC_SWEEP_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -117,21 +129,44 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>) {
         tracing::info!("pollis-delivery: envelope-GC sweep disabled (POLLIS_DS_GC_SWEEP_SECS=0)");
         return;
     }
-    tracing::info!("pollis-delivery: envelope-GC sweep every {secs}s");
+    let stale = watermark_stale_modifier();
+    tracing::info!("pollis-delivery: envelope-GC sweep every {secs}s (staleness window {stale})");
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(secs));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
             match db.conn() {
-                Ok(conn) => match pollis_delivery::messages::sweep_envelope_gc(&conn).await {
-                    Ok(n) => tracing::debug!("envelope-GC sweep visited {n} conversation(s)"),
+                Ok(conn) => match pollis_delivery::messages::sweep_envelope_gc(&conn, &stale).await {
+                    Ok(report) => {
+                        emit_retention_metrics(report.visited, &report.metrics);
+                        *metrics.lock().unwrap() = Some(report.metrics);
+                    }
                     Err(e) => tracing::warn!("envelope-GC sweep failed: {e}"),
                 },
                 Err(e) => tracing::warn!("envelope-GC sweep: DB connection failed: {e}"),
             }
         }
     });
+}
+
+/// Log the identity-free growth snapshot from a sweep (#720 checkbox 1). This is
+/// the source of truth the owner scrapes; deliberately carries NO conversation or
+/// user id — only counts and the worst offender's SHAPE. Alert routing
+/// (thresholds/paging in Cloudflare/Grafana/email) is the owner's console and is
+/// out of scope: this only EMITS the numbers, on both a log line and
+/// `GET /v1/retention/metrics`.
+fn emit_retention_metrics(visited: usize, m: &RetentionSnapshot) {
+    tracing::info!(
+        visited,
+        total_envelopes = m.total_envelopes,
+        conversations_with_envelopes = m.conversations_with_envelopes,
+        oldest_sent_at = m.oldest_sent_at.as_deref().unwrap_or("-"),
+        largest_conversation_envelopes = m.largest_conversation_envelopes,
+        largest_conversation_oldest_sent_at =
+            m.largest_conversation_oldest_sent_at.as_deref().unwrap_or("-"),
+        "envelope-GC sweep complete"
+    );
 }
 
 /// Resolve when the process is asked to terminate — SIGTERM (orchestrator) or

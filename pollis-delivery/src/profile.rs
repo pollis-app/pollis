@@ -397,10 +397,12 @@ pub async fn apply_create_dm(
     // are excluded (#685) — they never rejoin and so are not part of the roster
     // the envelope GC gate measures against.
     for member in std::iter::once(&creator).chain(others.iter()) {
+        // `reported_at = datetime('now')` marks each seeded device LIVE as of DM
+        // creation (#720): it pins for the staleness window, then stops if silent.
         tx.execute(
             "INSERT OR IGNORE INTO conversation_watermark \
-                 (conversation_id, user_id, device_id, last_fetched_at) \
-             SELECT ?1, ?2, ud.device_id, datetime('now') \
+                 (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
+             SELECT ?1, ?2, ud.device_id, datetime('now'), datetime('now') \
              FROM user_device ud WHERE ud.user_id = ?2 AND ud.revoked_at IS NULL",
             libsql::params![body.id.clone(), member.clone()],
         )
@@ -552,10 +554,12 @@ pub async fn apply_add_dm_member(
     // Seed a watermark for every device of the new member so pre-join messages
     // don't block envelope cleanup indefinitely. Revoked devices are excluded
     // (#685) — they never rejoin, so they are not part of the GC roster.
+    // `reported_at = datetime('now')` marks each seeded device LIVE as of the add
+    // (#720): it pins for the staleness window, then stops if it never reports.
     tx.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
-             (conversation_id, user_id, device_id, last_fetched_at) \
-         SELECT ?1, ?2, ud.device_id, datetime('now') \
+             (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
+         SELECT ?1, ?2, ud.device_id, datetime('now'), datetime('now') \
          FROM user_device ud WHERE ud.user_id = ?2 AND ud.revoked_at IS NULL",
         libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
     )

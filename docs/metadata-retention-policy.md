@@ -38,23 +38,47 @@ encoding is a frozen contract.
 The single most important thing to understand about Pollis retention is that **the primary mechanism is
 a delivery watermark, not a TTL.**
 
-An encrypted envelope is deleted when *every current member device of its conversation has reported a
-fetch watermark past it* (`pollis-delivery/src/messages.rs`, the `CLEANUP_*` fragments). A 30-day TTL
+An encrypted envelope is deleted when *every current, LIVE member device of its conversation has reported
+a fetch watermark past it* (`pollis-delivery/src/messages.rs`, the `CLEANUP_*` fragments). A 30-day TTL
 used to be OR-ed with that gate; it was removed in #688 / PR #716 because either arm alone could delete,
 so a device offline for a month silently lost mail. That contradicted invariant I3 in
 `docs/backend-core-invariants.md`, which requires retention bounded by the slowest member device and
 specifies **no TTL**.
 
-The consequence, stated plainly because a privacy form will ask: **there is no maximum retention period
-for an undelivered envelope.** A member who joins a busy conversation and never opens the app again
-pins that conversation's envelopes indefinitely. This is a deliberate trade — correctness of delivery
-over convenience of storage — and it must not be "fixed" by reintroducing a TTL. Bounding the worst case
-via a *device staleness* rule (a device that has not reported in N months stops pinning retention) is
-tracked in #720 and is the correct shape; it is not implemented today.
+**Device-staleness bound (#720).** Since #720 the floor is bounded by member watermarks **and** by device
+*liveness*: a member device that has not **reported** a watermark within a configured window
+(`POLLIS_DS_WATERMARK_STALE_MONTHS`, default **6 months**) stops pinning retention and is excluded from
+the floor, mirroring how a revoked device is excluded (#685). This is **not** a TTL and does not reopen
+the #688 bug: the bound is on the device's own last **report** (`conversation_watermark.reported_at`, a
+server-stamped wall-clock time), never on the message's age. A device that reported yesterday still pins
+every envelope below its cursor, however old. Coming back and reporting makes the device live again
+immediately (reversible; the device is not revoked or removed from any roster).
 
-The MLS commit log has already solved the analogous problem: it prunes to a tier-1 floor (the minimum
+The consequence, stated plainly because a privacy form will ask: **there is no wall-clock maximum
+retention period for an undelivered envelope, but there is now a bound tied to recipient-device
+liveness.** A member who joins a busy conversation and keeps at least one device reporting pins that
+conversation's envelopes indefinitely; a member whose every device goes silent past the window stops
+pinning. The cost is a **third accepted message loss** — beyond "messages sent before you joined" and "a
+new device starts empty" — a device dormant past the window that later returns may find gaps. This is a
+deliberate storage/correctness trade; the window's **value is the owner's product call** and is held
+conservative. The mechanism is done; **the owner must decide N** (and may set `0` to disable the bound).
+
+**Growth visibility (#720 checkbox 1).** The GC sweep computes an identity-free `message_envelope` growth
+snapshot on the same walk — total envelope count, how many conversations hold envelopes, the oldest
+retained `sent_at`, and the *shape* of the worst offender (largest conversation's count + oldest `sent_at`,
+no id). It is logged and served on `GET /v1/retention/metrics`. That endpoint is **gated by an operator
+bearer token**, NOT open like `/health`/`/version`: those return a service name and a git sha, whereas this
+is a pollable aggregate activity meter — scraped on a schedule it reveals how many conversations exist, how
+fast the network is growing, and when it is busy. Identity-free (§3) is necessary but not sufficient; the
+volume itself is metadata this product exists not to disclose. So it is **default-closed**:
+`POLLIS_DS_METRICS_TOKEN` unset → the route 404s (not served); set → callers must send
+`Authorization: Bearer <token>`. Alert *routing* (thresholds/paging in Cloudflare/Grafana/email) is the
+owner's console and is out of scope — the DS only emits the numbers.
+
+The MLS commit log solved the analogous problem differently — it prunes to a tier-1 floor (the minimum
 applied epoch across current member devices) with a tier-2 per-conversation hard cap that bounds a stuck
-member (`retention_tests::tier2_hard_cap_bounds_a_stuck_member`).
+member (`retention_tests::tier2_hard_cap_bounds_a_stuck_member`). #720 follows that *shape* (a bound
+against a permanently-absent device) but keys the envelope bound on liveness, not epoch distance.
 
 ---
 
@@ -65,9 +89,9 @@ DB, split out in #420 Goal A).
 
 | Data | Table | Retention | Enforced by |
 |---|---|---|---|
-| Encrypted message envelopes | `message_envelope` | Until every current member device has reported a watermark past the row. **No TTL.** Also removed immediately on user-initiated delete. | `messages.rs` `CLEANUP_*`; #688/#716 |
+| Encrypted message envelopes | `message_envelope` | Until every current **live** member device has reported a watermark past the row. **No TTL** (age never deletes); since #720 a device silent past `POLLIS_DS_WATERMARK_STALE_MONTHS` (default 6) stops pinning, bounded on the device's last **report**, not the message's age. Also removed immediately on user-initiated delete. | `messages.rs` `CLEANUP_*`; #688/#716, #720 |
 | Reactions | `message_reaction` | Life of the account; cascade-deleted with the user | `000000_baseline.sql` FK |
-| Per-device fetch cursors | `conversation_watermark` | **Indefinite** — advanced, never deleted, except with the device | `apply_advance_watermark` |
+| Per-device fetch cursors | `conversation_watermark` | **Indefinite** — advanced, never deleted, except with the device. Carries `reported_at` (server-stamped last-report wall-clock, #720), the liveness signal the envelope floor reads | `apply_advance_watermark`; #720 |
 | MLS commit history | `mls_commit_log` (log DB) | Pruned to the tier-1 floor (min applied epoch across current member devices) with a tier-2 per-conversation hard cap | commit-log retention code + `retention_tests` |
 | Latest MLS group state | `mls_group_info` | Latest epoch only; overwritten, no history | `000001_commit_log_db.sql` |
 | Per-device commit catch-up | `mls_commit_since` | Indefinite, upserted monotonically | `000003_mls_commit_since.sql` |
@@ -270,7 +294,10 @@ Writing this document surfaced retention behaviour we have not decided on, only 
       are long gone. Harmless in size, but it is a per-device activity record with no expiry.
 - [ ] **`push_token` has no stale-token reap.** A token for an uninstalled app persists until the
       account is deleted.
-- [ ] **No maximum retention for undelivered envelopes** (§1) until #720 lands a device-staleness bound.
+- [x] **No maximum retention for undelivered envelopes** (§1) — #720 landed a device-staleness bound
+      (`POLLIS_DS_WATERMARK_STALE_MONTHS`, default 6 months). Retention is now bounded by member watermarks
+      **and** by recipient-device liveness. **Owner decision still open:** the value of N (and whether to
+      surface the resulting third accepted-loss in the public "what we can and cannot see" page).
 - [x] **Attachment deletion is not reference-counted** (#690). **Done** — the reference count is derived
       by joining `attachment_ref` to `message_envelope`, so a reference is released by deleting its message
       (self/admin delete, envelope GC #689, retention #720, teardown) and cannot outlive it; the Turso row

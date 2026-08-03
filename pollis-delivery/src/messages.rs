@@ -46,10 +46,12 @@
 //!     only advance their own.
 //!   - envelope GC: the deletion *decision* is many-member correct regardless of
 //!     who triggers it — bounded by the MIN watermark over the whole current
-//!     member-device roster and never by wall-clock age (invariant I3). The
-//!     *trigger* is the DS-internal sweep [`sweep_envelope_gc`] (#689), not a
-//!     member's ingest path; the per-conversation [`apply_envelope_gc`] endpoint
-//!     runs the same watermark-gated cleanup for one conversation on demand.
+//!     member-device roster, and by device liveness (#720: a device silent past
+//!     N months stops pinning), but never by wall-clock message age (invariant
+//!     I3). The *trigger* is the DS-internal sweep [`sweep_envelope_gc`] (#689),
+//!     not a member's ingest path; the per-conversation [`apply_envelope_gc`]
+//!     endpoint runs the same watermark-gated cleanup for one conversation on
+//!     demand.
 //!   - attachment references (#690): releasing a reference is NOT a gated
 //!     endpoint at all — the reference count is DERIVED from envelope existence
 //!     (`attachment_ref ⋈ message_envelope`, see [`live_ref_exists`]), so the
@@ -81,12 +83,11 @@ use crate::AppState;
 
 // ── Envelope GC SQL ──────────────────────────────────────────────────────────
 //
-// Envelope cleanup is gated on the DELIVERY WATERMARK and on nothing else: a row
-// is deleted only when its `sent_at` sits strictly below the MINIMUM
-// `last_fetched_at` over EVERY current member device of the conversation.
-// Retention is therefore bounded by the slowest member device — never by
-// wall-clock time. This is invariant I3 ("no TTL") in
-// `docs/backend-core-invariants.md`.
+// Envelope cleanup is gated on the DELIVERY WATERMARK: a row is deleted only when
+// its `sent_at` sits strictly below the MINIMUM `last_fetched_at` over every
+// current member device of the conversation that is still LIVE. Retention is
+// bounded by the slowest LIVE member device — never by wall-clock message age.
+// This is invariant I3 ("no TTL") in `docs/backend-core-invariants.md`.
 //
 // There used to be a second, OR'd arm: `sent_at < datetime('now', '-30 days')`.
 // Because it was OR'd it deleted ON ITS OWN, without consulting a single
@@ -97,6 +98,39 @@ use crate::AppState;
 // they were a member; the only acceptable losses are pre-join history and a
 // brand-new empty device). The arm is gone. Do not reintroduce a time-based — or
 // any other delivery-blind — deletion gate here: age is not evidence of delivery.
+//
+// ## The device-liveness bound (#720, WS1)
+//
+// Without more, a device that installs, joins a busy group and never opens the
+// app again pins that conversation's envelopes forever: its `last_fetched_at`
+// never advances, so it holds `MIN(cw)` down indefinitely. #720 bounds this by
+// LIVENESS — a member device that has not REPORTED a watermark in N months stops
+// counting toward the gate (the `?2` staleness arm below; N is the `?2` modifier,
+// the owner's product call). It mirrors the revoked-device exclusion (#685): a
+// stale device is filtered out of the roster the gate measures against, exactly
+// as a revoked one is.
+//
+// The bound is on the device's own LAST REPORT (`cw.reported_at`, a wall-clock
+// timestamp the DS stamps on every watermark write), NEVER on `last_fetched_at`
+// (a message-cursor value) or the envelope's `sent_at`. That distinction is the
+// whole point: a device that reported yesterday pins EVERY envelope below its
+// cursor no matter how old the envelope is (anti-F3). Reusing `last_fetched_at`
+// or `sent_at` for staleness would resurrect F3 — a live device in a quiet
+// conversation legitimately carries an old cursor without being dormant.
+//
+// This makes envelope retention bounded by member watermarks AND by device
+// liveness — a strictly SMALLER bound than the commit log's, whose stale-device
+// case is instead handled by its Tier-2 hard cap (`commit::prune_floor`). The
+// consequence is a THIRD accepted loss (beyond pre-join history and a new empty
+// device): a device dormant past N months that returns may find gaps. This is a
+// deliberate storage/correctness trade, gated behind a conservative N; see
+// invariant I3 and `docs/metadata-retention-policy.md` §1.
+//
+// It fails CLOSED on `reported_at IS NULL`: a device with NO watermark row (a
+// LEFT JOIN miss — brand-new, never synced) and a pre-migration row whose
+// `reported_at` was never stamped both read NULL and are KEPT in the roster (they
+// pin), because unknown report time is not evidence of dormancy. Only a device
+// with a KNOWN report time older than the window is excluded.
 //
 // What remains fails CLOSED on every edge:
 //   * `COUNT(ud.device_id) = COUNT(cw.last_fetched_at)` — every current member
@@ -168,6 +202,28 @@ macro_rules! dm_member_device_rows {
     };
 }
 
+// ## The `?2` device-liveness (staleness) arm, and why it lives OUTSIDE the macro
+//
+// The staleness filter (`cw.reported_at IS NULL OR cw.reported_at >=
+// datetime('now', ?2)`) is appended to each DELETE *around* the shared roster
+// fragment, NOT inside it. This is deliberate and load-bearing for the I5 roster
+// parity (see `roster_parity_tests`): the roster macro is the ONE definition of
+// "which member devices exist" shared with `commit::current_member_devices`, and
+// the commit log applies NO liveness bound (it uses its own Tier-2 hard cap). If
+// staleness went inside the macro, the envelope roster and the commit roster
+// would diverge and the parity test would (correctly) fail. Keeping it outside
+// leaves the shared roster byte-for-byte identical — the parity SELECTs read the
+// pure roster — while the envelope DELETE applies liveness as an ADDITIONAL,
+// envelope-only filter on top of that roster. The channel fragment has no `WHERE`
+// so the arm opens one; the DM fragment already ends in `WHERE dcm.dm_channel_id
+// = ?1` so the arm is `AND`-ed onto it.
+//
+// `?2` is a SQLite datetime modifier (e.g. `'-6 months'`), computed in Rust from
+// config (`watermark_stale_modifier`). Both the sweep and the per-conversation
+// endpoint bind the same value through the one chokepoint
+// `cleanup_conversation_envelopes`, so the two GC paths can never apply different
+// predicates (#720 checkbox 3).
+
 const CLEANUP_CHANNEL_ENVELOPES: &str = concat!(
     "\
 DELETE FROM message_envelope
@@ -181,6 +237,7 @@ DELETE FROM message_envelope
        ",
     channel_member_device_rows!(),
     "
+       WHERE cw.reported_at IS NULL OR cw.reported_at >= datetime('now', ?2)
      )"
 );
 
@@ -197,8 +254,64 @@ DELETE FROM message_envelope
        ",
     dm_member_device_rows!(),
     "
+         AND (cw.reported_at IS NULL OR cw.reported_at >= datetime('now', ?2))
      )"
 );
+
+// ── Device-liveness (staleness) window (#720) ────────────────────────────────
+
+/// The default staleness window, as a SQLite `datetime()` modifier: a member
+/// device that has not reported a watermark in this long stops pinning envelope
+/// retention. **Deliberately conservative** — a device genuinely silent for six
+/// months in a conversation is treated as dormant. The VALUE of N is the owner's
+/// product call (it governs the third accepted-message-loss; see the GC block
+/// comment and `docs/metadata-retention-policy.md` §1); this is only the code
+/// default when `POLLIS_DS_WATERMARK_STALE_MONTHS` is unset.
+pub const DEFAULT_WATERMARK_STALE_MODIFIER: &str = "-6 months";
+
+/// The configured device-staleness window as a SQLite `datetime()` modifier,
+/// bound as `?2` into the `CLEANUP_*` predicates.
+///
+/// `POLLIS_DS_WATERMARK_STALE_MONTHS` = N months (default 6). `0` DISABLES the
+/// bound — it returns a window so far in the past (`-1000 years`) that no device
+/// is ever stale, restoring the pre-#720 "watermark-only" behaviour without a
+/// second SQL path.
+pub fn watermark_stale_modifier() -> String {
+    match std::env::var("POLLIS_DS_WATERMARK_STALE_MONTHS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+    {
+        Some(0) => "-1000 years".to_string(),
+        Some(n) => format!("-{n} months"),
+        None => DEFAULT_WATERMARK_STALE_MODIFIER.to_string(),
+    }
+}
+
+// ── Retention growth metrics (#720 checkbox 1) ───────────────────────────────
+
+/// Identity-free growth metrics for `message_envelope`, computed by the sweep and
+/// served on `GET /v1/retention/metrics`. Deliberately holds NO conversation id
+/// or user id (see `docs/metadata-retention-policy.md` §3) — only counts and the
+/// shape of the worst offender.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct RetentionSnapshot {
+    /// Total surviving `message_envelope` rows across all conversations.
+    pub total_envelopes: i64,
+    /// How many distinct conversations still hold at least one envelope.
+    pub conversations_with_envelopes: i64,
+    /// The oldest `sent_at` still retained anywhere (a timestamp, not an id).
+    pub oldest_sent_at: Option<String>,
+    /// The worst offender's envelope count — the single conversation holding the
+    /// most envelopes. No id: the SHAPE only.
+    pub largest_conversation_envelopes: i64,
+    /// That worst offender's oldest retained `sent_at`.
+    pub largest_conversation_oldest_sent_at: Option<String>,
+}
+
+/// Shared, in-memory home for the latest [`RetentionSnapshot`]. The sweep writes
+/// it after each run; `GET /v1/retention/metrics` reads it. `None` until the
+/// first sweep completes.
+pub type RetentionMetricsHandle = std::sync::Arc<std::sync::Mutex<Option<RetentionSnapshot>>>;
 
 // ── Shared authz helpers ─────────────────────────────────────────────────────
 
@@ -815,6 +928,18 @@ pub async fn advance_watermark(
 
 /// Monotone UPSERT of a `(conversation, user, device)` watermark. Authz: the row
 /// belongs to the actor (`user_id` bound to the authenticated user).
+///
+/// `reported_at` is server-stamped to `datetime('now')` on BOTH insert and
+/// update — this is the wall-clock "device liveness" signal the envelope-GC
+/// staleness bound reads (#720). It is stamped UNCONDITIONALLY, even when the
+/// monotone `last_fetched_at` guard keeps the cursor where it is: a device that
+/// re-reports the same cursor is still LIVE, and a live device must keep pinning.
+/// This is also what makes the bound reversible — a dormant device that comes
+/// back and reports refreshes `reported_at` to now and immediately counts again.
+/// `reported_at` is a distinct column from `last_fetched_at` on purpose: the
+/// cursor is a message timestamp (it may legitimately be old for a live device in
+/// a quiet conversation), while liveness is when the DS last heard from the
+/// device — conflating them would resurrect F3.
 pub async fn apply_advance_watermark(
     conn: &Connection,
     authed: Option<&str>,
@@ -826,10 +951,11 @@ pub async fn apply_advance_watermark(
     };
     conn.execute(
         "INSERT INTO conversation_watermark \
-             (conversation_id, user_id, device_id, last_fetched_at) \
-         VALUES (?1, ?2, ?3, ?4) \
+             (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
+         VALUES (?1, ?2, ?3, ?4, datetime('now')) \
          ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET \
-             last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+             last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at), \
+             reported_at = datetime('now')",
         libsql::params![
             body.conversation_id.clone(),
             user,
@@ -869,16 +995,19 @@ pub async fn envelope_gc(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_envelope_gc(&conn, authed.as_deref(), &parsed).await?)
+    let stale = watermark_stale_modifier();
+    outcome_response(apply_envelope_gc(&conn, authed.as_deref(), &parsed, &stale).await?)
 }
 
 /// Run the watermark-gated envelope GC for a SINGLE conversation on demand.
 /// Authz: the actor is a current member (skipped on the no-auth path).
 ///
-/// The deletion predicate is bounded by the SLOWEST current member device and by
-/// nothing else — see the [`CLEANUP_CHANNEL_ENVELOPES`] block comment. The
+/// The deletion predicate is bounded by the SLOWEST current *live* member device
+/// and by nothing else — see the [`CLEANUP_CHANNEL_ENVELOPES`] block comment. The
 /// 30-day TTL that used to be OR'd into it is gone (invariant I3, failure mode
-/// F3): an envelope no member device has collected is retained however old it is.
+/// F3): an envelope no live member device has collected is retained however old
+/// it is. `stale` is the device-liveness window (`?2`, #720) — the SAME value the
+/// sweep passes, threaded here so the two paths cannot apply different predicates.
 ///
 /// Because the predicate consults the WHOLE current member-device roster, the
 /// *decision* is the same no matter who fires it — so a single eager device can
@@ -892,6 +1021,7 @@ pub async fn apply_envelope_gc(
     conn: &Connection,
     authed: Option<&str>,
     body: &EnvelopeGcBody,
+    stale: &str,
 ) -> anyhow::Result<WriteOutcome> {
     let actor = match resolve_actor(authed, body.actor_id.as_deref()) {
         Ok(a) => a,
@@ -900,46 +1030,61 @@ pub async fn apply_envelope_gc(
     if authed.is_some() && !is_member(conn, &body.conversation_id, &actor).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    cleanup_conversation_envelopes(conn, &body.conversation_id, body.is_dm).await?;
+    cleanup_conversation_envelopes(conn, &body.conversation_id, body.is_dm, stale).await?;
     Ok(WriteOutcome::Ok)
 }
 
 /// Run the watermark-gated cleanup for ONE conversation. Pure DB effect, no
 /// authz — callers gate. The single place the `CLEANUP_*` predicate is executed,
 /// shared by the per-conversation [`apply_envelope_gc`] endpoint and the
-/// server-side [`sweep_envelope_gc`], so the two can never drift.
+/// server-side [`sweep_envelope_gc`], so the two can never drift — including on
+/// the `?2` device-liveness window, which both pass through here (#720).
 async fn cleanup_conversation_envelopes(
     conn: &Connection,
     conversation_id: &str,
     is_dm: bool,
+    stale: &str,
 ) -> anyhow::Result<()> {
     let sql = if is_dm {
         CLEANUP_DM_ENVELOPES
     } else {
         CLEANUP_CHANNEL_ENVELOPES
     };
-    conn.execute(sql, libsql::params![conversation_id.to_string()])
-        .await?;
+    conn.execute(
+        sql,
+        libsql::params![conversation_id.to_string(), stale.to_string()],
+    )
+    .await?;
     Ok(())
 }
 
+/// The report a sweep returns: how many conversations it visited, plus the
+/// identity-free growth snapshot it gathered on the same walk.
+#[derive(Clone, Debug, Default)]
+pub struct SweepReport {
+    pub visited: usize,
+    pub metrics: RetentionSnapshot,
+}
+
 /// The server-side envelope-GC trigger (#689): sweep every conversation that
-/// still has envelopes and run the watermark-gated cleanup for each. Returns the
-/// number of conversations visited.
+/// still has envelopes and run the watermark-gated cleanup for each. `stale` is
+/// the device-liveness window (`?2`, #720). Returns a [`SweepReport`] — the count
+/// visited plus the identity-free growth metrics gathered on the SAME walk (#720
+/// checkbox 1), so no second full scan is needed to emit them.
 ///
 /// This replaces the old trigger — "whichever member device happens to ingest
 /// calls `/v1/envelopes/gc`" — which never fired for a conversation whose members
 /// all went quiet and fired far more often than needed for a chatty one. Nothing
-/// about *which rows qualify* changes: retention stays bounded by the slowest
-/// member device (invariant I3), only *what drives* GC moves off the member
-/// ingest path.
+/// about *which rows qualify* changes here beyond the #720 liveness bound;
+/// retention stays bounded by the slowest LIVE member device (invariant I3), only
+/// *what drives* GC moves off the member ingest path.
 ///
 /// A conversation is a DM iff its id appears in `dm_channel_member` (mirroring
 /// [`is_member`]); every other id is a group/channel. Running the wrong predicate
 /// is a no-op — its roster join yields zero rows, `COUNT(ud) = COUNT(cw) = 0`, the
 /// CASE returns NULL and `sent_at < NULL` deletes nothing — so a misclassified id
 /// can never over-delete.
-pub async fn sweep_envelope_gc(conn: &Connection) -> anyhow::Result<usize> {
+pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result<SweepReport> {
     // Only conversations that still hold envelopes are worth visiting; steady
     // state this set is small.
     let mut conversations: Vec<String> = Vec::new();
@@ -951,6 +1096,11 @@ pub async fn sweep_envelope_gc(conn: &Connection) -> anyhow::Result<usize> {
             conversations.push(row.get::<String>(0)?);
         }
     }
+    // Growth metrics accumulated on the SAME per-conversation walk that runs
+    // cleanup — no second full scan (#720 checkbox 1). Post-cleanup counts, so
+    // they reflect what actually survives GC. Deliberately identity-free: the
+    // worst offender is tracked by its shape (count + oldest), never its id.
+    let mut metrics = RetentionSnapshot::default();
     for conversation_id in &conversations {
         let is_dm = {
             let mut rows = conn
@@ -961,7 +1111,29 @@ pub async fn sweep_envelope_gc(conn: &Connection) -> anyhow::Result<usize> {
                 .await?;
             rows.next().await?.is_some()
         };
-        cleanup_conversation_envelopes(conn, conversation_id, is_dm).await?;
+        cleanup_conversation_envelopes(conn, conversation_id, is_dm, stale).await?;
+
+        let (count, oldest) = {
+            let mut rows = conn
+                .query(
+                    "SELECT COUNT(*), MIN(sent_at) FROM message_envelope WHERE conversation_id = ?1",
+                    libsql::params![conversation_id.clone()],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => (row.get::<i64>(0)?, row.get::<Option<String>>(1)?),
+                None => (0, None),
+            }
+        };
+        if count > 0 {
+            metrics.total_envelopes += count;
+            metrics.conversations_with_envelopes += 1;
+            metrics.oldest_sent_at = min_opt(metrics.oldest_sent_at.take(), oldest.clone());
+            if count > metrics.largest_conversation_envelopes {
+                metrics.largest_conversation_envelopes = count;
+                metrics.largest_conversation_oldest_sent_at = oldest;
+            }
+        }
     }
     // Reap dead attachment reference declarations (#690, Blocking 2). Envelopes
     // deleted just above (and by every other deleter) already stopped counting
@@ -971,7 +1143,21 @@ pub async fn sweep_envelope_gc(conn: &Connection) -> anyhow::Result<usize> {
     // never named a real envelope. Runs unconditionally: even a fully-pruned DB
     // (the loop visited nothing) may hold such orphans.
     conn.execute(REAP_ORPHANED_ATTACHMENT_REFS_SQL, ()).await?;
-    Ok(conversations.len())
+    Ok(SweepReport {
+        visited: conversations.len(),
+        metrics,
+    })
+}
+
+/// Lexical min of two optional timestamps, skipping `None` (mirrors SQLite's
+/// NULL-skipping `MIN`). `sent_at` sorts lexically = chronologically here (see
+/// [`now_rfc3339`]), so a string compare is the right "oldest".
+fn min_opt(a: Option<String>, b: Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if a <= b { a } else { b }),
+        (Some(a), None) => Some(a),
+        (None, b) => b,
+    }
 }
 
 // ── POST /v1/attachments/register  &  /v1/attachments/delete ─────────────────
@@ -1527,16 +1713,30 @@ CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL);\
 CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
 CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);\
 CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, last_fetched_at TEXT NOT NULL);\
+  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
+  last_fetched_at TEXT NOT NULL, reported_at TEXT);\
 CREATE TABLE attachment_object (content_hash TEXT PRIMARY KEY, r2_key TEXT NOT NULL);\
 CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NULL, \
   PRIMARY KEY (content_hash, message_id));";
+
+    /// A staleness window wide enough that none of the legacy fixtures (which seed
+    /// `reported_at = NULL`, i.e. "report time unknown" → treated as live) are ever
+    /// excluded — so the pre-#720 behaviour they pin is exactly preserved. The
+    /// #720 tests set `reported_at` explicitly and probe across this boundary.
+    const TEST_STALE: &str = "-6 months";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
         conn.execute_batch(SCHEMA).await.unwrap();
         conn
+    }
+
+    /// Run one `CLEANUP_*` statement with the standard test staleness window.
+    async fn run_cleanup(conn: &Connection, sql: &str, conv: &str) {
+        conn.execute(sql, libsql::params![conv.to_string(), TEST_STALE.to_string()])
+            .await
+            .unwrap();
     }
 
     async fn add_device(conn: &Connection, user: &str, device: &str, revoked: bool) {
@@ -1550,11 +1750,42 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
     }
 
     /// Seed a watermark row whose `last_fetched_at` is `datetime('now', offset)`.
+    /// `reported_at` is left NULL — "report time unknown", treated as live — so
+    /// legacy fixtures keep their pre-#720 meaning.
     async fn seed_watermark(conn: &Connection, conv: &str, user: &str, device: &str, offset: &str) {
         conn.execute(
             "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
              VALUES (?1, ?2, ?3, datetime('now', ?4))",
             libsql::params![conv.to_string(), user.to_string(), device.to_string(), offset.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    /// Seed a watermark row with BOTH the message cursor (`last_fetched_at`) and
+    /// the wall-clock report time (`reported_at`) as explicit `datetime('now', …)`
+    /// offsets. The two are deliberately independent: `cursor` is how far the
+    /// device has read (a message timestamp), `reported` is when the DS last heard
+    /// from it (the #720 liveness signal).
+    async fn seed_watermark_reported(
+        conn: &Connection,
+        conv: &str,
+        user: &str,
+        device: &str,
+        cursor: &str,
+        reported: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
+             VALUES (?1, ?2, ?3, datetime('now', ?4), datetime('now', ?5))",
+            libsql::params![
+                conv.to_string(),
+                user.to_string(),
+                device.to_string(),
+                cursor.to_string(),
+                reported.to_string()
+            ],
         )
         .await
         .unwrap();
@@ -1607,9 +1838,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         // The envelope sits between them: above the stale cursor, below the live one.
         add_envelope(&conn, "e1", "c1", "-5 days").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
         assert_eq!(
             envelope_count(&conn, "c1").await,
@@ -1631,9 +1860,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         seed_watermark(&conn, "c1", "alice", "a-live", "-1 day").await;
         add_envelope(&conn, "e1", "c1", "-5 days").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
         assert_eq!(
             envelope_count(&conn, "c1").await,
@@ -1661,9 +1888,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         seed_watermark(&conn, "d1", "alice", "a-old", "-10 days").await;
         add_envelope(&conn, "e1", "d1", "-5 days").await;
 
-        conn.execute(CLEANUP_DM_ENVELOPES, libsql::params!["d1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "d1").await;
 
         assert_eq!(
             envelope_count(&conn, "d1").await,
@@ -1681,9 +1906,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         seed_watermark(&conn, "d1", "alice", "a-live", "-1 day").await;
         add_envelope(&conn, "e1", "d1", "-5 days").await;
 
-        conn.execute(CLEANUP_DM_ENVELOPES, libsql::params!["d1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "d1").await;
 
         assert_eq!(
             envelope_count(&conn, "d1").await,
@@ -1716,9 +1939,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         seed_watermark(&conn, "c1", "bob", "b1", "-500 days").await;
         add_envelope(&conn, "ancient", "c1", "-400 days").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
         assert_eq!(
             envelope_count(&conn, "c1").await,
@@ -1745,9 +1966,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
         add_envelope(&conn, "ancient", "c1", "-400 days").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
         assert_eq!(
             envelope_count(&conn, "c1").await,
@@ -1771,9 +1990,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         seed_watermark(&conn, "d1", "bob", "b1", "-500 days").await;
         add_envelope(&conn, "ancient", "d1", "-400 days").await;
 
-        conn.execute(CLEANUP_DM_ENVELOPES, libsql::params!["d1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "d1").await;
 
         assert_eq!(
             envelope_count(&conn, "d1").await,
@@ -1806,9 +2023,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         seed_watermark(&conn, "c1", "alice", "a2", "-2 days").await;
         seed_watermark(&conn, "c1", "bob", "b1", "-2 days").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
         assert_eq!(
             envelope_count(&conn, "c1").await,
@@ -1837,9 +2052,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         // Above the slow cursor, below the fast one: MIN keeps it, MAX would not.
         add_envelope(&conn, "between", "c1", "-3 days").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
         assert_eq!(
             envelope_count(&conn, "c1").await,
@@ -1865,9 +2078,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         add_envelope(&conn, "ancient", "c1", "-400 days").await;
         add_envelope(&conn, "fresh", "c1", "-1 hour").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
         assert_eq!(
             envelope_count(&conn, "c1").await,
@@ -1883,12 +2094,8 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         let conn = conn().await;
         add_envelope(&conn, "ancient", "ghost", "-400 days").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["ghost".to_string()])
-            .await
-            .unwrap();
-        conn.execute(CLEANUP_DM_ENVELOPES, libsql::params!["ghost".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "ghost").await;
+        run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "ghost").await;
 
         assert_eq!(
             envelope_count(&conn, "ghost").await,
@@ -1908,9 +2115,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         seed_watermark(&conn, "c1", "alice", "a-old", "-500 days").await;
         add_envelope(&conn, "ancient", "c1", "-400 days").await;
 
-        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
-            .await
-            .unwrap();
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
 
         assert_eq!(
             envelope_count(&conn, "c1").await,
@@ -1959,15 +2164,193 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         add_envelope(&conn, "eB", "c2", "-5 days").await;
 
         // No member ingests; the sweep is the sole trigger.
-        let visited = sweep_envelope_gc(&conn).await.unwrap();
+        let report = sweep_envelope_gc(&conn, TEST_STALE).await.unwrap();
 
-        assert_eq!(visited, 3, "the sweep visits every conversation that still has envelopes");
+        assert_eq!(report.visited, 3, "the sweep visits every conversation that still has envelopes");
         assert_eq!(envelope_count(&conn, "c1").await, 0, "quiet channel, all caught up → swept");
         assert_eq!(envelope_count(&conn, "d1").await, 0, "quiet DM, all caught up → swept");
         assert_eq!(
             envelope_count(&conn, "c2").await,
             1,
             "a conversation with an uncollected recipient must NOT be swept"
+        );
+
+        // The growth snapshot is gathered on the SAME walk (#720 checkbox 1) and
+        // reflects POST-cleanup survivors: only c2's uncollected envelope remains.
+        assert_eq!(report.metrics.total_envelopes, 1, "one envelope survives GC (eB in c2)");
+        assert_eq!(report.metrics.conversations_with_envelopes, 1, "held by one conversation");
+        assert_eq!(report.metrics.largest_conversation_envelopes, 1, "worst offender holds one");
+    }
+
+    // ── The #720 device-liveness bound ───────────────────────────────────────
+    //
+    // Each test below FAILS against the pre-#720 code (no `reported_at`, no
+    // staleness arm) by asserting a COLLECTION the watermark-only predicate never
+    // performs — confirmed by removing the `?2` arm from `CLEANUP_*`, which leaves
+    // the dormant device pinning and flips the survivor count back to 1.
+
+    /// A dormant device — one that reported a watermark long ago and then went
+    /// silent — stops pinning after the staleness window: its envelope is
+    /// collected once every LIVE device has read past it. Pre-#720 (bob still in
+    /// the roster with his ancient cursor) `MIN(cw) = bob` sits below the envelope
+    /// and it is retained forever; this asserts the opposite.
+    #[tokio::test]
+    async fn channel_dormant_device_stops_pinning_after_the_bound() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "alice", "a1", false).await;
+        add_device(&conn, "bob", "b1", false).await;
+        // Alice is live and caught up. Bob reported 400 days ago (past the 6-month
+        // window) and his cursor is stuck 500 days back — dormant.
+        seed_watermark_reported(&conn, "c1", "alice", "a1", "-1 day", "-1 day").await;
+        seed_watermark_reported(&conn, "c1", "bob", "b1", "-500 days", "-400 days").await;
+        // The envelope sits above bob's stuck cursor but below alice's.
+        add_envelope(&conn, "e1", "c1", "-100 days").await;
+
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            0,
+            "a device silent past the window stops pinning; the envelope every LIVE \
+             device read past is collected (#720). Pre-change bob pins it forever."
+        );
+    }
+
+    /// **The anti-F3 test — the important one.** A device that reported RECENTLY
+    /// still pins every envelope below its cursor, no matter how ANCIENT the
+    /// envelope is: liveness is `reported_at`, never the message's age or the
+    /// cursor's age. Both legs share one fixture and differ ONLY in `reported_at`,
+    /// so the outcome provably pivots on liveness alone.
+    ///
+    /// Leg 2 (dormant) is what fails against pre-#720 code — it asserts the ancient
+    /// envelope IS collected once the blocker is stale. Leg 1 (live) is the F3
+    /// guard: a naive staleness keyed on `last_fetched_at` (the cursor, 500 days
+    /// old here) or on `sent_at` (400 days old) would wrongly collect it; keying on
+    /// `reported_at` (1 day old) keeps it.
+    #[tokio::test]
+    async fn channel_recent_report_pins_ancient_envelope_but_dormant_does_not() {
+        // Leg 1 — bob reported yesterday, cursor and envelope both ancient: PINS.
+        {
+            let conn = conn().await;
+            channel_fixture(&conn).await;
+            conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob')", ())
+                .await
+                .unwrap();
+            add_device(&conn, "alice", "a1", false).await;
+            add_device(&conn, "bob", "b1", false).await;
+            seed_watermark_reported(&conn, "c1", "alice", "a1", "-1 day", "-1 day").await;
+            // Cursor 500 days back, but reported ONE day ago — live.
+            seed_watermark_reported(&conn, "c1", "bob", "b1", "-500 days", "-1 day").await;
+            add_envelope(&conn, "ancient", "c1", "-400 days").await;
+
+            run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
+
+            assert_eq!(
+                envelope_count(&conn, "c1").await,
+                1,
+                "a 400-day-old envelope below a RECENTLY-REPORTED device's cursor \
+                 must survive — age is not dormancy (anti-F3, #720)"
+            );
+        }
+        // Leg 2 — identical, except bob reported 400 days ago: stale → COLLECTED.
+        {
+            let conn = conn().await;
+            channel_fixture(&conn).await;
+            conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob')", ())
+                .await
+                .unwrap();
+            add_device(&conn, "alice", "a1", false).await;
+            add_device(&conn, "bob", "b1", false).await;
+            seed_watermark_reported(&conn, "c1", "alice", "a1", "-1 day", "-1 day").await;
+            // Same cursor, but reported 400 days ago — dormant.
+            seed_watermark_reported(&conn, "c1", "bob", "b1", "-500 days", "-400 days").await;
+            add_envelope(&conn, "ancient", "c1", "-400 days").await;
+
+            run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
+
+            assert_eq!(
+                envelope_count(&conn, "c1").await,
+                0,
+                "flipping ONLY reported_at to stale collects the same envelope: the \
+                 outcome pivots on liveness, not age (#720). Fails pre-change."
+            );
+        }
+    }
+
+    /// A `reported_at IS NULL` device (never stamped — a pre-migration row, or a
+    /// device with no watermark row at all) is treated as LIVE and keeps pinning:
+    /// unknown report time is not evidence of dormancy (fail-closed). Guards
+    /// against a staleness arm that would exclude NULLs and drop mail on rollout.
+    #[tokio::test]
+    async fn channel_null_reported_at_still_pins() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "alice", "a1", false).await;
+        add_device(&conn, "bob", "b1", false).await;
+        seed_watermark_reported(&conn, "c1", "alice", "a1", "-1 day", "-1 day").await;
+        // Legacy row: cursor set, reported_at NULL.
+        seed_watermark(&conn, "c1", "bob", "b1", "-500 days").await;
+        add_envelope(&conn, "e1", "c1", "-100 days").await;
+
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            1,
+            "a NULL reported_at must pin (fail-closed) — unknown ≠ dormant (#720)"
+        );
+    }
+
+    /// Whole-roster dormancy must not manufacture an empty roster that deletes:
+    /// when EVERY device is stale the roster is empty, and — exactly like the
+    /// all-revoked case — an empty roster deletes nothing (`MIN` over zero rows is
+    /// NULL). A dead conversation retains its (bounded) envelopes; it is not wiped.
+    #[tokio::test]
+    async fn an_all_stale_roster_deletes_nothing() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        add_device(&conn, "alice", "a1", false).await;
+        seed_watermark_reported(&conn, "c1", "alice", "a1", "-100 days", "-400 days").await;
+        add_envelope(&conn, "ancient", "c1", "-50 days").await;
+
+        run_cleanup(&conn, CLEANUP_CHANNEL_ENVELOPES, "c1").await;
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            1,
+            "an all-stale roster is empty, and an empty roster deletes nothing — \
+             staleness must not wipe a fully-dormant conversation (#720)"
+        );
+    }
+
+    /// The DM predicate carries the same bound (the `?2` arm is `AND`-ed onto the
+    /// DM roster's existing `WHERE`).
+    #[tokio::test]
+    async fn dm_dormant_device_stops_pinning_after_the_bound() {
+        let conn = conn().await;
+        dm_fixture(&conn).await;
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'bob')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "alice", "a1", false).await;
+        add_device(&conn, "bob", "b1", false).await;
+        seed_watermark_reported(&conn, "d1", "alice", "a1", "-1 day", "-1 day").await;
+        seed_watermark_reported(&conn, "d1", "bob", "b1", "-500 days", "-400 days").await;
+        add_envelope(&conn, "e1", "d1", "-100 days").await;
+
+        run_cleanup(&conn, CLEANUP_DM_ENVELOPES, "d1").await;
+
+        assert_eq!(
+            envelope_count(&conn, "d1").await,
+            0,
+            "DM: a device silent past the window stops pinning (#720)"
         );
     }
 
@@ -2025,8 +2408,8 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
             "referenced while the message is live"
         );
 
-        let visited = sweep_envelope_gc(&conn).await.unwrap();
-        assert_eq!(visited, 1, "the sweep visits the one conversation with envelopes");
+        let report = sweep_envelope_gc(&conn, TEST_STALE).await.unwrap();
+        assert_eq!(report.visited, 1, "the sweep visits the one conversation with envelopes");
         assert_eq!(envelope_count(&conn, "c1").await, 0, "the message was swept");
         assert!(
             !object_is_referenced(&conn, "h").await.unwrap(),
@@ -2058,7 +2441,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
             "a declaration whose message never existed must never count (#690)"
         );
 
-        sweep_envelope_gc(&conn).await.unwrap();
+        sweep_envelope_gc(&conn, TEST_STALE).await.unwrap();
         assert_eq!(
             raw_ref_count(&conn, "h").await,
             0,
@@ -2140,7 +2523,8 @@ CREATE TABLE dm_channel_member (\
   dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (dm_channel_id, user_id));\
 CREATE TABLE conversation_watermark (\
   conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));";
+  last_fetched_at TEXT NOT NULL, reported_at TEXT, \
+  PRIMARY KEY (conversation_id, user_id, device_id));";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
@@ -2439,6 +2823,7 @@ DELETE FROM message_envelope
               ON cw.conversation_id = ?1
              AND cw.user_id = ud.user_id
              AND cw.device_id = ud.device_id
+       WHERE cw.reported_at IS NULL OR cw.reported_at >= datetime('now', ?2)
      )"
         );
         assert_eq!(
@@ -2459,6 +2844,7 @@ DELETE FROM message_envelope
              AND cw.user_id = ud.user_id
              AND cw.device_id = ud.device_id
        WHERE dcm.dm_channel_id = ?1
+         AND (cw.reported_at IS NULL OR cw.reported_at >= datetime('now', ?2))
      )"
         );
     }
@@ -2493,8 +2879,10 @@ DELETE FROM message_envelope
             watermark(&caught_up, conv, "carol", "carol-old-2", "-400 days").await;
             watermark(&caught_up, conv, "mallory", "mallory-1", "-400 days").await;
             envelope(&caught_up, "e1", conv, "-5 days").await;
+            // The `watermark` helper leaves `reported_at` NULL (live), so the #720
+            // staleness arm excludes no one here — this test isolates the roster.
             caught_up
-                .execute(sql, libsql::params![conv.to_string()])
+                .execute(sql, libsql::params![conv.to_string(), "-6 months".to_string()])
                 .await
                 .unwrap();
             assert_eq!(
@@ -2521,7 +2909,7 @@ DELETE FROM message_envelope
             watermark(&held, conv, "carol", "carol-old-2", "-1 day").await;
             watermark(&held, conv, "mallory", "mallory-1", "-1 day").await;
             envelope(&held, "e1", conv, "-5 days").await;
-            held.execute(sql, libsql::params![conv.to_string()])
+            held.execute(sql, libsql::params![conv.to_string(), "-6 months".to_string()])
                 .await
                 .unwrap();
             assert_eq!(

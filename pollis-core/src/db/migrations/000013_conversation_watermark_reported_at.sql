@@ -1,0 +1,22 @@
+-- #720 (WS1) — device-liveness bound on envelope retention.
+--
+-- Envelope GC is gated on the MIN delivery watermark over every current member
+-- device (invariant I3, `pollis-delivery/src/messages.rs` `CLEANUP_*`). A device
+-- that installs, joins a busy group and never opens the app again therefore pins
+-- that conversation's envelopes forever. #720 adds a bound: a member device that
+-- has not REPORTED a watermark in N months stops pinning retention (mirroring how
+-- revoked devices are excluded, #685).
+--
+-- The bound must be evaluated from the device's own last REPORT wall-clock time,
+-- NEVER from `last_fetched_at` (a message-cursor value) or the message's age —
+-- reusing either would resurrect failure mode F3 (a live device in a quiet
+-- conversation carries an old cursor yet is not dormant). So it needs its own
+-- column: the server-stamped wall-clock time the watermark row was last written.
+--
+-- Additive and backward-compatible (safe per CLAUDE.md): a nullable ADD COLUMN.
+-- SQLite forbids a non-constant default (`datetime('now')`) on ADD COLUMN, so
+-- existing rows get NULL. NULL means "report time unknown" and the cleanup
+-- predicate treats it as LIVE (fail-closed — a pre-migration row belongs to a
+-- device that was reporting; excluding it on unknown could drop mail). New writes
+-- and re-reports server-stamp it (`apply_advance_watermark` and the seed paths).
+ALTER TABLE conversation_watermark ADD COLUMN reported_at TEXT;

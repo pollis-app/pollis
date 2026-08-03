@@ -872,7 +872,8 @@ async fn delivery_envelopes_gc(
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("conn: {e}")),
     };
-    match pollis_delivery::messages::apply_envelope_gc(&conn, Some(&authed), &parsed).await {
+    let stale = pollis_delivery::messages::watermark_stale_modifier();
+    match pollis_delivery::messages::apply_envelope_gc(&conn, Some(&authed), &parsed, &stale).await {
         Ok(o) => ds_outcome(o),
         Err(e) => ds_internal_error(format!("envelopes/gc: {e}")),
     }

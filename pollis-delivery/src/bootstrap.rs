@@ -252,11 +252,14 @@ pub async fn apply_register_device(
 
     // Seed watermark rows for every conversation the user already belongs to so a
     // new device doesn't retroactively block envelope cleanup. INSERT OR IGNORE —
-    // mirrors auth.rs.
+    // mirrors auth.rs. `reported_at = datetime('now')` marks the device LIVE as of
+    // join: it pins for the #720 staleness window from here, then — if it never
+    // opens the app again — stops pinning. Seeding it (not NULL) is what makes the
+    // dormancy bound actually bite for a device that installs, joins and vanishes.
     tx.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
-            (conversation_id, user_id, device_id, last_fetched_at) \
-         SELECT c.id, ?1, ?2, datetime('now') \
+            (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
+         SELECT c.id, ?1, ?2, datetime('now'), datetime('now') \
          FROM channels c \
          JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
         libsql::params![user_id.to_string(), device_id.to_string()],
@@ -264,8 +267,8 @@ pub async fn apply_register_device(
     .await?;
     tx.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
-            (conversation_id, user_id, device_id, last_fetched_at) \
-         SELECT dcm.dm_channel_id, ?1, ?2, datetime('now') \
+            (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
+         SELECT dcm.dm_channel_id, ?1, ?2, datetime('now'), datetime('now') \
          FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
         libsql::params![user_id.to_string(), device_id.to_string()],
     )

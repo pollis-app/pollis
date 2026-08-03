@@ -70,6 +70,7 @@ CREATE TABLE conversation_watermark (\
   user_id TEXT NOT NULL,\
   device_id TEXT NOT NULL,\
   last_fetched_at TEXT NOT NULL,\
+  reported_at TEXT,\
   PRIMARY KEY (conversation_id, user_id, device_id)\
 );\
 CREATE TABLE channels (\

@@ -103,6 +103,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "attachment_ref",
         include_str!("migrations/000012_attachment_ref.sql"),
     ),
+    (
+        13,
+        "conversation_watermark_reported_at",
+        include_str!("migrations/000013_conversation_watermark_reported_at.sql"),
+    ),
 ];
 
 pub mod queries {

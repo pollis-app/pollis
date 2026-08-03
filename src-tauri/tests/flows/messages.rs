@@ -788,7 +788,8 @@ async fn clear_watermarks(
 /// deletion predicate is unchanged; only what triggers it moved.
 async fn run_gc_sweep(remote: &Arc<pollis_lib::db::remote::RemoteDb>) {
     let conn = remote.conn().await.expect("remote conn");
-    pollis_delivery::messages::sweep_envelope_gc(&conn)
+    let stale = pollis_delivery::messages::watermark_stale_modifier();
+    pollis_delivery::messages::sweep_envelope_gc(&conn, &stale)
         .await
         .expect("gc sweep");
 }

@@ -106,10 +106,12 @@ async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> an
     // don't block envelope cleanup. Best-effort — mirrors the core helper, which
     // logs and continues on failure. Revoked devices are excluded (#685) — they
     // never rejoin, so they are not part of the GC roster.
+    // `reported_at = datetime('now')` marks each seeded device LIVE as of the join
+    // (#720): it pins for the staleness window, then stops if it never reports.
     let _ = conn
         .execute(
-            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-             SELECT c.id, ?1, ud.device_id, datetime('now')
+            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at, reported_at)
+             SELECT c.id, ?1, ud.device_id, datetime('now'), datetime('now')
              FROM channels c
              JOIN user_device ud ON ud.user_id = ?1 AND ud.revoked_at IS NULL
              WHERE c.group_id = ?2",
