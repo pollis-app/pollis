@@ -511,10 +511,9 @@
         <p class="art-section-lede">
           All of the above trusts exactly one thing: a single pinned public key. Every signature, on every tree head, on
           every release, is checked against it. If you trust this key, you can verify everything; if you don't, verify
-          nothing. That key is being rotated from Ed25519 to <strong>ML-DSA-44</strong>, a post-quantum signature
-          scheme, so a signed statement about history stays meaningful for as long as anyone might want to re-check
-          the past (#668). Until the new key is minted and all three trees are republished under it, this page pins
-          nothing and checks nothing — it says so plainly below rather than showing you a match that isn't one.
+          nothing. It is an <strong>ML-DSA-44</strong> post-quantum key, so a signed statement about history stays
+          meaningful for as long as anyone might want to re-check the past (#668). The key below is fresh material:
+          the earlier Ed25519 key, and the seed it was derived from, were retired outright rather than re-encoded.
         </p>
         <div class="art-card">
           <div class="art-key-block">
@@ -524,9 +523,9 @@
             </div>
             <p class="art-note">
               That comparison is the <strong>only</strong> verification your browser ever performs: it fetches the key
-              the server serves and compares it, character by character, to the constant baked into this page. While
-              the constant is absent, as it is during the ML-DSA-44 rotation, the browser performs no verification at
-              all. Everything else on this page is a <strong>server-computed</strong> verdict, re-run it with
+              the server serves and compares it, character by character, to the constant baked into this page. If the
+              constant were ever absent the browser would perform no verification at all, and would say so rather than
+              imply a match. Everything else on this page is a <strong>server-computed</strong> verdict, re-run it with
               <code>pollis-verify</code> to make it trustless.
             </p>
 

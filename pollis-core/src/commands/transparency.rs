@@ -890,9 +890,12 @@ fn check_pin(served: &str, pin: Option<&str>) -> PinCheck {
     }
 }
 
-/// Detail shown when this build carries no log pin.
+/// Detail shown when this build carries no log pin. Shipping builds do pin one
+/// (see [`PINNED_LOG_PUBLIC_KEY`]), so this is reachable only from a build made
+/// while a rotation is mid-flight — it must still read correctly if that happens.
 const PIN_PENDING_DETAIL: &str =
-    "this build pins no transparency-log key yet (the log's signing key is being rotated to      ML-DSA-44), so the published tree cannot be checked against anything — treating it as      unverified rather than trusted";
+    "this build pins no transparency-log key, so the published tree cannot be checked against \
+     anything — treating it as unverified rather than trusted";
 
 /// The chain's latest published key version (highest `identity_version`). `keys`
 /// is already in `seq` order; `max_by_key` is defensive against source ordering.

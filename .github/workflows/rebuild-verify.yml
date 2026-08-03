@@ -104,10 +104,10 @@ jobs:
           served="$(curl -fsSL "${VERIFY_BASE_URL}/v1/binaries/public_key.json" | jq -r '.public_key')"
           echo "served binaries log key: ${served}"
           if [ -z "${PINNED_LOG_KEY}" ]; then
-            echo "::error::no pinned log key is set — the log's signing key is being rotated to"
-            echo "::error::ML-DSA-44 (#668). Without an anchor obtained independently of the host,"
-            echo "::error::nothing this workflow computes would mean anything. Set PINNED_LOG_KEY"
-            echo "::error::to the new key once all three trees are republished under it."
+            echo "::error::no pinned log key is set. Without an anchor obtained independently of"
+            echo "::error::the host, nothing this workflow computes would mean anything — a hostile"
+            echo "::error::host can serve its own key alongside a self-consistent forged tree."
+            echo "::error::Set PINNED_LOG_KEY to the published ML-DSA-44 key."
             exit 1
           fi
           if [ "${served}" != "${PINNED_LOG_KEY}" ]; then
