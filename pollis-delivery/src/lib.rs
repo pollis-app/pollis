@@ -85,6 +85,13 @@ pub struct AppState {
     pub ratelimit: ratelimit::RateLimiter,
     /// Per-IP rate-limit tunables (DS env).
     pub ratelimit_config: ratelimit::RateLimitConfig,
+    /// In-memory device-pubkey cache for the device-signature auth path (#658).
+    /// Shallow-`Clone` (shared `Arc`), so every `AppState` clone — i.e. every
+    /// request — sees the same map, and an eviction from any handler is
+    /// immediately visible to the auth gate. See [`auth::DeviceKeyCache`] for
+    /// the invalidation contract and the `max_instances: 1` assumption it rests
+    /// on.
+    pub device_keys: auth::DeviceKeyCache,
 }
 
 impl AppState {
@@ -109,6 +116,7 @@ impl AppState {
             broker: broker::BrokerConfig::default(),
             ratelimit: ratelimit::RateLimiter::default(),
             ratelimit_config: ratelimit::RateLimitConfig::default(),
+            device_keys: auth::DeviceKeyCache::default(),
         }
     }
 
@@ -336,7 +344,8 @@ async fn submit(
     // taken from the matched URI (no query on this route).
     let authed_user = if state.require_auth {
         let conn = state.db.conn()?;
-        match auth::verify_request(
+        match auth::verify_request_cached(
+            &state.device_keys,
             &conn,
             &headers,
             method.as_str(),
@@ -496,7 +505,8 @@ async fn report_commit_since(
     // the body — when auth is on.
     let authed = if state.require_auth {
         let conn = state.db.conn()?;
-        match auth::verify_request_identity(
+        match auth::verify_request_identity_cached(
+            &state.device_keys,
             &conn,
             &headers,
             method.as_str(),

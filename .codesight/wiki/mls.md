@@ -293,6 +293,28 @@ races, and duplicate deliveries. All are additive to the flows above.
   unauthenticated, per-conversation commit-log wipe. Reads stay open; an
   unauthenticated report is dropped, which only ever leaves the floor conservative
   (an unreported member disables Tier 1).
+- **Device-pubkey cache on the auth path (#658).** Every device-signed DS request
+  used to re-read `user_device.mls_signature_pub_pq` from Turso; from the
+  Cloudflare Container's network position that single query cost **2000–4700 ms**,
+  and a first message in a fresh mobile group chains ~14 sequential signed calls
+  (15–60 s of user-visible latency). `auth::DeviceKeyCache` — an in-process
+  `(user_id, device_id) → verifying key` map on `AppState`, consulted by
+  `writes::gate` and the two `lib.rs` call sites — removes that read on every
+  request after the first. The **signature is still verified in full every time**;
+  only the key lookup is cached.
+  - *Revocation safety* is by explicit eviction: `/v1/devices/revoke`,
+    `/v1/auth/logout`, `/v1/devices/resign`, `/v1/account/rotate-identity`,
+    `/v1/account/delete`, `/v1/account/reset-recover`, `/v1/auth/register-device`
+    and `/v1/auth/publish-device-cert` all invalidate. A 30 s **absolute** TTL
+    (from insertion, never refreshed on use) backstops a hook that is ever missed.
+  - *Negative results are never cached* — a missing row is the normal state of a
+    device mid-enrollment, and a cached "unknown device" would 401 a device that
+    has since registered.
+  - *Depends on `max_instances: 1`* (`pollis-delivery/wrangler.{dev,prod}.jsonc`):
+    one container ⇒ one cache ⇒ eviction is globally effective. **Raising
+    `max_instances` breaks this** — a sibling instance would keep serving a
+    revoked device's key for up to the TTL — so it would require dropping the
+    cache or replacing eviction with a shared signal.
 
 ## Post-quantum suite: birth, migration, retirement (#454, #669)
 
