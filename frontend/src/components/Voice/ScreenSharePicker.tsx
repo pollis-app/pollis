@@ -17,9 +17,8 @@ import { Card } from "../ui/Card";
  *  overlay, just a full-pane takeover that gives the user a grid of
  *  displays + windows. The source list comes from each platform's
  *  enumerator (macOS: SCShareableContent in the helper subprocess;
- *  Windows: windows-rs Monitor/Window enumeration + GDI thumbnails;
- *  Electron: `desktopCapturer.getSources()`). Industry-standard pattern
- *  — what Slack/Discord/Zoom do. */
+ *  Windows: windows-rs Monitor/Window enumeration + GDI thumbnails).
+ *  Industry-standard pattern — what Slack/Discord/Zoom do. */
 export const ScreenSharePicker: React.FC = observer(() => {
   // Picker only renders when shareState.kind === 'picking', so sources are
   // guaranteed present. Narrowed via the union; bail to null defensively
@@ -254,10 +253,8 @@ const DisplayCard: React.FC<{
     onPick={onPick}
     title={display.name}
     // Suppress the dim subtitle when the backend didn't supply real
-    // dimensions (0×0 looked broken; "—" would be noise). Electron's
-    // path now resolves screen sizes from screen.getAllDisplays(), so
-    // this only falls back to undefined under capture-helper paths
-    // that don't enumerate displays at all.
+    // dimensions (0×0 looked broken; "—" would be noise) — i.e. under
+    // capture-helper paths that don't enumerate display sizes.
     subtitle={
       display.width > 0 && display.height > 0
         ? `${display.width} × ${display.height}`
@@ -285,9 +282,9 @@ const WindowCard: React.FC<{
       disabled={disabled}
       onPick={onPick}
       title={primary}
-      // Don't show "0 × 0" for Electron-enumerated windows; the
-      // thumbnail is the primary visual identifier, and the size is
-      // only knowable after capture starts (via track.getSettings()).
+      // Never show "0 × 0" for window sources; the thumbnail is the
+      // primary visual identifier, and per-window size is only knowable
+      // after capture starts.
       subtitle={secondary}
       thumbnail={window.thumbnail_data_url}
       icon={<Square size={32} />}

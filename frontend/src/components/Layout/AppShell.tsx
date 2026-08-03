@@ -5,7 +5,6 @@ import { invoke, getCurrentWindow, hideWindow } from "../../bridge";
 import { TitleBar } from "./TitleBar";
 import { WindowResizeEdges } from "./WindowResizeEdges";
 import { BreadcrumbNav } from "./BreadcrumbNav";
-import { MigrationBanner } from "../MigrationBanner";
 import { Sidebar } from "./Sidebar";
 import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
@@ -155,10 +154,9 @@ export const AppShell: React.FC = observer(() => {
     }
   }, [isTerminal]);
 
-  // Global file drop. The bridge's onDragDropEvent normalizes OS drag-drop
-  // (DOM events under Electron, native events under Tauri) into a common
-  // payload; we show the overlay and rebroadcast dropped paths to the mounted
-  // ChatInput via `pollis:pathdrop`.
+  // Global file drop. The bridge's onDragDropEvent surfaces Tauri's native
+  // drag-drop payload; we show the overlay and rebroadcast dropped paths to
+  // the mounted ChatInput via `pollis:pathdrop`.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -544,9 +542,6 @@ export const AppShell: React.FC = observer(() => {
 
       {/* Breadcrumb nav — appears on every authenticated page */}
       <BreadcrumbNav />
-
-      {/* End-of-life nudge — only renders in the legacy Electron build */}
-      <MigrationBanner />
 
       {/* Main content — sidebar + matched child route. The screen-share
           viewer mounts INSIDE this region so the TitleBar (drag handle),

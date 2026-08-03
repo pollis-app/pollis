@@ -564,6 +564,182 @@ async fn unlock_resigns_stale_sibling_device_cert() {
     drop(alice);
 }
 
+/// The graceful sign-out path, end to end (#685, part E).
+///
+/// `revoke_device` publishes a `device_revoked` inbox nudge; the nudge is
+/// per-USER, so it reaches every device, and each one is supposed to
+/// authoritatively re-check with `is_current_device_registered` so that only the
+/// device that was actually revoked signs itself out (a forged nudge must not be
+/// able to sign out a valid device).
+///
+/// That check was inert two ways at once. Since #372 revocation is a TOMBSTONE,
+/// not a hard delete, so the bare `SELECT 1 FROM user_device` returned a row —
+/// and hence `true` — for a revoked device. And on desktop there was no
+/// `#[tauri::command]` shim at all, so the renderer's `invoke` rejected and the
+/// handler's deliberate never-sign-out-on-a-blip `.catch` swallowed it.
+///
+/// Asserts `true` while live (the control — the command must exist and answer,
+/// which alone would have caught the missing shim) and `false` once the row
+/// carries a tombstone.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn revoked_device_reports_itself_unregistered() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+
+    let registered = || async {
+        invoke::<bool>(
+            &alice.webview,
+            "is_current_device_registered",
+            json!({ "userId": user_id }),
+        )
+        .await
+        .expect("is_current_device_registered must be a reachable command")
+    };
+
+    assert!(
+        registered().await,
+        "control: a live, enrolled device must report itself registered — if this \
+         fails the command is missing or broken, and the false case below would \
+         pass for the wrong reason (#685)"
+    );
+
+    // Tombstone this device exactly as `POST /v1/devices/revoke` does: the row
+    // stays, `revoked_at` is set.
+    conn.execute(
+        "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
+        libsql::params![user_id.clone()],
+    )
+    .await
+    .expect("tombstone the device");
+
+    assert!(
+        !registered().await,
+        "a REVOKED device must report itself unregistered so the device_revoked \
+         nudge signs it out — revocation is a tombstone, not a row delete, so a \
+         bare existence check can never fail (#685)"
+    );
+
+    drop(alice);
+}
+
+/// The negative twin of the test above (#685, part C): the boot-time sweep must
+/// re-sign a stale LIVE sibling and must NOT re-sign a stale REVOKED one.
+///
+/// This is a security property, not hygiene. `pollis-device-cert` verification is
+/// offline by design (#455 relay cert auth) — it binds `identity_version` and
+/// `issued_at` and consults no revocation list. So bumping `identity_version` is
+/// the ONLY mechanism that invalidates a revoked device's relay cert, and an
+/// identity rotation is exactly what you do after a device is compromised. Handing
+/// the revoked device a freshly-signed cert at the new version defeats that kill
+/// switch.
+///
+/// Both phantom rows are stale at `cert_identity_version = 0`, differing ONLY in
+/// `revoked_at`, so the revocation predicate is the sole thing that can produce
+/// different outcomes. The live phantom is the control: without it a pass could be
+/// earned by a sweep that re-signs nothing at all.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn unlock_never_resigns_a_revoked_sibling_device_cert() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+
+    let sig_pub = vec![0xABu8; 32];
+    let sig_pub_pq = vec![0xCDu8; pollis_lib::commands::account_identity::MLDSA44_PUB_LEN];
+    let placeholder = vec![0u8; pollis_lib::commands::account_identity::MLDSA44_SIG_LEN];
+
+    // Two synthetic siblings, both stale at cert_identity_version = 0. Identical
+    // in every respect except that one carries a revocation tombstone.
+    for (device_id, revoked) in [("live-sibling", false), ("revoked-sibling", true)] {
+        conn.execute(
+            "INSERT INTO user_device \
+               (device_id, user_id, device_cert, cert_issued_at, cert_identity_version, \
+                mls_signature_pub, mls_signature_pub_pq, revoked_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
+                     CASE WHEN ?8 THEN datetime('now') ELSE NULL END)",
+            libsql::params![
+                device_id,
+                user_id.clone(),
+                placeholder.clone(),
+                "0".to_string(),
+                0i64,
+                sig_pub.clone(),
+                sig_pub_pq.clone(),
+                revoked as i64,
+            ],
+        )
+        .await
+        .expect("insert phantom user_device row");
+    }
+
+    // Lock + unlock to trigger the boot-time sweep.
+    invoke::<()>(&alice.webview, "lock", json!({}))
+        .await
+        .expect("lock");
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "unlock",
+        json!({ "userId": user_id, "pin": TEST_PIN }),
+    )
+    .await
+    .expect("unlock");
+
+    let cert_state = |device_id: &'static str| {
+        let conn = conn.clone();
+        let user_id = user_id.clone();
+        async move {
+            let mut rows = conn
+                .query(
+                    "SELECT device_cert, cert_identity_version \
+                     FROM user_device WHERE device_id = ?1 AND user_id = ?2",
+                    libsql::params![device_id, user_id],
+                )
+                .await
+                .expect("phantom re-select");
+            let row = rows.next().await.expect("rows").expect("phantom row");
+            (
+                row.get::<Option<Vec<u8>>>(0).unwrap().expect("device_cert"),
+                row.get::<i64>(1).expect("cert_identity_version"),
+            )
+        }
+    };
+
+    // Control: the live stale sibling WAS re-signed, so the sweep really ran.
+    let (live_cert, live_version) = cert_state("live-sibling").await;
+    assert!(
+        live_version > 0 && live_cert != placeholder,
+        "control failed: the LIVE stale sibling must be re-signed, otherwise this \
+         test proves nothing about the revoked one (#685)"
+    );
+
+    // The property: the revoked sibling is untouched at the stale version.
+    let (revoked_cert, revoked_version) = cert_state("revoked-sibling").await;
+    assert_eq!(
+        revoked_version, 0,
+        "a REVOKED device must never be re-signed to the current identity_version — \
+         device-cert verification is offline and consults no revocation list, so the \
+         version bump is the only thing that invalidates its relay cert (#685)"
+    );
+    assert_eq!(
+        revoked_cert, placeholder,
+        "a REVOKED device's cert bytes must be left exactly as they were (#685)"
+    );
+
+    drop(alice);
+}
+
 // ─── Email change (device-signed, through the DS) ────────────────────────────
 
 /// Email change routed through the Delivery Service end to end. The request +

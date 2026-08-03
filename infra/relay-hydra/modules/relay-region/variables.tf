@@ -4,17 +4,28 @@ variable "name_prefix" {
 }
 
 variable "region" {
-  description = "AWS region this pool shard runs in (must already be jurisdiction-approved by the root)."
+  description = "AWS region this pool shard runs in (must already be jurisdiction-approved by the root). Must match the region of the aws provider passed in."
   type        = string
 }
 
-variable "node_floor" {
-  description = "ASG min size AND on_demand_base_capacity — the guaranteed-on-demand floor Spot can never drop below."
-  type        = number
+variable "param_region" {
+  description = <<-EOT
+    Region holding the SSM parameters (the control plane's primary_region). SSM
+    Parameter Store is regional and the pool's QUIC identity is minted once, in
+    one region — so a node in ANY region fetches it from here, not from its own
+    region. Node IAM and the KMS ViaService condition are scoped to this region
+    for the same reason.
+  EOT
+  type        = string
 }
 
 variable "node_max" {
-  description = "ASG max size."
+  description = "ASG max size. Set to the POOL-WIDE max: a random draw may legitimately place every node in this one region. Min size is 0 — the reconciler owns desired capacity."
+  type        = number
+}
+
+variable "on_demand_base" {
+  description = "on_demand_base_capacity: the first N nodes in this region are on-demand, the rest Spot. Bounds the blast radius of a regional Spot capacity event."
   type        = number
 }
 
@@ -61,7 +72,7 @@ variable "health_source_cidr" {
 }
 
 variable "az_count" {
-  description = "How many AZs to spread the public subnets (and thus nodes) across."
+  description = "How many AZs to spread the public subnets (and thus nodes) across. Must not exceed what the account actually has in this region, and must be a STATIC number — the AZ name list is a data source, so it can't size a for_each. us-west-1 exposes only two AZs to most accounts and is passed 2 at the call site."
   type        = number
   default     = 3
 }

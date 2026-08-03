@@ -18,9 +18,8 @@ export const TitleBar: React.FC = () => {
     win().startDragging().catch(console.error);
   };
 
-  // macOS: native traffic lights are drawn by the OS via Electron's
-  // `titleBarStyle: "hiddenInset"`. We just reserve enough horizontal space
-  // on the left so our own UI doesn't overlap them.
+  // macOS: native traffic lights are drawn by the OS. We just reserve enough
+  // horizontal space on the left so our own UI doesn't overlap them.
   const macControls = <div className="flex-shrink-0" style={{ width: 68 }} />;
 
   // Windows / Linux controls (right side)
@@ -53,10 +52,9 @@ export const TitleBar: React.FC = () => {
     </div>
   );
 
-  // CSS app-region marker — Electron (Chromium) reads this directly and
-  // makes the area draggable. Tauri ignores it and relies on
-  // data-tauri-drag-region + the onMouseDown handler instead. The two
-  // approaches coexist cleanly.
+  // CSS app-region marker. Tauri ignores it and relies on
+  // data-tauri-drag-region + the onMouseDown handler below instead; the
+  // marker is harmless and keeps the drag region declarative in the DOM.
   const dragStyle: React.CSSProperties = {
     WebkitAppRegion: "drag",
   } as React.CSSProperties;

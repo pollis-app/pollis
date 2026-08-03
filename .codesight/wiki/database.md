@@ -192,12 +192,20 @@ anonymous-membership (not shipped — tracked in #489).
 - `device_id` TEXT NOT NULL
 - `last_fetched_at` TEXT NOT NULL
 
-Used by the envelope cleanup sweep in `get_channel_messages` and `get_dm_messages` to decide when it is safe to drop a row from `message_envelope`. A row is deleted when EITHER it is older than 30 days OR every registered device of every current member has watermarked past `sent_at` (the `OR` is deliberate — one slow device must not pin storage forever; the TTL is the hard ceiling).
+Used by the envelope cleanup sweep — the `CLEANUP_CHANNEL_ENVELOPES` / `CLEANUP_DM_ENVELOPES` DELETEs in `pollis-delivery/src/messages.rs`, run server-side by `apply_envelope_gc` (the `/v1/envelopes/gc` endpoint) on ingest — to decide when it is safe to drop a row from `message_envelope`. A row is deleted **only** when every **non-revoked** device of every current member has watermarked past `sent_at`. Retention is bounded by the slowest member device and by nothing else — invariant **I3** in `docs/backend-core-invariants.md`.
 
-Seed paths (so a new device or a pre-join user doesn't block cleanup retroactively):
-- `add_member_to_group` seeds one row per (channel, device) for the joining user at join time.
-- `create_dm_channel` / `add_user_to_dm_channel` seed per (member, device).
+There is **no TTL, and no time-based gate of any kind may be added here.** An OR'd `sent_at < datetime('now','-30 days')` arm used to sit alongside the watermark gate; because it was OR'd it deleted on its own, without consulting a single watermark, so encrypted mail no recipient device had ever collected was destroyed 30 days after it was sent, and any member offline for longer silently and permanently lost messages. That is failure mode **F3**. Age is not evidence of delivery.
+
+Every branch of the remaining gate fails closed: a member device that has never reported a watermark breaks the `COUNT(devices) = COUNT(watermarks)` check (the LEFT JOIN yields NULL, which `COUNT` skips), so the CASE returns NULL and `sent_at < NULL` deletes nothing; an empty member-device roster aggregates to `COUNT 0 = COUNT 0` with `MIN(...) = NULL` over zero rows and likewise deletes nothing. An unresolvable or fully-vacated roster is never read as "everybody has collected".
+
+**Revoked devices are excluded from the roster the watermark gate is measured against** (`AND ud.revoked_at IS NULL` in the `user_device` join, #685). A revoked device can never rejoin the tree (invariant I5), so it must not count: otherwise its stale watermark pins `MIN(cw)` down, or — with no watermark row at all — it breaks the `COUNT(devices) = COUNT(watermarks)` "every device reported" check and disables pruning **entirely**, leaving envelopes every live device has long since read on the server forever. This mirrors `commit::current_member_devices`, which excludes revoked devices from the commit-log retention floor for the same reason.
+
+Seed paths (so a new device or a pre-join user doesn't block cleanup retroactively). All three skip revoked devices (`revoked_at IS NULL`, #685) — a revoked device is not part of the GC roster, so seeding it a row would just re-introduce the wedge:
+- group member-add (`pollis-delivery` `groups.rs::add_member_rows`) seeds one row per (channel, device) for the joining user at join time.
+- DM create / DM member-add (`pollis-delivery` `profile.rs`) seed per (member, device).
 - `register_device` seeds per conversation the user is already a member of, for the newly-registered device.
+
+Teardown: `POST /v1/devices/revoke` (`account.rs::apply_revoke_device`) DELETEs the revoked device's watermark rows in the same transaction as the tombstone, scoped `WHERE user_id = actor AND device_id = ?` (#685). The read-time filters above already make the prune floor correct, so this is the "invalid states unrepresentable" half: a cursor that can never advance stops existing rather than relying on every future reader remembering to exclude it. Note `POST /v1/auth/logout` DELETEs the `user_device` row outright, and the watermark join hangs off `user_device`, so a logged-out device's leftover rows are already invisible to the gate.
 
 ### voice_presence _(removed in migration 18)_
 Dropped. LiveKit's `RoomService.ListParticipants` / `ListRooms` is the source

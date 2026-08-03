@@ -2454,3 +2454,445 @@ fn pq_payloads_stay_under_their_ceilings() {
     eprintln!("[test] hybrid commit at 8 members: {unmerged} B unmerged, {merged} B merged");
     assert!(merged < 20_480, "hybrid commit at 8 members: {merged} B");
 }
+
+// ─── #680: commit-apply recovery classification + no-wedge Stop sites ─────────
+//
+// These tests are the regression harness for issue #680. Two properties are
+// pinned: (1) `apply_one_commit` classifies openmls failures by their real error
+// ENUMS (not `Display` strings that silently drift on an openmls bump), and (2)
+// none of the former `Stop` sites wedge a group that exists locally but can never
+// advance — every one turns into an explicit `Recover(reason)` and drops the
+// local group so the caller's external-rejoin backstop rebuilds it.
+
+use super::group_state::{
+    apply_one_commit, build_external_commit, classify_process_message_error, export_group_info_blob,
+    CommitApply, RecoverReason,
+};
+use openmls::prelude::group_info::VerifiableGroupInfo;
+
+/// Layer 1 — the pure classifier. One case per openmls error we classify, plus
+/// the load-bearing #680 guarantee: an UNRECOGNISED error recovers conservatively
+/// rather than wedging. `S = ()` — the classifier is generic over the provider's
+/// storage-error type and never inspects it.
+mod commit_recovery_classification {
+    use super::super::group_state::{classify_process_message_error, RecoverReason};
+    use openmls::prelude::*;
+
+    fn classify(e: ProcessMessageError<()>) -> RecoverReason {
+        classify_process_message_error(&e)
+    }
+
+    #[test]
+    fn use_after_eviction_maps_to_evicted() {
+        assert_eq!(
+            classify(ProcessMessageError::GroupStateError(
+                MlsGroupStateError::UseAfterEviction
+            )),
+            RecoverReason::Evicted
+        );
+    }
+
+    #[test]
+    fn own_commit_mismatch_maps_to_forked_tree() {
+        // The case the OLD "created by this client" string used to catch. It is
+        // now a typed `StageCommitError`, and it means our pending state diverged
+        // from what landed — rebuild, do NOT merge our stale pending.
+        assert_eq!(
+            classify(ProcessMessageError::InvalidCommit(
+                StageCommitError::OwnCommitMismatch
+            )),
+            RecoverReason::ForkedTree
+        );
+    }
+
+    #[test]
+    fn other_stage_commit_errors_map_to_forked_tree() {
+        for e in [
+            StageCommitError::EpochMismatch,
+            StageCommitError::ConfirmationTagMismatch,
+            StageCommitError::WrongPlaintextContentType,
+        ] {
+            assert_eq!(
+                classify(ProcessMessageError::InvalidCommit(e)),
+                RecoverReason::ForkedTree
+            );
+        }
+    }
+
+    #[test]
+    fn validation_errors_map_to_forked_tree() {
+        for e in [
+            ValidationError::WrongEpoch,
+            ValidationError::WrongGroupId,
+            ValidationError::UnknownMember,
+        ] {
+            assert_eq!(
+                classify(ProcessMessageError::ValidationError(e)),
+                RecoverReason::ForkedTree
+            );
+        }
+    }
+
+    #[test]
+    fn wire_format_and_external_sender_errors_are_unclassified() {
+        for e in [
+            ProcessMessageError::IncompatibleWireFormat,
+            ProcessMessageError::UnauthorizedExternalApplicationMessage,
+            ProcessMessageError::UnauthorizedExternalCommitMessage,
+            ProcessMessageError::UnsupportedProposalType,
+        ] {
+            assert_eq!(classify(e), RecoverReason::Unclassified);
+        }
+    }
+
+    #[test]
+    fn unrecognised_error_recovers_conservatively_never_wedges() {
+        // THE #680 guarantee. A storage error — and, by the same `_` arm, any
+        // future openmls variant this code has never seen — must still RECOVER,
+        // never wedge. When openmls reshapes its error surface, this is the arm
+        // that keeps a group live instead of silently stuck.
+        assert_eq!(
+            classify(ProcessMessageError::StorageError(())),
+            RecoverReason::Unclassified
+        );
+    }
+}
+
+// ── layer-2 helpers: real MLS group manipulation via `apply_one_commit` ───────
+
+/// Load a member's stored MLS group (generation 0), or `None` if it was deleted.
+fn load_local_group(db: &rusqlite::Connection, conv: &str) -> Option<MlsGroup> {
+    let provider = PollisProvider::new(db);
+    let group_id = GroupId::from_slice(conv.as_bytes());
+    MlsGroup::load(provider.storage(), &group_id).unwrap()
+}
+
+/// This member's current epoch.
+fn member_epoch(db: &rusqlite::Connection, conv: &str) -> u64 {
+    load_local_group(db, conv).expect("group must exist").epoch().as_u64()
+}
+
+/// This member's epoch authenticator — openmls's own "everyone has the same group
+/// state" fingerprint. Two members at the same epoch with equal authenticators
+/// hold identical group state (tree + transcript); it diverges the instant their
+/// trees do, which is exactly the convergence property #680 must preserve.
+fn member_auth(db: &rusqlite::Connection, conv: &str) -> Vec<u8> {
+    load_local_group(db, conv)
+        .expect("group must exist")
+        .epoch_authenticator()
+        .as_slice()
+        .to_vec()
+}
+
+/// Stage a member-add commit but do NOT merge it — the group is left holding a
+/// PENDING commit, exactly the state a committer is in between building its
+/// commit and adopting it. Returns `(commit_bytes, welcome_bytes)`.
+fn stage_add_without_merge(
+    adder_db: &rusqlite::Connection,
+    conv: &str,
+    kp_bytes: &[u8],
+) -> (Vec<u8>, Vec<u8>) {
+    let provider = PollisProvider::new(adder_db);
+    let (mut group, signer) = load_group_with_signer(&provider, conv, 0).unwrap();
+    let mut reader: &[u8] = kp_bytes;
+    let kp_in = KeyPackageIn::tls_deserialize(&mut reader).unwrap();
+    let kp = kp_in.validate(provider.crypto(), ProtocolVersion::Mls10).unwrap();
+    let (commit_msg, welcome_msg, _) = group.add_members(&provider, &signer, &[kp]).unwrap();
+    (
+        commit_msg.tls_serialize_detached().unwrap(),
+        welcome_msg.tls_serialize_detached().unwrap(),
+    )
+}
+
+/// Self-update and merge, advancing this member's own epoch by one. Returns the
+/// commit bytes other members would apply to follow.
+fn self_update_and_merge(db: &rusqlite::Connection, conv: &str) -> Vec<u8> {
+    let provider = PollisProvider::new(db);
+    let (_epoch_before, commit_bytes, _gi) =
+        stage_self_update(&provider, conv, 0).unwrap().expect("self-update produced a commit");
+    let group_id = GroupId::from_slice(conv.as_bytes());
+    let mut group = MlsGroup::load(provider.storage(), &group_id).unwrap().unwrap();
+    group.merge_pending_commit(&provider).unwrap();
+    commit_bytes
+}
+
+/// Drive `apply_one_commit` (generation 0) for `member` against `commit_bytes`.
+fn apply_one(db: &rusqlite::Connection, conv: &str, epoch: i64, commit_bytes: &[u8]) -> CommitApply {
+    let provider = PollisProvider::new(db);
+    apply_one_commit(&provider, conv, 0, epoch, commit_bytes)
+}
+
+/// Build a two-member group (alice creator + bob via Welcome), both at epoch 1,
+/// and return a THIRD-party commit alice produced at epoch 1 (adding carol,
+/// merged on alice → alice at epoch 2) that bob, still at epoch 1, can apply.
+/// The returned `(commit, welcome)` is a genuine, valid commit — the failure
+/// tests corrupt or misuse it; the happy path applies it.
+fn two_members_plus_valid_commit(
+    conv: &str,
+    alice_db: &rusqlite::Connection,
+    bob_db: &rusqlite::Connection,
+    carol_db: &rusqlite::Connection,
+) -> (Vec<u8>, Vec<u8>) {
+    create_group(alice_db, conv, "alice");
+    let bob_kp = gen_key_package(bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(alice_db, conv, &bob_kp);
+    join_via_welcome(bob_db, &welcome1);
+    assert_eq!(member_epoch(alice_db, conv), 1);
+    assert_eq!(member_epoch(bob_db, conv), 1);
+
+    let carol_kp = gen_key_package(carol_db, "carol");
+    let (commit2, welcome2) = add_member_to_group(alice_db, conv, &carol_kp);
+    assert_eq!(member_epoch(alice_db, conv), 2);
+    (commit2, welcome2)
+}
+
+/// Site 1 (`MlsGroup::load` → `Ok(None)`): a member with NO local group must
+/// recover, not wedge. This is the arm at group_state.rs ~:1632.
+#[test]
+fn stop_site_group_missing_recovers() {
+    let conv = "01JT680MISSINGGROUP0000000";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
+
+    // A brand-new device with no group for this conversation.
+    let empty_db = make_db();
+    let outcome = apply_one(&empty_db, conv, 1, &commit2);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::GroupMissing)),
+        "a missing local group must recover via external-join, not wedge"
+    );
+}
+
+/// Site 2 (`MlsMessageIn::tls_deserialize` fails): corrupt / truncated commit
+/// bytes must recover, not wedge (group_state.rs ~:1644). Also proves the group
+/// is DELETED so the caller's rejoin has a clean slate, and that the member can
+/// then rejoin and apply the NEXT commit.
+#[test]
+fn stop_site_corrupt_commit_bytes_recovers_and_can_advance() {
+    let conv = "01JT680CORRUPTBYTES000000A";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
+
+    // Truncate the commit so it can't even deserialize.
+    let truncated = &commit2[..commit2.len() / 2];
+    let outcome = apply_one(&bob_db, conv, 1, truncated);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::MalformedCommit)),
+        "truncated commit bytes must recover, got {outcome:?}",
+    );
+    // The wedge is converted to a recovery signal: the stale local group is gone.
+    assert!(
+        load_local_group(&bob_db, conv).is_none(),
+        "recovery must delete the local group so the rejoin path rebuilds it",
+    );
+
+    // …and recovery is REAL: bob external-joins alice's published GroupInfo and
+    // then applies alice's NEXT commit, decrypting a fresh message. This is the
+    // whole point of #680 — a group that could not advance is now advancing.
+    assert_rejoin_then_next_commit_works(&alice_db, &bob_db, conv);
+}
+
+/// Site 3 (`try_into_protocol_message` fails): bytes that deserialize as an MLS
+/// message but are NOT a protocol message (here, a Welcome) must recover, not
+/// wedge (group_state.rs ~:1651).
+#[test]
+fn stop_site_non_protocol_message_recovers() {
+    let conv = "01JT680NONPROTOMESSAGE0000";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    let (_commit2, welcome2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
+
+    // A Welcome deserializes as `MlsMessageIn` but is not a `ProtocolMessage`.
+    let outcome = apply_one(&bob_db, conv, 1, &welcome2);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::NotAProtocolMessage)),
+        "a non-protocol message must recover, got {outcome:?}",
+    );
+    assert!(load_local_group(&bob_db, conv).is_none(), "group must be deleted for rejoin");
+}
+
+/// The DoD's "a commit for an already-merged epoch": bob applies the commit, then
+/// is fed the SAME (now stale) commit again. openmls rejects it (`WrongEpoch`),
+/// which classifies as a forked/diverged tree and recovers — it must NOT wedge.
+#[test]
+fn already_merged_epoch_commit_recovers() {
+    let conv = "01JT680ALREADYMERGED00000A";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    let (commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
+
+    // Bob applies commit2 normally: epoch 1 → 2.
+    assert!(matches!(apply_one(&bob_db, conv, 1, &commit2), CommitApply::Applied));
+    assert_eq!(member_epoch(&bob_db, conv), 2);
+
+    // Re-feeding the stale epoch-1 commit at epoch 2 must recover, not wedge.
+    let outcome = apply_one(&bob_db, conv, 1, &commit2);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::ForkedTree)),
+        "a commit for an already-merged epoch must recover, got {outcome:?}",
+    );
+}
+
+/// The DoD's "a merge failure against a diverged local tree". Two members commit
+/// CONCURRENTLY at epoch 1 and each merges its own, so both sit at "epoch 2" over
+/// DIFFERENT trees. Alice then commits again (epoch 2 → 3) and bob is fed that
+/// epoch-2 commit: it passes the epoch-gap check (bob is at epoch 2) yet cannot
+/// apply against bob's diverged tree. On today's code that wedged; it must now
+/// recover.
+///
+/// Note on the merge site (group_state.rs ~:1660): at the pinned openmls rev a
+/// diverged tree is rejected during `process_message` (staging), classified as
+/// `ForkedTree`, before `merge_staged_commit` is reached — so this scenario and
+/// the `merge_staged_commit` arm share one recovery. The merge arm's own contract
+/// (return `Recover(MergeFailed)`, delete the group) is exercised by the code and
+/// covered structurally; a storage-level merge failure is not reproducible in an
+/// in-memory provider without corrupting storage.
+#[test]
+fn diverged_tree_commit_recovers() {
+    let conv = "01JT680DIVERGEDTREE00000AB";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    let (_commit2, _w2) = two_members_plus_valid_commit(conv, &alice_db, &bob_db, &carol_db);
+    // Reset to a clean two-member group so the fork is unambiguous: rebuild.
+    let conv = "01JT680DIVERGEDTREE00000CD";
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    join_via_welcome(&bob_db, &welcome1);
+
+    // Concurrent commits at epoch 1: alice and bob each self-update and merge
+    // their OWN, diverging onto distinct epoch-2 trees.
+    let _alice_fork = self_update_and_merge(&alice_db, conv);
+    let _bob_fork = self_update_and_merge(&bob_db, conv);
+    assert_eq!(member_epoch(&alice_db, conv), 2);
+    assert_eq!(member_epoch(&bob_db, conv), 2);
+    assert_ne!(
+        member_auth(&alice_db, conv),
+        member_auth(&bob_db, conv),
+        "the two members must have genuinely diverged trees"
+    );
+
+    // Alice commits again (epoch 2 → 3). Feeding bob this epoch-2 commit passes
+    // the gap check but cannot apply against bob's diverged tree.
+    let alice_next = self_update_and_merge(&alice_db, conv);
+    let outcome = apply_one(&bob_db, conv, 2, &alice_next);
+    assert!(
+        matches!(outcome, CommitApply::Recover(RecoverReason::ForkedTree)),
+        "a commit against a diverged local tree must recover, got {outcome:?}",
+    );
+    assert!(load_local_group(&bob_db, conv).is_none(), "group must be deleted for rejoin");
+}
+
+/// The #411 own-commit replay, and the specific misclassification #680 fixes: at
+/// the pinned openmls rev, a committer's OWN commit fanned back to it is surfaced
+/// as CONTENT (an `Ok`) — `OwnPrivateMessage` for Pollis's PrivateMessage-framed
+/// handshake (or `OwnPendingCommit` if it were PublicMessage-framed) — NOT the OLD
+/// "created by this client" error string. The pre-#680 code only matched the
+/// string, so the own commit fell through UNMERGED — counted as applied, left a
+/// dangling pending commit, and the dangling-clear backstop then discarded the
+/// landed commit, stranding the committer at a phantom epoch. This asserts the
+/// fix: `apply_one_commit` MERGES the pending commit, the committer advances to
+/// the real epoch, and it CONVERGES with the members who applied the same commit —
+/// same epoch, same epoch-authenticator.
+#[test]
+fn own_pending_commit_is_adopted_and_converges() {
+    let conv = "01JT680OWNPENDINGCOMMIT000";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    join_via_welcome(&bob_db, &welcome1);
+    assert_eq!(member_epoch(&alice_db, conv), 1);
+
+    // Alice STAGES a commit adding carol but does NOT merge it — she holds a
+    // pending commit at epoch 1. This is exactly the #411 state after a lost
+    // success-response: the commit landed in the log, but alice never adopted it.
+    let carol_kp = gen_key_package(&carol_db, "carol");
+    let (own_commit, welcome2) = stage_add_without_merge(&alice_db, conv, &carol_kp);
+    assert_eq!(member_epoch(&alice_db, conv), 1, "alice still at epoch 1 (unmerged)");
+    assert!(
+        load_local_group(&alice_db, conv).unwrap().pending_commit().is_some(),
+        "alice holds a pending commit",
+    );
+
+    // Alice replays her OWN commit from the log. Pre-#680 this fell through
+    // unmerged; now it must be adopted (merge the pending commit) and count as
+    // applied.
+    let outcome = apply_one(&alice_db, conv, 1, &own_commit);
+    assert!(
+        matches!(outcome, CommitApply::Applied),
+        "own commit replay must be adopted (Applied), got {outcome:?}",
+    );
+    assert_eq!(member_epoch(&alice_db, conv), 2, "alice must advance to the real merged epoch");
+    assert!(
+        load_local_group(&alice_db, conv).unwrap().pending_commit().is_none(),
+        "the pending commit must be merged, not left dangling",
+    );
+
+    // Convergence: bob applies the same commit, carol joins via the Welcome, and
+    // all three land at the same epoch over the same tree.
+    apply_commit(&bob_db, conv, &own_commit);
+    join_via_welcome(&carol_db, &welcome2);
+    assert_eq!(member_epoch(&alice_db, conv), member_epoch(&bob_db, conv));
+    assert_eq!(member_epoch(&alice_db, conv), member_epoch(&carol_db, conv));
+    let a = member_auth(&alice_db, conv);
+    assert_eq!(a, member_auth(&bob_db, conv), "alice and bob trees must match");
+    assert_eq!(a, member_auth(&carol_db, conv), "alice and carol trees must match");
+
+    // And the converged group works: alice encrypts, both others decrypt.
+    let ct = try_mls_encrypt(&alice_db, conv, b"post-recovery").expect("encrypt");
+    let (bob_pt, _) = try_mls_decrypt(&bob_db, conv, &ct).expect("bob decrypts");
+    let (carol_pt, _) = try_mls_decrypt(&carol_db, conv, &ct).expect("carol decrypts");
+    assert_eq!(bob_pt, b"post-recovery");
+    assert_eq!(carol_pt, b"post-recovery");
+}
+
+/// After a Stop-site failure deleted `joiner`'s local group, prove recovery is
+/// real: the joiner external-joins `owner`'s published GroupInfo (the exact MLS
+/// primitive the production external-rejoin uses) and then applies `owner`'s NEXT
+/// commit, decrypting a fresh message. Panics on any failure.
+fn assert_rejoin_then_next_commit_works(
+    owner_db: &rusqlite::Connection,
+    joiner_db: &rusqlite::Connection,
+    conv: &str,
+) {
+    // Owner publishes a GroupInfo at its current epoch.
+    let gi_bytes = {
+        let provider = PollisProvider::new(owner_db);
+        export_group_info_blob(&provider, conv, 0).unwrap().expect("owner exports GroupInfo").1
+    };
+    let vgi: VerifiableGroupInfo = {
+        let mut reader: &[u8] = &gi_bytes;
+        let msg_in = MlsMessageIn::tls_deserialize(&mut reader).unwrap();
+        match msg_in.extract() {
+            MlsMessageBodyIn::GroupInfo(gi) => gi,
+            _ => panic!("expected GroupInfo"),
+        }
+    };
+
+    // Joiner external-joins from the GroupInfo, producing an external commit.
+    let ext_commit = {
+        let provider = PollisProvider::new(joiner_db);
+        let (commit, _gi) = build_external_commit(
+            &provider,
+            conv,
+            0,
+            "bob",
+            &test_device_id("bob"),
+            CS_PQ,
+            vgi,
+        )
+        .expect("external join builds");
+        commit
+    };
+    // The joiner is now a fresh member — its rebuilt group exists again.
+    assert!(load_local_group(joiner_db, conv).is_some(), "rejoin must rebuild the local group");
+
+    // Owner applies the joiner's external commit to converge onto the shared head.
+    apply_commit(owner_db, conv, &ext_commit);
+
+    // Owner drives the NEXT commit; the rejoined member applies it and decrypts a
+    // fresh message — the group is advancing again.
+    let next = self_update_and_merge(owner_db, conv);
+    apply_commit(joiner_db, conv, &next);
+    let ct = try_mls_encrypt(owner_db, conv, b"after recovery").expect("owner encrypts");
+    let (pt, _) = try_mls_decrypt(joiner_db, conv, &ct).expect("rejoined member decrypts");
+    assert_eq!(pt, b"after recovery", "the rejoined group must apply the next commit");
+}
