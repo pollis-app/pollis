@@ -387,6 +387,8 @@ jobs:
 
       - name: Self-audit the published log + equivocation tripwire
         if: steps.decide.outputs.build == 'true'
+        env:
+          FULL_RESYNC: ${{ inputs.full_resync }}
         run: |
           set -euo pipefail
           base="https://verify.pollis.com"
@@ -432,7 +434,27 @@ jobs:
             return 0
           }
 
+          # A signing-key rotation legitimately changes the signature on EVERY
+          # per-size STH, so it is byte-indistinguishable from equivocation and
+          # trips every check above. That is the tripwire working, not failing:
+          # the cached heads were signed by the retired key and can never match
+          # again. Skip the comparison for this run and let step (3) re-seed the
+          # cache from the newly-signed heads. Independent auditors holding their
+          # own cached pre-rotation STHs will see the same discontinuity and must
+          # re-pin from the rotation announcement — that is the unavoidable cost
+          # of a rotation without an overlap window (#700).
+          skip_tripwire=0
+          if [ "${FULL_RESYNC:-false}" = "true" ]; then
+            echo "::warning::full_resync — skipping the equivocation tripwire for this run."
+            echo "Every STH signature changed because the signing key rotated."
+            echo "The cache is re-seeded below; the next run tripwires normally."
+            skip_tripwire=1
+          fi
+
           rc=0
+          if [ "${skip_tripwire}" = "1" ]; then
+            echo "tripwire: skipped (rotation)."
+          else
           check_tree "commit-log" ".sth-prev/commit-latest.json" \
             "${base}/v1/sth" "${base}/v1/sth/latest.json" || rc=1
           # The account tree may be brand-new this publish; only tripwire if a
@@ -443,6 +465,7 @@ jobs:
           # attested; tripwire only if a prior STH was cached.
           check_tree "binaries" ".sth-prev/binaries-latest.json" \
             "${base}/v1/binaries/sth" "${base}/v1/binaries/sth/latest.json" || rc=1
+          fi
           if [ "${rc}" -ne 0 ]; then
             echo "Equivocation tripwire FAILED."
             exit 1
