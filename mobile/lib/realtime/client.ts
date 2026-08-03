@@ -53,9 +53,10 @@ function ensureGlobals(registerGlobals: () => void): void {
 }
 
 /**
- * Mint a LiveKit access token for `room` via the Rust core. The
- * `get_livekit_token` command does not exist on the mobile bridge yet, so
- * this returns `null` (caller treats realtime as unavailable) until it does.
+ * Mint a LiveKit access token for `room` via the Rust core's
+ * `get_livekit_token` bridge arm (`pollis-core/src/bridge.rs`), which asks the
+ * DS to mint it. Returns `null` on any failure so the caller can treat
+ * realtime as unavailable rather than throwing.
  */
 export async function fetchRealtimeToken(room: string): Promise<string | null> {
   try {

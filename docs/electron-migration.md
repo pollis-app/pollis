@@ -1,8 +1,29 @@
-# Electron migration
+# Electron migration — HISTORICAL RECORD (ABANDONED, REVERSED)
 
-**Status:** code-complete, awaiting end-to-end GUI verification + cutover decision
-**Branch:** `feature/electron-migration`
-**Goal:** swap Tauri's webview for Electron's Chromium renderer; keep every line of Rust (pollis-core, MLS, voice, libwebrtc, R2, Turso) running in-process via napi-rs.
+> **⚠️ This document describes a migration that was completed and then REVERSED.
+> Nothing below reflects the current state of the repo. Do not use it as a guide.**
+>
+> - **Current desktop shell: Tauri 2 (`src-tauri/`).** That is the only shipping shell.
+> - The Electron shell was reverted by the Electron→Tauri re-migration (#386 / #389).
+>   There is no `electron/` directory, no `pollis-node/` crate, and no
+>   `electron-release.yml` workflow in this repo.
+> - Every "Status: ✅" and "as of v1.1.0 `pnpm dev` runs the Electron flow" claim
+>   below was true only on the abandoned `feature/electron-migration` branch.
+>   Today `pnpm dev` runs Tauri.
+> - Its two companion docs (`electron-migration-inventory.md`,
+>   `electron-migration-plumbing.md`) were pure porting scaffolding and have been
+>   deleted.
+>
+> **Why this file is kept at all:** it is the decision record for *why* Electron was
+> attempted (WebKitGTK on Linux ships no WebRTC) and which alternatives were
+> evaluated and rejected (CEF/`cef-rs`, a native video-hole overlay, a forked
+> WebKitGTK, moving voice to `livekit-client`). If that same Linux WebRTC wall is
+> hit again, read the "Why" and "Non-goals" sections — and then read them as
+> history, not as a plan.
+
+**Status:** ABANDONED — reversed by #386 / #389. Historical only.
+**Branch:** `feature/electron-migration` (no longer exists)
+**Goal (as stated at the time):** swap Tauri's webview for Electron's Chromium renderer; keep every line of Rust (pollis-core, MLS, voice, libwebrtc, R2, Turso) running in-process via napi-rs.
 
 ## Why
 

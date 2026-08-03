@@ -1,10 +1,9 @@
 /**
  * Runtime bridge: re-exports every host-API symbol the React frontend uses,
- * routed at call time to either the Tauri or Electron runtime via the
- * helpers in `bridge/runtime.ts`.
+ * routed to the Tauri runtime.
  *
  * Layout:
- *  - `bridge/runtime.ts`        — host detection + `electronAPI` type
+ *  - `bridge/runtime.ts`        — host detection (`hasTauri`)
  *  - `bridge/invoke.ts`         — invoke / Channel / listen
  *  - `bridge/window.ts`         — getCurrentWindow / availableMonitors /
  *                                 LogicalSize / LogicalPosition / hideWindow
@@ -17,20 +16,18 @@
  *  - `bridge/notifications.ts`  — isPermissionGranted / requestPermission /
  *                                 sendNotification
  *  - `bridge/clipboard.ts`      — readClipboardFiles / readClipboardImageToTemp
- *  - `bridge/updater.ts`        — check (Phase 7 stub on Electron)
+ *  - `bridge/updater.ts`        — check
+ *  - `bridge/tray.ts`           — tray / menu-bar
  *
- * Detection:
- *  - Electron: a preload script exposes `window.electronAPI`. When present,
- *    every API routes through it.
- *  - Otherwise: fall through to `@tauri-apps/api/*` / `@tauri-apps/plugin-*`.
- *    Under the real Tauri runtime this hits the webview's IPC; under
- *    Playwright the vite alias swaps in `__mocks__/tauri-core.ts`.
+ * Everything below funnels into `@tauri-apps/api/*` / `@tauri-apps/plugin-*`.
+ * Under the real Tauri runtime this hits the webview's IPC; under Playwright
+ * the vite alias swaps in `__mocks__/tauri-core.ts`.
  */
 
-// Re-export the runtime helpers so any caller (and any new bridge module)
+// Re-export the runtime helper so any caller (and any new bridge module)
 // uses the canonical detection path.
-export { hasElectron, hasTauri, hasMediaDevices } from "./bridge/runtime";
-export type { DragDropPayload, ElectronAPI } from "./bridge/runtime";
+export { hasTauri } from "./bridge/runtime";
+export type { DragDropPayload } from "./bridge/runtime";
 
 // invoke / Channel / listen — the original three-symbol surface.
 export {
@@ -81,13 +78,13 @@ export {
   type NotificationOptions,
 } from "./bridge/notifications";
 
-// Clipboard wrappers for the custom Tauri IPCs (Phase 8 cleanup territory).
+// Clipboard wrappers for the custom Tauri IPCs in src-tauri/src/lib.rs.
 export {
   readClipboardFiles,
   readClipboardImageToTemp,
 } from "./bridge/clipboard";
 
-// Updater (Phase 7 stub).
+// Updater.
 export { check, type PollisUpdate, type DownloadEvent } from "./bridge/updater";
 
 // System tray / menu-bar.
