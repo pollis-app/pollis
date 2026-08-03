@@ -11,9 +11,10 @@ name: Transparency Verifier CLI
 #   * workflow_dispatch — builds every target and uploads them as run artifacts
 #     (no Release), for testing the pipeline without cutting a tag.
 #
-# The tag prefix MUST NOT start with `v`: electron-release.yml triggers on the
-# tag glob `v*` (any tag starting with `v`), so an earlier `verifier-v*` prefix
-# matched it and fired the desktop release by mistake. `pollis-verify-*` can't.
+# The tag prefix MUST NOT start with `v`: the desktop release pipeline
+# (desktop-release.yml) triggers on the tag glob `v*` (any tag starting with
+# `v`), so an earlier `verifier-v*` prefix matched it and fired a desktop
+# release by mistake. `pollis-verify-*` can't.
 
 on:
   push:

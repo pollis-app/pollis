@@ -1,6 +1,7 @@
-//! System-tray module — the Tauri counterpart to `electron/src/tray.ts`.
+//! System-tray module for the Tauri shell.
 //!
-//! Behaviour mirrors the Electron build exactly:
+//! Behaviour, carried over unchanged from the (since-reverted, #386/#389)
+//! Electron shell this replaced:
 //!   - Linux + Windows: tray is always created at startup (when the DE
 //!     supports StatusNotifierItem / has a tray host). Unread state swaps
 //!     the icon (`tray-default` ⇄ `tray-notification`) and tooltip. Closing
@@ -14,7 +15,8 @@
 //! The menu hosts Open / Mute mic / Version / Quit. The mute item reflects
 //! the live call (pushed from the renderer via `tray_set_voice_state`) and,
 //! when clicked, emits `tray:requestToggleMute` back to the renderer so the
-//! voice session toggles its own mic — same contract as Electron.
+//! voice session toggles its own mic. The tray never mutates the mic itself —
+//! the renderer's voice session stays the single owner of that state.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -37,8 +39,9 @@ impl Default for TrayState {
     fn default() -> Self {
         Self {
             tray: Mutex::new(None),
-            // Matches the Electron default: hide-on-close is on unless the
-            // user turns it off (and only ever applies when a tray exists).
+            // Default inherited from the pre-#386 Electron shell, kept so
+            // upgraders see no behaviour change: hide-on-close is on unless
+            // the user turns it off (and only ever applies when a tray exists).
             close_to_tray: AtomicBool::new(true),
             voice_in_call: AtomicBool::new(false),
             voice_muted: AtomicBool::new(false),
@@ -60,7 +63,8 @@ fn show_main_window(app: &AppHandle) {
 }
 
 /// Build the context menu from the current voice state. Rebuilt (rather than
-/// mutated) on every voice transition — matches the Electron `rebuildMenu`.
+/// mutated) on every voice transition, the same approach the pre-#386 Electron
+/// shell's `rebuildMenu` took.
 fn build_menu(app: &AppHandle, in_call: bool, muted: bool) -> tauri::Result<Menu<Wry>> {
     let open = MenuItem::with_id(app, "open", "Open Pollis", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;

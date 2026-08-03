@@ -7,15 +7,18 @@ name: Desktop Release (Tauri)
 # release, AUR push, install.sh + latest.json refresh, and the Tauri-format
 # `cdn.pollis.com/releases/update-*.json` updater manifests (minisign-signed).
 #
-# electron-release.yml no longer fires on tags (it kept workflow_dispatch
-# only for emergency Electron rebuilds), so a tag triggers this pipeline
-# alone — no double db-apply / latest.json / AUR races.
+# This is the ONLY workflow in the repo that triggers on a `v*` tag — the
+# Electron pipeline was removed along with the rest of the Electron shell, so a
+# tag fires this pipeline alone: no double db-apply / latest.json / AUR races.
+# (verifier-release.yml deliberately uses a `pollis-verify-v*` prefix so it can
+# never match the `v*` glob below.)
 #
-# Cutover note: there is no in-place auto-update from an installed Electron
-# build to a Tauri build — electron-updater installs electron-builder
-# artifacts and Tauri verifies a minisign signature the Electron build
-# doesn't carry. Existing Electron installs must re-download once; every
-# release after that auto-updates through the Tauri updater normally.
+# Historical cutover note (#386/#389): there was never an in-place auto-update
+# from an installed Electron build to a Tauri build — electron-updater installs
+# electron-builder artifacts and Tauri verifies a minisign signature the
+# Electron build did not carry. Any surviving Electron install has to
+# re-download once; every release after that auto-updates through the Tauri
+# updater normally.
 on:
   workflow_dispatch:
   # Tag-driven release: `git tag v1.2.0 && git push --tags` is the entire
@@ -833,13 +836,15 @@ jobs:
           cd aur-pollis
 
           # Regenerate the PKGBUILD from scratch (heredoc) rather than
-          # sed-patching it. electron-release.yml overwrites this same AUR
-          # file with an Electron-layout PKGBUILD (binary at /opt/Pollis,
-          # Electron deps), so a sed-only bump would inherit Electron's
-          # package()/depends on top of a Tauri .deb — the old behaviour
-          # produced a dangling /usr/bin/pollis symlink that failed to
-          # launch. Owning the whole file keeps it correct no matter which
-          # pipeline ran last. Depends mirror tauri.conf.json's deb.depends
+          # sed-patching it. This workflow is the SOLE writer of the AUR
+          # PKGBUILD today — nothing else pushes to aur/pollis.git. Owning the
+          # whole file (instead of patching whatever is checked in) is what
+          # keeps it correct regardless of what a previous release left behind:
+          # historically the now-removed Electron pipeline wrote an
+          # Electron-layout PKGBUILD here (binary at /opt/Pollis, Electron
+          # deps), and a sed-only version bump inherited that package()/depends
+          # on top of a Tauri .deb, producing a dangling /usr/bin/pollis symlink
+          # that failed to launch. Depends mirror tauri.conf.json's deb.depends
           # plus webkit, in Arch package names.
           cat > PKGBUILD <<PKGBUILD_EOF
           # Maintainer: Pollis <hello@pollis.com>
