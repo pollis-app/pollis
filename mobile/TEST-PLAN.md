@@ -55,7 +55,7 @@ work is split by where it can happen:
 ### 1. Test harness — #619
 Maestro harness under `mobile/.maestro/` (flows, subflows, `config.yaml`), a
 `mobile/scripts/maestro-run.sh <flow> <ios|ipad|android>` runner that boots the
-right device, installs the dev build (`com.anonymous.mobile`), runs the flow, and
+right device, installs the dev build (`com.pollis.mobile`), runs the flow, and
 drops screenshots into `mobile/.maestro/artifacts/<date>/<platform>/`. Deterministic
 seed against the **dev DS** (`DEV_OTP` bypass, fixed PIN, pre-seeded peers
 Alice/Bob) so DM/group/reaction flows reproduce. `README.md` runbook.

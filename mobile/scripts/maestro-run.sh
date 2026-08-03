@@ -20,7 +20,7 @@ PLATFORM="${2:?usage: maestro-run.sh <flow|all> <ios|ipad|android>}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"        # mobile/
 MAE="$HERE/.maestro"
 ENV_FILE="$MAE/.env"
-APP_ID="com.anonymous.mobile"
+APP_ID="com.pollis.mobile"
 
 # Device names — override to match your simulators/emulators.
 IOS_DEVICE="${IOS_DEVICE:-iPhone 17 Pro}"

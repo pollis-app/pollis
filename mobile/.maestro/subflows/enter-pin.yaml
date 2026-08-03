@@ -1,4 +1,4 @@
-appId: com.anonymous.mobile
+appId: com.pollis.mobile
 ---
 # Enter the 4-digit device PIN on the keypad. testIDs are value-keyed
 # (btn-pin-<digit>), so these taps type "1234" — keep in sync with
