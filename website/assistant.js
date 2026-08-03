@@ -1,21 +1,28 @@
-// Pollis "Ask about how this works" assistant — retrieval + curated canned answers, with an
-// optional tiny SEMANTIC re-ranker (Phase 1, extractive — still no generative model).
+// Pollis "Ask about how this works" assistant — remote answering via archon.pollis.com, with the
+// existing on-device extractive retrieval kept as a fallback.
 //
-// The always-on floor runs ENTIRELY from static JSON shipped with the page: no LLM, no generative
-// model, no WebGPU/WASM runtime, no network calls at query time. Answers come from two places:
+// PRIMARY PATH (#731): the question is POSTed to archon (Pollis's docs AI) and its generated answer is
+// shown. This sends the question to Pollis's servers — a deliberate, DISCLOSED trade (see PRIVACY_NOTICE
+// below; it is shown in the panel before the user types). Everything the archon wire format assumes is
+// confined to archonAdapter() and nowhere else.
+//
+// FALLBACK PATH (the always-on floor, unchanged): on ANY archon failure — network error, non-2xx,
+// timeout, malformed/empty body, missing answer, or the browser being offline entirely — the assistant
+// falls straight through to the on-device index. That floor runs ENTIRELY from static JSON shipped with
+// the page (no network call at query time; the question never leaves the browser). Answers come from:
 //   1. a curated canned-answer map (assistant-answers.json) — the doc-faithful, hand-checked path;
 //   2. a lexical search over a chunked corpus (assistant-corpus.json), returning source excerpts.
-// If neither is confident, it says it does not know and points at the closest page. It NEVER
+// If neither is confident, it says it does not know and points at the closest page. The fallback NEVER
 // synthesizes prose of its own — it only surfaces text a human authored and cited.
 //
-// The optional semantic tier improves *which* answer/excerpt is surfaced for paraphrased questions.
-// It is the all-MiniLM-L6-v2 sentence embedder (int8 ONNX) running ENTIRELY in the browser via a
-// VENDORED transformers.js + ONNX-Runtime-Web (assistant-embed.js) — an EXTRACTIVE re-ranker, NOT a
-// generative model. It is loaded LAZILY the first time the panel opens, from same-origin static assets
-// only (never a remote/CDN, and the query text never leaves the device). Until it loads (or if it
-// fails), behaviour is exactly the lexical floor. Semantic scores are FUSED with lexical scores, and a
-// paraphrase can be routed to a doc-exact canned answer only above a validated high-precision cosine
-// floor. The result stays fully extractive and cited.
+// The optional semantic tier improves *which* fallback answer/excerpt is surfaced for paraphrased
+// questions. It is the all-MiniLM-L6-v2 sentence embedder (int8 ONNX) running ENTIRELY in the browser
+// via a VENDORED transformers.js + ONNX-Runtime-Web (assistant-embed.js) — an EXTRACTIVE re-ranker, NOT
+// a generative model. It is loaded LAZILY the first time the panel opens, from same-origin static assets
+// only (never a remote/CDN, and the query text never leaves the device on this path). Until it loads (or
+// if it fails), fallback behaviour is exactly the lexical floor. Semantic scores are FUSED with lexical
+// scores, and a paraphrase can be routed to a doc-exact canned answer only above a validated
+// high-precision cosine floor. The fallback stays fully extractive and cited.
 
 // Load the static data at runtime rather than via `import ... with { type: 'json' }`:
 // JSON-module import attributes only became cross-browser Baseline in mid-2025, and an
@@ -74,6 +81,81 @@ const DISCLAIMER =
   'This assistant is generated from Pollis’s public docs. It can be wrong, and it is not a ' +
   'source of truth — the linked pages are authoritative. Nothing here changes what Pollis does; ' +
   'it only helps you find where the docs say it.';
+
+// Shown in the panel BEFORE the input, so a user reads it before they type. States what happens (the
+// question is sent to Pollis's servers) and what the fallback is — NOT any claim about how archon
+// retains, logs, or anonymises the question, which this repo does not control and cannot promise.
+const PRIVACY_NOTICE =
+  'Heads up: your question is sent to Pollis’s servers (archon.pollis.com) to be answered. If that ' +
+  'service can’t be reached, your question is instead answered locally, from an on-device index that ' +
+  'never leaves your browser.';
+
+// ── Remote answering via archon (Pollis's docs AI) ───────────────────────────────────────────────
+// Same pattern as transparency.js / artifacts.js: one const base URL, reached through one small helper.
+const ARCHON_BASE = 'https://archon.pollis.com';
+
+// Hard ceiling on how long we wait for archon before giving up and using the on-device fallback. 4s is
+// the right order of magnitude: long enough for a genuine generative round-trip over a slow-but-working
+// link, short enough that a hung or black-holed request never leaves the panel spinning — a stalled
+// archon degrades to the instant local answer in ~4s, not "forever".
+const ARCHON_TIMEOUT_MS = 4000;
+
+// ⚠ PROVISIONAL CONTRACT — THE ONLY PLACE THE ARCHON WIRE FORMAT LIVES. CHANGE IT HERE AND NOWHERE ELSE. ⚠
+// The archon request/response shape is ASSUMED, not specified: nothing in this repo defines it and the
+// service was not reachable from the build box to verify against. Every assumption about archon's wire
+// format is confined to THIS function; the rest of assistant.js only ever sees the normalized
+// { answer, sources } it returns. When the real contract is known, edit ONLY this function.
+//
+// Assumed:  POST {ARCHON_BASE}/query   body {"query": "<user text>"}
+//   → 2xx   {"answer": "<markdown or text>", "sources": [{"title": "...", "url": "..."}]}
+// Returns a validated { answer: string, sources: [{title, url}] }. Throws on ANYTHING unexpected — a
+// non-2xx status, a body that isn't JSON, a missing/blank answer — so the caller can fall back. This is
+// strict validation, never best-effort rendering of a half-understood payload.
+async function archonAdapter(query, signal) {
+  const res = await fetch(ARCHON_BASE + '/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error('archon: HTTP ' + res.status);
+  }
+  const body = await res.json();
+  if (!body || typeof body.answer !== 'string' || body.answer.trim().length === 0) {
+    throw new Error('archon: missing or empty answer');
+  }
+  // Sources are optional and best-effort: keep only well-formed { title, url } entries, silently drop
+  // the rest. A malformed sources array must not sink an otherwise-valid answer.
+  const sources = [];
+  if (Array.isArray(body.sources)) {
+    for (const s of body.sources) {
+      if (s && typeof s.title === 'string' && typeof s.url === 'string') {
+        sources.push({ title: s.title, url: s.url });
+      }
+    }
+  }
+  return { answer: body.answer, sources };
+}
+
+// Ask archon, bounded by a hard timeout and NEVER throwing: returns the normalized { answer, sources }
+// on success, or null on EVERY failure path (offline / no fetch, network error, non-2xx, timeout,
+// malformed or empty body, missing answer) so the caller falls straight through to the on-device index.
+// `timeoutMs` is injectable so tests can exercise the timeout branch without waiting the full ceiling.
+async function queryArchon(query, timeoutMs = ARCHON_TIMEOUT_MS) {
+  if (typeof fetch !== 'function' || typeof AbortController !== 'function') {
+    return null;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await archonAdapter(query, controller.signal);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const STOPWORDS = new Set([
   'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'as',
@@ -384,6 +466,29 @@ function renderCanned(container, answer) {
   container.appendChild(makeCitationsBlock(answer.cites || []));
 }
 
+// Render an archon answer. The answer is treated as PLAIN TEXT (split into paragraphs on blank lines)
+// and inserted via textContent — never parsed as HTML/markdown — so an untrusted server response can
+// never inject markup, matching how every other renderer here handles remote/authored text.
+function renderArchon(container, result) {
+  const body = document.createElement('div');
+  body.className = 'assistant-answer-body';
+  for (const para of String(result.answer).split(/\n\n+/)) {
+    const trimmed = para.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const p = document.createElement('p');
+    p.textContent = trimmed;
+    body.appendChild(p);
+  }
+  container.appendChild(body);
+  if (result.sources.length > 0) {
+    container.appendChild(
+      makeCitationsBlock(result.sources.map((s) => ({ title: s.title, source: s.url })))
+    );
+  }
+}
+
 function renderChunks(container, chunks) {
   const intro = document.createElement('p');
   intro.className = 'assistant-answer-intro';
@@ -443,6 +548,12 @@ function buildWidget(mount) {
   panel.id = panelId;
   panel.className = 'assistant-panel';
   panel.hidden = true;
+
+  // Persistent privacy disclosure — first, so it is read before the input is used (#731).
+  const privacy = document.createElement('p');
+  privacy.className = 'assistant-disclaimer';
+  privacy.textContent = PRIVACY_NOTICE;
+  panel.appendChild(privacy);
 
   // Persistent honesty disclaimer.
   const disclaimer = document.createElement('p');
@@ -523,15 +634,24 @@ function buildWidget(mount) {
     answer.appendChild(pending);
     submit.disabled = true;
 
+    // Remote-first: try archon, then fall back — silently and fast — to the on-device index on any
+    // failure (see queryArchon). queryArchon never throws, so no try/catch is needed around it.
     let result;
-    try {
-      result = await handleQuery(trimmed);
-    } catch (err) {
-      result = { kind: 'unknown', closest: null };
+    const remote = await queryArchon(trimmed);
+    if (remote) {
+      result = { kind: 'archon', archon: remote };
+    } else {
+      try {
+        result = await handleQuery(trimmed);
+      } catch (err) {
+        result = { kind: 'unknown', closest: null };
+      }
     }
     submit.disabled = false;
     answer.textContent = '';
-    if (result.kind === 'canned') {
+    if (result.kind === 'archon') {
+      renderArchon(answer, result.archon);
+    } else if (result.kind === 'canned') {
       renderCanned(answer, result.answer);
     } else if (result.kind === 'chunks') {
       renderChunks(answer, result.chunks);
@@ -592,8 +712,9 @@ function init() {
   buildWidget(mount);
 }
 
-// Export the resolution entry point for testing; the DOM bootstrap only runs in a browser.
-export { handleQuery };
+// Export the resolution entry point and the archon adapter/wrapper for testing; the DOM bootstrap only
+// runs in a browser.
+export { handleQuery, archonAdapter, queryArchon };
 
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') {

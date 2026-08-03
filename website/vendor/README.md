@@ -1,9 +1,12 @@
 # Assistant vendored runtime (issue #508)
 
 These assets power the site assistant's optional **semantic** tier (see `../assistant.js`,
-`../assistant-embed.js`). They are vendored — not fetched from a CDN — so the feature is fully
-self-contained and makes **no third-party network call**; a visitor's question never leaves the
-device. Everything here is loaded **lazily** the first time the assistant panel opens, then cached.
+`../assistant-embed.js`). They are vendored — not fetched from a CDN — so this tier is fully
+self-contained and makes **no third-party network call**: on the semantic re-ranker path the visitor's
+question never leaves the device. Note this is **only** the assistant's on-device fallback tier — as of
+#731 the assistant's primary path sends the question to `archon.pollis.com` to be answered, and falls
+back to this on-device index when archon is unavailable. Everything here is loaded **lazily** the first
+time the assistant panel opens, then cached.
 
 ## Contents
 
