@@ -111,19 +111,75 @@ jobs:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
         run: bash ../.github/scripts/sync-ds-secrets.sh
 
-      - name: Stamp GIT_SHA into container build args
+      - name: Set up Docker Buildx
+        if: steps.guard.outputs.ok == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve image reference
+        id: img
+        if: steps.guard.outputs.ok == 'true'
+        run: |
+          IMAGE="registry.cloudflare.com/${CLOUDFLARE_ACCOUNT_ID}/pollis-delivery-prod"
+          TAG="${{ steps.sha.outputs.sha }}"
+          NONCE=0
+          # Secret-only rotation: same commit → same tag/digest → CF won't roll.
+          # force_restart makes the tag and BUILD_NONCE unique so a fresh digest
+          # deploys and the container re-reads the Secrets Store on restart.
+          if [ "${{ inputs.force_restart }}" = "true" ]; then
+            TAG="${TAG}-r${{ github.run_id }}"
+            NONCE="${{ github.run_id }}"
+            echo "force_restart: unique image tag ${TAG}"
+          fi
+          {
+            echo "ref=${IMAGE}:${TAG}"
+            echo "tag=${TAG}"
+            echo "nonce=${NONCE}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Build + cache the image OURSELVES (buildx + a persistent type=gha layer
+      # cache), which the old wrangler-driven `docker build` never had: this
+      # workflow set up no buildx and restored no cache, so BuildKit started cold
+      # every run and the cargo-chef dependency layer could never be reused (see
+      # docs/deployments.md). build-push-action wraps `docker buildx build`.
+      # load: true puts the image in the local daemon so `wrangler containers push`
+      # can upload it; we do NOT push from here (wrangler owns the CF-registry auth).
+      - name: Build image (buildx, cached)
+        if: steps.guard.outputs.ok == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: pollis-delivery/Dockerfile
+          platforms: linux/amd64
+          load: true
+          provenance: false
+          tags: ${{ steps.img.outputs.ref }}
+          build-args: |
+            GIT_SHA=${{ steps.sha.outputs.sha }}
+            BUILD_NONCE=${{ steps.img.outputs.nonce }}
+          cache-from: type=gha,scope=pollis-delivery
+          cache-to: type=gha,mode=max,scope=pollis-delivery
+
+      # Push the pre-built image to the Cloudflare managed registry with the
+      # documented wrangler command. On subsequent deploys the registry skips
+      # blobs it already has (push-time dedup) — that is the ONLY caching the old
+      # path ever got, and it is not build caching.
+      - name: Push image to the Cloudflare registry
+        if: steps.guard.outputs.ok == 'true'
+        working-directory: pollis-delivery
+        run: pnpm exec wrangler containers push "${{ steps.img.outputs.ref }}"
+
+      # Point the container config at the image we just pushed (account id from the
+      # existing vars.CLOUDFLARE_ACCOUNT_ID; tag = built SHA). wrangler now deploys
+      # a fully-qualified registry image and runs NO docker build of its own.
+      - name: Point wrangler config at the pushed image
         if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
         run: |
-          sed -i "s|\"GIT_SHA\": \"unknown\"|\"GIT_SHA\": \"${{ steps.sha.outputs.sha }}\"|" "$WRANGLER_CONFIG"
-          # Secret-only rotation: no code change → same image digest → CF won't
-          # roll. force_restart bumps BUILD_NONCE to a unique value so a new
-          # digest deploys and the container re-reads Secrets Store on restart.
-          if [ "${{ inputs.force_restart }}" = "true" ]; then
-            sed -i "s|\"BUILD_NONCE\": \"0\"|\"BUILD_NONCE\": \"${{ github.run_id }}\"|" "$WRANGLER_CONFIG"
-            echo "force_restart: bumped BUILD_NONCE to force a new image digest"
-          fi
-          grep -nE '"GIT_SHA"|"BUILD_NONCE"' "$WRANGLER_CONFIG"
+          sed -i \
+            -e "s|__CF_ACCOUNT_ID__|${CLOUDFLARE_ACCOUNT_ID}|" \
+            -e "s|__IMAGE_TAG__|${{ steps.img.outputs.tag }}|" \
+            "$WRANGLER_CONFIG"
+          grep -n '"image"' "$WRANGLER_CONFIG"
 
       - name: Deploy (wrangler)
         if: steps.guard.outputs.ok == 'true'

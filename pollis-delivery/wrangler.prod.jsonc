@@ -10,12 +10,16 @@
   "containers": [
     {
       "class_name": "PollisDelivery",
-      "image": "./Dockerfile",
-      "image_build_context": "../",
-      // Baked into the binary (option_env! -> /version) so the deploy can verify
-      // the new build is live. The deploy workflow rewrites "unknown" to the
-      // built commit SHA before `wrangler deploy` (jsonc-safe string replace).
-      "image_vars": { "GIT_SHA": "unknown", "BUILD_NONCE": "0" },
+      // Pre-built image from the Cloudflare managed registry — NOT a Dockerfile,
+      // so `wrangler deploy` performs no `docker build`. The deploy workflow
+      // (delivery-deploy-prod.yml) builds the image with `docker buildx` under a
+      // persistent layer cache, `wrangler containers push`es it, then substitutes
+      // __CF_ACCOUNT_ID__ (vars.CLOUDFLARE_ACCOUNT_ID) and __IMAGE_TAG__ (the built
+      // commit SHA) below before deploying. GIT_SHA (option_env! -> /version, so the
+      // deploy can verify the new build is live) and BUILD_NONCE are baked in as
+      // buildx --build-args, not image_vars. Why we build it ourselves rather than
+      // let wrangler build: docs/deployments.md (DS — the old path could never cache).
+      "image": "registry.cloudflare.com/__CF_ACCOUNT_ID__/pollis-delivery-prod:__IMAGE_TAG__",
       "instance_type": "basic",
       "max_instances": 1,
       // Single instance: roll 100% in one step so a deploy replaces the running
