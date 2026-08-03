@@ -782,26 +782,29 @@ async fn clear_watermarks(
     .expect("clear watermarks");
 }
 
-/// Exercises the two independent gates in `get_channel_messages`' envelope
-/// cleanup: the 30-day TTL and the all-members-caught-up watermark. They're
-/// OR'd, so either alone is sufficient to delete. The scenario drives
-/// three cases, each time triggering cleanup by having a member fetch:
+/// Exercises the envelope-cleanup gate in `get_channel_messages`. There is now
+/// exactly ONE gate — the all-member-devices-caught-up delivery watermark — and
+/// the scenario drives three cases, each time triggering cleanup by having a
+/// member fetch:
 ///
-/// - **Negative**: young envelope, only the sender has fetched. Neither
-///   gate fires — envelope stays.
-/// - **Watermark-only**: young envelope, both members have fetched past it.
-///   Watermark gate fires even though TTL is far from expired.
-/// - **TTL-only**: envelope backdated past 30 days while watermarks are
-///   deliberately left in a state where the watermark gate cannot fire
-///   (one member's row is absent, so the CASE returns NULL). TTL gate
-///   fires alone and the envelope is deleted.
+/// - **Negative**: young envelope, only the sender has fetched. The gate cannot
+///   fire (bob has no watermark row, so the CASE returns NULL) — envelope stays.
+/// - **Watermark**: young envelope, both members have fetched past it. The gate
+///   fires and the envelope is deleted.
+/// - **No-TTL regression**: an envelope backdated 400 days into the past while
+///   bob's watermark row is absent. The envelope MUST SURVIVE. This is failure
+///   mode F3: there used to be a second, OR'd `sent_at < datetime('now','-30
+///   days')` arm that deleted such a row on its own, without consulting a single
+///   watermark, so a member offline for over a month silently and permanently
+///   lost messages. Retention is now bounded by the slowest member device and by
+///   nothing else (invariant I3 — see `docs/backend-core-invariants.md`).
 ///
 /// The backdating + watermark hacks poke the remote DB directly — there's
 /// no production command that lets a test manipulate `sent_at` or
 /// `conversation_watermark`, and we intentionally don't add one.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn envelope_cleanup_ttl_or_watermark() {
+async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -836,9 +839,8 @@ async fn envelope_cleanup_ttl_or_watermark() {
 
     alice.send_channel_message(&channel_id, "neg-hello").await;
     // Alice fetches — triggers cleanup. Bob has not fetched. The cleanup
-    // subquery requires every current member to have a watermark row; bob
-    // does not, so the watermark gate returns NULL. TTL is fresh (< 30
-    // days). Neither gate fires — envelope stays.
+    // subquery requires every current member device to have a watermark row; bob
+    // does not, so the gate returns NULL — envelope stays.
     alice.fetch_channel_messages(&channel_id).await;
     assert_eq!(
         envelope_count(&remote, &channel_id).await,
@@ -846,7 +848,7 @@ async fn envelope_cleanup_ttl_or_watermark() {
         "young envelope with a lagging member should not be cleaned up"
     );
 
-    // ── Watermark-only: young envelope, both watermarks strictly past it ──
+    // ── Watermark: young envelope, both watermarks strictly past it ──
     // The cleanup query uses `sent_at < MIN(cw)`, and the watermark upsert
     // uses the latest returned message's `sent_at`. So to delete "neg-hello"
     // via the watermark gate we need a STRICTLY later message that both
@@ -866,21 +868,45 @@ async fn envelope_cleanup_ttl_or_watermark() {
         "older envelope should be cleaned once every watermark passes it, while the latest envelope remains"
     );
 
-    // ── TTL-only: old envelope, watermark gate deliberately broken ──
-    // Send a fresh envelope, then backdate it past the 30-day TTL.
+    // ── No-TTL regression (F3): ancient envelopes nobody has collected ──
+    // Send another envelope, then rewind EVERY envelope in the conversation to
+    // 2020 — over 400 days old, more than 13x the deleted 30-day TTL.
     alice.send_channel_message(&channel_id, "very-old").await;
-    // Rewind sent_at into the past — well beyond the 30-day threshold.
     backdate_envelopes(&remote, &channel_id, "2020-01-01T00:00:00+00:00").await;
-    // Wipe watermarks again so the gate cannot accidentally fire: alice's
-    // upsert during her fetch will re-create her row (set to the backdated
-    // sent_at), but bob will be missing until he fetches.  `COUNT(gm) !=
-    // COUNT(cw)` → CASE returns NULL → watermark gate stays false.
+    // `backdate_envelopes` rewrites the whole conversation, so this covers every
+    // surviving envelope, not just the one just sent.
+    let ancient = envelope_count(&remote, &channel_id).await;
+    assert!(ancient > 0, "fixture must leave ancient envelopes to protect");
+
+    // Wipe watermarks so the gate CANNOT fire: alice's upsert during her fetch
+    // re-creates her row, but bob's is missing until he fetches, so
+    // `COUNT(ud) != COUNT(cw)` → CASE returns NULL → nothing is deletable.
+    // Bob is still owed these messages, so age alone must not remove them.
     clear_watermarks(&remote, &channel_id).await;
     alice.fetch_channel_messages(&channel_id).await;
     assert_eq!(
         envelope_count(&remote, &channel_id).await,
-        0,
-        "old envelope should be cleaned by the TTL gate even when the watermark gate cannot fire"
+        ancient,
+        "ancient envelopes a current member device has NOT collected must ALL \
+         survive — retention is bounded by the slowest member device, never by \
+         wall-clock age (I3; the old 30-day TTL arm deleted these outright and \
+         lost bob's messages)"
+    );
+
+    // Still reclaimable, so removing the TTL bounds retention rather than
+    // disabling GC. As in the watermark leg above, the cursor is EXCLUSIVE
+    // (`sent_at < MIN(cw)`), so a STRICTLY later envelope is needed to lift both
+    // members' watermarks above the backdated rows.
+    bob.fetch_channel_messages(&channel_id).await;
+    alice.send_channel_message(&channel_id, "fresh").await;
+    alice.fetch_channel_messages(&channel_id).await;
+    bob.fetch_channel_messages(&channel_id).await;
+    alice.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        envelope_count(&remote, &channel_id).await,
+        1,
+        "once every member device has collected past them, the backdated \
+         envelopes are reclaimed and only the newest remains"
     );
 
     drop(alice);

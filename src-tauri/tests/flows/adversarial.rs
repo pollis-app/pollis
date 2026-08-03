@@ -1902,7 +1902,7 @@ async fn gc_envelope_count(conversation_id: &str) -> i64 {
 /// stayed on the server forever (this is the harsher of the two failure modes; the
 /// stale-row mode is covered in the unit + integration layers).
 ///
-/// **Asserted the way the GC suite asserts** ([`envelope_cleanup_ttl_or_watermark`]
+/// **Asserted the way the GC suite asserts** ([`envelope_cleanup_is_watermark_gated_and_never_ttl_gated`]
 /// in `messages.rs`): the *observable* raw row count. `old-msg` — young (TTL cannot
 /// fire) and read past by both live devices — must be pruned, while `new-msg` (equal
 /// to the watermark) survives. A control assertion confirms the group stays live, so
@@ -1942,7 +1942,7 @@ async fn revoked_device_does_not_wedge_envelope_gc() {
 
     // Reset the add-member-seeded watermarks so the lag pattern is exactly what
     // this test establishes (mirrors the `clear_watermarks` step in
-    // `envelope_cleanup_ttl_or_watermark`).
+    // `envelope_cleanup_is_watermark_gated_and_never_ttl_gated`).
     remote
         .conn()
         .await
