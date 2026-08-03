@@ -44,10 +44,40 @@ cannot** — happy-path coverage does not count.
 | PL-02 | Move the GC *trigger* server-side — today it fires from whichever member happens to ingest (`TODO(#419)`, messages.rs:752). The predicate is already many-member correct; the trigger is not. | P0 correctness | M |
 | PL-03 | Reference-count attachment deletion server-side (messages.rs:853) — today an unconditional remote delete can strand a still-referenced file. | P1 | M |
 | PL-04 | Enforce I1/I2 at the schema layer. No `TRIGGER` exists anywhere; the gapless chain is held only by the CAS insert in `pollis-delivery/src/commit.rs`. Phases 1–5 of the invariants doc. **Migration 000007 is a deliberate permanent hole — do not reuse.** | P1 | L |
-| PL-05 | Fix flaky `sealed_admin_delete_of_other_member_works` (#661). Confirm it is test timing, not a real ingest/delete race, before touching the assertion. | P2 | S |
+| PL-05 | **#661** — `sealed_admin_delete_of_other_member_works` is likely a real ordering defect, not test timing. See "PL-05 analysis" below before touching the assertion. | P1 | M |
 
 **Verify:** `cargo test -p pollis-delivery`; `cargo test --features test-harness --test flows`; Kani
 proofs; TLA+ `CommitLog` / `Delivery`.
+
+### PL-05 analysis — the flake is probably a real dropped-tombstone bug
+
+Ingest selects envelopes with `sent_at > last_fetched_at` (strictly greater) and advances the
+watermark to the highest `sent_at` it consumed (`pollis-core/src/commands/messages/ingest.rs:148-159`).
+Anything stamped at or below a device's watermark is therefore skipped **permanently**, not merely
+delayed — the cursor never goes back.
+
+The delete path already knows this. `sent_at_after()` (`pollis-delivery/src/messages.rs:203`) stamps
+a tombstone strictly after a floor, and its doc comment states the intent plainly: *"the tombstone
+would again sort underneath and never be fetched … removes the dependence on the two clocks
+agreeing."*
+
+**The hole:** the floor is computed as `SELECT MAX(sent_at) FROM message_envelope WHERE
+conversation_id = ?1` (messages.rs:511-522) — the maximum over envelopes **still present**. But
+envelopes are deleted by GC once every member device has collected them, and reads trigger that GC
+(`ingest.rs:180-192`). Once a conversation's envelopes have been pruned, `MAX(sent_at)` is `NULL`,
+`sent_at_after` falls back to wall-clock `now`, and the clock-skew dependency the comment claims to
+have removed is back. A recipient whose watermark was stamped from a client clock running ahead of
+the DS clock will then never fetch the tombstone, and the deleted message stays readable on that
+device forever.
+
+`conversation_watermark.last_fetched_at` rows survive envelope GC, so the correct floor is the
+greater of `MAX(sent_at)` over envelopes **and** `MAX(last_fetched_at)` over that conversation's
+watermarks. Fix the floor, then decide whether the test still needs a convergence wait.
+
+Treat this as correctness work, not test maintenance: the same mechanism can silently drop any
+envelope stamped at or below a live watermark, which is the exact class of failure this epic exists
+to eliminate. Note this was reasoned from the code, not yet reproduced under instrumentation —
+confirm with a targeted test before shipping the fix.
 
 ---
 
