@@ -39,7 +39,7 @@ The file path under the output root mirrors the URL exactly (drop the leading
 | `/v1/entries/<index>.json`                            | one entry                           | immutable    |
 | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json`   | inclusion proof                     | immutable    |
 | `/v1/proof/consistency/<first>-<second>.json`         | consistency proof                   | immutable    |
-| `/verify/group/<conversation_id>`                     | precomputed per-group `GroupReport` | short        |
+| `/verify/group/<conversation_id>`                     | `GroupReport`, **dynamic only** (#701) | n/a       |
 | `/v1/account-keys/...`                                | the account-key tree, same layout   | mixed        |
 | `/verify/account/<user_id>`                           | precomputed per-user `AccountReport` | short       |
 | `/v1/binaries/...`                                    | the released-binaries tree, same layout | mixed    |
@@ -48,18 +48,22 @@ The file path under the output root mirrors the URL exactly (drop the leading
 All wire shapes (`Entry`, `Sth`, `InclusionProof`, `ConsistencyProof`) are the
 frozen contract documented in `verifiable-log/README.md`.
 
-### Precomputed per-group reports (`/verify/group/<id>`)
+### Per-group verification is dynamic and member-gated (`/verify/group/<id>`, #701)
 
-`serve generate` also writes a precomputed report at
-`verify/group/<conversation_id>` (no extension — the file *is* the endpoint URL)
-for every conversation present in the bundle. The bytes are **byte-identical** to
-what the live `GET /verify/group/<id>` endpoint returns: both serialize the same
-`GroupReport` from the shared `verify_group_in_bundle` as compact JSON, so a
-static host serves the same verdict the live server would, with no server on the
-path. `index.json` lists every conversation that has a report so a client can
-enumerate them. These reports **move** as the log grows (a new head changes every
-group's `sth_tree_size` and inclusion), so they are short-cached like
-`latest.json` and `index.json`.
+Since #701 the commit-log leaf carries a **windowed pseudonym**, not the raw
+`conversation_id`, so `serve generate` writes **no** precomputed per-group report
+and `index.json` no longer enumerates conversations — either would re-expose the
+group set the pseudonyms exist to hide. Per-group verification is instead the
+dynamic `GET /verify/group/<conversation_id>` endpoint (dev + live servers) and
+`pollis-verify group <conversation_id>`: both take the *real* conversation id
+(which only a member knows), re-derive the windowed pseudonyms, select every
+window of the conversation, and check the full-strength invariant across windows
+via the shared `verify_group_in_bundle`. A pure static host (no server) therefore
+does not answer `/verify/group/<id>`; a member runs `pollis-verify group` (which
+fetches `entries.json` and computes locally) or points the explorer at a live
+server. The account-key tree keeps its precomputed `/verify/account/<user_id>`
+reports — its `user_id` is load-bearing (key transparency looks a user up by
+identity) and out of #701's scope.
 
 ### Manifest (`/v1/index.json`)
 
@@ -67,6 +71,7 @@ So a monitor or explorer can discover everything available without guessing:
 
 ```json
 {
+  "format_version": 2,
   "version": "v1",
   "public_key": "<ed25519 public key, 32 bytes hex>",
   "entry_count": 5,
@@ -78,16 +83,26 @@ So a monitor or explorer can discover everything available without guessing:
 }
 ```
 
+`format_version` (`bundle::FORMAT_VERSION`) is the **served wire format** version a
+verifier reads *first*: a log published in a format newer than the binary
+understands is reported as version skew (`pollis-verify` exits `2`, "upgrade your
+verifier"), never as a verification failure — so the next breaking wire change does
+not surface to an auditor as a serde error. It was bumped to `2` at #701 (the
+`conversations` list removed, the precomputed `/verify/group/<id>` artifacts gone,
+the commit leaf moved to windowed pseudonyms). A manifest with no `format_version`
+is treated as the legacy pre-#701 shape (`0`) and still verifies.
+
 ### Cache policy
 
 Every artifact is **write-once / immutable** except the ones that move as the log
-grows — `sth/latest.json`, `index.json`, and the `verify/group/*` reports. Hosts
-should serve them so:
+grows — `sth/latest.json`, `index.json`, and the `verify/account/*` /
+`verify/release/*` reports (the commit-log tree has no static `verify/group/*`
+since #701). Hosts should serve them so:
 
 - immutable artifacts (`v1/sth/<size>.json`, `v1/entries*`, `v1/proof/**`,
   `v1/public_key.json`) → `Cache-Control: public, max-age=31536000, immutable`
-- mutable artifacts (`v1/sth/latest.json`, `v1/index.json`, `verify/group/*`) →
-  `Cache-Control: public, max-age=300`
+- mutable artifacts (`v1/sth/latest.json`, `v1/index.json`,
+  `verify/account/*`, `verify/release/*`) → `Cache-Control: public, max-age=300`
 
 The production publish (`.github/workflows/transparency-publish.yml`) applies
 exactly this split during the R2 sync — immutable files first, then the mutable
@@ -124,6 +139,14 @@ equivocation, entry/STH-root replay (through the tenant invariants), inclusion,
 and consistency. It prints a per-check report and **exits non-zero** if anything
 fails — a tampered entry, a forged proof, a bad signature, or a mismatched
 `latest.json` are all rejected.
+
+**Exit codes** (stable, so scripts and CI can branch on them):
+
+| code | meaning |
+|---|---|
+| `0` | verification passed |
+| `1` | verification **failed** (bad signature, forged proof, fork, epoch regression) or a transport/parse error |
+| `2` | **version skew** — the log's `format_version` is newer than this binary understands; upgrade `pollis-verify`. Deliberately distinct from `1`: it is *not* a tampering finding, so a stale binary the day after a republish reads as "upgrade me", not "verification failed". |
 
 ## Production note
 

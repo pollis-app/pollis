@@ -118,7 +118,7 @@ function renderReport(report) {
       '<div class="kt-commit-detail">seq ' +
       esc(c.seq) +
       " · sender " +
-      esc(shortHash(c.sender_id)) +
+      esc(shortHash(c.sender_pseudonym)) +
       " · commit " +
       esc(shortHash(c.commit_sha256)) +
       "</div>" +

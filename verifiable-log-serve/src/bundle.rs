@@ -15,6 +15,34 @@
 use serde::{Deserialize, Serialize};
 use verifiable_log::{ConsistencyProof, Entry, InclusionProof, Sth};
 
+/// The served-bundle **wire format version**: the shape of the discovery
+/// manifests and the artifact set a verifier fetches. It is the number a verifier
+/// checks *before* it trusts anything else, so version skew is reported as version
+/// skew and never mistaken for tampering (see [`crate::remote::gate_format_version`]
+/// and `pollis-verify`).
+///
+/// Bumped on any **breaking** change to the served shape — a removed/renamed
+/// manifest field, a deleted class of artifact, or a change to the leaf encoding
+/// that a prior verifier cannot parse. It is *not* bumped for additive changes an
+/// older verifier tolerates.
+///
+/// | version | change |
+/// |---------|--------|
+/// | 0 (implicit) | the pre-#701 shape: `index.json` carried a `conversations` list, the commit-log tree published precomputed `/verify/group/<id>` reports, and the commit leaf published a raw `conversation_id` / `sender_id`. A manifest with **no** `format_version` field is treated as version 0. |
+/// | 2 | **#701**: `conversations` removed from the manifest, the precomputed `/verify/group/<id>` artifacts deleted, and the commit leaf moved to windowed pseudonyms. Lands at the #672 / #699 republish (the leaf is a frozen contract — see `verifiable_log_builder::CommitLeaf`). |
+///
+/// (Version 1 is skipped so the number lines up with the `sth:v2` STH contexts the
+/// same republish introduces — one mental model, "everything went to v2 at the
+/// republish", not two.)
+///
+/// A verifier accepts any served version **≤** this constant (older or equal — it
+/// understands the shape) and rejects any version **greater** than it as
+/// [`crate::error::ServeError::VersionSkew`] ("this verifier is too old for this
+/// log — upgrade"). That is the mechanism that stops the *next* breaking wire
+/// change from surfacing as a serde/verification error to an auditor who is merely
+/// running a stale binary.
+pub const FORMAT_VERSION: u32 = 2;
+
 /// The signed monitor bundle (input to the layout generator). Field names and
 /// shapes match the frozen wire contract; every section except `public_key` is
 /// optional so a minimal fixture still deserializes.
@@ -176,6 +204,13 @@ pub struct ConsistencyRef {
 /// grows, so it is served short-cache (see the README cache policy).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
+    /// Served-bundle wire format version — see [`FORMAT_VERSION`]. A verifier reads
+    /// this *first* and refuses a log newer than it understands with a clear
+    /// "upgrade your verifier" rather than a parse/verification failure.
+    /// `#[serde(default)]` (→ 0) so a pre-#701 manifest with no such field still
+    /// deserializes and is treated as the legacy shape.
+    #[serde(default)]
+    pub format_version: u32,
     /// API version segment these artifacts live under (`"v1"`).
     pub version: String,
     /// ML-DSA-44 log public key, lowercase hex.
@@ -193,13 +228,6 @@ pub struct Manifest {
     pub consistency: Vec<ConsistencyRef>,
     /// Tenants whose uniqueness invariant a verifier enforces on replay.
     pub enforce_unique: Vec<String>,
-    /// Every conversation id with a precomputed `/verify/group/<id>` report,
-    /// sorted. Lets a client enumerate the per-conversation endpoints (and learn
-    /// how many conversations the log carries) without scraping every entry.
-    /// `#[serde(default)]` so an older `index.json` written before this field
-    /// existed still deserializes.
-    #[serde(default)]
-    pub conversations: Vec<String>,
 }
 
 /// The discovery manifest for the **account-key** tree, served at
@@ -213,6 +241,12 @@ pub struct Manifest {
 /// Like [`Manifest`] it *moves* as the log grows, so it is served short-cache.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountManifest {
+    /// Served-bundle wire format version — see [`FORMAT_VERSION`]. The account
+    /// tree's shape did not change in #701, but it carries the same version marker
+    /// as the commit-log manifest so every served `index.json` is uniformly
+    /// version-gated and a future break to *this* tree is caught the same way.
+    #[serde(default)]
+    pub format_version: u32,
     /// API version segment these artifacts live under (`"v1"`).
     pub version: String,
     /// ML-DSA-44 log public key, lowercase hex. The same key signs both trees;
@@ -250,6 +284,11 @@ pub struct AccountManifest {
 /// Like the others it *moves* as the log grows, so it is served short-cache.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BinaryManifest {
+    /// Served-bundle wire format version — see [`FORMAT_VERSION`]. Same marker as
+    /// the other two manifests so every served `index.json` is uniformly
+    /// version-gated (the binaries tree's shape did not change in #701).
+    #[serde(default)]
+    pub format_version: u32,
     /// API version segment these artifacts live under (`"v1"`).
     pub version: String,
     /// ML-DSA-44 log public key, lowercase hex. The same key signs all three

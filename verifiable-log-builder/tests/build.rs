@@ -12,7 +12,10 @@ use verifiable_log::{
     UniqueDataInvariant, VerifiableLog,
 };
 use verifiable_log_builder::builder::Bundle;
-use verifiable_log_builder::{build_bundle, keys, source};
+use verifiable_log_builder::{
+    build_bundle, derive_conversation_pseudonym, derive_sender_pseudonym, keys, source,
+    window_for_seq, CommitLeaf, PSEUDONYM_WINDOW_SIZE,
+};
 
 const TS: u64 = 1_700_000_000_000;
 // Deterministic dev key (custody is a later slice).
@@ -434,6 +437,78 @@ async fn empty_commit_log_still_builds_a_valid_bundle() {
     let json = serde_json::to_string_pretty(&bundle).unwrap();
     let reparsed: Bundle = serde_json::from_str(&json).unwrap();
     assert!(monitor_verify(&reparsed));
+}
+
+// ---------------------------------------------------------------------------
+// #701: windowed pseudonyms in the published leaf.
+// ---------------------------------------------------------------------------
+
+/// The published tree carries windowed pseudonyms, never the raw ids: an
+/// `entries.json` scraper sees no stable `conversation_id` or `sender_id`.
+#[tokio::test]
+async fn published_leaves_are_pseudonymous_not_raw_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("pseudo.db");
+    let rows = vec![row(1, "conv-a", 0, "a0"), row(2, "conv-a", 1, "a1")];
+    seed_db(&db_path, &rows).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_commit_log(&conn).await.unwrap();
+    let bundle = build_bundle(&read, &signing_key(), TS).unwrap();
+
+    let leaf0 = CommitLeaf::decode(&bundle.entries[0].data).unwrap();
+    // The pseudonym is a 64-hex SHA-256, and it is NOT the raw id.
+    assert_eq!(leaf0.conversation_pseudonym.len(), 64);
+    assert_ne!(leaf0.conversation_pseudonym, "conv-a");
+    assert_eq!(
+        leaf0.conversation_pseudonym,
+        derive_conversation_pseudonym("conv-a", window_for_seq(leaf0.seq)),
+        "the published pseudonym must be exactly what a member re-derives"
+    );
+    assert_ne!(leaf0.sender_pseudonym, "u-sender");
+    assert_eq!(
+        leaf0.sender_pseudonym,
+        derive_sender_pseudonym("conv-a", "u-sender", window_for_seq(leaf0.seq))
+    );
+
+    // Belt and braces: the raw strings appear nowhere in the serialized entries.
+    let raw = serde_json::to_string(&bundle.entries).unwrap();
+    assert!(!raw.contains("conv-a"), "raw conversation id leaked into the log");
+    assert!(!raw.contains("u-sender"), "raw sender id leaked into the log");
+}
+
+/// DoD: a fork whose two branches straddle a pseudonym-window boundary is NOT
+/// visible to the public per-pseudonym check (the two branches carry different
+/// pseudonyms), but the builder's full-strength source-integrity gate — which
+/// runs on the real ids — still aborts the build. This is the residual being held
+/// shut at the one place the real ids are in hand.
+#[tokio::test]
+async fn a_cross_window_fork_is_rejected_at_full_strength() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("xwindow.db");
+    let w = PSEUDONYM_WINDOW_SIZE as i64;
+    // Same conversation, same epoch 0 (a real fork), but placed one window apart.
+    let rows = vec![
+        row(1, "conv-a", 0, "a0"),
+        row(w + 1, "conv-a", 0, "a0-EVIL"),
+    ];
+    seed_db(&db_path, &rows).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_commit_log(&conn).await.unwrap();
+
+    // Sanity: the two branches really do land in different windows / pseudonyms,
+    // so a public replay grouping by pseudonym would miss them.
+    assert_ne!(
+        derive_conversation_pseudonym("conv-a", window_for_seq(1)),
+        derive_conversation_pseudonym("conv-a", window_for_seq(w + 1))
+    );
+
+    let err = build_bundle(&read, &signing_key(), TS).unwrap_err();
+    assert!(
+        err.to_string().contains("fork"),
+        "the source-integrity gate must catch a boundary-straddling fork: {err}"
+    );
 }
 
 #[test]

@@ -177,12 +177,11 @@ fn run_generate(
     let bundle = layout::load_bundle(bundle_path)?;
     let manifest = layout::generate(&bundle, out)?;
     println!(
-        "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s), {} group report(s) -> {}",
+        "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
         manifest.entry_count,
         manifest.sth_sizes.len(),
         manifest.inclusion.len(),
         manifest.consistency.len(),
-        manifest.conversations.len(),
         out.join(layout::API_VERSION).display()
     );
 

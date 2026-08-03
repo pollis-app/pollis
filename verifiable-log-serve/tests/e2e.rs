@@ -129,25 +129,22 @@ fn layout_generator_writes_documented_files() {
 }
 
 #[test]
-fn non_commit_entries_emit_no_group_reports() {
-    // This fixture's entries are raw "commits"/"accounts" payloads, not encoded
-    // CommitLeafs, so none decode to a conversation: no per-group reports, and an
-    // empty conversation list in the manifest.
+fn commit_log_tree_emits_no_group_reports() {
+    // Since #701 the commit-log tree never precomputes per-group reports (they
+    // would re-enumerate the group set next to pseudonymous leaves). Per-group
+    // verification is dynamic and member-gated instead.
     let dir = tempfile::tempdir().unwrap();
     generate_into(dir.path());
 
     let group_dir = dir.path().join("verify").join("group");
     let empty = !group_dir.exists()
         || std::fs::read_dir(&group_dir).unwrap().next().is_none();
-    assert!(empty, "non-commit entries must not produce any verify/group reports");
+    assert!(empty, "the commit-log tree must not produce any verify/group reports");
 
-    let manifest: verifiable_log_serve::Manifest =
-        serde_json::from_str(&std::fs::read_to_string(dir.path().join("v1").join("index.json")).unwrap())
-            .unwrap();
-    assert!(
-        manifest.conversations.is_empty(),
-        "no conversations should be advertised for non-commit entries"
-    );
+    // And the manifest no longer carries a `conversations` enumeration at all.
+    let index = std::fs::read_to_string(dir.path().join("v1").join("index.json")).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&index).unwrap();
+    assert!(value.get("conversations").is_none(), "index.json must not enumerate conversations");
 }
 
 #[test]

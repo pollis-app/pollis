@@ -144,10 +144,42 @@ fn run() -> Result<bool, ServeError> {
     }
 }
 
+/// Process exit codes, kept stable so scripts and CI can branch on them:
+///
+/// * `0` — verification passed.
+/// * `1` — verification **failed** (a bad signature, a forged proof, a fork, an
+///   epoch regression) or a transport/parse error. The log was checked and found
+///   wanting, or could not be fetched.
+/// * `2` — **version skew**: the log is published in a wire format newer than this
+///   binary understands, so it could not verify it *at all*. This is NOT a
+///   tampering finding — it means "upgrade your verifier". Distinct from `1` so
+///   the day after a key rotation / republish a stale binary does not read as
+///   "verification failed" (the same false-alarm mode #668 ruled out for the
+///   missing log pin: an inability to check must withhold trust, never alarm).
+const EXIT_VERSION_SKEW: u8 = 2;
+
 fn main() -> ExitCode {
     match run() {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
+        // Version skew is reported as version skew, with its own exit code and an
+        // actionable message — never folded into a verification failure.
+        Err(ServeError::VersionSkew { served, supported }) => {
+            eprintln!(
+                "your pollis-verify is too old for this log — upgrade it.\n\
+                 \n\
+                 The log is published in wire format v{served}; this binary only \
+                 understands up to v{supported}. This is a version mismatch, NOT a \
+                 verification failure: nothing here says the log was tampered with. \
+                 Download a newer pollis-verify (a `pollis-verify-v*` release) and \
+                 re-run.\n\
+                 \n\
+                 (Note: a log's format only ever moves forward at a full republish, \
+                 e.g. the #672 ML-DSA-44 key rotation. The website explorer, which \
+                 calls the live server's dynamic endpoints, is unaffected.)"
+            );
+            ExitCode::from(EXIT_VERSION_SKEW)
+        }
         Err(e) => {
             eprintln!("error: {e}");
             ExitCode::FAILURE

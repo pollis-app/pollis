@@ -22,23 +22,33 @@ use std::path::Path;
 use ml_dsa::Keypair;
 use verifiable_log::SigningKey;
 use verifiable_log::{Entry, Sth, VerifiableLog};
-use verifiable_log_builder::CommitLeaf;
+use verifiable_log_builder::{
+    derive_conversation_pseudonym, derive_sender_pseudonym, window_for_seq, CommitLeaf,
+    PSEUDONYM_WINDOW_SIZE,
+};
 use verifiable_log_serve::bundle::{Bundle, ConsistencyCheck, InclusionCheck};
-use verifiable_log_serve::group::{verify_group, verify_group_in_bundle, GroupReport};
-use verifiable_log_serve::{layout, DevServer, Manifest};
+use verifiable_log_serve::group::{verify_group, GroupReport};
+use verifiable_log_serve::{layout, DevServer};
 
 const TS: u64 = 1_700_000_000_000;
 
+/// One pseudonym window, so tests can straddle a real boundary with small seqs.
+const W: i64 = PSEUDONYM_WINDOW_SIZE as i64;
+
+/// A **published** leaf as the builder emits it since #701: the identity fields
+/// are the windowed pseudonyms derived from the real `conv` and the leaf's own
+/// `seq`. The fixtures keep passing the real `conv`, exactly as a member does.
 fn leaf(conv: &str, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
     leaf_at(conv, 0, epoch, seq, commit)
 }
 
 fn leaf_at(conv: &str, generation: u64, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
+    let window = window_for_seq(seq);
     CommitLeaf {
-        conversation_id: conv.to_string(),
+        conversation_pseudonym: derive_conversation_pseudonym(conv, window),
         generation,
         epoch,
-        sender_id: format!("u-{conv}"),
+        sender_pseudonym: derive_sender_pseudonym(conv, &format!("u-{conv}"), window),
         seq,
         commit_sha256: hex::encode(blake_ish(commit)),
     }
@@ -256,85 +266,130 @@ fn cli_and_http_return_the_same_report() {
     server.shutdown();
 }
 
+/// DoD #4: the static commit-log tree emits **no** per-group artifact and the
+/// manifest no longer enumerates conversations — the two things that would leak
+/// the group set next to pseudonymous leaves. Per-group verification is dynamic
+/// and member-gated instead.
 #[test]
-fn generate_emits_precomputed_group_reports() {
-    let dir = tempfile::tempdir().unwrap();
-    let bundle = build_tree(dir.path(), &mixed_leaves());
-
-    // Every distinct conversation in the bundle gets a precomputed report at
-    // verify/group/<id> — no `.json` suffix, the file path IS the endpoint URL.
-    for id in ["conv-a", "conv-b", "conv-c", "conv-d"] {
-        let path = dir.path().join("verify").join("group").join(id);
-        assert!(path.is_file(), "expected a precomputed report file for {id}");
-
-        let on_disk = std::fs::read(&path).unwrap();
-        // Byte-identical to the shared verifier's compact JSON — which is exactly
-        // what the live `GET /verify/group/<id>` endpoint serializes and returns.
-        let expected = serde_json::to_vec(&verify_group_in_bundle(&bundle, id)).unwrap();
-        assert_eq!(on_disk, expected, "report for {id} must be byte-identical to the shared verifier");
-
-        // And it round-trips back into the same report the endpoint would return.
-        let report: GroupReport = serde_json::from_slice(&on_disk).unwrap();
-        assert_eq!(report.group_id, id);
-    }
-
-    // The precomputed verdicts carry the right answer per group: healthy passes,
-    // forked/regressed fail — proving the report content, not just its presence.
-    let read = |id: &str| -> GroupReport {
-        serde_json::from_slice(&std::fs::read(dir.path().join("verify").join("group").join(id)).unwrap())
-            .unwrap()
-    };
-    assert!(read("conv-a").chain_valid, "healthy group's report must pass");
-    assert!(!read("conv-c").chain_valid, "forked group's report must fail");
-    assert!(!read("conv-d").chain_valid, "regressed group's report must fail");
-
-    // A conversation never present in the bundle gets no precomputed file (it is
-    // only ever answered dynamically).
-    assert!(!dir.path().join("verify").join("group").join("conv-missing").exists());
-}
-
-#[test]
-fn precomputed_report_matches_live_endpoint_byte_for_byte() {
+fn generate_emits_no_precomputed_group_reports_or_conversation_list() {
     let dir = tempfile::tempdir().unwrap();
     build_tree(dir.path(), &mixed_leaves());
 
-    // The dynamic endpoint shadows the static file on the dev server, so fetch
-    // the live response and compare it to the precomputed file on disk: the
-    // static host (R2) serves this exact file, with no server on the path.
-    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
-    for id in ["conv-a", "conv-c", "conv-d"] {
-        let live = ureq::get(&format!("{}/verify/group/{id}", server.base_url()))
-            .call()
-            .unwrap()
-            .into_string()
-            .unwrap();
-        let on_disk =
-            std::fs::read_to_string(dir.path().join("verify").join("group").join(id)).unwrap();
-        assert_eq!(on_disk, live, "precomputed file for {id} must match the live endpoint body");
+    // No `verify/group/` directory at all.
+    assert!(
+        !dir.path().join("verify").join("group").exists(),
+        "the static commit-log tree must not precompute per-group reports (#701)"
+    );
+
+    // The manifest carries no `conversations` key and no raw conversation id.
+    let index = std::fs::read_to_string(dir.path().join("v1").join("index.json")).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&index).unwrap();
+    assert!(
+        value.get("conversations").is_none(),
+        "index.json must not enumerate conversations: {index}"
+    );
+    for id in ["conv-a", "conv-b", "conv-c", "conv-d"] {
+        assert!(!index.contains(id), "index.json leaked a raw conversation id: {id}");
     }
+
+    // And the published entries themselves carry no raw ids — only pseudonyms.
+    let entries = std::fs::read_to_string(dir.path().join("v1").join("entries.json")).unwrap();
+    for raw in ["conv-a", "conv-b", "conv-c", "conv-d", "u-conv-a"] {
+        assert!(!entries.contains(raw), "entries.json leaked a raw id: {raw}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #701: windowing. A member (who knows the real conversation_id) verifies the
+// whole conversation across windows; an outsider with only the dump cannot link
+// the windows.
+// ---------------------------------------------------------------------------
+
+/// A conversation whose commits fall on both sides of a window boundary. `conv-w`
+/// is healthy across the boundary; `conv-r` regresses across it (epoch 5 then 3).
+fn windowed_leaves() -> Vec<CommitLeaf> {
+    vec![
+        leaf("conv-w", 0, 1, "w0"),
+        leaf("conv-w", 1, 2, "w1"),
+        // …crosses the boundary, still monotone.
+        leaf("conv-w", 2, W + 1, "w2"),
+        leaf("conv-w", 3, W + 2, "w3"),
+        // conv-r: a regression that only shows up if you span the boundary.
+        leaf("conv-r", 5, 3, "r5"),
+        leaf("conv-r", 3, W + 3, "r3"),
+    ]
+}
+
+/// DoD #2: someone who knows the real `conversation_id` verifies the whole chain
+/// across ≥2 windows.
+#[test]
+fn a_member_verifies_a_conversation_across_windows() {
+    let dir = tempfile::tempdir().unwrap();
+    build_tree(dir.path(), &windowed_leaves());
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+
+    let (status, _, report) = http_group(&server.base_url(), "conv-w");
+    assert_eq!(status, 200);
+    assert!(report.found, "conv-w must be found across windows");
+    assert!(report.chain_valid, "a healthy cross-window chain must verify: {:?}", report.violations);
+    // All four commits recovered, in seq order, spanning the boundary.
+    let epochs: Vec<u64> = report.commits.iter().map(|c| c.epoch).collect();
+    assert_eq!(epochs, vec![0, 1, 2, 3], "every window's commits must be recovered");
+    assert!(report.commits.iter().all(|c| c.included));
+    // The two windows really are distinct pseudonyms in the log.
+    assert_ne!(
+        derive_conversation_pseudonym("conv-w", window_for_seq(1)),
+        derive_conversation_pseudonym("conv-w", window_for_seq(W + 1))
+    );
+
     server.shutdown();
 }
 
+/// The member path is full-strength: a regression that straddles the window
+/// boundary — invisible to a public per-pseudonym grouping — is caught because the
+/// member regroups every window under the real id.
 #[test]
-fn index_advertises_the_conversation_list() {
+fn a_member_catches_a_cross_window_regression() {
     let dir = tempfile::tempdir().unwrap();
-    build_tree(dir.path(), &mixed_leaves());
+    build_tree(dir.path(), &windowed_leaves());
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
 
-    let manifest: Manifest =
-        serde_json::from_str(&std::fs::read_to_string(dir.path().join("v1").join("index.json")).unwrap())
-            .unwrap();
-
-    // Distinct, sorted, one entry per conversation that has a report file.
-    assert_eq!(
-        manifest.conversations,
-        vec![
-            "conv-a".to_string(),
-            "conv-b".to_string(),
-            "conv-c".to_string(),
-            "conv-d".to_string(),
-        ],
-        "index.json must list every conversation with a precomputed report"
+    let (_, _, report) = http_group(&server.base_url(), "conv-r");
+    assert!(report.found);
+    assert!(!report.chain_valid, "a cross-window regression must fail for a member");
+    assert!(
+        report.violations.iter().any(|v| v.contains("regression")),
+        "expected a regression violation, got: {:?}",
+        report.violations
     );
+
+    server.shutdown();
+}
+
+/// DoD #3, at the serve boundary: from the entries dump alone you cannot link the
+/// same conversation across windows, nor the same sender across conversations.
+#[test]
+fn the_dump_alone_does_not_link_across_windows_or_conversations() {
+    let dir = tempfile::tempdir().unwrap();
+    let bundle = build_tree(dir.path(), &windowed_leaves());
+
+    // Pull the published pseudonyms straight out of the leaves.
+    let leaves: Vec<CommitLeaf> = bundle
+        .entries
+        .iter()
+        .map(|e| CommitLeaf::decode(&e.data).unwrap())
+        .collect();
+    // conv-w appears under two *different* conversation pseudonyms (one per
+    // window); nothing in the dump ties them together.
+    let convw_pseudos: std::collections::BTreeSet<&str> = leaves
+        .iter()
+        .filter(|l| l.seq <= W + 2)
+        .filter(|l| {
+            l.conversation_pseudonym == derive_conversation_pseudonym("conv-w", window_for_seq(l.seq))
+        })
+        .map(|l| l.conversation_pseudonym.as_str())
+        .collect();
+    assert_eq!(convw_pseudos.len(), 2, "one conversation must show two unlinkable window pseudonyms");
 }
 
 #[test]

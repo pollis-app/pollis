@@ -9,7 +9,9 @@
 //!    the STH signature *first*. Everything downstream is checked against that
 //!    signed root — an unsigned/forged head is worth nothing.
 //! 2. **Membership.** Select the entries whose [`CommitLeaf`] decodes and whose
-//!    `conversation_id` matches, in `seq` order.
+//!    windowed pseudonym matches the one re-derived for the real
+//!    `conversation_id` in that leaf's window (#701), in `seq` order — every
+//!    window of the conversation.
 //! 3. **Inclusion.** For each selected entry, fetch its inclusion proof and
 //!    verify it against the latest STH (reusing slice 1's
 //!    [`verifiable_log::proof::verify_inclusion_proof`]).
@@ -29,11 +31,13 @@ use serde::{Deserialize, Serialize};
 use verifiable_log::{
     proof, verifying_key_from_hex, Entry, InclusionProof, Sth, VerifiableLog,
 };
-use verifiable_log_builder::{CommitLeaf, CommitLogInvariant, TENANT};
+use verifiable_log_builder::{
+    derive_conversation_pseudonym, window_for_seq, CommitLeaf, CommitLogInvariant, TENANT,
+};
 
 use crate::bundle::{Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
-use crate::remote::{build_agent, fetch_json};
+use crate::remote::{build_agent, fetch_json, fetch_text, gate_format_version};
 
 /// One commit in a group's chain, as reported to a caller. Mirrors the
 /// structural fields of a [`CommitLeaf`] plus whether its inclusion proof
@@ -47,8 +51,10 @@ pub struct GroupCommit {
     pub epoch: u64,
     /// Global insertion order (`mls_commit_log.seq`).
     pub seq: i64,
-    /// Committer's user id (recorded, not authorized — see [`CommitLeaf`]).
-    pub sender_id: String,
+    /// Windowed, conversation-bound pseudonym for the committer (#701) — the
+    /// opaque published value, not the real user id. Recorded, not authorized
+    /// (see [`CommitLeaf`]).
+    pub sender_pseudonym: String,
     /// `sha256(commit_data)`, lowercase hex.
     pub commit_sha256: String,
     /// Did this entry's inclusion proof verify against the latest STH?
@@ -111,21 +117,36 @@ pub fn verify_group_via(
     let base = base_url.trim_end_matches('/');
     let agent = build_agent(proxy)?;
 
+    // Version gate first: `group` decodes commit leaves, whose encoding changed at
+    // the #701 republish, so a verifier older than the log would silently select
+    // nothing and report "Found: no" for a conversation that is really there. Read
+    // the manifest's `format_version` up front and refuse a log newer than we
+    // understand with VersionSkew ("upgrade your verifier") rather than a
+    // misleading empty result.
+    let index_body = fetch_text(&agent, &format!("{base}/v1/index.json"))?;
+    gate_format_version(&index_body)?;
+
     // Prerequisites: the published key, the latest signed head, and the full
     // ordered entry list. Without these there is nothing to verify.
     let pk_doc: PublicKeyDoc = fetch_json(&agent, &format!("{base}/v1/public_key.json"))?;
     let sth: Sth = fetch_json(&agent, &format!("{base}/v1/sth/latest.json"))?;
     let entries: Vec<Entry> = fetch_json(&agent, &format!("{base}/v1/entries.json"))?;
 
-    // Plan which proofs to fetch: only this group's entries (decode + match).
-    // This selection is a fetch optimisation; the verdict-bearing selection is
-    // re-derived inside the shared core, so the two can't disagree.
+    // Plan which proofs to fetch: only this group's entries. Since #701 the leaf
+    // carries a windowed pseudonym, not the raw id, so we match by re-deriving the
+    // pseudonym for the conversation *in each leaf's own window* (window = seq /
+    // WINDOW_SIZE) — the same thing a member does to recover their history across
+    // windows. This selection is a fetch optimisation; the verdict-bearing
+    // selection is re-derived inside the shared core, so the two can't disagree.
     let group_indices: Vec<usize> = entries
         .iter()
         .enumerate()
         .filter(|(_, e)| e.tenant == TENANT)
         .filter_map(|(i, e)| CommitLeaf::decode(&e.data).ok().map(|leaf| (i, leaf)))
-        .filter(|(_, leaf)| leaf.conversation_id == conversation_id)
+        .filter(|(_, leaf)| {
+            leaf.conversation_pseudonym
+                == derive_conversation_pseudonym(conversation_id, window_for_seq(leaf.seq))
+        })
         .map(|(i, _)| i)
         .collect();
 
@@ -166,17 +187,28 @@ pub fn verify_group_via(
 /// [`verify_group`] and the live server's `/verify/group/<id>` endpoint call it,
 /// so a group's verdict is identical no matter how the bundle was obtained.
 ///
+/// **This is the member/auditor path (#701).** `conversation_id` is the *real*
+/// id — something only a member (or an auditor a member has told) knows, since the
+/// published log carries windowed pseudonyms, not raw ids. Knowing it lets this
+/// function recover the conversation's *entire* history across every window and
+/// check the **full-strength** invariant, closing the window-boundary residual an
+/// outside-only replay cannot (see [`CommitLogInvariant`]).
+///
 /// The checks mirror the static read API exactly:
 ///
 /// 1. **Trust anchor.** The newest STH's signature must verify under the
 ///    bundle's published key. If not, the report still lists the group's commits
 ///    but the verdict is doomed.
 /// 2. **Membership.** Select entries whose [`CommitLeaf`] decodes and whose
-///    `conversation_id` matches, in `seq` order.
+///    `conversation_pseudonym` equals the pseudonym re-derived for
+///    `conversation_id` in that leaf's own window (`seq / WINDOW_SIZE`), in `seq`
+///    order — i.e. every window of this conversation.
 /// 3. **Inclusion.** Each selected entry must have an inclusion proof (against
 ///    the newest STH) in the bundle that verifies.
 /// 4. **Invariant.** Replay the group's commits through slice 2's
-///    [`CommitLogInvariant`] (epoch strictly increasing, no fork).
+///    [`CommitLogInvariant`], **regrouped under a single key** so the check spans
+///    windows (epoch strictly increasing, no fork — across the whole conversation,
+///    not just within a window).
 ///
 /// Never panics; a tampered/forked/regressed group yields `chain_valid == false`
 /// with populated `violations` rather than an error.
@@ -195,15 +227,20 @@ pub fn verify_group_in_bundle(bundle: &Bundle, conversation_id: &str) -> GroupRe
         violations.push("STH signature is invalid — published head is not trustworthy".to_string());
     }
 
-    // 2. Membership: every entry that decodes as a commit leaf for this group,
-    //    paired with its global leaf index (used to locate its proof).
+    // 2. Membership: every entry whose published pseudonym matches the one this
+    //    conversation would carry in that leaf's own window — i.e. all of the
+    //    conversation's commits, across every window — paired with its global leaf
+    //    index (used to locate its proof).
     let mut selected: Vec<(usize, CommitLeaf)> = bundle
         .entries
         .iter()
         .enumerate()
         .filter(|(_, e)| e.tenant == TENANT)
         .filter_map(|(i, e)| CommitLeaf::decode(&e.data).ok().map(|leaf| (i, leaf)))
-        .filter(|(_, leaf)| leaf.conversation_id == conversation_id)
+        .filter(|(_, leaf)| {
+            leaf.conversation_pseudonym
+                == derive_conversation_pseudonym(conversation_id, window_for_seq(leaf.seq))
+        })
         .collect();
     // The log is already in seq order, but sort defensively so the chain we
     // report and replay is unambiguous regardless of source ordering.
@@ -245,7 +282,7 @@ pub fn verify_group_in_bundle(bundle: &Bundle, conversation_id: &str) -> GroupRe
             generation: leaf.generation,
             epoch: leaf.epoch,
             seq: leaf.seq,
-            sender_id: leaf.sender_id.clone(),
+            sender_pseudonym: leaf.sender_pseudonym.clone(),
             commit_sha256: leaf.commit_sha256.clone(),
             included,
         });
@@ -254,11 +291,27 @@ pub fn verify_group_in_bundle(bundle: &Bundle, conversation_id: &str) -> GroupRe
     // 4. Invariant: replay this group's commits through the commit-log rules
     //    (no fork, no epoch regression). Reuse slice 2's invariant verbatim — a
     //    rejected append is exactly a detected violation.
+    //
+    //    Since #701 the selected leaves carry a *different* pseudonym per window,
+    //    so replaying them as-is would let [`CommitLogInvariant`] group only
+    //    within a window and miss a boundary-straddling fork/regression. Because
+    //    we know the real `conversation_id`, we regroup every selected leaf under
+    //    one canonical key (the real id) so the invariant spans all windows — the
+    //    full-strength check a member is entitled to, and the whole reason this
+    //    path takes the real id rather than a pseudonym.
     let mut log = VerifiableLog::new();
     log.register_invariant(TENANT, Box::new(CommitLogInvariant));
     let mut invariant_ok = true;
     for (_, leaf) in &selected {
-        match leaf.to_entry() {
+        let canonical = CommitLeaf {
+            conversation_pseudonym: conversation_id.to_string(),
+            generation: leaf.generation,
+            epoch: leaf.epoch,
+            sender_pseudonym: leaf.sender_pseudonym.clone(),
+            seq: leaf.seq,
+            commit_sha256: leaf.commit_sha256.clone(),
+        };
+        match canonical.to_entry() {
             Ok(entry) => {
                 if let Err(violation) = log.append(entry) {
                     invariant_ok = false;
@@ -300,7 +353,7 @@ impl GroupReport {
                     "  epoch {:<4} seq {:<6} sender {:<12} commit {}  {}",
                     c.epoch,
                     c.seq,
-                    short(&c.sender_id),
+                    short(&c.sender_pseudonym),
                     short(&c.commit_sha256),
                     if c.included { "[included \u{2713}]" } else { "[MISSING \u{2717}]" },
                 );

@@ -27,17 +27,31 @@ This extends `verifiable-log`'s frozen leaf encoding for the `mls-commit-log`
 tenant. The tenant's `Entry.data` is the **compact JSON** of:
 
 ```
-{"conversation_id":<string>,"epoch":<u64>,"sender_id":<string>,"seq":<i64>,"commit_sha256":<hex string>}
+{"conversation_pseudonym":<hex>,"epoch":<u64>,"sender_pseudonym":<hex>,"seq":<i64>,"commit_sha256":<hex string>}
 ```
 
 with fields in **exactly that order** (serde emits struct fields in declaration
 order, no insignificant whitespace), so the encoding is deterministic and stable.
+`generation` is inserted after `conversation_pseudonym` when non-zero (#454 P4).
 
 - `commit_sha256` is `sha256(commit_data)`, lowercase hex (32 bytes). The leaf
   commits to the commit bytes **without storing the raw blob**.
-- `sender_id` is recorded so a later slice can add cryptographic authorization
-  ("was this sender entitled to commit at this epoch?"). **This slice does not
-  validate it** — that needs MLS group state and is out of scope (see below).
+- `conversation_pseudonym` / `sender_pseudonym` are **windowed pseudonyms** (#701),
+  not the raw `conversation_id` / `sender_id`. They are keyless SHA-256 over the
+  real id(s) and a window index (`window = seq / PSEUDONYM_WINDOW_SIZE`):
+  `H(dom || conversation_id || window)` and
+  `H(dom || conversation_id || sender_id || window)`. The pseudonym rotates at each
+  window boundary, so a third party who only sees the public log cannot build a
+  longitudinal activity map, while anyone who knows the real `conversation_id` (a
+  member) re-derives every window's pseudonym and verifies their full history. See
+  `docs/transparency.md` for the scheme and its boundary residual.
+- **This is a frozen-contract change:** leaf bytes are Merkle-hashed, so it takes
+  effect only at a full republish — the #672 / PL-11 ML-DSA-44 key rotation
+  (executed by #699) under the `sth:v2` contexts. #701 changes *what that
+  republished tree contains*.
+- `sender_pseudonym` is recorded so a later slice can add cryptographic
+  authorization. **This slice does not validate it** — that needs MLS group state
+  and is out of scope (see below).
 
 The full leaf hashed by the core is then `verifiable-log`'s own encoding around
 this payload: `SHA-256(0x00 || len(tenant) BE || "mls-commit-log" || data)`.
@@ -45,18 +59,30 @@ this payload: `SHA-256(0x00 || len(tenant) BE || "mls-commit-log" || data)`.
 ## Commit-log invariant (the auditable form of #357)
 
 `CommitLogInvariant` is registered for the tenant and consulted on every append.
-Per conversation it enforces:
+Per **grouping key** (the leaf's `conversation_pseudonym`) it enforces:
 
-- **(a) no fork** — no two entries share the same `(conversation_id, epoch)`;
-- **(b) no epoch regression / replay** — within a conversation, `epoch` strictly
-  increases in `seq` order.
+- **(a) no fork** — no two entries share the same
+  `(conversation_pseudonym, generation, epoch)`;
+- **(b) no epoch regression / replay** — within a grouping key, `(generation,
+  epoch)` strictly increases in `seq` order;
+- **(c) a lineage opens at epoch 0** (#454 P4).
 
 Because commits are appended in `seq` order, the candidate always has the largest
-`seq` seen so far for its conversation, so (b) is exactly "strictly greater than
-every prior epoch for this conversation". A fork or regression in the source data
+`seq` seen so far for its grouping key, so (b) is exactly "strictly greater than
+every prior `(generation, epoch)`". A fork or regression in the source data
 **aborts the build** rather than producing a bundle that hides it. (#357 enforces
-this with a live `UNIQUE INDEX (conversation_id, epoch)`; this is its global,
-publicly-auditable mirror.)
+this with a live `UNIQUE INDEX (conversation_id, generation, epoch)`; this is its
+global, publicly-auditable mirror.)
+
+**Windowing and the two integrity passes (#701).** Grouping on the *published*
+pseudonym is the check an outside replayer runs, and it is only *within-window*: a
+fork whose branches straddle a window boundary carries two different pseudonyms and
+so escapes it (the residual — see `docs/transparency.md`). So `build_bundle` runs
+`CommitLogInvariant` **twice**: first over leaves keyed on the *real*
+`conversation_id` (`to_identity_leaf`, never published), which catches any fork or
+regression at full strength including across boundaries; then over the published
+pseudonymous leaves. A member re-runs the full-strength check at read time because
+they know the real id (`verifiable-log-serve`'s `verify_group`).
 
 The emitted bundle also lists `mls-commit-log` in `enforce_unique`, so the
 monitor's own replay re-checks leaf uniqueness independently.
@@ -119,8 +145,8 @@ tags, payload/signed pairing).
 ## Out of scope (later slices)
 
 No real signing-key custody/HSM; no deep MLS authorization of committers (the
-`sender_id` is recorded but not validated); no browser/WASM explorer. Tests use a
-local fixture file only and never connect to a real/production database.
+`sender_pseudonym` is recorded but not validated); no browser/WASM explorer. Tests
+use a local fixture file only and never connect to a real/production database.
 
 ## Tests
 

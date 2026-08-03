@@ -26,8 +26,10 @@ used for rate limiting and are never written to a database. Push tokens are stor
 re-registers or the account is deleted, and the notification they carry is content-free. Account
 records, membership rows, and the account-key history are retained for the life of the account and
 removed when the account is deleted. The public transparency ledger is, by design, permanent and
-append-only — and it currently publishes stable conversation and sender identifiers in the clear
-(§6, tracked by #701).
+append-only; #701 replaces the commit log's formerly-stable conversation and sender identifiers with
+windowed pseudonyms, so a third party can no longer build a longitudinal activity map from it (§6). That
+change takes effect at the next full republish (the #672 / #699 key-rotation ceremony), because the leaf
+encoding is a frozen contract.
 
 ---
 
@@ -178,24 +180,55 @@ Three trees are published, all signed under one key with distinct context string
 
 | Tree | Tenant | Leaf contents |
 |---|---|---|
-| MLS commit log | `mls-commit-log` | `conversation_id`, `generation`, `epoch`, `sender_id`, `seq`, `sha256(commit_data)` (`verifiable-log-builder/src/commit_log.rs`) |
+| MLS commit log | `mls-commit-log` | `conversation_pseudonym`, `generation`, `epoch`, `sender_pseudonym`, `seq`, `sha256(commit_data)` — **windowed pseudonyms, not raw ids** since #701 (`verifiable-log-builder/src/commit_log.rs`) |
 | Account-key directory | account-keys | user id + key version + key material commitment |
 | Released binaries | binaries | release tag, platform, artifact name, digest, provenance URI |
 
 The Signed Tree Head is `{tree_size, root_hash, timestamp, signature}` — ML-DSA-44 over
 `context || tree_size || root_hash || timestamp`.
 
-**Known exposure, stated plainly:** the commit-log leaf publishes a **stable `conversation_id` and a
-real `sender_id` in the clear**. Hex encoding is not obfuscation. Anyone can therefore build a
-longitudinal activity map — which groups exist, how often each changes membership or state, and who
-commits to them — without any access to Pollis. The raw commit bytes are *not* published (the leaf
-commits to `sha256(commit_data)` only), so no content or key material leaks; the leak is purely the
-social/activity graph.
+**Former exposure and the #701 mitigation, stated plainly:** the commit-log leaf *used to* publish a
+**stable `conversation_id` and a real `sender_id` in the clear**, so anyone could build a longitudinal
+activity map — which groups exist, how often each changes, and who commits to them — with no access to
+Pollis. #701 replaces both with **windowed pseudonyms**: `conversation_pseudonym =
+H(dom || conversation_id || window)` and `sender_pseudonym = H(dom || conversation_id || sender_id ||
+window)`, where `window = seq / PSEUDONYM_WINDOW_SIZE`. The pseudonym is stable *within* a window (so
+the fork/monotonicity invariant stays publicly checkable inside one) and rotates at each boundary (so an
+outside observer cannot link a conversation across windows, nor a user across conversations). Deriving a
+pseudonym is keyless — it needs only `conversation_id`, which members and the server already hold but a
+third-party scraper does not — so **no new signing key or custody problem is introduced** (contrast
+`docs/sth-signing-key-custody.md`). The raw commit bytes were never published (the leaf commits to
+`sha256(commit_data)` only). The account-key tree's `user_id` is deliberately **not** pseudonymised —
+key transparency looks a user up by identity, so it is load-bearing (out of #701's scope). Full design:
+`docs/transparency.md` → "Windowed pseudonyms in the commit log".
 
-Mitigation is tracked by **#701** (rotating pseudonyms). Note the coupling: the leaf encoding is a
-**frozen contract** — re-encoding history invalidates every signed root ever published and every cached
-inclusion proof — so pseudonymisation must land as part of a full republish, which is exactly what the
-key rotation in #699 already requires. **These two should ship together.**
+**Residual, named honestly:** windowing weakens the *public* invariant at window boundaries — a fork or
+regression whose two branches straddle a boundary carries two different pseudonyms, so an outside-only
+replay grouping by pseudonym cannot see it. This is inherent: a public commitment that let an outsider
+re-link two windows would also defeat the unlinkability, so the two are mutually exclusive for a
+third-party observer. It is **not** a gap for members or the builder: a member (who knows
+`conversation_id`) regroups every window and catches it, and `build_bundle` runs the invariant at full
+strength over the real ids before pseudonymising, so the honest builder never emits a
+boundary-straddling fork. Only a substituted/compromised publisher could, and a member catches that on
+replay.
+
+**Coupling, stated because it is not written down elsewhere:** the leaf encoding is a **frozen
+contract** — re-encoding history invalidates every signed root ever published and every cached inclusion
+proof — so #701's code cannot pseudonymise *existing* history in place. It takes effect only at a **full
+republish of the tree from scratch**, which is exactly what the #672 / PL-11 ML-DSA-44 key rotation
+(executed by #699, `docs/sth-signing-key-custody.md` §7) already performs under the `sth:v2` contexts.
+**#701 ships with that ceremony:** its builder is what makes the republished commit-log tree carry
+pseudonyms. Until the ceremony runs, the *code* is complete and tested but the *live* ledger still
+carries the pre-#701 (raw-id) leaves under the current roots.
+
+**Stale auditors after the republish:** the republish is a breaking change to the served wire shape, so
+the served manifests now carry a `format_version` an auditor's `pollis-verify` reads *before* it
+verifies anything. A binary older than the republished log reports version skew (exit code 2, "upgrade
+your verifier") — never a verification failure — because a tool whose whole job is answering "was this
+tampered with?" must not raise a false alarm the day the key rotates (the same principle as the absent
+log pin, #668). Upgrade any `pollis-verify` older than `v0.6.0` after the republish; the website
+explorer is unaffected (it calls the live server's dynamic endpoint, not a static manifest). Details:
+`docs/transparency.md` → "A stale `pollis-verify` after the republish".
 
 ---
 
@@ -246,7 +279,14 @@ Writing this document surfaced retention behaviour we have not decided on, only 
       ledger-side). **Remaining:** an object whose last message aged out is now *collectable* but not yet
       auto-*reclaimed* — a server-side R2+row sweep (giving the DS R2-delete capability) is the identified
       follow-up, unblocked by this ticket.
-- [ ] **The commit-log ledger publishes stable identifiers** (#701, coupled to #699).
+- [x] **The commit-log ledger publishes stable identifiers** (#701). Closed by windowed pseudonyms (§6):
+      `conversation_id` / `sender_id` are replaced with per-window `H(...)` pseudonyms. The *code* is
+      complete and tested; it takes effect on the *live* ledger at the next full republish (the #672 /
+      #699 ML-DSA-44 key-rotation ceremony), since the leaf is a frozen contract. Residual (a
+      boundary-straddling fork is invisible to an outside-only replay, but not to members or the honest
+      builder) is named in §6. The republish is a breaking wire change, so the served bundle now carries
+      a `format_version` and `pollis-verify` (bumped to `v0.6.0`) reports a too-old binary as version
+      skew, not a verification failure — see §6.
 - [ ] **The original filename is preserved in R2 object keys** (§5). Decide whether to hash it.
 
 None of these is a launch blocker on its own. All of them are questions a store privacy form or a

@@ -10,7 +10,9 @@
 use sha2::{Digest, Sha256};
 
 use crate::account_key::AccountKeyLeaf;
-use crate::commit_log::CommitLeaf;
+use crate::commit_log::{
+    derive_conversation_pseudonym, derive_sender_pseudonym, window_for_seq, CommitLeaf,
+};
 use crate::error::{BuilderError, Result};
 
 /// One structural row of `mls_commit_log`. Carries `commit_sha256` (hex), never
@@ -29,16 +31,43 @@ pub struct CommitRow {
 }
 
 impl CommitRow {
-    /// Project this row into its canonical leaf. `epoch` and `generation` are
-    /// stored as signed INTEGERs in SQLite but are logically non-negative; we
+    /// Project this row into the **published** leaf: the real `conversation_id`
+    /// and `sender_id` are replaced by windowed pseudonyms (#701), so the public
+    /// log never carries a stable identifier. The window is `seq / WINDOW_SIZE`,
+    /// derivable by a member from the leaf's own `seq`. `epoch` and `generation`
+    /// are stored as signed INTEGERs in SQLite but are logically non-negative; we
     /// keep them as `u64` in the leaf and clamp a (never-expected) negative to 0
     /// rather than panic.
     pub fn to_leaf(&self) -> CommitLeaf {
+        let window = window_for_seq(self.seq);
         CommitLeaf {
-            conversation_id: self.conversation_id.clone(),
+            conversation_pseudonym: derive_conversation_pseudonym(&self.conversation_id, window),
             generation: self.generation.max(0) as u64,
             epoch: self.epoch.max(0) as u64,
-            sender_id: self.sender_id.clone(),
+            sender_pseudonym: derive_sender_pseudonym(
+                &self.conversation_id,
+                &self.sender_id,
+                window,
+            ),
+            seq: self.seq,
+            commit_sha256: self.commit_sha256.clone(),
+        }
+    }
+
+    /// Project this row into a leaf keyed on the **real** `conversation_id` /
+    /// `sender_id` rather than pseudonyms. This is **never published** — it exists
+    /// only so the builder can run [`crate::commit_log::CommitLogInvariant`] at
+    /// full (cross-window) strength over the source rows before pseudonymising
+    /// them (`build_bundle`'s source-integrity gate). The published tree carries
+    /// pseudonyms, whose public invariant is only within-window; this is the one
+    /// point the real ids are in hand to prove there is no boundary-straddling
+    /// fork or regression at all.
+    pub fn to_identity_leaf(&self) -> CommitLeaf {
+        CommitLeaf {
+            conversation_pseudonym: self.conversation_id.clone(),
+            generation: self.generation.max(0) as u64,
+            epoch: self.epoch.max(0) as u64,
+            sender_pseudonym: self.sender_id.clone(),
             seq: self.seq,
             commit_sha256: self.commit_sha256.clone(),
         }

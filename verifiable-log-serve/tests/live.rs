@@ -19,7 +19,9 @@ use std::time::Duration;
 use ml_dsa::Keypair;
 use verifiable_log::SigningKey;
 use verifiable_log::{Entry, Sth, VerifiableLog};
-use verifiable_log_builder::CommitLeaf;
+use verifiable_log_builder::{
+    derive_conversation_pseudonym, derive_sender_pseudonym, window_for_seq, CommitLeaf,
+};
 use verifiable_log_serve::bundle::{Bundle, ConsistencyCheck, InclusionCheck};
 use verifiable_log_serve::group::{verify_group, verify_group_in_bundle, GroupReport};
 use verifiable_log_serve::{layout, DevServer, LiveServer, Manifest};
@@ -151,11 +153,14 @@ fn leaf(conv: &str, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
 }
 
 fn leaf_at(conv: &str, generation: u64, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
+    // Published leaf shape since #701: windowed pseudonyms derived from the real
+    // `conv` and the leaf's own `seq`.
+    let window = window_for_seq(seq);
     CommitLeaf {
-        conversation_id: conv.to_string(),
+        conversation_pseudonym: derive_conversation_pseudonym(conv, window),
         generation,
         epoch,
-        sender_id: format!("u-{conv}"),
+        sender_pseudonym: derive_sender_pseudonym(conv, &format!("u-{conv}"), window),
         seq,
         commit_sha256: hex::encode(distinct_hash(commit)),
     }

@@ -80,10 +80,24 @@ pub struct ConsistencyCheck {
 
 /// Build a signed bundle from commit rows (assumed already in `seq` order).
 ///
-/// Every commit is appended to a [`VerifiableLog`] with [`CommitLogInvariant`]
-/// registered for the [`TENANT`], so a fork or epoch regression in the source
-/// aborts the build with an [`crate::error::BuilderError::Invariant`] rather than
-/// producing a bundle that hides it.
+/// The published leaves carry **windowed pseudonyms**, not raw ids (#701), so the
+/// public log cannot be scraped into a longitudinal activity map. Two integrity
+/// passes run, and either aborts the build with an
+/// [`crate::error::BuilderError::Invariant`] rather than producing a bundle that
+/// hides a violation:
+///
+/// 1. **Source-integrity gate (full strength).** [`CommitLogInvariant`] is
+///    replayed over leaves keyed on the *real* `conversation_id`
+///    ([`CommitRow::to_identity_leaf`]). Because it groups on the real id it
+///    catches any fork or epoch regression, **including one that straddles a
+///    pseudonym-window boundary** — the residual the public per-pseudonym check
+///    cannot see. This is the one point the real ids are in hand, so it is where
+///    full-strength integrity is proven.
+/// 2. **Published tree.** The pseudonymous leaves ([`CommitRow::to_leaf`]) are
+///    appended, again under [`CommitLogInvariant`] — here it is the *public*
+///    within-window check, exactly what an outside replayer runs. Pass (1) has
+///    already guaranteed integrity, so this cannot fail on honest data; it keeps
+///    the build and the public replay on the identical code path.
 ///
 /// Emits, over the full log:
 /// * an STH over the final tree (and, when there are ≥2 entries, an earlier STH
@@ -100,6 +114,14 @@ pub fn build_bundle(
     signing_key: &SigningKey,
     timestamp: u64,
 ) -> Result<Bundle> {
+    // (1) Full-strength source-integrity gate on the real ids (#701).
+    let mut source_log = VerifiableLog::new();
+    source_log.register_invariant(TENANT, Box::new(CommitLogInvariant));
+    for row in rows {
+        source_log.append(row.to_identity_leaf().to_entry()?)?;
+    }
+
+    // (2) Build the published, pseudonymous tree.
     let mut log = VerifiableLog::new();
     log.register_invariant(TENANT, Box::new(CommitLogInvariant));
 
@@ -110,7 +132,7 @@ pub fn build_bundle(
         entries.push(entry);
     }
 
-    // Default (commit-log) STH context — byte-identical to the frozen contract.
+    // Default (commit-log) STH context.
     seal(log, entries, &[TENANT.to_string()], signing_key, timestamp, None)
 }
 

@@ -167,9 +167,16 @@ tree can never stand in for another:
 - **Commit-log tenant** (`pollis-verifiable-log:sth:v2`) — one leaf per MLS
   commit. Closes server-side fork / epoch-regression / replay on the MLS commit
   stream: replaying under its invariant proves no two commits share a
-  `(conversation_id, generation, epoch)`, that `(generation, epoch)` only
+  `(conversation_pseudonym, generation, epoch)`, that `(generation, epoch)` only
   increases lexicographically, and that a new generation opens at epoch 0. The
-  `generation` term is the PQ suite lineage (#454 P4). See `docs/transparency.md`.
+  `generation` term is the PQ suite lineage (#454 P4). **Since #701 the leaf's
+  identity fields are windowed pseudonyms** (`conversation_pseudonym`,
+  `sender_pseudonym` = keyless `H(conversation_id[|sender_id]|window)`,
+  `window = seq / PSEUDONYM_WINDOW_SIZE`), not raw ids, so an outside scraper can no
+  longer build a longitudinal group/activity map; the public invariant is checked
+  *within* a window and a member (who knows the real `conversation_id`) verifies
+  across windows via `pollis-verify group`. This lands at the next full republish
+  (frozen leaf → the #672/#699 key-rotation ceremony). See `docs/transparency.md`.
 - **Account-key tenant** (`pollis-verifiable-log:sth:v2:account-keys`) — one leaf
   per account identity-key version, sourced from the append-only
   `account_key_log` table (dual-written with `users.account_id_pub` at signup and
@@ -310,12 +317,13 @@ above rather than a hidden key swap. Properties: `pollis-delivery/tests/reset_se
 
 ## Roadmap
 
-- **VRF private lookups for key transparency.** The shipped log (#330, see "Key
-  transparency" above) is enumerable by design — `user_id`s and public keys are
-  listable, since the keys are public anyway. A CONIKS / Signal-KT-style
-  VRF-backed private-lookup layer would hide the user set and rotation cadence
-  while keeping the same auditability. This is the remaining future upgrade, not
-  a quick follow-up.
+- **VRF private lookups for key transparency.** The **account-key** tree (#330) is
+  enumerable by design — `user_id`s and public keys are listable, since the keys are
+  public anyway. A CONIKS / Signal-KT-style VRF-backed private-lookup layer would
+  hide the user set and rotation cadence while keeping the same auditability. This
+  is the remaining future upgrade, not a quick follow-up. (The **commit-log** tree's
+  analogous enumeration — stable conversation/sender ids — is closed by #701's
+  windowed pseudonyms; see "Key transparency" above.)
 - **Hard-block-on-mismatch policy.** Today's stance is advisory across
   the board. A user-configurable per-conversation "block sends until
   acknowledged" mode is an open product call — would make sense for

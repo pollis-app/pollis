@@ -118,12 +118,17 @@ different verdicts for the same input.
 
 ### The commit-log invariant
 
-Beyond raw Merkle inclusion, the log enforces three rules per conversation when the
-commits are replayed (the publicly-auditable mirror of the live DB's
-`UNIQUE(conversation_id, generation, epoch)` constraint):
+Beyond raw Merkle inclusion, the log enforces three rules per **grouping key** when
+the commits are replayed (the publicly-auditable mirror of the live DB's
+`UNIQUE(conversation_id, generation, epoch)` constraint). Since #701 the grouping
+key is the leaf's `conversation_pseudonym` (a per-window value), so a public replay
+checks these *within a window*; a member who knows the real `conversation_id`
+regroups across windows and checks them end to end — see
+[Windowed pseudonyms](#windowed-pseudonyms-in-the-commit-log-701):
 
-- **No fork** — no two commits share the same `(conversation_id, generation, epoch)`.
-- **No epoch regression / replay** — within a conversation, `(generation, epoch)`
+- **No fork** — no two commits share the same
+  `(conversation_pseudonym, generation, epoch)`.
+- **No epoch regression / replay** — within a grouping key, `(generation, epoch)`
   strictly increases **lexicographically** in `seq` order.
 - **A lineage opens at epoch 0** — the first commit of a generation higher than any
   seen before must be at epoch 0.
@@ -146,6 +151,182 @@ what it was.
 
 A fork or regression in the source data **aborts the build** rather than producing
 a bundle that hides it, and the verifiers re-check it independently on replay.
+
+## Windowed pseudonyms in the commit log (#701)
+
+Before #701 the commit-log leaf published a **stable `conversation_id` and a real
+`sender_id` in the clear**. Hex is not obfuscation: anyone who fetched
+`/v1/entries.json` — with no access to Pollis at all — could build a longitudinal
+activity map of every group (which groups exist, who commits to them, how often,
+when, and which groups a given user is in across the whole product). The raw commit
+bytes were never published (the leaf commits to `sha256(commit_data)` only), so no
+content or key material leaked; the leak was purely the **social/activity graph**.
+#701 closes it.
+
+### The scheme
+
+The leaf's two identity fields are now **windowed pseudonyms**, never the raw ids:
+
+```
+window                 = seq / PSEUDONYM_WINDOW_SIZE          (a coarse bucket)
+conversation_pseudonym = SHA256(dom_c || conversation_id || window)
+sender_pseudonym       = SHA256(dom_s || conversation_id || sender_id || window)
+```
+
+(`dom_c`/`dom_s` are fixed domain-separation tags; every field is length-prefixed
+so the pre-image is unambiguous.) Two properties fall out:
+
+- **Keyless, no new custody problem.** The only "secret" is `conversation_id`
+  itself, which members and the server already hold but a third-party log scraper
+  does not. No new key is minted, so there is nothing new to guard — deliberately,
+  because the log's *existing* key is already a hard custody problem
+  (`docs/sth-signing-key-custody.md`); a second secret here would be a second one.
+- **Sender bound to conversation.** Because the sender pseudonym mixes in
+  `conversation_id`, the same user gets an unrelated pseudonym in every group they
+  are in. Following a *person* across the groups they participate in — the worst
+  part of the old exposure — is broken outright, not merely windowed.
+
+A **member** (or an auditor a member trusts) knows the real `conversation_id`, so
+they re-derive `conversation_pseudonym` for every window and recover their whole
+history; `pollis-verify group <conversation_id>` and the
+`GET /verify/group/<conversation_id>` endpoint do exactly this. The window of any
+leaf is a function of its own published `seq`, so no extra field is published and a
+member needs nothing but the id they already know.
+
+### Why a window, and why this window
+
+The unlinkability goal fights the public-auditability goal, and the tension is
+real, not hand-waved. The whole point of the log is that *anyone* can replay it and
+check the invariant — but every invariant rule is stated **per conversation**. If
+the identifier were a single unchanging pseudonym, an outsider still could not group
+entries and so could not check anything; if it were the raw id, there is no privacy.
+The **window** is the hinge: a conversation's pseudonym is *stable within a window*
+and *rotates at each boundary*. So:
+
+- **inside a window**, an outsider groups a conversation's entries by their shared
+  pseudonym and checks fork / monotonicity / lineage-opening exactly as before —
+  the invariant stays **publicly checkable with no side knowledge**;
+- **across windows**, the pseudonym changes, so an outsider cannot tell window `w`
+  and window `w+1` are the same conversation — linkage is broken for anyone who
+  does not know `conversation_id`.
+
+`PSEUDONYM_WINDOW_SIZE` is the one tunable. Larger → more of a conversation's
+commits share a window, so the public check has more to bite on, but a conversation
+stays linkable across a longer stretch of the log. Smaller → stronger
+unlinkability, but the public check degrades toward per-entry singletons and there
+are more boundaries (bigger residual, below). It is defined over the global `seq`
+sequence rather than wall-clock time on purpose: `seq` is **already published**, so
+windowing adds *no new field and no new timing disclosure* — the most conservative
+choice for a privacy change (the builder already, deliberately, does not read or
+publish each commit's `created_at`). The commit log grows by one leaf per MLS
+*commit* (a membership/key change), not per message, so it is low-volume; the
+current value (1024) keeps a busy conversation groupable within a window while
+fragmenting a long-lived group across many. Because the value is baked into the
+frozen leaf, it only ever changes at a full republish. (A fixed *calendar* window
+would give a scale-independent "unlinkable after N days" guarantee; it would cost a
+published coarse timestamp and a `created_at` read. If that guarantee is later
+wanted, switching the window function is a localized change at the next republish.)
+
+### The residual, named honestly
+
+Windowing weakens the invariant **at window boundaries**: a fork (or regression)
+whose two branches straddle a boundary carries two *different* pseudonyms, so a
+public replay that groups by pseudonym **cannot** see them as the same conversation
+and does not fire. This is not a bug awaiting a patch — it is inherent. A *public*
+commitment that let an outsider re-link the two windows would, by construction, also
+let them defeat the unlinkability the scheme exists for: **public cross-window fork
+detection and public cross-window unlinkability are mutually exclusive for a
+third-party observer.** So we do not add a chaining commitment (it could only be
+useless-to-outsiders or unlinkability-defeating); we state the residual and close it
+for everyone who legitimately can:
+
+- **Members are unaffected.** Knowing `conversation_id`, they regroup every window
+  under one key and check the full-strength invariant end to end — the
+  `verify_group` path does exactly this, which is *why* it takes the real id and not
+  a pseudonym. The serve tests plant a boundary-straddling regression and prove a
+  member still catches it.
+- **The builder never emits one.** It holds the real ids, so `build_bundle` runs
+  the invariant twice: once at **full strength** over leaves keyed on the real
+  `conversation_id` (this catches any boundary-straddling fork/regression and aborts
+  the build), then over the published pseudonymous leaves. Only a *substituted or
+  compromised* publisher could plant a boundary-straddling fork, and a member catches
+  that on replay.
+
+So the residual is precisely: **a boundary-straddling fork is invisible to an
+outside-only replay, but not to a member and not to the honest builder.** It is
+recorded here and in `docs/metadata-retention-policy.md` §6.
+
+### Frozen contract → this lands at the republish (coupling to #672 / #699)
+
+Leaf bytes are hashed into the Merkle tree, so **re-encoding published leaves is not
+an edit — it invalidates every signed root ever published and every inclusion proof
+a client has cached.** Pseudonymising *existing* history is therefore a **republish
+of the tree from scratch**, not a migration. The only sane landing point is the
+republish the #672 / PL-11 ML-DSA-44 key rotation (executed by #699,
+`docs/sth-signing-key-custody.md` §7) already performs under the `sth:v2` contexts:
+that ceremony rebuilds all three trees, and #701's code changes **what the rebuilt
+commit-log tree contains**. Whoever runs the ceremony must know this — the
+republished tree will carry pseudonymous leaves the moment #701's builder is the one
+that builds it. (The account-key and binaries trees are unaffected; see below.) This
+follows the `generation` precedent (#454 P4): a compatible leaf extension that takes
+effect without pretending old bytes can be rewritten in place.
+
+### A stale `pollis-verify` after the republish: skew, not a false alarm
+
+The republish is a **breaking wire change**, and `pollis-verify` is the tool an
+auditor runs to ask *"has this log been tampered with?"*. Handing that person a hard
+failure the day after we rotate the key would be the exact false-alarm mode #668
+already ruled out for the missing log pin — an inability to check must *withhold*
+trust, never *alarm*. So the change ships with a version gate.
+
+**Who actually stops working** (measured, not assumed — the review note's "missing
+field" mechanism was off):
+
+| subcommand | pre-#701 binary vs the republished log | why |
+|---|---|---|
+| `remote` | **still passes** | The manifest's `conversations` field was always `#[serde(default)]`, so its removal is not a missing-field error; `remote` never decodes a commit leaf (it replays through the generic uniqueness invariant), so the leaf-shape change is invisible to it. |
+| `group` | **silently wrong** — reports `Found: no` for a conversation that is really there | It decodes each leaf into the *old* `CommitLeaf` (which requires `conversation_id`); a pseudonymous leaf fails to decode, the error is swallowed, and the selection comes back empty. Not a crash — a misleading empty result. |
+| `account`, `release` | **unaffected** | Separate trees; neither their manifest shape nor their leaf encoding changed. |
+
+Because a pre-#701 binary is already compiled, we cannot retrofit it — but we can
+stop this from recurring, and make the failure legible going forward. The served
+manifests now carry a **`format_version`** (`verifiable_log_serve::bundle::FORMAT_VERSION`,
+currently `2`). `pollis-verify` reads it **before** it deserializes or verifies
+anything: a log published in a format *newer* than the binary understands exits with
+a distinct code (`2`) and the message *"your pollis-verify is too old for this log —
+upgrade it"*, explicitly **not** a verification failure (exit `1`). A format at or
+below what it understands — including a legacy manifest with no `format_version` at
+all — is accepted, so a new binary still works against the not-yet-republished log
+during the transition window. From this release on, the *next* breaking wire change
+surfaces as honest skew rather than a serde error or a silent empty result. **After
+the republish, upgrade any `pollis-verify` older than `v0.6.0`.**
+
+The **website explorer is unaffected**: it calls the live server's *dynamic*
+`GET /verify/group/<id>` endpoint (`BACKEND_BASE` in `website/transparency.js`), which
+always runs the current code — it never deserializes a static manifest or an old leaf
+shape, so there is nothing for it to be stale against.
+
+### What an outside observer can and cannot learn after this lands
+
+**Can still learn (unchanged):** the total number of commits, the tree's growth over
+time (STH timestamps), and — *within a single window* — that some conversation had a
+run of commits with a given epoch progression, and whether that run is fork-free.
+This is what keeps the log a transparency log.
+
+**Can no longer learn:** which real conversation a pseudonym is; that two windows
+belong to the same conversation; that a pseudonym in group A and a pseudonym in
+group B are the same user; and therefore the cross-time, cross-group **activity map**
+that was the whole exposure. The map now requires knowing a `conversation_id`, i.e.
+being a member (or the server, which already had the data — the log defends against
+the server *lying*, not against it *knowing*).
+
+### Out of scope: the account-key tree's `user_id`
+
+The account-key tree still publishes a real `user_id`, and #701 deliberately does
+**not** touch it. Key transparency requires looking a user up **by identity** — the
+whole point is to audit *that specific user's* published key history — so the
+identifier there is load-bearing, not incidental exposure. Pseudonymising it would
+break the feature.
 
 ### The binaries invariant
 
@@ -178,7 +359,7 @@ served as plain static assets. The URL path mirrors the file path exactly.
 | URL | Contents | Cache |
 |-----|----------|-------|
 | `/v1/public_key.json` | the log's ML-DSA-44 public key (1312 bytes, 2624 hex chars) | immutable |
-| `/v1/index.json` | discovery manifest | short (`no-cache`) |
+| `/v1/index.json` | discovery manifest — carries `format_version` (the served wire version a verifier checks first) | short (`no-cache`) |
 | `/v1/sth/latest.json` | newest STH | short (`no-cache`) |
 | `/v1/sth/<tree_size>.json` | STH at that tree size | immutable |
 | `/v1/entries.json` | full ordered `[Entry]` | immutable |

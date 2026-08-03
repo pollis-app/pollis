@@ -20,9 +20,45 @@ use verifiable_log_builder::account_key::{self, AccountKeyInvariant};
 use verifiable_log_builder::binaries::{self, BinaryInvariant};
 
 use crate::account::ACCOUNT_TENANT;
-use crate::bundle::{AccountManifest, BinaryManifest, Manifest, PublicKeyDoc};
+use crate::bundle::{AccountManifest, BinaryManifest, Manifest, PublicKeyDoc, FORMAT_VERSION};
 use crate::error::{Result, ServeError};
 use crate::release::BINARIES_TENANT;
+
+/// The `format_version` alone, pulled out of a served manifest *before* any full
+/// deserialize. A future breaking change may add or rename fields a whole
+/// [`Manifest`] can no longer parse; reading only this one field first means a
+/// genuine version skew is reported as skew, not as a parse error that reads like
+/// tampering. Absent (a pre-#701 manifest) → 0 via `serde(default)`.
+#[derive(serde::Deserialize)]
+struct FormatProbe {
+    #[serde(default)]
+    format_version: u32,
+}
+
+/// Gate a served manifest body on its wire [`FORMAT_VERSION`], **before** trusting
+/// anything else in it.
+///
+/// A log published in a format *newer* than this build understands is
+/// [`ServeError::VersionSkew`] — the verifier is too old, upgrade it — and is kept
+/// deliberately distinct from a verification failure. A format at or below what we
+/// support (including a legacy manifest with no `format_version` field → 0) is
+/// accepted and verified normally, so this build stays backward-compatible with
+/// the not-yet-republished log.
+///
+/// Applied to the commit-log manifest, which is the mandatory first fetch of both
+/// `remote` and `group`. The three trees are republished together under one
+/// bundle version, so gating that manifest covers the whole served bundle.
+pub(crate) fn gate_format_version(body: &str) -> Result<()> {
+    let probe: FormatProbe = serde_json::from_str(body)
+        .map_err(|e| ServeError::Http(format!("read manifest format_version: {e}")))?;
+    if probe.format_version > FORMAT_VERSION {
+        return Err(ServeError::VersionSkew {
+            served: probe.format_version,
+            supported: FORMAT_VERSION,
+        });
+    }
+    Ok(())
+}
 
 /// A pass/fail report over all remote checks. `ok` is the conjunction of every
 /// individual check; the labelled list is for human-readable output. `notes`
@@ -117,13 +153,32 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
     // Prerequisites: the public key we anchor trust in, and the manifest that
     // tells us what to fetch.
     let pk_doc: PublicKeyDoc = fetch_json(&agent, &format!("{base}/v1/public_key.json"))?;
+
+    // Read the manifest body once and gate on its wire format *first* — before
+    // deserializing the full struct AND before judging the key set. A log newer
+    // than we understand must surface as "upgrade your verifier" (VersionSkew),
+    // never as a parse failure and never as "no usable key". The gate has to win
+    // over the empty-candidates check below: a future format bump that changes how
+    // keys are published could leave `active_keys` empty, and reporting that as a
+    // bad bundle would masquerade a version skew as tampering/misconfiguration —
+    // exactly the false alarm this gate exists to remove. Understanding the body
+    // is a precondition for making any judgement about its contents, keys included.
+    let index_url = format!("{base}/v1/index.json");
+    let index_body = fetch_text(&agent, &index_url)?;
+    gate_format_version(&index_body)?;
+    let manifest: Manifest = serde_json::from_str(&index_body)
+        .map_err(|e| ServeError::Http(format!("parse {index_url}: {e}")))?;
+
+    // The set of keys any head may verify under, at the current wall clock: during
+    // an overlap window both the new and the retiring key are published, so a head
+    // signed by either verifies and a rotation stays invisible. Only reached once
+    // the format gate has accepted the served version.
     let candidates = key_candidates(&pk_doc, now_ms());
     if candidates.is_empty() {
         return Err(ServeError::BadBundle(
             "public_key.json has no usable key (all expired or malformed)".to_string(),
         ));
     }
-    let manifest: Manifest = fetch_json(&agent, &format!("{base}/v1/index.json"))?;
 
     // 1. Fetch every advertised STH and verify its signature. Keyed by size so
     //    later proof checks can look the right head up.
@@ -690,6 +745,19 @@ pub(crate) fn build_agent(proxy: Option<&str>) -> Result<ureq::Agent> {
         builder = builder.proxy(proxy);
     }
     Ok(builder.build())
+}
+
+/// Blocking GET returning the raw body text. Used where the caller needs the
+/// bytes before deciding how to parse them — the version gate reads
+/// `format_version` off the manifest body first, then deserializes the full
+/// [`Manifest`] from the same string.
+pub(crate) fn fetch_text(agent: &ureq::Agent, url: &str) -> Result<String> {
+    agent
+        .get(url)
+        .call()
+        .map_err(|e| ServeError::Http(format!("GET {url}: {e}")))?
+        .into_string()
+        .map_err(|e| ServeError::Http(format!("read body {url}: {e}")))
 }
 
 /// Blocking GET + JSON parse. A non-2xx status, transport error, or malformed

@@ -13,7 +13,7 @@
 //!
 //! | URL                                                   | Contents                          | Cache     |
 //! |-------------------------------------------------------|-----------------------------------|-----------|
-//! | `/v1/public_key.json`                                 | [`PublicKeyDoc`]                  | immutable |
+//! | `/v1/public_key.json`                                 | [`PublicKeyDoc`](crate::bundle::PublicKeyDoc)                  | immutable |
 //! | `/v1/index.json`                                      | [`Manifest`] (discovery)          | short     |
 //! | `/v1/sth/latest.json`                                 | newest [`Sth`]                    | short     |
 //! | `/v1/sth/<tree_size>.json`                            | [`Sth`] at that size              | immutable |
@@ -21,7 +21,12 @@
 //! | `/v1/entries/<index>.json`                            | one [`Entry`]                     | immutable |
 //! | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json`   | [`InclusionProof`]                | immutable |
 //! | `/v1/proof/consistency/<first>-<second>.json`         | [`ConsistencyProof`]              | immutable |
-//! | `/verify/group/<conversation_id>`                     | [`GroupReport`] (precomputed)     | short     |
+//!
+//! Since #701 there is **no** static `/verify/group/<id>` artifact for the commit
+//! log: the leaves carry windowed pseudonyms, so per-group verification is dynamic
+//! and member-gated (the `GET /verify/group/<conversation_id>` endpoint and
+//! `pollis-verify group <conversation_id>` take the real id, which only a member
+//! knows). See the note in [`generate_artifacts`].
 //!
 //! ### The account-key tree (`/v1/account-keys/...`)
 //!
@@ -34,7 +39,7 @@
 //!
 //! | URL                                                              | Contents                          | Cache     |
 //! |------------------------------------------------------------------|-----------------------------------|-----------|
-//! | `/v1/account-keys/public_key.json`                               | [`PublicKeyDoc`]                  | immutable |
+//! | `/v1/account-keys/public_key.json`                               | [`PublicKeyDoc`](crate::bundle::PublicKeyDoc)                  | immutable |
 //! | `/v1/account-keys/index.json`                                    | [`AccountManifest`] (discovery)   | short     |
 //! | `/v1/account-keys/sth/latest.json`                               | newest account [`Sth`]            | short     |
 //! | `/v1/account-keys/sth/<tree_size>.json`                          | account [`Sth`] at that size      | immutable |
@@ -55,7 +60,7 @@
 //!
 //! | URL                                                          | Contents                          | Cache     |
 //! |--------------------------------------------------------------|-----------------------------------|-----------|
-//! | `/v1/binaries/public_key.json`                               | [`PublicKeyDoc`]                  | immutable |
+//! | `/v1/binaries/public_key.json`                               | [`PublicKeyDoc`](crate::bundle::PublicKeyDoc)                  | immutable |
 //! | `/v1/binaries/index.json`                                    | [`BinaryManifest`] (discovery)    | short     |
 //! | `/v1/binaries/sth/latest.json`                               | newest binaries [`Sth`]           | short     |
 //! | `/v1/binaries/sth/<tree_size>.json`                          | binaries [`Sth`] at that size     | immutable |
@@ -71,19 +76,20 @@
 //! The file path under the output root mirrors the URL exactly (drop the
 //! leading `/`), so serving is a literal static-file mapping.
 //!
-//! ## Precomputed per-group reports (`/verify/group/<id>`)
+//! ## Per-group verification is dynamic and member-gated (#701)
 //!
-//! In addition to the immutable `/v1` surface, the generator emits a precomputed
-//! per-conversation report at `verify/group/<conversation_id>` (no extension —
-//! the file *is* the endpoint URL) for every conversation present in the bundle's
-//! commit-log entries. The bytes are **byte-identical** to what the live
-//! `GET /verify/group/<id>` endpoint returns, because both serialize the exact
-//! same [`GroupReport`] from the shared [`verify_group_in_bundle`] as compact
-//! JSON — the static host therefore serves the same verdict the live server
-//! would, with no server on the path. These reports move as the log grows (a new
-//! head changes every group's `sth_tree_size`/inclusion), so they are
-//! short-cached like `index.json` and `sth/latest.json`. The account-key tree's
-//! `/verify/account/<user_id>` reports are emitted the same way (see
+//! The commit-log tree emits **no** precomputed per-group report. Before #701 it
+//! wrote one report per conversation at `verify/group/<conversation_id>` and
+//! listed every conversation in the manifest — but that enumeration is exactly the
+//! longitudinal exposure #701 closes. The published leaves now carry windowed
+//! pseudonyms, so per-group verification moves to the dynamic
+//! `GET /verify/group/<conversation_id>` endpoint (dev + live servers) and
+//! `pollis-verify group <conversation_id>`, both of which take the *real*
+//! conversation id (something only a member knows), re-derive the windowed
+//! pseudonyms, and verify the whole conversation across windows via the shared
+//! `verify_group_in_bundle`. The account-key tree still emits precomputed
+//! `/verify/account/<user_id>` reports — its `user_id` is deliberately load-bearing
+//! (key transparency looks a user up by identity) and out of #701's scope (see
 //! [`generate_account`]).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -93,14 +99,11 @@ use serde::Serialize;
 
 use verifiable_log_builder::account_key::AccountKeyLeaf;
 use verifiable_log_builder::binaries::BinaryRecord;
-use verifiable_log_builder::{CommitLeaf, TENANT};
-
 use crate::account::{verify_account_in_bundle, ACCOUNT_TENANT};
 use crate::bundle::{
-    AccountManifest, BinaryManifest, Bundle, ConsistencyRef, InclusionRef, Manifest,
+    AccountManifest, BinaryManifest, Bundle, ConsistencyRef, InclusionRef, Manifest, FORMAT_VERSION,
 };
 use crate::error::{Result, ServeError};
-use crate::group::verify_group_in_bundle;
 use crate::release::{verify_release_in_bundle, BINARIES_TENANT};
 
 /// API version segment all artifacts live under.
@@ -182,35 +185,27 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
         });
     }
 
-    // /verify/group/<conversation_id> — a precomputed per-conversation report
-    // for every distinct conversation in the bundle's commit-log entries. The
-    // bytes are compact JSON of the shared [`verify_group_in_bundle`] verdict,
-    // so they are byte-identical to the live `GET /verify/group/<id>` endpoint's
-    // response (which serializes the same `GroupReport` the same way). The file
-    // has no extension — its path is the endpoint URL verbatim.
-    let conversations: Vec<String> = bundle
-        .entries
-        .iter()
-        .filter(|e| e.tenant == TENANT)
-        .filter_map(|e| CommitLeaf::decode(&e.data).ok())
-        .map(|leaf| leaf.conversation_id)
-        // A report is one path segment under `verify/group/`; reject anything
-        // that could escape it. Real MLS conversation ids are ULID-shaped and
-        // always pass — this only guards against malformed source data.
-        .filter(|id| is_safe_segment(id))
-        .collect::<BTreeSet<String>>()
-        .into_iter()
-        .collect();
-    for conv in &conversations {
-        let report = verify_group_in_bundle(bundle, conv);
-        // Compact (not pretty) to match the live endpoint's `to_string`.
-        let bytes = serde_json::to_vec(&report)?;
-        map.insert(format!("verify/group/{conv}"), bytes);
-    }
+    // No precomputed `/verify/group/<id>` files and no conversation list (#701).
+    //
+    // Before #701 this emitted one static report per conversation and advertised
+    // every conversation id in the manifest — but that enumeration *is* the
+    // exposure #701 closes (which groups exist and how active each is). Since the
+    // published leaves now carry only windowed pseudonyms, a static report can key
+    // on nothing better than a per-(conversation, window) pseudonym, which still
+    // enumerates conversation-windows and their activity — undoing the ticket.
+    //
+    // Per-group verification therefore becomes **dynamic and member-gated**: the
+    // `GET /verify/group/<conversation_id>` endpoint (dev + live servers) and
+    // `pollis-verify group <conversation_id>` take the *real* id — which only a
+    // member knows — re-derive the windowed pseudonyms, and verify the whole
+    // conversation across windows. There is nothing for a static host to
+    // precompute without either re-publishing real ids or re-enumerating the group
+    // set, so the static commit-log tree publishes no per-group artifact at all.
 
     // /v1/index.json — the discovery manifest. Built last so it only ever
     // advertises artifacts already present in the map.
     let manifest = Manifest {
+        format_version: FORMAT_VERSION,
         version: API_VERSION.to_string(),
         public_key: bundle.public_key.clone(),
         entry_count: bundle.entries.len() as u64,
@@ -219,7 +214,6 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
         inclusion: inclusion_refs,
         consistency: consistency_refs,
         enforce_unique: bundle.enforce_unique.clone(),
-        conversations,
     };
     insert_json(&mut map, format!("{API_VERSION}/index.json"), &manifest)?;
 
@@ -352,6 +346,7 @@ pub fn generate_account_artifacts(
     // /v1/account-keys/index.json — the discovery manifest, built last so it
     // only ever advertises artifacts already present in the map.
     let manifest = AccountManifest {
+        format_version: FORMAT_VERSION,
         version: API_VERSION.to_string(),
         public_key: bundle.public_key.clone(),
         entry_count: bundle.entries.len() as u64,
@@ -498,6 +493,7 @@ pub fn generate_binaries_artifacts(
     // /v1/binaries/index.json — the discovery manifest, built last so it only
     // ever advertises artifacts already present in the map.
     let manifest = BinaryManifest {
+        format_version: FORMAT_VERSION,
         version: API_VERSION.to_string(),
         public_key: bundle.public_key.clone(),
         entry_count: bundle.entries.len() as u64,

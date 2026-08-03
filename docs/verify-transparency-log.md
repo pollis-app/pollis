@@ -93,6 +93,21 @@ the signature and the proofs, not from anything the server told you to believe.
 pollis-verify remote <base-url> && echo "log is intact" || echo "VERIFICATION FAILED"
 ```
 
+### Exit codes, and "your verifier is too old"
+
+The exit code is stable so you can script it: `0` = passed, `1` = a real
+verification failure (a bad signature, a forged proof, a fork, a regression) or a
+transport error, and `2` = **version skew**. Skew means the log has been published
+in a wire format newer than your binary understands — for example after a key
+rotation and full republish (the #672 ML-DSA-44 ceremony bumped the served format).
+`pollis-verify` reads the log's `format_version` *before* it checks anything, so it
+can tell you *"your pollis-verify is too old for this log — upgrade it"* and exit
+`2` instead of raising a false alarm. **Exit `2` is not a tampering finding** — the
+log has not been shown to be wrong; you just need a newer binary (a
+`pollis-verify-v*` release ≥ the one that introduced the format). Older binaries
+that predate this mechanism can't say this: against a newer log, `remote` still
+passes but `group` silently reports `Found: no`, so if in doubt, upgrade.
+
 ## 3. Verify one conversation — `pollis-verify group`
 
 To check a single conversation's commit chain — that every one of its commits is
