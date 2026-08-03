@@ -26,14 +26,29 @@
 //!   * **Part E** — the no-TTL invariant and the conservative edges (empty
 //!     roster, never-reported device), plus the positive leg proving GC is
 //!     bounded rather than disabled.
+//!   * **Part F (#692)** — the tombstone `sent_at` floor must OUTLIVE this GC.
+//!     An admin delete only ever reaches a recipient whose watermark sorts BELOW
+//!     the tombstone (ingest selects `sent_at > last_fetched_at` and the cursor
+//!     never rewinds), so the DS stamps the tombstone above the conversation's
+//!     floor. That floor used to be `MAX(sent_at)` over envelopes STILL PRESENT
+//!     — which is exactly what the pruning tested above empties. Part F runs the
+//!     real GC first, then the real delete, and proves the tombstone still clears
+//!     every surviving cursor.
+//!   * **Part G (#689)** — the GC *trigger* is the DS-internal sweep
+//!     `sweep_envelope_gc`, not a member's ingest path. One sweep collects a
+//!     conversation every member device has caught up on — with no ingest and no
+//!     per-conversation endpoint call — and spares one with an uncollected
+//!     recipient.
 //!
 //! The mirror-image failures are covered as unit tests in
-//! `pollis_delivery::messages` (the raw `CLEANUP_*` SQL) and end-to-end in
-//! `src-tauri/tests/flows/adversarial.rs`.
+//! `pollis_delivery::messages` (the raw `CLEANUP_*` SQL and the floor query) and
+//! end-to-end in `src-tauri/tests/flows/adversarial.rs`.
 
 use pollis_delivery::account::{apply_revoke_device, RevokeDeviceBody};
 use pollis_delivery::db::Db;
-use pollis_delivery::messages::{apply_envelope_gc, EnvelopeGcBody};
+use pollis_delivery::messages::{
+    apply_delete_message, apply_envelope_gc, sweep_envelope_gc, DeleteMessageBody, EnvelopeGcBody,
+};
 use pollis_delivery::profile::{apply_add_dm_member, apply_create_dm, AddDmMemberBody, CreateDmBody};
 use pollis_delivery::groups::{apply_approve_join_request, ApproveJoinRequestBody};
 use pollis_delivery::writes::WriteOutcome;
@@ -42,7 +57,10 @@ use pollis_delivery::writes::WriteOutcome;
 /// `retention.rs`) — `connect_local` runs with `foreign_keys=OFF`, so standalone
 /// tables suffice and keep the fixtures minimal.
 const SCHEMA: &str = "\
-CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
+CREATE TABLE message_envelope (\
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL, \
+  sender_id TEXT NOT NULL DEFAULT '', ciphertext TEXT NOT NULL DEFAULT '', \
+  reply_to_id TEXT, type TEXT NOT NULL DEFAULT 'message', target_message_id TEXT);\
 CREATE TABLE user_device (user_id TEXT NOT NULL, device_id TEXT NOT NULL, revoked_at TEXT);\
 CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member');\
 CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
@@ -551,5 +569,289 @@ async fn an_all_revoked_roster_deletes_nothing() {
         1,
         "excluding revoked devices must never leave a roster that deletes by \
          virtue of being empty"
+    );
+}
+
+// ── Part F (#692) — the tombstone floor outlives envelope GC ──────────────────
+//
+// Part F uses RFC3339 timestamps rather than the `datetime('now', ...)` shape the
+// parts above use. That is load-bearing, not cosmetic: `sent_at_after` parses the
+// floor with `DateTime::parse_from_rfc3339` and falls back to plain `now` when
+// that fails, so a SQLite-shaped floor would silently exercise the fallback path
+// instead of the guard. RFC3339 is also what production actually stores — clients
+// write `chrono::Utc::now().to_rfc3339()` into `sent_at`, and ingest copies a
+// consumed `sent_at` straight into `last_fetched_at`.
+
+/// An RFC3339 stamp `minutes` away from the DS's now, exactly as a client writes
+/// it. Negative is the past; positive models a client clock running AHEAD.
+fn rfc3339_from_now(minutes: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339()
+}
+
+async fn add_envelope_at(db: &Db, id: &str, conv: &str, sender: &str, sent_at: &str) {
+    db.conn()
+        .unwrap()
+        .execute(
+            "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
+             VALUES (?1, ?2, ?3, 'mls:00', ?4)",
+            libsql::params![
+                id.to_string(),
+                conv.to_string(),
+                sender.to_string(),
+                sent_at.to_string()
+            ],
+        )
+        .await
+        .unwrap();
+}
+
+async fn seed_watermark_at(db: &Db, conv: &str, user: &str, device: &str, at: &str) {
+    db.conn()
+        .unwrap()
+        .execute(
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![
+                conv.to_string(),
+                user.to_string(),
+                device.to_string(),
+                at.to_string()
+            ],
+        )
+        .await
+        .unwrap();
+}
+
+/// The single `type='delete'` tombstone in `conv`, as `(id, sent_at)`.
+async fn only_tombstone(db: &Db, conv: &str) -> (String, String) {
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT id, sent_at FROM message_envelope \
+             WHERE conversation_id = ?1 AND type = 'delete'",
+            libsql::params![conv.to_string()],
+        )
+        .await
+        .unwrap();
+    let row = rows
+        .next()
+        .await
+        .unwrap()
+        .expect("an admin delete must write a tombstone");
+    let out = (
+        row.get::<String>(0).unwrap(),
+        row.get::<String>(1).unwrap(),
+    );
+    assert!(
+        rows.next().await.unwrap().is_none(),
+        "expected exactly one tombstone"
+    );
+    out
+}
+
+/// Every surviving `last_fetched_at` in `conv` — the cursors the tombstone has to
+/// clear to be fetched at all.
+async fn watermark_values(db: &Db, conv: &str) -> Vec<String> {
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT last_fetched_at FROM conversation_watermark WHERE conversation_id = ?1",
+            libsql::params![conv.to_string()],
+        )
+        .await
+        .unwrap();
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().await.unwrap() {
+        out.push(r.get::<String>(0).unwrap());
+    }
+    out
+}
+
+/// **The #692 regression test.** The whole conversation has been GC'd — every
+/// current member device reported a watermark past every envelope, so the real
+/// cleanup predicate emptied `message_envelope`. The watermark rows survive that
+/// pruning, and they were written from client clocks running an HOUR AHEAD of the
+/// DS clock. An admin then deletes the message.
+///
+/// With the floor read only from surviving envelopes there is nothing left to
+/// read: the floor is NULL, `sent_at_after` falls back to wall-clock `now`, and
+/// `now` sorts an hour BELOW every surviving cursor. Ingest's `sent_at >
+/// last_fetched_at` then never selects the tombstone, the cursor never rewinds to
+/// pick it up later, and the deleted message stays readable on those devices
+/// forever. Consulting `MAX(last_fetched_at)` — the evidence GC does not destroy
+/// — is what makes the tombstone reachable.
+#[tokio::test]
+async fn tombstone_clears_watermarks_that_outlived_envelope_gc() {
+    let db = fresh().await;
+    channel_with_members(&db, &["alice", "bob"]).await;
+    db.conn()
+        .unwrap()
+        .execute("UPDATE group_member SET role = 'admin' WHERE user_id = 'alice'", ())
+        .await
+        .unwrap();
+    add_device(&db, "alice", "a1", false).await;
+    add_device(&db, "bob", "b1", false).await;
+
+    // Bob's client clock runs ahead: his message is stamped 30 minutes into the
+    // DS's future, and both devices' cursors — copied from that `sent_at` on
+    // ingest — end up an hour ahead.
+    add_envelope_at(&db, "m1", "c1", "bob", &rfc3339_from_now(30)).await;
+    let alice_cursor = rfc3339_from_now(60);
+    let bob_cursor = rfc3339_from_now(60);
+    seed_watermark_at(&db, "c1", "alice", "a1", &alice_cursor).await;
+    seed_watermark_at(&db, "c1", "bob", "b1", &bob_cursor).await;
+
+    // The REAL cleanup predicate, not a hand-emptied table: every current member
+    // device has collected past `m1`, so it is pruned.
+    gc_channel(&db).await;
+    assert_eq!(
+        envelope_count(&db, "c1").await,
+        0,
+        "fixture precondition: watermark-gated GC must have emptied the \
+         conversation, leaving the floor with no envelope to read"
+    );
+
+    // Alice (a group admin) deletes bob's message — the admin branch, which is
+    // the one that writes a tombstone.
+    let out = apply_delete_message(
+        &db.conn().unwrap(),
+        Some("alice"),
+        &DeleteMessageBody {
+            message_id: "m1".into(),
+            conversation_id: "c1".into(),
+            msg_sender_id: Some("bob".into()),
+            actor_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(out, WriteOutcome::Ok), "admin delete must be allowed");
+
+    let (_, tombstone_sent_at) = only_tombstone(&db, "c1").await;
+    let cursors = watermark_values(&db, "c1").await;
+    assert_eq!(cursors.len(), 2, "both watermark rows must have survived GC");
+    for cursor in &cursors {
+        assert!(
+            tombstone_sent_at.as_str() > cursor.as_str(),
+            "tombstone {tombstone_sent_at} must sort strictly above the surviving \
+             cursor {cursor}: ingest selects `sent_at > last_fetched_at` and never \
+             rewinds, so a tombstone at or below a cursor is skipped PERMANENTLY \
+             and the deleted message stays readable on that device (#692)"
+        );
+    }
+}
+
+/// The complementary shape, to prove the widened floor did not simply become
+/// "always jump forward": with every surviving cursor BEHIND the DS clock the
+/// tombstone keeps a stamp at wall-clock now — above the cursors, but not pushed
+/// into the future by them.
+#[tokio::test]
+async fn tombstone_is_not_pushed_forward_by_watermarks_behind_the_ds_clock() {
+    let db = fresh().await;
+    channel_with_members(&db, &["alice", "bob"]).await;
+    db.conn()
+        .unwrap()
+        .execute("UPDATE group_member SET role = 'admin' WHERE user_id = 'alice'", ())
+        .await
+        .unwrap();
+    add_device(&db, "alice", "a1", false).await;
+    add_device(&db, "bob", "b1", false).await;
+    add_envelope_at(&db, "m1", "c1", "bob", &rfc3339_from_now(-120)).await;
+    seed_watermark_at(&db, "c1", "alice", "a1", &rfc3339_from_now(-60)).await;
+    seed_watermark_at(&db, "c1", "bob", "b1", &rfc3339_from_now(-60)).await;
+
+    gc_channel(&db).await;
+    assert_eq!(envelope_count(&db, "c1").await, 0, "fixture precondition");
+
+    let before = chrono::Utc::now();
+    apply_delete_message(
+        &db.conn().unwrap(),
+        Some("alice"),
+        &DeleteMessageBody {
+            message_id: "m1".into(),
+            conversation_id: "c1".into(),
+            msg_sender_id: Some("bob".into()),
+            actor_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    let after = chrono::Utc::now();
+
+    let (_, tombstone_sent_at) = only_tombstone(&db, "c1").await;
+    // Compared as instants, not lexically: the bound is "inside the window the
+    // call occupied", and the two stamps can carry different fraction widths.
+    let stamped = chrono::DateTime::parse_from_rfc3339(&tombstone_sent_at)
+        .expect("tombstone sent_at must be RFC3339")
+        .to_utc();
+    assert!(
+        stamped >= before && stamped <= after,
+        "with every cursor behind the DS clock the tombstone must keep plain \
+         wall-clock now ({before} ..= {after}), got {tombstone_sent_at} — the \
+         floor only ever pushes forward when something is already ahead"
+    );
+}
+
+// ── Part G (#689) — the server-side sweep is the GC trigger ───────────────────
+//
+// GC used to fire only from whichever member device happened to ingest. This
+// pins the new trigger: the DS-internal sweep collects a conversation every
+// member device has caught up on WITHOUT any member calling the per-conversation
+// endpoint, and spares one with an uncollected recipient. It fails on the old
+// trigger (nothing drives GC when no member ingests) and passes on the sweep.
+
+/// The sweep collects quiet-but-collected conversations and spares uncollected
+/// ones — driving neither ingest nor the `/v1/envelopes/gc` endpoint. Covers a
+/// channel AND a DM so it also proves the sweep classifies both predicates.
+#[tokio::test]
+async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
+    let db = fresh().await;
+    db.conn()
+        .unwrap()
+        .execute_batch(
+            // A channel every member device has caught up on.
+            "INSERT INTO group_member (group_id, user_id) VALUES ('gA', 'alice');\
+             INSERT INTO channels (id, group_id) VALUES ('cA', 'gA');\
+             INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) \
+               VALUES ('dB', 'bob', 'bob', datetime('now'));\
+             INSERT INTO group_member (group_id, user_id) VALUES ('gC', 'carol');\
+             INSERT INTO channels (id, group_id) VALUES ('cC', 'gC');",
+        )
+        .await
+        .unwrap();
+
+    // cA — channel, its one device caught up past the envelope.
+    add_device(&db, "alice", "aA", false).await;
+    seed_watermark(&db, "cA", "alice", "aA", "-1 day").await;
+    add_envelope(&db, "eA", "cA", "-5 days").await;
+
+    // dB — DM, its one device caught up past the envelope.
+    add_device(&db, "bob", "bB", false).await;
+    seed_watermark(&db, "dB", "bob", "bB", "-1 day").await;
+    add_envelope(&db, "eB", "dB", "-5 days").await;
+
+    // cC — channel with an uncollected recipient: carol's device never reported.
+    add_device(&db, "carol", "cC-dev", false).await;
+    add_envelope(&db, "eC", "cC", "-5 days").await;
+
+    // No member ingests, no endpoint call — the sweep is the sole trigger.
+    let visited = sweep_envelope_gc(&db.conn().unwrap()).await.unwrap();
+
+    assert_eq!(visited, 3, "the sweep visits every conversation that still has envelopes");
+    assert_eq!(
+        envelope_count(&db, "cA").await,
+        0,
+        "a quiet channel every device has caught up on must be swept, with no ingest"
+    );
+    assert_eq!(
+        envelope_count(&db, "dB").await,
+        0,
+        "a quiet DM every device has caught up on must be swept (DM predicate)"
+    );
+    assert_eq!(
+        envelope_count(&db, "cC").await,
+        1,
+        "a conversation with an uncollected recipient must NOT be swept"
     );
 }

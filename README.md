@@ -76,9 +76,13 @@ on disk.
 
 **Honest scope.** Pollis hides message *content*, not the *fact* that you are
 communicating. The server and network still see connection metadata (IP address,
-timing, which accounts are in a channel). There is no sender anonymity, no
-IP-hiding relay (an optional overlay is designed but deferred —
-[docs/relay-overlay-design.md](docs/relay-overlay-design.md)). Key exchange *is*
+timing, which accounts are in a channel). There is no sender anonymity. IP
+hiding is **off by default**: an optional closed-overlay relay (v0, single-hop)
+is built into the app and can be switched on in Preferences → "Network privacy
+(relay)", but unless you turn it on every connection goes direct
+([docs/relay-overlay-design.md](docs/relay-overlay-design.md) §13). Even when
+on, it hides your IP from our servers only — it is not anonymity, it does not
+hide the social graph, and it is not part of the E2EE guarantee. Key exchange *is*
 post-quantum hybrid ([docs/pq-hybrid-mls-design.md](docs/pq-hybrid-mls-design.md)),
 but traffic is only ever as strong as the suite it was sealed under at the time:
 moving a group onto a newer suite does not re-seal what came before it — nothing
@@ -152,7 +156,7 @@ own tooling. The verifier above is just a convenient client for these bytes.
 
 | Path | What it is |
 |---|---|
-| `/v1/public_key.json` | the log's Ed25519 public key |
+| `/v1/public_key.json` | the log's ML-DSA-44 public key (1312 bytes, hex) |
 | `/v1/sth/latest.json` | newest Signed Tree Head (`tree_size`, `root_hash`, `timestamp`, signature) |
 | `/v1/sth/<tree_size>.json` | the immutable STH at that size |
 | `/v1/entries.json` · `/v1/entries/<i>.json` | the full ordered log, and each leaf |
@@ -257,5 +261,6 @@ website/          # Static marketing site — plain HTML/CSS/JS, deployed to Clo
 
 - **Broader platform availability** — currently open pre-alpha; working toward a
   stable public release
-- **An optional IP-hiding relay overlay** — designed, deferred; see the security
-  docs above
+- **Maturing the optional IP-hiding relay overlay** — v0 (single-hop) is built
+  and opt-in today, off by default; multi-hop (v1) is not built. See the
+  security docs above

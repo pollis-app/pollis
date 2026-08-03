@@ -31,7 +31,7 @@ The file path under the output root mirrors the URL exactly (drop the leading
 
 | URL                                                   | Contents                            | Cache policy |
 |-------------------------------------------------------|-------------------------------------|--------------|
-| `/v1/public_key.json`                                 | the log's Ed25519 public key        | immutable    |
+| `/v1/public_key.json`                                 | the log's ML-DSA-44 public key       | immutable    |
 | `/v1/index.json`                                      | discovery manifest (see below)      | short        |
 | `/v1/sth/latest.json`                                 | newest STH                          | short        |
 | `/v1/sth/<tree_size>.json`                            | STH at that tree size               | immutable    |

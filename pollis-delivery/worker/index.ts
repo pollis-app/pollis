@@ -63,7 +63,18 @@ export class PollisDelivery extends Container<Env> {
   pingEndpoint = "/health";
   // Scale-to-zero pre-launch: the DO wakes the container on the next request,
   // so single-instance serialization is unaffected — only a cold boot cost.
-  // TODO(#515): drop sleepAfter (go always-on) before real users arrive.
+  //
+  // "10m" is EXACTLY the @cloudflare/containers default (DEFAULT_SLEEP_AFTER
+  // in dist/lib/container.js as of the pinned 0.3.7). Consequences:
+  //   - Deleting this line is a NO-OP — the base class re-applies the same 10m.
+  //   - There is no "never sleep" value: parseTimeExpression accepts only
+  //     `<n>[smh]` or a bare seconds count, so always-on is not expressible via
+  //     sleepAfter at any value. The only lever is a large FINITE duration
+  //     (e.g. "24h"), which just widens the warm window at a running cost.
+  // So going always-on is a COST decision, not a code fix (#515). We keep the
+  // value EXPLICIT — matching the default — to document intent and to survive a
+  // library default change. Re-measure the cold start before paying: procedure
+  // in docs/deployments.md, DS section. (#695)
   sleepAfter = "10m";
   // The DS reaches out to Turso, Resend, LiveKit and R2 — needs egress.
   enableInternet = true;

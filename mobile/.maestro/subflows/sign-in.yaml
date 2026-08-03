@@ -1,4 +1,4 @@
-appId: com.anonymous.mobile
+appId: com.pollis.mobile
 ---
 # Reusable fresh sign-in: email -> OTP -> create PIN (x2) -> land on the tabs.
 # Assumes a disposable dev-DS account (first run signs it up). Reads

@@ -662,9 +662,9 @@ commands::livekit::get_livekit_token,
                         // Close the LiveKit rooms (realtime + voice) so the
                         // server evicts us immediately instead of waiting out its
                         // RTC timeout — otherwise our voice card lingers as a
-                        // ghost for everyone still in the channel. The Electron
-                        // path gets this via pollis-node's before-quit shutdown;
-                        // Tauri has no equivalent, so call it explicitly here.
+                        // ghost for everyone still in the channel. Tauri fires
+                        // no teardown hook of its own, so this is the only place
+                        // `AppState::shutdown` gets called — call it explicitly.
                         state.shutdown().await;
                     });
                 }

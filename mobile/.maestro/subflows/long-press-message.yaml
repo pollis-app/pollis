@@ -1,4 +1,4 @@
-appId: com.anonymous.mobile
+appId: com.pollis.mobile
 ---
 # Long-press a message row to open its action sheet (react/edit/delete).
 # The very first long-press attempt in a flow is observed to occasionally

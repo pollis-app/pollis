@@ -24,7 +24,7 @@ form factors.
    EXPO_PUBLIC_TURSO_URL=... EXPO_PUBLIC_TURSO_TOKEN=...   # dev, read-only
    ```
    Build + install: `cd mobile && pnpm expo run:ios` / `run:android` (see
-   `mobile/CLAUDE.md` for the ubrn/native steps). App id: `com.anonymous.mobile`.
+   `mobile/CLAUDE.md` for the ubrn/native steps). App id: `com.pollis.mobile`.
 3. **Seed env** — `cp .maestro/env.example .maestro/.env` and fill it in. The dev
    DS must have a fixed `DEV_OTP` so `MAESTRO_OTP` is deterministic (no inbox
    polling). `.env` is gitignored.

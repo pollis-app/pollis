@@ -44,7 +44,7 @@ cannot** — happy-path coverage does not count.
 | PL-02 | Move the GC *trigger* server-side — today it fires from whichever member happens to ingest (`TODO(#419)`, messages.rs:752). The predicate is already many-member correct; the trigger is not. | P0 correctness | M |
 | PL-03 | Reference-count attachment deletion server-side (messages.rs:853) — today an unconditional remote delete can strand a still-referenced file. | P1 | M |
 | PL-04 | Enforce I1/I2 at the schema layer. No `TRIGGER` exists anywhere; the gapless chain is held only by the CAS insert in `pollis-delivery/src/commit.rs`. Phases 1–5 of the invariants doc. **Migration 000007 is a deliberate permanent hole — do not reuse.** | P1 | L |
-| PL-05a | Harden the tombstone `sent_at` floor against envelope GC (latent hazard, reasoned from code). See "PL-05 analysis (a)". | P2 | S |
+| PL-05a | ~~Harden the tombstone `sent_at` floor against envelope GC (latent hazard, reasoned from code).~~ **Done — #692.** See "PL-05 analysis (a)". | P2 | S |
 | PL-05b | **#661** — root cause UNCONFIRMED. An earlier hypothesis was checked and ruled out; see "PL-05 analysis (b)". Instrument before touching the assertion. | P2 | M |
 
 **Verify:** `cargo test -p pollis-delivery`; `cargo test --features test-harness --test flows`; Kani
@@ -52,7 +52,11 @@ proofs; TLA+ `CommitLog` / `Delivery`.
 
 ### PL-05 analysis — two separate things, do not conflate them
 
-**(a) A latent tombstone-ordering hazard. Real, but it does NOT explain #661.**
+**(a) A latent tombstone-ordering hazard. Real, but it does NOT explain #661.** — **FIXED in #692**;
+the analysis below is kept as the rationale. The floor is now the greater of `MAX(sent_at)` over
+`message_envelope` and `MAX(last_fetched_at)` over `conversation_watermark` (`TOMBSTONE_FLOOR` in
+`pollis-delivery/src/messages.rs`), pinned by `messages::tombstone_floor_tests` and
+`pollis-delivery/tests/envelope_retention.rs` (Part F).
 
 Ingest selects envelopes with `sent_at > last_fetched_at` (strictly greater) and advances the
 watermark to the highest `sent_at` it consumed (`pollis-core/src/commands/messages/ingest.rs:148-159`).
@@ -98,7 +102,7 @@ replay. Instrument before fixing — do not patch the assertion until the mechan
 | PL-07 | **#515** — drop `sleepAfter = "10m"` (worker/index.ts:66) before real users; removes the cold-start penalty. | P1 | S |
 | PL-08 | Add dependency-layer caching to the DS Dockerfile (today a full release build from `COPY . .`). Expect 5–10× faster deploys, no new infra. | P2 | S |
 | PL-09 | Move ~120 MB of committed media to R2 — `website/learn` (77 MB video), `website/vendor` (23 MB WASM + 22 MB ONNX). `docs/deployments.md:55` notes this is a one-line base-URL swap. | P2 | S |
-| PL-10 | Make `mls-tests.yml` genuinely merge-blocking — it is path-filtered, so mark required via the ruleset's "skipped = pass" option. The 11 `e2e-*.yml` workflows stay dispatch-only by design. | P2 | S |
+| PL-10 | **#698 — done.** Make `mls-tests.yml` genuinely merge-blocking. Rather than rely on unverified "skipped = pass" behaviour, the workflow always runs and always reports: a seconds-cheap `changes` job decides exemption (frontend/website/docs/markdown), the heavy `tests` job is gated on it, and a final `gate` job (`if: always()`) collapses the outcome to pass-or-exempt/fail. Mark the **`gate`** check required. The 11 `e2e-*.yml` workflows stay dispatch-only by design. | P2 | S |
 
 ---
 

@@ -83,15 +83,20 @@
 //! re-reading an almost-never-changing row.
 //!
 //! [`DeviceKeyCache`] holds `(user_id, device_id) -> verifying key` in process
-//! memory. Three properties make it safe:
+//! memory. Four properties make it safe:
 //!
 //!   1. **Every mutation of `user_device` evicts.** Revoke, logout, resign,
 //!      identity rotation, account delete, reset-recover, device registration and
 //!      the cert publish all call [`DeviceKeyCache::invalidate_device`] /
 //!      [`DeviceKeyCache::invalidate_user`]. See the type docs for the full list.
-//!   2. **A short absolute TTL** ([`DEVICE_KEY_CACHE_TTL_SECS`]) backstops a
-//!      missed eviction, so a stale entry can never live indefinitely.
-//!   3. **Positive entries only.** A miss is never cached — see
+//!   2. **A per-key generation counter closes the read-then-evict race (#721).**
+//!      A miss captures the generation before it reads the row; an invalidation
+//!      bumps it; an insert whose generation is stale is discarded, so a revoke
+//!      that commits during an in-flight read can never be resurrected. See the
+//!      type docs.
+//!   3. **A short absolute TTL** ([`DEVICE_KEY_CACHE_TTL_SECS`]) backstops a
+//!      missed eviction hook, so a stale entry can never live indefinitely.
+//!   4. **Positive entries only.** A miss is never cached — see
 //!      [`DeviceKeyCache`] for why.
 //!
 //! The cache is only ever consulted AFTER [`parse_credentials`] has passed
@@ -101,6 +106,8 @@
 //! a DB read, never a cryptographic check.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use axum::http::HeaderMap;
@@ -148,11 +155,67 @@ pub const DEVICE_KEY_CACHE_TTL_SECS: i64 = 30;
 /// safe (clearing can only cause a re-read, never an acceptance).
 const DEVICE_KEY_CACHE_MAX_ENTRIES: usize = 10_000;
 
-/// One cached verifying key. `cached_at` is the server unix-seconds clock that
-/// was passed to [`verify_request_identity_cached`] when the entry was inserted.
-struct CachedKey {
-    key: Arc<VerifyingKey>,
+/// One slot in the cache map for a `(user_id, device_id)`.
+///
+/// A slot outlives its cached key. An invalidation drops `key` to `None` but
+/// bumps and KEEPS `generation`, because an in-flight read that already captured
+/// the old generation must still be told, at insert time, that the world moved
+/// under it (see [`DeviceKeyCache`] on the read-then-evict race). A slot with
+/// `key: None` is therefore pure generation-tracking state — a tombstone — and is
+/// swept by the same TTL as a real entry so tombstones cannot accumulate.
+struct Slot {
+    /// The cached verifying key, or `None` for a bare generation tombstone.
+    key: Option<Arc<VerifyingKey>>,
+    /// Per-key monotonic generation, bumped by every [`DeviceKeyCache::invalidate_device`]
+    /// of this key. Read-captured before the DB read; an insert is discarded
+    /// unless it is unchanged.
+    generation: u64,
+    /// Server unix-seconds when this slot was last written — a key insert OR a
+    /// generation bump. TTL is measured from here.
     cached_at: i64,
+}
+
+/// The generation stamp a cache MISS captures, so the matching insert can detect
+/// a write that raced between the read and the insert. `key` is the per-key
+/// generation; `bulk` is the process-wide user-scoped generation (see
+/// [`DeviceKeyCache`]). An insert is admitted only if BOTH still match.
+#[derive(Clone, Copy)]
+struct GenStamp {
+    key: u64,
+    bulk: u64,
+}
+
+/// The outcome of consulting the cache: a live key, or a miss carrying the
+/// generation stamp the follow-up insert must present.
+enum Lookup {
+    Hit(Arc<VerifyingKey>),
+    Miss(GenStamp),
+}
+
+/// A test-only async barrier invoked on the cache-miss path AFTER the device row
+/// has been read and BEFORE the freshly-read key is inserted — the exact window
+/// of the read-then-evict race (#721). Production never installs one
+/// (`miss_barrier` stays `None`, a single `Option` check on the miss path); a
+/// test installs one to deterministically slot a concurrent revoke into that
+/// window. Boxed so it can capture the test's synchronisation state.
+type MissBarrier =
+    Arc<dyn Fn(&str, &str) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
+/// The mutable state behind the cache's single `Mutex`.
+#[derive(Default)]
+struct Inner {
+    map: HashMap<(String, String), Slot>,
+    /// Process-wide generation bumped by every [`DeviceKeyCache::invalidate_user`]
+    /// (and [`DeviceKeyCache::clear`]). A read captures it alongside the per-key
+    /// generation; a user-scoped invalidation between a read and its insert — rare
+    /// (account rotate/delete/reset, cert re-sign) — discards the insert. It is
+    /// deliberately coarse: user-scoped writes are infrequent, so the cost of
+    /// discarding an unrelated in-flight insert is at most one extra DB read, and
+    /// in exchange it closes the race for a device whose user is bulk-invalidated
+    /// even when that device was never individually cached.
+    bulk_generation: u64,
+    /// See [`MissBarrier`]. Always `None` outside tests.
+    miss_barrier: Option<MissBarrier>,
 }
 
 /// In-process cache of `(user_id, device_id) -> mls_signature_pub_pq` (#658).
@@ -195,99 +258,180 @@ struct CachedKey {
 /// The last two are the ones that can *change a live pubkey* rather than remove
 /// one, so they matter even though nothing is being revoked.
 ///
-/// **Known race, bounded by the TTL.** A request that reads the row just before
-/// a revoke commits can insert its (now stale) entry just after that revoke's
-/// eviction, resurrecting it for up to [`DEVICE_KEY_CACHE_TTL_SECS`]. Closing it
-/// fully needs a per-key generation counter shared with the writer; the TTL is
-/// the deliberate, documented bound instead. The window is one request's
-/// DB-read-to-insert span, and both sides run in the same process.
+/// **The read-then-evict race is closed by a per-key generation counter (#721).**
+/// A request that read the row just before a revoke committed could formerly
+/// insert its now-stale entry just after that revoke's eviction, resurrecting a
+/// revoked key for up to [`DEVICE_KEY_CACHE_TTL_SECS`]. The fix: every miss
+/// captures the key's [`GenStamp`] BEFORE it reads the DB row; every invalidation
+/// bumps that generation; an insert whose stamp no longer matches is discarded
+/// rather than written. Because the capture strictly precedes the DB read, any
+/// invalidation that commits after the read is guaranteed to have bumped the
+/// generation past the captured value, so the racing insert always loses. The
+/// per-key generation covers [`invalidate_device`](Self::invalidate_device); a
+/// process-wide `bulk_generation` (see [`Inner`]) covers the coarser
+/// [`invalidate_user`](Self::invalidate_user). The TTL now backstops nothing but
+/// a genuinely missed eviction hook.
 ///
 /// `Clone` is shallow (shared `Arc`), so it rides on the `Clone` `AppState`
 /// exactly like [`crate::session::SessionStore`].
 #[derive(Clone, Default)]
 pub struct DeviceKeyCache {
-    inner: Arc<Mutex<HashMap<(String, String), CachedKey>>>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl DeviceKeyCache {
-    /// The cached key for `(user_id, device_id)`, or `None` on a miss or an
-    /// entry older than [`DEVICE_KEY_CACHE_TTL_SECS`].
+    /// Consult the cache for `(user_id, device_id)`.
+    ///
+    /// A live, in-TTL key is a [`Lookup::Hit`]. Anything else — no slot, a bare
+    /// generation tombstone, or an expired slot — is a [`Lookup::Miss`] carrying
+    /// the [`GenStamp`] the follow-up [`insert`](Self::insert) must present. The
+    /// stamp is captured HERE, under the lock, before the caller reads the DB row:
+    /// that ordering is what makes a later invalidation always observable at
+    /// insert time.
     ///
     /// An entry whose `cached_at` is in the FUTURE relative to `now` (the server
     /// clock jumped backwards) is treated as stale, not as fresh — fail closed.
-    fn get(&self, user_id: &str, device_id: &str, now: i64) -> Option<Arc<VerifyingKey>> {
+    fn lookup(&self, user_id: &str, device_id: &str, now: i64) -> Lookup {
         let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
+        let bulk = guard.bulk_generation;
         let key = (user_id.to_string(), device_id.to_string());
-        let age = match guard.get(&key) {
-            Some(entry) => now - entry.cached_at,
-            None => return None,
-        };
-        if (0..DEVICE_KEY_CACHE_TTL_SECS).contains(&age) {
-            return guard.get(&key).map(|e| Arc::clone(&e.key));
-        }
-        // Expired (or clock went backwards) — drop it so it can't be served.
-        guard.remove(&key);
-        None
-    }
-
-    /// Record a freshly-read, LIVE (non-revoked, well-formed) pubkey. Only
-    /// called on a positive DB lookup — see the type docs on negatives.
-    fn insert(&self, user_id: &str, device_id: &str, key: Arc<VerifyingKey>, now: i64) {
-        let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
-        if guard.len() >= DEVICE_KEY_CACHE_MAX_ENTRIES {
-            guard.retain(|_, e| (0..DEVICE_KEY_CACHE_TTL_SECS).contains(&(now - e.cached_at)));
-            if guard.len() >= DEVICE_KEY_CACHE_MAX_ENTRIES {
-                guard.clear();
+        match guard.map.get(&key) {
+            Some(slot) if (0..DEVICE_KEY_CACHE_TTL_SECS).contains(&(now - slot.cached_at)) => {
+                match &slot.key {
+                    Some(vk) => Lookup::Hit(Arc::clone(vk)),
+                    None => Lookup::Miss(GenStamp {
+                        key: slot.generation,
+                        bulk,
+                    }),
+                }
             }
+            // Expired (or clock went backwards): drop the slot so nothing stale is
+            // served, and treat its generation as a fresh line (0). A concurrent
+            // invalidation re-creates a tombstone at generation 1, which still
+            // beats this miss's captured 0 at insert time.
+            Some(_) => {
+                guard.map.remove(&key);
+                Lookup::Miss(GenStamp { key: 0, bulk })
+            }
+            None => Lookup::Miss(GenStamp { key: 0, bulk }),
         }
-        guard.insert(
-            (user_id.to_string(), device_id.to_string()),
-            CachedKey { key, cached_at: now },
-        );
     }
 
-    /// Evict ONE device. Call after any write that revokes, deletes, or
-    /// re-keys that specific `user_device` row.
-    pub fn invalidate_device(&self, user_id: &str, device_id: &str) {
+    /// The test-only miss barrier, cloned out so it can be awaited WITHOUT holding
+    /// the cache lock. `None` in production.
+    fn miss_barrier(&self) -> Option<MissBarrier> {
         self.inner
             .lock()
             .expect("device key cache mutex poisoned")
-            .remove(&(user_id.to_string(), device_id.to_string()));
+            .miss_barrier
+            .clone()
+    }
+
+    /// Record a freshly-read, LIVE (non-revoked, well-formed) pubkey — UNLESS the
+    /// `stamp` captured at the matching miss is now stale, i.e. an invalidation
+    /// (device- or user-scoped) committed between the read and here. In that case
+    /// the insert is discarded: the key we hold may be the one that was just
+    /// revoked, so it must not be resurrected. Only ever called on a positive DB
+    /// lookup — see the type docs on negatives.
+    fn insert(&self, user_id: &str, device_id: &str, key: Arc<VerifyingKey>, now: i64, stamp: GenStamp) {
+        let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
+        // A user-scoped invalidation raced us.
+        if guard.bulk_generation != stamp.bulk {
+            return;
+        }
+        let map_key = (user_id.to_string(), device_id.to_string());
+        // A device-scoped invalidation raced us (an absent slot reads as
+        // generation 0, matching a miss that captured 0).
+        let current_gen = guard.map.get(&map_key).map(|s| s.generation).unwrap_or(0);
+        if current_gen != stamp.key {
+            return;
+        }
+        if guard.map.len() >= DEVICE_KEY_CACHE_MAX_ENTRIES {
+            guard
+                .map
+                .retain(|_, s| (0..DEVICE_KEY_CACHE_TTL_SECS).contains(&(now - s.cached_at)));
+            if guard.map.len() >= DEVICE_KEY_CACHE_MAX_ENTRIES {
+                guard.map.clear();
+            }
+        }
+        guard.map.insert(
+            map_key,
+            Slot {
+                key: Some(key),
+                generation: current_gen,
+                cached_at: now,
+            },
+        );
+    }
+
+    /// Evict ONE device. Call after any write that revokes, deletes, or re-keys
+    /// that specific `user_device` row. Bumps the key's generation and leaves a
+    /// tombstone even when nothing was cached, so a concurrent read that already
+    /// captured the old generation cannot resurrect the key it read (#721).
+    pub fn invalidate_device(&self, user_id: &str, device_id: &str) {
+        let now = now_unix();
+        let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
+        let slot = guard
+            .map
+            .entry((user_id.to_string(), device_id.to_string()))
+            .or_insert(Slot {
+                key: None,
+                generation: 0,
+                cached_at: now,
+            });
+        slot.key = None;
+        slot.generation += 1;
+        slot.cached_at = now;
     }
 
     /// Evict EVERY device of one user. Call after account-scoped writes whose
     /// blast radius is the whole fleet (identity rotation, account delete,
     /// reset-recover, cert re-sign) — cheaper to reason about than enumerating
-    /// the affected device ids, and never less safe.
+    /// the affected device ids, and never less safe. Bumps the process-wide
+    /// `bulk_generation` so an in-flight read for ANY of the user's devices — even
+    /// one that was never individually cached — loses its insert (#721).
     pub fn invalidate_user(&self, user_id: &str) {
-        self.inner
-            .lock()
-            .expect("device key cache mutex poisoned")
-            .retain(|(u, _), _| u != user_id);
+        let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
+        guard.bulk_generation = guard.bulk_generation.wrapping_add(1);
+        guard.map.retain(|(u, _), _| u != user_id);
     }
 
     /// Drop everything. Not used on the request path; exposed for operational
-    /// escape hatches and tests.
+    /// escape hatches and tests. Bumps `bulk_generation` too, so an insert whose
+    /// stamp was captured before the clear cannot repopulate behind it.
     pub fn clear(&self) {
-        self.inner
-            .lock()
-            .expect("device key cache mutex poisoned")
-            .clear();
+        let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
+        guard.bulk_generation = guard.bulk_generation.wrapping_add(1);
+        guard.map.clear();
     }
 
-    /// Live entry count, including not-yet-swept expired entries. Test/telemetry
-    /// observability only — never an auth input.
+    /// Live cached-key count — bare generation tombstones (`key: None`) are NOT
+    /// counted, so eviction still reads as "empty". Includes not-yet-swept expired
+    /// keys. Test/telemetry observability only — never an auth input.
     pub fn len(&self) -> usize {
         self.inner
             .lock()
             .expect("device key cache mutex poisoned")
-            .len()
+            .map
+            .values()
+            .filter(|s| s.key.is_some())
+            .count()
     }
 
-    /// `true` when nothing is cached. Present because clippy insists a `len` has
-    /// one.
+    /// `true` when no live key is cached. Present because clippy insists a `len`
+    /// has one.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Install the test-only miss barrier (see [`MissBarrier`]). Test infra: never
+    /// called in production. Named distinctly from the private accessor so the
+    /// public surface reads as "set".
+    pub fn set_miss_barrier(&self, barrier: MissBarrier) {
+        self.inner
+            .lock()
+            .expect("device key cache mutex poisoned")
+            .miss_barrier = Some(barrier);
     }
 }
 
@@ -516,20 +660,36 @@ async fn verify_request_inner(
     // or the DB until the request is at least well-formed and in-window.
     let creds = parse_credentials(headers, now)?;
 
-    let verifying_key = match cache.and_then(|c| c.get(&creds.user_id, &creds.device_id, now)) {
-        Some(vk) => vk,
-        None => {
-            let vk = match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
-                Ok(Some(vk)) => Arc::new(vk),
-                // Unknown / revoked device, or a DB error: never fail open, and
-                // never cache the negative (see `DeviceKeyCache` docs).
-                Ok(None) | Err(_) => return Err(AuthRejection::Unauthorized),
-            };
-            if let Some(c) = cache {
-                c.insert(&creds.user_id, &creds.device_id, Arc::clone(&vk), now);
+    let verifying_key = match cache {
+        // Cached path (the shipping DS). A miss captures the key's generation
+        // stamp BEFORE the DB read, and the matching insert is discarded if an
+        // invalidation bumped it in between (#721).
+        Some(c) => match c.lookup(&creds.user_id, &creds.device_id, now) {
+            Lookup::Hit(vk) => vk,
+            Lookup::Miss(stamp) => {
+                let vk = match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
+                    Ok(Some(vk)) => Arc::new(vk),
+                    // Unknown / revoked device, or a DB error: never fail open,
+                    // and never cache the negative (see `DeviceKeyCache` docs).
+                    Ok(None) | Err(_) => return Err(AuthRejection::Unauthorized),
+                };
+                // Test seam (#721): with a barrier installed, park here — after
+                // the read, before the insert — so a test can commit a revoke into
+                // the exact race window. A no-op in production.
+                if let Some(barrier) = c.miss_barrier() {
+                    barrier(&creds.user_id, &creds.device_id).await;
+                }
+                c.insert(&creds.user_id, &creds.device_id, Arc::clone(&vk), now, stamp);
+                vk
             }
-            vk
-        }
+        },
+        // Uncached path: the in-process integration harnesses build their own
+        // routers and have no `AppState` to hang a cache off — every lookup hits
+        // the DB.
+        None => match lookup_device_pubkey(conn, &creds.user_id, &creds.device_id).await {
+            Ok(Some(vk)) => Arc::new(vk),
+            Ok(None) | Err(_) => return Err(AuthRejection::Unauthorized),
+        },
     };
 
     let message = canonical_message(method, path, creds.timestamp, body);
@@ -546,4 +706,68 @@ pub fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use std::time::Instant;
+
+    /// A well-formed (but never verified) verifying key for populating the cache.
+    fn dummy_key() -> Arc<VerifyingKey> {
+        let bytes = [0u8; MLDSA44_PUB_LEN];
+        let encoded: &EncodedVerifyingKey<MlDsa44> = bytes.as_slice().try_into().unwrap();
+        Arc::new(VerifyingKey::decode(encoded))
+    }
+
+    /// Lock-contention microbenchmark for the cache's `Mutex<HashMap>` (#721 DoD
+    /// item 3): hammer the hot read path from 1..=16 threads and report ns/op and
+    /// throughput, so the single mutex can be judged against a realistic request
+    /// rate before anyone reaches for sharding or an `RwLock`.
+    ///
+    /// Ignored by default (it spins CPU for a second). Run it explicitly:
+    ///   cargo test -p pollis-delivery --lib bench::mutex_contention -- --ignored --nocapture
+    #[test]
+    #[ignore = "microbenchmark; run with --ignored --nocapture"]
+    fn mutex_contention() {
+        const DEVICES: usize = 256;
+        const OPS_PER_THREAD: usize = 200_000;
+
+        let cache = DeviceKeyCache::default();
+        let now = now_unix();
+        let key = dummy_key();
+        let devs: Vec<String> = (0..DEVICES).map(|i| format!("dev-{i}")).collect();
+        // Warm a realistic working set: one live key per active device.
+        for dev in &devs {
+            let stamp = match cache.lookup("u", dev, now) {
+                Lookup::Miss(s) => s,
+                Lookup::Hit(_) => unreachable!(),
+            };
+            cache.insert("u", dev, Arc::clone(&key), now, stamp);
+        }
+
+        println!("device-key cache Mutex<HashMap> contention ({DEVICES} warm entries):");
+        for threads in [1usize, 2, 4, 8, 16] {
+            let start = Instant::now();
+            std::thread::scope(|scope| {
+                for t in 0..threads {
+                    let cache = cache.clone();
+                    let devs = &devs;
+                    scope.spawn(move || {
+                        // Hot path: a cache HIT — lock, hashmap get, `Arc` clone.
+                        for i in 0..OPS_PER_THREAD {
+                            let _ = cache.lookup("u", &devs[(t + i) % DEVICES], now);
+                        }
+                    });
+                }
+            });
+            let elapsed = start.elapsed();
+            let total = (threads * OPS_PER_THREAD) as f64;
+            let per_op_ns = elapsed.as_nanos() as f64 / total;
+            let mops = total / elapsed.as_secs_f64() / 1e6;
+            println!(
+                "  threads={threads:2}  {per_op_ns:6.1} ns/op  {mops:7.2} Mops/s  ({elapsed:?} for {total:.0} ops)"
+            );
+        }
+    }
 }

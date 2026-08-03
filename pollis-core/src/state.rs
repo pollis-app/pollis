@@ -107,15 +107,15 @@ pub struct AppState {
     /// Broadcasts "tear down" to every long-lived background task that
     /// has wired itself up to wait on it. Today the media-server task
     /// listens via `axum::serve(...).with_graceful_shutdown(...)`. A
-    /// shell can call `shutdown_signal.notify_waiters()` (via the
-    /// `shutdown()` method on AppState) when the process is exiting —
-    /// see `pollis-node`'s `shutdown` napi export and the Electron
-    /// `before-quit` / `update-downloaded` handlers in
-    /// `electron/src/main.ts`.
+    /// shell calls `shutdown_signal.notify_waiters()` (via the
+    /// `shutdown()` method on AppState) when the process is exiting — the
+    /// only caller today is the Tauri shell's quit path in
+    /// `src-tauri/src/lib.rs`.
     ///
     /// Without this, the axum task's accept loop pins the Tokio runtime
-    /// alive and Squirrel.Mac's ShipIt helper sits forever waiting for
-    /// the parent PID to die — i.e. the "Relaunching…" hang #335 fixes.
+    /// alive and the host process hangs instead of exiting — the
+    /// "Relaunching…" hang #335 fixes, whose symptom was first hit under
+    /// the (since-reverted, #386/#389) Electron shell's auto-updater.
     pub shutdown_signal: Arc<Notify>,
     /// Per-conversation locks serializing MLS group mutations within this
     /// process. The MLS sync path (`process_pending_commits`,
@@ -258,10 +258,9 @@ impl AppState {
     }
 
     /// Tear down long-lived background tasks so the host process can
-    /// exit cleanly. Idempotent — safe to call from `before-quit` and
-    /// the updater path even though they overlap on the same code path
-    /// (electron-updater's `quitAndInstall` calls `app.quit()`, which
-    /// fires `before-quit`).
+    /// exit cleanly. Idempotent — safe to call more than once and from
+    /// more than one exit path, because a quit and an update-relaunch can
+    /// both funnel through the same teardown.
     ///
     /// Steps, in order:
     /// 1. Signal `shutdown_signal` so the axum media server hits its

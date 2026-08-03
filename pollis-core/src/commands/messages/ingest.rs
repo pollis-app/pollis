@@ -177,8 +177,12 @@ pub async fn catch_up_mls_group_interleaved(
     let watermarks: Vec<(String, Option<String>)> =
         ingest_group_envelopes_interleaved(state, user_id, mls_group_id, &per_conv).await?;
 
-    // Advance each conversation's watermark + run envelope GC through the
-    // Delivery Service. Both best-effort — DS failures are logged and ignored.
+    // Advance each conversation's watermark through the Delivery Service (best
+    // effort — DS failures are logged and ignored). Envelope GC is NOT fired from
+    // here any more (#689): the trigger moved server-side to the DS's own sweep
+    // (`pollis-delivery` `sweep_envelope_gc`), so a conversation whose members all
+    // go quiet is still collected and a chatty one no longer runs GC on every
+    // ingest. This path only reports the watermark that GC reads.
     for (cid, ts_opt) in &watermarks {
         if let (Some(ts), Some(did)) = (ts_opt.as_ref(), device_id.as_ref()) {
             let body = serde_json::json!({
@@ -192,11 +196,6 @@ pub async fn catch_up_mls_group_interleaved(
             {
                 eprintln!("[watermark] catch_up_group: DS advance failed for {cid}: {e}");
             }
-        }
-
-        let body = serde_json::json!({ "conversation_id": cid, "is_dm": is_dm });
-        if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/envelopes/gc", &body).await {
-            eprintln!("[ingest] catch_up_group cleanup (DS) failed for {cid}: {e}");
         }
     }
 

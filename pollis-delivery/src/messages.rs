@@ -44,11 +44,12 @@
 //!     reaction (`user_id` is bound to the authenticated user).
 //!   - watermark: the row is per `(conversation, user, device)`; the user may
 //!     only advance their own.
-//!   - envelope GC: the user is a member. The deletion *decision* is many-member
-//!     correct regardless of who triggers it — it is bounded by the MIN watermark
-//!     over the whole current member-device roster and never by wall-clock age
-//!     (invariant I3). See the TODO on [`apply_envelope_gc`] for the residual
-//!     *trigger* concern, which is liveness-only.
+//!   - envelope GC: the deletion *decision* is many-member correct regardless of
+//!     who triggers it — bounded by the MIN watermark over the whole current
+//!     member-device roster and never by wall-clock age (invariant I3). The
+//!     *trigger* is the DS-internal sweep [`sweep_envelope_gc`] (#689), not a
+//!     member's ingest path; the per-conversation [`apply_envelope_gc`] endpoint
+//!     runs the same watermark-gated cleanup for one conversation on demand.
 //!
 //! On the no-auth path (`authed == None`, only reachable when the DS runs with
 //! `POLLIS_DS_REQUIRE_AUTH` off) the membership/identity checks are skipped and
@@ -110,26 +111,57 @@ use crate::AppState;
 // pruning outright. This mirrors `commit::current_member_devices`, which excludes
 // revoked devices from the commit-log retention floor for the same reason — keep
 // the two rosters in agreement (I5).
+//
+// ## Why the roster lives in a macro (#722)
+//
+// The roster — "which member devices does the watermark gate measure against" —
+// is the SAME rule in three places: these two DELETEs and
+// [`crate::commit::current_member_devices`]. Nothing structural forces them to
+// agree, and a divergence is an I5 violation surfacing as dropped mail (a roster
+// too small deletes what a device still needs) or wedged retention (a roster too
+// large never clears). So the join chain each DELETE aggregates over is factored
+// out into a macro expanding to a string literal, and `concat!`-ed back into the
+// statement — the SQL the DS executes is byte-for-byte what it always was, but
+// the *roster half* of it now has exactly one definition that the parity test in
+// `roster_parity_tests` can SELECT from directly. Editing the roster inside the
+// DELETE now necessarily edits what the test reads, so any drift away from the
+// Rust roster shows up as a red test rather than as silent divergence.
+//
+// The fragments deliberately include the `LEFT JOIN conversation_watermark`: it
+// is what `COUNT(ud.device_id)` is counted over, so `SELECT ud.device_id` +
+// fragment is *precisely* the row set the gate aggregates — including any
+// accidental fan-out — not a paraphrase of it.
 
-const CLEANUP_CHANNEL_ENVELOPES: &str = "\
-DELETE FROM message_envelope
- WHERE conversation_id = ?1
-   AND sent_at < (
-       SELECT CASE
-                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
-                THEN MIN(cw.last_fetched_at)
-                ELSE NULL
-              END
-       FROM group_member gm
+/// The channel roster: every non-revoked device of every member of the group
+/// that owns channel `?1`, LEFT JOINed to that device's watermark for `?1`.
+macro_rules! channel_member_device_rows {
+    () => {
+        "FROM group_member gm
        JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
        JOIN user_device ud ON ud.user_id = gm.user_id AND ud.revoked_at IS NULL
        LEFT JOIN conversation_watermark cw
               ON cw.conversation_id = ?1
              AND cw.user_id = ud.user_id
-             AND cw.device_id = ud.device_id
-     )";
+             AND cw.device_id = ud.device_id"
+    };
+}
 
-const CLEANUP_DM_ENVELOPES: &str = "\
+/// The DM roster: every non-revoked device of every member of DM channel `?1`,
+/// LEFT JOINed to that device's watermark for `?1`.
+macro_rules! dm_member_device_rows {
+    () => {
+        "FROM dm_channel_member dcm
+       JOIN user_device ud ON ud.user_id = dcm.user_id AND ud.revoked_at IS NULL
+       LEFT JOIN conversation_watermark cw
+              ON cw.conversation_id = ?1
+             AND cw.user_id = ud.user_id
+             AND cw.device_id = ud.device_id
+       WHERE dcm.dm_channel_id = ?1"
+    };
+}
+
+const CLEANUP_CHANNEL_ENVELOPES: &str = concat!(
+    "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
    AND sent_at < (
@@ -138,14 +170,27 @@ DELETE FROM message_envelope
                 THEN MIN(cw.last_fetched_at)
                 ELSE NULL
               END
-       FROM dm_channel_member dcm
-       JOIN user_device ud ON ud.user_id = dcm.user_id AND ud.revoked_at IS NULL
-       LEFT JOIN conversation_watermark cw
-              ON cw.conversation_id = ?1
-             AND cw.user_id = ud.user_id
-             AND cw.device_id = ud.device_id
-       WHERE dcm.dm_channel_id = ?1
-     )";
+       ",
+    channel_member_device_rows!(),
+    "
+     )"
+);
+
+const CLEANUP_DM_ENVELOPES: &str = concat!(
+    "\
+DELETE FROM message_envelope
+ WHERE conversation_id = ?1
+   AND sent_at < (
+       SELECT CASE
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
+                THEN MIN(cw.last_fetched_at)
+                ELSE NULL
+              END
+       ",
+    dm_member_device_rows!(),
+    "
+     )"
+);
 
 // ── Shared authz helpers ─────────────────────────────────────────────────────
 
@@ -207,9 +252,72 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, false)
 }
 
+// ── The tombstone `sent_at` floor ────────────────────────────────────────────
+//
+// A DS-stamped tombstone is only ever fetched if it sorts strictly ABOVE the
+// recipient's `conversation_watermark.last_fetched_at`: ingest selects
+// `sent_at > last_fetched_at` (strictly greater) and advances the cursor to the
+// highest `sent_at` it consumed, so the cursor NEVER rewinds and anything
+// stamped at or below it is skipped permanently, not merely delayed
+// (`pollis_core::commands::messages::ingest`).
+//
+// The floor is therefore the highest cursor value any recipient could already
+// hold, and it has TWO sources — one of which outlives the other:
+//
+//   * `MAX(sent_at)` over `message_envelope` — the conversation's high-water
+//     mark, but only over envelopes STILL PRESENT. Envelope GC deletes rows once
+//     every current member device has reported a watermark past them (see
+//     `CLEANUP_*` above; since #688 that deletion is purely watermark-gated, with
+//     no TTL arm to bound it). Once a conversation has been fully pruned this
+//     side is NULL.
+//   * `MAX(last_fetched_at)` over `conversation_watermark` — the highest cursor
+//     actually reported for the conversation. These rows are NOT touched by
+//     envelope GC; they are only ever advanced (monotone UPSERT in
+//     `apply_advance_watermark`) or deleted with the device itself
+//     (`apply_revoke_device`). They therefore SURVIVE the pruning that empties
+//     the envelope side.
+//
+// #692: using only the envelope side meant that once GC had pruned a
+// conversation the floor went NULL, `sent_at_after` fell back to wall-clock
+// `now`, and the clock-skew dependency this guard exists to remove was back — a
+// recipient whose watermark came from a client clock running AHEAD of the DS
+// clock would never fetch the tombstone, and the deleted message stayed readable
+// on that device forever. The watermark side is precisely the evidence that
+// survives GC, so the floor is the greater of the two.
+//
+// Expressed as one SQL statement rather than two queries max'd in Rust: each arm
+// is an aggregate over a possibly-empty set, so each yields exactly one
+// (possibly NULL) row, and the outer `MAX` skips NULLs — giving "greater of the
+// two, or NULL when both are absent" with no Rust-side NULL bookkeeping and a
+// single round trip. The comparison is lexical in both SQL and Rust (see
+// [`now_rfc3339`] on why lexical order matches chronological order here), so the
+// two formulations agree.
+const TOMBSTONE_FLOOR: &str = "\
+SELECT MAX(v) FROM (
+    SELECT MAX(sent_at)         AS v FROM message_envelope       WHERE conversation_id = ?1
+    UNION ALL
+    SELECT MAX(last_fetched_at) AS v FROM conversation_watermark WHERE conversation_id = ?1
+)";
+
+/// The greatest cursor value any recipient of `conversation_id` could already
+/// hold — see the [`TOMBSTONE_FLOOR`] block comment. `None` only when the
+/// conversation has neither a surviving envelope nor a reported watermark.
+async fn tombstone_floor(
+    conn: &Connection,
+    conversation_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(TOMBSTONE_FLOOR, libsql::params![conversation_id.to_string()])
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0)?,
+        None => None,
+    })
+}
+
 /// The `sent_at` an envelope must carry to be guaranteed visible to every
-/// member of `conversation_id`, given `floor` — the greatest `sent_at` already
-/// in that conversation.
+/// member of `conversation_id`, given `floor` — the greatest cursor value any
+/// recipient could already hold (see [`tombstone_floor`]).
 ///
 /// Precision parity (see [`now_rfc3339`]) fixes ordering between two correct
 /// clocks, but `sent_at` for ordinary messages comes from the *client's* clock
@@ -526,21 +634,10 @@ pub async fn apply_delete_message(
     }
 
     let tombstone_id = Ulid::new().to_string();
-    // Read the conversation's high-water `sent_at` BEFORE the deletes below
-    // remove the target — a recipient's watermark can be anywhere up to this
-    // value, and the tombstone is only ever fetched if it sorts above it.
-    let floor: Option<String> = {
-        let mut rows = conn
-            .query(
-                "SELECT MAX(sent_at) FROM message_envelope WHERE conversation_id = ?1",
-                libsql::params![body.conversation_id.clone()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => row.get::<Option<String>>(0)?,
-            None => None,
-        }
-    };
+    // Read the conversation's floor BEFORE the deletes below remove the target —
+    // a recipient's watermark can be anywhere up to this value, and the tombstone
+    // is only ever fetched if it sorts above it.
+    let floor = tombstone_floor(conn, &body.conversation_id).await?;
     let now = sent_at_after(now_rfc3339(), floor);
     let tx = conn.transaction().await?;
     tx.execute(
@@ -767,8 +864,8 @@ pub async fn envelope_gc(
     outcome_response(apply_envelope_gc(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Run the watermark-gated envelope GC for a conversation. Authz: the actor is
-/// a current member.
+/// Run the watermark-gated envelope GC for a SINGLE conversation on demand.
+/// Authz: the actor is a current member (skipped on the no-auth path).
 ///
 /// The deletion predicate is bounded by the SLOWEST current member device and by
 /// nothing else — see the [`CLEANUP_CHANNEL_ENVELOPES`] block comment. The
@@ -779,11 +876,10 @@ pub async fn envelope_gc(
 /// *decision* is the same no matter who fires it — so a single eager device can
 /// never delete another device's mail, whatever the trigger.
 ///
-/// TODO(#419): the *trigger* is still "whichever member happens to ingest calls
-/// `/v1/envelopes/gc`", which is a liveness concern only: a conversation whose
-/// members all stop ingesting simply retains envelopes longer than necessary. It
-/// can no longer cause loss, so it is tracked separately from this fix. When it
-/// is revisited, the predicate must stay watermark-bounded.
+/// This is the per-conversation form. The GC *trigger* is now the DS-internal
+/// sweep [`sweep_envelope_gc`] (#689): GC no longer rides a member's ingest path,
+/// so a conversation whose members all went quiet is still collected. Both share
+/// the one cleanup chokepoint [`cleanup_conversation_envelopes`].
 pub async fn apply_envelope_gc(
     conn: &Connection,
     authed: Option<&str>,
@@ -796,14 +892,70 @@ pub async fn apply_envelope_gc(
     if authed.is_some() && !is_member(conn, &body.conversation_id, &actor).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    let sql = if body.is_dm {
+    cleanup_conversation_envelopes(conn, &body.conversation_id, body.is_dm).await?;
+    Ok(WriteOutcome::Ok)
+}
+
+/// Run the watermark-gated cleanup for ONE conversation. Pure DB effect, no
+/// authz — callers gate. The single place the `CLEANUP_*` predicate is executed,
+/// shared by the per-conversation [`apply_envelope_gc`] endpoint and the
+/// server-side [`sweep_envelope_gc`], so the two can never drift.
+async fn cleanup_conversation_envelopes(
+    conn: &Connection,
+    conversation_id: &str,
+    is_dm: bool,
+) -> anyhow::Result<()> {
+    let sql = if is_dm {
         CLEANUP_DM_ENVELOPES
     } else {
         CLEANUP_CHANNEL_ENVELOPES
     };
-    conn.execute(sql, libsql::params![body.conversation_id.clone()])
+    conn.execute(sql, libsql::params![conversation_id.to_string()])
         .await?;
-    Ok(WriteOutcome::Ok)
+    Ok(())
+}
+
+/// The server-side envelope-GC trigger (#689): sweep every conversation that
+/// still has envelopes and run the watermark-gated cleanup for each. Returns the
+/// number of conversations visited.
+///
+/// This replaces the old trigger — "whichever member device happens to ingest
+/// calls `/v1/envelopes/gc`" — which never fired for a conversation whose members
+/// all went quiet and fired far more often than needed for a chatty one. Nothing
+/// about *which rows qualify* changes: retention stays bounded by the slowest
+/// member device (invariant I3), only *what drives* GC moves off the member
+/// ingest path.
+///
+/// A conversation is a DM iff its id appears in `dm_channel_member` (mirroring
+/// [`is_member`]); every other id is a group/channel. Running the wrong predicate
+/// is a no-op — its roster join yields zero rows, `COUNT(ud) = COUNT(cw) = 0`, the
+/// CASE returns NULL and `sent_at < NULL` deletes nothing — so a misclassified id
+/// can never over-delete.
+pub async fn sweep_envelope_gc(conn: &Connection) -> anyhow::Result<usize> {
+    // Only conversations that still hold envelopes are worth visiting; steady
+    // state this set is small.
+    let mut conversations: Vec<String> = Vec::new();
+    {
+        let mut rows = conn
+            .query("SELECT DISTINCT conversation_id FROM message_envelope", ())
+            .await?;
+        while let Some(row) = rows.next().await? {
+            conversations.push(row.get::<String>(0)?);
+        }
+    }
+    for conversation_id in &conversations {
+        let is_dm = {
+            let mut rows = conn
+                .query(
+                    "SELECT 1 FROM dm_channel_member WHERE dm_channel_id = ?1 LIMIT 1",
+                    libsql::params![conversation_id.clone()],
+                )
+                .await?;
+            rows.next().await?.is_some()
+        };
+        cleanup_conversation_envelopes(conn, conversation_id, is_dm).await?;
+    }
+    Ok(conversations.len())
 }
 
 // ── POST /v1/attachments/register  &  /v1/attachments/delete ─────────────────
@@ -980,6 +1132,195 @@ mod timestamp_tests {
         assert_eq!(sent_at_after(now.clone(), Some(behind)), now);
         assert_eq!(sent_at_after(now.clone(), None), now);
         assert_eq!(sent_at_after(now.clone(), Some("not-a-timestamp".into())), now);
+    }
+}
+
+#[cfg(test)]
+mod tombstone_floor_tests {
+    //! [`TOMBSTONE_FLOOR`] driven against a real (in-memory) libsql DB.
+    //!
+    //! **#692 — the floor must outlive envelope GC.** A tombstone is only ever
+    //! fetched when it sorts strictly above the recipient's watermark, because
+    //! ingest selects `sent_at > last_fetched_at` and the cursor never rewinds.
+    //! The old floor was `MAX(sent_at)` over envelopes STILL PRESENT, so once
+    //! watermark-gated GC had pruned a conversation the floor went NULL, the
+    //! stamp fell back to wall-clock `now`, and a recipient whose watermark came
+    //! from a client clock running AHEAD of the DS clock never fetched the
+    //! tombstone — the deleted message stayed readable on that device forever.
+    //!
+    //! `conversation_watermark` rows survive that pruning, so they are the
+    //! evidence the floor must also consult. Each test below asserts the floor
+    //! AND the stamp `sent_at_after` derives from it, since the stamp is what
+    //! ingest actually compares.
+
+    use super::*;
+
+    const SCHEMA: &str = "\
+CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
+CREATE TABLE conversation_watermark (\
+  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
+  last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));";
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute_batch(SCHEMA).await.unwrap();
+        conn
+    }
+
+    /// An RFC3339 stamp `offset` from now, in the shape a CLIENT writes it
+    /// (`chrono::Utc::now().to_rfc3339()`), which is what actually lands in
+    /// `sent_at` and — via ingest — in `last_fetched_at`.
+    fn stamp(offset: chrono::Duration) -> String {
+        (chrono::Utc::now() + offset).to_rfc3339()
+    }
+
+    async fn add_envelope(conn: &Connection, id: &str, conv: &str, sent_at: &str) {
+        conn.execute(
+            "INSERT INTO message_envelope (id, conversation_id, sent_at) VALUES (?1, ?2, ?3)",
+            libsql::params![id.to_string(), conv.to_string(), sent_at.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn add_watermark(conn: &Connection, conv: &str, user: &str, device: &str, at: &str) {
+        conn.execute(
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![
+                conv.to_string(),
+                user.to_string(),
+                device.to_string(),
+                at.to_string()
+            ],
+        )
+        .await
+        .unwrap();
+    }
+
+    /// **The #692 regression test.** Every envelope in the conversation has been
+    /// GC'd (watermark-gated deletion: every current member device reported past
+    /// them), but the watermark rows survive — and one of them was written from a
+    /// client clock running an hour AHEAD of the DS clock, so it sits in the DS's
+    /// future. The tombstone must still be stamped strictly above it.
+    ///
+    /// Against the old `MAX(sent_at)`-only floor this FAILS: with no envelopes
+    /// left the floor is NULL, `sent_at_after` returns plain `now`, and `now` is
+    /// an hour BELOW the surviving cursor — so ingest's `sent_at >
+    /// last_fetched_at` never selects the tombstone and the delete silently does
+    /// nothing on that device, permanently.
+    #[tokio::test]
+    async fn a_future_watermark_surviving_gc_still_floors_the_tombstone() {
+        let conn = conn().await;
+        // The recipient's clock ran ahead; its reported cursor is in the DS's future.
+        let ahead = stamp(chrono::Duration::hours(1));
+        add_watermark(&conn, "c1", "alice", "a1", &ahead).await;
+        // GC has pruned every envelope — `message_envelope` is empty for c1.
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(
+            floor.as_deref(),
+            Some(ahead.as_str()),
+            "with every envelope GC'd, the surviving watermark must still supply \
+             the floor — MAX(sent_at) alone yields NULL here (#692)"
+        );
+
+        let stamped = sent_at_after(now_rfc3339(), floor);
+        assert!(
+            stamped > ahead,
+            "tombstone {stamped} must sort strictly above the surviving watermark \
+             {ahead}, or ingest's `sent_at > last_fetched_at` never selects it and \
+             the deleted message stays readable on that device forever (#692)"
+        );
+    }
+
+    /// Envelopes present and every watermark BEHIND them: the floor is the
+    /// envelope high-water mark exactly as before — this fix widens the floor,
+    /// it never lowers it.
+    #[tokio::test]
+    async fn envelopes_present_with_watermarks_behind_keeps_todays_floor() {
+        let conn = conn().await;
+        let newest = stamp(chrono::Duration::minutes(-1));
+        add_envelope(&conn, "e1", "c1", &stamp(chrono::Duration::hours(-2))).await;
+        add_envelope(&conn, "e2", "c1", &newest).await;
+        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-3))).await;
+        add_watermark(&conn, "c1", "bob", "b1", &stamp(chrono::Duration::minutes(-30))).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(
+            floor.as_deref(),
+            Some(newest.as_str()),
+            "with every watermark behind the newest envelope the floor is \
+             unchanged from the MAX(sent_at)-only behaviour"
+        );
+
+        // Both floors are behind the DS clock, so the guard is a no-op and the
+        // tombstone keeps plain `now` — today's behaviour, preserved.
+        let now = now_rfc3339();
+        assert_eq!(sent_at_after(now.clone(), floor), now);
+    }
+
+    /// Neither envelopes nor watermarks: the floor is absent and `sent_at_after`
+    /// falls back to `now` — the pre-existing behaviour, unchanged.
+    #[tokio::test]
+    async fn no_envelopes_and_no_watermarks_falls_back_to_now() {
+        let conn = conn().await;
+        // Rows exist, but for a DIFFERENT conversation — the floor is scoped.
+        add_envelope(&conn, "e1", "other", &stamp(chrono::Duration::hours(1))).await;
+        add_watermark(&conn, "other", "alice", "a1", &stamp(chrono::Duration::hours(1))).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(floor, None, "an empty conversation has no floor");
+
+        let now = now_rfc3339();
+        assert_eq!(
+            sent_at_after(now.clone(), floor),
+            now,
+            "with no floor the tombstone keeps plain `now` (unchanged fallback)"
+        );
+    }
+
+    /// Mixed: envelopes survive, but a watermark sits ABOVE the newest of them
+    /// (a client clock ahead of everyone else's). The greater of the two wins, so
+    /// the watermark supplies the floor and the tombstone clears it.
+    #[tokio::test]
+    async fn a_watermark_ahead_of_the_newest_envelope_wins() {
+        let conn = conn().await;
+        add_envelope(&conn, "e1", "c1", &stamp(chrono::Duration::minutes(-5))).await;
+        let ahead = stamp(chrono::Duration::hours(2));
+        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-1))).await;
+        add_watermark(&conn, "c1", "bob", "b1", &ahead).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(
+            floor.as_deref(),
+            Some(ahead.as_str()),
+            "the floor is the GREATER of MAX(sent_at) and MAX(last_fetched_at)"
+        );
+
+        let stamped = sent_at_after(now_rfc3339(), floor);
+        assert!(
+            stamped > ahead,
+            "tombstone {stamped} must clear the highest surviving cursor {ahead}"
+        );
+    }
+
+    /// The symmetric case: an envelope ahead of every watermark still wins, so
+    /// widening the floor cannot regress the case the guard originally covered.
+    #[tokio::test]
+    async fn an_envelope_ahead_of_every_watermark_wins() {
+        let conn = conn().await;
+        let ahead = stamp(chrono::Duration::hours(2));
+        add_envelope(&conn, "e1", "c1", &ahead).await;
+        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-1))).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(floor.as_deref(), Some(ahead.as_str()));
+
+        let stamped = sent_at_after(now_rfc3339(), floor);
+        assert!(stamped > ahead, "tombstone {stamped} must clear {ahead}");
     }
 }
 
@@ -1407,5 +1748,523 @@ CREATE TABLE conversation_watermark (\
             "excluding revoked devices must never leave a roster that deletes by \
              virtue of being empty"
         );
+    }
+
+    // ── The server-side sweep is the trigger (#689) ──────────────────────────
+
+    /// The GC trigger is a DS-internal sweep, not a member's ingest path. With NO
+    /// member calling the per-conversation endpoint, one sweep collects every
+    /// conversation whose devices have all caught up — a channel AND a DM (proving
+    /// it classifies both predicates) — while sparing one with an uncollected
+    /// recipient. On the old trigger nothing drives GC when no member ingests, so
+    /// the quiet-but-collected conversations would survive.
+    #[tokio::test]
+    async fn sweep_collects_quiet_conversations_without_any_ingest() {
+        let conn = conn().await;
+
+        // A channel whose one member device has caught up. Distinct users per
+        // conversation: `user_device` is global, so a member's device in one
+        // conversation counts toward every conversation they belong to.
+        channel_fixture(&conn).await;
+        add_device(&conn, "alice", "a1", false).await;
+        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
+        add_envelope(&conn, "eA", "c1", "-5 days").await;
+
+        // A DM whose one member device has caught up (exercises the DM predicate).
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'dave')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "dave", "d-dev", false).await;
+        seed_watermark(&conn, "d1", "dave", "d-dev", "-1 day").await;
+        add_envelope(&conn, "eD", "d1", "-5 days").await;
+
+        // A channel with an uncollected recipient: bob's device never reported.
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g2', 'bob')", ())
+            .await
+            .unwrap();
+        conn.execute("INSERT INTO channels (id, group_id) VALUES ('c2', 'g2')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "bob", "b1", false).await;
+        add_envelope(&conn, "eB", "c2", "-5 days").await;
+
+        // No member ingests; the sweep is the sole trigger.
+        let visited = sweep_envelope_gc(&conn).await.unwrap();
+
+        assert_eq!(visited, 3, "the sweep visits every conversation that still has envelopes");
+        assert_eq!(envelope_count(&conn, "c1").await, 0, "quiet channel, all caught up → swept");
+        assert_eq!(envelope_count(&conn, "d1").await, 0, "quiet DM, all caught up → swept");
+        assert_eq!(
+            envelope_count(&conn, "c2").await,
+            1,
+            "a conversation with an uncollected recipient must NOT be swept"
+        );
+    }
+}
+
+#[cfg(test)]
+mod roster_parity_tests {
+    //! **I5 — the three rosters must agree (#722).**
+    //!
+    //! "Which member devices count toward retention" is one rule with three
+    //! implementations: [`CLEANUP_CHANNEL_ENVELOPES`], [`CLEANUP_DM_ENVELOPES`]
+    //! (envelope GC, SQL) and [`crate::commit::current_member_devices`]
+    //! (commit-log retention floor, Rust). #685/#686 brought them into agreement
+    //! on revoked devices; nothing structural keeps them there. A divergence is
+    //! not cosmetic:
+    //!
+    //!   * SQL roster **narrower** than the Rust one → envelope GC deletes mail a
+    //!     device the commit log still serves has not collected (loss, F3-shaped).
+    //!   * SQL roster **wider** → a device that cannot rejoin the tree holds the
+    //!     watermark floor down forever and envelopes never clear (stuck
+    //!     retention).
+    //!
+    //! ## How this test avoids being a restatement of the SQL
+    //!
+    //! The cleanup SQL embeds its roster inside a DELETE, so it cannot be read
+    //! back directly. Rather than hand-copy an "equivalent" SELECT here — which
+    //! would only ever prove *this file* agrees with *this file*, and would sit
+    //! there passing while the DELETE drifted — the join chain is factored out of
+    //! the DELETE into `channel_member_device_rows!` / `dm_member_device_rows!`
+    //! and `concat!`-ed back in. The statements the DS executes are unchanged
+    //! byte-for-byte (`the_extraction_did_not_change_the_cleanup_sql` pins that),
+    //! and the SELECTs below are built from the SAME macro the DELETE is. There
+    //! is exactly one copy of the roster SQL in the crate.
+    //!
+    //! So the drift this catches is the drift that matters: change the roster on
+    //! either side — the JOIN inside the DELETE, or the query in
+    //! `current_member_devices` — and the two sides disagree here. The expected
+    //! rosters are additionally spelled out literally, so a change applied
+    //! symmetrically to *both* implementations still fails rather than silently
+    //! redefining the invariant.
+    //!
+    //! [`the_roster_is_what_the_delete_actually_gates_on`] closes the remaining
+    //! gap between "the fragment" and "the statement": it proves the deletion
+    //! outcome flips exactly on the watermark of a device the fragment lists, and
+    //! does not move for devices it excludes.
+
+    use super::*;
+    use crate::commit::current_member_devices;
+
+    /// The row set `COUNT(ud.device_id)` is counted over in the channel DELETE —
+    /// same text, projected instead of aggregated.
+    const CHANNEL_ROSTER_SELECT: &str = concat!(
+        "SELECT ud.device_id
+       ",
+        channel_member_device_rows!()
+    );
+
+    /// The DM equivalent.
+    const DM_ROSTER_SELECT: &str = concat!(
+        "SELECT ud.device_id
+       ",
+        dm_member_device_rows!()
+    );
+
+    /// Production shapes, keys included — the PKs matter here. `user_device`'s
+    /// PK is what makes a device id globally unique (so the Rust side's
+    /// `DISTINCT` and the SQL side's raw rows are comparable), and
+    /// `conversation_watermark`'s is what stops the LEFT JOIN fanning a roster
+    /// row out into several.
+    const SCHEMA: &str = "\
+CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
+CREATE TABLE user_device (device_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, revoked_at TEXT);\
+CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (group_id, user_id));\
+CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
+CREATE TABLE dm_channel_member (\
+  dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (dm_channel_id, user_id));\
+CREATE TABLE conversation_watermark (\
+  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
+  last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));";
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute_batch(SCHEMA).await.unwrap();
+        conn
+    }
+
+    async fn exec(conn: &Connection, sql: &str) {
+        conn.execute(sql, ()).await.unwrap();
+    }
+
+    async fn device(conn: &Connection, user: &str, device: &str, revoked: bool) {
+        conn.execute(
+            "INSERT INTO user_device (device_id, user_id, revoked_at) \
+             VALUES (?1, ?2, CASE WHEN ?3 THEN datetime('now') ELSE NULL END)",
+            libsql::params![device.to_string(), user.to_string(), revoked as i64],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn watermark(conn: &Connection, conv: &str, user: &str, device: &str, offset: &str) {
+        conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
+             VALUES (?1, ?2, ?3, datetime('now', ?4))",
+            libsql::params![
+                conv.to_string(),
+                user.to_string(),
+                device.to_string(),
+                offset.to_string()
+            ],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn envelope(conn: &Connection, id: &str, conv: &str, offset: &str) {
+        conn.execute(
+            "INSERT INTO message_envelope (id, conversation_id, sent_at) \
+             VALUES (?1, ?2, datetime('now', ?3))",
+            libsql::params![id.to_string(), conv.to_string(), offset.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn envelope_count(conn: &Connection, conv: &str) -> i64 {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM message_envelope WHERE conversation_id = ?1",
+                libsql::params![conv.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+    }
+
+    /// The roster the cleanup SQL measures against, as a sorted device list.
+    /// Duplicates are deliberately NOT collapsed: a repeated row would inflate
+    /// `COUNT(ud.device_id)` and break the "every device reported" gate, so it
+    /// must show up as a mismatch rather than be normalised away.
+    async fn sql_roster(conn: &Connection, select: &str, conv: &str) -> Vec<String> {
+        let mut rows = conn
+            .query(select, libsql::params![conv.to_string()])
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(r) = rows.next().await.unwrap() {
+            out.push(r.get::<String>(0).unwrap());
+        }
+        out.sort();
+        out
+    }
+
+    async fn rust_roster(conn: &Connection, conv: &str) -> Vec<String> {
+        let mut out = current_member_devices(conn, conv).await.unwrap();
+        out.sort();
+        out
+    }
+
+    /// Every drift-prone shape in one fixture, seeded identically for a channel
+    /// (`c-main`, owned by group `g-main`) and a DM (`dm-main`):
+    ///
+    ///   * `alice` — a plain member with a single active device.
+    ///   * `bob` — several devices, one of them revoked, and one active device
+    ///     that has never reported a watermark.
+    ///   * `carol` — a member whose devices are ALL revoked.
+    ///   * `dave` — a member whose one active device has no watermark row.
+    ///   * `mallory` — not a member of anything, with an active device (and a
+    ///     stray watermark row for both conversations, so a roster that reached
+    ///     through `conversation_watermark` instead of through membership would
+    ///     be caught).
+    ///   * `eve` — a member of a DIFFERENT group/DM, to pin conversation scoping.
+    ///
+    /// Watermarks are seeded only where a test needs them; membership and
+    /// devices are the shared part.
+    async fn fixture(conn: &Connection) {
+        exec(conn, "INSERT INTO channels (id, group_id) VALUES ('c-main', 'g-main')").await;
+        exec(conn, "INSERT INTO channels (id, group_id) VALUES ('c-other', 'g-other')").await;
+        for user in ["alice", "bob", "carol", "dave"] {
+            conn.execute(
+                "INSERT INTO group_member (group_id, user_id) VALUES ('g-main', ?1)",
+                libsql::params![user.to_string()],
+            )
+            .await
+            .unwrap();
+            conn.execute(
+                "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('dm-main', ?1)",
+                libsql::params![user.to_string()],
+            )
+            .await
+            .unwrap();
+        }
+        exec(conn, "INSERT INTO group_member (group_id, user_id) VALUES ('g-other', 'eve')").await;
+        exec(
+            conn,
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('dm-other', 'eve')",
+        )
+        .await;
+
+        device(conn, "alice", "alice-1", false).await;
+        device(conn, "bob", "bob-live", false).await;
+        device(conn, "bob", "bob-revoked", true).await;
+        device(conn, "bob", "bob-silent", false).await;
+        device(conn, "carol", "carol-old-1", true).await;
+        device(conn, "carol", "carol-old-2", true).await;
+        device(conn, "dave", "dave-1", false).await;
+        device(conn, "eve", "eve-1", false).await;
+        device(conn, "mallory", "mallory-1", false).await;
+    }
+
+    /// The devices the fixture's rosters must resolve to, for BOTH conversation
+    /// shapes. Spelled out rather than derived, so a change made symmetrically to
+    /// the SQL and the Rust roster still fails here instead of quietly
+    /// redefining the invariant.
+    const EXPECTED: [&str; 4] = ["alice-1", "bob-live", "bob-silent", "dave-1"];
+
+    fn expected() -> Vec<String> {
+        let mut v: Vec<String> = EXPECTED.iter().map(|s| s.to_string()).collect();
+        v.sort();
+        v
+    }
+
+    /// Seed the watermark spread the roster must be insensitive to: some roster
+    /// devices reported, some never did, revoked devices carry ancient cursors,
+    /// and a non-member has a row for the conversation.
+    async fn seed_mixed_watermarks(conn: &Connection, conv: &str) {
+        watermark(conn, conv, "alice", "alice-1", "-1 day").await;
+        watermark(conn, conv, "bob", "bob-live", "-2 days").await;
+        // `bob-silent` and `dave-1` deliberately have NO row.
+        watermark(conn, conv, "bob", "bob-revoked", "-400 days").await;
+        watermark(conn, conv, "carol", "carol-old-1", "-400 days").await;
+        watermark(conn, conv, "carol", "carol-old-2", "-400 days").await;
+        watermark(conn, conv, "mallory", "mallory-1", "-400 days").await;
+    }
+
+    // ── The parity assertions ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn channel_sql_and_rust_rosters_agree() {
+        let conn = conn().await;
+        fixture(&conn).await;
+        seed_mixed_watermarks(&conn, "c-main").await;
+
+        let sql = sql_roster(&conn, CHANNEL_ROSTER_SELECT, "c-main").await;
+        let rust = rust_roster(&conn, "c-main").await;
+
+        assert_eq!(
+            sql, rust,
+            "CLEANUP_CHANNEL_ENVELOPES and commit::current_member_devices must \
+             resolve the SAME member-device roster for a channel (I5, #722). \
+             SQL: {sql:?} / Rust: {rust:?}"
+        );
+        assert_eq!(
+            sql,
+            expected(),
+            "the agreed roster is not the intended one: active devices of current \
+             members only — revoked devices excluded, a member with no live device \
+             contributing nothing, and non-members absent"
+        );
+    }
+
+    #[tokio::test]
+    async fn dm_sql_and_rust_rosters_agree() {
+        let conn = conn().await;
+        fixture(&conn).await;
+        seed_mixed_watermarks(&conn, "dm-main").await;
+
+        let sql = sql_roster(&conn, DM_ROSTER_SELECT, "dm-main").await;
+        let rust = rust_roster(&conn, "dm-main").await;
+
+        assert_eq!(
+            sql, rust,
+            "CLEANUP_DM_ENVELOPES and commit::current_member_devices must resolve \
+             the SAME member-device roster for a DM (I5, #722). \
+             SQL: {sql:?} / Rust: {rust:?}"
+        );
+        assert_eq!(sql, expected(), "the agreed DM roster is not the intended one");
+    }
+
+    /// Scoping: the roster of a sibling conversation is its own, on both paths.
+    /// A roster that leaked across conversations would delete one channel's mail
+    /// on another channel's watermarks.
+    #[tokio::test]
+    async fn a_sibling_conversation_resolves_its_own_roster_on_both_paths() {
+        let conn = conn().await;
+        fixture(&conn).await;
+
+        for (select, conv) in [
+            (CHANNEL_ROSTER_SELECT, "c-other"),
+            (DM_ROSTER_SELECT, "dm-other"),
+        ] {
+            let sql = sql_roster(&conn, select, conv).await;
+            let rust = rust_roster(&conn, conv).await;
+            assert_eq!(sql, rust, "{conv}: rosters diverge");
+            assert_eq!(
+                sql,
+                vec!["eve-1".to_string()],
+                "{conv} must see only its own member's device"
+            );
+        }
+    }
+
+    /// A member whose devices are ALL revoked, alone in the conversation: both
+    /// paths must return the EMPTY roster. This is the case where disagreeing is
+    /// most expensive — an empty roster disables envelope GC (conservative), but
+    /// on the commit-log side it removes Tier-1's lower bound, so the two sides
+    /// answering differently means one of them is acting on a device the other
+    /// considers gone.
+    #[tokio::test]
+    async fn an_all_revoked_member_yields_the_empty_roster_on_both_paths() {
+        let conn = conn().await;
+        exec(&conn, "INSERT INTO channels (id, group_id) VALUES ('c-dead', 'g-dead')").await;
+        exec(&conn, "INSERT INTO group_member (group_id, user_id) VALUES ('g-dead', 'carol')").await;
+        exec(
+            &conn,
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('dm-dead', 'carol')",
+        )
+        .await;
+        device(&conn, "carol", "carol-old-1", true).await;
+        device(&conn, "carol", "carol-old-2", true).await;
+        watermark(&conn, "c-dead", "carol", "carol-old-1", "-400 days").await;
+
+        for (select, conv) in [
+            (CHANNEL_ROSTER_SELECT, "c-dead"),
+            (DM_ROSTER_SELECT, "dm-dead"),
+        ] {
+            let sql = sql_roster(&conn, select, conv).await;
+            let rust = rust_roster(&conn, conv).await;
+            assert_eq!(sql, rust, "{conv}: rosters diverge on an all-revoked member");
+            assert!(
+                sql.is_empty(),
+                "{conv}: an all-revoked member contributes no devices, got {sql:?}"
+            );
+        }
+    }
+
+    /// An id that names no conversation: both paths must return nothing rather
+    /// than, say, every device in the table.
+    #[tokio::test]
+    async fn an_unknown_conversation_yields_the_empty_roster_on_both_paths() {
+        let conn = conn().await;
+        fixture(&conn).await;
+
+        for select in [CHANNEL_ROSTER_SELECT, DM_ROSTER_SELECT] {
+            let sql = sql_roster(&conn, select, "ghost").await;
+            assert!(sql.is_empty(), "unknown conversation resolved {sql:?}");
+        }
+        assert!(rust_roster(&conn, "ghost").await.is_empty());
+    }
+
+    // ── The fragment really is the statement ─────────────────────────────────
+
+    /// Factoring the roster out of the DELETE must not have changed the SQL the
+    /// DS executes. Pinned against the literal statements as they stood before
+    /// the extraction, so the "safe, non-behavioural refactor" claim is checked
+    /// rather than asserted.
+    #[test]
+    fn the_extraction_did_not_change_the_cleanup_sql() {
+        assert_eq!(
+            CLEANUP_CHANNEL_ENVELOPES,
+            "\
+DELETE FROM message_envelope
+ WHERE conversation_id = ?1
+   AND sent_at < (
+       SELECT CASE
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
+                THEN MIN(cw.last_fetched_at)
+                ELSE NULL
+              END
+       FROM group_member gm
+       JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
+       JOIN user_device ud ON ud.user_id = gm.user_id AND ud.revoked_at IS NULL
+       LEFT JOIN conversation_watermark cw
+              ON cw.conversation_id = ?1
+             AND cw.user_id = ud.user_id
+             AND cw.device_id = ud.device_id
+     )"
+        );
+        assert_eq!(
+            CLEANUP_DM_ENVELOPES,
+            "\
+DELETE FROM message_envelope
+ WHERE conversation_id = ?1
+   AND sent_at < (
+       SELECT CASE
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
+                THEN MIN(cw.last_fetched_at)
+                ELSE NULL
+              END
+       FROM dm_channel_member dcm
+       JOIN user_device ud ON ud.user_id = dcm.user_id AND ud.revoked_at IS NULL
+       LEFT JOIN conversation_watermark cw
+              ON cw.conversation_id = ?1
+             AND cw.user_id = ud.user_id
+             AND cw.device_id = ud.device_id
+       WHERE dcm.dm_channel_id = ?1
+     )"
+        );
+    }
+
+    /// The parity above compares a FRAGMENT of the DELETE against the Rust
+    /// roster; this ties that fragment to the DELETE's observable behaviour, so a
+    /// roster condition smuggled in ELSEWHERE in the statement cannot hide.
+    ///
+    /// Every device the fragment lists gets a recent cursor and every device it
+    /// excludes an ancient one, so an envelope in between is deleted. Then ONE
+    /// listed device — and only that one — is moved below the envelope, and the
+    /// envelope must survive: the outcome pivots on exactly the roster the
+    /// fragment reports.
+    #[tokio::test]
+    async fn the_roster_is_what_the_delete_actually_gates_on() {
+        for (conv, sql, select) in [
+            ("c-main", CLEANUP_CHANNEL_ENVELOPES, CHANNEL_ROSTER_SELECT),
+            ("dm-main", CLEANUP_DM_ENVELOPES, DM_ROSTER_SELECT),
+        ] {
+            // Leg 1 — every roster device collected past the envelope.
+            let caught_up = conn().await;
+            fixture(&caught_up).await;
+            let roster = sql_roster(&caught_up, select, conv).await;
+            assert_eq!(roster, expected(), "{conv}: unexpected roster");
+            for d in &roster {
+                let user = d.split('-').next().unwrap().to_string();
+                watermark(&caught_up, conv, &user, d, "-1 day").await;
+            }
+            // Excluded devices are far behind — they must not be consulted.
+            watermark(&caught_up, conv, "bob", "bob-revoked", "-400 days").await;
+            watermark(&caught_up, conv, "carol", "carol-old-1", "-400 days").await;
+            watermark(&caught_up, conv, "carol", "carol-old-2", "-400 days").await;
+            watermark(&caught_up, conv, "mallory", "mallory-1", "-400 days").await;
+            envelope(&caught_up, "e1", conv, "-5 days").await;
+            caught_up
+                .execute(sql, libsql::params![conv.to_string()])
+                .await
+                .unwrap();
+            assert_eq!(
+                envelope_count(&caught_up, conv).await,
+                0,
+                "{conv}: with every device the roster lists caught up, the envelope \
+                 must go — a device the roster EXCLUDES must not hold it"
+            );
+
+            // Leg 2 — one roster device, and only it, falls behind.
+            let held = conn().await;
+            fixture(&held).await;
+            for d in &roster {
+                let user = d.split('-').next().unwrap().to_string();
+                let offset = if d.as_str() == "bob-silent" {
+                    "-400 days"
+                } else {
+                    "-1 day"
+                };
+                watermark(&held, conv, &user, d, offset).await;
+            }
+            watermark(&held, conv, "bob", "bob-revoked", "-1 day").await;
+            watermark(&held, conv, "carol", "carol-old-1", "-1 day").await;
+            watermark(&held, conv, "carol", "carol-old-2", "-1 day").await;
+            watermark(&held, conv, "mallory", "mallory-1", "-1 day").await;
+            envelope(&held, "e1", conv, "-5 days").await;
+            held.execute(sql, libsql::params![conv.to_string()])
+                .await
+                .unwrap();
+            assert_eq!(
+                envelope_count(&held, conv).await,
+                1,
+                "{conv}: a single device the roster LISTS still holds the envelope, \
+                 however caught-up the excluded devices are"
+            );
+        }
     }
 }

@@ -98,8 +98,24 @@ whole-second `…T09:00:00+00:00` sorts *below* `…T09:00:00.123456789+00:00`
 (`'+'` 0x2B < `'.'` 0x2E), which silently buried admin tombstones written in the
 same second as the message they redact — the delete appeared to succeed and no
 recipient ever applied it. The DS additionally stamps a tombstone strictly above
-the conversation's existing high-water `sent_at`, so client/DS clock skew cannot
-reintroduce the same burial.
+the conversation's **floor** (`sent_at_after` / `TOMBSTONE_FLOOR` in
+`pollis-delivery/src/messages.rs`), so client/DS clock skew cannot reintroduce
+the same burial.
+
+That floor is the greater of `MAX(sent_at)` over `message_envelope` **and**
+`MAX(last_fetched_at)` over `conversation_watermark`, both scoped to the
+conversation (#692). The envelope side alone is not enough: envelope GC deletes
+rows once every current member device has watermarked past them, and since the
+TTL arm's removal that deletion is purely watermark-gated — so a fully-collected
+conversation ends up with *no* envelopes, `MAX(sent_at)` goes NULL, and the stamp
+falls back to wall-clock `now`. A recipient whose watermark came from a client
+clock running ahead of the DS clock would then never fetch the tombstone (the
+cursor only moves forward, so an envelope at or below it is skipped permanently,
+not merely delayed) and the deleted message would stay readable on that device
+forever. `conversation_watermark` rows outlive envelope GC — they are only ever
+advanced, or deleted with the device itself — so they are the evidence the floor
+must also consult. Pinned by `messages::tombstone_floor_tests` and
+`pollis-delivery/tests/envelope_retention.rs` (Part F).
 
 **Sealed sender (#331, #607).** Attribution is taken from the MLS credential inside
 the ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))
@@ -192,13 +208,15 @@ anonymous-membership (not shipped — tracked in #489).
 - `device_id` TEXT NOT NULL
 - `last_fetched_at` TEXT NOT NULL
 
-Used by the envelope cleanup sweep — the `CLEANUP_CHANNEL_ENVELOPES` / `CLEANUP_DM_ENVELOPES` DELETEs in `pollis-delivery/src/messages.rs`, run server-side by `apply_envelope_gc` (the `/v1/envelopes/gc` endpoint) on ingest — to decide when it is safe to drop a row from `message_envelope`. A row is deleted **only** when every **non-revoked** device of every current member has watermarked past `sent_at`. Retention is bounded by the slowest member device and by nothing else — invariant **I3** in `docs/backend-core-invariants.md`.
+Used by the envelope cleanup sweep — the `CLEANUP_CHANNEL_ENVELOPES` / `CLEANUP_DM_ENVELOPES` DELETEs in `pollis-delivery/src/messages.rs` — to decide when it is safe to drop a row from `message_envelope`. The **trigger** is server-side (#689): the DS runs `sweep_envelope_gc` on a fixed cadence (`POLLIS_DS_GC_SWEEP_SECS`, default 3600s) over every conversation with envelopes, so GC no longer rides a member's ingest path and a conversation whose members all go quiet is still collected. The per-conversation `apply_envelope_gc` (the `/v1/envelopes/gc` endpoint) runs the same watermark-gated cleanup on demand; both share the one cleanup chokepoint. A row is deleted **only** when every **non-revoked** device of every current member has watermarked past `sent_at`. Retention is bounded by the slowest member device and by nothing else — invariant **I3** in `docs/backend-core-invariants.md`.
 
 There is **no TTL, and no time-based gate of any kind may be added here.** An OR'd `sent_at < datetime('now','-30 days')` arm used to sit alongside the watermark gate; because it was OR'd it deleted on its own, without consulting a single watermark, so encrypted mail no recipient device had ever collected was destroyed 30 days after it was sent, and any member offline for longer silently and permanently lost messages. That is failure mode **F3**. Age is not evidence of delivery.
 
 Every branch of the remaining gate fails closed: a member device that has never reported a watermark breaks the `COUNT(devices) = COUNT(watermarks)` check (the LEFT JOIN yields NULL, which `COUNT` skips), so the CASE returns NULL and `sent_at < NULL` deletes nothing; an empty member-device roster aggregates to `COUNT 0 = COUNT 0` with `MIN(...) = NULL` over zero rows and likewise deletes nothing. An unresolvable or fully-vacated roster is never read as "everybody has collected".
 
 **Revoked devices are excluded from the roster the watermark gate is measured against** (`AND ud.revoked_at IS NULL` in the `user_device` join, #685). A revoked device can never rejoin the tree (invariant I5), so it must not count: otherwise its stale watermark pins `MIN(cw)` down, or — with no watermark row at all — it breaks the `COUNT(devices) = COUNT(watermarks)` "every device reported" check and disables pruning **entirely**, leaving envelopes every live device has long since read on the server forever. This mirrors `commit::current_member_devices`, which excludes revoked devices from the commit-log retention floor for the same reason.
+
+That mirroring is **enforced, not merely documented** (#722). "Which member devices count toward retention" has three implementations that had to agree by hand — the two `CLEANUP_*` DELETEs and `commit::current_member_devices` — and a divergence is an I5 violation surfacing as dropped mail (roster too narrow) or retention that never clears (roster too wide). The roster half of each DELETE now lives in the `channel_member_device_rows!` / `dm_member_device_rows!` macros in `messages.rs`, `concat!`-ed back into the statement (the executed SQL is byte-identical, pinned by a test). `messages::roster_parity_tests` SELECTs the *same* join chain the DELETE aggregates over and asserts it resolves the identical device list as the Rust function, over a fixture covering plain members, mixed live/revoked devices, all-revoked members, non-members, member devices with no watermark row, and both conversation shapes.
 
 Seed paths (so a new device or a pre-join user doesn't block cleanup retroactively). All three skip revoked devices (`revoked_at IS NULL`, #685) — a revoked device is not part of the GC roster, so seeding it a row would just re-introduce the wedge:
 - group member-add (`pollis-delivery` `groups.rs::add_member_rows`) seeds one row per (channel, device) for the joining user at join time.
