@@ -65,8 +65,9 @@ pub fn frame_fanout_counters() -> (u64, u64) {
 /// runtime so the host process can exit.
 ///
 /// Pre-#335 this task spawned with no shutdown path and pinned the
-/// runtime alive forever, causing Squirrel.Mac's ShipIt to hang during
-/// auto-update; see `electron/src/main.ts`'s graceful-quit handlers.
+/// runtime alive forever, hanging the host process during auto-update. The
+/// symptom was first hit under the (since-reverted, #386/#389) Electron
+/// shell; the shutdown path here is what keeps the Tauri host able to exit.
 pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();

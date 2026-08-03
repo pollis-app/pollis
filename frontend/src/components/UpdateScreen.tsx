@@ -1,7 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState } from "react";
 import { check, relaunch, invoke } from "../bridge";
-import { hasElectron } from "../bridge/runtime";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 
 type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "relaunching" | "error";
@@ -57,14 +56,9 @@ export const UpdateScreen: React.FC = () => {
               break;
             case "Progress":
               downloadedBytes += event.data.chunkLength;
-              // Prefer the precomputed `percent` Electron ships
-              // (electron-updater computes it against the true CDN
-              // content-length, which the `Started` event doesn't
-              // carry). Fall back to chunkLength-sum / totalBytes
-              // for the Tauri path where percent isn't included.
-              if (typeof event.data.percent === "number") {
-                setProgress(Math.round(event.data.percent));
-              } else if (totalBytes > 0) {
+              // Tauri's plugin ships per-chunk byte counts plus the upfront
+              // `contentLength` from `Started` — no precomputed percentage.
+              if (totalBytes > 0) {
                 setProgress(Math.round((downloadedBytes / totalBytes) * 100));
               }
               break;
@@ -79,16 +73,9 @@ export const UpdateScreen: React.FC = () => {
         }
 
         setPhase("relaunching");
-        // Electron: main process already called autoUpdater.quitAndInstall()
-        // when the download finished — it will quit + relaunch the app
-        // itself. Calling relaunch() here (app.relaunch + app.exit(0))
-        // races with Squirrel.Mac's ShipIt handoff and can leave the
-        // install half-applied. Tauri's plugin has the opposite shape:
-        // downloadAndInstall completes the install but does NOT relaunch,
-        // so the renderer must.
-        if (!hasElectron()) {
-          await relaunch();
-        }
+        // Tauri's plugin completes the install but does NOT relaunch, so the
+        // renderer must.
+        await relaunch();
       } catch (err) {
         if (!cancelled) {
           console.error("[update] Auto-update failed:", err);

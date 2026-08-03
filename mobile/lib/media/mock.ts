@@ -1,11 +1,14 @@
 // Dev-only mock for the `get_media_path` command (issue #346).
 //
-// The Rust side of the file-path transport doesn't exist yet — when it
-// does, it'll decrypt R2 bytes to a sandbox file and return the path.
-// Until then this mock writes a placeholder image into the same dest dir
-// and returns its `file://` URI, so the full mobile pipeline (resolve →
-// expo-image render → unlink-on-unmount) can be exercised end-to-end
-// against mock message data exactly as the real command will drive it.
+// The real command exists — the `get_media_path` arm in
+// `pollis-core/src/bridge.rs` decrypts R2 bytes to a sandbox file and returns
+// its `file://` path. This mock writes a placeholder image into the same dest
+// dir and returns the same shape, so the mobile pipeline (resolve →
+// expo-image render → unlink-on-unmount) can be exercised against mock
+// message data without R2 credentials or a real attachment.
+//
+// NOTE: the real arm also takes `r2Key`; this mock keys off `contentHash` +
+// `destDir` only.
 //
 // Registered via the bridge's mock registry, which always wins over the
 // native bridge — so this is safe to leave installed in dev even after

@@ -13,8 +13,9 @@ and [security-whitepaper.md](security-whitepaper.md)), running *your own* server
 is exactly the adversarial position: if the operator could read messages or hear
 audio, you — now the operator — would be able to, and you can confirm you can't.
 
-> This builds the **Tauri** desktop app (the shipping shell). The `electron/`
-> directory is deprecated legacy — see [../electron/DEPRECATED.md](../electron/DEPRECATED.md).
+> This builds the **Tauri** desktop app — the only desktop shell. (An Electron
+> shell existed briefly and was reverted by #386/#389; there is no `electron/`
+> directory. See [electron-migration.md](electron-migration.md) for that history.)
 
 ---
 
