@@ -44,40 +44,48 @@ cannot** — happy-path coverage does not count.
 | PL-02 | Move the GC *trigger* server-side — today it fires from whichever member happens to ingest (`TODO(#419)`, messages.rs:752). The predicate is already many-member correct; the trigger is not. | P0 correctness | M |
 | PL-03 | Reference-count attachment deletion server-side (messages.rs:853) — today an unconditional remote delete can strand a still-referenced file. | P1 | M |
 | PL-04 | Enforce I1/I2 at the schema layer. No `TRIGGER` exists anywhere; the gapless chain is held only by the CAS insert in `pollis-delivery/src/commit.rs`. Phases 1–5 of the invariants doc. **Migration 000007 is a deliberate permanent hole — do not reuse.** | P1 | L |
-| PL-05 | **#661** — `sealed_admin_delete_of_other_member_works` is likely a real ordering defect, not test timing. See "PL-05 analysis" below before touching the assertion. | P1 | M |
+| PL-05a | Harden the tombstone `sent_at` floor against envelope GC (latent hazard, reasoned from code). See "PL-05 analysis (a)". | P2 | S |
+| PL-05b | **#661** — root cause UNCONFIRMED. An earlier hypothesis was checked and ruled out; see "PL-05 analysis (b)". Instrument before touching the assertion. | P2 | M |
 
 **Verify:** `cargo test -p pollis-delivery`; `cargo test --features test-harness --test flows`; Kani
 proofs; TLA+ `CommitLog` / `Delivery`.
 
-### PL-05 analysis — the flake is probably a real dropped-tombstone bug
+### PL-05 analysis — two separate things, do not conflate them
+
+**(a) A latent tombstone-ordering hazard. Real, but it does NOT explain #661.**
 
 Ingest selects envelopes with `sent_at > last_fetched_at` (strictly greater) and advances the
 watermark to the highest `sent_at` it consumed (`pollis-core/src/commands/messages/ingest.rs:148-159`).
-Anything stamped at or below a device's watermark is therefore skipped **permanently**, not merely
-delayed — the cursor never goes back.
+Anything stamped at or below a device's watermark is skipped **permanently** — the cursor never
+rewinds.
 
-The delete path already knows this. `sent_at_after()` (`pollis-delivery/src/messages.rs:203`) stamps
-a tombstone strictly after a floor, and its doc comment states the intent plainly: *"the tombstone
-would again sort underneath and never be fetched … removes the dependence on the two clocks
-agreeing."*
+The delete path already guards this. `sent_at_after()` (`pollis-delivery/src/messages.rs:203`) stamps
+the tombstone strictly above a floor, and its doc comment states the intent: *"the tombstone would
+again sort underneath and never be fetched … removes the dependence on the two clocks agreeing."*
 
-**The hole:** the floor is computed as `SELECT MAX(sent_at) FROM message_envelope WHERE
-conversation_id = ?1` (messages.rs:511-522) — the maximum over envelopes **still present**. But
-envelopes are deleted by GC once every member device has collected them, and reads trigger that GC
-(`ingest.rs:180-192`). Once a conversation's envelopes have been pruned, `MAX(sent_at)` is `NULL`,
-`sent_at_after` falls back to wall-clock `now`, and the clock-skew dependency the comment claims to
-have removed is back. A recipient whose watermark was stamped from a client clock running ahead of
-the DS clock will then never fetch the tombstone, and the deleted message stays readable on that
-device forever.
+The gap: the floor is `SELECT MAX(sent_at) FROM message_envelope WHERE conversation_id = ?1`
+(messages.rs:511-522) — the max over envelopes **still present**. Once every member device has
+reported a watermark, GC prunes those envelopes; with the conversation's envelopes gone,
+`MAX(sent_at)` is `NULL`, `sent_at_after` falls back to wall-clock `now`, and the clock-skew
+dependency the guard was written to remove is back. A recipient whose watermark came from a client
+clock running ahead of the DS clock would then never fetch the tombstone.
 
-`conversation_watermark.last_fetched_at` rows survive envelope GC, so the correct floor is the
-greater of `MAX(sent_at)` over envelopes **and** `MAX(last_fetched_at)` over that conversation's
-watermarks. Fix the floor, then decide whether the test still needs a convergence wait.
+`conversation_watermark.last_fetched_at` rows outlive envelope GC, so the floor should be the greater
+of `MAX(sent_at)` over envelopes **and** `MAX(last_fetched_at)` over that conversation's watermarks.
+Cheap, strictly safer, worth doing on its own merits.
 
-Treat this as correctness work, not test maintenance: the same mechanism can silently drop any
-envelope stamped at or below a live watermark, which is the exact class of failure this epic exists
-to eliminate. Note this was reasoned from the code, not yet reproduced under instrumentation —
-confirm with a targeted test before shipping the fix.
+**(b) Why this is not the #661 cause.** In that test bob sends and never fetches, and only
+`ingest.rs` advances watermarks — no other call site does. So bob's device has no
+`conversation_watermark` row, the cleanup CASE's `COUNT(devices) = COUNT(watermarks)` check fails,
+nothing is pruned, and the floor is therefore non-NULL and equal to bob's message. The tombstone
+lands strictly above carol's watermark and she should fetch it. The hazard in (a) needs *all* member
+devices to have reported, which this test never reaches.
+
+So **#661's root cause remains unconfirmed.** The remaining candidates, in order: read-after-write
+visibility between the DS's write connection and carol's read connection (the issue author's own
+hypothesis, and the best fit for a timing-dependent 1-in-18 failure); or the tombstone being fetched
+but not applied because carol's MLS state has not reached the required epoch during interleaved
+replay. Instrument before fixing — do not patch the assertion until the mechanism is known.
 
 ---
 

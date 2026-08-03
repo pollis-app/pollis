@@ -113,16 +113,27 @@ Implements phases 1-5 of `docs/backend-core-invariants.md`.
 
 **Migrations are additive, and 000007 is a deliberate permanent hole — do not reuse it.**')" "security"
 
-create "WS1: Fix the dropped-tombstone ordering bug behind flaky #661" \
-"$(ref WS1 'See the "PL-05 analysis" section of the epic doc for the full derivation. Summary:
+create "WS1: Harden the tombstone sent_at floor against envelope GC" \
+"$(ref WS1 'See "PL-05 analysis (a)" in the epic doc.
 
 Ingest selects `sent_at > last_fetched_at` and never rewinds the cursor (`pollis-core/src/commands/messages/ingest.rs:148-159`), so an envelope stamped at or below a device watermark is skipped **permanently**.
 
-`sent_at_after()` (`pollis-delivery/src/messages.rs:203`) already guards tombstones against this, but its floor is `MAX(sent_at)` over envelopes **still present** (messages.rs:511-522). Envelope GC — which reads themselves trigger — can prune them all, at which point the floor is NULL, the stamp falls back to wall-clock `now`, and the clock-skew dependency the guard was written to remove is back. The deleted message then stays readable on that device forever.
+`sent_at_after()` (`pollis-delivery/src/messages.rs:203`) guards tombstones against this, but its floor is `MAX(sent_at)` over envelopes **still present** (messages.rs:511-522). Once every member device has reported a watermark, GC prunes those envelopes; the floor then goes NULL, the stamp falls back to wall-clock `now`, and the clock-skew dependency the guard was written to remove is back.
 
-`conversation_watermark.last_fetched_at` rows outlive envelope GC, so the floor should be the greater of `MAX(sent_at)` and `MAX(last_fetched_at)`.
+`conversation_watermark.last_fetched_at` rows outlive envelope GC, so the floor should be the greater of `MAX(sent_at)` and `MAX(last_fetched_at)`. Cheap and strictly safer.
 
-Reasoned from the code, **not yet reproduced under instrumentation** — confirm with a targeted test before shipping. Fix the ordering first, then decide whether the test still needs a convergence wait.')" "bug"
+Latent hazard reasoned from code, not observed in the wild.')" "bug"
+
+create "WS1: Find the actual root cause of flaky #661" \
+"$(ref WS1 'See "PL-05 analysis (b)" in the epic doc. **The cause is unconfirmed — instrument before changing anything.**
+
+An earlier hypothesis (the tombstone `sent_at` floor going NULL after GC) was checked and **ruled out for this test**: bob sends and never fetches, and only `ingest.rs` advances watermarks, so bob has no `conversation_watermark` row, the `COUNT(devices) = COUNT(watermarks)` check fails, nothing is pruned, and the floor stays non-NULL. The tombstone therefore sorts above carol'"'"'s watermark and she should fetch it.
+
+Remaining candidates, in order:
+1. Read-after-write visibility between the DS write connection and carol'"'"'s read connection — the issue author'"'"'s own hypothesis and the best fit for a timing-dependent 1-in-18 failure.
+2. The tombstone is fetched but not applied because carol'"'"'s MLS state has not reached the required epoch during interleaved replay.
+
+Do not add a retry/sleep to the assertion until the mechanism is known — that would convert a possible real dropped-tombstone bug into a green test.')" "bug"
 
 echo
 echo "== WS2 - latency and cost =="
