@@ -207,35 +207,23 @@ verifier and run it against the live log — see
 
 ## Rotating the signing key
 
-Operator ceremony — needs write access to the `STH_SIGNING_KEY` secret. Last run:
-#732, which replaced the original seed with fresh material.
+The design, custody options and the literal step-by-step ceremony live in
+[`sth-signing-key-custody.md`](sth-signing-key-custody.md) — that is the canonical
+runbook; follow it rather than this summary. Last executed by #732, which replaced
+the original seed with fresh material.
 
-The published ML-DSA-44 key lives in five places that must never disagree:
-`pollis-core/src/commands/transparency.rs` (`PINNED_LOG_PUBLIC_KEY`),
-`website/artifacts.js` (`PINNED_KEY`), `.github/workflows/rebuild-verify.yml`
-(`PINNED_LOG_KEY`), the `verifier-release.yml` release body, and `SECURITY.md` /
-`README.md`.
+Two things about it are easy to get wrong and worth repeating here:
 
-1. Mint fresh material — `cargo run -p verifiable-log-builder --bin builder -- keygen`.
-   The secret is the 32-byte hex seed; an ML-DSA-44 private key *is* its seed.
-2. Replace `STH_SIGNING_KEY`. The old value is unrecoverable afterwards, which is
-   fine: trees rebuild from the source DBs, never from the old key.
-3. Dispatch `transparency-publish.yml` with **`full_resync: true`**. This is not
-   optional. Pass 1 normally syncs `--size-only`, and every re-signed artifact is
-   byte-length-identical to the one it replaces (fixed-size ML-DSA keys and
-   signatures, SHA-256 roots, reused timestamps), so without the flag the
-   re-signed heads are silently skipped — leaving the old key published while
-   `latest.json` carries a signature it cannot verify.
-4. `full_resync` also skips the cross-run equivocation tripwire for that run and
-   re-seeds it. A rotation changes every signature and is byte-indistinguishable
-   from equivocation; the tripwire is right to fire, so the ceremony suppresses it
-   once, deliberately, rather than the tripwire being made lenient.
-5. Confirm all three tenants serve the new key, then pin it in the five places
-   above **in one commit**, and verify with `pollis-verify remote
-   https://verify.pollis.com` from a machine that did not perform the rotation.
-6. Ship a desktop release — the app pin is compiled in — and run `website-deploy.yml`.
+- Dispatch `transparency-publish.yml` with **`full_resync: true`**. Re-signed
+  artifacts are byte-length-identical to the ones they replace, so the default
+  `--size-only` sync skips them and the rotation silently does not take.
+- The published key is pinned in five places that must never disagree:
+  `pollis-core/src/commands/transparency.rs` (`PINNED_LOG_PUBLIC_KEY`),
+  `website/artifacts.js` (`PINNED_KEY`), `.github/workflows/rebuild-verify.yml`
+  (`PINNED_LOG_KEY`), the `verifier-release.yml` release body, and
+  `SECURITY.md` / `README.md`. Change them in one commit.
 
-**Known gap (#700):** there is no overlap window. Independent auditors holding
-cached pre-rotation heads see the rotation as equivocation and can only re-pin
-from the announcement, not verify the transition. A small pinned key set with an
-overlap window needs designing before the next rotation.
+**Known gap (#700):** there is no overlap window, so a rotation is a flag day —
+auditors holding cached pre-rotation heads see it as equivocation and can only
+re-pin from the announcement. The key-set shape that fixes this is designed in
+§5 of the custody doc and not yet built.

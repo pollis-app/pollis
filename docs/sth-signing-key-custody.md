@@ -185,9 +185,22 @@ Written to be followed literally. Every step is checkable; none of it is "and th
 **Republish**
 5. Republish **all three trees from source data** under the v2 contexts. This is a rebuild, not a
    re-signature: the v1 (Ed25519-era) roots are retired and do not chain to the v2 roots.
-6. Verify each served bundle end to end with the public verifier — `public_key.json`, `sth/latest.json`,
+   Dispatch `transparency-publish.yml` with **`full_resync: true`**. This is not optional, and it is
+   the step that makes the rotation actually take. Pass 1 normally syncs `--size-only`, and every
+   re-signed artifact is byte-length-*identical* to the one it replaces — ML-DSA-44 keys (1312 B) and
+   signatures (2420 B) are fixed-length, roots are SHA-256, and an unchanged tree deliberately reuses
+   the timestamp frozen in its published head. Measured on the #732 rotation: `public_key.json` 2646 B
+   and `v1/sth/1.json` 4992 B, before and after. Without the flag the sync skips every re-signed head
+   while pass 2 (which has no `--size-only`) overwrites `latest.json` with a signature the still-served
+   old key cannot verify — a live, self-inconsistent log, strictly worse than not rotating.
+6. `full_resync` also suppresses the cross-run equivocation tripwire for that one run and re-seeds it.
+   A rotation changes every signature and so is byte-indistinguishable from equivocation; the tripwire
+   is right to fire, and the ceremony silences it once, deliberately, rather than the tripwire being
+   made lenient. Note the tripwire cache is an `actions/cache` entry and ages out after 7 days of
+   non-use, which silently disables equivocation detection — check it is seeded after any rotation.
+7. Verify each served bundle end to end with the public verifier — `public_key.json`, `sth/latest.json`,
    `entries.json`, and the inclusion/consistency proofs — for **all three** trees, not just the commit
-   log.
+   log. Run it from a machine that did **not** perform the rotation.
 
 **Pin**
 7. Set the pin(s) in `pollis-core/src/commands/transparency.rs` in the same change that ships the
