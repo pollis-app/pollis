@@ -73,8 +73,24 @@ frontend/src/
   stores/            # MobX class singletons (appStore.ts)
   types/             # TypeScript types
 
+mobile/              # Standalone Expo/RN app (NOT a pnpm workspace member) —
+                     #   consumes pollis-core via uniffi (modules/pollis-native)
+  eas.json           # EAS build profiles (dev/preview/production); fingerprint
+                     #   runtimeVersion so a native-core change can't ship a bad OTA
+  modules/pollis-native/  # uniffi-bindgen-react-native turbo module (JSI bridge)
+
 website/             # Static marketing site (Cloudflare Pages, not part of the app)
 ```
+
+**Mobile build (#706):** the mobile app has no released output yet, but CI now
+builds a real Android APK. The `android-build` job in
+`.github/workflows/mobile-core-check.yml` runs the full chain on `ubuntu-latest`
+— uniffi binding gen + a 3-ABI `cargo-ndk` cross-compile of `pollis-core`,
+`expo prebuild`, then `gradlew :app:assembleRelease` — and uploads the APK
+artifact. It uses `expo prebuild` + Gradle directly (no `eas build`, no EAS
+account) and signs with the throwaway debug keystore; distribution signing is
+blocked (Play console / Apple account #723). See `docs/deployments.md` and
+`mobile/CLAUDE.md`.
 
 ## Storage Model
 

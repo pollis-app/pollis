@@ -1,0 +1,40 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "runtimeVersion": {
+        "policy": "fingerprint"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": true
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "runtimeVersion": {
+        "policy": "fingerprint"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "runtimeVersion": {
+        "policy": "fingerprint"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  }
+}

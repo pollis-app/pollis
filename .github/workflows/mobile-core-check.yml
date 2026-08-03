@@ -14,7 +14,22 @@
 # (gating is per-OS, not per-ABI). The iOS job needs a macOS runner for the
 # Apple SDK; it gates the `ios_kek` Keychain path the same way the android job
 # gates the JNI path.
-name: Mobile core (cross-compile)
+#
+# On top of those two cross-compile gates, `android-build` assembles a REAL
+# installable Android APK end to end on a stock ubuntu-latest runner — uniffi
+# binding generation, a 3-ABI cargo-ndk cross-compile of pollis-core, the Expo
+# prebuild, and a Gradle release assembly — and uploads it as an artifact. This
+# is the first CI job that ever exercises the full mobile build (prebuild +
+# Gradle + uniffi C++ template alignment), where the first-real-build breakage
+# lives (#706 / PL-18). It uses `expo prebuild` + Gradle directly, NOT
+# `eas build` (that needs an EAS account this repo has none of). No signing
+# secret is consumed: the artifact is signed with the throwaway Android debug
+# keystore that the Expo template generates — Play/App Store upload signing is
+# the deliberately-blocked half of PL-18 (needs the Play console + an Apple
+# account, #723). `expo-doctor` runs as its own cheap job. All three heavy jobs
+# are path-filtered (they never run on unrelated PRs), so nothing here is an
+# always-on gate.
+name: Mobile core (cross-compile + Android build)
 
 on:
   pull_request:
@@ -22,6 +37,7 @@ on:
       - 'pollis-core/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'mobile/**'
       - '.github/workflows/mobile-core-check.yml'
   workflow_dispatch:
 
@@ -78,3 +94,141 @@ jobs:
       # (ios_kek Keychain seal, mobile stubs) exactly like the android job.
       - name: Cross-compile pollis-core for ios
         run: cargo check -p pollis-core --no-default-features --target aarch64-apple-ios
+
+  # Config/dependency health of the Expo project. Cheap (no Rust, no NDK, no
+  # Gradle) so it gives fast independent signal and never holds up the APK
+  # artifact. If it flags anything, the first-run output is the enumeration.
+  expo-doctor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+
+      # mobile/ is a standalone Expo project, NOT a workspace member (see
+      # mobile/CLAUDE.md) — every pnpm command runs with --ignore-workspace.
+      - name: Install JS dependencies
+        working-directory: mobile
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      - name: expo-doctor
+        working-directory: mobile
+        run: pnpm dlx expo-doctor
+
+  # The first end-to-end mobile build in CI: uniffi bindings + a 3-ABI
+  # cargo-ndk cross-compile of pollis-core, Expo prebuild, Gradle release
+  # assembly, and an uploaded APK. Everything runs on a stock ubuntu-latest
+  # runner with no EAS account and no signing secret.
+  android-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+
+      # The three Android ABIs the app ships (arm64-v8a, armeabi-v7a, x86_64),
+      # matching modules/pollis-native/ubrn.config.yaml.
+      - name: Add android rust targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-apk
+
+      # RN 0.83.6 pins NDK 27.1.12297006 and CMake 3.22.1 (mobile/CLAUDE.md);
+      # the runner's default NDK is a different revision, so Gradle's
+      # externalNativeBuild would fail to find the pinned one. Install the exact
+      # versions and point cargo-ndk at the same NDK the Gradle CMake build uses.
+      - name: Install the RN-pinned Android NDK + CMake
+        run: |
+          set -euo pipefail
+          # Resolve the SDK root and sdkmanager the way the current ubuntu-latest
+          # image lays them out, and fail loudly (not silently) if neither is
+          # where we expect — a missing tool must surface here, not three steps
+          # later as a confusing "NDK not found".
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK" ]; then
+            echo "ANDROID_HOME / ANDROID_SDK_ROOT not set on this runner" >&2
+            exit 1
+          fi
+          SDKMGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMGR" ]; then
+            SDKMGR="$(command -v sdkmanager)"
+          fi
+          # `sdkmanager --licenses` stops reading stdin once every licence is
+          # accepted and exits 0; a bare `yes | sdkmanager` then dies with EPIPE
+          # on the *successful* path and `pipefail` promotes that to a step
+          # failure. Wrapping only `yes` in `{ ... || true; }` discards yes's
+          # exit status while leaving sdkmanager's as the pipe's status, so a
+          # genuine licence failure still fails the step.
+          { yes || true; } | "$SDKMGR" --licenses >/dev/null
+          # compileSdk/targetSdk 36 + build-tools 36.0.0 are the Expo SDK 55 /
+          # RN 0.83 defaults (expo-modules-core ProjectConfiguration.kt); NDK
+          # 27.1.12297006 + CMake 3.22.1 are the RN-pinned native toolchain
+          # (mobile/CLAUDE.md). Gradle's externalNativeBuild resolves the NDK by
+          # exact version, so this must match or the CMake link fails.
+          "$SDKMGR" "ndk;27.1.12297006" "cmake;3.22.1" "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_NDK_HOME=$SDK/ndk/27.1.12297006" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$SDK/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      # cargo-ndk drives the per-ABI cross-compile; the ubrn CLI must be the
+      # exact tag pinned in mobile/CLAUDE.md — its generated C++ template has to
+      # match the npm `uniffi-bindgen-react-native` (0.31.0-2) or CMake fails
+      # with `no member named 'string_to_buffer'`.
+      - name: Install cargo-ndk + uniffi-bindgen-react-native (pinned)
+        run: |
+          set -euo pipefail
+          cargo install cargo-ndk --locked
+          cargo install --git https://github.com/jhugman/uniffi-bindgen-react-native \
+            --tag 0.31.0-2 uniffi-bindgen-react-native --locked
+
+      - name: Install JS dependencies
+        working-directory: mobile
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      # Cross-compiles pollis-core for the 3 ABIs (--no-default-features, via
+      # cargo-ndk) into jniLibs AND generates the TS bindings + C++ JSI glue +
+      # android/CMakeLists.txt. Must precede prebuild/Gradle: the Metro JS
+      # bundle imports the generated module TS, and Gradle links the generated
+      # CMake + jniLibs.
+      - name: Generate uniffi bindings + cross-compile pollis-core (3 ABIs)
+        working-directory: mobile/modules/pollis-native
+        run: uniffi-bindgen-react-native build android --config ubrn.config.yaml --and-generate
+
+      # Generates the android/ project from app.json (deps already installed).
+      - name: Expo prebuild (android)
+        working-directory: mobile
+        run: pnpm expo prebuild --platform android --no-install
+
+      # assembleRelease is self-contained: it bundles the JS and, per the RN
+      # template, signs the release variant with the auto-generated debug
+      # keystore (no signing secret needed). The output is installable but NOT
+      # distribution-signed — Play upload signing is the blocked half of PL-18.
+      - name: Assemble release APK
+        working-directory: mobile/android
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-android-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
