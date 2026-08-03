@@ -5,15 +5,26 @@
 -- Device cert v2 binds BOTH leaf keys, so both must be readable by any client
 -- that re-verifies the chain (`verify_added_devices`) and by the relay's offline
 -- handshake check. They are separate columns rather than one overloaded blob
--- because `mls_signature_pub` is ALSO the DS request-auth credential
--- (`pollis-delivery/src/auth.rs` reads it as a raw 32-byte Ed25519 key);
--- overwriting it with a 1312-byte ML-DSA key would break authentication for
--- every already-shipped client the instant this migration ran.
+-- because `mls_signature_pub` WAS the DS request-auth credential, read as a raw
+-- 32-byte Ed25519 key; overwriting it in place with a 1312-byte ML-DSA key would
+-- have broken authentication for every already-shipped client the instant this
+-- migration ran. The same PR then moved request auth onto the new column, so
+-- `pollis-delivery/src/auth.rs` now reads `mls_signature_pub_pq` and verifies
+-- ML-DSA-44; `mls_signature_pub` survives only as the classic MLS leaf key that
+-- the v2 cert payload still binds.
 --
--- Additive + backward-compatible (CLAUDE.md migration rule): one nullable ADD
--- COLUMN. NULL means "this device predates #668" — such a row is skipped by
--- `resign_stale_device_certs` and treated as AbsentRetry by
+-- Additive + backward-compatible AS A SCHEMA CHANGE (CLAUDE.md migration rule):
+-- one nullable ADD COLUMN, so applying it cannot fail against a live DB and
+-- nothing existing is rewritten. NULL means "this device predates #668" — such a
+-- row is skipped by `resign_stale_device_certs` and treated as AbsentRetry by
 -- `verify_added_devices`, and self-heals the next time that device runs
--- `ensure_device_cert`. A previously-shipped app mentions the column nowhere and
--- keeps working unchanged.
+-- `ensure_device_cert`.
+--
+-- The migration is NOT, however, a compatibility shim for the release as a whole:
+-- once the #668 DS is live it authenticates against this column only, so a
+-- previously-shipped app — which never populates it and still signs Ed25519 — is
+-- 401'd on every write until it updates. That is why the #668 entry in
+-- docs/deployments.md requires the DS and the client to ship in the SAME cycle,
+-- DS first. It was an acceptable hard cutover solely because the deployment had
+-- no active users.
 ALTER TABLE user_device ADD COLUMN mls_signature_pub_pq BLOB;

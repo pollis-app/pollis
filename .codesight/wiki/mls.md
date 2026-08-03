@@ -41,10 +41,10 @@ Source: `pollis-core/src/commands/mls.rs`
 Steps:
 1. **Build roster** from `group_member` + `group_invite` (or `dm_channel_member`)
 2. **TOFU-pin every roster peer's `account_id_pub`** via `batch_check_and_pin_account_keys` (one Turso query). First-seen keys are pinned silently; an existing pin that no longer matches the server flips `verified=0`, refreshes the pin in place, and emits a `KeyChanged` realtime event. The actor's own user id is excluded. This closes the historical group MITM hole — see `.codesight/wiki/safety.md`.
-3. **Find devices** with unclaimed KeyPackages for roster users
+3. **Find devices** with unclaimed KeyPackages for roster users — filtered to `revoked_at IS NULL`, so a revoked device's leftover KeyPackages are never claimed
 4. **Peek at tree** to see who's already a member (avoids wasting KPs)
 5. **Claim KPs** only for devices not in the tree
-6. **Diff**: desired set vs actual tree → compute adds and removes
+6. **Diff**: desired set vs actual tree → compute adds and removes. The desired set (`desired_set`) is the union of two sources — devices with an available KeyPackage (the adds) and existing leaves whose user is still on the roster (the retentions, which is what stops the committer evicting itself). **Both** are gated on `valid_devices`, the `revoked_at IS NULL` snapshot from `registered_devices`. Gating only the retention half was #679: a revoked device rode back in through its own leftover KeyPackage, so it never reached `to_remove` and its leaf survived. `valid_devices = None` (snapshot unreadable) disables the gate; `Some(empty)` means nothing is valid — the two are deliberately different states, so a transient `user_device` read failure cannot empty a group.
 7. **Build and stage commit** with both add and remove proposals — do NOT `merge_pending_commit` yet
 8. **Submit the commit bundle to the DS on a fresh connection**: commit + GroupInfo + Welcome(s) are one **atomic** `POST /v1/commits` — the DS writes all three in a single libsql transaction (see "MLS durability hardening" below), so a recipient never sees a commit with no matching Welcome
 9. **On success**: `merge_pending_commit` locally → advance the local epoch
@@ -67,11 +67,46 @@ When device A commits a membership change:
 2. A `membership_changed` LiveKit event notifies online devices (convenience, not required). Like every realtime wake-up ping it carries **no sender/actor identity** — just the routing handle (see "Metadata-minimized signalling" below)
 3. Other devices call `process_pending_commits_inner` which:
    - Fetches commits from `mls_commit_log` at `epoch >= local_epoch`
-   - Applies them sequentially
+   - Applies them sequentially via `apply_one_commit`
    - If no local group exists → external-joins using published GroupInfo
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
-   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → `GET /v1/commits/:id?since=`) so the server can compute the commit-log **retention floor** (#539, below)
+   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → **device-signed** `POST /v1/commits/since`) so the server can compute the commit-log **retention floor** (#539, below). The report is authenticated (#681): it raises the floor, so it must be bound to the reporting device — reads (`GET /v1/commits/:id`) stay open, but recording a high-water does not. The report is fully best-effort and bounded by a short (5s) timeout inside `ds_report_commit_since`, so a black-holed DS can never stall catch-up — nor the suite-migration path (`migrate.rs`), which awaits it inline
+
+### Commit-apply recovery: no silent wedge (#680)
+
+`apply_one_commit` returns either `Applied` (the local epoch advanced) or
+`Recover(RecoverReason)` — never a bare "stop" that a caller could mistake for
+"caught up". Every failure to advance is a **recoverable** state that
+delete-and-rejoins (external-join), and the caller keys recovery off the explicit
+reason, not off the group merely being absent. This closes the four former `Stop`
+sites (`MlsGroup::load` None/Err, `tls_deserialize`, `try_into_protocol_message`,
+`merge_staged_commit`) that used to wedge a group that existed locally but could
+never advance.
+
+Classification matches the **real openmls error enums**, never their `Display`
+strings (`classify_process_message_error`): a string match silently reclassifies
+the moment openmls rewords a message or moves a case, and the group wedges with no
+signal. An error this code does not recognise falls to `RecoverReason::Unclassified`
+and still recovers — so a future openmls bump surfaces loudly (caught by the
+classification unit tests) instead of wedging.
+
+- **Own commit fanned back (#411):** at the pinned openmls rev, our own commit
+  echoed by the DS is returned as *content* (`OwnPrivateMessage` for Pollis's
+  PrivateMessage-framed handshake, or `OwnPendingCommit` if it were PublicMessage),
+  **not** an error. `apply_one_commit` merges the pending commit to adopt it. The
+  pre-#680 code only matched the old `"created by this client"` error string, so at
+  this rev the own commit fell through unmerged, was miscounted as applied, and the
+  dangling-pending clear then discarded the landed commit — stranding the committer
+  at a phantom epoch.
+- **Eviction / fork / corrupt / merge failure:** delete the local group and
+  external-join at head (gated by `may_rejoin` — a removed/revoked device stays
+  out). Messages sealed at the jumped-over epoch fall under accepted loss #1
+  (messages sent before you (re)joined the tree).
+
+Regression harness: `commands/mls/tests.rs` (classifier + per-Stop-site real-MLS
+recovery + own-commit convergence) and `tests/flows/adversarial.rs`
+(`corrupt_commit_recovers_instead_of_wedging`).
 
 ### Commit-log retention (I4, #539)
 
@@ -87,6 +122,18 @@ on return (`invariants::classify` → `GapRecover`) and external-joins at head,
 forfeiting only the pruned-gap messages (accepted loss #1). `may_rejoin` (I5) still
 blocks a removed/revoked device from that rejoin. See
 [database.md](./database.md#mls_commit_since-commit-log-db-migration-000003-539).
+
+The epoch floor (`prune_floor`) is **clamped to `head − 1`** (#681): the reported
+`since` values it derives Tier 1 from are untrusted, so a report above the real head
+must never drive the floor at/above `head` and delete the whole live log — the head
+commit (`epoch = head − 1`) is always retained, keeping the head reading true and the
+group advanceable. This mirrors `closed_generation_floor`'s `.min(head_generation)`
+(the live lineage is never retired wholesale). The report auth (above) and this clamp
+are the two halves of #681: together an unauthenticated, per-conversation commit-log
+wipe. Coverage: `prune_floor` clamp property + omit-clamp mutant (Kani, `commit.rs`);
+`pollis-delivery/tests/retention.rs` (bogus high-water cannot wipe); the report
+endpoint's signed/unsigned/revoked cases (`pollis-delivery/tests/auth.rs`); and the
+E2E `forged_retention_high_water_cannot_wipe_the_live_log` (`flows/adversarial.rs`).
 
 The bare `process_pending_commits_inner` / `_locked` variants are the raw commit replay used internally by the interleaved catch-up (via `process_pending_commits_inner_with_hook`). Callers that ADVANCE the epoch — the **commit-INITIATION** paths and the recovery converge alike — must NOT use the bare variant directly. The **commit-INITIATION** paths — send, edit, invite (add), remove — must NOT use the bare variant: advancing this device to head before its own op discards the ratchet keys for the current epoch (`max_past_epochs = 0`), so a current-epoch inbound message this device hasn't fetched yet would be **stranded** by its own commit (issue #440, the *committer strand*). They instead run the interleaved ingesting catch-up **before** advancing — see "Pre-op ingest-before-advance" below.
 
@@ -237,6 +284,37 @@ races, and duplicate deliveries. All are additive to the flows above.
   (`writes::is_member`) before accepting — mirroring `/v1/group-info`'s gate. This
   is the server half of the client-side membership gate above; together they make
   "a removed member climbs back via external-join" unrepresentable on both sides.
+- **Authenticated retention report + head-clamped floor (#681).** The catch-up
+  high-water report is a **device-signed** `POST /v1/commits/since`
+  (`auth::verify_request_identity`, same four `X-Pollis-*` headers as
+  `POST /v1/commits`, refuses a revoked device) instead of an unsigned `GET`
+  side-effect — nobody can raise the floor on another device's behalf. Paired with
+  `prune_floor`'s clamp to `head − 1`, this closes what was a remote,
+  unauthenticated, per-conversation commit-log wipe. Reads stay open; an
+  unauthenticated report is dropped, which only ever leaves the floor conservative
+  (an unreported member disables Tier 1).
+- **Device-pubkey cache on the auth path (#658).** Every device-signed DS request
+  used to re-read `user_device.mls_signature_pub_pq` from Turso; from the
+  Cloudflare Container's network position that single query cost **2000–4700 ms**,
+  and a first message in a fresh mobile group chains ~14 sequential signed calls
+  (15–60 s of user-visible latency). `auth::DeviceKeyCache` — an in-process
+  `(user_id, device_id) → verifying key` map on `AppState`, consulted by
+  `writes::gate` and the two `lib.rs` call sites — removes that read on every
+  request after the first. The **signature is still verified in full every time**;
+  only the key lookup is cached.
+  - *Revocation safety* is by explicit eviction: `/v1/devices/revoke`,
+    `/v1/auth/logout`, `/v1/devices/resign`, `/v1/account/rotate-identity`,
+    `/v1/account/delete`, `/v1/account/reset-recover`, `/v1/auth/register-device`
+    and `/v1/auth/publish-device-cert` all invalidate. A 30 s **absolute** TTL
+    (from insertion, never refreshed on use) backstops a hook that is ever missed.
+  - *Negative results are never cached* — a missing row is the normal state of a
+    device mid-enrollment, and a cached "unknown device" would 401 a device that
+    has since registered.
+  - *Depends on `max_instances: 1`* (`pollis-delivery/wrangler.{dev,prod}.jsonc`):
+    one container ⇒ one cache ⇒ eviction is globally effective. **Raising
+    `max_instances` breaks this** — a sibling instance would keep serving a
+    revoked device's key for up to the TTL — so it would require dropping the
+    cache or replacing eviction with a shared signal.
 
 ## Post-quantum suite: birth, migration, retirement (#454, #669)
 
@@ -334,6 +412,8 @@ When a new device (deviceC) enrolls for an existing user:
 3. **Other devices** process deviceC's external-join commits on next read/send
 
 The approver does NOT reconcile during approval (deviceC has no KPs yet at that point). DeviceC handles its own group joining via external-join.
+
+**Cert re-signing on identity rotation.** When the account identity key rotates (`account_identity::reset_identity`, and opportunistically on `pin::unlock`), every `user_device` row certed under the old key is stale and re-signed by `resign_stale_device_certs` (`mls/device.rs`). The candidate query (`stale_cert_candidates`) skips **revoked** rows (`revoked_at IS NULL`, #685): a revoked device can never rejoin the tree, so re-signing its cert is wasted work and would resurrect a valid-looking cert for a deliberately-retired device. (It also skips rows with a NULL leaf pub, which get their cert when that device next runs `ensure_device_cert`.)
 
 ## Voice Key Export
 

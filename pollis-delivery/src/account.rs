@@ -159,7 +159,16 @@ pub async fn rotate_identity(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    rotate_outcome_response(apply_rotate_identity(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_rotate_identity(&conn, authed.as_deref(), &parsed).await?;
+    // Rotation does not itself rewrite `mls_signature_pub_pq`, but it changes the
+    // account key every device cert chains to and is immediately followed by
+    // `/v1/devices/resign` and (for a recovering device) a fresh cert publish.
+    // Evicting the user here means the auth path re-reads once and can never
+    // serve a key from before the rotation (#658).
+    if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        state.device_keys.invalidate_user(&owner);
+    }
+    rotate_outcome_response(outcome)
 }
 
 /// Map a [`RotateOutcome`] to its HTTP response (200 / 403 / 409).
@@ -499,11 +508,28 @@ pub async fn revoke_device(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_revoke_device(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_revoke_device(&conn, authed.as_deref(), &parsed).await?;
+    // Revocation must bite on the NEXT request, not when the cache TTL lapses
+    // (#658). Evicted unconditionally: if the write was Forbidden nothing
+    // changed and the eviction only costs one re-read.
+    if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        state
+            .device_keys
+            .invalidate_device(&owner, &parsed.device_id);
+    }
+    outcome_response(outcome)
 }
 
-/// DELETE the revoked device's unclaimed key packages, then tombstone its row —
-/// one transaction, both `WHERE user_id = actor`.
+/// DELETE the revoked device's unclaimed key packages and its conversation
+/// watermarks, then tombstone its row — one transaction, all `WHERE user_id =
+/// actor`.
+///
+/// The watermark DELETE is the "invalid states unrepresentable" half of #685: a
+/// revoked device can never fetch again, so a `conversation_watermark` row for it
+/// is a cursor that can never advance. The envelope-GC reads filter revoked
+/// devices out at read time, but leaving the rows behind means the invalid state
+/// still exists in the table and every future reader has to remember to exclude
+/// it. Deleting it here removes it at the chokepoint instead.
 pub async fn apply_revoke_device(
     conn: &Connection,
     authed: Option<&str>,
@@ -516,6 +542,11 @@ pub async fn apply_revoke_device(
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
+        libsql::params![actor.clone(), body.device_id.clone()],
+    )
+    .await?;
+    tx.execute(
+        "DELETE FROM conversation_watermark WHERE user_id = ?1 AND device_id = ?2",
         libsql::params![actor.clone(), body.device_id.clone()],
     )
     .await?;
@@ -567,7 +598,15 @@ pub async fn logout_device(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_logout_device(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_logout_device(&conn, authed.as_deref(), &parsed).await?;
+    // The row is gone; the cached key must go with it (#658), or the logged-out
+    // device would keep authenticating until the TTL lapsed.
+    if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        state
+            .device_keys
+            .invalidate_device(&owner, &parsed.device_id);
+    }
+    outcome_response(outcome)
 }
 
 /// DELETE the device row `WHERE device_id = ? AND user_id = actor`. The
@@ -626,7 +665,14 @@ pub async fn reset_recover(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_reset_recover(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_reset_recover(&conn, authed.as_deref(), &parsed).await?;
+    // Account-wide device wipe → evict the whole user (#658). Cheaper to reason
+    // about than enumerating which sibling devices were dropped, and the kept
+    // `current_device_id` merely pays one re-read.
+    if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        state.device_keys.invalidate_user(&owner);
+    }
+    outcome_response(outcome)
 }
 
 /// All of identity-reset's main-DB cleanup, in one transaction. Self-scoped: the
@@ -718,7 +764,13 @@ pub async fn delete_account(
         }
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_delete_account(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_delete_account(&conn, authed.as_deref(), &parsed).await?;
+    // The `users` DELETE cascades to `user_device`, so every one of this user's
+    // cached keys is now stale (#658).
+    if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        state.device_keys.invalidate_user(&owner);
+    }
+    outcome_response(outcome)
 }
 
 /// Every remote-data delete of account deletion, in one transaction. Self-scoped

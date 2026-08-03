@@ -2,9 +2,11 @@ terraform {
   required_version = ">= 1.6.0"
 
   required_providers {
+    # 6.x, not 5.x: the 5.x line stopped at 5.100 and its runtime validator
+    # predates nodejs24.x, so it rejects the runtime this Lambda now needs.
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.60"
+      version = "~> 6.0"
     }
     archive = {
       source  = "hashicorp/archive"

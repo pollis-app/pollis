@@ -5,11 +5,11 @@
 //   import { invoke } from "../../lib/native/invoke";
 //   const groups = await invoke<Group[]>("list_user_groups");
 //
-// Today this routes through `nativeBridge` (see ./bridge.ts) which is a
-// placeholder turbomodule seam. Real bindings will come from the
-// `pollis-native` JSI module (uniffi-bindgen-react-native) — when those
-// land, only `./bridge.ts` needs to swap implementations. Call sites that
-// already use `invoke(cmd, args)` keep working unchanged.
+// This routes through `nativeBridge` (see ./bridge.ts), which in production
+// calls the real `pollis-native` JSI module (uniffi-bindgen-react-native) and
+// lands in the Rust dispatcher at `pollis-core/src/bridge.rs`. Before
+// `initializeNativeBridge()` runs — and in jest / typecheck — it falls back to
+// the `registerMockCommand` registry.
 
 import { nativeBridge } from "./bridge";
 

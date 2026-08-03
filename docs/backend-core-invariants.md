@@ -49,10 +49,10 @@ the invariant that makes it unrepresentable.
 |---|---|---|---|
 | F1 | **Commit-log gap** (non-contiguous epoch) | `mls_commit_log` has `UNIQUE(conv, epoch)` but *no contiguity constraint*; inserts can skip | ELECTRON epochs 4, 5, **11** missing → `ants` wedged |
 | F2 | **Deletion of an applied commit** | `process_pending_commits` used to `DELETE` a "revoked self-add" row (fixed in `adfe518`, but not *forbidden*) | dan applied epoch 11, it was deleted, ants wedged |
-| F3 | **Message dropped before delivery** | `ingest.rs` cleanup: `sent_at < now-30d` **OR** all-devices-caught-up. The **30-day TTL drops undelivered messages** | direct data loss for any member absent > 30d |
-| F4 | **Fragile delivery accounting** | delivery tracked by `sent_at` vs per-device `conversation_watermark` timestamp — clock skew, equal timestamps, coarse acks | timestamp ≠ a reliable cursor |
+| F3 | ~~**Message dropped before delivery**~~ — **FIXED** | was `sent_at < now-30d` **OR** all-devices-caught-up; the OR'd TTL deleted undelivered envelopes on its own. TTL arm removed — envelope GC is now gated on the all-member-devices watermark alone (`pollis-delivery/src/messages.rs`) | was direct data loss for any member absent > 30d. Regressions pinned in `messages::gc_sql_tests`, `pollis-delivery/tests/envelope_retention.rs` (Part E), `flows::messages` |
+| F4 | **Fragile delivery accounting** | delivery tracked by `sent_at` vs per-device `conversation_watermark` timestamp — clock skew, equal timestamps, coarse acks | timestamp ≠ a reliable cursor (**still open** — the monotonic-seq cursor of I3 is not yet built; the F3 fix bounds retention by that timestamp watermark) |
 | F5 | **Welcome dropped before delivery** | `mls_welcome.delivered` flag + delete paths; no retention floor | a new device can miss its only Welcome |
-| F6 | **Retention ignores absent members** | floor is computed from a snapshot and gated by a TTL, not the *true* slowest member-device cursor | F3's TTL is the leak |
+| F6 | ~~**Retention ignores absent members**~~ — **FIXED for envelopes** | the envelope floor is the MIN `last_fetched_at` over every current member device (revoked devices excluded, #685), no longer gated by a TTL | F3's TTL was the leak; it is gone. Commit/Welcome floors (I4) tracked separately |
 | F7 | **Schema divergence: test vs prod** | two apply paths — test harness uses `POST_BASELINE_MIGRATIONS` on a *fresh* DB; prod uses `db-apply.sh` (version-tracked) on the *long-lived* DB. Version numbers collide with the old lineage | prod missing `000005_account_key_log`, `000006_push_token` while all tests pass |
 
 ## Target invariants & where they're enforced
@@ -128,8 +128,11 @@ the invariant that makes it unrepresentable.
   more commit-log deletes) + auto-heal wedged members via external-join.
 - **Phase 1:** I1 — DB triggers making the commit log gapless/append-only/
   immutable. + the regression test that was missing (laggard + apply-then-mutate).
-- **Phase 2:** I3 — delivery cursor model (monotonic seq + per-device cursor),
-  delete the 30-day TTL, retention bound to the slowest member-device.
+- **Phase 2:** I3 — **partially done.** The 30-day TTL is deleted and envelope
+  retention is bound to the slowest member-device (kills F3, and F6 for
+  envelopes). The delivery cursor model itself (monotonic per-conversation seq +
+  per-device cursor, replacing the `sent_at` timestamp watermark) is **still
+  outstanding** — F4 remains open.
 - **Phase 3:** I4/I5 — retention floor for commits + welcomes; historical
   membership derivation; the "300 commits behind, 4 years later" acceptance test.
 - **Phase 4:** I6 — collapse the dual schema-apply paths into one; fix the

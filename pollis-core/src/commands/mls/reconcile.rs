@@ -326,6 +326,51 @@ pub struct ReconcileCommitData {
     pub group_info_bytes: Option<Vec<u8>>,
 }
 
+/// The devices that *should* hold a leaf: the single definition of "desired",
+/// extracted from [`reconcile_group_mls_core_staged`] as pure set algebra so the
+/// #679 invariant can be tested without a live MLS group, real KeyPackages, or a
+/// crypto backend.
+///
+/// Two sources, and **both** are gated on `valid_devices`:
+///
+/// 1. Devices with an available (unclaimed) KeyPackage — these are the additions.
+/// 2. Devices already holding a leaf whose user is still in the roster — these
+///    are the retentions. Retaining them is what stops us evicting the
+///    committer's own device, which consumed its KeyPackage when it created the
+///    group and so has none left to appear in (1).
+///
+/// `valid_devices` is the `revoked_at IS NULL` snapshot from
+/// [`registered_devices`]. Gating both sources on it is the whole point: a
+/// revoked device keeps its published KeyPackage, so filtering only source (2)
+/// leaves source (1) re-admitting the exact device (2) was trying to evict. It
+/// would land in `desired`, therefore never in `to_remove`, and — if its leaf had
+/// already been pruned — be *added back*. That was #679: revocation reduced to a
+/// cosmetic flag while the device went on decrypting every message and deriving
+/// the call media key.
+///
+/// `None` means "no revocation snapshot available" and disables the gate. That is
+/// deliberately a distinct state from an empty set (which means "no device is
+/// valid — remove everything") so a caller that cannot read `user_device` degrades
+/// to the old roster-only behaviour instead of silently emptying the group.
+fn desired_set<'a>(
+    kp_keys: &[(String, String)],
+    tree_members: impl Iterator<Item = &'a (String, String)>,
+    roster_user_ids: &std::collections::HashSet<String>,
+    valid_devices: Option<&std::collections::HashSet<(String, String)>>,
+) -> std::collections::HashSet<(String, String)> {
+    let is_valid = |key: &(String, String)| valid_devices.is_none_or(|v| v.contains(key));
+
+    let mut desired: std::collections::HashSet<(String, String)> =
+        kp_keys.iter().filter(|k| is_valid(k)).cloned().collect();
+
+    for key in tree_members {
+        if roster_user_ids.contains(&key.0) && is_valid(key) {
+            desired.insert(key.clone());
+        }
+    }
+    desired
+}
+
 /// Sync core (staged variant): computes the diff between the desired roster
 /// and the actual MLS tree, then issues a single combined commit. Does NOT
 /// merge the commit locally — the commit is left as a pending commit on the
@@ -363,29 +408,13 @@ where
         actual.insert((uid, did), m.index);
     }
 
-    // 2. Build the desired set.
-    //    Start with devices that have available KPs…
-    let mut desired: HashSet<(String, String)> = available_kps
+    // 2. Build the desired set. Pure set algebra, extracted so it can be tested
+    //    exhaustively without standing up a live MLS group — see `desired_set`.
+    let kp_keys: Vec<(String, String)> = available_kps
         .iter()
         .map(|(uid, did, _)| (uid.clone(), did.clone()))
         .collect();
-    //    …UNION with existing tree members whose user is still in the roster
-    //    AND whose device row still exists (when `valid_devices` is provided).
-    //    This prevents removing the committer's own device (which consumed its
-    //    KP on creation and has none left) or other devices that are already
-    //    correctly in the tree, while still letting a `user_device` deletion
-    //    drive a leaf removal (used by device revocation).
-    for (uid, did) in actual.keys() {
-        if !roster_user_ids.contains(uid) {
-            continue;
-        }
-        if let Some(valid) = valid_devices {
-            if !valid.contains(&(uid.clone(), did.clone())) {
-                continue;
-            }
-        }
-        desired.insert((uid.clone(), did.clone()));
-    }
+    let desired = desired_set(&kp_keys, actual.keys(), roster_user_ids, valid_devices);
 
     // 3. Diff.
     let actual_keys: HashSet<(String, String)> = actual.keys().cloned().collect();
@@ -575,30 +604,45 @@ where
 /// of devices the successor lineage must be able to admit — the two must never
 /// disagree about who belongs, which is why there is one query, not two.
 ///
-/// Ids are sanitised into the `IN` clause because libsql has no array binding.
-pub(super) async fn registered_devices(
+/// A revoked device is NOT still registered. `revoke_device` tombstones the row
+/// (`user_device.revoked_at`, migration 000004) rather than deleting it, so the
+/// row's mere existence says nothing about whether the device still belongs —
+/// only `revoked_at IS NULL` does. Without that predicate the tombstoned device
+/// stays in `desired`, never reaches `to_remove`, and keeps its leaf: it goes on
+/// decrypting every subsequent message and deriving the call media key. The
+/// filter matches the DS, which gets this right in `current_member_devices`.
+///
+/// libsql has no array binding, so the `IN` clause is built with a generated
+/// `?n` placeholder per id and the ids are BOUND, not interpolated. They used to
+/// be interpolated behind a character filter; binding is what makes the
+/// predicate above trustworthy rather than something a stray quote can reshape.
+///
+/// `pub` so the #679 revocation regression tests can reach it from
+/// `tests/revoked_device_reconcile.rs`. They cannot live in the crate's `--lib`
+/// test binary: libsql's local backend calls `sqlite3_config` on first use, which
+/// returns `SQLITE_MISUSE` once rusqlite/SQLCipher (`LocalDb`) has already run
+/// `sqlite3_initialize` in the same process — so any lib test that opens a local
+/// libsql DB panics as soon as it shares a binary with a test that touches the
+/// local DB. An integration test gets its own process and does not load rusqlite.
+pub async fn registered_devices(
     conn: &libsql::Connection,
     roster: &std::collections::HashSet<String>,
 ) -> crate::error::Result<std::collections::HashSet<(String, String)>> {
     let mut devices = std::collections::HashSet::new();
-    let safe_ids: Vec<String> = roster
-        .iter()
-        .map(|id| {
-            id.chars()
-                .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-                .collect::<String>()
-        })
-        .collect();
-    if safe_ids.is_empty() {
+    if roster.is_empty() {
         return Ok(devices);
     }
-    let in_clause = safe_ids
-        .iter()
-        .map(|id| format!("'{id}'"))
+    let ids: Vec<String> = roster.iter().cloned().collect();
+    let placeholders = (1..=ids.len())
+        .map(|i| format!("?{i}"))
         .collect::<Vec<_>>()
         .join(",");
-    let query = format!("SELECT user_id, device_id FROM user_device WHERE user_id IN ({in_clause})");
-    let mut rows = conn.query(&query, ()).await?;
+    let query = format!(
+        "SELECT user_id, device_id FROM user_device \
+         WHERE revoked_at IS NULL AND user_id IN ({placeholders})"
+    );
+    let params: Vec<libsql::Value> = ids.into_iter().map(libsql::Value::from).collect();
+    let mut rows = conn.query(&query, params).await?;
     while let Some(row) = rows.next().await? {
         devices.insert((row.get::<String>(0)?, row.get::<String>(1)?));
     }
@@ -821,21 +865,33 @@ pub async fn reconcile_group_mls_impl(
     // 2. Find devices with unclaimed KPs for all roster users.
     let mut device_pairs: Vec<(String, String)> = Vec::new();
     {
-        let safe_ids: Vec<String> = roster_user_ids
-            .iter()
-            .map(|id| id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>())
-            .collect();
-        if !safe_ids.is_empty() {
-            let in_clause = safe_ids.iter().map(|id| format!("'{id}'")).collect::<Vec<_>>().join(",");
+        // A revoked device keeps its unclaimed KeyPackages, so this query needs
+        // the same `revoked_at IS NULL` predicate as `registered_devices` — it is
+        // the source of `available_kps`, and therefore of the KP half of
+        // `desired`. Without it a revoked device is handed back a claimed KP and
+        // re-admitted to the tree. `compute_diff` now filters this set against
+        // `valid_devices` as a second line of defence; filtering here as well
+        // means we never claim (and so never burn) a revoked device's KeyPackage.
+        //
+        // The ids are BOUND as `?n` placeholders rather than interpolated behind
+        // a character filter, matching `registered_devices`. libsql has no array
+        // binding, so the placeholder list is generated but the values are not.
+        let ids: Vec<String> = roster_user_ids.iter().cloned().collect();
+        if !ids.is_empty() {
+            let placeholders = (1..=ids.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
             let query = format!(
                 "SELECT d.user_id, d.device_id FROM user_device d \
-                 WHERE d.user_id IN ({in_clause}) \
+                 WHERE d.revoked_at IS NULL AND d.user_id IN ({placeholders}) \
                  AND EXISTS ( \
                      SELECT 1 FROM mls_key_package kp \
                      WHERE kp.user_id = d.user_id AND kp.device_id = d.device_id AND kp.claimed = 0 \
                  )"
             );
-            let mut rows = conn.query(&query, ()).await?;
+            let params: Vec<libsql::Value> = ids.into_iter().map(libsql::Value::from).collect();
+            let mut rows = conn.query(&query, params).await?;
             while let Some(row) = rows.next().await? {
                 device_pairs.push((row.get::<String>(0)?, row.get::<String>(1)?));
             }
@@ -1190,4 +1246,168 @@ pub async fn reconcile_group_mls_impl(
     }
 
     Ok(outcome)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn roster(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ─── `desired_set` — the diff chokepoint (#679) ───────────────────────────
+
+    fn key(uid: &str, did: &str) -> (String, String) {
+        (uid.to_string(), did.to_string())
+    }
+
+    fn valid(pairs: &[(&str, &str)]) -> HashSet<(String, String)> {
+        pairs.iter().map(|(u, d)| key(u, d)).collect()
+    }
+
+    /// The load-bearing #679 case, and the one a `registered_devices`-only fix
+    /// does NOT cover: the revoked device still has an unclaimed KeyPackage, so
+    /// it arrives via `available_kps`. If only the tree-member half were gated,
+    /// the KP half would put it straight back into `desired` — out of
+    /// `to_remove`, and re-added if its leaf were already gone.
+    #[test]
+    fn a_revoked_device_with_a_key_package_is_not_desired() {
+        let tree = vec![key("alice", "a1"), key("bob", "b1")];
+        let kps = vec![key("bob", "b1")];
+
+        let got = desired_set(
+            &kps,
+            tree.iter(),
+            &roster(&["alice", "bob"]),
+            Some(&valid(&[("alice", "a1")])),
+        );
+
+        assert!(
+            !got.contains(&key("bob", "b1")),
+            "REVOCATION LEAK (#679): a revoked device was re-admitted through its own \
+             leftover KeyPackage, so it can never reach `to_remove`. got {got:?}"
+        );
+        assert_eq!(
+            got,
+            valid(&[("alice", "a1")]),
+            "only alice is desired; got {got:?}"
+        );
+    }
+
+    /// The committer's own device consumed its KeyPackage creating the group, so
+    /// it appears ONLY as a tree member. Retaining it is why the tree-member half
+    /// of the union exists; losing it would make every reconcile try to evict the
+    /// actor.
+    #[test]
+    fn the_committers_own_leaf_is_retained_without_a_key_package() {
+        let tree = vec![key("alice", "a1")];
+
+        let got = desired_set(
+            &[],
+            tree.iter(),
+            &roster(&["alice"]),
+            Some(&valid(&[("alice", "a1")])),
+        );
+
+        assert_eq!(
+            got,
+            valid(&[("alice", "a1")]),
+            "committer must stay desired; got {got:?}"
+        );
+    }
+
+    /// A device whose USER left the roster is undesired regardless of KeyPackages
+    /// or validity — the plain removal case, which must keep working.
+    #[test]
+    fn a_leaf_whose_user_left_the_roster_is_not_desired() {
+        let tree = vec![key("alice", "a1"), key("bob", "b1")];
+
+        let got = desired_set(
+            &[],
+            tree.iter(),
+            &roster(&["alice"]),
+            Some(&valid(&[("alice", "a1"), ("bob", "b1")])),
+        );
+
+        assert!(
+            !got.contains(&key("bob", "b1")),
+            "a non-roster user's leaf must not be desired; got {got:?}"
+        );
+    }
+
+    /// A live device that is in the roster and has a KeyPackage but no leaf yet
+    /// is desired — this is the addition path, and it must not be collateral
+    /// damage of the new filter.
+    #[test]
+    fn a_live_device_awaiting_its_first_leaf_is_desired() {
+        let tree: Vec<(String, String)> = vec![key("alice", "a1")];
+        let kps = vec![key("bob", "b1")];
+
+        let got = desired_set(
+            &kps,
+            tree.iter(),
+            &roster(&["alice", "bob"]),
+            Some(&valid(&[("alice", "a1"), ("bob", "b1")])),
+        );
+
+        assert!(
+            got.contains(&key("bob", "b1")),
+            "a live roster device with a KP must be desired (the add path); got {got:?}"
+        );
+    }
+
+    /// A user may hold several devices and have only one revoked. The live
+    /// sibling must survive — otherwise revoking one device would silently log
+    /// the user out everywhere.
+    #[test]
+    fn revoking_one_device_spares_its_live_sibling() {
+        let tree = vec![key("alice", "a1"), key("alice", "a2")];
+
+        let got = desired_set(
+            &[],
+            tree.iter(),
+            &roster(&["alice"]),
+            Some(&valid(&[("alice", "a1")])),
+        );
+
+        assert_eq!(
+            got,
+            valid(&[("alice", "a1")]),
+            "exactly the live sibling stays desired; got {got:?}"
+        );
+    }
+
+    /// `None` (no snapshot readable) must disable the gate, NOT behave like an
+    /// empty set. An empty set means "nothing is valid — remove everything"; if
+    /// `None` collapsed to that, a transient `user_device` read failure would
+    /// empty the group.
+    #[test]
+    fn a_missing_snapshot_disables_the_gate_rather_than_emptying_the_group() {
+        let tree = vec![key("alice", "a1"), key("bob", "b1")];
+        let kps = vec![key("bob", "b1")];
+
+        let unguarded = desired_set(&kps, tree.iter(), &roster(&["alice", "bob"]), None);
+        assert_eq!(
+            unguarded,
+            valid(&[("alice", "a1"), ("bob", "b1")]),
+            "None must keep the roster-only behaviour; got {unguarded:?}"
+        );
+
+        let empty_snapshot = desired_set(
+            &kps,
+            tree.iter(),
+            &roster(&["alice", "bob"]),
+            Some(&HashSet::new()),
+        );
+        assert!(
+            empty_snapshot.is_empty(),
+            "an EMPTY snapshot genuinely means nothing is valid; got {empty_snapshot:?}"
+        );
+        assert_ne!(
+            unguarded, empty_snapshot,
+            "`None` and `Some(empty)` must not be the same state"
+        );
+    }
 }

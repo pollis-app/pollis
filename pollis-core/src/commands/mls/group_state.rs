@@ -91,7 +91,7 @@ pub async fn publish_group_info(
 /// `Ok(None)` — not an error — when there is no usable local group or the export
 /// itself fails: `publish_group_info` is a best-effort durability backstop, and
 /// a device with nothing to publish has nothing to report.
-fn export_group_info_blob<C>(
+pub(super) fn export_group_info_blob<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
     generation: i64,
@@ -522,7 +522,7 @@ async fn external_join_attempt(
 ///
 /// Sync: the caller owns the local-DB guard.
 #[allow(clippy::too_many_arguments)]
-fn build_external_commit<C>(
+pub(super) fn build_external_commit<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
     generation: i64,
@@ -1225,6 +1225,11 @@ async fn process_one_generation<'h>(
     //    state.
     let mut current_epoch = initial_epoch;
     let mut any_applied = false;
+    // Set when a commit could not be applied and the lineage must be rebuilt
+    // (#680). Carried out of the loop so recovery is driven by an EXPLICIT reason,
+    // never inferred from a group's mere absence — a group that exists locally yet
+    // cannot advance must still recover, not wedge.
+    let mut recover: Option<RecoverReason> = None;
     for commit in pending {
         // Gap classification (I1), proved by Kani (`invariants::classify`) never
         // to `Apply` across a gap: `Apply` iff this row's epoch is exactly
@@ -1349,7 +1354,14 @@ async fn process_one_generation<'h>(
                 apply_one_commit(&provider, mls_group_id, generation, commit.epoch, &commit_data);
             match outcome {
                 CommitApply::Applied => true,
-                CommitApply::Stop => break,
+                CommitApply::Recover(reason) => {
+                    eprintln!(
+                        "[mls] process_pending_commits: {mls_group_id} cannot advance past epoch {} ({reason:?}) — recovering rather than wedging (#680)",
+                        commit.epoch
+                    );
+                    recover = Some(reason);
+                    break;
+                }
             }
         };
 
@@ -1440,15 +1452,22 @@ async fn process_one_generation<'h>(
         crate::commands::voice_e2ee::on_mls_epoch_changed(state, mls_group_id).await;
     }
 
-    // If the group was deleted during processing (e.g. eviction),
-    // external-join to recover.
+    // If the group was deleted during processing (e.g. eviction), OR a commit
+    // could not be applied and asked us to recover (#680 — the four former `Stop`
+    // wedge sites), external-join to rebuild. The explicit `recover` reason is the
+    // load-bearing addition: previously recovery was gated ONLY on `!group_exists`,
+    // so a group that still existed but could never advance (corrupt commit bytes,
+    // a merge failure, a diverged tree) wedged permanently. `apply_one_commit`
+    // deletes the group before returning `Recover`, so in practice `group_exists`
+    // is already false here — but we key off the reason so a wedge can never again
+    // be silently mistaken for "caught up".
     let group_exists = {
         let guard = state.local_db.lock().await;
         guard.as_ref().map_or(false, |db| {
             load_stored_group_at(db.conn(), mls_group_id, generation).is_some()
         })
     };
-    if !group_exists {
+    if !group_exists || recover.is_some() {
         // Recover by external-join — UNLESS this device was revoked (its
         // `user_device` row is gone) OR its user was removed from the group
         // (`group_member` row gone). Either must stay out rather than squatting
@@ -1598,14 +1617,83 @@ pub(super) async fn adopt_generation_locked(
     let _ = forget_local_mls_group_at(state, conversation_id, predecessor).await;
 }
 
+/// Why the local group could not advance from a commit — see [`apply_one_commit`]
+/// and [`classify_process_message_error`].
+///
+/// Every variant is RECOVERABLE by delete-and-rejoin (external join). The reason
+/// is carried so (a) the caller acts on the specific failure, and (b) a wedge is
+/// a *distinct* return value from `Applied`/"caught up" and can never be silently
+/// mistaken for "done" — that conflation is the #680 bug, where four `Stop` sites
+/// left a group that exists locally yet can never advance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecoverReason {
+    /// The stored group is gone (never built, or already deleted).
+    GroupMissing,
+    /// The stored group failed to load from storage.
+    GroupLoadFailed,
+    /// The commit bytes did not TLS-deserialize (corrupt / truncated row).
+    MalformedCommit,
+    /// The deserialized message was not a protocol message.
+    NotAProtocolMessage,
+    /// Merging the staged commit failed (storage error / diverged tree).
+    MergeFailed,
+    /// Our keys cannot open the commit — we were evicted from the group.
+    Evicted,
+    /// The commit is at our epoch yet won't stage/validate: our local tree has
+    /// diverged from the canonical branch (fork; #411, prod incident 01KQYX89…).
+    ForkedTree,
+    /// Our own commit was echoed back but merging the pending commit failed.
+    OwnCommitMergeFailed,
+    /// An openmls error this code does not specifically classify. Recover
+    /// conservatively — NEVER wedge. A future openmls bump that reshapes the
+    /// error surface lands HERE (loudly, and caught by the classification unit
+    /// tests) instead of silently wedging on a stale string match (#680).
+    Unclassified,
+}
+
 /// Outcome of applying one commit from the log — see [`apply_one_commit`].
-enum CommitApply {
+#[derive(Debug)]
+pub(super) enum CommitApply {
     /// Merged; the local epoch advanced.
     Applied,
-    /// Stop replaying. Every reason is logged by `apply_one_commit` itself, and
-    /// on the unrecoverable ones it has already deleted the local group so the
-    /// caller's external-rejoin backstop rebuilds it.
-    Stop,
+    /// The local group cannot advance on this lineage and must be rebuilt. The
+    /// reason is carried so the caller recovers (external-join) rather than
+    /// treating the stop as "caught up". `apply_one_commit` has already deleted
+    /// the local group where one was loaded, so the caller's rejoin path has a
+    /// clean slate.
+    Recover(RecoverReason),
+}
+
+/// Map an openmls `process_message` error to the recovery it warrants.
+///
+/// Matching the real error ENUMS — not their `Display` strings (`format!("{e}")`)
+/// — is the load-bearing change of #680: a string match silently reclassifies the
+/// moment openmls rewords a message or moves a case (as the pinned rev already did
+/// for the own-commit path), and the group wedges with no signal. An enum match is
+/// a compile-checked, test-pinned contract; anything unrecognised falls to
+/// [`RecoverReason::Unclassified`], which still recovers rather than wedging.
+pub(super) fn classify_process_message_error<S>(
+    e: &ProcessMessageError<S>,
+) -> RecoverReason {
+    use ProcessMessageError as E;
+    match e {
+        // We tried to use a group we've been evicted from: our leaf is gone and
+        // our keys can't open this or any later commit. Re-join only if still a
+        // roster member — the `may_rejoin` gate downstream enforces that.
+        E::GroupStateError(MlsGroupStateError::UseAfterEviction) => RecoverReason::Evicted,
+        // Our OWN commit came back but does NOT match our pending commit — our
+        // pending state diverged from what actually landed. This was the old
+        // "created by this client" string; now a typed StageCommitError. Merging
+        // our stale pending here would diverge us further, so rebuild instead.
+        E::InvalidCommit(StageCommitError::OwnCommitMismatch) => RecoverReason::ForkedTree,
+        // The commit passed the log's epoch-gap check yet still fails to stage or
+        // validate: our local tree has diverged from the canonical branch. Every
+        // remaining StageCommit / Validation failure is this same fork shape.
+        E::InvalidCommit(_) | E::ValidationError(_) => RecoverReason::ForkedTree,
+        // Anything else (LibraryError, StorageError, wire-format policy, and any
+        // future variant) — recover conservatively rather than wedge.
+        _ => RecoverReason::Unclassified,
+    }
 }
 
 /// Apply a single commit from the log to the local group.
@@ -1616,7 +1704,7 @@ enum CommitApply {
 /// replay loop with an `Err` — see [`CommitApply`].
 ///
 /// Sync: the caller owns the local-DB guard.
-fn apply_one_commit<C>(
+pub(super) fn apply_one_commit<C>(
     provider: &MlsProvider<'_, C>,
     mls_group_id: &str,
     generation: i64,
@@ -1629,10 +1717,15 @@ where
     let group_id = super::generation::mls_group_id(mls_group_id, generation);
     let mut group = match MlsGroup::load(provider.storage(), &group_id) {
         Ok(Some(g)) => g,
-        Ok(None) => return CommitApply::Stop,
+        // The group is simply absent (never built, or already deleted by an
+        // earlier recovery). Nothing to delete; the caller's rejoin path rebuilds.
+        Ok(None) => {
+            eprintln!("[mls] process_pending_commits: no local group for {mls_group_id} gen {generation} at epoch {commit_epoch} — recovering via external-join");
+            return CommitApply::Recover(RecoverReason::GroupMissing);
+        }
         Err(e) => {
-            eprintln!("[mls] process_pending_commits: mls load failed for {mls_group_id}: {e} — stopping");
-            return CommitApply::Stop;
+            eprintln!("[mls] process_pending_commits: mls load failed for {mls_group_id}: {e} — recovering via external-join");
+            return CommitApply::Recover(RecoverReason::GroupLoadFailed);
         }
     };
 
@@ -1640,79 +1733,95 @@ where
     let msg_in = match MlsMessageIn::tls_deserialize(&mut reader) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id} at epoch {commit_epoch}: {e} — stopping");
-            return CommitApply::Stop;
+            eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
+            let _ = group.delete(provider.storage());
+            return CommitApply::Recover(RecoverReason::MalformedCommit);
         }
     };
     let protocol_msg = match msg_in.try_into_protocol_message() {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id} at epoch {commit_epoch}: {e} — stopping");
-            return CommitApply::Stop;
+            eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
+            let _ = group.delete(provider.storage());
+            return CommitApply::Recover(RecoverReason::NotAProtocolMessage);
         }
     };
 
     match group.process_message(provider, protocol_msg) {
-        Ok(processed) => {
-            if let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() {
+        Ok(processed) => match processed.into_content() {
+            ProcessedMessageContent::StagedCommitMessage(staged) => {
                 if let Err(e) = group.merge_staged_commit(provider, *staged) {
-                    eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — stopping");
-                    return CommitApply::Stop;
+                    eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
+                    let _ = group.delete(provider.storage());
+                    return CommitApply::Recover(RecoverReason::MergeFailed);
                 }
             }
-        }
-        Err(e) => {
-            let msg = format!("{e}");
-            // Our OWN commit is canonical at this epoch — e.g. we submitted it
-            // but a lost response made us converge instead of merging (issue
-            // #411). openmls refuses to process its own commit ("...created by
-            // this client"); the right move is to ADOPT it by merging our pending
-            // commit, not delete the group and try to re-join from a possibly-
-            // stale GroupInfo. This advances us to the same epoch as everyone else.
-            if msg.contains("created by this client") {
-                if let Err(merge_err) = group.merge_pending_commit(provider) {
+            // Our OWN commit, fanned back to us at this epoch — e.g. we submitted
+            // it but a lost response made us converge instead of merging (issue
+            // #411). At the pinned openmls rev this is surfaced as CONTENT (an
+            // `Ok`), NOT an error: `OwnPendingCommit` when the commit is framed as
+            // a PublicMessage, or `OwnPrivateMessage` when framed as a
+            // PrivateMessage. Pollis frames handshake messages as PrivateMessage,
+            // so `OwnPrivateMessage` is the path we ACTUALLY hit — its ciphertext
+            // cannot be decrypted by its own author, so openmls can't stage it and
+            // hands it back for us to adopt.
+            //
+            // The pre-#680 code matched only the OLD "created by this client"
+            // error STRING in the `Err` arm, which at this rev catches NEITHER
+            // shape. So the own-commit replay fell through unmerged: it was
+            // miscounted as `Applied`, the pending commit was left dangling, and
+            // the dangling-clear backstop then DISCARDED our landed commit —
+            // stranding us at a phantom epoch no other member shares. Adopt it by
+            // merging our pending commit so we land at the same epoch as everyone
+            // else.
+            ProcessedMessageContent::OwnPendingCommit
+            | ProcessedMessageContent::OwnPrivateMessage => {
+                // A commit-log slot always carries a Commit, so an own message
+                // here is always our own commit. If we hold no pending commit to
+                // adopt (e.g. a crash cleared it) we cannot advance from it
+                // locally — rebuild from the published GroupInfo rather than wedge.
+                if group.pending_commit().is_none() {
                     eprintln!(
-                        "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but merge_pending failed ({merge_err}) — deleting to recover"
+                        "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but no pending commit to adopt — recovering via external-join"
                     );
                     let _ = group.delete(provider.storage());
-                    return CommitApply::Stop;
+                    return CommitApply::Recover(RecoverReason::OwnCommitMergeFailed);
+                }
+                if let Err(merge_err) = group.merge_pending_commit(provider) {
+                    eprintln!(
+                        "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but merge_pending failed ({merge_err}) — recovering via external-join"
+                    );
+                    let _ = group.delete(provider.storage());
+                    return CommitApply::Recover(RecoverReason::OwnCommitMergeFailed);
                 }
                 eprintln!(
                     "[mls] process_pending_commits: adopted our own commit at epoch {commit_epoch} for {mls_group_id}"
                 );
                 // Fall through so this counts as applied and the epoch advances.
-            } else {
-                // Two distinct recoverable failures, both handled by dropping the
-                // local group so the external-rejoin below rebuilds it from the
-                // latest published GroupInfo:
-                //
-                //   1. Eviction — we were removed; our keys can't open the commit.
-                //      Re-join only if we're still a roster member (external_join
-                //      no-ops cleanly if GroupInfo is gone).
-                //
-                //   2. Fork — the commit is at our CURRENT epoch (it passed the
-                //      epoch-gap check above) yet still won't apply, so our local
-                //      tree has diverged from the canonical branch. This is the
-                //      residue of a historical concurrent-commit race (prod
-                //      incident: group `01KQYX89…`); the UNIQUE(conversation_id,
-                //      epoch) constraint stops new forks, but already-forked
-                //      devices only heal by re-joining the live branch.
-                //
-                // Deleting drops only this device's MLS crypto state, not its
-                // decrypted message history (that lives in the local `message`
-                // table). The rejoin lands at the latest epoch, so the next pass
-                // filters `epoch >= new_epoch` and can't re-fail on the same
-                // commit — no recovery loop.
-                if msg.contains("evicted") {
-                    eprintln!("[mls] process_pending_commits: evicted from {mls_group_id} — deleting local group for recovery");
-                } else {
-                    eprintln!(
-                        "[mls] process_pending_commits: commit at epoch {commit_epoch} for {mls_group_id} failed to apply ({e}) — local state diverged from canonical branch; deleting local group to re-join"
-                    );
-                }
-                let _ = group.delete(provider.storage());
-                return CommitApply::Stop;
             }
+            // A commit-log slot only ever carries a Commit, so proposal /
+            // application content here is impossible in practice. Treat it as a
+            // no-op advance rather than wedging on an unreachable shape.
+            _ => {
+                eprintln!(
+                    "[mls] process_pending_commits: unexpected non-commit content at epoch {commit_epoch} for {mls_group_id} — skipping"
+                );
+            }
+        },
+        Err(e) => {
+            // Classify by the real error enum, then recover by dropping the local
+            // group so the caller's external-rejoin rebuilds it from the latest
+            // published GroupInfo. Deleting drops only this device's MLS crypto
+            // state, not its decrypted message history (that lives in the local
+            // `message` table). The rejoin lands at the latest epoch, so the next
+            // pass filters `epoch >= new_epoch` and can't re-fail on the same
+            // commit — no recovery loop.
+            let reason = classify_process_message_error(&e);
+            eprintln!(
+                "[mls] process_pending_commits: commit at epoch {commit_epoch} for {mls_group_id} failed to apply ({e}) — classified {reason:?}, deleting local group to re-join"
+            );
+            let _ = group.delete(provider.storage());
+            return CommitApply::Recover(reason);
         }
     }
 

@@ -220,6 +220,73 @@ async fn revoked_device_does_not_pin_the_floor() {
     assert!(!epochs(&log, conv).await.contains(&2), "the revoked laggard does not hold epoch 2");
 }
 
+/// #681 — a device reporting a high-water FAR ABOVE the real head cannot delete
+/// the live commit log. `prune_floor` is clamped to `head - 1`, so the head
+/// commit survives, `head_epoch` is unchanged, and the group stays advanceable —
+/// even though the same report, UNCLAMPED, drove the floor to ~`i64::MAX` and made
+/// `delete_commits_below` take every epoch, resetting the head to 0 (the wipe).
+#[tokio::test]
+async fn bogus_high_water_above_head_cannot_wipe_the_live_log() {
+    let main = fresh(MAIN_SCHEMA).await;
+    let log = fresh(LOG_SCHEMA).await;
+    let conv = "grp1";
+
+    // A single-member conversation, so the bogus report IS the roster minimum and
+    // drives Tier 1 directly — the worst case for the clamp.
+    add_member(&main, conv, "alice", "a-dev").await;
+    seed_commits(&log, conv, 10).await; // head = 11, epochs 0..=10
+    let log_conn = log.conn().unwrap();
+
+    // A forged/buggy report claiming an epoch astronomically above the real head.
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 0, i64::MAX)
+        .await
+        .unwrap();
+
+    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv)
+        .await
+        .unwrap();
+
+    // Clamped to head - 1 = 10; the head commit at epoch 10 is retained.
+    assert_eq!(report.floor, 10, "floor is clamped to head - 1, never at/above head");
+    assert_eq!(
+        epochs(&log, conv).await,
+        vec![10],
+        "the head commit survives — the live commit log is NOT wiped"
+    );
+    // The head is unchanged, so the member can still advance from it (no forced
+    // external-join, no lost history) — the property the wipe destroyed.
+    assert_eq!(
+        pollis_delivery::commit::head_epoch(&log_conn, conv).await.unwrap(),
+        11,
+        "a bogus report must not reset the conversation head"
+    );
+}
+
+/// #681 no-regression: an HONEST report still prunes exactly as before once the
+/// clamp is in place — the clamp only ever narrows pruning for absurd inputs, so
+/// a real slowest-member floor well below head is untouched by it.
+#[tokio::test]
+async fn clamp_does_not_disturb_an_honest_prune() {
+    let main = fresh(MAIN_SCHEMA).await;
+    let log = fresh(LOG_SCHEMA).await;
+    let conv = "grp1";
+
+    add_member(&main, conv, "alice", "a-dev").await;
+    add_member(&main, conv, "bob", "b-dev").await;
+    seed_commits(&log, conv, 24).await; // head = 25
+    let log_conn = log.conn().unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 0, 20).await.unwrap();
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 15).await.unwrap();
+
+    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+
+    // Exactly the pre-clamp Tier-1 floor: min(15, 20) - SLACK, well below head.
+    assert_eq!(report.floor, 15 - PRUNE_SLACK_EPOCHS);
+    let surviving = epochs(&log, conv).await;
+    assert_eq!(*surviving.first().unwrap(), 15 - PRUNE_SLACK_EPOCHS);
+    assert!(surviving.contains(&24), "the head epoch survives");
+}
+
 /// The prune DELETE leaves the UNIQUE(conversation_id, generation, epoch) fork-dedup index
 /// intact: a surviving epoch still rejects a duplicate INSERT (no fork), and a
 /// pruned epoch is genuinely free.

@@ -214,7 +214,17 @@ pub async fn register_device(
         Err(e) => return internal(e),
     };
     match apply_register_device(&conn, &claims.user_id, &device_id, &device_name).await {
-        Ok(()) => ok_status(),
+        Ok(()) => {
+            // The row was just (re)created. Nothing stale can be cached for it —
+            // negatives are never cached and the upsert leaves the key columns
+            // alone — but a device id can be re-registered after a logout DELETE,
+            // so evict to keep "any write to `user_device` evicts" a rule with no
+            // exceptions rather than a case analysis (#658).
+            state
+                .device_keys
+                .invalidate_device(&claims.user_id, &device_id);
+            ok_status()
+        }
         Err(e) => internal(e),
     }
 }
@@ -390,6 +400,11 @@ pub async fn publish_device_cert(
             if let Some(token) = invalidate_token {
                 state.sessions.invalidate(&token);
             }
+            // This is the ONE write that rewrites `mls_signature_pub_pq` on a
+            // live row, so a cached key for this device is now the WRONG key and
+            // the device's new signatures would be rejected until the TTL lapsed
+            // (#658). Evict so the next request re-reads the key just written.
+            state.device_keys.invalidate_device(&user_id, &device_id);
             ok_status()
         }
         Ok(PublishCertOutcome::IdentityNotEstablished) => {

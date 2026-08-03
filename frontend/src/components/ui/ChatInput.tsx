@@ -455,9 +455,9 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     }
 
     // For files copied from the OS file manager, WebKit doesn't expose the
-    // clipboard data — go through the bridge to read it via the OS clipboard
-    // API (Rust under Tauri, Node's clipboard module under Electron). We
-    // don't prevent default here so normal text paste still works alongside.
+    // clipboard data — go through the bridge to read it via the Rust OS
+    // clipboard command. We don't prevent default here so normal text paste
+    // still works alongside.
     readClipboardFiles().then((paths) => {
       if (paths.length > 0) {
         handlePaths(paths);

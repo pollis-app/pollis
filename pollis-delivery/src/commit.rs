@@ -536,7 +536,7 @@ pub const PRUNE_MAX_BEHIND_HEAD: i64 = 512;
 ///     Tier 1 contributes nothing (floor 0) and only Tier 2's cap applies.
 ///   * `head` — the group head epoch (`MAX(epoch)+1`).
 ///
-/// `floor = max(tier1, tier2)`, clamped to `>= 0`:
+/// `floor = min(max(tier1, tier2), head - 1)`, clamped to `>= 0`:
 ///   * `tier1 = (min_since - PRUNE_SLACK_EPOCHS)` when `all_reported`, else 0.
 ///   * `tier2 = head - PRUNE_MAX_BEHIND_HEAD`.
 ///
@@ -544,15 +544,47 @@ pub const PRUNE_MAX_BEHIND_HEAD: i64 = 512;
 /// than `PRUNE_MAX_BEHIND_HEAD` epochs behind head) — the deliberate,
 /// documented accepted-loss path. Tier 1 alone is always `<= min_since`, i.e.
 /// the spec's `NoLossForCurrentMember`.
+///
+/// ## The clamp to `head - 1` (the safety property that matters most — #681)
+///
+/// `tier1` is derived from client-REPORTED epochs (`record_commit_since`), which
+/// this function must treat as untrusted: a member that reports a `since` far
+/// above the real head — whether by a bug or a forged report — would drive
+/// `tier1` (hence the floor) above `head`, and [`delete_commits_below`] deletes
+/// every `epoch < floor`. An unclamped floor `>= head` therefore deletes the
+/// ENTIRE live commit log for the conversation, resetting its head to 0 and
+/// leaving every current member — even one sitting exactly at head — unable to
+/// advance (they must all external-join, and anyone who cannot loses history).
+///
+/// So the floor is clamped so it can never reach the head commit. The head
+/// commit sits at `epoch = head - 1` (the log holds epochs `0..=head-1`, since
+/// `head = MAX(epoch) + 1`), and the floor is EXCLUSIVE, so retaining it means
+/// `floor <= head - 1`. `head - 1` — not `head` — is the correct ceiling:
+/// clamping to `head` would still permit `floor == head`, which deletes
+/// `epoch < head` = the whole log. Keeping the head commit keeps `head_epoch_in`
+/// reading the true head and keeps the group advanceable; a member that lost
+/// OLDER commits still recovers via the documented Tier-2 external-join path.
+/// This mirrors [`closed_generation_floor`]'s `.min(head_generation)`: the LIVE
+/// lineage is never retired wholesale, whatever the reports say.
+///
+/// The clamp never bites a HONEST report: an honest `min_since <= head`, so
+/// `tier1 <= head - PRUNE_SLACK_EPOCHS < head - 1`, and `tier2 <= head -
+/// PRUNE_MAX_BEHIND_HEAD < head - 1`. It only ever narrows pruning for absurd
+/// inputs — it can never widen it. `saturating_sub` keeps `min_since == i64::MAX`
+/// (or a bogus deeply-negative report) from overflowing the Tier-1 subtraction.
 pub fn prune_floor(min_since: Option<i64>, all_reported: bool, head: i64) -> i64 {
     let tier1 = match (all_reported, min_since) {
-        (true, Some(m)) => (m - PRUNE_SLACK_EPOCHS).max(0),
+        (true, Some(m)) => m.saturating_sub(PRUNE_SLACK_EPOCHS).max(0),
         // A current member has not reported: `min_since` is not a safe lower
         // bound over the roster, so Tier 1 must not prune. Tier 2 still applies.
         _ => 0,
     };
     let tier2 = (head - PRUNE_MAX_BEHIND_HEAD).max(0);
-    tier1.max(tier2)
+    // The head commit (`epoch = head - 1`) is NEVER pruned: the floor is
+    // exclusive, so clamping to `head - 1` retains it and keeps the live log
+    // non-empty for ANY report, honest or forged (#681).
+    let head_ceiling = (head - 1).max(0);
+    tier1.max(tier2).min(head_ceiling)
 }
 
 /// The generation floor (EXCLUSIVE): whole lineages with `generation < floor` are
@@ -1093,6 +1125,29 @@ mod proofs {
         assert!(floor == (head - PRUNE_MAX_BEHIND_HEAD).max(0));
     }
 
+    /// P4 (#681, floor_never_reaches_head): the floor NEVER reaches the head, for
+    /// ANY reported `min_since` — including a forged one far above head. Because
+    /// the floor is exclusive and the head commit sits at `head - 1`, `floor <=
+    /// head - 1` is exactly "the live commit log is never wiped": whatever a
+    /// device reports, the head commit survives and the group stays advanceable.
+    /// The symbolic `min_since` deliberately ranges independently of `head`, so
+    /// `min_since > head` (the log-wipe input) is covered.
+    #[kani::proof]
+    fn i4_floor_never_reaches_head() {
+        let min_since = symbolic_min_since();
+        let all_reported: bool = kani::any();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor(min_since, all_reported, head);
+        // Never at or above head — the head commit (epoch head-1) is retained.
+        assert!(floor <= (head - 1).max(0));
+        // A non-empty log therefore always keeps at least its head commit.
+        if head > 0 {
+            assert!(floor < head);
+        }
+    }
+
     // ─── Mutants (teeth) ──────────────────────────────────────────────────────
 
     /// P1 mutant: the raw Tier-2 expression with NO `.max(0)` clamp and no Tier 1
@@ -1170,6 +1225,36 @@ mod proofs {
         // A reported `min_since` above the Tier-2 cap makes the mutant floor
         // exceed `(head - 512).max(0)` → Kani finds the violation.
         assert!(floor == (head - PRUNE_MAX_BEHIND_HEAD).max(0));
+    }
+
+    /// P4 mutant (#681): the pre-fix floor with NO `.min(head - 1)` clamp — Tier 1
+    /// is driven straight off the reported `min_since`. A reported epoch above the
+    /// head (`min_since > head + SLACK`) pushes the floor to/above head, so
+    /// `delete_commits_below(epoch < floor)` deletes the whole live log. `Kani`
+    /// must find the input that makes the floor reach head.
+    fn prune_floor_clamp_mutant(min_since: Option<i64>, all_reported: bool, head: i64) -> i64 {
+        let tier1 = match (all_reported, min_since) {
+            (true, Some(m)) => m.saturating_sub(PRUNE_SLACK_EPOCHS).max(0),
+            _ => 0,
+        };
+        let tier2 = (head - PRUNE_MAX_BEHIND_HEAD).max(0);
+        // BUG: dropped the `.min((head - 1).max(0))` clamp — a forged high-water
+        // drives the floor above head and wipes the live commit log.
+        tier1.max(tier2)
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_floor_never_reaches_head_mutant_refuted() {
+        let min_since = symbolic_min_since();
+        let all_reported: bool = kani::any();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor_clamp_mutant(min_since, all_reported, head);
+        // A reported `min_since` above head drives the mutant floor to/above head
+        // (the log wipe) → Kani finds the violation of the retention property.
+        assert!(floor <= (head - 1).max(0));
     }
 
     // ─── I4 under generations — closed-lineage retirement ─────────────────────
@@ -1382,6 +1467,37 @@ mod retention_tests {
         assert_eq!(prune_floor(None, false, 0), 0);
         assert_eq!(prune_floor(Some(0), true, 0), 0);
         assert_eq!(prune_floor(Some(3), true, 3), 0); // min(3)-8 → clamp 0; head 3 < cap
+    }
+
+    /// #681 — the retention floor NEVER reaches the head, so a forged/absurd
+    /// high-water can never wipe the live commit log. The floor is clamped to
+    /// `head - 1` (the head commit at `epoch = head - 1` is always retained), and
+    /// the Tier-1 subtraction saturates so `min_since == i64::MAX` does not
+    /// overflow. Covers head==0, min_since==head, min_since>head, the i64::MAX
+    /// blow-up, and the (already Tier-1-disabling) unreported case.
+    #[test]
+    fn floor_never_reaches_head_even_for_a_bogus_report() {
+        // The log-wipe input: a device reports an epoch far above the real head.
+        // Pre-fix this returned i64::MAX - 8 (⇒ delete every epoch < that ⇒ wipe);
+        // clamped it retains the head commit at epoch 9.
+        assert_eq!(prune_floor(Some(i64::MAX), true, 10), 9);
+        assert!(prune_floor(Some(i64::MAX), true, 10) < 10, "never at/above head");
+
+        // min_since a plain amount above head → still clamped to head - 1.
+        assert_eq!(prune_floor(Some(1_000), true, 20), 19);
+
+        // head == 0 (empty log): nothing to retain, floor collapses to 0.
+        assert_eq!(prune_floor(Some(100), true, 0), 0);
+        assert_eq!(prune_floor(Some(i64::MAX), true, 0), 0);
+
+        // min_since == head is an honest "caught up to head" report; the slack
+        // keeps it well below the ceiling, so the clamp does not bite.
+        assert_eq!(prune_floor(Some(20), true, 20), 20 - PRUNE_SLACK_EPOCHS);
+
+        // An unreported roster already disables Tier 1, so a bogus min_since is
+        // inert regardless of the clamp — dropping a report can only NARROW
+        // pruning, never widen it.
+        assert_eq!(prune_floor(Some(i64::MAX), false, 10), 0);
     }
 
     /// A conversation that has never migrated (head generation 0) never retires a
