@@ -279,6 +279,52 @@ that class of bug.
 - `generation` INTEGER NOT NULL DEFAULT 0 _(commit-log-DB migration 000004, #454 P4 — the **suite generation**)_
 - UNIQUE INDEX `idx_mls_commit_conv_gen_epoch` on `(conversation_id, generation, epoch)` _(migration 000004, replacing `idx_mls_commit_conv_epoch`)_
 
+**Schema-layer I1 triggers (commit-log-DB migration 000005, #691).** Three
+`BEFORE` triggers make a gap/rewrite/head-loss physically unrepresentable, as a
+second line of defence behind the CAS insert (`submit_commit`) — the invariant
+enforced at the lowest layer, not just the protocol layer:
+- `trg_mls_commit_log_no_forward_gap` (INSERT) — rejects `NEW.epoch` above the
+  lineage head (`MAX(epoch)+1` within `(conversation_id, generation)`). Kills F1
+  (skip-ahead gap). The head append and any `epoch ≤ MAX` resubmit (absorbed by
+  the CAS `ON CONFLICT`) pass; only a forward jump aborts.
+- `trg_mls_commit_log_immutable` (UPDATE) — rejects any change to the chain
+  identity (`conversation_id`/`generation`/`epoch`) or payload (`commit_data`).
+  Kills the history-rewrite half of F2. The DS never UPDATEs this table, so it
+  has no legitimate traffic to fire on.
+- `trg_mls_commit_log_keep_head` (DELETE) — rejects deleting the live head
+  (`MAX(epoch)` of `MAX(generation)`) **while any earlier commit of the same
+  conversation still exists** (`AND EXISTS (… row with a different `seq` …)`).
+  Kills the catastrophic half of F2 (the ELECTRON deletion that wedges every
+  member: the head regresses out from under members who had applied it, with
+  earlier commits still present that it can no longer reconcile against). The head
+  is invariant under BOTH retention delete shapes (`delete_commits_below`,
+  floor ≤ head−1; `delete_generations_below`, closed generations only), so those
+  never trip it. Interior-gap-on-delete is NOT trigger-enforced — a per-row
+  `BEFORE DELETE` trigger cannot tell a mid-chain hole from an intermediate state
+  of a legitimate bulk prefix prune — so interior contiguity stays with the CAS +
+  the clamped retention floor in Rust. Proven by
+  `pollis-delivery/tests/commit_log_triggers.rs` (direct-SQL violation attempts).
+
+  *Full-conversation erasure IS allowed (the `EXISTS` clause was narrowed in the
+  #691 review; an earlier draft blocked it and took down 81/82 flows scenarios,
+  whose `wipe_remote` reset issues a bare `DELETE FROM mls_commit_log`).* The guard
+  fires only on a head-with-siblings delete, so a conversation can be emptied:
+  bottom-up (the final row is head-and-only-row → allowed), or via a bare
+  `DELETE FROM mls_commit_log` (SQLite deletes in ascending `seq`/rowid order and
+  the head holds the highest `seq` in its conversation, so it is visited last,
+  after its siblings are gone → the `EXISTS` is false). A future delete-account /
+  erase-conversation path therefore needs **no** bypass primitive. Cost, stated
+  plainly: buggy code that sweeps an entire *live* conversation is no longer stopped
+  at the schema layer — acceptable, since that is whole-conversation removal (not
+  I1's head-regression failure mode) and nothing above the DB issues an unscoped
+  per-conversation delete (`account.rs` account deletion never touches
+  `mls_commit_log`).
+
+  Trigger bodies (`BEGIN … ; END`) carry inner `;` that are not statement
+  boundaries, so the migration appliers (`scripts/db-apply.sh`, the flows/tui
+  test harnesses' `split_sql_statements`) were taught to keep a `CREATE TRIGGER`
+  intact until its `END`.
+
 **Suite generations (#454 P4).** MLS binds the ciphersuite into the group, so a
 conversation cannot be switched to another suite in place: the migration stands up
 a *successor* group for the same conversation and moves the roster into it by

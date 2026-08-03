@@ -355,11 +355,20 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
                 }
             }
             ';' => {
-                let stmt = current.trim().to_string();
-                if !stmt.is_empty() {
-                    statements.push(stmt);
+                // A `CREATE TRIGGER` body carries its own statement-terminating
+                // `;` (`BEGIN <stmt>; END`). Those inner `;` are NOT statement
+                // boundaries — the trigger ends only at the `;` after its `END`.
+                // Keep accumulating until the trimmed text ends with `END`.
+                let upper = current.trim().to_ascii_uppercase();
+                if upper.starts_with("CREATE TRIGGER") && !upper.ends_with("END") {
+                    current.push(c);
+                } else {
+                    let stmt = current.trim().to_string();
+                    if !stmt.is_empty() {
+                        statements.push(stmt);
+                    }
+                    current.clear();
                 }
-                current.clear();
             }
             _ => current.push(c),
         }

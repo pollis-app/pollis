@@ -532,17 +532,26 @@ pub async fn resign_stale_device_certs(
 /// Outcome of verifying every device in a commit's added-devices list.
 ///
 /// The three variants tell the caller (`process_pending_commits_locked`)
-/// whether the rejection-and-delete of the offending `mls_commit_log` row
-/// is safe. See issue #372 for the full rationale.
+/// how to treat the offending commit. NOTE: none of them delete the
+/// `mls_commit_log` row — a commit that won the epoch CAS is canonical and
+/// immutable, and deleting it forks the group (the ELECTRON-epoch-11
+/// incident; see `group_state.rs::VerifyOutcome::Revoked`). Log-DB migration
+/// 000005 (#691) now also enforces this at the schema layer: deleting a
+/// canonical commit is never safe, so the head-protection and immutability
+/// triggers make the old delete physically impossible. See issue #372 for the
+/// full rationale.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum VerifyOutcome {
     /// Every added device verified — apply the commit normally.
     Verified,
     /// At least one added device is confirmed REVOKED (tombstoned via
     /// `user_device.revoked_at`), OR the cert chain itself failed
-    /// verification (bad signature, wrong identity_version). Either way
-    /// the commit is illegitimate and the caller may delete it from
-    /// `mls_commit_log` so a legit commit can claim the same epoch.
+    /// verification (bad signature, wrong identity_version). The commit is
+    /// illegitimate, but the caller still APPLIES it to stay on the one
+    /// canonical branch (it won the epoch CAS and other members may already
+    /// have advanced past it); the revoked device is evicted the
+    /// append-only way by a later `reconcile` remove commit. We do NOT delete
+    /// the row — that broke the append-only invariant (ELECTRON epoch 11).
     Revoked,
     /// At least one added device is ABSENT — the row doesn't exist
     /// anywhere yet, or required cert columns are NULL. This is the

@@ -2383,25 +2383,114 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
 ///
 /// `conversation_id` is the MLS group id (the `group_id` for a group channel).
 /// Asserts exactly one row was corrupted — a silent no-op would prove nothing.
+///
+/// IMPLEMENTATION NOTE — why this is a DELETE-then-INSERT, not a straight
+/// `UPDATE ... SET commit_data`. Log-DB migration 000005 (#691) added
+/// `trg_mls_commit_log_immutable`, a BEFORE UPDATE trigger that RAISE(ABORT)s any
+/// UPDATE that changes `commit_data` — commit-payload immutability is the "rewrite"
+/// half of invariant F2 and is the most valuable clause in that migration, so it
+/// must NOT be weakened to accommodate this test. Instead we reproduce the exact
+/// same observable end state — one INTERIOR row whose `commit_data` is a two-byte
+/// stub, every other column (including `seq`, the catch-up order key, and the
+/// untouched `epoch`) identical, the head unchanged — by deleting the row and
+/// re-inserting it with the stub payload. That satisfies both new triggers as
+/// written: the DELETE guard (`trg_..._keep_head`) only protects the live head, and
+/// this row is provably interior (the caller asserts a higher epoch sits above it);
+/// the INSERT guard (`trg_..._no_forward_gap`) only rejects `epoch > head + 1`, and
+/// re-inserting a below-head epoch (the head row is never removed) is `epoch <= head`,
+/// so it passes. Do NOT "simplify" this back into an UPDATE — you will hit a
+/// confusing ABORT from the immutability trigger.
 pub(crate) async fn corrupt_commit_row(conversation_id: &str, epoch: i64) {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for corrupt_commit_row");
-    // Truncate to a two-byte stub: too short to be a valid TLS-serialised
-    // MlsMessageOut, so `tls_deserialize` fails outright.
-    let affected = conn
-        .execute(
-            "UPDATE mls_commit_log SET commit_data = X'0001' \
+    // Snapshot the full row first — we must re-insert it byte-for-byte except for
+    // the payload, preserving `seq` so the row keeps its position in the seq-ordered
+    // catch-up replay (a fresh AUTOINCREMENT seq would re-order the corrupt commit to
+    // the tail and change what the replay observes).
+    let mut rows = conn
+        .query(
+            "SELECT seq, generation, sender_id, created_at, added_user_id, added_device_ids \
+             FROM mls_commit_log \
              WHERE conversation_id = ?1 AND epoch = ?2 \
                AND generation = (SELECT COALESCE(MAX(generation), 0) FROM mls_commit_log \
                                   WHERE conversation_id = ?1)",
             libsql::params![conversation_id.to_string(), epoch],
         )
         .await
-        .expect("corrupt commit row");
+        .expect("select commit row to corrupt");
+    let row = rows
+        .next()
+        .await
+        .expect("read commit row")
+        .unwrap_or_else(|| {
+            panic!(
+                "corrupt_commit_row: no commit at epoch {epoch} for {conversation_id} — \
+                 the scenario's setup is wrong (no such epoch)"
+            )
+        });
+    // ORDERING IS LOAD-BEARING — read every column out of `row` into a local BEFORE
+    // the duplicate-row check below. A `libsql::Row` is a view over the statement's
+    // current cursor position, not an owned snapshot of its values: calling
+    // `rows.next()` again to look for a second row steps the statement and
+    // invalidates the `Row` already handed out, after which every `row.get(i)` reads
+    // back `NULL` (surfacing as a misleading `NullValue` on `seq`, an
+    // `INTEGER PRIMARY KEY AUTOINCREMENT` that can never actually be NULL). Do NOT
+    // "tidy" the assert back up next to its `next()` call — that reintroduces the
+    // dead-cursor read and wedges `corrupt_commit_recovers_instead_of_wedging`.
+    let seq: i64 = row.get(0).expect("seq");
+    let generation: i64 = row.get(1).expect("generation");
+    let sender_id: String = row.get(2).expect("sender_id");
+    let created_at: String = row.get(3).expect("created_at");
+    let added_user_id: Option<String> = row.get(4).expect("added_user_id");
+    let added_device_ids: Option<String> = row.get(5).expect("added_device_ids");
+    // Now safe to step the cursor: the duplicate-row guard catches a genuinely wrong
+    // scenario setup (two commits at the same epoch/generation), but must run only
+    // after the reads above.
+    assert!(
+        rows.next().await.expect("second row check").is_none(),
+        "corrupt_commit_row: more than one commit at epoch {epoch} for {conversation_id} — \
+         the scenario's setup is wrong (a duplicate row)"
+    );
+
+    // Truncate to a two-byte stub: too short to be a valid TLS-serialised
+    // MlsMessageOut, so `tls_deserialize` fails outright. The row is interior, so the
+    // DELETE never trips the head guard; the re-insert lands below the head, so it
+    // never trips the forward-gap guard.
+    let deleted = conn
+        .execute(
+            "DELETE FROM mls_commit_log WHERE seq = ?1",
+            libsql::params![seq],
+        )
+        .await
+        .expect("delete commit row to corrupt");
     assert_eq!(
-        affected, 1,
-        "corrupt_commit_row: expected exactly ONE commit at epoch {epoch} for \
-         {conversation_id} to corrupt, changed {affected} — the scenario's setup is wrong"
+        deleted, 1,
+        "corrupt_commit_row: expected to delete exactly ONE row at seq {seq} for \
+         {conversation_id}, deleted {deleted}"
+    );
+    let inserted = conn
+        .execute(
+            "INSERT INTO mls_commit_log \
+               (seq, conversation_id, generation, epoch, sender_id, commit_data, \
+                created_at, added_user_id, added_device_ids) \
+             VALUES (?1, ?2, ?3, ?4, ?5, X'0001', ?6, ?7, ?8)",
+            libsql::params![
+                seq,
+                conversation_id.to_string(),
+                generation,
+                epoch,
+                sender_id,
+                created_at,
+                added_user_id,
+                added_device_ids,
+            ],
+        )
+        .await
+        .expect("re-insert corrupted commit row");
+    assert_eq!(
+        inserted, 1,
+        "corrupt_commit_row: expected to re-insert exactly ONE row at epoch {epoch} for \
+         {conversation_id}, inserted {inserted} — the scenario's setup is wrong"
     );
 }
 

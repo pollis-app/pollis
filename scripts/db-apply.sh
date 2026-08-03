@@ -97,6 +97,20 @@ for f in "${PENDING[@]}"; do
       $sql
       | gsub("(?m)^\\s*--.*$"; "")
       | split(";")
+      # A CREATE TRIGGER body carries its own `;` terminators
+      # (`BEGIN <stmt>; END`), so a naive split on `;` shreds it. Re-join the
+      # fragments from a `CREATE TRIGGER` up to and including the one ending in
+      # `END`, re-inserting the `;` that was split out of the body.
+      | reduce .[] as $part (
+          {out: [], cur: null};
+          (if .cur == null then $part else .cur + ";" + $part end) as $joined
+          | if ($joined | test("(?i)create\\s+trigger"))
+               and (($joined | test("(?i)end\\s*$")) | not)
+            then {out: .out, cur: $joined}
+            else {out: (.out + [$joined]), cur: null}
+            end
+        )
+      | (.out + (if .cur == null then [] else [.cur] end))
       | map(gsub("^\\s+|\\s+$"; ""))
       | map(select(length > 0));
     {

@@ -47,8 +47,8 @@ the invariant that makes it unrepresentable.
 
 | # | Invalid state | Source (today) | Evidence |
 |---|---|---|---|
-| F1 | **Commit-log gap** (non-contiguous epoch) | `mls_commit_log` has `UNIQUE(conv, epoch)` but *no contiguity constraint*; inserts can skip | ELECTRON epochs 4, 5, **11** missing → `ants` wedged |
-| F2 | **Deletion of an applied commit** | `process_pending_commits` used to `DELETE` a "revoked self-add" row (fixed in `adfe518`, but not *forbidden*) | dan applied epoch 11, it was deleted, ants wedged |
+| F1 | ~~**Commit-log gap** (non-contiguous epoch)~~ — **schema-guarded (#691)** | `UNIQUE(conv, epoch)` had *no contiguity constraint*; inserts could skip. The `BEFORE INSERT` forward-gap trigger (migration 000005) now aborts `epoch > MAX(epoch)+1` | ELECTRON epochs 4, 5, **11** missing → `ants` wedged |
+| F2 | ~~**Deletion/rewrite of an applied commit**~~ — **schema-guarded (#691)** | client deletes closed by the #420 read-only token split; DS-side now blocked by the `BEFORE UPDATE` immutability trigger + the `BEFORE DELETE` head-protection trigger (migration 000005). Interior-gap deletes remain a Rust-layer concern — see the I1 scope note | dan applied epoch 11, it was deleted, ants wedged |
 | F3 | ~~**Message dropped before delivery**~~ — **FIXED** | was `sent_at < now-30d` **OR** all-devices-caught-up; the OR'd TTL deleted undelivered envelopes on its own. TTL arm removed — envelope GC is now gated on the all-member-devices watermark alone (`pollis-delivery/src/messages.rs`) | was direct data loss for any member absent > 30d. Regressions pinned in `messages::gc_sql_tests`, `pollis-delivery/tests/envelope_retention.rs` (Part E), `flows::messages` |
 | F4 | **Fragile delivery accounting** | delivery tracked by `sent_at` vs per-device `conversation_watermark` timestamp — clock skew, equal timestamps, coarse acks | timestamp ≠ a reliable cursor (**still open** — the monotonic-seq cursor of I3 is not yet built; the F3 fix bounds retention by that timestamp watermark) |
 | F5 | **Welcome dropped before delivery** | `mls_welcome.delivered` flag + delete paths; no retention floor | a new device can miss its only Welcome |
@@ -65,10 +65,55 @@ the invariant that makes it unrepresentable.
   conversation → can't skip ahead (kills F1). Compatible with the existing
   CAS (`ON CONFLICT(conv,epoch) DO NOTHING`): a stale committer inserts at
   `epoch ≤ max` and is absorbed by the conflict; only forward gaps abort.
-- **`BEFORE DELETE` trigger**: abort all deletes → append-only (kills F2).
-- **`BEFORE UPDATE` trigger**: abort changes to `epoch`/`commit_data` →
-  immutable history.
-- *Result:* a gap or a deleted/edited commit is **physically unrepresentable.**
+- **`BEFORE DELETE` trigger**: reject deleting the **live head**
+  (`MAX(epoch)` of `MAX(generation)`) **while any earlier commit of the same
+  conversation still exists** → the ELECTRON deletion that wedges every member
+  (head regressed out from under members who had applied it) is unrepresentable
+  (kills the catastrophic half of F2). Deleting the head when it is the *last*
+  row is allowed — an empty chain is trivially gapless (see the scope note).
+- **`BEFORE UPDATE` trigger**: abort changes to
+  `conversation_id`/`generation`/`epoch`/`commit_data` → immutable history
+  (kills the rewrite half of F2).
+- *Result:* a forward gap, a rewritten commit, or a head deleted while earlier
+  commits remain is **physically unrepresentable.**
+- **Shipped:** commit-log-DB migration `000005_mls_commit_log_triggers.sql`
+  (#691), with direct-SQL violation tests in
+  `pollis-delivery/tests/commit_log_triggers.rs`.
+- **Scope note (honest, from #691).** The doc originally specified a
+  `BEFORE DELETE` that "aborts all deletes". That is now **infeasible**: the I4
+  retention prune (`delete_commits_below` / `delete_generations_below`, #539)
+  legitimately deletes a *prefix* / whole *closed lineage*, and it post-dates
+  this section. The DELETE trigger therefore guards the head — invariant under
+  both prune shapes, hence order-independent and provably free of false
+  positives — rather than aborting outright. Preventing an *interior* gap on
+  delete is not expressible in a per-row SQLite `BEFORE DELETE` trigger without
+  false-positiving on the intermediate state of a legitimate bulk prefix prune
+  (a partly-truncated prefix is indistinguishable from a mid-chain hole), so
+  interior contiguity stays enforced by the CAS + the clamped retention floor in
+  Rust. The schema layer guarantees the three that actually wedge a group:
+  no forward gap, no rewrite, no head-regression-while-members-hold-it.
+- **Full-conversation erasure IS allowed (corrected in #691 review — an earlier
+  draft of this section wrongly claimed the head guard made erasure impossible).**
+  The guard fires only when the head is deleted *while an earlier commit of the
+  same conversation still exists* — the ELECTRON shape. It does **not** fire on
+  deleting the head when it is the last row, so a conversation can be emptied:
+  prune bottom-up (each step the lowest epoch; the final row is head-and-only-row →
+  allowed), or issue a bare `DELETE FROM mls_commit_log` (SQLite visits rows in
+  ascending `seq`/rowid order, and the head has the highest `seq` in its
+  conversation, so it is deleted last, after its siblings are gone). This is not
+  hypothetical: the test-harness `wipe_remote` reset issues exactly that bare
+  `DELETE`, and the *first* draft of the guard took down the entire flows suite
+  (81/82 scenarios) because it forbade the wipe. A future delete-account /
+  erase-conversation path therefore needs **no** bypass primitive — it just
+  deletes, and the guard stays out of the way. The stated cost: buggy code that
+  sweeps an entire *live* conversation's rows is no longer stopped at the schema
+  layer, which is acceptable — it is whole-conversation removal, a different
+  operation from I1's head-regression failure mode, and nothing above the DB
+  issues an unscoped per-conversation delete (the only production deletes are the
+  two prefix/generation retention shapes; account deletion in `account.rs` never
+  touches `mls_commit_log`). The two boundary cases are pinned by
+  `bulk_wipe_empties_the_table` / `delete_head_when_only_row_is_allowed` in
+  `commit_log_triggers.rs`.
 
 ### I2 — Commits are a verifiable chain
 - MLS already chains epochs via the confirmed transcript hash / confirmation
@@ -112,7 +157,7 @@ the invariant that makes it unrepresentable.
 
 | Invariant | DB constraint/trigger | Rust type | Protocol | Test |
 |---|---|---|---|---|
-| I1 gapless append-only log | ✅ primary | append-only chain type | CAS insert | multi-client gap/laggard |
+| I1 gapless append-only log | ✅ triggers (#691, migration 000005) | append-only chain type | CAS insert | direct-SQL violation (`commit_log_triggers.rs`) |
 | I2 verifiable chain | link column | typed `CommitChain` | verify-on-apply | tamper test |
 | I3 cursor delivery | seq + cursor tables; retention via floor | monotonic `Cursor` | ingest advances cursor | absent-member catch-up |
 | I4 retain-to-slowest | retention floor (no TTL) | — | GC reads floor | 300-behind catch-up |
@@ -126,8 +171,12 @@ the invariant that makes it unrepresentable.
 
 - **Phase 0 (done):** stop the bleeding — append-only in code (`adfe518`: no
   more commit-log deletes) + auto-heal wedged members via external-join.
-- **Phase 1:** I1 — DB triggers making the commit log gapless/append-only/
-  immutable. + the regression test that was missing (laggard + apply-then-mutate).
+- **Phase 1 (done, #691):** I1 — DB triggers making the commit log
+  gapless/immutable and protecting the live head *against a regression while
+  earlier commits remain* (migration `000005`, log DB) + the direct-SQL violation
+  tests (`pollis-delivery/tests/commit_log_triggers.rs`). "Append-only" is enforced as
+  head-protection rather than abort-all-deletes, because the I4 retention prune
+  legitimately truncates a prefix — see the I1 scope note above.
 - **Phase 2:** I3 — **partially done.** The 30-day TTL is deleted and envelope
   retention is bound to the slowest member-device (kills F3, and F6 for
   envelopes). The delivery cursor model itself (monotonic per-conversation seq +

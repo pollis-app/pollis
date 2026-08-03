@@ -147,8 +147,10 @@ async fn run_sql_script(conn: &libsql::Connection, sql: &str) -> anyhow::Result<
     Ok(())
 }
 
-/// Split on `;`, honoring `--` line comments and `'...'` string literals (both
-/// appear in the migrations). Copied from the flows harness.
+/// Split on `;`, honoring `--` line comments, `'...'` string literals, and
+/// `CREATE TRIGGER ... BEGIN <stmt>; END` bodies (whose inner `;` are not
+/// statement boundaries). All appear in the migrations. Copied from the flows
+/// harness.
 fn split_sql_statements(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
@@ -178,11 +180,19 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
                 }
             }
             ';' => {
-                let stmt = current.trim().to_string();
-                if !stmt.is_empty() {
-                    statements.push(stmt);
+                // A `CREATE TRIGGER` body carries its own statement-terminating
+                // `;` (`BEGIN <stmt>; END`). Those inner `;` are NOT statement
+                // boundaries — the trigger ends only at the `;` after its `END`.
+                let upper = current.trim().to_ascii_uppercase();
+                if upper.starts_with("CREATE TRIGGER") && !upper.ends_with("END") {
+                    current.push(c);
+                } else {
+                    let stmt = current.trim().to_string();
+                    if !stmt.is_empty() {
+                        statements.push(stmt);
+                    }
+                    current.clear();
                 }
-                current.clear();
             }
             _ => current.push(c),
         }
