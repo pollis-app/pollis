@@ -340,10 +340,17 @@ The release workflow currently ends by uploading artifacts, minisign manifests,
 `latest.json`, and the GitHub release. We insert a **new job, `attest-and-log`,
 after `release`** (it needs the built + signed artifacts in hand):
 
-1. **Compute hashes.** For each platform artifact: extract the reproducible
-   payload (`.app` contents / AppImage squashfs / unsigned exe+resources from the
-   NSIS installer), hash it → `payload_sha256`; hash the shipped signed file →
-   `artifact_sha256`.
+1. **Compute hashes.** For each platform artifact: obtain the reproducible
+   **pre-signature** payload and hash it → `payload_sha256`; hash the shipped
+   signed file → `artifact_sha256`. On Linux the shipped AppImage/deb/rpm bytes
+   *are* the payload (detached minisign), so the attest job hashes them directly.
+   On macOS/Windows the pre-signature `.app` / unsigned exe+resources cannot be
+   recovered from the signed installer at all — as of #704 (WS3) the **build job**
+   builds the bundle unsigned, hashes it with the shared `sha_tree` helper, and
+   publishes the digest as a `*.payload-sha256` release-asset sidecar the attest
+   job reads (it must never re-hash the signed bytes, which embed a
+   per-signing-operation signature + notarization ticket and are unreproducible by
+   construction).
 2. **Emit `BinaryRecord` leaves** into a small JSON the builder consumes.
 3. **Append to the binaries tree.** The `verifiable-log-builder` gains a
    `--binaries-in <records.json>` mode (analogous to `--account-out`): it appends

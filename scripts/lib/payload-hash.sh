@@ -34,9 +34,17 @@ sha_file() { sha256sum "$1" | awk '{print $1}'; }
 
 # Deterministic sha256 of a directory tree. SOURCE_DATE_EPOCH (tag commit unix
 # seconds) fixes the archive mtime so the hash is a pure function of contents.
+#
+# GNU tar only: `--sort=name` is a GNU extension (BSD/macOS tar lacks it). The
+# pre-signature payload for macOS is captured on a macOS runner, which ships BSD
+# tar, so that job installs GNU tar and exports `TAR=gtar`; everywhere else the
+# default `tar` is already GNU. Both must be GNU tar for the archive bytes — and
+# therefore the hash — to match between the party that LOGS and the party that
+# REBUILDS (see the file header). Windows captures run under Git-for-Windows bash,
+# whose `tar` is already GNU.
 sha_tree() {
   : "${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH required for sha_tree (tag commit unix seconds)}"
-  tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" \
+  "${TAR:-tar}" --sort=name --mtime="@${SOURCE_DATE_EPOCH}" \
       --owner=0 --group=0 --numeric-owner \
       -cf - -C "$1" . | sha256sum | awk '{print $1}'
 }

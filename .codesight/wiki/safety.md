@@ -235,14 +235,14 @@ makes every user's full history auditable by anyone.
   never auto-run) and advisory — it never gates launch or update.
 
   **The `exe` layer is what makes this work off Linux.** Originally the app
-  compared `sha256(current_exe())` against `payload` leaves — but
-  `scripts/attest-binaries.sh` logs `payload` as a `sha_tree` of an *extracted
-  directory* (a `SOURCE_DATE_EPOCH`-pinned tar) or a `sha_file` of the
-  *installer*, and an installed process has neither preimage. The comparison
-  therefore missed 100% of the time on macOS `.app`, Windows NSIS and deb/rpm,
-  rendering the danger-styled "Build not in public log" on every genuine signed
-  release. Only the AppImage (whose shipped bytes ARE the payload, reachable via
-  `$APPIMAGE`) ever matched.
+  compared `sha256(current_exe())` against `payload` leaves — but the `payload`
+  leaf is a `sha_tree` of a directory (the pre-signature `.app` / unsigned
+  exe+resources, a `SOURCE_DATE_EPOCH`-pinned tar the build job captures before
+  signing as of #704) or a `sha_file` of the *installer*, and an installed process
+  has neither preimage. The comparison therefore missed 100% of the time on macOS
+  `.app`, Windows NSIS and deb/rpm, rendering the danger-styled "Build not in
+  public log" on every genuine signed release. Only the AppImage (whose shipped
+  bytes ARE the payload, reachable via `$APPIMAGE`) ever matched.
 
   The fix is a third `Layer::Exe` leaf per bundle, carrying the sha256 of the
   main executable as installed (`Contents/MacOS/pollis`, `pollis.exe`,

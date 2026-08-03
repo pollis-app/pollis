@@ -41,3 +41,23 @@ need() {
 find_installed_bin() {
   find "$1" -type f -path "*/usr/bin/${MAIN_BIN}" 2>/dev/null | head -1
 }
+
+# read_payload_sha256 <manifest-file> — echo the validated pre-signature
+# payload sha256 (64 lowercase hex) from a build-job manifest, or return 1.
+#
+# The payload leaf for macOS/Windows must hash the app payload BEFORE
+# code-signing / notarization (#603/#704); those bytes exist only in the build
+# job, so it captures the pre-signature payload's `sha_tree` and publishes the
+# digest in this tiny sidecar. The attest job (which only ever sees the
+# already-signed installer) reads the digest from here rather than re-hashing the
+# signed artifact — a leaf hashing signed bytes is unreproducible by construction,
+# forever, which is worse than no leaf. Pure and side-effect-free so
+# test-attest-helpers.sh can exercise the hex-validation without a real release.
+read_payload_sha256() {
+  local f="${1:-}" sha
+  [ -n "$f" ] && [ -f "$f" ] || return 1
+  # Whole-file content, all whitespace stripped (tolerate a trailing newline).
+  sha="$(tr -d '[:space:]' < "$f")"
+  printf '%s' "$sha" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s' "$sha"
+}

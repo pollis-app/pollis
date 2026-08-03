@@ -40,42 +40,104 @@ Authenticode `.exe` embeds a mandatory RFC-3161 timestamp from
 over the artifact. **None can be reproduced** without Pollis's private keys, and
 the timestamps differ on every run by design.
 
-**What we log today (corrected):** on Linux the `payload` leaf genuinely is the
-pre-signature reproducible unit. On **macOS and Windows it is not** — the attest
-job extracts the `.app` out of the already-signed, notarized `.dmg` (and the file
-tree out of the signed NSIS installer) and hashes that, so those `payload` leaves
-contain Apple's CMS signature, the stapled notarization ticket, and Authenticode
-data. **They therefore cannot be reproduced by anyone, including us on a matching
-runner** — not "hard", impossible. Capturing a genuine pre-signature payload on
-those platforms is tracked in #603. This paragraph previously claimed the
-pre-signature behaviour as already implemented; it was describing the intent, not
-the pipeline.
+**What we log today:** on **all three** platforms the `payload` leaf is now a
+hash of the **pre-signature** payload. On Linux the shipped AppImage/deb/rpm bytes
+already *are* that payload (Tauri's minisign signature is detached), so the attest
+job hashes them directly. On **macOS and Windows** the shipped `.dmg` / NSIS `.exe`
+is signed + notarized, so the pre-signature `.app` / unsigned exe+resources exist
+only *inside the build job* — as of #704 (WS3) each build job runs an extra `tauri
+build` that produces the bundle **unsigned** (macOS: no `APPLE_*` env is set, so
+tauri resolves `signing_identity = None` and does not codesign/notarize; Windows:
+this build runs before the Authenticode `signCommand` is injected), hashes that
+payload with the shared `sha_tree` helper, and publishes the digest as a
+`*.payload-sha256` release-asset sidecar that `scripts/attest-binaries.sh` reads
+back as `payload_sha256`. The attest job **no longer hashes anything extracted from
+the signed artifact for the payload leaf** (it still opens the signed artifact only
+to reach the installed executable for the `exe` leaf). Before #704 those macOS/
+Windows `payload` leaves hashed the already-signed bytes — which embed Apple's CMS
+signature, the stapled notarization ticket, and Authenticode data, and so **could
+never be reproduced by anyone, including us on a byte-identical runner** (impossible
+by construction, not merely hard). That is fixed: the payload leaf now commits to
+bytes a rebuilder can, in principle, reproduce.
 
-The signed wrapper is logged as a separate derived hash bound to the payload. Install-time integrity of the signed wrapper still
-rests on platform code-signing (Gatekeeper / Authenticode), exactly as before —
-transparency is *added to*, not a *replacement for*, signing.
+**The payload leaf provably wraps the *shipped* binary — this is CI-enforced, not
+assumed.** The pre-signature payload is only meaningful if the signed installer
+wraps the *same* compiled binary the payload hashed; otherwise the leaf would
+attest a binary that never shipped (a false claim, worse than the unreproducible
+leaf it replaced). The macOS `signingIdentity` was removed from the committed
+config in #704 (it was redundant — the signed build's `APPLE_SIGNING_IDENTITY` env
+overrides config, so env alone drives signing; `tauri-cli` interface/rust.rs), so
+the two macOS builds read a byte-identical config. The remaining deltas
+(`createUpdaterArtifacts:false` on the capture build; the Windows `signCommand`
+injected only for the signed build) all live in `bundle` fields Tauri's codegen
+strips to their defaults before embedding the config into the binary
+(`tauri-utils` `BundleConfig::to_tokens`), so they **cannot** change the compiled
+bytes. Rather than *trust* that, `scripts/verify-presig-binary.sh` fingerprints the
+compiled binary (plus the macOS externalBin capture-helper sidecar) right after the
+capture build and re-checks it right after the signed build; a mismatch **fails the
+release loudly** and refuses to publish the payload leaf. So a future Tauri or
+config change that silently re-introduced divergence would stop the release, not
+ship a false leaf.
+
+**What is still not reproducible on macOS/Windows** is the *degree* to which those
+pre-signature payloads reproduce bit-for-bit — see §2. #704 changed *what we hash*
+(pre-signature, not signed); it did **not** add `--remap-path-prefix`, digest-pinned
+runners, or a matching-platform reproducer, so macOS/Windows payload reproduction
+stays **best-effort** (native codegen can still embed host paths). The distinction
+is the whole point: "best-effort, closable" replaces "impossible, forever."
+
+**That the shipped artifact is actually signed is also CI-enforced, not assumed.**
+Removing the hardcoded macOS `signingIdentity` (above) deleted the config fallback,
+so the whole macOS signing configuration now lives in one secret,
+`APPLE_SIGNING_IDENTITY`. If it were ever empty, tauri would resolve no identity and
+*silently* skip codesigning **and** notarization while the job stayed green —
+shipping a Gatekeeper-blocked `.dmg` wrapped in a valid-looking payload leaf. Two
+checks close that (`scripts/verify-signed-artifact.sh`, both platforms): a
+**preflight** that hard-fails before the signed build if a required signing secret
+is empty (GitHub sets an unset secret's env var to `""`, so this catches the
+`Some("")` case the bundler's own filter would otherwise decide), and a **post-build
+verification** — macOS `codesign --verify --deep --strict` + a Developer ID
+Application authority + `spctl` Gatekeeper/notarization acceptance; Windows `signtool
+verify /pa` — that refuses to publish an unsigned/unnotarized artifact. This asserts
+signing the same way `verify-presig-binary.sh` asserts the payload leaf wraps the
+binary. (No identity string, team id, or cert thumbprint is written into the repo —
+the authority is matched by prefix only.)
+
+The signed wrapper is logged as a separate derived `layer:"signed"` leaf whose
+`payload_sha256` equals the payload leaf's — an explicit, verifiable binding
+("this signed artifact wraps that reproducible payload"), never a reproducibility
+claim about the signed bytes themselves. Install-time integrity of the signed
+wrapper still rests on platform code-signing (Gatekeeper / Authenticode), exactly
+as before — transparency is *added to*, not a *replacement for*, signing.
 
 ### 2. macOS `.app` and Windows NSIS native payload bits — best-effort, cross-platform
 macOS builds on `macos-latest` (ARM), Windows on `windows-latest`. You cannot
 bit-reproduce a macOS or Windows payload on a Linux runner, and we do **not**
-promise cross-OS reproducibility. Their payloads (the `.app` contents; the
-unsigned exe + resources inside the NSIS installer) are extracted and logged with
-the correct two-leaf `payload`/`signed` structure, and reproduction is
-**best-effort on a matching runner** — not asserted by `rebuild-verify.yml`,
-which reproduces the Linux payload only. Native codegen on these platforms
-(MSVC/clang, resource compilers) can embed host paths and vary across patch
-versions; treat macOS/Windows payload reproduction as **impossible with the
-current leaf definition** (see §1) rather than merely unverified. Two things must
-land before it becomes a question of determinism at all: a pre-signature payload
-hash (#603) and a matching-platform reproducer.
+promise cross-OS reproducibility. As of #704 their `payload` leaf commits to the
+**pre-signature** payload (the unsigned `.app` contents; the unsigned exe +
+resources inside the NSIS installer), captured *in the build job before signing*
+and hashed with the shared `sha_tree` helper — logged with the correct two-leaf
+`payload`/`signed` structure plus the `exe` leaf. Reproduction is now
+**best-effort on a matching runner** — no longer *impossible by construction* (the
+pre-signature-hash prerequisite has landed), but still not asserted by
+`rebuild-verify.yml`, which reproduces the Linux payload only. Native codegen on
+these platforms (MSVC/clang, resource compilers) can embed host paths and vary
+across patch versions, and these jobs do **not** yet apply `--remap-path-prefix`
+(macOS/Windows carry per-target `rustflags` in `.cargo/config.toml`, so a blanket
+`RUSTFLAGS` would clobber them — deferred, tracked as its own step). So treat
+macOS/Windows payload reproduction as **best-effort and unverified** rather than
+impossible. The one remaining prerequisite before it becomes purely a question of
+determinism is a **matching-platform reproducer** (the macOS/Windows analogue of
+`rebuild-verify.yml`).
 
-An empirical note for whoever picks up #603: `codesign --remove-signature` is
+An empirical note for the determinism work: `codesign --remove-signature` is
 **deterministic** — stripping the shipped v1.5.3 `Contents/MacOS/pollis` twice
 yields the identical digest (`acd70269be7b…`). That makes normalization viable as
-a cross-check between two observers of the same signed artifact. It does **not**
-establish that stripped bytes equal a freshly built *unsigned* binary, and that
-equality — untested — is the load-bearing assumption for any reproducibility
-claim built on stripping rather than on capturing the payload before signing.
+an *optional* cross-check between two observers of the same signed artifact, but it
+is **not** how the payload leaf is produced: #704 deliberately captures the payload
+*before* signing rather than stripping it *after*, because stripped bytes equalling
+a freshly built *unsigned* binary is an untested assumption we chose not to rest a
+reproducibility claim on.
 
 ### 3. Apple notarization staple — non-reproducible, post-build mutation
 Apple's notary service staples a ticket **after** the build, changing the shipped

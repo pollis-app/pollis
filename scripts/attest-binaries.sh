@@ -4,9 +4,17 @@
 # released tag (issue #453, Phase 2 "attest-and-log").
 #
 # For each shipped platform artifact it computes:
-#   * payload_sha256  — the reproducible PRE-SIGNATURE payload (the `.app`
-#     contents inside a `.dmg`, the unsigned exe+resources inside an NSIS
-#     installer, the AppImage/deb/rpm payload) hashed deterministically;
+#   * payload_sha256  — the reproducible PRE-SIGNATURE payload hashed
+#     deterministically. For Linux (AppImage/deb/rpm) the shipped bytes ARE that
+#     payload (Tauri's minisign signature is detached), so it is hashed here. For
+#     macOS/Windows the shipped `.dmg`/NSIS `.exe` is already signed + notarized,
+#     so the pre-signature `.app` / unsigned exe+resources exist ONLY in the build
+#     job — which captures their `sha_tree` before signing and publishes it as a
+#     `*.payload-sha256` sidecar (see desktop-release.yml). This script reads that
+#     sidecar rather than re-hashing the signed artifact: a leaf over signed bytes
+#     embeds a per-signing CMS/Authenticode signature (and, on macOS, an
+#     Apple-minted notarization ticket) and is unreproducible by construction,
+#     forever, by anyone — worse than no leaf (#603/#704).
 #   * artifact_sha256 — the SHIPPED, signed file's own sha256.
 # and emits the leaves the `binaries` tenant consumes (see
 # verifiable-log-builder/src/binaries.rs, matched field-for-field):
@@ -30,11 +38,15 @@
 # order. The caller (desktop-release.yml) merges it into the accumulating
 # records JSON on R2 and hands that to `builder build-binaries`.
 #
-# Reproducibility caveat (P2 vs P5): the payload EXTRACTION here is best-effort
-# on a Linux runner (7z over dmg/NSIS) and the toolchain recipe is recorded from
-# labels, not digest-pinned. Byte-exact reproducibility + digest-pinned runners
-# are Phase 5 (docs/verifiable-builds-design.md §1.5, §6). What P2 delivers is
-# the correct LEAF STRUCTURE and the two hashes per artifact.
+# Reproducibility caveat (P2 vs P5): the pre-signature payload for macOS/Windows
+# is now captured in the build job (before signing) rather than re-extracted from
+# the signed artifact here, so the `payload` leaf is no longer unreproducible by
+# construction. It remains best-effort: the toolchain recipe is recorded from
+# labels, not digest-pinned, and macOS/Windows have no `--remap-path-prefix` /
+# matching-runner reproducer yet (docs/reproducible-builds-residuals.md §1–§2,
+# docs/verifiable-builds-design.md §1.5, §6). What this delivers is the correct
+# LEAF STRUCTURE and — for every platform — a payload hash over pre-signature
+# bytes bound to the signed wrapper.
 set -euo pipefail
 
 : "${RELEASE_TAG:?RELEASE_TAG required (e.g. v1.3.0)}"
@@ -96,10 +108,37 @@ emit() {
 . "$(dirname "$0")/lib/attest-helpers.sh"
 
 need jq "build the BinaryRecord leaves"
-need tar "hash directory-tree payloads"
+need tar "unpack the .deb payload tarball"
 need sha256sum "hash payloads and artifacts"
 
 find_one() { find "$ARTIFACTS_DIR" -type f -name "$1" 2>/dev/null | head -1; }
+
+# require_presig_payload <label> <manifest-glob> — echo the pre-signature payload
+# sha256 the build job captured for a signed platform, or hard-fail.
+#
+# The `.dmg`/NSIS `.exe` reaching this script are already signed + notarized, so
+# their pre-signature payload cannot be recovered here — it exists only in the
+# build job, which publishes its digest as a `*.payload-sha256` sidecar (a release
+# asset, so the backfill path in attest-release.yml can fetch it too). A missing
+# or malformed sidecar is a HARD FAILURE, never a skip: emitting a `payload` leaf
+# over the signed bytes instead would log a hash nobody can ever reproduce, which
+# is exactly the bug #603/#704 exist to kill. Tags predating WS3 captured no
+# pre-signature payload and legitimately cannot be attested for these platforms.
+require_presig_payload() {
+  local label="$1" glob="$2" file sha
+  file="$(find_one "$glob" || true)"
+  if ! sha="$(read_payload_sha256 "${file:-}")"; then
+    echo "::error::attest: pre-signature payload manifest for ${label} not found or"
+    echo "::error::  invalid — looked for '${glob}' under ${ARTIFACTS_DIR}, got"
+    echo "::error::  '${file:-<no match>}'. The build job must capture the payload"
+    echo "::error::  BEFORE code-signing/notarization and publish its sha256 as the"
+    echo "::error::  '${glob}' release asset (desktop-release.yml). A tag predating"
+    echo "::error::  WS3 (#704) captured none and cannot be attested for ${label} —"
+    echo "::error::  see docs/reproducible-builds-residuals.md §1."
+    exit 1
+  fi
+  printf '%s' "$sha"
+}
 
 # emit_exe <platform> <arch> <bundle> <artifact_name> <payload_sha> <runner_image> <path-to-exe>
 #
@@ -131,21 +170,26 @@ dmg="$(find_one '*.dmg' || true)"
 if [ -n "${dmg:-}" ]; then
   name="pollis-${RELEASE_TAG}-macos.dmg"
   art_sha="$(sha_file "$dmg")"
+  # payload_sha256 is the PRE-SIGNATURE .app payload, hashed in the build job
+  # before codesign/notarization and published as this sidecar — NOT a hash of
+  # anything extracted from this already-signed, notarized .dmg (those bytes carry
+  # Apple's CMS signature + stapled ticket and can never be reproduced).
+  pay_sha="$(require_presig_payload "macOS .dmg" '*macos.payload-sha256')"
   need 7z "extract the .app payload from the .dmg"
   ex="$work/dmg"; mkdir -p "$ex"
-  # 7z reads the HFS filesystem inside the .dmg on Linux; extract the .app.
-  # The .dmg carries the standard "drag to /Applications" symlink, on which
-  # p7zip prints "Dangerous link path was ignored" and returns a non-zero exit
-  # even though it correctly skips only that symlink and extracts the .app. We
-  # don't need that symlink, so tolerate the exit and let the .app-present check
-  # below be the real gate (a genuine extraction failure leaves no .app).
+  # We still open the SIGNED .dmg — but only to reach the installed Mach-O for the
+  # `exe` leaf below (what a running app hashes to self-verify), never for payload.
+  # The .dmg carries the standard "drag to /Applications" symlink, on which p7zip
+  # prints "Dangerous link path was ignored" and returns non-zero even though it
+  # correctly skips only that symlink and extracts the .app. Tolerate the exit and
+  # let the .app-present check be the real gate (a genuine failure leaves no .app).
   7z x -y -o"$ex" "$dmg" >/dev/null 2>&1 || true
   app="$(find "$ex" -maxdepth 4 -name '*.app' -type d | head -1 || true)"
   [ -n "${app:-}" ] || { echo "::error::attest: no .app payload found inside ${dmg}"; exit 1; }
-  pay_sha="$(sha_tree "$app")"
   emit darwin aarch64 dmg "$name" payload "$pay_sha" "$pay_sha" "macos-latest"
   emit darwin aarch64 dmg "$name" signed  "$pay_sha" "$art_sha" "macos-latest"
-  # The Mach-O the user actually runs, inside the bundle we just hashed.
+  # The Mach-O the user actually runs, inside the signed bundle — bound to the
+  # pre-signature payload via the shared pay_sha.
   emit_exe darwin aarch64 dmg "$name" "$pay_sha" "macos-latest" "$app/Contents/MacOS/$MAIN_BIN"
 fi
 
@@ -154,16 +198,21 @@ exe="$(find_one '*.exe' || true)"
 if [ -n "${exe:-}" ]; then
   name="pollis-${RELEASE_TAG}-windows.exe"
   art_sha="$(sha_file "$exe")"
+  # payload_sha256 is the PRE-SIGNATURE exe+resources tree, hashed in the build
+  # job before signtool runs and published as this sidecar — NOT a hash of the
+  # tree inside this signed NSIS installer (whose exe carries Authenticode data).
+  pay_sha="$(require_presig_payload "Windows NSIS .exe" '*windows.payload-sha256')"
   need 7z "extract the file tree from the NSIS installer"
   ex="$work/nsis"; mkdir -p "$ex"
-  # 7z unpacks the NSIS installer's embedded file tree.
+  # We still unpack the SIGNED installer — but only to reach the installed exe for
+  # the `exe` leaf below, never for the payload hash.
   7z x -y -o"$ex" "$exe" >/dev/null
-  # Drop installer scaffolding that is not part of the reproducible payload.
+  # Drop installer scaffolding that is not part of the payload.
   rm -rf "$ex/\$PLUGINSDIR" "$ex/Uninstall.exe" 2>/dev/null || true
-  pay_sha="$(sha_tree "$ex")"
   emit windows x86_64 nsis "$name" payload "$pay_sha" "$pay_sha" "windows-latest"
   emit windows x86_64 nsis "$name" signed  "$pay_sha" "$art_sha" "windows-latest"
-  # NSIS lays the install tree out flat, so the exe sits at the extraction root.
+  # NSIS lays the install tree out flat, so the exe sits at the extraction root —
+  # bound to the pre-signature payload via the shared pay_sha.
   emit_exe windows x86_64 nsis "$name" "$pay_sha" "windows-latest" "$ex/${MAIN_BIN}.exe"
 fi
 

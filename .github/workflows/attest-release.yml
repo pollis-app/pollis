@@ -43,6 +43,12 @@ jobs:
 
       # The shipped installers, pulled from the GitHub release for the tag (same
       # bytes published to cdn.pollis.com). attest-binaries.sh finds each by glob.
+      # The `*.payload-sha256` sidecars carry the PRE-SIGNATURE payload hash the
+      # build job captured before signing (WS3, #603/#704); the signed installers
+      # here embed a signature + notarization ticket from which that payload is
+      # unrecoverable, so this backfill path depends on the sidecar. A tag released
+      # before WS3 has no sidecar and cannot be attested for macOS/Windows — the
+      # attest script fails loudly with that exact diagnosis (see require_presig_payload).
       - name: Download the release's published installers
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,7 +57,7 @@ jobs:
           mkdir -p artifacts
           gh release download "${{ inputs.tag }}" --dir artifacts \
             --pattern '*.dmg' --pattern '*.exe' --pattern '*.AppImage' \
-            --pattern '*.deb' --pattern '*.rpm'
+            --pattern '*.deb' --pattern '*.rpm' --pattern '*.payload-sha256'
           ls -la artifacts
 
       # Must match desktop-release.yml's attest-and-log tooling: this workflow

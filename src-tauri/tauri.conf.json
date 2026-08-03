@@ -49,7 +49,6 @@
       "icons/Assets.car"
     ],
     "macOS": {
-      "signingIdentity": "Developer ID Application: Daniel Kral (9JF7WWYMU2)",
       "minimumSystemVersion": "14.0",
       "infoPlist": "Info.plist",
       "entitlements": "Entitlements.plist"
