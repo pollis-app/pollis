@@ -30,7 +30,9 @@ name: Publish Transparency Log
 #   LOG_DB_URL, LOG_DB_AUTH_TOKEN         — log DB: read mls_commit_log (Goal A
 #     moved the commit log into its own DB). Optional: when unset, both fall back
 #     to the main DB vars (single-DB / pre-cutover behaviour).
-#   STH_SIGNING_KEY                       — 32-byte hex Ed25519 log signing key
+#   STH_SIGNING_KEY                       — 32-byte hex ML-DSA-44 log signing
+#     key (an ML-DSA private key IS its seed, so the format is unchanged from the
+#     retired Ed25519 key). Custody + rotation: docs/sth-signing-key-custody.md
 #   R2_TRANSPARENCY_ACCESS_KEY_ID, R2_TRANSPARENCY_SECRET_ACCESS_KEY,
 #   R2_TRANSPARENCY_ENDPOINT, R2_TRANSPARENCY_BUCKET — R2 sync (namespaced:
 #   the bare R2_* names are account-wide creds owned by the release workflows)

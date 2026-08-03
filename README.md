@@ -151,7 +151,7 @@ own tooling. The verifier above is just a convenient client for these bytes.
 
 | Path | What it is |
 |---|---|
-| `/v1/public_key.json` | the log's Ed25519 public key |
+| `/v1/public_key.json` | the log's ML-DSA-44 public key (1312 bytes, hex) |
 | `/v1/sth/latest.json` | newest Signed Tree Head (`tree_size`, `root_hash`, `timestamp`, signature) |
 | `/v1/sth/<tree_size>.json` | the immutable STH at that size |
 | `/v1/entries.json` · `/v1/entries/<i>.json` | the full ordered log, and each leaf |

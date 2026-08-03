@@ -20,7 +20,7 @@ use verifiable_log::{ConsistencyProof, Entry, InclusionProof, Sth};
 /// optional so a minimal fixture still deserializes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
-    /// Ed25519 log public key, lowercase hex (32 bytes).
+    /// ML-DSA-44 log public key, lowercase hex (1312 bytes).
     pub public_key: String,
     /// Signed Tree Heads, oldest first.
     #[serde(default)]
@@ -56,10 +56,13 @@ pub struct ConsistencyCheck {
 
 /// The standalone `/v1/public_key.json` document. A one-field object (rather
 /// than a bare string) so it round-trips through serde and can grow metadata
-/// (key id, algorithm) without breaking the URL.
+/// (key id, algorithm) without breaking the URL. That growth is not optional
+/// for long: rotation needs a key *list* with per-key ids and validity, because
+/// one served key makes rotation a flag day for every pinned client — see
+/// `docs/sth-signing-key-custody.md` §5.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicKeyDoc {
-    /// Ed25519 log public key, lowercase hex (32 bytes).
+    /// ML-DSA-44 log public key, lowercase hex (1312 bytes).
     pub public_key: String,
 }
 
@@ -88,7 +91,7 @@ pub struct ConsistencyRef {
 pub struct Manifest {
     /// API version segment these artifacts live under (`"v1"`).
     pub version: String,
-    /// Ed25519 log public key, lowercase hex.
+    /// ML-DSA-44 log public key, lowercase hex.
     pub public_key: String,
     /// Number of entries in the log.
     pub entry_count: u64,
@@ -125,7 +128,7 @@ pub struct Manifest {
 pub struct AccountManifest {
     /// API version segment these artifacts live under (`"v1"`).
     pub version: String,
-    /// Ed25519 log public key, lowercase hex. The same key signs both trees;
+    /// ML-DSA-44 log public key, lowercase hex. The same key signs both trees;
     /// the account tree's STHs are domain-separated by signing context, not key.
     pub public_key: String,
     /// Number of account-key entries in the tree.
@@ -162,7 +165,7 @@ pub struct AccountManifest {
 pub struct BinaryManifest {
     /// API version segment these artifacts live under (`"v1"`).
     pub version: String,
-    /// Ed25519 log public key, lowercase hex. The same key signs all three
+    /// ML-DSA-44 log public key, lowercase hex. The same key signs all three
     /// trees; the binaries tree's STHs are domain-separated by signing context.
     pub public_key: String,
     /// Number of binary-artifact entries in the tree.
