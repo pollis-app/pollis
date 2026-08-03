@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pollis iOS privacy manifest (Apple "privacy manifest" / required-reason APIs).
+
+  BUILD WIRING: the authoritative copy of these declarations lives in
+  app.json -> expo.ios.privacyManifests. `expo prebuild` renders that block into
+  ios/mobile/PrivacyInfo.xcprivacy and links it into the app target, so an
+  EAS/prebuild iOS build picks it up automatically. This committed file is the
+  reviewable, version-controlled mirror of that generated output — keep it in
+  sync with app.json (app.json wins if they ever diverge).
+
+  Third-party SDKs (React Native core, expo-file-system, expo-constants,
+  expo-application, expo-notifications) ship their OWN PrivacyInfo.xcprivacy and
+  Apple unions every linked manifest, so their required-reason APIs
+  (UserDefaults CA92.1, DiskSpace E174.1/85F4.1, additional FileTimestamp
+  reasons) are declared there, not here. This manifest declares only what the
+  first-party binary adds on top: the FileTimestamp access from the statically
+  linked SQLite/SQLCipher (rusqlite) inside the pollis-native Rust core, which
+  ships no manifest of its own.
+
+  See docs/mobile-compliance-answers.md for the full audit + the one UNVERIFIED
+  item (SystemBootTime, conditional on @livekit/react-native-webrtc linkage).
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeUserID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeName</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
