@@ -4,23 +4,32 @@
 # (docs/backend-core-invariants.md). Building pollis-core pulls the native media
 # stack (libwebrtc / cpal / webrtc-audio-processing) and the flows harness pulls
 # Tauri (webkit), so this needs the same Linux system deps as a desktop build.
+#
+# Merge-blocking design (#698). The heavy `tests` job is expensive and pointless
+# for PRs that can't touch it (frontend, marketing site, docs/markdown). It used
+# to be exempted with a job-level `paths-ignore`, but a path-filtered workflow
+# does not run AT ALL on an exempt PR — so a *required* status check would sit
+# pending forever and wedge every frontend-only PR. This workflow therefore
+# ALWAYS triggers and ALWAYS reports, in three jobs:
+#   1. `changes` — a seconds-cheap decision job (no checkout, no toolchain, no
+#      apt) that asks the PR's changed-file list whether any NON-exempt file was
+#      touched. Ignore-list, not allow-list: the exemptions are exactly the old
+#      `paths-ignore` (frontend/website/docs/markdown), so any Rust/workspace
+#      change still trips it. Non-PR triggers (dispatch/schedule) always say yes.
+#   2. `tests`   — the heavy native build+test job, gated on that decision. Its
+#      runner, caching, system deps, env, and steps are byte-for-byte unchanged;
+#      on an exempt PR it is simply skipped.
+#   3. `gate`    — `needs: tests`, `if: always()`. Green when the heavy job passed
+#      OR was legitimately skipped as exempt; red when it failed, was cancelled,
+#      or the decision job itself failed (fail-closed). Because it always runs it
+#      always reports, so it — NOT `tests` — is the check to mark required in
+#      branch protection.
 name: MLS & delivery tests
 
 on:
+  # No paths filter here: the workflow must always run so `gate` always reports.
+  # Exemption is decided inside the `changes` job instead (see the comment above).
   pull_request:
-    # Skip the heavy Rust gate for PRs that can't affect it — frontend, the
-    # marketing site, and docs/markdown only. Uses paths-ignore (not an
-    # allow-list) so any Rust/workspace change still triggers it; only the
-    # listed pure-non-Rust surfaces are exempt. NOTE: don't mark this a
-    # *required* check under branch protection while path-filtered — GitHub
-    # leaves required-but-skipped checks pending forever, which would wedge
-    # frontend-only PRs. Gate merges on it via the ruleset's "skipped = pass"
-    # option, or keep it advisory.
-    paths-ignore:
-      - 'frontend/**'
-      - 'website/**'
-      - 'docs/**'
-      - '**/*.md'
   workflow_dispatch:
     inputs:
       marathon_ops:
@@ -41,13 +50,60 @@ on:
 
 permissions:
   contents: read
+  # dorny/paths-filter reads the PR's changed-file list via the API (no checkout).
+  pull-requests: read
 
 concurrency:
   group: mls-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Seconds-cheap gatekeeper: decide whether the heavy Rust job needs to run.
+  # No checkout, no toolchain, no apt — just an API-backed changed-file query on
+  # PRs, and an unconditional "yes" on every other trigger.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run_tests: ${{ steps.decide.outputs.run_tests }}
+    steps:
+      # Ignore-list matching the old `paths-ignore`: a changed file trips `rust`
+      # only if it is NOT under any exempt surface. `predicate-quantifier: every`
+      # ANDs the negated patterns, so a file matches `rust` iff it is neither a
+      # frontend, website, docs, nor markdown file — i.e. any real Rust/workspace
+      # change flips the output to `true`. Skipped on non-PR events, which the
+      # decide step forces to `true` regardless.
+      - name: Detect non-exempt changes (PRs only)
+        id: filter
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: dorny/paths-filter@v3
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            rust:
+              - '!frontend/**'
+              - '!website/**'
+              - '!docs/**'
+              - '!**/*.md'
+      - name: Decide whether the heavy Rust gate must run
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          FILTERED: ${{ steps.filter.outputs.rust }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            echo "run_tests=$FILTERED" >> "$GITHUB_OUTPUT"
+          else
+            # workflow_dispatch / schedule / any non-PR trigger: always run the
+            # full gate (the marathon step keys off event_name inside the job).
+            echo "run_tests=true" >> "$GITHUB_OUTPUT"
+          fi
+
   tests:
+    needs: changes
+    # Run the heavy native build+test only when the decision job says a
+    # Rust/workspace file changed (always true for dispatch/schedule). Exempt PRs
+    # skip it; `gate` below still reports a result either way.
+    if: ${{ needs.changes.outputs.run_tests == 'true' }}
     # 24.04, not 22.04: src-tauri/build.rs compiles pollis-capture-linux, whose
     # libspa 0.9 bindgen needs PipeWire >= 1.0 headers (same reason the release
     # workflow's build-capture-helper job runs on 24.04). No AppImage is built
@@ -204,3 +260,50 @@ jobs:
             src-tauri/marathon-soak.log
           retention-days: 90
           if-no-files-found: warn
+
+  # The always-reporting required check. Runs on every trigger regardless of what
+  # `tests` did, and collapses the outcome into a single pass/fail. Fail-closed:
+  # the only way to green is a genuine pass or a genuine exemption.
+  gate:
+    needs: [changes, tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate gate
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUN_TESTS: ${{ needs.changes.outputs.run_tests }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+        run: |
+          echo "changes=$CHANGES_RESULT run_tests=$RUN_TESTS tests=$TESTS_RESULT"
+          # The decision must have completed cleanly; if it failed or was
+          # cancelled we cannot trust the exemption verdict, so fail closed.
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "::error::Decision job did not succeed ($CHANGES_RESULT) — failing closed."
+            exit 1
+          fi
+          if [ "$RUN_TESTS" = "true" ]; then
+            # A Rust/workspace change: the heavy job MUST have run and passed.
+            # Anything else (failure / cancelled / skipped) is a hard fail — this
+            # is the one outcome we must never let go green.
+            if [ "$TESTS_RESULT" = "success" ]; then
+              echo "Heavy MLS tests passed."
+              exit 0
+            fi
+            echo "::error::Heavy MLS tests were required but their result was '$TESTS_RESULT' — failing."
+            exit 1
+          fi
+          # Exempt PR (frontend/website/docs/markdown only): the heavy job was
+          # legitimately not run.
+          if [ "$TESTS_RESULT" = "skipped" ]; then
+            echo "Exempt PR — no Rust/workspace change, heavy MLS tests correctly skipped."
+            exit 0
+          fi
+          # Defensive: exemption said skip but the job somehow ran — honour its
+          # actual result rather than assuming.
+          if [ "$TESTS_RESULT" = "success" ]; then
+            echo "Heavy MLS tests ran and passed."
+            exit 0
+          fi
+          echo "::error::Unexpected state (run_tests=$RUN_TESTS tests=$TESTS_RESULT) — failing closed."
+          exit 1

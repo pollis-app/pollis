@@ -102,7 +102,7 @@ replay. Instrument before fixing — do not patch the assertion until the mechan
 | PL-07 | **#515** — drop `sleepAfter = "10m"` (worker/index.ts:66) before real users; removes the cold-start penalty. | P1 | S |
 | PL-08 | Add dependency-layer caching to the DS Dockerfile (today a full release build from `COPY . .`). Expect 5–10× faster deploys, no new infra. | P2 | S |
 | PL-09 | Move ~120 MB of committed media to R2 — `website/learn` (77 MB video), `website/vendor` (23 MB WASM + 22 MB ONNX). `docs/deployments.md:55` notes this is a one-line base-URL swap. | P2 | S |
-| PL-10 | Make `mls-tests.yml` genuinely merge-blocking — it is path-filtered, so mark required via the ruleset's "skipped = pass" option. The 11 `e2e-*.yml` workflows stay dispatch-only by design. | P2 | S |
+| PL-10 | **#698 — done.** Make `mls-tests.yml` genuinely merge-blocking. Rather than rely on unverified "skipped = pass" behaviour, the workflow always runs and always reports: a seconds-cheap `changes` job decides exemption (frontend/website/docs/markdown), the heavy `tests` job is gated on it, and a final `gate` job (`if: always()`) collapses the outcome to pass-or-exempt/fail. Mark the **`gate`** check required. The 11 `e2e-*.yml` workflows stay dispatch-only by design. | P2 | S |
 
 ---
 

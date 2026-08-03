@@ -111,7 +111,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 
 | Workflow | Gates |
 |---|---|
-| `mls-tests.yml` | DS serializer, MLS crypto/state-machine unit tests, multi-client integration flows harness + marathon soak (protects the bulletproof-membership invariants). Runs on any Rust/workspace change. |
+| `mls-tests.yml` | DS serializer, MLS crypto/state-machine unit tests, multi-client integration flows harness + marathon soak (protects the bulletproof-membership invariants). The heavy `tests` job runs on any Rust/workspace change; frontend/website/docs/markdown-only PRs are exempt (decided by a seconds-cheap `changes` job, not `paths-ignore`, so the workflow always runs). A final `gate` job (`needs: tests`, `if: always()`) reports green on pass-or-exempt and red on failure/cancel — **`gate` is the merge-blocking required check** (#698). |
 | `kani.yml` | Kani bounded-model-checking proofs on `pollis-core` + `pollis-delivery` pure fns (watermark no-skip, recovery gate, canonicalization, gap/head arithmetic). Path-filtered to `pollis-core/**`. |
 | `supply-chain.yml` | cargo-deny (advisories/licenses/bans/sources) + cargo-vet (dependency review provenance). Runs on every PR. |
 | `verifiable-log-tests.yml` | `cargo test` on the three `verifiable-log*` crates (transparency infra + `pollis-verify`). Pure Rust, no system deps. |
