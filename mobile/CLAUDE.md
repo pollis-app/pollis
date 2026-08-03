@@ -44,7 +44,7 @@ cd mobile/modules/pollis-native
 uniffi-bindgen-react-native build android --config ubrn.config.yaml --and-generate
 cd ../../android && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n com.anonymous.mobile/.MainActivity
+adb shell am start -n com.pollis.mobile/.MainActivity
 ```
 
 ### Dev loop — TS-only changes

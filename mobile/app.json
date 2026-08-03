@@ -32,7 +32,7 @@
           "UIInterfaceOrientationLandscapeRight"
         ]
       },
-      "bundleIdentifier": "com.anonymous.mobile"
+      "bundleIdentifier": "com.pollis.mobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -42,7 +42,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.mobile",
+      "package": "com.pollis.mobile",
       "permissions": [
         "android.permission.CAMERA"
       ]
