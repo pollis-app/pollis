@@ -98,8 +98,24 @@ whole-second `…T09:00:00+00:00` sorts *below* `…T09:00:00.123456789+00:00`
 (`'+'` 0x2B < `'.'` 0x2E), which silently buried admin tombstones written in the
 same second as the message they redact — the delete appeared to succeed and no
 recipient ever applied it. The DS additionally stamps a tombstone strictly above
-the conversation's existing high-water `sent_at`, so client/DS clock skew cannot
-reintroduce the same burial.
+the conversation's **floor** (`sent_at_after` / `TOMBSTONE_FLOOR` in
+`pollis-delivery/src/messages.rs`), so client/DS clock skew cannot reintroduce
+the same burial.
+
+That floor is the greater of `MAX(sent_at)` over `message_envelope` **and**
+`MAX(last_fetched_at)` over `conversation_watermark`, both scoped to the
+conversation (#692). The envelope side alone is not enough: envelope GC deletes
+rows once every current member device has watermarked past them, and since the
+TTL arm's removal that deletion is purely watermark-gated — so a fully-collected
+conversation ends up with *no* envelopes, `MAX(sent_at)` goes NULL, and the stamp
+falls back to wall-clock `now`. A recipient whose watermark came from a client
+clock running ahead of the DS clock would then never fetch the tombstone (the
+cursor only moves forward, so an envelope at or below it is skipped permanently,
+not merely delayed) and the deleted message would stay readable on that device
+forever. `conversation_watermark` rows outlive envelope GC — they are only ever
+advanced, or deleted with the device itself — so they are the evidence the floor
+must also consult. Pinned by `messages::tombstone_floor_tests` and
+`pollis-delivery/tests/envelope_retention.rs` (Part F).
 
 **Sealed sender (#331, #607).** Attribution is taken from the MLS credential inside
 the ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))

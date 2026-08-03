@@ -207,9 +207,72 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, false)
 }
 
+// ── The tombstone `sent_at` floor ────────────────────────────────────────────
+//
+// A DS-stamped tombstone is only ever fetched if it sorts strictly ABOVE the
+// recipient's `conversation_watermark.last_fetched_at`: ingest selects
+// `sent_at > last_fetched_at` (strictly greater) and advances the cursor to the
+// highest `sent_at` it consumed, so the cursor NEVER rewinds and anything
+// stamped at or below it is skipped permanently, not merely delayed
+// (`pollis_core::commands::messages::ingest`).
+//
+// The floor is therefore the highest cursor value any recipient could already
+// hold, and it has TWO sources — one of which outlives the other:
+//
+//   * `MAX(sent_at)` over `message_envelope` — the conversation's high-water
+//     mark, but only over envelopes STILL PRESENT. Envelope GC deletes rows once
+//     every current member device has reported a watermark past them (see
+//     `CLEANUP_*` above; since #688 that deletion is purely watermark-gated, with
+//     no TTL arm to bound it). Once a conversation has been fully pruned this
+//     side is NULL.
+//   * `MAX(last_fetched_at)` over `conversation_watermark` — the highest cursor
+//     actually reported for the conversation. These rows are NOT touched by
+//     envelope GC; they are only ever advanced (monotone UPSERT in
+//     `apply_advance_watermark`) or deleted with the device itself
+//     (`apply_revoke_device`). They therefore SURVIVE the pruning that empties
+//     the envelope side.
+//
+// #692: using only the envelope side meant that once GC had pruned a
+// conversation the floor went NULL, `sent_at_after` fell back to wall-clock
+// `now`, and the clock-skew dependency this guard exists to remove was back — a
+// recipient whose watermark came from a client clock running AHEAD of the DS
+// clock would never fetch the tombstone, and the deleted message stayed readable
+// on that device forever. The watermark side is precisely the evidence that
+// survives GC, so the floor is the greater of the two.
+//
+// Expressed as one SQL statement rather than two queries max'd in Rust: each arm
+// is an aggregate over a possibly-empty set, so each yields exactly one
+// (possibly NULL) row, and the outer `MAX` skips NULLs — giving "greater of the
+// two, or NULL when both are absent" with no Rust-side NULL bookkeeping and a
+// single round trip. The comparison is lexical in both SQL and Rust (see
+// [`now_rfc3339`] on why lexical order matches chronological order here), so the
+// two formulations agree.
+const TOMBSTONE_FLOOR: &str = "\
+SELECT MAX(v) FROM (
+    SELECT MAX(sent_at)         AS v FROM message_envelope       WHERE conversation_id = ?1
+    UNION ALL
+    SELECT MAX(last_fetched_at) AS v FROM conversation_watermark WHERE conversation_id = ?1
+)";
+
+/// The greatest cursor value any recipient of `conversation_id` could already
+/// hold — see the [`TOMBSTONE_FLOOR`] block comment. `None` only when the
+/// conversation has neither a surviving envelope nor a reported watermark.
+async fn tombstone_floor(
+    conn: &Connection,
+    conversation_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(TOMBSTONE_FLOOR, libsql::params![conversation_id.to_string()])
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0)?,
+        None => None,
+    })
+}
+
 /// The `sent_at` an envelope must carry to be guaranteed visible to every
-/// member of `conversation_id`, given `floor` — the greatest `sent_at` already
-/// in that conversation.
+/// member of `conversation_id`, given `floor` — the greatest cursor value any
+/// recipient could already hold (see [`tombstone_floor`]).
 ///
 /// Precision parity (see [`now_rfc3339`]) fixes ordering between two correct
 /// clocks, but `sent_at` for ordinary messages comes from the *client's* clock
@@ -526,21 +589,10 @@ pub async fn apply_delete_message(
     }
 
     let tombstone_id = Ulid::new().to_string();
-    // Read the conversation's high-water `sent_at` BEFORE the deletes below
-    // remove the target — a recipient's watermark can be anywhere up to this
-    // value, and the tombstone is only ever fetched if it sorts above it.
-    let floor: Option<String> = {
-        let mut rows = conn
-            .query(
-                "SELECT MAX(sent_at) FROM message_envelope WHERE conversation_id = ?1",
-                libsql::params![body.conversation_id.clone()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => row.get::<Option<String>>(0)?,
-            None => None,
-        }
-    };
+    // Read the conversation's floor BEFORE the deletes below remove the target —
+    // a recipient's watermark can be anywhere up to this value, and the tombstone
+    // is only ever fetched if it sorts above it.
+    let floor = tombstone_floor(conn, &body.conversation_id).await?;
     let now = sent_at_after(now_rfc3339(), floor);
     let tx = conn.transaction().await?;
     tx.execute(
@@ -980,6 +1032,195 @@ mod timestamp_tests {
         assert_eq!(sent_at_after(now.clone(), Some(behind)), now);
         assert_eq!(sent_at_after(now.clone(), None), now);
         assert_eq!(sent_at_after(now.clone(), Some("not-a-timestamp".into())), now);
+    }
+}
+
+#[cfg(test)]
+mod tombstone_floor_tests {
+    //! [`TOMBSTONE_FLOOR`] driven against a real (in-memory) libsql DB.
+    //!
+    //! **#692 — the floor must outlive envelope GC.** A tombstone is only ever
+    //! fetched when it sorts strictly above the recipient's watermark, because
+    //! ingest selects `sent_at > last_fetched_at` and the cursor never rewinds.
+    //! The old floor was `MAX(sent_at)` over envelopes STILL PRESENT, so once
+    //! watermark-gated GC had pruned a conversation the floor went NULL, the
+    //! stamp fell back to wall-clock `now`, and a recipient whose watermark came
+    //! from a client clock running AHEAD of the DS clock never fetched the
+    //! tombstone — the deleted message stayed readable on that device forever.
+    //!
+    //! `conversation_watermark` rows survive that pruning, so they are the
+    //! evidence the floor must also consult. Each test below asserts the floor
+    //! AND the stamp `sent_at_after` derives from it, since the stamp is what
+    //! ingest actually compares.
+
+    use super::*;
+
+    const SCHEMA: &str = "\
+CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
+CREATE TABLE conversation_watermark (\
+  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
+  last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));";
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute_batch(SCHEMA).await.unwrap();
+        conn
+    }
+
+    /// An RFC3339 stamp `offset` from now, in the shape a CLIENT writes it
+    /// (`chrono::Utc::now().to_rfc3339()`), which is what actually lands in
+    /// `sent_at` and — via ingest — in `last_fetched_at`.
+    fn stamp(offset: chrono::Duration) -> String {
+        (chrono::Utc::now() + offset).to_rfc3339()
+    }
+
+    async fn add_envelope(conn: &Connection, id: &str, conv: &str, sent_at: &str) {
+        conn.execute(
+            "INSERT INTO message_envelope (id, conversation_id, sent_at) VALUES (?1, ?2, ?3)",
+            libsql::params![id.to_string(), conv.to_string(), sent_at.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn add_watermark(conn: &Connection, conv: &str, user: &str, device: &str, at: &str) {
+        conn.execute(
+            "INSERT INTO conversation_watermark \
+                 (conversation_id, user_id, device_id, last_fetched_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![
+                conv.to_string(),
+                user.to_string(),
+                device.to_string(),
+                at.to_string()
+            ],
+        )
+        .await
+        .unwrap();
+    }
+
+    /// **The #692 regression test.** Every envelope in the conversation has been
+    /// GC'd (watermark-gated deletion: every current member device reported past
+    /// them), but the watermark rows survive — and one of them was written from a
+    /// client clock running an hour AHEAD of the DS clock, so it sits in the DS's
+    /// future. The tombstone must still be stamped strictly above it.
+    ///
+    /// Against the old `MAX(sent_at)`-only floor this FAILS: with no envelopes
+    /// left the floor is NULL, `sent_at_after` returns plain `now`, and `now` is
+    /// an hour BELOW the surviving cursor — so ingest's `sent_at >
+    /// last_fetched_at` never selects the tombstone and the delete silently does
+    /// nothing on that device, permanently.
+    #[tokio::test]
+    async fn a_future_watermark_surviving_gc_still_floors_the_tombstone() {
+        let conn = conn().await;
+        // The recipient's clock ran ahead; its reported cursor is in the DS's future.
+        let ahead = stamp(chrono::Duration::hours(1));
+        add_watermark(&conn, "c1", "alice", "a1", &ahead).await;
+        // GC has pruned every envelope — `message_envelope` is empty for c1.
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(
+            floor.as_deref(),
+            Some(ahead.as_str()),
+            "with every envelope GC'd, the surviving watermark must still supply \
+             the floor — MAX(sent_at) alone yields NULL here (#692)"
+        );
+
+        let stamped = sent_at_after(now_rfc3339(), floor);
+        assert!(
+            stamped > ahead,
+            "tombstone {stamped} must sort strictly above the surviving watermark \
+             {ahead}, or ingest's `sent_at > last_fetched_at` never selects it and \
+             the deleted message stays readable on that device forever (#692)"
+        );
+    }
+
+    /// Envelopes present and every watermark BEHIND them: the floor is the
+    /// envelope high-water mark exactly as before — this fix widens the floor,
+    /// it never lowers it.
+    #[tokio::test]
+    async fn envelopes_present_with_watermarks_behind_keeps_todays_floor() {
+        let conn = conn().await;
+        let newest = stamp(chrono::Duration::minutes(-1));
+        add_envelope(&conn, "e1", "c1", &stamp(chrono::Duration::hours(-2))).await;
+        add_envelope(&conn, "e2", "c1", &newest).await;
+        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-3))).await;
+        add_watermark(&conn, "c1", "bob", "b1", &stamp(chrono::Duration::minutes(-30))).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(
+            floor.as_deref(),
+            Some(newest.as_str()),
+            "with every watermark behind the newest envelope the floor is \
+             unchanged from the MAX(sent_at)-only behaviour"
+        );
+
+        // Both floors are behind the DS clock, so the guard is a no-op and the
+        // tombstone keeps plain `now` — today's behaviour, preserved.
+        let now = now_rfc3339();
+        assert_eq!(sent_at_after(now.clone(), floor), now);
+    }
+
+    /// Neither envelopes nor watermarks: the floor is absent and `sent_at_after`
+    /// falls back to `now` — the pre-existing behaviour, unchanged.
+    #[tokio::test]
+    async fn no_envelopes_and_no_watermarks_falls_back_to_now() {
+        let conn = conn().await;
+        // Rows exist, but for a DIFFERENT conversation — the floor is scoped.
+        add_envelope(&conn, "e1", "other", &stamp(chrono::Duration::hours(1))).await;
+        add_watermark(&conn, "other", "alice", "a1", &stamp(chrono::Duration::hours(1))).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(floor, None, "an empty conversation has no floor");
+
+        let now = now_rfc3339();
+        assert_eq!(
+            sent_at_after(now.clone(), floor),
+            now,
+            "with no floor the tombstone keeps plain `now` (unchanged fallback)"
+        );
+    }
+
+    /// Mixed: envelopes survive, but a watermark sits ABOVE the newest of them
+    /// (a client clock ahead of everyone else's). The greater of the two wins, so
+    /// the watermark supplies the floor and the tombstone clears it.
+    #[tokio::test]
+    async fn a_watermark_ahead_of_the_newest_envelope_wins() {
+        let conn = conn().await;
+        add_envelope(&conn, "e1", "c1", &stamp(chrono::Duration::minutes(-5))).await;
+        let ahead = stamp(chrono::Duration::hours(2));
+        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-1))).await;
+        add_watermark(&conn, "c1", "bob", "b1", &ahead).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(
+            floor.as_deref(),
+            Some(ahead.as_str()),
+            "the floor is the GREATER of MAX(sent_at) and MAX(last_fetched_at)"
+        );
+
+        let stamped = sent_at_after(now_rfc3339(), floor);
+        assert!(
+            stamped > ahead,
+            "tombstone {stamped} must clear the highest surviving cursor {ahead}"
+        );
+    }
+
+    /// The symmetric case: an envelope ahead of every watermark still wins, so
+    /// widening the floor cannot regress the case the guard originally covered.
+    #[tokio::test]
+    async fn an_envelope_ahead_of_every_watermark_wins() {
+        let conn = conn().await;
+        let ahead = stamp(chrono::Duration::hours(2));
+        add_envelope(&conn, "e1", "c1", &ahead).await;
+        add_watermark(&conn, "c1", "alice", "a1", &stamp(chrono::Duration::hours(-1))).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(floor.as_deref(), Some(ahead.as_str()));
+
+        let stamped = sent_at_after(now_rfc3339(), floor);
+        assert!(stamped > ahead, "tombstone {stamped} must clear {ahead}");
     }
 }
 
