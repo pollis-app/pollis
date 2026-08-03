@@ -10,7 +10,7 @@
 //! No proof, Merkle, or signature logic is reimplemented here.
 //!
 //! **Pinned trust root.** The log's Ed25519 public key is pinned as a constant
-//! ([`PINNED_LOG_PUBLIC_KEY`]). The served `public_key.json` MUST equal it; a
+//! ([`PINNED_LOG_PUBLIC_KEYS`]). The served `public_key.json` MUST equal it; a
 //! mismatch is a hard [`AuditStatus::Alarm`], never a warning — without the pin
 //! a hostile host could serve its own key over its own self-consistent (but
 //! forged) tree and every signature would "verify".
@@ -36,29 +36,52 @@ use verifiable_log_serve::{AccountKeyVersion, AccountReport};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-/// The transparency log's pinned ML-DSA-44 public key (lowercase hex, 1312
-/// bytes), or `None` while the key rotation is in flight.
+/// One key this build will accept from the transparency log.
+///
+/// A *set* rather than a single key so a rotation is not a flag day. The
+/// mechanism is ordering: ship a release whose set contains both the current key
+/// and its successor, wait out the overlap window so the fleet updates, and only
+/// then move the log onto the successor. Every client already accepts it, so the
+/// changeover is invisible; a release later drops the retired entry. Doing it the
+/// other way round — rotate first, pin second — is what turns every future
+/// rotation into a fleet-wide false ALARM. Design: `docs/sth-signing-key-custody.md` §5.
+pub struct PinnedKey {
+    /// `verifiable_log_serve::key_id_for` of `public_key`, for logs and diagnostics.
+    /// Never a trust input — the key bytes are what is compared.
+    pub key_id: &'static str,
+    /// The ML-DSA-44 public key, lowercase hex (1312 bytes).
+    pub public_key: &'static str,
+    /// Milliseconds since epoch after which this key is no longer accepted.
+    /// `None` = the current key. A retiring key carries the end of its overlap
+    /// window, so it stops being trusted on schedule even if the user never
+    /// updates again.
+    pub not_after: Option<u64>,
+}
+
+/// The transparency log's pinned ML-DSA-44 public keys (lowercase hex, 1312
+/// bytes each). Empty only if a build deliberately ships unpinned.
 ///
 /// Cross-checked against the auditor release notes / `docs/transparency.md` —
-/// this is the key the static `/v1/account-keys/public_key.json` MUST carry. A
-/// served key that differs is treated as a hostile host (hard ALARM), since any
-/// key can sign a self-consistent forged tree. Pinning it here is what makes the
-/// signature check mean anything.
+/// one of these is the key the static `/v1/account-keys/public_key.json` MUST
+/// carry. A served key matching none of them is treated as a hostile host (hard
+/// ALARM), since any key can sign a self-consistent forged tree. Pinning is what
+/// makes the signature check mean anything.
 ///
-/// Set as part of the #732 rotation: #668 moved the STH signature from Ed25519
-/// to ML-DSA-44, but what shipped then was a *format migration* — the ML-DSA key
-/// was derived from the same 32-byte seed that had been the Ed25519 private key,
-/// so the material had never been rotated. This pin is fresh material, minted
-/// for the rotation and published across all three trees under the `sth:v2`
-/// contexts before it was pinned here.
+/// Populated by the #732 rotation: #668 moved the STH signature from Ed25519 to
+/// ML-DSA-44, but what shipped then was a *format migration* — the ML-DSA key was
+/// derived from the same 32-byte seed that had been the Ed25519 private key, so
+/// the material had never been rotated. This entry is fresh material, minted for
+/// the rotation and published across all three trees under the `sth:v2` contexts
+/// before it was pinned here.
 ///
-/// If this is ever set back to `None`, that is safe but inert: an absent pin can
-/// only WITHHOLD trust — [`check_pin`] resolves it to
-/// [`AuditStatus::Unavailable`]/[`BuildVerifyStatus::Unavailable`], never `Ok`
-/// and never `Alarm`.
-pub const PINNED_LOG_PUBLIC_KEY: Option<&str> = Some(
-    "56ab128f3f10107382802e69d3de8659d0127c711feb9c849f5b213c6f2d0af3b5fe41f581b202b385906fc42e4421747e84939054d160c551536131e41508a82b1f3ff0a07bcc4cee5e2eae8e85155d5c9e0dbc6e7683811649fb9e3b1f18c7ed070dbf61f2a058915b33f8ad3edcd135dd18770053e5ac971b13d17d95e16e98f47a852d600c47cbc0349354af2898803cfec7112660076d20027cb67870e18fb25ee327a36743fa812ccf93ba0769ddbd3d42ab40849ac8c98357b64eaf1ffc242abb12fddef4d8cdfa02448b4d99546b448e589657f898a47c6f30ddd88edd3f4456470e0a151e5fd601750c8b0489d3471897cfa78e0d7a00d938dfe876ef243117c972e041fdb00aa7af30d34184153cfd7b1e3b481dc562bbfc82bc20fe8ac4d9845f41de49fc33b6f94494df7088b06c7cb9ae35db86ac0fd293ca403046cec46ca9b12c755670d3d9b14c300b11ec292cd5e37d9f9e5e5d1729222a33bf1e13440f44dbf1b4d4104c612db4e269760868be5ff99f9ed269625fa4f39e21713a14293285e95f8a8e8cecd9db8e6a70c36340280322eab3490270ac640f706a23e81d79111dead641eaf7b926582ed0b0422f9addc0091d731a4fe1b9079be8bd75df23f5f9bf287beab7f67f763e04f0245bf9c705136d04eb8391fb4b4f12bfba44ae49bb6f32ddb0d539e59cd0159120b2fb1718f57e12a846638dbe0b650bfcd5a6cc74cd315b49136ea4e13d431a7f3a4c38fc783a82ca2b4c44a2f379c8aa9704d4639de3f94466662c97fbbd834db97a90405c382b5039803f4e4ed5c6b57487c8d23ad9e4d319df3466c49ef1e1cef526ddad1db5fa14f3b067b40580e068582dc428e21dbdc3df848e8e00fe1181f8e0d1409ab9a8757aef008b67191f4368f37cbd587ff65acdf07adbb989d09cc3318e346ca71c029557f2c523c204defab472b3dcb09bfbb95d5d1665a360a00faeb09b660f13fdc00f7b53fbfeaa58f87a208ad4551bcbe4307bf4d8451e027f4cc33cd55700016795c3164b1bc90d9dd1737b49d2e9e4b190128d2e62a44a80c1375c616aa2871ae7ad4a914102551380a8f8edb68c2df02bdf52607a7432ea7026f6a1efcdb37ecc11ecf1623ec6979e5d65c2812a997121010cd5fd9a98b9ed34edc17b667bfd37ef2be6dfe67fbdde03fa95bb80d0e1c7336263042ef44c4f9d28f1bf959bdc24c09cf8269378705022ff476fce91dbba6c8ffec00b27572eaa4835b59948d7a625ccc84ff4ac062176f4972f5131a961b17c7ff0010d2f2f3f8c12b7bf05fb9771d64a24fdab058f4bf3a155ade6a496b9a09d43a7673b5d8fb6519e01bf911ca78cc23f95943f63db72883d522fe24d4b7c7a26c7fd43b4f6f7496acf9ea2cab2e3cd6fc274964b576084c820bae79dbaa331d11751ec718660cd8e7847b7bacf31180803f681fb349b96338c98c791f74bc95e0d37b2810632159bc3175fed2e16038d45d35e4628250e8c9fb66c5bb2238f6456901f657e9655d3d5a09ff4952a0b9eb9c614f78c27626a136ef281f7099f68e898628530ef690851c179ef6a02448d498e49b2c362c839832100f4a9bf4abf17d496c71bfb5263da345d952b275f04707b31b9f6575da6dd2be799b90cc615f52ec32b4833a7e619d7f34f91f16edc38bc0a869c7211473f3ab90255446e0b7efbb2b97e8111d43b039ec0469b020f38925aad61e229836c96fad5bf3c3cad8f2c1c8b56cd819e8972d108dbfa8cd518177feaa7f4e0b547584a9a5d39ad4f1e8010cfead998ec18991cb89031a11c03cbd1ee7e0a1436da10ef154db13d4850c687c0a668215c9c8b7b1c",
-);
+/// An empty set is safe but inert: it can only WITHHOLD trust — [`check_pin`]
+/// resolves it to [`AuditStatus::Unavailable`]/[`BuildVerifyStatus::Unavailable`],
+/// never `Ok` and never `Alarm`.
+pub const PINNED_LOG_PUBLIC_KEYS: &[PinnedKey] = &[PinnedKey {
+    key_id: "6cbd4b2aed5c4bf1",
+    public_key: "56ab128f3f10107382802e69d3de8659d0127c711feb9c849f5b213c6f2d0af3b5fe41f581b202b385906fc42e4421747e84939054d160c551536131e41508a82b1f3ff0a07bcc4cee5e2eae8e85155d5c9e0dbc6e7683811649fb9e3b1f18c7ed070dbf61f2a058915b33f8ad3edcd135dd18770053e5ac971b13d17d95e16e98f47a852d600c47cbc0349354af2898803cfec7112660076d20027cb67870e18fb25ee327a36743fa812ccf93ba0769ddbd3d42ab40849ac8c98357b64eaf1ffc242abb12fddef4d8cdfa02448b4d99546b448e589657f898a47c6f30ddd88edd3f4456470e0a151e5fd601750c8b0489d3471897cfa78e0d7a00d938dfe876ef243117c972e041fdb00aa7af30d34184153cfd7b1e3b481dc562bbfc82bc20fe8ac4d9845f41de49fc33b6f94494df7088b06c7cb9ae35db86ac0fd293ca403046cec46ca9b12c755670d3d9b14c300b11ec292cd5e37d9f9e5e5d1729222a33bf1e13440f44dbf1b4d4104c612db4e269760868be5ff99f9ed269625fa4f39e21713a14293285e95f8a8e8cecd9db8e6a70c36340280322eab3490270ac640f706a23e81d79111dead641eaf7b926582ed0b0422f9addc0091d731a4fe1b9079be8bd75df23f5f9bf287beab7f67f763e04f0245bf9c705136d04eb8391fb4b4f12bfba44ae49bb6f32ddb0d539e59cd0159120b2fb1718f57e12a846638dbe0b650bfcd5a6cc74cd315b49136ea4e13d431a7f3a4c38fc783a82ca2b4c44a2f379c8aa9704d4639de3f94466662c97fbbd834db97a90405c382b5039803f4e4ed5c6b57487c8d23ad9e4d319df3466c49ef1e1cef526ddad1db5fa14f3b067b40580e068582dc428e21dbdc3df848e8e00fe1181f8e0d1409ab9a8757aef008b67191f4368f37cbd587ff65acdf07adbb989d09cc3318e346ca71c029557f2c523c204defab472b3dcb09bfbb95d5d1665a360a00faeb09b660f13fdc00f7b53fbfeaa58f87a208ad4551bcbe4307bf4d8451e027f4cc33cd55700016795c3164b1bc90d9dd1737b49d2e9e4b190128d2e62a44a80c1375c616aa2871ae7ad4a914102551380a8f8edb68c2df02bdf52607a7432ea7026f6a1efcdb37ecc11ecf1623ec6979e5d65c2812a997121010cd5fd9a98b9ed34edc17b667bfd37ef2be6dfe67fbdde03fa95bb80d0e1c7336263042ef44c4f9d28f1bf959bdc24c09cf8269378705022ff476fce91dbba6c8ffec00b27572eaa4835b59948d7a625ccc84ff4ac062176f4972f5131a961b17c7ff0010d2f2f3f8c12b7bf05fb9771d64a24fdab058f4bf3a155ade6a496b9a09d43a7673b5d8fb6519e01bf911ca78cc23f95943f63db72883d522fe24d4b7c7a26c7fd43b4f6f7496acf9ea2cab2e3cd6fc274964b576084c820bae79dbaa331d11751ec718660cd8e7847b7bacf31180803f681fb349b96338c98c791f74bc95e0d37b2810632159bc3175fed2e16038d45d35e4628250e8c9fb66c5bb2238f6456901f657e9655d3d5a09ff4952a0b9eb9c614f78c27626a136ef281f7099f68e898628530ef690851c179ef6a02448d498e49b2c362c839832100f4a9bf4abf17d496c71bfb5263da345d952b275f04707b31b9f6575da6dd2be799b90cc615f52ec32b4833a7e619d7f34f91f16edc38bc0a869c7211473f3ab90255446e0b7efbb2b97e8111d43b039ec0469b020f38925aad61e229836c96fad5bf3c3cad8f2c1c8b56cd819e8972d108dbfa8cd518177feaa7f4e0b547584a9a5d39ad4f1e8010cfead998ec18991cb89031a11c03cbd1ee7e0a1436da10ef154db13d4850c687c0a668215c9c8b7b1c",
+    not_after: None,
+}];
 
 /// Default base URL of the published transparency log.
 const DEFAULT_TRANSPARENCY_URL: &str = "https://verify.pollis.com";
@@ -194,7 +217,7 @@ pub async fn self_audit_account_key(
             Ok(derive_self_audit(
                 &report,
                 &served_key,
-                PINNED_LOG_PUBLIC_KEY,
+                PINNED_LOG_PUBLIC_KEYS,
                 &my_pub_hex,
                 my_version,
             ))
@@ -232,7 +255,7 @@ pub async fn audit_peer_account_key(
             Ok(derive_peer_audit(
                 &report,
                 &served_key,
-                PINNED_LOG_PUBLIC_KEY,
+                PINNED_LOG_PUBLIC_KEYS,
                 &peer_user_id,
                 pin,
             ))
@@ -295,12 +318,12 @@ pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport
     // self-audit guards against. A served key ≠ the pin is the loud case.
     let overlay = state.overlay_handle();
     match fetch_served_binaries_public_key(overlay.as_deref(), &base).await {
-        Ok(served) => match check_pin(&served, PINNED_LOG_PUBLIC_KEY) {
+        Ok(served) => match check_pin(&served, PINNED_LOG_PUBLIC_KEYS) {
             PinCheck::Match => {}
             PinCheck::Mismatch => {
                 return Ok(BuildVerifyReport {
                     status: BuildVerifyStatus::Mismatch,
-                    detail: pin_mismatch_detail(&served, PINNED_LOG_PUBLIC_KEY),
+                    detail: pin_mismatch_detail(&served, PINNED_LOG_PUBLIC_KEYS),
                     version,
                     commit,
                     my_payload_sha256: my_hash,
@@ -570,7 +593,7 @@ async fn load_pinned_key(
 pub fn derive_self_audit(
     report: &AccountReport,
     served_public_key: &str,
-    log_pin: Option<&str>,
+    log_pin: &[PinnedKey],
     my_account_id_pub: &str,
     my_identity_version: i64,
 ) -> SelfAuditReport {
@@ -667,7 +690,7 @@ pub fn derive_self_audit(
 pub fn derive_peer_audit(
     report: &AccountReport,
     served_public_key: &str,
-    log_pin: Option<&str>,
+    log_pin: &[PinnedKey],
     peer_user_id: &str,
     pinned: Option<(&str, i64)>,
 ) -> PeerAuditReport {
@@ -881,17 +904,52 @@ pub enum PinCheck {
     RotationPending,
 }
 
-/// Compare the served key against `pin` (case-insensitive hex).
-fn check_pin(served: &str, pin: Option<&str>) -> PinCheck {
-    match pin {
-        None => PinCheck::RotationPending,
-        Some(p) if served.eq_ignore_ascii_case(p) => PinCheck::Match,
-        Some(_) => PinCheck::Mismatch,
+/// Compare the served key against the build's pinned set (case-insensitive hex),
+/// ignoring any pin whose overlap window closed before `now_ms`.
+///
+/// `Match` if the served key is any still-valid pin — that is the whole point of
+/// the set: during a changeover a client accepts both the outgoing and incoming
+/// key, so moving the log between them is invisible.
+///
+/// Expiry is enforced here rather than trusted from the server, so a retired key
+/// stops being accepted on schedule even on a client that never updates again.
+/// An empty (or wholly expired) set withholds trust rather than alarming.
+fn check_pin_at(served: &str, pins: &[PinnedKey], now_ms: u64) -> PinCheck {
+    let mut any_live = false;
+    for p in pins {
+        if p.not_after.is_some_and(|exp| now_ms > exp) {
+            continue;
+        }
+        any_live = true;
+        if served.eq_ignore_ascii_case(p.public_key) {
+            return PinCheck::Match;
+        }
+    }
+    if any_live {
+        PinCheck::Mismatch
+    } else {
+        PinCheck::RotationPending
     }
 }
 
+/// [`check_pin_at`] against the current wall clock.
+fn check_pin(served: &str, pins: &[PinnedKey]) -> PinCheck {
+    check_pin_at(served, pins, now_ms())
+}
+
+/// Wall-clock milliseconds, for pin-expiry checks. A clock that is wrong in the
+/// past can only keep a retired key trusted slightly too long; one that is wrong
+/// in the future expires it early and degrades to `Unavailable`, never to a false
+/// alarm.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Detail shown when this build carries no log pin. Shipping builds do pin one
-/// (see [`PINNED_LOG_PUBLIC_KEY`]), so this is reachable only from a build made
+/// (see [`PINNED_LOG_PUBLIC_KEYS`]), so this is reachable only from a build made
 /// while a rotation is mid-flight — it must still read correctly if that happens.
 const PIN_PENDING_DETAIL: &str =
     "this build pins no transparency-log key, so the published tree cannot be checked against \
@@ -922,11 +980,19 @@ fn first_release_violation(report: &ReleaseReport, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn pin_mismatch_detail(served: &str, pin: Option<&str>) -> String {
+fn pin_mismatch_detail(served: &str, pins: &[PinnedKey]) -> String {
+    let pinned = if pins.is_empty() {
+        "(none)".to_string()
+    } else {
+        pins.iter()
+            .map(|p| short_hex(p.public_key))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     format!(
         "the log served public key {} but this build pins {} — refusing to trust the served tree",
         short_hex(served),
-        short_hex(pin.unwrap_or("(none)"))
+        pinned
     )
 }
 
@@ -950,10 +1016,18 @@ mod tests {
     use super::*;
 
     /// A stand-in for the build's transparency-log pin. The real
-    /// [`PINNED_LOG_PUBLIC_KEY`] is `None` while the key rotates to ML-DSA-44,
+    /// [`PINNED_LOG_PUBLIC_KEYS`] is `None` while the key rotates to ML-DSA-44,
     /// so these tests inject their own pin — the derivation logic is what is
     /// under test, not the constant's current value.
     const LOG_PIN: &str = "10900000000000000000000000000000000000000000000000000000000000ff";
+    /// A build pinning exactly the key the fixtures serve.
+    const PIN_SET: &[PinnedKey] = &[PinnedKey {
+        key_id: "0000000000000000",
+        public_key: LOG_PIN,
+        not_after: None,
+    }];
+    /// A build shipping no pin at all — can only withhold trust, never alarm.
+    const NO_PINS: &[PinnedKey] = &[];
 
     const KEY_A: &str = "aa00000000000000000000000000000000000000000000000000000000000000";
     const KEY_B: &str = "bb00000000000000000000000000000000000000000000000000000000000000";
@@ -989,21 +1063,21 @@ mod tests {
     #[test]
     fn self_ok_when_latest_matches_my_key() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Ok);
     }
 
     #[test]
     fn self_ok_is_case_insensitive_on_key() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), &KEY_A.to_uppercase(), 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, &KEY_A.to_uppercase(), 1);
         assert_eq!(out.status, AuditStatus::Ok);
     }
 
     #[test]
     fn self_pending_when_history_empty() {
         let r = report(vec![], true);
-        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
@@ -1011,7 +1085,7 @@ mod tests {
     fn self_pending_when_my_version_newer_than_published() {
         // Published latest is v1; this device already rotated to v2.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_B, 2);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_B, 2);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
@@ -1019,7 +1093,7 @@ mod tests {
     fn self_alarm_when_same_version_different_key() {
         // Selective targeting: log shows a different key at my current version.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_B, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_B, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
@@ -1027,21 +1101,21 @@ mod tests {
     fn self_alarm_when_published_version_higher() {
         // The log shows a rotation this device never performed.
         let r = report(vec![version(1, 0, KEY_A), version(2, 1, KEY_B)], true);
-        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn self_alarm_on_pin_mismatch_even_if_chain_valid() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&r, KEY_B, Some(LOG_PIN), KEY_A, 1);
+        let out = derive_self_audit(&r, KEY_B, PIN_SET, KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn self_alarm_on_invalid_chain() {
         let r = report(vec![version(1, 0, KEY_A)], false);
-        let out = derive_self_audit(&r, LOG_PIN, Some(LOG_PIN), KEY_A, 1);
+        let out = derive_self_audit(&r, LOG_PIN, PIN_SET, KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
@@ -1051,14 +1125,14 @@ mod tests {
     #[test]
     fn no_pin_withholds_trust_without_alarming() {
         let good = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_self_audit(&good, KEY_A, None, KEY_A, 1);
+        let out = derive_self_audit(&good, KEY_A, NO_PINS, KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Unavailable);
 
         let bad = report(vec![version(1, 0, KEY_A)], false);
-        let out = derive_self_audit(&bad, KEY_B, None, KEY_A, 1);
+        let out = derive_self_audit(&bad, KEY_B, NO_PINS, KEY_A, 1);
         assert_eq!(out.status, AuditStatus::Unavailable);
 
-        let out = derive_peer_audit(&good, KEY_A, None, "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&good, KEY_A, NO_PINS, "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Unavailable);
     }
 
@@ -1066,11 +1140,98 @@ mod tests {
     /// ML-DSA-44 key is unminted. When it IS set it must be a full 1312-byte hex
     /// key — a leftover 32-byte Ed25519 pin would match nothing the v2 log serves.
     #[test]
-    fn shipping_pin_is_either_absent_or_ml_dsa_sized() {
-        if let Some(pin) = PINNED_LOG_PUBLIC_KEY {
-            assert_eq!(pin.len(), verifiable_log_serve::STH_PUB_LEN * 2);
-            assert!(pin.chars().all(|c| c.is_ascii_hexdigit()));
+    fn shipping_pins_are_ml_dsa_sized_with_derived_ids() {
+        for pin in PINNED_LOG_PUBLIC_KEYS {
+            assert_eq!(pin.public_key.len(), verifiable_log_serve::STH_PUB_LEN * 2);
+            assert!(pin.public_key.chars().all(|c| c.is_ascii_hexdigit()));
+            // The id must be DERIVED from the key, not typed in beside it —
+            // otherwise a copy-paste slip ships an id naming a different key.
+            let vk = verifiable_log_serve::verifying_key_from_hex(pin.public_key)
+                .expect("pinned key must parse as ML-DSA-44");
+            assert_eq!(pin.key_id, verifiable_log_serve::key_id_for(&vk));
         }
+    }
+
+    // ── rotation overlap (the point of the key set) ──────────────────────
+
+    const OLD_KEY: &str = "aa900000000000000000000000000000000000000000000000000000000000ff";
+    const NEW_KEY: &str = "bb900000000000000000000000000000000000000000000000000000000000ff";
+    const WINDOW_CLOSES: u64 = 2_000;
+
+    /// A build mid-rotation: still trusts the outgoing key until its window
+    /// closes, and already trusts the incoming one.
+    const OVERLAP: &[PinnedKey] = &[
+        PinnedKey { key_id: "new", public_key: NEW_KEY, not_after: None },
+        PinnedKey { key_id: "old", public_key: OLD_KEY, not_after: Some(WINDOW_CLOSES) },
+    ];
+
+    /// The guarantee this whole change exists for: inside the window BOTH keys
+    /// verify, so moving the log from one to the other is invisible to clients.
+    #[test]
+    fn overlap_window_accepts_both_keys() {
+        assert_eq!(check_pin_at(OLD_KEY, OVERLAP, 1_000), PinCheck::Match);
+        assert_eq!(check_pin_at(NEW_KEY, OVERLAP, 1_000), PinCheck::Match);
+    }
+
+    /// The window is a deadline, not a suggestion: once it closes the retired key
+    /// is rejected even though it is still listed, and even on a client that
+    /// never updated again.
+    #[test]
+    fn retired_key_stops_being_accepted_after_its_window() {
+        assert_eq!(check_pin_at(OLD_KEY, OVERLAP, WINDOW_CLOSES), PinCheck::Match);
+        assert_eq!(
+            check_pin_at(OLD_KEY, OVERLAP, WINDOW_CLOSES + 1),
+            PinCheck::Mismatch
+        );
+        // ...while the incoming key is unaffected by the expiry.
+        assert_eq!(
+            check_pin_at(NEW_KEY, OVERLAP, WINDOW_CLOSES + 1),
+            PinCheck::Match
+        );
+    }
+
+    /// An unknown key is still a hard alarm — the set widens what is trusted, it
+    /// must not weaken the hostile-host verdict.
+    #[test]
+    fn overlap_still_alarms_on_an_unpinned_key() {
+        assert_eq!(check_pin_at(LOG_PIN, OVERLAP, 1_000), PinCheck::Mismatch);
+    }
+
+    /// When every pin has expired the build can no longer check anything. That
+    /// withholds trust rather than alarming — the same fail-closed reading as an
+    /// empty set, because "my pins aged out" is not evidence of a hostile host.
+    #[test]
+    fn wholly_expired_set_withholds_trust_instead_of_alarming() {
+        const ALL_EXPIRED: &[PinnedKey] = &[PinnedKey {
+            key_id: "old",
+            public_key: OLD_KEY,
+            not_after: Some(WINDOW_CLOSES),
+        }];
+        assert_eq!(
+            check_pin_at(OLD_KEY, ALL_EXPIRED, WINDOW_CLOSES + 1),
+            PinCheck::RotationPending
+        );
+        assert_eq!(check_pin_at(LOG_PIN, NO_PINS, 1_000), PinCheck::RotationPending);
+    }
+
+    /// Hex case must not decide trust.
+    #[test]
+    fn pin_comparison_is_case_insensitive() {
+        assert_eq!(
+            check_pin_at(&NEW_KEY.to_uppercase(), OVERLAP, 1_000),
+            PinCheck::Match
+        );
+    }
+
+    /// Exactly one pin may be open-ended. Two keys with no `not_after` means a
+    /// retired key was never given a deadline and would be trusted forever.
+    #[test]
+    fn at_most_one_pin_has_no_expiry() {
+        let open = PINNED_LOG_PUBLIC_KEYS
+            .iter()
+            .filter(|p| p.not_after.is_none())
+            .count();
+        assert!(open <= 1, "{open} pins have no not_after; at most one may");
     }
 
     // ── peer-audit ────────────────────────────────────────────────────────
@@ -1078,7 +1239,7 @@ mod tests {
     #[test]
     fn peer_ok_when_pinned_key_present() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Ok);
         assert!(!out.key_rotated);
     }
@@ -1086,7 +1247,7 @@ mod tests {
     #[test]
     fn peer_ok_notes_rotation_when_newer_version_exists() {
         let r = report(vec![version(1, 0, KEY_A), version(2, 1, KEY_B)], true);
-        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Ok);
         assert!(out.key_rotated);
     }
@@ -1095,35 +1256,35 @@ mod tests {
     fn peer_alarm_when_pinned_key_absent_from_history() {
         // The server showed us KEY_Z but the published history only has KEY_A.
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_Z, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_Z, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn peer_pending_when_no_local_pin() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", None);
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", None);
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
     #[test]
     fn peer_pending_when_peer_never_published() {
         let r = report(vec![], true);
-        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Pending);
     }
 
     #[test]
     fn peer_alarm_on_pin_mismatch() {
         let r = report(vec![version(1, 0, KEY_A)], true);
-        let out = derive_peer_audit(&r, KEY_B, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, KEY_B, PIN_SET, "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 
     #[test]
     fn peer_alarm_on_invalid_chain() {
         let r = report(vec![version(1, 0, KEY_A)], false);
-        let out = derive_peer_audit(&r, LOG_PIN, Some(LOG_PIN), "peer", Some((KEY_A, 1)));
+        let out = derive_peer_audit(&r, LOG_PIN, PIN_SET, "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
     }
 

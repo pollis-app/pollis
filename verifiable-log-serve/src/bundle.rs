@@ -22,6 +22,11 @@ use verifiable_log::{ConsistencyProof, Entry, InclusionProof, Sth};
 pub struct Bundle {
     /// ML-DSA-44 log public key, lowercase hex (1312 bytes).
     pub public_key: String,
+    /// Keys that no longer sign but must still be accepted until their
+    /// `not_after` — the rotation overlap window. Empty outside a rotation.
+    /// Published alongside the active key in `public_key.json`.
+    #[serde(default)]
+    pub retired_keys: Vec<PublicKeyEntry>,
     /// Signed Tree Heads, oldest first.
     #[serde(default)]
     pub sths: Vec<Sth>,
@@ -54,16 +59,98 @@ pub struct ConsistencyCheck {
     pub proof: ConsistencyProof,
 }
 
-/// The standalone `/v1/public_key.json` document. A one-field object (rather
-/// than a bare string) so it round-trips through serde and can grow metadata
-/// (key id, algorithm) without breaking the URL. That growth is not optional
-/// for long: rotation needs a key *list* with per-key ids and validity, because
-/// one served key makes rotation a flag day for every pinned client — see
+/// One entry in [`PublicKeyDoc::keys`] — a key the log may currently be signing
+/// under, or one recently retired but still inside its overlap window.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublicKeyEntry {
+    /// [`verifiable_log::key_id_for`] of `public_key`. Derived, so a verifier can
+    /// recompute it rather than trusting the label.
+    pub key_id: String,
+    /// Signature algorithm, e.g. `"ML-DSA-44"`. Present so a future algorithm
+    /// migration is a data change rather than another flag day.
+    pub algorithm: String,
+    /// The public key, lowercase hex.
+    pub public_key: String,
+    /// Milliseconds since epoch after which this key must no longer be accepted.
+    /// `None` = the active signing key, no expiry. A retiring key carries the end
+    /// of its overlap window; past it, a client treats heads under it as
+    /// unverified rather than trusted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_after: Option<u64>,
+}
+
+/// The standalone `/v1/public_key.json` document.
+///
+/// Carries a key **list** so a rotation is not a flag day: during a changeover
+/// the log serves both the new key and the retiring one (with its `not_after`),
+/// a client pinning either can still verify, and the overlap is what lets a
+/// release reach users before the old key stops being accepted. Design:
 /// `docs/sth-signing-key-custody.md` §5.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicKeyDoc {
-    /// ML-DSA-44 log public key, lowercase hex (1312 bytes).
+    /// The active signing key, lowercase hex — the same value that has always
+    /// been served here.
+    ///
+    /// Retained for compatibility with verifiers built before `keys` existed
+    /// (including every shipped desktop build). Those read this field and see a
+    /// single key, exactly as before. Drop it only once no such verifier is in
+    /// the field; until then it must always equal the one entry in `keys` with no
+    /// `not_after`.
     pub public_key: String,
+    /// Every key currently acceptable, active first. Empty on documents written
+    /// before the key set existed, which is why consumers must fall back to
+    /// `public_key`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<PublicKeyEntry>,
+}
+
+impl Bundle {
+    /// The `public_key.json` this bundle publishes: the active signing key first,
+    /// then any keys still inside their overlap window.
+    ///
+    /// `public_key` stays populated with the active key so verifiers built before
+    /// the key set keep working unchanged.
+    pub fn public_key_doc(&self) -> PublicKeyDoc {
+        let mut keys = Vec::with_capacity(1 + self.retired_keys.len());
+        keys.push(PublicKeyEntry {
+            key_id: verifiable_log::verifying_key_from_hex(&self.public_key)
+                .map(|vk| verifiable_log::key_id_for(&vk))
+                .unwrap_or_default(),
+            algorithm: "ML-DSA-44".to_string(),
+            public_key: self.public_key.clone(),
+            not_after: None,
+        });
+        keys.extend(self.retired_keys.iter().cloned());
+        PublicKeyDoc {
+            public_key: self.public_key.clone(),
+            keys,
+        }
+    }
+}
+
+impl PublicKeyDoc {
+    /// Every acceptable key at `now_ms`, newest-usable first: the entries in
+    /// `keys` that have not expired, or `public_key` alone when `keys` is absent
+    /// (a log published before the key set existed).
+    ///
+    /// Expiry is enforced here so a retired key stops being accepted on schedule
+    /// even if a client never updates — the overlap window is a deadline, not a
+    /// suggestion.
+    pub fn active_keys(&self, now_ms: u64) -> Vec<PublicKeyEntry> {
+        if self.keys.is_empty() {
+            return vec![PublicKeyEntry {
+                key_id: String::new(),
+                algorithm: "ML-DSA-44".to_string(),
+                public_key: self.public_key.clone(),
+                not_after: None,
+            }];
+        }
+        self.keys
+            .iter()
+            .filter(|k| k.not_after.is_none_or(|exp| now_ms <= exp))
+            .cloned()
+            .collect()
+    }
 }
 
 /// A `(tree_size, leaf_index)` reference to an inclusion-proof artifact, used in

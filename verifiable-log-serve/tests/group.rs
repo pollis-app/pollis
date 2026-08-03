@@ -97,6 +97,7 @@ fn build_tree(root: &Path, leaves: &[CommitLeaf]) -> Bundle {
 
     let bundle = Bundle {
         public_key: hex::encode(signing_key.verifying_key().encode()),
+        retired_keys: Vec::new(),
         sths,
         entries,
         enforce_unique: vec!["mls-commit-log".to_string()],

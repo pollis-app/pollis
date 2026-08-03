@@ -36,6 +36,6 @@ pub use proof::{
     verify_consistency_proof, verify_inclusion_proof, ConsistencyProof, InclusionProof,
 };
 pub use sth::{
-    is_equivocation, signing_key_from_seed_hex, verifying_key_from_hex, SigningKey, Sth,
-    VerifyingKey, STH_PUB_LEN, STH_SIG_LEN,
+    is_equivocation, key_id_for, signing_key_from_seed_hex, verifying_key_from_hex, SigningKey, Sth,
+    VerifyingKey, KEY_ID_HEX_LEN, STH_PUB_LEN, STH_SIG_LEN,
 };

@@ -8,8 +8,9 @@
 //! rewritten history that still verifies. A signature that has to be sound
 //! decades after it was minted cannot be Ed25519.
 
-use ml_dsa::{EncodedSignature, EncodedVerifyingKey, MlDsa44, Signer, Verifier};
+use ml_dsa::{EncodedSignature, EncodedVerifyingKey, Keypair, MlDsa44, Signer, Verifier};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
 use crate::hash::{from_hex, to_hex, Hash};
@@ -46,6 +47,26 @@ pub const STH_SIG_LEN: usize = 2420;
 /// under `…:sth:v2:binaries`. One key, three trees, three contexts.
 const STH_DOMAIN: &[u8] = b"pollis-verifiable-log:sth:v2";
 
+/// Length in hex characters of a [`key_id_for`] identifier.
+pub const KEY_ID_HEX_LEN: usize = 16;
+
+/// A short, stable identifier for a verifying key: the first 8 bytes of
+/// `SHA-256(encoded_key)`, lowercase hex.
+///
+/// Derived rather than assigned, so there is no registry to keep in sync and no
+/// way for two parties to disagree about which key an id names — anyone holding
+/// the key can recompute it.
+///
+/// **This is a selection hint, never a trust input.** It tells a verifier which
+/// of several pinned keys to try first; the signature still has to verify under
+/// that key. A wrong or attacker-supplied id costs at most a few extra
+/// verifications, which is why [`Sth::key_id`] is deliberately outside the
+/// signed preimage.
+pub fn key_id_for(verifying_key: &VerifyingKey) -> String {
+    let digest = Sha256::digest(verifying_key.encode());
+    hex::encode(&digest[..8])
+}
+
 /// A Signed Tree Head. Wire shape (see `README.md`): all binary fields are
 /// lowercase hex. This is part of the frozen contract a future serve layer
 /// must emit.
@@ -59,6 +80,16 @@ pub struct Sth {
     pub timestamp: u64,
     /// ML-DSA-44 signature over the canonical message, hex-encoded (2420 bytes).
     pub signature: String,
+    /// Which key signed this head ([`key_id_for`]), so a verifier holding several
+    /// pinned keys during a rotation overlap selects rather than trial-verifies.
+    ///
+    /// Additive and **unsigned**: absent on every head published before the key
+    /// set existed, and `skip_serializing_if` keeps those heads byte-identical
+    /// when they are not re-signed. Because it is outside the signed preimage a
+    /// verifier must treat it as a hint only — try the named key first, then fall
+    /// back to every other non-expired pinned key before concluding anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
 }
 
 /// Canonical bytes signed by an STH, under the given domain-separation context:
@@ -104,7 +135,44 @@ impl Sth {
             root_hash: to_hex(&root),
             timestamp,
             signature: to_hex_sig(&signature),
+            key_id: Some(key_id_for(&signing_key.verifying_key())),
         }
+    }
+
+    /// [`Self::verify_any_with_context`] under the default ([`STH_DOMAIN`])
+    /// context — the commit-log tree.
+    pub fn verify_any<'k>(
+        &self,
+        candidates: &'k [(String, VerifyingKey)],
+    ) -> Option<&'k (String, VerifyingKey)> {
+        self.verify_any_with_context(candidates, STH_DOMAIN)
+    }
+
+    /// Verify against a **set** of candidate keys, returning the one that
+    /// validated. This is the rotation-overlap path: during a changeover two keys
+    /// are simultaneously valid, and a head is honest if it verifies under any of
+    /// them. Only when it verifies under *none* is something actually wrong.
+    ///
+    /// [`Self::key_id`] just reorders the attempts — every candidate is tried
+    /// regardless, so a wrong or hostile id can slow this down but can never make
+    /// a bad head verify or a good one fail.
+    pub fn verify_any_with_context<'k>(
+        &self,
+        candidates: &'k [(String, VerifyingKey)],
+        context: &[u8],
+    ) -> Option<&'k (String, VerifyingKey)> {
+        let hinted = self
+            .key_id
+            .as_deref()
+            .and_then(|id| candidates.iter().find(|(kid, _)| kid == id));
+        if let Some(c) = hinted {
+            if self.verify_with_context(&c.1, context) {
+                return Some(c);
+            }
+        }
+        candidates
+            .iter()
+            .find(|c| self.verify_with_context(&c.1, context))
     }
 
     /// Decode the root hash field into bytes.
@@ -238,6 +306,116 @@ mod tests {
 
         assert!(account_sth.verify_with_context(&vk, OTHER_CONTEXT));
         assert!(!account_sth.verify(&vk));
+    }
+
+    fn key_b() -> SigningKey {
+        SigningKey::from_seed(&[9u8; 32].into())
+    }
+
+    fn candidates() -> Vec<(String, VerifyingKey)> {
+        vec![
+            (key_id_for(&key().verifying_key()), key().verifying_key()),
+            (key_id_for(&key_b().verifying_key()), key_b().verifying_key()),
+        ]
+    }
+
+    /// A key id is derived from the key, so it is stable and unambiguous without
+    /// any registry — and distinct keys get distinct ids.
+    #[test]
+    fn key_ids_are_derived_stable_and_distinct() {
+        let a = key_id_for(&key().verifying_key());
+        assert_eq!(a.len(), KEY_ID_HEX_LEN);
+        assert_eq!(a, key_id_for(&key().verifying_key()));
+        assert_ne!(a, key_id_for(&key_b().verifying_key()));
+    }
+
+    /// Heads published before the key set existed carry no `key_id`. They must
+    /// still deserialize and verify — and re-serialize byte-identically, because
+    /// per-size heads are immutable and a spurious `"key_id": null` would rewrite
+    /// attested history.
+    #[test]
+    fn pre_key_set_sth_roundtrips_without_the_field() {
+        let wire = r#"{"tree_size":3,"root_hash":"0101010101010101010101010101010101010101010101010101010101010101","timestamp":1700000000000,"signature":"00"}"#;
+        let sth: Sth = serde_json::from_str(wire).expect("legacy STH must deserialize");
+        assert_eq!(sth.key_id, None);
+        let out = serde_json::to_string(&sth).unwrap();
+        assert!(!out.contains("key_id"), "absent key_id must not be emitted");
+    }
+
+    /// The overlap case: two keys are simultaneously valid and a head signed by
+    /// either one verifies. This is what makes a rotation invisible to clients.
+    #[test]
+    fn verify_any_accepts_a_head_from_either_pinned_key() {
+        let from_a = Sth::create(&key(), 5, [9u8; 32], TS);
+        let from_b = Sth::create(&key_b(), 5, [9u8; 32], TS);
+        let c = candidates();
+
+        let hit_a = from_a.verify_any_with_context(&c, STH_DOMAIN).expect("A");
+        assert_eq!(hit_a.0, key_id_for(&key().verifying_key()));
+
+        let hit_b = from_b.verify_any_with_context(&c, STH_DOMAIN).expect("B");
+        assert_eq!(hit_b.0, key_id_for(&key_b().verifying_key()));
+    }
+
+    /// `key_id` is a hint outside the signed preimage, so tampering with it must
+    /// not change any verdict — a head with a wrong or unknown id still verifies
+    /// under the key that actually signed it.
+    #[test]
+    fn a_lying_key_id_changes_nothing() {
+        let c = candidates();
+        let real = key_id_for(&key().verifying_key());
+
+        let mut points_at_wrong_key = Sth::create(&key(), 5, [9u8; 32], TS);
+        points_at_wrong_key.key_id = Some(key_id_for(&key_b().verifying_key()));
+        assert_eq!(
+            points_at_wrong_key
+                .verify_any_with_context(&c, STH_DOMAIN)
+                .map(|h| h.0.clone()),
+            Some(real.clone())
+        );
+
+        let mut points_at_nothing = Sth::create(&key(), 5, [9u8; 32], TS);
+        points_at_nothing.key_id = Some("ffffffffffffffff".into());
+        assert_eq!(
+            points_at_nothing
+                .verify_any_with_context(&c, STH_DOMAIN)
+                .map(|h| h.0.clone()),
+            Some(real.clone())
+        );
+
+        let mut absent = Sth::create(&key(), 5, [9u8; 32], TS);
+        absent.key_id = None;
+        assert_eq!(
+            absent
+                .verify_any_with_context(&c, STH_DOMAIN)
+                .map(|h| h.0.clone()),
+            Some(real)
+        );
+    }
+
+    /// The alarm case survives the key set: a head signed by a key that is in no
+    /// pinned set verifies under none of them, however friendly its `key_id`.
+    #[test]
+    fn verify_any_rejects_a_head_from_an_unpinned_key() {
+        let stranger = SigningKey::from_seed(&[42u8; 32].into());
+        let mut forged = Sth::create(&stranger, 5, [9u8; 32], TS);
+        forged.key_id = Some(key_id_for(&key().verifying_key()));
+        assert!(forged
+            .verify_any_with_context(&candidates(), STH_DOMAIN)
+            .is_none());
+    }
+
+    /// Domain separation still binds across the key set: a head from a valid key
+    /// but the wrong tree verifies under no candidate.
+    #[test]
+    fn verify_any_still_honours_domain_separation() {
+        let account = Sth::create_with_context(&key(), 5, [9u8; 32], TS, OTHER_CONTEXT);
+        assert!(account
+            .verify_any_with_context(&candidates(), STH_DOMAIN)
+            .is_none());
+        assert!(account
+            .verify_any_with_context(&candidates(), OTHER_CONTEXT)
+            .is_some());
     }
 
     #[test]

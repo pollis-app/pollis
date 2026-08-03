@@ -17,6 +17,7 @@ use clap::{Parser, Subcommand};
 use verifiable_log_builder::error::{BuilderError, Result};
 use verifiable_log_builder::{
     build_account_bundle, build_binaries_bundle, build_bundle, keys, source, BinaryRecord,
+    RetiredKey,
 };
 
 #[derive(Parser)]
@@ -78,6 +79,14 @@ enum Command {
         /// var is unset).
         #[arg(long)]
         signing_key_file: Option<PathBuf>,
+
+        /// A key inside its rotation overlap window, as
+        /// `<public_key_hex>:<not_after_ms>`. Repeatable. These keys no longer
+        /// sign, but are published alongside the active key so a client pinning
+        /// one can still verify until `not_after` passes — which is what stops a
+        /// rotation being a flag day. Omit outside a rotation.
+        #[arg(long = "retired-key", value_name = "HEX:NOT_AFTER_MS")]
+        retired_key: Vec<String>,
     },
     /// Read a JSON file of `BinaryRecord`s and write a signed binaries-tree
     /// bundle. Unlike `build`, the binaries tenant's source of truth is a JSON
@@ -108,6 +117,14 @@ enum Command {
         /// var is unset).
         #[arg(long)]
         signing_key_file: Option<PathBuf>,
+
+        /// A key inside its rotation overlap window, as
+        /// `<public_key_hex>:<not_after_ms>`. Repeatable. These keys no longer
+        /// sign, but are published alongside the active key so a client pinning
+        /// one can still verify until `not_after` passes — which is what stops a
+        /// rotation being a flag day. Omit outside a rotation.
+        #[arg(long = "retired-key", value_name = "HEX:NOT_AFTER_MS")]
+        retired_key: Vec<String>,
     },
     /// Mint a fresh Ed25519 keypair (hex) for dev/throwaway use.
     Keygen,
@@ -125,6 +142,7 @@ fn main() -> ExitCode {
             account_timestamp,
             signing_key_env,
             signing_key_file,
+            retired_key,
         } => run_build(
             db,
             log_db,
@@ -134,6 +152,7 @@ fn main() -> ExitCode {
             account_timestamp.unwrap_or(timestamp),
             &signing_key_env,
             signing_key_file.as_deref(),
+            &retired_key,
         ),
         Command::BuildBinaries {
             binaries_in,
@@ -141,12 +160,14 @@ fn main() -> ExitCode {
             timestamp,
             signing_key_env,
             signing_key_file,
+            retired_key,
         } => run_build_binaries(
             binaries_in,
             out,
             timestamp,
             &signing_key_env,
             signing_key_file.as_deref(),
+            &retired_key,
         ),
         Command::Keygen => {
             run_keygen();
@@ -163,6 +184,38 @@ fn main() -> ExitCode {
     }
 }
 
+/// Parse `--retired-key <public_key_hex>:<not_after_ms>` into bundle entries.
+///
+/// The key id is *derived* from the key rather than accepted from the operator,
+/// so a typo cannot publish an id that names a different key than the bytes
+/// beside it. A malformed entry is a hard error: silently dropping one would
+/// publish a shorter overlap set than intended and strand clients pinning the
+/// omitted key.
+fn parse_retired_keys(specs: &[String]) -> Result<Vec<RetiredKey>> {
+    specs
+        .iter()
+        .map(|spec| {
+            let (hex_key, not_after) = spec.rsplit_once(':').ok_or_else(|| {
+                BuilderError::SigningKey(format!(
+                    "--retired-key must be <public_key_hex>:<not_after_ms>, got {spec:?}"
+                ))
+            })?;
+            let not_after: u64 = not_after.trim().parse().map_err(|_| {
+                BuilderError::SigningKey(format!("--retired-key not_after not an integer: {spec:?}"))
+            })?;
+            let vk = verifiable_log::verifying_key_from_hex(hex_key.trim()).map_err(|e| {
+                BuilderError::SigningKey(format!("--retired-key is not a valid ML-DSA-44 key: {e}"))
+            })?;
+            Ok(RetiredKey {
+                key_id: verifiable_log::key_id_for(&vk),
+                algorithm: "ML-DSA-44".to_string(),
+                public_key: hex_key.trim().to_ascii_lowercase(),
+                not_after: Some(not_after),
+            })
+        })
+        .collect()
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn run_build(
     db: Option<String>,
@@ -173,6 +226,7 @@ async fn run_build(
     account_timestamp: u64,
     signing_key_env: &str,
     signing_key_file: Option<&std::path::Path>,
+    retired_key: &[String],
 ) -> Result<()> {
     let db = db
         .or_else(|| std::env::var("TURSO_DATABASE_URL").ok())
@@ -233,7 +287,9 @@ async fn run_build(
              bundle so `serve generate` still runs; the account-key tree is built independently"
         );
     }
-    let bundle = build_bundle(&rows, &signing_key, timestamp)?;
+    let retired = parse_retired_keys(retired_key)?;
+    let mut bundle = build_bundle(&rows, &signing_key, timestamp)?;
+    bundle.retired_keys.clone_from(&retired);
     let json = serde_json::to_string_pretty(&bundle)?;
     std::fs::write(&out, json)?;
 
@@ -256,7 +312,9 @@ async fn run_build(
                  account-key bundle"
             );
         }
-        let account_bundle = build_account_bundle(&account_rows, &signing_key, account_timestamp)?;
+        let mut account_bundle =
+            build_account_bundle(&account_rows, &signing_key, account_timestamp)?;
+        account_bundle.retired_keys.clone_from(&retired);
         let account_json = serde_json::to_string_pretty(&account_bundle)?;
         std::fs::write(&account_out, account_json)?;
 
@@ -282,6 +340,7 @@ fn run_build_binaries(
     timestamp: u64,
     signing_key_env: &str,
     signing_key_file: Option<&std::path::Path>,
+    retired_key: &[String],
 ) -> Result<()> {
     // Resolve the signing key BEFORE reading input so a missing key fails fast.
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
@@ -296,7 +355,8 @@ fn run_build_binaries(
         );
     }
 
-    let bundle = build_binaries_bundle(&records, &signing_key, timestamp)?;
+    let mut bundle = build_binaries_bundle(&records, &signing_key, timestamp)?;
+    bundle.retired_keys = parse_retired_keys(retired_key)?;
     let json = serde_json::to_string_pretty(&bundle)?;
     std::fs::write(&out, json)?;
 

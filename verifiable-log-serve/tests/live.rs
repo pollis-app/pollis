@@ -211,6 +211,7 @@ fn plant_bundle(leaves: &[CommitLeaf], root: Option<&Path>) -> Bundle {
 
     let bundle = Bundle {
         public_key: hex::encode(key.verifying_key().encode()),
+        retired_keys: Vec::new(),
         sths,
         entries,
         enforce_unique: vec!["mls-commit-log".to_string()],

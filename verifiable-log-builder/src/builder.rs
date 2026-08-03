@@ -32,8 +32,14 @@ use crate::source::{AccountKeyRow, CommitRow};
 /// contract in `verifiable-log/README.md`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bundle {
-    /// Ed25519 log public key, lowercase hex (32 bytes).
+    /// ML-DSA-44 log public key, lowercase hex (1312 bytes).
     pub public_key: String,
+    /// Keys that no longer sign but must still be accepted until their
+    /// `not_after` (ms since epoch) — the rotation overlap window that keeps a
+    /// key change from being a flag day. Empty outside a rotation; serialized
+    /// only when non-empty so bundles are byte-identical to before otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retired_keys: Vec<RetiredKey>,
     /// Signed Tree Heads, oldest first.
     pub sths: Vec<Sth>,
     /// Full ordered log contents.
@@ -44,6 +50,17 @@ pub struct Bundle {
     pub inclusion: Vec<InclusionCheck>,
     /// Consistency proofs between successive STHs.
     pub consistency: Vec<ConsistencyCheck>,
+}
+
+/// A key inside its overlap window. Mirrors `PublicKeyEntry` in
+/// `verifiable-log-serve`; the two are joined by the bundle JSON, not a shared
+/// type, so the builder does not depend on the serve crate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetiredKey {
+    pub key_id: String,
+    pub algorithm: String,
+    pub public_key: String,
+    pub not_after: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -227,6 +244,9 @@ fn seal(
 
     Ok(Bundle {
         public_key,
+        // Populated by the caller from --retired-key: the overlap set is
+        // publishing policy, not something the signing pass can know.
+        retired_keys: Vec::new(),
         sths,
         entries,
         enforce_unique: enforce_unique.to_vec(),
