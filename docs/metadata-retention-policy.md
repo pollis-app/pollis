@@ -76,7 +76,8 @@ DB, split out in #420 Goal A).
 | Account identity-key history | `account_key_log` | **Append-only, never deleted.** This is deliberate: it is the client-verifiable record that an account's key did not change behind your back | `000005_account_key_log.sql` |
 | Membership and social graph | `group_member`, `dm_channel_member`, `groups`, `channels`, `dm_channel`, `user_block`, `group_invite`, `group_join_request`, `user_groups`, `user_dms` | Life of the account / conversation; cascade-deleted with the user | `000000_baseline.sql`, `000009_directory_index.sql` |
 | Security events | `security_event` (`id`, `user_id`, `kind`, `device_id`, `created_at`, `metadata`) | **Indefinite** — no TTL; cascade-deleted with the user | `000000_baseline.sql` |
-| Attachment dedup index | `attachment_object` (`content_hash` → `r2_key`) | Deleted when the referencing message is deleted. **Today that delete is unconditional**, which can strand a second conversation still referencing the same object — reference counting is tracked by #690 | `messages.rs:988` |
+| Attachment dedup index | `attachment_object` (`content_hash` → `r2_key`) | **Reference-counted (#690):** collected only when no still-existing message references the hash. | `messages.rs` `apply_delete_attachment` (conditional `NOT EXISTS (attachment_ref ⋈ message_envelope)`) |
+| Attachment references | `attachment_ref` (`content_hash`, `message_id`) | One declaration per (message that carries a file). The count is **derived** — a declaration counts only while its `message_envelope` exists — so a reference is released by deleting the message envelope (self/admin delete, envelope GC #689, retention #720, teardown), never by a dedicated call, and cannot outlive its message. Orphaned/forged declarations are reaped by `sweep_envelope_gc`. **New at-rest linkage — see the note below.** | `messages.rs` (`object_is_referenced`, `sweep_envelope_gc`), `000012_attachment_ref.sql` |
 | Push tokens | `push_token` | Until the device re-registers (upsert on `token`) or the account is deleted. **No TTL and no reap of stale tokens** | `000006_push_token.sql` |
 
 **Sealed sender.** Since #607 / migration `000008`, `message_envelope.sender_id` holds a sentinel rather
@@ -84,6 +85,27 @@ than the real sender; the true sender is authenticated inside the MLS ciphertext
 members. The stored row therefore no longer shows who sent what. The DS still observes the sender *live*
 on the authenticated write, via the `X-Pollis-User` header — that is an at-rest guarantee, not an
 in-flight one, and `docs/metadata-minimization-design.md` says so.
+
+**Attachment references, stated plainly (#690).** Making attachment deletion correct required the client
+to declare each reference to the DS, because the server cannot read message content and so cannot count
+references itself. The chosen mechanism — `attachment_ref (content_hash, message_id)` — introduces a new
+piece of *at-rest* linkage the operator did not previously hold: because `content_hash` is convergent
+(SHA-256 of plaintext), joining `attachment_ref` to `message_envelope.conversation_id` tells the operator
+which messages, and therefore which conversations, **share the same file** — durably and in the clear.
+It does **not** reveal the file itself (plaintext is never seen), the filename (that already sits in the
+R2 key, §5), or the sender (sealed, above). The `message_id` is now **load-bearing**, not incidental: the
+reference count is derived by joining `attachment_ref` to `message_envelope` on it (#690), which is what
+makes a reference self-releasing when its message is deleted/GC'd and unforgeable by an unauthorized
+caller. The considered alternative — an opaque, client-minted `ref_token` per reference — would expose
+only a per-file *count*, never a linkage, but it cannot join to the envelope, so it loses exactly that
+derived-release property: a device that loses local state can never release its tokens (references leak,
+the object is never collected) and an admin deleting another member's message cannot release a token it
+never held. That alternative fails deletion, which is the exact guarantee this ticket exists to establish,
+so we **accept the co-reference linkage as-is** as the price of a robust, honestly-collectable store.
+Note this is **not** picked up by #701/#662 — those minimize the *public transparency ledger*, not DS
+tables — so reducing this specific DS-side linkage (e.g. pseudonymising the `message_id`, if it can be
+done without breaking the envelope join) would be its own follow-up, deliberately not planned as part of
+#690.
 
 ---
 
@@ -128,8 +150,18 @@ client IPs from the first-party services, and is opt-in and off by default. This
   identifier — but note the **original filename is preserved in the key**, so a distinctive filename is
   itself metadata visible to the storage operator.
 - Objects are client-side encrypted (AES-256-GCM) before upload; R2 holds ciphertext only.
-- Deletion is explicit — a DS-minted presigned DELETE issued when the referencing message is deleted.
-  There is no lifecycle rule and no automatic expiry. See the `attachment_object` caveat in §2 (#690).
+- Deletion is **reference-counted**, and the count is **derived** (#690): a declaration counts only while
+  its `message_envelope` exists, so a reference is released by deleting the message envelope — through the
+  ordinary self/admin delete, envelope GC (#689), the retention sweep (#720) or account/group teardown —
+  and the object is collected only once no still-existing message references the hash. A reference cannot
+  outlive its message, and releasing is not a separately-authorized action a caller can abuse. The DS is
+  the chokepoint — `/v1/r2/presign` **refuses to mint a `delete`** for an object that still has a live
+  reference (`broker.rs`, `object_is_referenced`), so a client that deleted its own message cannot blow
+  away a blob another conversation still needs. There is no lifecycle rule and no automatic expiry.
+  **Reclaiming the R2 blob + Turso row for a hash that no live message references (e.g. after envelope GC
+  aged the last message out) is a separable server-side sweep and is NOT built here — #690 makes such an
+  object *collectable* (the reference no longer pins it); a follow-up gives the DS the R2-delete capability
+  to actually reclaim it.** See the `attachment_object` / `attachment_ref` rows and the linkage note in §2.
 - The on-device decrypted cache lives under the app sandbox, is itself encrypted with a key derived from
   the local database key, is capped at 500 MiB, and is LRU-evicted.
 
@@ -206,7 +238,14 @@ Writing this document surfaced retention behaviour we have not decided on, only 
 - [ ] **`push_token` has no stale-token reap.** A token for an uninstalled app persists until the
       account is deleted.
 - [ ] **No maximum retention for undelivered envelopes** (§1) until #720 lands a device-staleness bound.
-- [ ] **Attachment deletion is not reference-counted** (#690).
+- [x] **Attachment deletion is not reference-counted** (#690). **Done** — the reference count is derived
+      by joining `attachment_ref` to `message_envelope`, so a reference is released by deleting its message
+      (self/admin delete, envelope GC #689, retention #720, teardown) and cannot outlive it; the Turso row
+      and the R2 delete gate both consult that derived count. The trade-off is a new co-reference linkage
+      the operator can read at rest (§2 note), accepted as-is (not covered by #701/#662, which are
+      ledger-side). **Remaining:** an object whose last message aged out is now *collectable* but not yet
+      auto-*reclaimed* — a server-side R2+row sweep (giving the DS R2-delete capability) is the identified
+      follow-up, unblocked by this ticket.
 - [ ] **The commit-log ledger publishes stable identifiers** (#701, coupled to #699).
 - [ ] **The original filename is preserved in R2 object keys** (§5). Decide whether to hash it.
 

@@ -14,7 +14,7 @@
 //! signer, not from anything the client sends**: a client cannot mint a LiveKit
 //! token as another user.
 //!
-//! ## Why R2 presign needs no per-object authz
+//! ## Why R2 presign needs no per-object READ authz (but delete is gated)
 //!
 //! Pollis media is **convergent-encrypted** (see `pollis-core`'s `r2.rs`):
 //! the AES-256-GCM key is derived from `SHA-256(plaintext)`, and the
@@ -22,11 +22,28 @@
 //! conversation binding at all. A presigned URL therefore only ever exposes
 //! **ciphertext** — confidentiality comes from MLS key distribution (only a
 //! member who decrypted the message learns the content hash, and only the
-//! content hash derives the decryption key), NOT from the R2 ACL. So the
-//! presign gate exists solely to stop **anonymous internet access** to the
-//! bucket; it does not — and cannot meaningfully — enforce read authz on a
-//! per-object basis. Requiring an authenticated device is the right and
-//! sufficient gate.
+//! content hash derives the decryption key), NOT from the R2 ACL. So for `get`
+//! and `put` the presign gate exists solely to stop **anonymous internet
+//! access** to the bucket; it does not — and cannot meaningfully — enforce read
+//! authz on a per-object basis. Requiring an authenticated device is the right
+//! and sufficient gate there.
+//!
+//! `delete` is different, and NOT for confidentiality — for **integrity of a
+//! SHARED object** (#690). Because the object is a global dedup, one convergent
+//! blob backs every message that carries the file, across conversations and
+//! users. Minting a `delete` for it while another message still references it
+//! would 404 that attachment for everyone else. So the `delete` presign consults
+//! the server-side reference count ([`crate::messages::object_is_referenced`],
+//! DERIVED by joining `attachment_ref` declarations to the still-live
+//! `message_envelope` rows — #690) and refuses to sign while any reference
+//! remains — the same evidence that gates the Turso row's collection in
+//! `apply_delete_attachment`. The DS is the chokepoint: a client that has already
+//! deleted its own message cannot blow away a blob a second conversation still
+//! needs. Because the count is derived, a reference cannot outlive its message:
+//! once every referencing envelope is deleted or GC'd the gate opens on its own,
+//! with no per-deleter bookkeeping to forget. This is a per-object *integrity*
+//! gate, not the per-object *read* authz
+//! the paragraph above (still correctly) says the bucket does not need.
 //!
 //! ## Contract
 //!
@@ -763,6 +780,21 @@ pub struct R2PresignBody {
 /// Default presigned-URL lifetime, in seconds.
 const PRESIGN_EXPIRES_SECS: u64 = 900;
 
+/// The convergent content hash embedded in a media R2 key
+/// (`media/<content_hash>/<sanitized-filename>.enc`, see `pollis-core`'s
+/// `upload_media`). `None` for any key not of that shape — avatar/icon keys and
+/// anything else that carries no reference-counted attachment object, which the
+/// `delete` gate then lets through unchecked. Returns a borrow to avoid an
+/// allocation on the hot presign path.
+fn content_hash_from_key(key: &str) -> Option<&str> {
+    let rest = key.strip_prefix("media/")?;
+    let hash = rest.split('/').next()?;
+    if hash.is_empty() {
+        return None;
+    }
+    Some(hash)
+}
+
 /// POST /v1/r2/presign — return a SigV4 presigned URL for a GET or PUT against
 /// the configured R2 bucket. Requires an authenticated device (when auth is
 /// enforced, [`gate`] rejects an unsigned request with 401). There is NO
@@ -806,6 +838,21 @@ pub async fn r2_presign(
     // no-auth body shape (and reject an empty/absent user_id there).
     if let Err(resp) = resolve_user(&authed, parsed.user_id.as_deref()) {
         return Ok(resp);
+    }
+
+    // Per-object INTEGRITY gate on delete (#690, see the module docs). The R2
+    // object is a global convergent dedup, so refuse to mint a `delete` for it
+    // while any message still references the hash — collecting it would 404 the
+    // attachment for every other conversation still holding it. `get`/`put` are
+    // never gated this way. A non-media key (no `media/<hash>/…` shape) has no
+    // reference to consult and passes through.
+    if http_method == "DELETE" {
+        if let Some(content_hash) = content_hash_from_key(&parsed.key) {
+            let conn = state.db.conn()?;
+            if crate::messages::object_is_referenced(&conn, content_hash).await? {
+                return Ok(AuthRejection::Forbidden.into_response());
+            }
+        }
     }
 
     let url = presign_r2_url(

@@ -38,11 +38,15 @@ use crate::state::AppState;
 /// concept in 1:1 DMs).
 ///
 /// Attachment cleanup: if the message had one or more attachments, each
-/// content_hash is reference-counted against the caller's other non-deleted
-/// local messages. When no other local message references the same hash, the
-/// `attachment_object` row is removed from Turso and the R2 object is deleted.
-/// R2 deletion is best-effort and must not fail the overall delete; orphaned
-/// R2 objects can be reclaimed by a future sweep.
+/// content_hash's reference is RELEASED server-side through the DS (#690). The
+/// DS reference-counts the shared, convergent `attachment_object` row and
+/// collects it — and permits the R2 object's deletion — only when NO message
+/// anywhere still references the hash, so a delete in one conversation can no
+/// longer strand a copy in another. The local ref-count pass survives as a cheap
+/// first pass (skip the R2 round trip when this device still references the hash),
+/// but the client no longer assumes its local view is complete: the server-side
+/// count is the authority. R2 deletion is best-effort and must not fail the
+/// overall delete; orphaned R2 objects can be reclaimed by a future sweep.
 pub async fn delete_message(
     message_id: String,
     user_id: String,
@@ -149,7 +153,7 @@ pub async fn delete_message(
         // may not have a local row (joined after the message was sent and
         // it's already aged out) — that's fine, the tombstone in Turso is
         // what propagates the delete.
-        let orphaned: Vec<AttachmentRef> = {
+        let attachments: Vec<(AttachmentRef, bool)> = {
             let guard = state.local_db.lock().await;
             let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
@@ -176,12 +180,16 @@ pub async fn delete_message(
                 // not just the admin's own — if any local copy still
                 // references the hash (e.g. another member also attached
                 // the same file in a separate message they sent), keep R2.
-                filter_orphaned_locally_all(db.conn(), &attachments)?
+                // This is a cheap first pass; the DS is the authority.
+                let orphaned = filter_orphaned_locally_all(db.conn(), &attachments)?;
+                mark_locally_orphaned(attachments, &orphaned)
             }
         };
 
-        for att in orphaned {
-            cleanup_attachment(state, &att).await;
+        // Release EVERY attachment's reference for the deleted message; the DS
+        // collects the shared object only when no reference remains.
+        for (att, locally_orphaned) in attachments {
+            cleanup_attachment(state, &message_id, &att, locally_orphaned).await;
         }
 
         // Broadcast so currently-connected clients invalidate their message
@@ -230,7 +238,7 @@ pub async fn delete_message(
     // vanishing only for them. Compute which attachments are no longer
     // referenced by any of this user's other non-deleted messages. Done inside a
     // single lock scope to avoid races with concurrent sends.
-    let orphaned: Vec<AttachmentRef> = {
+    let attachments: Vec<(AttachmentRef, bool)> = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
@@ -263,12 +271,16 @@ pub async fn delete_message(
         if attachments.is_empty() {
             Vec::new()
         } else {
-            filter_orphaned_locally(db.conn(), &user_id, &attachments)?
+            let orphaned = filter_orphaned_locally(db.conn(), &user_id, &attachments)?;
+            mark_locally_orphaned(attachments, &orphaned)
         }
     };
 
-    for att in orphaned {
-        cleanup_attachment(state, &att).await;
+    // Release EVERY attachment's reference for the deleted message; the DS
+    // collects the shared object (and permits the R2 delete) only when no
+    // reference remains.
+    for (att, locally_orphaned) in attachments {
+        cleanup_attachment(state, &message_id, &att, locally_orphaned).await;
     }
 
     // Broadcast so currently-connected members invalidate their cache and apply
@@ -492,15 +504,15 @@ async fn send_redaction_message(
 
 /// Attachment identifier extracted from a message's plaintext JSON payload.
 #[derive(Debug, Clone)]
-struct AttachmentRef {
-    content_hash: String,
-    r2_key: String,
+pub(crate) struct AttachmentRef {
+    pub(crate) content_hash: String,
+    pub(crate) r2_key: String,
 }
 
 /// Parse the `_att` array out of a message's local plaintext content and
 /// return the (content_hash, r2_key) pairs. Returns an empty Vec for plain
 /// text messages, malformed JSON, or any missing fields.
-fn parse_attachment_refs(raw: &str) -> Vec<AttachmentRef> {
+pub(crate) fn parse_attachment_refs(raw: &str) -> Vec<AttachmentRef> {
     if !raw.starts_with('{') {
         return Vec::new();
     }
@@ -529,6 +541,25 @@ fn parse_attachment_refs(raw: &str) -> Vec<AttachmentRef> {
 /// the send/edit path leaves attachment envelopes unpadded.
 pub(crate) fn is_attachment_content(content: &str) -> bool {
     !parse_attachment_refs(content).is_empty()
+}
+
+/// Pair every attachment with whether the local ref-count pass flagged it
+/// orphaned. `orphaned` is the subset returned by `filter_orphaned_locally*`
+/// (attachments no remaining local message references); membership is matched on
+/// `content_hash`. The flag only decides whether it is worth ATTEMPTING the R2
+/// delete — the reference release runs for every attachment regardless (#690).
+fn mark_locally_orphaned(
+    all: Vec<AttachmentRef>,
+    orphaned: &[AttachmentRef],
+) -> Vec<(AttachmentRef, bool)> {
+    let orphaned_hashes: std::collections::HashSet<&str> =
+        orphaned.iter().map(|a| a.content_hash.as_str()).collect();
+    all.into_iter()
+        .map(|att| {
+            let is_orphaned = orphaned_hashes.contains(att.content_hash.as_str());
+            (att, is_orphaned)
+        })
+        .collect()
 }
 
 /// Return the subset of the given attachments that are not referenced by any
@@ -592,25 +623,86 @@ fn filter_orphaned_locally_all(
         .collect())
 }
 
-/// Delete an attachment's Turso dedup row and its R2 object. Best-effort on
-/// both: failures are logged, never bubbled. The attachment_object row is
-/// removed first — if R2 deletion fails, a future re-upload will re-register
-/// the row and overwrite the object, restoring a consistent state.
-async fn cleanup_attachment(state: &Arc<AppState>, att: &AttachmentRef) {
-    // DS seam: remove the dedup row through the Delivery Service. Best-effort
-    // (a convergent re-upload re-creates the row), so failures are logged,
-    // never bubbled.
+/// Register a server-side reference for each attachment carried by `content`,
+/// keyed by the sending message's id (#690). Called on the send path so the DS
+/// can reference-count the shared, convergent `attachment_object` row: it now
+/// refuses to collect that row — or its R2 object — while ANY message still
+/// references the hash, closing the cross-conversation stranding this ticket
+/// fixes.
+///
+/// Best-effort: a failure here NEVER fails the send. The envelope is already the
+/// durable delivery; a missing reference only risks the pre-#690 status quo for
+/// this one object (it could be collected early if every OTHER reference is
+/// released), so this is never worse than before server-side counting existed.
+pub(crate) async fn register_attachment_refs(
+    state: &Arc<AppState>,
+    message_id: &str,
+    content: &str,
+) {
+    for att in parse_attachment_refs(content) {
+        let body = serde_json::json!({
+            "content_hash": att.content_hash,
+            "r2_key": att.r2_key,
+            "message_id": message_id,
+        });
+        if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/attachments/register", &body).await {
+            eprintln!(
+                "[send_message] failed to register attachment ref for {} (msg {message_id}): {e}",
+                att.content_hash
+            );
+        }
+    }
+}
+
+/// Trigger server-side collection of a deleted message's attachment, and — when
+/// the client's local view suggests it may now be orphaned — try to collect the
+/// R2 object. Best-effort on both: failures are logged, never bubbled.
+///
+/// The reference itself is already released at this point: the DS derives the
+/// reference count from message-envelope existence (#690), and this delete's
+/// `/v1/messages/delete` (issued earlier in `delete_message`) removed the
+/// envelope, so the reference stopped counting the moment the message went. This
+/// `/v1/attachments/delete` call therefore does not release anything — it asks
+/// the DS to COLLECT the shared `attachment_object` row, which it does only when
+/// NO still-existing message references the hash. A hash another conversation
+/// still references survives; the client's local view is not assumed complete.
+///
+/// `locally_orphaned` is a cheap first pass over THIS device's other non-deleted
+/// messages: `true` means nothing local still references the hash, so it is worth
+/// attempting the R2 delete. It only saves a pointless round trip — it is not
+/// trusted for correctness. The DS `/v1/r2/presign` gate is the authority and
+/// refuses to mint a `delete` while a cross-conversation reference the client
+/// cannot see still exists, so a refused delete (surfacing here as a logged
+/// error) is the expected, benign outcome that keeps the shared object alive.
+async fn cleanup_attachment(
+    state: &Arc<AppState>,
+    message_id: &str,
+    att: &AttachmentRef,
+    locally_orphaned: bool,
+) {
+    // DS seam: ask the DS to conditionally collect the shared dedup row (the
+    // reference was already released by deleting the message envelope above).
+    // Best-effort — failures are logged, never bubbled.
     let remote_result = async {
-        let body = serde_json::json!({ "content_hash": att.content_hash });
+        let body = serde_json::json!({
+            "content_hash": att.content_hash,
+            "message_id": message_id,
+        });
         crate::commands::mls::ds_post_ok(state, "/v1/attachments/delete", &body).await
     }
     .await;
 
     if let Err(e) = remote_result {
         eprintln!(
-            "[delete_message] failed to remove attachment_object for {}: {e}",
+            "[delete_message] failed to release attachment ref for {} (msg {message_id}): {e}",
             att.content_hash
         );
+    }
+
+    if !locally_orphaned {
+        // Still referenced by another local message — the DS gate would refuse
+        // the R2 delete anyway, so skip the round trip.
+        return;
     }
 
     if let Err(e) = crate::commands::r2::delete_r2_object(state, &att.r2_key).await {

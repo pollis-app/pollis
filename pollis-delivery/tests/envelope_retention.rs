@@ -74,7 +74,9 @@ CREATE TABLE group_join_request (\
 CREATE TABLE conversation_watermark (\
   conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
   last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));\
-CREATE TABLE mls_key_package (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL);";
+CREATE TABLE mls_key_package (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL);\
+CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NULL, \
+  PRIMARY KEY (content_hash, message_id));";
 
 async fn fresh() -> Db {
     let dir = tempfile::tempdir().expect("tempdir");

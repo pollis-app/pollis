@@ -93,6 +93,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "device_pq_signature_pub",
         include_str!("migrations/000011_device_pq_signature_pub.sql"),
     ),
+    (
+        12,
+        "attachment_ref",
+        include_str!("migrations/000012_attachment_ref.sql"),
+    ),
 ];
 
 pub mod queries {

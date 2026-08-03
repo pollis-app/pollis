@@ -197,9 +197,23 @@ anonymous-membership (not shipped — tracked in #489).
 ### attachment_object
 - `content_hash` TEXT PK _(SHA-256 of plaintext)_
 - `r2_key` TEXT NOT NULL
-- `mime_type` TEXT NOT NULL
-- `size_bytes` INTEGER NOT NULL
 - `created_at` TEXT NOT NULL DEFAULT now
+
+Global convergent-encryption dedup: one row (and one R2 blob) per unique file, shared by every message that carries it across all conversations and users. Written via the DS `/v1/attachments/register` endpoint (`apply_register_attachment`), never a client-side INSERT.
+
+**Deletion is reference-counted server-side (#690, migration 000012).** The row — and its R2 object — is collected **only when no still-existing message references the hash**, via a single conditional predicate: `DELETE FROM attachment_object WHERE content_hash = ?1 AND NOT EXISTS (SELECT 1 FROM attachment_ref ar JOIN message_envelope me ON me.id = ar.message_id WHERE ar.content_hash = ?1)` in `apply_delete_attachment`. The count is **derived** — a declaration counts only while its [message_envelope](#message_envelope) still exists (see [attachment_ref](#attachment_ref)). The old delete was unconditional and stranded any other conversation still referencing the file (its attachment 404'd). Legacy rows predating the migration hold no references and are collectable as before (no worse than the old unconditional delete); any send from an updated client re-references the hash and promotes it to counted protection.
+
+### attachment_ref _(migration 000012, #690)_
+- PK: (`content_hash`, `message_id`)
+- `content_hash` TEXT NOT NULL _(the referenced [attachment_object](#attachment_object))_
+- `message_id` TEXT NOT NULL _(the message that carries the attachment)_
+- `created_at` TEXT NOT NULL DEFAULT now
+
+One row = "message `message_id` carries the file with `content_hash`". Because the DS cannot read message content (bodies are E2EE ciphertext in [message_envelope](#message_envelope)), it cannot parse attachment references itself — the client DECLARES each one on send (`/v1/attachments/register`, carrying the `message_id`).
+
+**The count is derived, not maintained (#690 Blocking 1 & 2).** A declaration counts only while a `message_envelope` with that id still exists — the reference count is `attachment_ref ⋈ message_envelope`, never the raw rows. So a reference is **released** simply by deleting its message envelope, through the already-authorized paths: self/admin delete, watermark-gated envelope GC (#689), the retention sweep (#720), account/group teardown. Nothing has to *remember* to release, so no deleter can forget (the #691 ELECTRON lesson), and a reference can never outlive its message. `/v1/attachments/delete` no longer mutates `attachment_ref` — it only runs the conditional collect above — so an unauthorized caller naming another member's still-live message cannot strand anything (Blocking 1); releasing is not an action of that endpoint. A declaration whose id names an envelope that never existed (a forged register) or has already gone never counts, and is reaped in bulk by `sweep_envelope_gc` so the table stays bounded. The same derived count gates the R2 object (`/v1/r2/presign` refuses a `delete` while `object_is_referenced` holds — `broker.rs`). PK `(content_hash, message_id)` makes registration idempotent (a retried send cannot double-count) and indexes `content_hash` left-most for the join probe.
+
+**Metadata-exposure trade-off (chosen deliberately; see `docs/metadata-retention-policy.md` §2/§5).** Storing `message_id` in the clear moves the attachment↔message linkage that previously lived only inside the MLS-encrypted payload out to the operator: joining `attachment_ref` to `message_envelope.conversation_id` reveals which messages — and thus which conversations — share a given convergent file. It does **not** reveal the file (plaintext is never seen) or the sender (sealed, #607). The opaque-`ref_token` alternative would hide that graph but leaks references forever when a device loses local state and cannot release a token an admin never held — i.e. it fails deletion, the very thing #690 exists to make correct. We chose the counted, robust option; the incremental exposure is the co-reference graph over hashes the operator already stores.
 
 ### conversation_watermark _(migration 5, re-keyed in migration 16)_
 - PK: (`conversation_id`, `user_id`, `device_id`)

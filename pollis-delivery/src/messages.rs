@@ -50,6 +50,14 @@
 //!     *trigger* is the DS-internal sweep [`sweep_envelope_gc`] (#689), not a
 //!     member's ingest path; the per-conversation [`apply_envelope_gc`] endpoint
 //!     runs the same watermark-gated cleanup for one conversation on demand.
+//!   - attachment references (#690): releasing a reference is NOT a gated
+//!     endpoint at all — the reference count is DERIVED from envelope existence
+//!     (`attachment_ref ⋈ message_envelope`, see [`live_ref_exists`]), so the
+//!     only way to release one is to delete its message envelope through the
+//!     already-authorized delete/GC/teardown paths above. `/v1/attachments/
+//!     register` and `/v1/attachments/delete` need only prove a real device:
+//!     the former adds a declaration that counts only against a live envelope, the
+//!     latter merely collects an already-unreferenced object.
 //!
 //! On the no-auth path (`authed == None`, only reachable when the DS runs with
 //! `POLLIS_DS_REQUIRE_AUTH` off) the membership/identity checks are skipped and
@@ -955,6 +963,14 @@ pub async fn sweep_envelope_gc(conn: &Connection) -> anyhow::Result<usize> {
         };
         cleanup_conversation_envelopes(conn, conversation_id, is_dm).await?;
     }
+    // Reap dead attachment reference declarations (#690, Blocking 2). Envelopes
+    // deleted just above (and by every other deleter) already stopped counting
+    // toward `object_is_referenced` — the count is derived — so this changes NO
+    // deletion decision; it only clears the now-orphaned `attachment_ref` rows so
+    // the table stays bounded, and reclaims forged declarations whose `message_id`
+    // never named a real envelope. Runs unconditionally: even a fully-pruned DB
+    // (the loop visited nothing) may hold such orphans.
+    conn.execute(REAP_ORPHANED_ATTACHMENT_REFS_SQL, ()).await?;
     Ok(conversations.len())
 }
 
@@ -964,12 +980,91 @@ pub async fn sweep_envelope_gc(conn: &Connection) -> anyhow::Result<usize> {
 pub struct AttachmentRegisterBody {
     pub content_hash: String,
     pub r2_key: String,
+    /// The id of the message that carries this attachment (#690). Present on the
+    /// send path — it registers a `(content_hash, message_id)` reference so the
+    /// shared, convergent `attachment_object` row is reference-counted. Absent on
+    /// the upload-time dedup registration (no message exists yet) and on
+    /// pre-#690 clients, which register the object row only.
+    #[serde(default)]
+    pub message_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct AttachmentDeleteBody {
     pub content_hash: String,
+    /// The id of the message being deleted (#690). Present → release that
+    /// message's `(content_hash, message_id)` reference before the (now
+    /// conditional) object collection. Absent (pre-#690 client) → release
+    /// nothing; the object is still only collected when NO reference remains, so
+    /// an old client can no longer strand a hash a newer client references.
+    #[serde(default)]
+    pub message_id: Option<String>,
 }
+
+// ── The reference count is DERIVED, not maintained (#690) ─────────────────────
+//
+// A `(content_hash, message_id)` row in `attachment_ref` is a client DECLARATION
+// — "message M carries the file with this hash" — but it only COUNTS while the
+// message it names still exists, i.e. while a `message_envelope` row carries that
+// id. The live count is therefore `attachment_ref` JOINed to `message_envelope`,
+// never the raw `attachment_ref` rows.
+//
+// This is what makes the two blocking properties true by construction rather than
+// by discipline:
+//
+//   * **A reference cannot outlive its message (Blocking 2).** EVERY path that
+//     deletes an envelope — self/admin delete (`apply_delete_message`), the
+//     watermark-gated GC sweep (#689, `cleanup_conversation_envelopes`), the
+//     retention sweep (#720), account teardown (`account.rs`), group/profile
+//     teardown (`groups.rs`/`profile.rs`), even a test harness — drops the join
+//     partner and so releases the reference FOR FREE. Nothing has to remember to
+//     release; release is the disappearance of the envelope, not a step any of
+//     those N deleters performs. That is the #691 ELECTRON lesson applied: don't
+//     ask three-plus deleters to each remember the same cleanup — make the
+//     invariant derive so the next deleter cannot forget it.
+//
+//   * **Releasing a reference is not an unauthorized action (Blocking 1).**
+//     Because the count is derived from envelope existence, the ONLY way to drop
+//     it is to delete the envelope — which already goes through the
+//     membership-gated (self) / admin-gated (moderation) `/v1/messages/delete`,
+//     the server-internal sweeps, or account/group teardown. `/v1/attachments/
+//     delete` no longer mutates `attachment_ref` at all (see
+//     [`apply_delete_attachment`]), so a forged call naming another member's
+//     `message_id` cannot strand anything: the referencing envelope still exists,
+//     so the object stays referenced. The attack is removed structurally, not
+//     access-checked.
+//
+// A declaration whose `message_id` names an envelope that never existed (a forged
+// register) or has already gone simply never counts — it is inert, and reaped in
+// bulk by [`sweep_envelope_gc`] so `attachment_ref` stays bounded.
+macro_rules! live_ref_exists {
+    () => {
+        "EXISTS (SELECT 1 FROM attachment_ref ar \
+                 JOIN message_envelope me ON me.id = ar.message_id \
+                 WHERE ar.content_hash = ?1)"
+    };
+}
+
+/// `SELECT` form of [`live_ref_exists`] — yields a single `0`/`1` row for
+/// [`object_is_referenced`].
+const OBJECT_IS_REFERENCED_SQL: &str = concat!("SELECT ", live_ref_exists!());
+
+/// Collect the shared dedup row iff NO live reference remains. One predicate, no
+/// Rust-side count — the row cannot go while a referencing envelope survives even
+/// under concurrent deletes (CLAUDE.md "invalid states unrepresentable").
+const COLLECT_UNREFERENCED_OBJECT_SQL: &str = concat!(
+    "DELETE FROM attachment_object WHERE content_hash = ?1 AND NOT ",
+    live_ref_exists!()
+);
+
+/// Reap declaration rows whose message envelope is gone (GC'd, deleted, aged out,
+/// or a forged id that never had an envelope). Pure storage hygiene: the count is
+/// already correct without it (see [`live_ref_exists`]); this only keeps
+/// `attachment_ref` from accumulating dead rows as envelopes churn, and turns a
+/// forged/orphaned declaration from merely inert into actually reclaimed.
+const REAP_ORPHANED_ATTACHMENT_REFS_SQL: &str = "\
+DELETE FROM attachment_ref \
+ WHERE NOT EXISTS (SELECT 1 FROM message_envelope me WHERE me.id = attachment_ref.message_id)";
 
 pub async fn register_attachment(
     State(state): State<AppState>,
@@ -1009,43 +1104,115 @@ pub async fn delete_attachment(
     outcome_response(apply_delete_attachment(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Register a convergent-encryption dedup row (`content_hash → r2_key`). Authz:
-/// any authenticated user. There is no conversation context at upload time —
-/// the row is content-addressed and identical for every uploader — so there is
-/// nothing finer to gate on. The signature still proves a real device, which is
-/// all the no-token model can assert here.
+/// Register a convergent-encryption dedup row (`content_hash → r2_key`) and,
+/// when a `message_id` is supplied, a `(content_hash, message_id)` REFERENCE
+/// declaration (#690). Authz: any authenticated user. There is no conversation
+/// context at upload time — the row is content-addressed and identical for every
+/// uploader — so there is nothing finer to gate on. The signature still proves a
+/// real device, which is all the no-token model can assert here.
+///
+/// A forged register is inert, not merely fail-safe: the declaration only counts
+/// while a `message_envelope` with that id exists (see [`live_ref_exists`]), and
+/// a member does not control whether a given id names a live envelope. Forging a
+/// reference for a `message_id` it does not own therefore adds a row that never
+/// counts (reaped by [`sweep_envelope_gc`]); it cannot even over-retain, let
+/// alone release someone else's reference.
+///
+/// The object INSERT stays `OR IGNORE` (the row is convergent — identical for
+/// every uploader). The reference INSERT is likewise `OR IGNORE`: the PK
+/// `(content_hash, message_id)` makes a retried send idempotent rather than
+/// double-counting. Registering the reference here (rather than at upload) is
+/// deliberate — a file is uploaded once but referenced by every message that
+/// carries it, and the count must track messages, not uploads.
 pub async fn apply_register_attachment(
     conn: &Connection,
     _authed: Option<&str>,
     body: &AttachmentRegisterBody,
 ) -> anyhow::Result<WriteOutcome> {
-    conn.execute(
+    let tx = conn.transaction().await?;
+    tx.execute(
         "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
         libsql::params![body.content_hash.clone(), body.r2_key.clone()],
     )
     .await?;
+    if let Some(message_id) = body.message_id.as_deref() {
+        tx.execute(
+            "INSERT OR IGNORE INTO attachment_ref (content_hash, message_id) VALUES (?1, ?2)",
+            libsql::params![body.content_hash.clone(), message_id.to_string()],
+        )
+        .await?;
+    }
+    tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
 
-/// Delete a dedup row during message-delete attachment cleanup. Authz: any
-/// authenticated user.
+/// COLLECT the shared `attachment_object` row once no LIVE reference remains
+/// (#690, resolving the second `TODO(#419)`). Authz: any authenticated user —
+/// deliberately, because this endpoint no longer performs the destructive act.
 ///
-/// TODO(#419): this should be server-side reference-counted — a shared
-/// convergent row must only be removed once NO member's message references the
-/// hash. Current client semantics are best-effort local ref-counting + an
-/// unconditional remote delete (convergent re-upload re-creates the row), and
-/// this preserves them; promote to a counted delete in a later domain pass.
+/// It does NOT release a reference. Releasing is not an action of this endpoint
+/// (Blocking 1): a reference is released only by deleting the message envelope
+/// that declared it, and the count is DERIVED from envelope existence (see
+/// [`live_ref_exists`]). The client still calls this after a message-delete
+/// (having already deleted the envelope via `/v1/messages/delete`) to trigger the
+/// collection, and `message_id` is retained in the body for wire-compat, but it
+/// is intentionally UNUSED: a forged call naming another member's message cannot
+/// strand anything, because that member's envelope still exists and so the object
+/// stays referenced. The old code deleted `attachment_ref (content_hash,
+/// message_id)` here, which is exactly the deliberate-strand path this revision
+/// closes.
+///
+/// The collect is a SINGLE conditional `DELETE`: the object goes iff no
+/// `attachment_ref ⋈ message_envelope` row remains for the hash. One predicate,
+/// no Rust-side count, so the row cannot be removed while a referencing envelope
+/// survives even under concurrent deletes (CLAUDE.md "invalid states
+/// unrepresentable").
+///
+/// The R2 object is gated separately and by the SAME evidence: `/v1/r2/presign`
+/// refuses to mint a `delete` while [`object_is_referenced`] holds (`broker.rs`).
+/// Turso row and R2 blob are collected together, only once the last live
+/// reference is gone.
+///
+/// Legacy / pre-#690 rows and messageless hashes have no live reference, so the
+/// predicate treats them as collectable — today's behaviour, no worse. Any send
+/// from an updated client re-references the hash (with a live envelope) and
+/// promotes it to counted protection.
 pub async fn apply_delete_attachment(
     conn: &Connection,
     _authed: Option<&str>,
     body: &AttachmentDeleteBody,
 ) -> anyhow::Result<WriteOutcome> {
+    // Collect only. No `attachment_ref` mutation — release happens when the
+    // envelope is deleted (authorized), not here.
     conn.execute(
-        "DELETE FROM attachment_object WHERE content_hash = ?1",
+        COLLECT_UNREFERENCED_OBJECT_SQL,
         libsql::params![body.content_hash.clone()],
     )
     .await?;
     Ok(WriteOutcome::Ok)
+}
+
+/// True when at least one STILL-EXISTING message references the convergent
+/// attachment `content_hash` (#690) — the count derived by joining
+/// `attachment_ref` to `message_envelope` (see [`live_ref_exists`]), never the
+/// raw declaration rows. The single source of truth for BOTH the counted Turso
+/// collect in [`apply_delete_attachment`] and the R2 `delete`-presign gate in
+/// [`crate::broker::r2_presign`]: an object may be collected — in Turso or in R2
+/// — only when this returns `false`. Collecting the R2 blob out from under a live
+/// reference would 404 that attachment for every conversation still holding it.
+/// A reference whose message has been GC'd/deleted/aged-out — or never existed —
+/// does not keep this `true`, so the object cannot be pinned forever.
+pub async fn object_is_referenced(conn: &Connection, content_hash: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            OBJECT_IS_REFERENCED_SQL,
+            libsql::params![content_hash.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<i64>(0)? != 0,
+        None => false,
+    })
 }
 
 #[cfg(test)]
@@ -1360,7 +1527,10 @@ CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL);\
 CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
 CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);\
 CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, last_fetched_at TEXT NOT NULL);";
+  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, last_fetched_at TEXT NOT NULL);\
+CREATE TABLE attachment_object (content_hash TEXT PRIMARY KEY, r2_key TEXT NOT NULL);\
+CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NULL, \
+  PRIMARY KEY (content_hash, message_id));";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
@@ -1798,6 +1968,101 @@ CREATE TABLE conversation_watermark (\
             envelope_count(&conn, "c2").await,
             1,
             "a conversation with an uncollected recipient must NOT be swept"
+        );
+    }
+
+    // ── #690 — the GC path releases attachment references (Blocking 2) ────────
+
+    /// Insert a convergent dedup object + a `(content_hash, message_id)`
+    /// declaration keyed to `msg`.
+    async fn add_attachment(conn: &Connection, hash: &str, msg: &str) {
+        conn.execute(
+            "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
+            libsql::params![hash.to_string(), format!("media/{hash}/f.enc")],
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO attachment_ref (content_hash, message_id) VALUES (?1, ?2)",
+            libsql::params![hash.to_string(), msg.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn raw_ref_count(conn: &Connection, hash: &str) -> i64 {
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM attachment_ref WHERE content_hash = ?1",
+                libsql::params![hash.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+    }
+
+    /// The DS-internal GC sweep releases a swept message's attachment reference:
+    /// once the envelope is gone the object is no longer referenced (collectable),
+    /// and the orphaned declaration row is reaped so `attachment_ref` stays
+    /// bounded. Without this the reference outlived its message forever and pinned
+    /// the object + R2 blob — the #690 Blocking 2 storage leak.
+    ///
+    /// **Fails against the pre-change code:** `object_is_referenced` read the raw
+    /// `attachment_ref` row (still present after GC) and `sweep_envelope_gc` never
+    /// reaped, so the object stayed pinned and referenced for the hash forever.
+    #[tokio::test]
+    async fn gc_releases_a_swept_messages_attachment_reference() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        add_device(&conn, "alice", "a1", false).await;
+        // Alice's one device has collected past the message, so GC will sweep it.
+        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
+        add_envelope(&conn, "m1", "c1", "-5 days").await;
+        add_attachment(&conn, "h", "m1").await;
+
+        assert!(
+            object_is_referenced(&conn, "h").await.unwrap(),
+            "referenced while the message is live"
+        );
+
+        let visited = sweep_envelope_gc(&conn).await.unwrap();
+        assert_eq!(visited, 1, "the sweep visits the one conversation with envelopes");
+        assert_eq!(envelope_count(&conn, "c1").await, 0, "the message was swept");
+        assert!(
+            !object_is_referenced(&conn, "h").await.unwrap(),
+            "with the message gone the reference must not survive — the object is \
+             now collectable (#690 Blocking 2)"
+        );
+        assert_eq!(
+            raw_ref_count(&conn, "h").await,
+            0,
+            "the orphaned declaration row is reaped so attachment_ref stays bounded"
+        );
+    }
+
+    /// A forged-add reference — a `register` for a `message_id` that never had an
+    /// envelope, the residue of the Blocking 1 attack — is never counted, and is
+    /// reclaimed by the sweep rather than pinning the object forever.
+    ///
+    /// **Fails against the pre-change code**, where the raw row made
+    /// `object_is_referenced` true with no envelope ever behind it, and no sweep
+    /// reaped it: an attacker could pin any object permanently.
+    #[tokio::test]
+    async fn a_reference_to_a_nonexistent_message_is_never_counted_and_is_reaped() {
+        let conn = conn().await;
+        // No `message_envelope` row 'ghost' is ever created.
+        add_attachment(&conn, "h", "ghost").await;
+
+        assert!(
+            !object_is_referenced(&conn, "h").await.unwrap(),
+            "a declaration whose message never existed must never count (#690)"
+        );
+
+        sweep_envelope_gc(&conn).await.unwrap();
+        assert_eq!(
+            raw_ref_count(&conn, "h").await,
+            0,
+            "the forged/orphaned declaration is reaped, not immortal"
         );
     }
 }

@@ -196,6 +196,15 @@ pub async fn send_message(
     });
     crate::commands::mls::ds_post_ok(state, "/v1/messages/send", &body).await?;
 
+    // Register a server-side reference for each attachment this message carries
+    // (#690), keyed by the message id. The DS reference-counts the shared,
+    // convergent `attachment_object` row so a later delete in ANOTHER
+    // conversation can no longer strand this one. Best-effort — never fails the
+    // send (the envelope above is the durable delivery).
+    if super::edit_delete::is_attachment_content(&content) {
+        super::edit_delete::register_attachment_refs(state, &id, &content).await;
+    }
+
     // Notify recipients via LiveKit. Non-fatal — errors are logged, not returned.
     // §5 signalling minimization: the wake-up carries conversation routing only,
     // no sender — recipients attribute the message from the decrypted envelope.
