@@ -1,10 +1,16 @@
-//! Envelope-GC retention against a REVOKED device (#685). Drives the real
-//! `pollis_delivery` write handlers against local libsql DBs, exactly as the DS
-//! runs them in production.
+//! Envelope-GC retention. Drives the real `pollis_delivery` write handlers
+//! against local libsql DBs, exactly as the DS runs them in production.
 //!
-//! A revoked device can never rejoin the MLS tree (I5), so it must not count
-//! toward the roster the envelope-GC watermark gate is measured against. Three
-//! parts are proved here:
+//! **Part E (I3 — no TTL)** is the headline invariant: envelope retention is
+//! bounded by the SLOWEST current member device and by nothing else. An envelope
+//! a member device has not collected is retained however old it is. The 30-day
+//! TTL that used to be OR'd into the deletion predicate deleted such envelopes on
+//! its own — failure mode F3, silent permanent loss for any member offline longer
+//! than a month.
+//!
+//! Parts A/B/D are the complementary #685 property: a revoked device can never
+//! rejoin the MLS tree (I5), so it must not count toward the roster the watermark
+//! gate is measured against — otherwise it holds the floor down forever.
 //!
 //!   * **Part A** — `apply_envelope_gc` prunes an envelope every LIVE device has
 //!     read past, even when a revoked device's watermark is stale (pins
@@ -17,6 +23,9 @@
 //!     rows outright, so the dead cursor stops existing rather than merely being
 //!     filtered out by every future reader — and does so scoped to that one
 //!     device of that one user.
+//!   * **Part E** — the no-TTL invariant and the conservative edges (empty
+//!     roster, never-reported device), plus the positive leg proving GC is
+//!     bounded rather than disabled.
 //!
 //! The mirror-image failures are covered as unit tests in
 //! `pollis_delivery::messages` (the raw `CLEANUP_*` SQL) and end-to-end in
@@ -354,5 +363,193 @@ async fn revoke_device_cannot_delete_another_users_watermarks() {
         vec!["b-live".to_string()],
         "alice revoking a device id that belongs to bob must not touch bob's \
          cursor — the DELETE is bound WHERE user_id = actor (#685)"
+    );
+}
+
+// ── Part E — I3: retention is bounded by the slowest member device, not a TTL ──
+
+/// Seed a channel `c1` in group `g1` with the given members.
+async fn channel_with_members(db: &Db, members: &[&str]) {
+    let conn = db.conn().unwrap();
+    conn.execute("INSERT INTO channels (id, group_id) VALUES ('c1', 'g1')", ())
+        .await
+        .unwrap();
+    for m in members {
+        conn.execute(
+            "INSERT INTO group_member (group_id, user_id) VALUES ('g1', ?1)",
+            libsql::params![m.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+}
+
+async fn gc_channel(db: &Db) {
+    let body = EnvelopeGcBody {
+        conversation_id: "c1".into(),
+        is_dm: false,
+        actor_id: Some("alice".into()),
+    };
+    let out = apply_envelope_gc(&db.conn().unwrap(), None, &body).await.unwrap();
+    assert!(matches!(out, WriteOutcome::Ok));
+}
+
+/// **The regression test for failure mode F3.**
+///
+/// Bob's device has been offline for 500 days; the envelope is 400 days old —
+/// more than 13× the deleted 30-day TTL. Under the old predicate the TTL arm
+/// deleted this row on its own, without consulting a single watermark, and bob
+/// permanently lost a message he was owed. Retention must be bounded by bob's
+/// cursor instead, so the envelope survives.
+///
+/// The age is an explicit `datetime('now','-400 days')` offset rather than a real
+/// elapsed wall-clock interval, so "well over 30 days" is a property of the
+/// fixture and not of when the suite happens to run.
+#[tokio::test]
+async fn ancient_envelope_survives_while_a_member_device_has_not_collected_it() {
+    let db = fresh().await;
+    channel_with_members(&db, &["alice", "bob"]).await;
+    add_device(&db, "alice", "a1", false).await;
+    add_device(&db, "bob", "b1", false).await;
+    // Alice is caught up; bob's cursor sits BELOW the envelope.
+    seed_watermark(&db, "c1", "alice", "a1", "-1 day").await;
+    seed_watermark(&db, "c1", "bob", "b1", "-500 days").await;
+    add_envelope(&db, "ancient", "c1", "-400 days").await;
+
+    gc_channel(&db).await;
+
+    assert_eq!(
+        envelope_count(&db, "c1").await,
+        1,
+        "a 400-day-old envelope below a current member device's cursor must \
+         survive: retention is bounded by the slowest member device, never by \
+         wall-clock age (I3, failure mode F3)"
+    );
+}
+
+/// The other never-collected shape: the absent member device has never reported a
+/// watermark at all. No watermark is no evidence of delivery, so the envelope is
+/// retained however old it is.
+#[tokio::test]
+async fn ancient_envelope_survives_for_a_device_that_never_reported() {
+    let db = fresh().await;
+    channel_with_members(&db, &["alice", "bob"]).await;
+    add_device(&db, "alice", "a1", false).await;
+    add_device(&db, "bob", "b-silent", false).await;
+    // Only alice has ever reported.
+    seed_watermark(&db, "c1", "alice", "a1", "-1 day").await;
+    add_envelope(&db, "ancient", "c1", "-400 days").await;
+
+    gc_channel(&db).await;
+
+    assert_eq!(
+        envelope_count(&db, "c1").await,
+        1,
+        "a member device with no watermark row must hold even a 400-day-old \
+         envelope (I3, failure mode F3)"
+    );
+}
+
+/// The positive leg: GC is bounded, not disabled. Once EVERY current member
+/// device has collected past an envelope it is deleted — and the envelope still
+/// above the floor is kept. Both envelopes are far younger than the old TTL, so
+/// this cannot be passing via the deleted arm.
+#[tokio::test]
+async fn envelope_is_deleted_once_every_member_device_collected_past_it() {
+    let db = fresh().await;
+    channel_with_members(&db, &["alice", "bob"]).await;
+    add_device(&db, "alice", "a1", false).await;
+    add_device(&db, "alice", "a2", false).await;
+    add_device(&db, "bob", "b1", false).await;
+    add_envelope(&db, "collected", "c1", "-3 days").await;
+    add_envelope(&db, "pending", "c1", "-1 hour").await;
+    // Every device sits strictly above `collected` and strictly below `pending`.
+    seed_watermark(&db, "c1", "alice", "a1", "-2 days").await;
+    seed_watermark(&db, "c1", "alice", "a2", "-2 days").await;
+    seed_watermark(&db, "c1", "bob", "b1", "-2 days").await;
+
+    gc_channel(&db).await;
+
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query("SELECT id FROM message_envelope WHERE conversation_id = 'c1'", ())
+        .await
+        .unwrap();
+    let mut survivors = Vec::new();
+    while let Some(r) = rows.next().await.unwrap() {
+        survivors.push(r.get::<String>(0).unwrap());
+    }
+    assert_eq!(
+        survivors,
+        vec!["pending".to_string()],
+        "the envelope every member device collected must be pruned and the one \
+         still above the floor kept — removing the TTL must not disable GC"
+    );
+}
+
+/// A revoked device must not pin retention forever. Bob's only device is revoked
+/// and its cursor is 500 days stale; alice — the sole remaining LIVE member
+/// device — has collected past the envelope, so it goes. Without the
+/// `revoked_at IS NULL` filter the dead cursor would hold this envelope for good.
+#[tokio::test]
+async fn a_revoked_device_does_not_pin_retention_forever() {
+    let db = fresh().await;
+    channel_with_members(&db, &["alice", "bob"]).await;
+    add_device(&db, "alice", "a1", false).await;
+    add_device(&db, "bob", "b-revoked", true).await;
+    seed_watermark(&db, "c1", "alice", "a1", "-1 day").await;
+    seed_watermark(&db, "c1", "bob", "b-revoked", "-500 days").await;
+    add_envelope(&db, "e1", "c1", "-3 days").await;
+
+    gc_channel(&db).await;
+
+    assert_eq!(
+        envelope_count(&db, "c1").await,
+        0,
+        "a revoked device can never rejoin the tree (I5), so its dead cursor must \
+         not hold the retention floor down forever (#685)"
+    );
+}
+
+/// The empty-member-set edge, pinned conservative. With no current member devices
+/// the gate's aggregate degenerates to `COUNT 0 = COUNT 0` with `MIN(...) = NULL`
+/// over zero rows, so the CASE yields NULL and `sent_at < NULL` is NULL — nothing
+/// is deleted. The alternative reading of an empty roster ("everyone has
+/// collected, drop it all") is precisely the unbounded delete this ticket removes.
+#[tokio::test]
+async fn an_empty_member_device_set_deletes_nothing() {
+    let db = fresh().await;
+    channel_with_members(&db, &["alice"]).await;
+    // A member row exists, but the member has no device at all.
+    add_envelope(&db, "ancient", "c1", "-400 days").await;
+    add_envelope(&db, "fresh", "c1", "-1 hour").await;
+
+    gc_channel(&db).await;
+
+    assert_eq!(
+        envelope_count(&db, "c1").await,
+        2,
+        "an empty member-device set must delete NOTHING, not everything"
+    );
+}
+
+/// The same, taken one step further: excluding revoked devices must never
+/// *manufacture* an empty roster that then deletes. When every device is revoked
+/// the roster is empty, and an empty roster deletes nothing.
+#[tokio::test]
+async fn an_all_revoked_roster_deletes_nothing() {
+    let db = fresh().await;
+    channel_with_members(&db, &["alice"]).await;
+    add_device(&db, "alice", "a-old", true).await;
+    seed_watermark(&db, "c1", "alice", "a-old", "-500 days").await;
+    add_envelope(&db, "ancient", "c1", "-400 days").await;
+
+    gc_channel(&db).await;
+
+    assert_eq!(
+        envelope_count(&db, "c1").await,
+        1,
+        "excluding revoked devices must never leave a roster that deletes by \
+         virtue of being empty"
     );
 }

@@ -44,9 +44,11 @@
 //!     reaction (`user_id` is bound to the authenticated user).
 //!   - watermark: the row is per `(conversation, user, device)`; the user may
 //!     only advance their own.
-//!   - envelope GC: the user is a member. (See the TODO on [`apply_envelope_gc`]
-//!     — moving the *trigger* server-side does not yet make GC many-member
-//!     correct; that redesign is out of scope for this slice.)
+//!   - envelope GC: the user is a member. The deletion *decision* is many-member
+//!     correct regardless of who triggers it — it is bounded by the MIN watermark
+//!     over the whole current member-device roster and never by wall-clock age
+//!     (invariant I3). See the TODO on [`apply_envelope_gc`] for the residual
+//!     *trigger* concern, which is liveness-only.
 //!
 //! On the no-auth path (`authed == None`, only reachable when the DS runs with
 //! `POLLIS_DS_REQUIRE_AUTH` off) the membership/identity checks are skipped and
@@ -70,26 +72,49 @@ use crate::AppState;
 
 // ── Envelope GC SQL ──────────────────────────────────────────────────────────
 //
-// Envelope cleanup: TTL gate OR watermark gate (OR'd — either alone deletes).
-// The watermark gate is keyed on (user, device): a multi-device user whose other
-// device hasn't synced keeps envelopes alive until every device catches up or the
-// 30-day TTL expires.
+// Envelope cleanup is gated on the DELIVERY WATERMARK and on nothing else: a row
+// is deleted only when its `sent_at` sits strictly below the MINIMUM
+// `last_fetched_at` over EVERY current member device of the conversation.
+// Retention is therefore bounded by the slowest member device — never by
+// wall-clock time. This is invariant I3 ("no TTL") in
+// `docs/backend-core-invariants.md`.
+//
+// There used to be a second, OR'd arm: `sent_at < datetime('now', '-30 days')`.
+// Because it was OR'd it deleted ON ITS OWN, without consulting a single
+// watermark — so encrypted mail that no recipient device had ever collected was
+// destroyed 30 days after it was sent, and a device offline for longer than that
+// silently and permanently lost messages. That is failure mode F3, and it broke
+// the product's headline guarantee (a member receives every message sent while
+// they were a member; the only acceptable losses are pre-join history and a
+// brand-new empty device). The arm is gone. Do not reintroduce a time-based — or
+// any other delivery-blind — deletion gate here: age is not evidence of delivery.
+//
+// What remains fails CLOSED on every edge:
+//   * `COUNT(ud.device_id) = COUNT(cw.last_fetched_at)` — every current member
+//     device must have REPORTED a watermark. The LEFT JOIN yields NULL for a
+//     device with no `conversation_watermark` row and `COUNT` skips NULLs, so a
+//     never-reported device (brand-new, or long absent) breaks the equality, the
+//     CASE returns NULL, and `sent_at < NULL` is NULL — nothing is deleted.
+//   * `MIN(cw.last_fetched_at)` — the floor is the SLOWEST reporter's cursor, so
+//     one eager device racing ahead cannot raise it.
+//   * an EMPTY member-device set aggregates to `COUNT 0 = COUNT 0` with
+//     `MIN(...) = NULL` over zero rows, so the CASE again returns NULL. A roster
+//     that resolves to nobody is not evidence that everybody collected.
 //
 // The member-device roster is filtered by `ud.revoked_at IS NULL` (#685): a
 // revoked device can never rejoin the MLS tree (I5), so it must not count toward
-// the roster the watermark gate is measured against. Without the filter a revoked
-// device's stale — or entirely absent — watermark row wedges cleanup: either it
-// pins `MIN(cw.last_fetched_at)` to an old cursor, or its missing row breaks the
-// `COUNT(ud) = COUNT(cw)` "every device reported" check and disables pruning
-// outright. This mirrors `commit::current_member_devices`, which excludes revoked
-// devices from the commit-log retention floor for the same reason.
+// the roster the watermark gate is measured against — otherwise it holds the
+// floor down forever. Without the filter a revoked device wedges cleanup in
+// either direction: its stale `last_fetched_at` pins `MIN(cw)` to a dead cursor,
+// or its missing row breaks the "every device reported" check and disables
+// pruning outright. This mirrors `commit::current_member_devices`, which excludes
+// revoked devices from the commit-log retention floor for the same reason — keep
+// the two rosters in agreement (I5).
 
 const CLEANUP_CHANNEL_ENVELOPES: &str = "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
-   AND (
-     sent_at < datetime('now', '-30 days')
-     OR sent_at < (
+   AND sent_at < (
        SELECT CASE
                 WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
                 THEN MIN(cw.last_fetched_at)
@@ -102,15 +127,12 @@ DELETE FROM message_envelope
               ON cw.conversation_id = ?1
              AND cw.user_id = ud.user_id
              AND cw.device_id = ud.device_id
-     )
-   )";
+     )";
 
 const CLEANUP_DM_ENVELOPES: &str = "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
-   AND (
-     sent_at < datetime('now', '-30 days')
-     OR sent_at < (
+   AND sent_at < (
        SELECT CASE
                 WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
                 THEN MIN(cw.last_fetched_at)
@@ -123,8 +145,7 @@ DELETE FROM message_envelope
              AND cw.user_id = ud.user_id
              AND cw.device_id = ud.device_id
        WHERE dcm.dm_channel_id = ?1
-     )
-   )";
+     )";
 
 // ── Shared authz helpers ─────────────────────────────────────────────────────
 
@@ -746,16 +767,23 @@ pub async fn envelope_gc(
     outcome_response(apply_envelope_gc(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Run the TTL-or-watermark envelope GC for a conversation. Authz: the actor is
+/// Run the watermark-gated envelope GC for a conversation. Authz: the actor is
 /// a current member.
 ///
-/// TODO(#419): GC should be gated on the MIN watermark across ALL members rather
-/// than triggered by whichever member happens to ingest. The SQL already
-/// AND-gates deletion on `COUNT(devices) == COUNT(watermarks)` plus `MIN(cw)` and
-/// the 30-day TTL, so moving the *trigger* server-side here is behavior-
-/// preserving — but it does NOT by itself make the trigger many-member correct.
-/// That redesign is deliberately out of scope for this slice; do not change the
-/// deletion predicate here.
+/// The deletion predicate is bounded by the SLOWEST current member device and by
+/// nothing else — see the [`CLEANUP_CHANNEL_ENVELOPES`] block comment. The
+/// 30-day TTL that used to be OR'd into it is gone (invariant I3, failure mode
+/// F3): an envelope no member device has collected is retained however old it is.
+///
+/// Because the predicate consults the WHOLE current member-device roster, the
+/// *decision* is the same no matter who fires it — so a single eager device can
+/// never delete another device's mail, whatever the trigger.
+///
+/// TODO(#419): the *trigger* is still "whichever member happens to ingest calls
+/// `/v1/envelopes/gc`", which is a liveness concern only: a conversation whose
+/// members all stop ingesting simply retains envelopes longer than necessary. It
+/// can no longer cause loss, so it is tracked separately from this fix. When it
+/// is revisited, the predicate must stay watermark-bounded.
 pub async fn apply_envelope_gc(
     conn: &Connection,
     authed: Option<&str>,
@@ -957,13 +985,20 @@ mod timestamp_tests {
 
 #[cfg(test)]
 mod gc_sql_tests {
-    //! Part A of #685: the envelope-GC cleanup SQL must not let a REVOKED device
-    //! wedge deletion. A revoked device can never rejoin the tree, so it must not
-    //! count toward the roster the watermark gate is measured against. These tests
-    //! drive the private `CLEANUP_CHANNEL_ENVELOPES` / `CLEANUP_DM_ENVELOPES`
-    //! constants directly against a real (in-memory) libsql DB.
+    //! The envelope-GC cleanup SQL, driven directly against a real (in-memory)
+    //! libsql DB. Two invariants are encoded here.
     //!
-    //! Both retention failure modes are covered for each conversation shape:
+    //! **I3 — retention is bounded by the slowest member device, never a TTL.**
+    //! The `no_ttl_*` tests below construct exactly the state the deleted 30-day
+    //! TTL destroyed (failure mode F3): an envelope FAR older than 30 days that a
+    //! current member device has not collected. It must survive. Ages are written
+    //! as explicit `datetime('now', '-N days')` offsets, so "well over 30 days" is
+    //! a property of the fixture rather than of when the suite happens to run.
+    //!
+    //! **#685 — a REVOKED device must not wedge deletion.** A revoked device can
+    //! never rejoin the tree, so it must not count toward the roster the watermark
+    //! gate is measured against. Both wedge modes are covered for each
+    //! conversation shape:
     //!   * **stale watermark row present** — the revoked device's old
     //!     `last_fetched_at` pins `MIN(cw)` down, so an envelope above the LIVE
     //!     device's cursor is (wrongly) kept.
@@ -973,8 +1008,7 @@ mod gc_sql_tests {
     //!
     //! All timestamps use SQLite's `datetime()` format on BOTH `sent_at` and
     //! `last_fetched_at` so the lexical comparison the gate performs is
-    //! unambiguous, and every value sits well inside the 30-day TTL so the TTL
-    //! gate never masks the watermark behaviour under test.
+    //! unambiguous.
 
     use super::*;
 
@@ -1144,6 +1178,234 @@ CREATE TABLE conversation_watermark (\
             envelope_count(&conn, "d1").await,
             0,
             "DM: the revoked device's absent watermark must not disable GC (#685)"
+        );
+    }
+
+    // ── I3 — no TTL: age alone never deletes ─────────────────────────────────
+
+    /// **The regression test for F3.** A LIVE member device whose cursor sits
+    /// below an envelope must keep that envelope alive no matter how old it is.
+    /// The fixture is deliberately extreme — the envelope is 400 days old, more
+    /// than 13× the deleted 30-day TTL — so the assertion cannot pass by accident
+    /// of when the suite runs. Under the old `sent_at < datetime('now','-30 days')
+    /// OR ...` predicate the TTL arm alone deleted this row and the recipient
+    /// permanently lost the message.
+    #[tokio::test]
+    async fn no_ttl_channel_uncollected_ancient_envelope_survives() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "alice", "a1", false).await;
+        add_device(&conn, "bob", "b1", false).await;
+        // Alice is fully caught up. Bob's device has been offline for 500 days —
+        // its cursor is BELOW the envelope, so the envelope is still owed to it.
+        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
+        seed_watermark(&conn, "c1", "bob", "b1", "-500 days").await;
+        add_envelope(&conn, "ancient", "c1", "-400 days").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            1,
+            "a 400-day-old envelope BELOW a live member device's cursor must \
+             survive — retention is bounded by the slowest member device, never by \
+             wall-clock age (I3/F3). A TTL arm would have deleted it."
+        );
+    }
+
+    /// The same property with the other never-collected shape: the absent member
+    /// device has never reported a watermark AT ALL. `COUNT(ud) != COUNT(cw)` →
+    /// CASE NULL → nothing deleted, however old the envelope is.
+    #[tokio::test]
+    async fn no_ttl_channel_never_reported_device_holds_ancient_envelope() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "alice", "a1", false).await;
+        add_device(&conn, "bob", "b-silent", false).await;
+        // Only alice has ever reported; bob's device has no watermark row.
+        seed_watermark(&conn, "c1", "alice", "a1", "-1 day").await;
+        add_envelope(&conn, "ancient", "c1", "-400 days").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            1,
+            "a member device that has never reported must hold even a 400-day-old \
+             envelope: no watermark is no evidence of delivery (I3/F3)"
+        );
+    }
+
+    /// DM shape, same regression.
+    #[tokio::test]
+    async fn no_ttl_dm_uncollected_ancient_envelope_survives() {
+        let conn = conn().await;
+        dm_fixture(&conn).await;
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'bob')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "alice", "a1", false).await;
+        add_device(&conn, "bob", "b1", false).await;
+        seed_watermark(&conn, "d1", "alice", "a1", "-1 day").await;
+        seed_watermark(&conn, "d1", "bob", "b1", "-500 days").await;
+        add_envelope(&conn, "ancient", "d1", "-400 days").await;
+
+        conn.execute(CLEANUP_DM_ENVELOPES, libsql::params!["d1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "d1").await,
+            1,
+            "DM: a 400-day-old envelope below the slowest member device's cursor \
+             must survive (I3/F3)"
+        );
+    }
+
+    // ── The positive leg: deletion still happens ─────────────────────────────
+
+    /// GC is not simply disabled: once EVERY current member device has collected
+    /// past an envelope, it goes — including one far younger than the old TTL, so
+    /// this cannot be passing via the deleted arm.
+    #[tokio::test]
+    async fn channel_envelope_is_deleted_once_every_device_collected_past_it() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob')", ())
+            .await
+            .unwrap();
+        add_device(&conn, "alice", "a1", false).await;
+        add_device(&conn, "alice", "a2", false).await;
+        add_device(&conn, "bob", "b1", false).await;
+        // Every device's cursor is strictly above `collected`, and strictly below
+        // `pending` — so exactly one of the two envelopes may go.
+        add_envelope(&conn, "collected", "c1", "-3 days").await;
+        add_envelope(&conn, "pending", "c1", "-1 hour").await;
+        seed_watermark(&conn, "c1", "alice", "a1", "-2 days").await;
+        seed_watermark(&conn, "c1", "alice", "a2", "-2 days").await;
+        seed_watermark(&conn, "c1", "bob", "b1", "-2 days").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            1,
+            "the envelope every member device collected must be pruned, and the \
+             one still above the floor must remain — GC is bounded, not disabled"
+        );
+        let mut rows = conn
+            .query("SELECT id FROM message_envelope WHERE conversation_id = 'c1'", ())
+            .await
+            .unwrap();
+        let survivor = rows.next().await.unwrap().unwrap().get::<String>(0).unwrap();
+        assert_eq!(survivor, "pending", "the wrong envelope was pruned");
+    }
+
+    /// The slowest device sets the floor: one device racing ahead must not raise
+    /// it and evict mail a sibling device still needs.
+    #[tokio::test]
+    async fn channel_floor_is_the_minimum_not_the_maximum() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        add_device(&conn, "alice", "a-fast", false).await;
+        add_device(&conn, "alice", "a-slow", false).await;
+        seed_watermark(&conn, "c1", "alice", "a-fast", "-1 hour").await;
+        seed_watermark(&conn, "c1", "alice", "a-slow", "-6 days").await;
+        // Above the slow cursor, below the fast one: MIN keeps it, MAX would not.
+        add_envelope(&conn, "between", "c1", "-3 days").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            1,
+            "the floor must be MIN over member devices — the fast device's cursor \
+             must not evict what the slow one has yet to collect"
+        );
+    }
+
+    // ── Conservative edges ───────────────────────────────────────────────────
+
+    /// A conversation with ZERO current member devices deletes NOTHING. The
+    /// aggregate degenerates to `COUNT 0 = COUNT 0` with `MIN(...) = NULL` over
+    /// zero rows, so the CASE returns NULL and `sent_at < NULL` is NULL. Pinned as
+    /// a test because the alternative reading of an empty roster — "everybody has
+    /// collected, delete it all" — is exactly the unbounded delete this ticket
+    /// removes.
+    #[tokio::test]
+    async fn an_empty_member_device_set_deletes_nothing() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        // A member row exists but the member has no device at all.
+        add_envelope(&conn, "ancient", "c1", "-400 days").await;
+        add_envelope(&conn, "fresh", "c1", "-1 hour").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            2,
+            "an empty member-device set must delete NOTHING, not everything"
+        );
+    }
+
+    /// The same, one step further: the conversation id resolves to no membership
+    /// row whatsoever (unknown/deleted conversation).
+    #[tokio::test]
+    async fn an_unknown_conversation_deletes_nothing() {
+        let conn = conn().await;
+        add_envelope(&conn, "ancient", "ghost", "-400 days").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["ghost".to_string()])
+            .await
+            .unwrap();
+        conn.execute(CLEANUP_DM_ENVELOPES, libsql::params!["ghost".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "ghost").await,
+            1,
+            "a conversation with no resolvable membership must delete nothing"
+        );
+    }
+
+    /// The revoked-device exclusion must not be able to *manufacture* an empty
+    /// roster that deletes: when EVERY device is revoked the roster is empty, and
+    /// an empty roster deletes nothing.
+    #[tokio::test]
+    async fn an_all_revoked_roster_deletes_nothing() {
+        let conn = conn().await;
+        channel_fixture(&conn).await;
+        add_device(&conn, "alice", "a-old", true).await;
+        seed_watermark(&conn, "c1", "alice", "a-old", "-500 days").await;
+        add_envelope(&conn, "ancient", "c1", "-400 days").await;
+
+        conn.execute(CLEANUP_CHANNEL_ENVELOPES, libsql::params!["c1".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            envelope_count(&conn, "c1").await,
+            1,
+            "excluding revoked devices must never leave a roster that deletes by \
+             virtue of being empty"
         );
     }
 }
