@@ -1,7 +1,8 @@
 # Design: STH Signing-Key Custody and Rotation
 
-**Status:** Design draft — **owner decision required on §4 (custody) and §6 (the anchor split).**
-Resolves the design half of #700; part of #662. The runbook in §7 is what #699 executes.
+**Status:** §5 (the key set + overlap window) is **BUILT** — #732. **Owner decision still
+required on §4 (custody) and §6 (the anchor split).** Resolves the design half of #700; part
+of #662. The runbook in §7 was executed by #732.
 **Scope:** the key that signs Signed Tree Heads for the three transparency trees. Not MLS keys, not
 account identity keys, not release code-signing certificates.
 
@@ -13,17 +14,17 @@ account identity keys, not release code-signing certificates.
 |---|---|
 | One ML-DSA-44 signing key signs **all three trees** — commit log, account keys, released binaries — separated only by a domain-context string | `verifiable-log/src/sth.rs` |
 | The private key is a **32-byte seed** (an ML-DSA private key *is* its seed, so the custody format did not change across the Ed25519 → ML-DSA-44 migration in #668) | `verifiable-log-builder/src/keys.rs` |
-| It lives as the GitHub Actions secret **`STH_SIGNING_KEY`**, injected as `VLOG_SIGNING_KEY` into the builder | `.github/workflows/transparency-publish.yml:180` |
+| It lives as the GitHub Actions secret **`STH_SIGNING_KEY`** (backed up in Doppler `pollis/prd`), injected as `VLOG_SIGNING_KEY` into the builder | `.github/workflows/transparency-publish.yml` |
 | It is consumed by exactly one workflow, on a daily schedule and on manual dispatch | `transparency-publish.yml` |
 | The builder **refuses to sign** if no key is present rather than inventing an ephemeral one | `keys.rs::load_signing_key` |
-| Clients pin **exactly one** key: `PINNED_LOG_PUBLIC_KEY: Option<&str>` | `pollis-core/src/commands/transparency.rs:56` |
-| That pin is **`None` today**, so every in-app transparency audit resolves to *Unavailable* | same |
-| The served trust anchor `/v1/public_key.json` is a **one-field document** holding a single key | `verifiable-log-serve/src/bundle.rs:57` |
-| There is **no rotation path, no key set, no overlap window, and no runbook** | absence across `docs/`, `.github/workflows/` |
+| Clients pin a **set**: `PINNED_LOG_PUBLIC_KEYS: &[PinnedKey]`, each with a `key_id` and an optional `not_after` (§5, #732) | `pollis-core/src/commands/transparency.rs` |
+| The set currently holds **one key with no expiry** — the material minted in #732 | same |
+| The served trust anchor `/v1/public_key.json` carries a **key list**, with the single `public_key` field retained for older verifiers | `verifiable-log-serve/src/bundle.rs` |
+| A rotation path, key set, overlap window and runbook now exist; **custody (§4) and the anchor split (§6) remain undecided** | §5, §7 |
 
-An absent pin is safe by construction — `check_pin` resolves `None` to *Unavailable*, never *Ok* and
-never *Alarm*, so a missing pin can only withhold trust. But the verification badge stays dark for every
-user until #699 lands, which is why this design is on the launch path rather than after it.
+An absent or wholly expired pin set is safe by construction — `check_pin_at` resolves it to
+*Unavailable*, never *Ok* and never *Alarm*, so a missing pin can only withhold trust. The set is
+populated as of #732, so the verification badge lights up with the release that carries it.
 
 ## 2. What an attacker gets from the key
 
@@ -110,36 +111,53 @@ confirmed.** This falls out of §6: once the roles are split, the offline root s
 statement), which is exactly the workload a ceremony suits, and the online key signs daily, which is
 exactly the workload a KMS suits. Choosing the split first makes the custody question much easier.
 
-## 5. Rotation requires a key *set*, which we do not have
+## 5. Rotation requires a key *set* — BUILT (#732)
 
-Every piece of the current design assumes exactly one valid key at a time:
+Originally written as required future work. It shipped with #732; this section now
+describes what exists.
 
-- `PINNED_LOG_PUBLIC_KEY` is `Option<&str>` — one key or none.
-- `PublicKeyDoc` is a one-field object — one key.
-- `Sth::create` takes a single `&SigningKey`.
+Every piece of the original design assumed exactly one valid key at a time, which made
+rotation a **flag day**: every client had to update at the instant the served key changed,
+or its audit flipped from *Ok* to *Alarm* — a false alarm that trains users to ignore the
+real one.
 
-With a single pinned key, rotation is a **flag day**: every client must update at the same instant the
-served key changes, or its audit turns from *Ok* to *Alarm* — a false alarm that trains users to ignore
-the real one. That is unacceptable, and it is why rotation must be designed before it is needed.
+**What is now in place:**
 
-**Required change — a pinned key set with an overlap window:**
+| Piece | Where | Shape |
+|---|---|---|
+| Pinned key set | `pollis-core/src/commands/transparency.rs` | `PINNED_LOG_PUBLIC_KEYS: &[PinnedKey]`, each with `key_id`, `public_key`, `not_after` |
+| Served key list | `verifiable-log-serve/src/bundle.rs` | `PublicKeyDoc.keys: Vec<PublicKeyEntry>`; the single `public_key` field is still populated for verifiers that predate the list |
+| STH key selection | `verifiable-log/src/sth.rs` | `Sth.key_id: Option<String>` plus `verify_any[_with_context]` |
+| Overlap publishing | `builder --retired-key <hex>:<not_after_ms>` | repeatable; emits `retired_keys` into the bundle |
+| Rebuilder | `.github/workflows/rebuild-verify.yml` | `PINNED_LOG_KEY` accepts a comma/space-separated list |
+| Website | `website/artifacts.js` | `PINNED_KEYS` + `livePinnedKeys()` |
 
-1. `PINNED_LOG_PUBLIC_KEYS: &[PinnedKey]` where `PinnedKey` carries the key hex, a key id, and a
-   `not_after` for a key being retired. Verification succeeds if the STH verifies under **any**
-   non-expired pinned key; *Alarm* only if it verifies under none.
-2. `PublicKeyDoc` grows to a key **list**, each entry carrying `key_id` and `algorithm` — the doc comment
-   already anticipates this ("can grow metadata (key id, algorithm) without breaking the URL"). Keep the
-   existing single-key field populated for one release for compatibility, then drop it.
-3. The STH gains a `key_id` so a verifier selects rather than trial-verifies. This is a **wire-format
-   change** and must be additive and versioned, like every other frozen contract in this system.
-4. The overlap window is **at least one full client-release cycle plus the tail of users who update
-   late** — in practice a minimum of 90 days. Sizing it is an owner decision; sizing it *after* a
-   compromise is not an option.
+**`key_id` is a hint, not a trust input.** It is derived (`key_id_for` = first 8 bytes of
+`SHA-256(key)`), so anyone holding the key can recompute it and no registry can drift. It
+is deliberately **outside the signed preimage**, which means the frozen STH signing message
+did not change and every previously published signature stays valid. A wrong or hostile
+`key_id` costs a few extra verification attempts and can never make a bad head verify or a
+good one fail — `a_lying_key_id_changes_nothing` encodes that.
 
-**Do not skip step 1 for #699.** #699 is currently framed as "mint the v2 key and set the pin" — a flag
-day that happens to be safe only because the pin is `None` today, so nothing breaks. That makes it the
-*last* free rotation we get. Landing the key-set shape as part of #699 costs little now and is the
-difference between a routine rotation and an incident later.
+**The ordering that makes a rotation invisible.** The key set only helps if the pins move
+*before* the log does:
+
+1. Ship a release whose `PINNED_LOG_PUBLIC_KEYS` contains **both** the current key and its
+   successor (successor `not_after: None`, incumbent given the window end).
+2. Wait out the overlap window so the fleet updates. **Minimum 90 days** — one full release
+   cycle plus the tail of users who update late.
+3. Only then move the log onto the successor. Every updated client already accepts it, so
+   nothing flips to *Alarm*.
+4. A later release drops the retired entry.
+
+Doing it the other way round — rotate first, pin second — is exactly the flag day this
+exists to prevent. #732 was the last rotation for which that was safe, because no shipped
+build pinned anything at the time.
+
+**Expiry is enforced client-side**, in `check_pin_at`, not trusted from the server: a
+retired key stops being accepted on schedule even on a client that never updates again. A
+wholly expired set withholds trust (*Unavailable*) rather than alarming — "my pins aged
+out" is not evidence of a hostile host.
 
 ## 6. Split the anchor from the signer
 
@@ -185,9 +203,22 @@ Written to be followed literally. Every step is checkable; none of it is "and th
 **Republish**
 5. Republish **all three trees from source data** under the v2 contexts. This is a rebuild, not a
    re-signature: the v1 (Ed25519-era) roots are retired and do not chain to the v2 roots.
-6. Verify each served bundle end to end with the public verifier — `public_key.json`, `sth/latest.json`,
+   Dispatch `transparency-publish.yml` with **`full_resync: true`**. This is not optional, and it is
+   the step that makes the rotation actually take. Pass 1 normally syncs `--size-only`, and every
+   re-signed artifact is byte-length-*identical* to the one it replaces — ML-DSA-44 keys (1312 B) and
+   signatures (2420 B) are fixed-length, roots are SHA-256, and an unchanged tree deliberately reuses
+   the timestamp frozen in its published head. Measured on the #732 rotation: `public_key.json` 2646 B
+   and `v1/sth/1.json` 4992 B, before and after. Without the flag the sync skips every re-signed head
+   while pass 2 (which has no `--size-only`) overwrites `latest.json` with a signature the still-served
+   old key cannot verify — a live, self-inconsistent log, strictly worse than not rotating.
+6. `full_resync` also suppresses the cross-run equivocation tripwire for that one run and re-seeds it.
+   A rotation changes every signature and so is byte-indistinguishable from equivocation; the tripwire
+   is right to fire, and the ceremony silences it once, deliberately, rather than the tripwire being
+   made lenient. Note the tripwire cache is an `actions/cache` entry and ages out after 7 days of
+   non-use, which silently disables equivocation detection — check it is seeded after any rotation.
+7. Verify each served bundle end to end with the public verifier — `public_key.json`, `sth/latest.json`,
    `entries.json`, and the inclusion/consistency proofs — for **all three** trees, not just the commit
-   log.
+   log. Run it from a machine that did **not** perform the rotation.
 
 **Pin**
 7. Set the pin(s) in `pollis-core/src/commands/transparency.rs` in the same change that ships the

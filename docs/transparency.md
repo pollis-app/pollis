@@ -204,3 +204,26 @@ runs the exact same `verify_group` code the CLI does. The wire shapes (`Entry`,
 The whole point is that you don't have to take any of this on faith. Build the
 verifier and run it against the live log — see
 **[verify-transparency-log.md](./verify-transparency-log.md)**.
+
+## Rotating the signing key
+
+The design, custody options and the literal step-by-step ceremony live in
+[`sth-signing-key-custody.md`](sth-signing-key-custody.md) — that is the canonical
+runbook; follow it rather than this summary. Last executed by #732, which replaced
+the original seed with fresh material.
+
+Two things about it are easy to get wrong and worth repeating here:
+
+- Dispatch `transparency-publish.yml` with **`full_resync: true`**. Re-signed
+  artifacts are byte-length-identical to the ones they replace, so the default
+  `--size-only` sync skips them and the rotation silently does not take.
+- The published key is pinned in five places that must never disagree:
+  `pollis-core/src/commands/transparency.rs` (`PINNED_LOG_PUBLIC_KEY`),
+  `website/artifacts.js` (`PINNED_KEY`), `.github/workflows/rebuild-verify.yml`
+  (`PINNED_LOG_KEY`), the `verifier-release.yml` release body, and
+  `SECURITY.md` / `README.md`. Change them in one commit.
+
+**Known gap (#700):** there is no overlap window, so a rotation is a flag day —
+auditors holding cached pre-rotation heads see it as equivocation and can only
+re-pin from the announcement. The key-set shape that fixes this is designed in
+§5 of the custody doc and not yet built.

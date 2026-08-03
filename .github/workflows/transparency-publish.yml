@@ -32,7 +32,12 @@ name: Publish Transparency Log
 #     to the main DB vars (single-DB / pre-cutover behaviour).
 #   STH_SIGNING_KEY                       — 32-byte hex ML-DSA-44 log signing
 #     key (an ML-DSA private key IS its seed, so the format is unchanged from the
-#     retired Ed25519 key). Custody + rotation: docs/sth-signing-key-custody.md
+#     retired Ed25519 key; only the published public half grew, 32 → 1312 B).
+#     Custody + rotation design: docs/sth-signing-key-custody.md
+#
+# Rotating STH_SIGNING_KEY: replace the secret, then dispatch this workflow with
+# `full_resync: true`. Without that input the re-signed artifacts are skipped as
+# same-size and the rotation silently does not take — see pass 1 for why.
 #   R2_TRANSPARENCY_ACCESS_KEY_ID, R2_TRANSPARENCY_SECRET_ACCESS_KEY,
 #   R2_TRANSPARENCY_ENDPOINT, R2_TRANSPARENCY_BUCKET — R2 sync (namespaced:
 #   the bare R2_* names are account-wide creds owned by the release workflows)
@@ -42,6 +47,11 @@ on:
     # 06:47 UTC daily (off the hour to dodge cron congestion).
     - cron: "47 6 * * *"
   workflow_dispatch:
+    inputs:
+      full_resync:
+        description: "Re-upload every artifact, ignoring the --size-only skip. Required for a signing-key rotation."
+        type: boolean
+        default: false
 
 # Never let two publishes overlap — a half-synced tree must never race another.
 concurrency:
@@ -294,14 +304,31 @@ jobs:
         env:
           R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+          FULL_RESYNC: ${{ inputs.full_resync }}
         run: |
           set -euo pipefail
           # --size-only: immutable artifacts have byte-stable content per path, so
           # comparing size alone skips re-uploading ones already in R2.
+          #
+          # A signing-key rotation is the one case where that assumption is false.
+          # ML-DSA-44 public keys (1312 B) and signatures (2420 B) are
+          # fixed-length, root hashes are SHA-256, and an unchanged tree
+          # deliberately reuses the timestamp frozen in its published head — so
+          # every re-signed public_key.json and per-size STH comes out
+          # byte-length-identical to the object already in R2 while differing in
+          # content. --size-only skips all of them, which would leave the OLD key
+          # published while pass 2 (no --size-only) overwrote latest.json with a
+          # signature that key cannot verify — a live, self-inconsistent log.
+          # full_resync drops the optimisation so re-signed artifacts upload.
+          size_only="--size-only"
+          if [ "${FULL_RESYNC:-false}" = "true" ]; then
+            size_only=""
+            echo "full_resync: re-uploading every artifact (signing-key rotation)."
+          fi
           aws s3 sync ./site "s3://${R2_BUCKET}/" \
             --endpoint-url "${R2_ENDPOINT}" \
             --only-show-errors \
-            --size-only \
+            ${size_only} \
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "v1/sth/latest.json" \
             --exclude "v1/index.json" \
@@ -361,6 +388,8 @@ jobs:
 
       - name: Self-audit the published log + equivocation tripwire
         if: steps.decide.outputs.build == 'true'
+        env:
+          FULL_RESYNC: ${{ inputs.full_resync }}
         run: |
           set -euo pipefail
           base="https://verify.pollis.com"
@@ -406,7 +435,27 @@ jobs:
             return 0
           }
 
+          # A signing-key rotation legitimately changes the signature on EVERY
+          # per-size STH, so it is byte-indistinguishable from equivocation and
+          # trips every check above. That is the tripwire working, not failing:
+          # the cached heads were signed by the retired key and can never match
+          # again. Skip the comparison for this run and let step (3) re-seed the
+          # cache from the newly-signed heads. Independent auditors holding their
+          # own cached pre-rotation STHs will see the same discontinuity and must
+          # re-pin from the rotation announcement — that is the unavoidable cost
+          # of a rotation without an overlap window (#700).
+          skip_tripwire=0
+          if [ "${FULL_RESYNC:-false}" = "true" ]; then
+            echo "::warning::full_resync — skipping the equivocation tripwire for this run."
+            echo "Every STH signature changed because the signing key rotated."
+            echo "The cache is re-seeded below; the next run tripwires normally."
+            skip_tripwire=1
+          fi
+
           rc=0
+          if [ "${skip_tripwire}" = "1" ]; then
+            echo "tripwire: skipped (rotation)."
+          else
           check_tree "commit-log" ".sth-prev/commit-latest.json" \
             "${base}/v1/sth" "${base}/v1/sth/latest.json" || rc=1
           # The account tree may be brand-new this publish; only tripwire if a
@@ -417,6 +466,7 @@ jobs:
           # attested; tripwire only if a prior STH was cached.
           check_tree "binaries" ".sth-prev/binaries-latest.json" \
             "${base}/v1/binaries/sth" "${base}/v1/binaries/sth/latest.json" || rc=1
+          fi
           if [ "${rc}" -ne 0 ]; then
             echo "Equivocation tripwire FAILED."
             exit 1

@@ -146,6 +146,9 @@ pub fn verify_account_via(
 
     let bundle = Bundle {
         public_key: pk_doc.public_key,
+        // Verification-side reconstruction, never re-published: the overlap set
+        // is applied when selecting the verifying key, not carried in here.
+        retired_keys: Vec::new(),
         sths: vec![sth],
         entries,
         enforce_unique: vec![ACCOUNT_TENANT.to_string()],

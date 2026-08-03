@@ -305,10 +305,11 @@
           target="_blank" rel="noopener noreferrer">guide here</a>), or query our
         <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
           rel="noopener noreferrer">public verification API</a> directly (rate limits apply).
-        The only thing you have to trust is the log's pinned public key. That key is being rotated to
-        <strong>ML-DSA-44</strong>, a post-quantum signature scheme, so that a signed statement about history stays
-        checkable for as long as anyone might want to re-check the past; it will be published here once every tree
-        has been republished under it.
+        The only thing you have to trust is the log's pinned public key: an
+        <strong>ML-DSA-44</strong> post-quantum key, so that a signed statement about history stays checkable for as
+        long as anyone might want to re-check the past. It is published in full on the
+        <a href="artifacts.html">artifacts page</a>, in the <code>pollis-verify</code> release body, and compiled into
+        every app build.
       </div>
 
       <form class="kt-form" id="kt-form">

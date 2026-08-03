@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use verifiable_log::{
     is_equivocation, proof, verifying_key_from_hex, ConsistencyProof, Entry, InclusionProof, Sth,
-    UniqueDataInvariant, VerifiableLog,
+    UniqueDataInvariant, VerifiableLog, VerifyingKey,
 };
 use verifiable_log_builder::account_key::{self, AccountKeyInvariant};
 use verifiable_log_builder::binaries::{self, BinaryInvariant};
@@ -80,6 +80,34 @@ impl Report {
 /// problem (a bad signature, a tampered entry, a missing or forged proof) is
 /// recorded as a failed check and folded into [`Report::ok`], so a tampered
 /// artifact yields `Ok(Report { ok: false, .. })` rather than an error.
+
+/// Turn a served `public_key.json` into the set of keys a head may verify under
+/// at `now_ms`, dropping any whose overlap window has closed.
+///
+/// Accepting a *set* is what makes a rotation invisible: during the overlap both
+/// the new and the retiring key are published, so heads signed by either verify.
+/// Expired entries are dropped here rather than at the call sites, so a retired
+/// key stops being accepted on schedule everywhere at once.
+fn key_candidates(doc: &PublicKeyDoc, now_ms: u64) -> Vec<(String, VerifyingKey)> {
+    doc.active_keys(now_ms)
+        .into_iter()
+        .filter_map(|e| {
+            verifying_key_from_hex(&e.public_key)
+                .ok()
+                .map(|vk| (e.key_id, vk))
+        })
+        .collect()
+}
+
+/// Wall-clock milliseconds, for overlap-window expiry. The verifier is allowed a
+/// clock (unlike the builder, whose output must be deterministic).
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 pub fn verify_remote(base_url: &str) -> Result<Report> {
     let base = base_url.trim_end_matches('/');
     let agent = build_agent(None)?;
@@ -89,7 +117,12 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
     // Prerequisites: the public key we anchor trust in, and the manifest that
     // tells us what to fetch.
     let pk_doc: PublicKeyDoc = fetch_json(&agent, &format!("{base}/v1/public_key.json"))?;
-    let verifying_key = verifying_key_from_hex(&pk_doc.public_key)?;
+    let candidates = key_candidates(&pk_doc, now_ms());
+    if candidates.is_empty() {
+        return Err(ServeError::BadBundle(
+            "public_key.json has no usable key (all expired or malformed)".to_string(),
+        ));
+    }
     let manifest: Manifest = fetch_json(&agent, &format!("{base}/v1/index.json"))?;
 
     // 1. Fetch every advertised STH and verify its signature. Keyed by size so
@@ -104,7 +137,7 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
                     format!("STH[{size}] tree_size matches its URL"),
                 );
                 report.check(
-                    sth.verify(&verifying_key),
+                    sth.verify_any(&candidates).is_some(),
                     format!("STH[{size}] signature"),
                 );
                 sths.insert(*size, sth);
@@ -121,7 +154,7 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
                 let agrees =
                     latest.tree_size == max_size && sths.get(&max_size) == Some(&latest);
                 report.check(agrees, "latest.json matches the newest STH");
-                report.check(latest.verify(&verifying_key), "latest.json signature");
+                report.check(latest.verify_any(&candidates).is_some(), "latest.json signature");
             }
             Err(e) => report.check(false, format!("fetch latest.json: {e}")),
         }
@@ -281,12 +314,16 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
 
     // The account tree's public key (the same key; published for a self-
     // contained subtree). Anchor trust in it before any signature check.
-    let verifying_key = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
+    let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
     {
-        Ok(pk) => match verifying_key_from_hex(&pk.public_key) {
-            Ok(vk) => vk,
-            Err(e) => {
-                report.check(false, format!("account-keys: public key parses: {e}"));
+        Ok(pk) => match Some(key_candidates(&pk, now_ms())).filter(|c| !c.is_empty()) {
+            Some(vk) => vk,
+            None => {
+                report.check(
+                    false,
+                    "account-keys: public_key.json has no usable key (all expired or malformed)"
+                        .to_string(),
+                );
                 return;
             }
         },
@@ -308,7 +345,7 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
                     format!("account-keys: STH[{size}] tree_size matches its URL"),
                 );
                 report.check(
-                    sth.verify_with_context(&verifying_key, account_key::STH_CONTEXT),
+                    sth.verify_any_with_context(&candidates, account_key::STH_CONTEXT).is_some(),
                     format!("account-keys: STH[{size}] signature (account context)"),
                 );
                 sths.insert(*size, sth);
@@ -324,7 +361,7 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
                     latest.tree_size == max_size && sths.get(&max_size) == Some(&latest);
                 report.check(agrees, "account-keys: latest.json matches the newest STH");
                 report.check(
-                    latest.verify_with_context(&verifying_key, account_key::STH_CONTEXT),
+                    latest.verify_any_with_context(&candidates, account_key::STH_CONTEXT).is_some(),
                     "account-keys: latest.json signature (account context)",
                 );
             }
@@ -471,12 +508,16 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
 
     // The binaries tree's public key (the same key; published for a self-
     // contained subtree). Anchor trust in it before any signature check.
-    let verifying_key = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
+    let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
     {
-        Ok(pk) => match verifying_key_from_hex(&pk.public_key) {
-            Ok(vk) => vk,
-            Err(e) => {
-                report.check(false, format!("binaries: public key parses: {e}"));
+        Ok(pk) => match Some(key_candidates(&pk, now_ms())).filter(|c| !c.is_empty()) {
+            Some(vk) => vk,
+            None => {
+                report.check(
+                    false,
+                    "binaries: public_key.json has no usable key (all expired or malformed)"
+                        .to_string(),
+                );
                 return;
             }
         },
@@ -498,7 +539,7 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
                     format!("binaries: STH[{size}] tree_size matches its URL"),
                 );
                 report.check(
-                    sth.verify_with_context(&verifying_key, binaries::STH_CONTEXT),
+                    sth.verify_any_with_context(&candidates, binaries::STH_CONTEXT).is_some(),
                     format!("binaries: STH[{size}] signature (binaries context)"),
                 );
                 sths.insert(*size, sth);
@@ -514,7 +555,7 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
                     latest.tree_size == max_size && sths.get(&max_size) == Some(&latest);
                 report.check(agrees, "binaries: latest.json matches the newest STH");
                 report.check(
-                    latest.verify_with_context(&verifying_key, binaries::STH_CONTEXT),
+                    latest.verify_any_with_context(&candidates, binaries::STH_CONTEXT).is_some(),
                     "binaries: latest.json signature (binaries context)",
                 );
             }

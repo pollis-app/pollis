@@ -97,7 +97,7 @@ use verifiable_log_builder::{CommitLeaf, TENANT};
 
 use crate::account::{verify_account_in_bundle, ACCOUNT_TENANT};
 use crate::bundle::{
-    AccountManifest, BinaryManifest, Bundle, ConsistencyRef, InclusionRef, Manifest, PublicKeyDoc,
+    AccountManifest, BinaryManifest, Bundle, ConsistencyRef, InclusionRef, Manifest,
 };
 use crate::error::{Result, ServeError};
 use crate::group::verify_group_in_bundle;
@@ -127,9 +127,7 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
     insert_json(
         &mut map,
         format!("{API_VERSION}/public_key.json"),
-        &PublicKeyDoc {
-            public_key: bundle.public_key.clone(),
-        },
+        &bundle.public_key_doc(),
     )?;
 
     // /v1/sth/<size>.json for every head, plus latest.json for the largest.
@@ -270,9 +268,7 @@ pub fn generate_account_artifacts(
     insert_json(
         &mut map,
         format!("{prefix}/public_key.json"),
-        &PublicKeyDoc {
-            public_key: bundle.public_key.clone(),
-        },
+        &bundle.public_key_doc(),
     )?;
 
     // /v1/account-keys/sth/<size>.json for every head, plus latest.json.
@@ -419,9 +415,7 @@ pub fn generate_binaries_artifacts(
     insert_json(
         &mut map,
         format!("{prefix}/public_key.json"),
-        &PublicKeyDoc {
-            public_key: bundle.public_key.clone(),
-        },
+        &bundle.public_key_doc(),
     )?;
 
     // /v1/binaries/sth/<size>.json for every head, plus latest.json.
