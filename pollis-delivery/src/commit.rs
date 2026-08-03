@@ -669,7 +669,14 @@ pub async fn record_commit_since(
 /// excluded — a revoked device can never rejoin (I5), so it must not pin the
 /// floor down. Cross-DB: membership lives on MAIN, the high-water on LOG, so the
 /// floor is composed in Rust across the two connections (no single SQL join).
-async fn current_member_devices(main: &Connection, conversation_id: &str) -> Result<Vec<String>> {
+///
+/// `pub(crate)` — not part of the DS's public surface, but the envelope-GC
+/// roster-parity test in [`crate::messages`] asserts this function and the
+/// `CLEANUP_*` SQL resolve the SAME roster for a shared fixture (#722, I5).
+pub(crate) async fn current_member_devices(
+    main: &Connection,
+    conversation_id: &str,
+) -> Result<Vec<String>> {
     let mut rows = main
         .query(
             "SELECT DISTINCT ud.device_id \
