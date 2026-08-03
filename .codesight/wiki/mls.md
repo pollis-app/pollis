@@ -307,6 +307,12 @@ races, and duplicate deliveries. All are additive to the flows above.
     `/v1/account/delete`, `/v1/account/reset-recover`, `/v1/auth/register-device`
     and `/v1/auth/publish-device-cert` all invalidate. A 30 s **absolute** TTL
     (from insertion, never refreshed on use) backstops a hook that is ever missed.
+  - *The read-then-evict race is closed by a per-key generation counter (#721).*
+    A cache miss captures the key's generation **before** it reads the row; every
+    invalidation bumps it (device-scoped) or a process-wide `bulk_generation`
+    (user-scoped); an insert whose captured generation is stale is discarded. So a
+    revoke that commits during an in-flight read can no longer resurrect the key
+    for up to the TTL — the window is gone, not merely bounded.
   - *Negative results are never cached* — a missing row is the normal state of a
     device mid-enrollment, and a cached "unknown device" would 401 a device that
     has since registered.

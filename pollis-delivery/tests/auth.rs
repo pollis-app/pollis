@@ -7,6 +7,7 @@
 //! with the device's raw-1312-byte-pubkey ML-DSA-44 key (the same
 //! `user_device.mls_signature_pub_pq` openmls produces).
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -1087,6 +1088,107 @@ async fn a_miss_is_never_cached_so_a_new_device_is_not_locked_out() {
             .await
             .is_ok(),
         "a freshly-enrolled device authenticates immediately"
+    );
+}
+
+/// **THE #721 regression test — the read-then-evict race, reproduced
+/// deterministically.**
+///
+/// The window the TTL used to merely bound: request A reads a *live* device row,
+/// then — before A inserts its cache entry — a revoke commits and evicts. Pre-fix,
+/// A's insert lands *after* the eviction and resurrects the revoked key for up to
+/// the TTL. This test forces exactly that interleaving with a scheduling hook (the
+/// cache's miss barrier), not a sleep, so it fails reliably against the pre-fix
+/// code and passes with the per-key generation guard.
+///
+/// Sequence (each step strictly ordered by the barrier + an atomic phase flag):
+///   1. A hits the cache-miss path, reads the still-valid row, and parks in the
+///      barrier — *before* inserting.
+///   2. The test revokes dev-alice through the real endpoint: the row is
+///      tombstoned and `invalidate_device` bumps the key's generation.
+///   3. A is released and runs its insert. The generation it captured at step 1 is
+///      now stale, so the insert is discarded — the revoked key is NOT resurrected.
+///   4. A fresh request from the revoked device is refused (401), proving nothing
+///      stale is being served from the cache.
+///
+/// Against the pre-fix cache (`insert` unconditional), step 3 repopulates the live
+/// key and step 4 returns 200 — the test fails, which is the point.
+#[tokio::test(flavor = "multi_thread")]
+async fn read_then_evict_race_does_not_resurrect_a_revoked_key() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    seed_group_membership(&db, "conv1", "alice").await;
+
+    let state = AppState::new(Arc::clone(&db), true);
+
+    // Phase flag: 0 = initial, 1 = A parked in the barrier (row already read),
+    // 2 = test has revoked and releases A. Only the FIRST caller (request A) parks;
+    // every later miss (the revoke's own auth, request B) sails straight through.
+    let phase = Arc::new(AtomicU8::new(0));
+    let phase_hook = Arc::clone(&phase);
+    state.device_keys.set_miss_barrier(Arc::new(move |_user, _device| {
+        let phase = Arc::clone(&phase_hook);
+        Box::pin(async move {
+            if phase.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                while phase.load(Ordering::SeqCst) != 2 {
+                    tokio::task::yield_now().await;
+                }
+            }
+        })
+    }));
+
+    // Request A: submit a commit. It authenticates (reads the live key), then parks
+    // in the barrier before its cache insert.
+    let a_state = state.clone();
+    let body_a = submit_body_json("conv1", 0, "alice");
+    let req_a = signed_request("alice", "dev-alice", now(), &sk, &body_a, None);
+    let a = tokio::spawn(async move {
+        status_of(build_router_with_state(a_state), req_a).await
+    });
+
+    // Wait — deterministically, no sleep — until A has read the row and parked.
+    while phase.load(Ordering::SeqCst) != 1 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        state.device_keys.is_empty(),
+        "A has not inserted yet — nothing is cached"
+    );
+
+    // Revoke dev-alice through the real endpoint: tombstones the row AND bumps the
+    // key's generation via `invalidate_device`.
+    let revoke = serde_json::to_vec(&serde_json::json!({ "device_id": "dev-alice" })).unwrap();
+    assert_eq!(
+        signed_call(&state, "/v1/devices/revoke", "alice", "dev-alice", &sk, &revoke).await,
+        StatusCode::OK
+    );
+    assert!(revoked_at(&db, "dev-alice").await.is_some(), "row tombstoned");
+
+    // Release A: its insert now carries a stale generation and must be discarded.
+    phase.store(2, Ordering::SeqCst);
+    assert_eq!(
+        a.await.unwrap(),
+        StatusCode::OK,
+        "A itself was authenticated (it read the live key before the revoke)"
+    );
+    assert!(
+        state.device_keys.is_empty(),
+        "A's stale insert was discarded — no live key resurrected"
+    );
+
+    // The revoked device must now be refused. Pre-fix, A's insert would have made
+    // this a cache hit and this would be 200.
+    let since = since_body_json("conv1", 0, 9);
+    assert_eq!(
+        signed_call(&state, "/v1/commits/since", "alice", "dev-alice", &sk, &since).await,
+        StatusCode::UNAUTHORIZED,
+        "a revoked device must NOT authenticate from a resurrected cache entry"
+    );
+    assert_eq!(
+        recorded_since(&db, "conv1", "dev-alice").await,
+        None,
+        "and nothing it sent was applied"
     );
 }
 
