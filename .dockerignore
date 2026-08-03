@@ -7,7 +7,6 @@ target/
 dist/
 **/dist/
 frontend/dist/
-electron/out/
 website/
 .codesight/
 *.log

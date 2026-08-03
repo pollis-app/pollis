@@ -1,6 +1,6 @@
 # Design Spike: Opt-In Peer-Relay / Onion Network-Privacy Overlay
 
-**Status:** Design spike — decision document. No code. The team reads this to decide *whether* to build a network-privacy overlay for Pollis, and if so, in what order.
+**Status:** the decision was taken and **v0 is built — opt-in, off by default** (single source of truth: §13). §1–§13 are the original decision document (written before any code, and preserved as the rationale); **§14 is the build contract that was actually implemented.** Read §13 first for where this stands today.
 **Audience:** Pollis engineering + whoever owns the security roadmap.
 **Scope:** the network / IP-metadata layer only. This is explicitly *not* a redesign of the E2EE protocol, the transparency logs, or the application-layer metadata model. It composes with those; it does not replace them.
 **Author's stance:** written to be argued with. Every claim that could be an overclaim is flagged as such. If you skim one section, skim §1 (the thesis) and §12 (the recommendation).
@@ -381,7 +381,16 @@ Safeguards so the incentive never distorts safety: a relay **cannot** gain any r
 
 ## 13. Status & GitHub-issue summary
 
-**Status: DEFERRED.** Sequenced after metadata minimization (sealed sender): a relay that hides IP while the app layer still transmits a plaintext sender column defends the weaker half of the metadata. Revisit trigger: sealed sender (metadata-minimization v1) shipped.
+**Status (#455): v0 BUILT — opt-in, OFF by default. Not "deployed", and not deferred.** This paragraph is the single source of truth for this doc, the README, and `docs/metadata-minimization-design.md`; nothing else may assert a different status.
+
+What that means concretely, verifiable in the tree:
+
+- **Client half: built and shipped.** The `pollis-relay` transport crate, the consumer side in `pollis-core/src/net/{overlay,directory}.rs`, the live off/prefer/strict engine in `pollis-core/src/commands/overlay.rs`, the `get_overlay_mode` / `set_overlay_mode` Tauri commands (`src-tauri/src/lib.rs`), and the Preferences → "Network privacy (relay)" control (`frontend/src/pages/PreferencesPage.tsx`, `overlay_mode` in `usePreferences.ts`).
+- **Off by default, and inert when off.** `Config::overlay_mode` defaults to `Off` (`pollis-core/src/config.rs`; unknown/empty values also fail safe to off). With the overlay off no shim is started, `AppState.overlay` is `None`, and every network path is byte-for-byte the pre-overlay direct path. A non-off mode is selected either by the user in Settings (persisted in the synced preferences blob and re-applied on load) or by the `POLLIS_OVERLAY` env/`option_env!` value at boot — release builds do **not** set it.
+- **Relay tier: build-and-publish only, no auto-deploy.** `.github/workflows/relay-image.yml` builds the image and publishes it to GHCR; it never rolls a node. Nodes are stood up either by an operator (`docs/relay-operations.md`) or by the automated AWS pool (`infra/relay-hydra/`, #616). Release builds bake `POLLIS_OVERLAY_DIRECTORY_URL` / `_KEY` so a pool is reachable *if* a user opts in; `POLLIS_OVERLAY` itself is never baked. See `docs/deployments.md` → "Relay pool" for how the pool is operated — **this doc does not claim any particular node is currently running.**
+- **v1 (multi-hop onion, peer-hosted relays) and v2 (timing defenses) are NOT built.** v0 is a waypoint toward the §14.0 north star (Option B), not the destination.
+
+Do not describe this as "deployed", "shipped to users", or "on" — it is built, opt-in, and off unless a user turns it on. The earlier sequencing note (defer until sealed sender lands, so the app layer isn't still leaking a plaintext sender column) was **not** followed: the network half landed first. That ordering caveat still holds as a *framing* rule — the relay hides IP only. Sealed sender has since landed as well (`docs/metadata-minimization-design.md` v1/v2 SHIPPED), but it is **at-rest only**: the DS still sees the sender live via the `X-Pollis-User` auth header, and the `group_member` / `dm_channel_member` social graph is still plaintext. Neither layer substitutes for the other (§6 layer table there).
 
 > **Title:** Opt-in closed-overlay relay — hide client IPs from the first-party services (Turso / DS / R2 / LiveKit)
 >
