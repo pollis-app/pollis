@@ -26,6 +26,31 @@ aws ssm get-parameter --region ${param_region} --name "${identity_cert_param}" -
   --query Parameter.Value --output text | base64 -d > /var/lib/pollis-relay/identity.key.crt
 chmod 0600 /var/lib/pollis-relay/identity.key /var/lib/pollis-relay/identity.key.crt
 
+# Resolve the IMAGE to run from the intended-image SSM record — NOT a mutable
+# `:latest` tag baked into this template (#703/#677). The record is a JSON
+# {"image": "<immutable ref>", "sha": "<git sha>"} the CI image workflow overwrites
+# on every roll; user-data runs its `.image` (a digest pin or an immutable
+# `:<sha>` tag). Because a fresh instance always reads the CURRENT record, cycling
+# an instance (the reconciler marks it Unhealthy; the ASG relaunches it) is what
+# lands it on the intended build — no `terraform apply`, no `:latest`. The AL2023
+# base image ships neither jq nor a JSON parser we can rely on, so pull the value
+# with a small sed over the fixed shape (the writer emits compact JSON).
+INTENDED_RECORD="$(aws ssm get-parameter --region ${param_region} --name "${image_param}" \
+  --query Parameter.Value --output text 2>/dev/null || true)"
+RELAY_IMAGE="$(printf '%s' "$INTENDED_RECORD" | sed -n 's/.*"image"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+
+# Fall back to the templated bootstrap image only if the record is empty/unreadable
+# (both are normally empty in prod). If we STILL have no image, fail the boot loudly
+# rather than silently: a node with no image serves nothing, and the reconciler's
+# health check + alarms surface it. Never default to `:latest`.
+if [ -z "$RELAY_IMAGE" ]; then
+  RELAY_IMAGE='${relay_image}'
+fi
+if [ -z "$RELAY_IMAGE" ]; then
+  echo "no intended relay image recorded in SSM (${image_param}) and no bootstrap fallback set — cannot launch" >&2
+  exit 1
+fi
+
 # --network host so the QUIC UDP port and the health TCP port bind directly to
 # the node's public interface. --restart=always survives dockerd/instance reboots;
 # the ASG replaces the whole node if it dies.
@@ -35,4 +60,4 @@ docker run -d --name pollis-relay --restart=always --network host \
   -e POLLIS_RELAY_HEALTH_BIND=0.0.0.0:${health_port} \
   -e POLLIS_RELAY_ALLOWLIST='${relay_allowlist}' \
   -e POLLIS_RELAY_IDENTITY=/var/lib/pollis-relay/identity.key \
-  ${relay_image}
+  "$RELAY_IMAGE"

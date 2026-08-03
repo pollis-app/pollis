@@ -130,9 +130,55 @@ variable "region_state_map" {
 # ── Relay image & runtime ───────────────────────────────────────────────────
 
 variable "relay_image" {
-  description = "Container image the nodes run. Must be pullable by the nodes (make the GHCR package public, or add a pull secret)."
+  description = <<-EOT
+    BOOTSTRAP intended image — the seed for the `intended-image` SSM parameter that
+    the reconciler and the nodes' user-data actually read (#703). Give it an
+    IMMUTABLE, explicitly-versioned reference: a digest pin
+    (`ghcr.io/actuallydan/pollis-relay@sha256:...`, strongest) or the immutable
+    `:<git-sha>` tag `relay-image.yml` publishes. NEVER `:latest` — a mutable tag is
+    the split-brain root cause (Docker caches by content hash and `--restart=always`
+    never re-pulls, so a running node keeps whatever `:latest` meant when it
+    launched). Must be pullable by the nodes (public GHCR package, or a pull secret).
+
+    Empty (the default) means "seed nothing" — the operator or CI records the first
+    build directly into the `intended-image` SSM param (see the runbook). Because of
+    `ignore_changes` on that param, this value is only ever read on the FIRST apply;
+    afterwards CI owns it (relay-image.yml writes the param on every roll) and
+    editing this variable does nothing. A fresh/test pool must set it (or seed the
+    param) or its nodes have no image to launch.
+  EOT
   type        = string
-  default     = "ghcr.io/actuallydan/pollis-relay:latest"
+  default     = ""
+}
+
+variable "expected_relay_protocol" {
+  description = <<-EOT
+    The pool's expected relay WIRE identity — the ALPN token the current relay
+    generation negotiates (`proto::ALPN`, e.g. "pollis-relay/3"). The reconciler
+    EXCLUDES any healthy node whose GET /version reports a different protocol from
+    the signed directory immediately, so clients never learn a wrong-generation
+    node's address and never fail ALPN against it.
+
+    This changes ONLY on a coordinated, wire-breaking protocol migration (the relay
+    pool, the DS and the client ship together — see docs/deployments.md), so it is
+    an explicit, human-set value rather than something an image roll flips. A
+    same-protocol image roll (the common case) converges purely on build identity
+    and never touches this. Empty disables the protocol membership gate.
+  EOT
+  type        = string
+  default     = "pollis-relay/3"
+}
+
+variable "max_cycle_per_run" {
+  description = <<-EOT
+    Upper bound on how many build-stale nodes the reconciler cycles (marks Unhealthy
+    so the ASG relaunches them on the intended build) per reconcile. Keeps a roll
+    gradual; combined with the floor guard it can never empty the pool. 1 = replace
+    at most one node every reconcile (~2 min), which converges a 3-node pool in a
+    handful of cycles while always keeping the rest serving.
+  EOT
+  type        = number
+  default     = 1
 }
 
 variable "relay_port" {
@@ -216,4 +262,47 @@ variable "alarm_email_addresses" {
   description = "Emails subscribed to the SNS topic the CloudWatch alarms (reconcile failures, Lambda errors, healthy-node floor) notify. Each address must confirm the AWS subscription email. Empty = alarms fire to the topic but nobody is subscribed."
   type        = list(string)
   default     = []
+}
+
+# ── CI convergence: GitHub OIDC role (item 4 / #703) ────────────────────────
+# relay-image.yml records the intended build into the `intended-image` SSM param
+# after it publishes, so a roll converges pull-based (the always-running reconciler
+# does the cycling on its schedule — CI never terminates instances or touches the
+# ASGs). CI's ONLY AWS action is that one `ssm:PutParameter`, and it authenticates
+# with a short-lived GitHub OIDC token — NO standing credentials in CI. The role and
+# its trust policy live here so they are reviewable in-repo; the owner applies them
+# and adds the role ARN to the repo as a GitHub Actions VARIABLE (not a secret, and
+# never committed — see the README runbook).
+
+variable "github_repository" {
+  description = <<-EOT
+    "owner/repo" of the repository whose Actions may assume the CI OIDC role (e.g.
+    "actuallydan/pollis"). The trust policy scopes the role to this repo's workflows
+    on `github_oidc_ref` only. Empty disables the CI OIDC role entirely (the loop is
+    then closed by the operator running the put-parameter by hand — see the runbook).
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "github_oidc_ref" {
+  description = <<-EOT
+    The git ref the CI OIDC role trusts, as the GitHub OIDC `sub` suffix. Default
+    restricts assumption to the main branch, so only a merged/publish workflow can
+    record a new intended build. Widen deliberately if you publish from tags.
+  EOT
+  type        = string
+  default     = "ref:refs/heads/main"
+}
+
+variable "manage_github_oidc_provider" {
+  description = <<-EOT
+    Whether Terraform creates the account's GitHub Actions OIDC identity provider
+    (token.actions.githubusercontent.com). An AWS account may hold only ONE provider
+    for that URL, so set this false if the account already has one (common) — the
+    role's trust policy references the provider by its conventional ARN either way.
+    Ignored when github_repository is empty.
+  EOT
+  type        = bool
+  default     = false
 }

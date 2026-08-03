@@ -146,6 +146,9 @@ data "aws_iam_policy_document" "node_identity" {
     resources = [
       "arn:aws:ssm:${var.param_region}:${data.aws_caller_identity.current.account_id}:parameter${var.identity_key_param}",
       "arn:aws:ssm:${var.param_region}:${data.aws_caller_identity.current.account_id}:parameter${var.identity_cert_param}",
+      # The intended-image record (non-secret): user-data reads it at boot to launch
+      # the intended, immutable image. Scoped to param_region like the identity params.
+      "arn:aws:ssm:${var.param_region}:${data.aws_caller_identity.current.account_id}:parameter${var.image_param}",
     ]
   }
   statement {
@@ -207,6 +210,7 @@ resource "aws_launch_template" "relay" {
   user_data = base64encode(templatefile("${path.module}/user-data.sh.tftpl", {
     param_region        = var.param_region
     relay_image         = var.relay_image
+    image_param         = var.image_param
     relay_port          = var.relay_port
     health_port         = var.health_port
     relay_allowlist     = var.relay_allowlist

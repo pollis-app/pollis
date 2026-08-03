@@ -7,9 +7,18 @@
 //! not started) that answers exactly two routes:
 //!
 //! - `GET /health`  → `200 OK`, body `ok` — liveness.
-//! - `GET /version` → `200 OK`, JSON `{"service":"pollis-relay","sha":"<GIT_SHA>"}`
-//!   — mirrors the DS `/version` tripwire so a deploy can confirm the *running*
-//!   image is the one it just built (not merely that a workflow fired).
+//! - `GET /version` → `200 OK`, JSON
+//!   `{"service":"pollis-relay","sha":"<GIT_SHA>","protocol":"<ALPN>","protocol_version":<N>}`
+//!   — `sha` mirrors the DS `/version` tripwire so a deploy can confirm the
+//!   *running* image is the one it just built (build identity); `protocol` /
+//!   `protocol_version` report the relay's WIRE identity ([`proto::ALPN`] /
+//!   [`proto::PROTOCOL_VERSION`]) so the hydra reconciler can tell a
+//!   wrong-generation node apart from a merely-old-but-compatible one. The
+//!   reconciler uses the protocol identity for signed-directory membership (a
+//!   mismatched node is excluded so clients never learn its address and cannot
+//!   fail ALPN against it) and the build identity for cycling stale nodes
+//!   (#703). An unrelated docs commit changes `sha` without changing `protocol`,
+//!   which is exactly why the two are reported separately.
 //!
 //! Anything else is `404`; a non-`GET` method is `405`. It is hand-rolled on a
 //! `tokio::net::TcpListener` (read the request line, match the path, write a fixed
@@ -138,10 +147,20 @@ fn route(method: &str, path: &str) -> String {
     }
 }
 
-/// The `/version` JSON body: `{"service":"pollis-relay","sha":"<GIT_SHA>"}`. Hand-
-/// formatted (no serde_json) — the shape is fixed and the SHA is `[0-9a-f]`/`unknown`.
+/// The `/version` JSON body:
+/// `{"service":"pollis-relay","sha":"<GIT_SHA>","protocol":"<ALPN>","protocol_version":<N>}`.
+/// Hand-formatted (no serde_json) — every field is a fixed shape: `sha` is
+/// `[0-9a-f]`/`unknown`, `protocol` is the ALPN token (`[a-z-]+/[0-9]+`, valid
+/// UTF-8 by construction), and `protocol_version` is a small integer. `protocol`
+/// and `protocol_version` come straight from [`crate::proto`], so `/version`
+/// cannot drift from what the QUIC transport actually negotiates.
 fn version_body() -> String {
-    format!("{{\"service\":\"pollis-relay\",\"sha\":\"{GIT_SHA}\"}}")
+    // ALPN is an ASCII token (`b"pollis-relay/3"`), so this never lossily replaces.
+    let protocol = std::str::from_utf8(crate::proto::ALPN).unwrap_or("");
+    let protocol_version = crate::proto::PROTOCOL_VERSION;
+    format!(
+        "{{\"service\":\"pollis-relay\",\"sha\":\"{GIT_SHA}\",\"protocol\":\"{protocol}\",\"protocol_version\":{protocol_version}}}"
+    )
 }
 
 /// Build a complete HTTP/1.1 response. `Connection: close` since each probe is a
@@ -192,11 +211,24 @@ mod tests {
         assert!(status.contains("200"), "health status: {status}");
         assert_eq!(body, "ok");
 
-        // GET /version → 200, JSON carrying the SHA (baked or "unknown").
+        // GET /version → 200, JSON carrying the SHA (baked or "unknown") plus the
+        // relay's wire identity (ALPN + numeric PROTOCOL_VERSION) the reconciler
+        // keys directory membership + stale-node cycling on (#703).
         let (status, body) = request(addr, "/version").await;
         assert!(status.contains("200"), "version status: {status}");
         assert!(body.contains("\"service\":\"pollis-relay\""), "version body: {body}");
         assert!(body.contains(GIT_SHA), "version body missing sha: {body}");
+        // The protocol identity must come straight from `proto`, so it stays in
+        // lockstep with the ALPN the QUIC transport negotiates.
+        let alpn = std::str::from_utf8(crate::proto::ALPN).unwrap();
+        assert!(
+            body.contains(&format!("\"protocol\":\"{alpn}\"")),
+            "version body missing protocol: {body}"
+        );
+        assert!(
+            body.contains(&format!("\"protocol_version\":{}", crate::proto::PROTOCOL_VERSION)),
+            "version body missing protocol_version: {body}"
+        );
 
         // An unknown path → 404.
         let (status, _body) = request(addr, "/nope").await;

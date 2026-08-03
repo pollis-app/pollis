@@ -237,3 +237,84 @@ jobs:
             fi
           done
           echo "manifest list contains both linux/amd64 and linux/arm64"
+
+  # Close the loop from the push to the fleet (#703). The image is published; now
+  # RECORD the intended build into the hydra's `intended-image` SSM param. The
+  # always-running reconciler reads that param on its 2-minute schedule and does the
+  # actual convergence (excludes wrong-generation nodes from the directory, cycles
+  # stale ones) — so this step is PULL-based: CI records a fact, it does not drive
+  # the ASGs. CI's only AWS action is this one ssm:PutParameter, authenticated with
+  # a short-lived GitHub OIDC token (aws-actions/configure-aws-credentials) — NO
+  # standing credentials in CI. The role + its resource-scoped policy live in
+  # infra/relay-hydra/ci-oidc.tf; the owner applies them and sets the two repo
+  # VARIABLES below (never secrets, never committed).
+  #
+  # HALF-ROLL SAFETY: the push (manifest) already succeeded. If THIS job fails or is
+  # skipped, the param keeps its previous value, so the whole fleet stays on the
+  # previously-recorded build — no node is cycled, the directory is unchanged, and
+  # nothing is half-rolled. The param flips atomically from old to new; there is no
+  # state where some nodes are told to move and others are not. Re-run this job (or
+  # have the operator set the param by hand) to complete the roll.
+  #
+  # Skipped entirely until the owner sets vars.RELAY_IMAGE_OIDC_ROLE_ARN — the image
+  # still publishes; the roll is then completed manually per the README runbook.
+  record-intended-image:
+    needs: manifest
+    if: vars.RELAY_IMAGE_OIDC_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token for AWS
+    steps:
+      - name: Checkout ${{ inputs.ref || github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Resolve build SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The manifest-LIST digest — a cryptographic, immutable content id for the
+      # multi-arch image. `docker run image@sha256:<listdigest>` resolves the right
+      # per-arch sub-manifest on each node, so pinning the list digest still gives
+      # arm64 Graviton nodes their arm64 image.
+      - name: Resolve manifest digest
+        id: digest
+        run: |
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${{ steps.sha.outputs.sha }}" \
+            --format '{{.Manifest.Digest}}')"
+          case "$digest" in
+            sha256:*) : ;;
+            *) echo "::error::unexpected digest '$digest'"; exit 1 ;;
+          esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (GitHub OIDC — no standing creds)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.RELAY_IMAGE_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.RELAY_HYDRA_REGION || 'us-west-2' }}
+
+      # Record {image: <digest pin>, sha: <git sha>}. The nodes' user-data reads
+      # .image to launch the exact build; the reconciler reads .sha to identify
+      # build-stale nodes. Compact JSON — the node parses it with a fixed-shape sed.
+      - name: Record intended image in SSM
+        env:
+          PARAM: ${{ vars.RELAY_INTENDED_IMAGE_PARAM || '/pollis/relay-hydra/intended-image' }}
+          IMAGE_REF: ${{ env.IMAGE }}@${{ steps.digest.outputs.digest }}
+          BUILD_SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          value="$(printf '{"image":"%s","sha":"%s"}' "$IMAGE_REF" "$BUILD_SHA")"
+          echo "recording intended-image -> $value into $PARAM"
+          aws ssm put-parameter --name "$PARAM" --type String --overwrite --value "$value"
+          echo "recorded. The reconciler will converge the fleet on its next cycle (~2 min)."

@@ -40,7 +40,13 @@ variable "spot_max_price" {
 }
 
 variable "relay_image" {
-  type = string
+  description = "FALLBACK bootstrap image, used by user-data only if the intended-image SSM param is empty. Normally empty — the intended image is read from `image_param` at boot. Never `:latest`."
+  type        = string
+}
+
+variable "image_param" {
+  description = "SSM param name holding the intended build ({image, sha}). user-data reads .image at boot and launches THAT exact reference (no :latest in the launch path); the node IAM grants read on it. Written by CI on every roll, seeded by Terraform."
+  type        = string
 }
 
 variable "relay_port" {

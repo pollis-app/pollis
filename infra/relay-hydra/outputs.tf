@@ -44,6 +44,16 @@ output "placement_param" {
   value       = aws_ssm_parameter.placement.name
 }
 
+output "intended_image_param" {
+  description = "SSM param recording the intended relay build ({image, sha}). CI writes it on every roll; the reconciler and the nodes' user-data read it. Seed a pinned digest by hand for a fresh pool: aws ssm put-parameter --name <this> --type String --overwrite --value '{\"image\":\"ghcr.io/actuallydan/pollis-relay@sha256:...\",\"sha\":\"<gitsha>\"}'."
+  value       = aws_ssm_parameter.intended_image.name
+}
+
+output "relay_image_oidc_role_arn" {
+  description = "ARN of the GitHub-OIDC role relay-image.yml assumes to record the intended build. Add it to the repo as the RELAY_IMAGE_OIDC_ROLE_ARN Actions VARIABLE (not a secret). Empty when github_repository is unset (record the param by hand instead)."
+  value       = local.ci_oidc_enabled ? aws_iam_role.ci_record_image[0].arn : ""
+}
+
 output "allowed_regions" {
   description = "Regions that passed the §4 jurisdiction filter. The reconciler draws node placement from exactly this set."
   value       = local.allowed_regions

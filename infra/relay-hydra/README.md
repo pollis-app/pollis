@@ -14,7 +14,7 @@ Terraform ──> per-region VPC + locked SG + mixed-instances ASG (t4g.nano, Sp
                                                               ASGs, health-checks /version,
                                                               signs + publishes the directory
           ──> Budgets $20 alert + CloudWatch alarms
-SSM (free) ── signing private key · pool QUIC identity (SecureString) · desired-state · placement
+SSM (free) ── signing private key · pool QUIC identity (SecureString) · desired-state · placement · intended-image
 ```
 
 There is **no load balancer**: clients fetch the signed directory and do their own
@@ -59,6 +59,14 @@ client pins the cert, never the address.
    `.github/workflows/relay-image.yml` (needs org `packages: write`) and make
    `ghcr.io/actuallydan/pollis-relay` **public** (or add a pull secret to the
    user-data). This is a prerequisite, not part of the Terraform.
+
+   > **Nodes launch an IMMUTABLE, recorded build — never `:latest` (#703).** The
+   > nodes' user-data reads the `intended-image` SSM param (a digest pin) and runs
+   > exactly that; a rolling push to a mutable tag never updates a running node
+   > (Docker caches by content hash, `--restart=always` never re-pulls), which is
+   > what used to split-brain the pool across two relay generations. The image
+   > workflow records the digest into that param on every roll (pull-based
+   > convergence — see "Roll the relay image" below); seed it once for a fresh pool.
 3. **Terraform ≥ 1.6** and Node ≥ 20 (for the scripts/test).
 
    > **State is local and gitignored** (`terraform.tfstate` next to this README).
@@ -209,6 +217,118 @@ scripts/mint-relay-identity.sh us-west-2   # overwrites the SSM identity key + c
 #   in the next directory automatically.
 ```
 
+### Roll the relay image (and heal a split-brain pool) — #703
+
+**How a roll reaches the fleet.** Nodes do NOT run `:latest`; a mutable tag never
+updates a running node (Docker caches by content hash, `--restart=always` never
+re-pulls), so a rolling push used to leave the pool split across two relay
+generations — and because the relay bumps its ALPN with `PROTOCOL_VERSION`, clients
+that reached a wrong-generation node simply failed QUIC ALPN negotiation. Instead:
+
+1. Each node's `GET /version` reports BOTH its **build** identity (`sha`) and its
+   **protocol** identity (`protocol` = the ALPN, e.g. `pollis-relay/3`).
+2. The reconciler uses **protocol identity for signed-directory membership** and
+   **build identity for cycling**:
+   - a healthy node whose `protocol` ≠ `expected_relay_protocol` is **excluded from
+     the directory immediately** (instant, free, reversible — clients never learn
+     its address, so the split-brain symptom is gone at once);
+   - a node whose `sha` ≠ the recorded intended build is **cycled** — marked
+     Unhealthy so the ASG relaunches it, at most `max_cycle_per_run` per reconcile
+     and never below the pool floor. **Unreachable ≠ stale**: a node is only cycled
+     on a POSITIVE build mismatch, never on a missing/garbled `/version`.
+3. The intended build is recorded in the `intended-image` SSM param
+   (`{"image": "<digest pin>", "sha": "<git sha>"}`). The nodes' user-data reads
+   `.image` at boot and launches exactly that; the reconciler reads `.sha`. The
+   image workflow (`relay-image.yml`) writes this param after it publishes, so an
+   image roll converges the fleet with **no `terraform apply`**.
+
+**Convergence is pull-based; CI holds no standing AWS credentials.** `relay-image.yml`
+records the intended build with a single `ssm:PutParameter`, authenticated by a
+short-lived GitHub OIDC token assuming the role in `ci-oidc.tf`. The reconciler does
+the actual cycling on its 2-minute schedule. **Half-roll safety:** if the GHCR push
+succeeds but the record step fails/ skips, the param keeps its previous value, so the
+whole fleet stays on the previously-recorded build — nothing is cycled, the directory
+is unchanged, and the roll is simply incomplete until the step is re-run or the param
+is set by hand. The param flips atomically old→new; there is no state where some
+nodes are told to move and others are not.
+
+#### One-time owner setup (enables auto-convergence)
+
+These are console/CLI steps the IaC cannot do for you. Do them once.
+
+```bash
+cd infra/relay-hydra
+eval "$(aws configure export-credentials --format env)"   # see Prerequisites
+
+# 1. Enable the CI OIDC role. Set the repo + (if the account has NO GitHub OIDC
+#    provider yet) create one. Then apply.
+cat >> terraform.tfvars <<'EOF'
+github_repository           = "actuallydan/pollis"
+manage_github_oidc_provider = false   # true ONLY if the account has no GitHub OIDC provider yet
+EOF
+terraform apply
+
+# 2. Hand the role ARN to CI as a repository VARIABLE (NOT a secret — it is not
+#    sensitive, and it must never be committed). Region only if not us-west-2.
+gh variable set RELAY_IMAGE_OIDC_ROLE_ARN --body "$(terraform output -raw relay_image_oidc_role_arn)"
+gh variable set RELAY_HYDRA_REGION        --body "us-west-2"
+```
+
+Until `RELAY_IMAGE_OIDC_ROLE_ARN` is set, `relay-image.yml` still publishes the
+image but SKIPS the record step (it says so in the run) — complete the roll by hand
+with step 2 of the heal runbook below.
+
+#### Heal the currently-stale pool (one-time), then verify auto-roll
+
+Run this once to converge the existing pool off `:latest` and onto a recorded,
+immutable build. **The reconciler cycles stale nodes on its own** once it can read
+the intended build — you do NOT hand-terminate instances unless you want it faster.
+
+```bash
+cd infra/relay-hydra
+eval "$(aws configure export-credentials --format env)"
+
+# 1. APPLY this change. It adds the intended-image param (seeded empty), the
+#    /version-consuming reconciler, and the node IAM/user-data that read the param.
+#    desired_capacity stays under ignore_changes, so the running pool is untouched.
+terraform apply
+
+# 2. RECORD the build you want the fleet on. Pin a DIGEST (strongest) from the
+#    published multi-arch image; the git sha is what the reconciler compares to
+#    /version. (CI does this automatically on future rolls once OIDC is set up.)
+PARAM="$(terraform output -raw intended_image_param)"
+SHA=<the git sha relay-image.yml built>
+DIGEST="$(docker buildx imagetools inspect ghcr.io/actuallydan/pollis-relay:$SHA --format '{{.Manifest.Digest}}')"
+aws ssm put-parameter --region us-west-2 --name "$PARAM" --type String --overwrite \
+  --value "$(printf '{"image":"ghcr.io/actuallydan/pollis-relay@%s","sha":"%s"}' "$DIGEST" "$SHA")"
+
+# 3. WATCH the reconciler converge (or force a cycle now):
+aws lambda invoke --function-name "$(terraform output -raw reconciler_function_name)" /dev/stdout
+#    Its JSON return reports { intendedSha, staleBuild, cycled, excludedFromDirectory }.
+#    Repeat/wait: it cycles at most max_cycle_per_run (default 1) node per ~2-min
+#    cycle, always keeping the rest serving. New nodes boot on the recorded digest.
+#    CloudWatch (namespace PollisRelayHydra): StaleBuildNodes should trend to 0.
+
+# 4. (Optional, faster) Hand-terminate the known-stale instances so the ASG
+#    relaunches them immediately on the recorded build. Safe to skip — the
+#    reconciler gets there on its own within a few cycles.
+
+# 5. VERIFY: every node reports the intended sha + expected protocol, and the
+#    directory advertises only current-generation nodes.
+for ip in $(<node ips>); do curl -s "http://$ip:9445/version"; echo; done
+#    → {"service":"pollis-relay","sha":"<intended>","protocol":"pollis-relay/3","protocol_version":3}
+node scripts/verify-directory.mjs "$(terraform output -raw POLLIS_OVERLAY_DIRECTORY_URL)" "<POLLIS_OVERLAY_DIRECTORY_KEY>"
+```
+
+> **Protocol bumps are still coordinated (not an image roll).** A wire-breaking
+> bump ships the relay pool, the DS and the client in one cycle (see
+> `docs/deployments.md`). Publish the new-protocol image so the fleet converges to
+> it FIRST (build cycling), then set `expected_relay_protocol` to the new ALPN and
+> `terraform apply`. Setting it before any new-protocol node exists would exclude
+> every current node from the directory at once — the reconciler then refuses to
+> publish an empty directory and lets the last good one expire (the overlay is off
+> by default and fails closed, so this is safe, but avoid it).
+
 ### Stand up a throwaway TEST env (`env=test`)
 
 Exercise the REAL infra end to end — a dev-enrolled client through real AWS
@@ -323,6 +443,9 @@ Re-denying is one line in `state_denylist`; the mechanism is unchanged.
 ```bash
 node --test                 # §3 directory contract (byte-exact + every reject case)
                             # + the random placement / rotation policy (seeded rng)
+                            # + the stale-node detection predicate (#703): unreachable
+                            #   != stale, bounded + floor-guarded cycling, protocol
+                            #   membership (test/staleness.test.mjs)
 terraform validate          # config validity
 terraform fmt -recursive -check
 ```

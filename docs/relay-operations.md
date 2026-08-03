@@ -264,6 +264,17 @@ Open the host firewall for **`9444/udp`** (the QUIC relay) and the **health TCP
 port** (`9445`, scoped to your orchestrator/LB rather than the public internet if
 you can). Mount the identity volume so a restart keeps the same pinned cert.
 
+> **On a MULTI-node pool, pin an immutable image — not `:latest`.** A mutable tag
+> never updates a running node (Docker caches by content hash and
+> `--restart=always` never re-pulls), so a rolling `:latest` push leaves the pool
+> split across two relay generations; because the relay bumps its ALPN with
+> `PROTOCOL_VERSION`, a client that reaches a wrong-generation node just fails QUIC
+> ALPN. Pull `ghcr.io/actuallydan/pollis-relay@sha256:<digest>` (or the immutable
+> `:<git-sha>` tag), roll one node at a time, and confirm each `GET /version`
+> reports the intended `sha` **and** `protocol` before moving on. The automated AWS
+> pool does this for you — see `infra/relay-hydra/README.md` → "Roll the relay
+> image" (#703).
+
 ### Step 3 — point clients at the pool
 
 Bake the pool into the client build (the same `option_env!` mechanism as every
@@ -324,9 +335,13 @@ against its own advertised cert.
 
 ### Step 4 — verify
 
-- **Image is live:** `curl http://<host>:9445/version` → the SHA `relay-image.yml`
-  built (mirrors the DS `/version` tripwire — don't trust "container started",
-  confirm the running build). `curl http://<host>:9445/health` → `ok`.
+- **Image is live:** `curl http://<host>:9445/version` →
+  `{"service":"pollis-relay","sha":"<GIT_SHA>","protocol":"pollis-relay/3","protocol_version":3}`.
+  `sha` is the build `relay-image.yml` produced (mirrors the DS `/version`
+  tripwire — don't trust "container started", confirm the running build);
+  `protocol` is the relay's ALPN/wire identity, which the hydra reconciler uses to
+  keep a wrong-generation node out of the signed directory and to cycle stale
+  builds (#703). `curl http://<host>:9445/health` → `ok`.
 - **Traffic actually routes:** a client with the overlay in **Prefer** mode (and a
   reachable pool) sends its control-plane traffic (Turso reads, DS writes) through
   a relay — the node's logs show authorized handshakes + dials to the allowlisted

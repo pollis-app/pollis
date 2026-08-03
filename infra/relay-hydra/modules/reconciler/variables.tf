@@ -38,6 +38,25 @@ variable "placement_param_arn" {
   type = string
 }
 
+variable "intended_image_param" {
+  description = "SSM param holding the intended build ({image, sha}), written by CI on every image roll. The reconciler reads .sha to identify build-stale nodes."
+  type        = string
+}
+
+variable "intended_image_param_arn" {
+  type = string
+}
+
+variable "expected_relay_protocol" {
+  description = "Expected relay ALPN/wire identity (e.g. pollis-relay/3). A healthy node reporting a different protocol at /version is excluded from the signed directory. Empty disables the protocol membership gate."
+  type        = string
+}
+
+variable "max_cycle_per_run" {
+  description = "Max build-stale nodes the reconciler cycles per reconcile. Bounds a roll's rate; the floor guard additionally prevents emptying the pool."
+  type        = number
+}
+
 variable "signing_key_param" {
   type = string
 }

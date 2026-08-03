@@ -80,11 +80,13 @@ data "aws_iam_policy_document" "reconciler" {
     resources = ["*"]
   }
 
-  # Read the desired-state, the current placement, and the signing/identity secrets.
+  # Read the desired-state, the current placement, the intended-image record, and
+  # the signing/identity secrets. The reconciler never WRITES the intended-image
+  # param — CI owns it (see the OIDC role); the reconciler only reads .sha from it.
   statement {
     sid       = "ReadParams"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = concat(var.secret_param_arns, [var.desired_state_param_arn, var.placement_param_arn])
+    resources = concat(var.secret_param_arns, [var.desired_state_param_arn, var.placement_param_arn, var.intended_image_param_arn])
   }
 
   # Persist a fresh random draw. Scoped to the placement parameter ALONE — the
@@ -160,6 +162,9 @@ resource "aws_lambda_function" "reconciler" {
       MANAGED_REGIONS         = jsonencode(var.managed_regions)
       DESIRED_STATE_PARAM     = var.desired_state_param
       PLACEMENT_PARAM         = var.placement_param
+      INTENDED_IMAGE_PARAM    = var.intended_image_param
+      EXPECTED_PROTOCOL       = var.expected_relay_protocol
+      MAX_CYCLE_PER_RUN       = tostring(var.max_cycle_per_run)
       SIGNING_KEY_PARAM       = var.signing_key_param
       IDENTITY_CERT_PARAM     = var.identity_cert_param
       DIRECTORY_BUCKET        = var.directory_bucket

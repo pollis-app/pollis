@@ -61,6 +61,7 @@ module "relay_region_us_east_1" {
   relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
+  image_param         = local.intended_image_param
 }
 
 module "relay_region_us_east_2" {
@@ -82,6 +83,7 @@ module "relay_region_us_east_2" {
   relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
+  image_param         = local.intended_image_param
 }
 
 module "relay_region_us_west_1" {
@@ -106,6 +108,7 @@ module "relay_region_us_west_1" {
   relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
+  image_param         = local.intended_image_param
 }
 
 module "relay_region_us_west_2" {
@@ -127,6 +130,7 @@ module "relay_region_us_west_2" {
   relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
+  image_param         = local.intended_image_param
 }
 
 # The original single-region pool was `module.relay_region` keyed by region, with
@@ -170,13 +174,18 @@ module "reconciler" {
   managed_regions    = local.managed_regions
   reconcile_schedule = var.reconcile_schedule
 
-  desired_state_param     = local.desired_state_param
-  desired_state_param_arn = local.desired_state_param_arn
-  placement_param         = local.placement_param
-  placement_param_arn     = local.placement_param_arn
-  signing_key_param       = local.signing_key_param
-  identity_cert_param     = local.identity_cert_param
-  secret_param_arns       = local.secret_param_arns
+  desired_state_param      = local.desired_state_param
+  desired_state_param_arn  = local.desired_state_param_arn
+  placement_param          = local.placement_param
+  placement_param_arn      = local.placement_param_arn
+  intended_image_param     = local.intended_image_param
+  intended_image_param_arn = local.intended_image_param_arn
+  signing_key_param        = local.signing_key_param
+  identity_cert_param      = local.identity_cert_param
+  secret_param_arns        = local.secret_param_arns
+
+  expected_relay_protocol = var.expected_relay_protocol
+  max_cycle_per_run       = var.max_cycle_per_run
 
   directory_bucket      = module.directory.bucket_name
   directory_bucket_arn  = module.directory.bucket_arn

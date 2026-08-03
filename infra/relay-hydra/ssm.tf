@@ -17,11 +17,12 @@ locals {
   # scripts + Terraform for the two envs never share secrets.
   param_prefix = local.is_prod ? "/pollis/relay-hydra" : "/pollis/relay-hydra-${var.env}"
 
-  signing_key_param   = "${local.param_prefix}/signing-key"   # SecureString: Ed25519 private PKCS8 PEM
-  identity_key_param  = "${local.param_prefix}/identity-key"  # SecureString: base64(raw) QUIC identity key
-  identity_cert_param = "${local.param_prefix}/identity-cert" # SecureString: base64(DER) QUIC leaf cert
-  desired_state_param = "${local.param_prefix}/desired-state" # String: {"total": N}
-  placement_param     = "${local.param_prefix}/placement"     # String: the reconciler's current random draw
+  signing_key_param    = "${local.param_prefix}/signing-key"    # SecureString: Ed25519 private PKCS8 PEM
+  identity_key_param   = "${local.param_prefix}/identity-key"   # SecureString: base64(raw) QUIC identity key
+  identity_cert_param  = "${local.param_prefix}/identity-cert"  # SecureString: base64(DER) QUIC leaf cert
+  desired_state_param  = "${local.param_prefix}/desired-state"  # String: {"total": N}
+  placement_param      = "${local.param_prefix}/placement"      # String: the reconciler's current random draw
+  intended_image_param = "${local.param_prefix}/intended-image" # String: {"image": "<immutable ref>", "sha": "<git sha>"}
 
   # Conventional ARNs (the params exist by name; no data-source dependency so
   # `plan` works before the mint scripts have run).
@@ -31,8 +32,9 @@ locals {
     "${local.param_arn_prefix}${local.identity_key_param}",
     "${local.param_arn_prefix}${local.identity_cert_param}",
   ]
-  desired_state_param_arn = "${local.param_arn_prefix}${local.desired_state_param}"
-  placement_param_arn     = "${local.param_arn_prefix}${local.placement_param}"
+  desired_state_param_arn  = "${local.param_arn_prefix}${local.desired_state_param}"
+  placement_param_arn      = "${local.param_arn_prefix}${local.placement_param}"
+  intended_image_param_arn = "${local.param_arn_prefix}${local.intended_image_param}"
 }
 
 # Desired-state IS Terraform-managed (non-secret) and seeded from pool_node_count.
@@ -64,6 +66,30 @@ resource "aws_ssm_parameter" "placement" {
   name  = local.placement_param
   type  = "String"
   value = jsonencode({ drawn_at = 0, placement = {} })
+
+  tags = { app = "pollis-relay" }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+# The intended relay BUILD, written by CI on every image roll (relay-image.yml)
+# and read by BOTH the reconciler (to positively identify build-stale nodes) and
+# every node's user-data (to launch the intended, immutable image — no `:latest`
+# anywhere in the launch path). Terraform only SEEDS it once, from var.relay_image,
+# then never touches the value again (ignore_changes), exactly like `placement` and
+# `desired_state`: after apply, CI owns it. Seeding from an empty relay_image writes
+# an empty record, which the reconciler and user-data both treat as "not recorded
+# yet" — the operator/CI must record a real immutable ref before nodes can launch
+# (see the runbook). The value shape is {"image": "<immutable ref>", "sha": "<git
+# sha>"}: user-data reads .image, the reconciler reads .sha.
+resource "aws_ssm_parameter" "intended_image" {
+  name = local.intended_image_param
+  type = "String"
+  # A digest ref has no separate git sha here at seed time, so record the ref as
+  # both when seeding by hand; CI writes the precise {image, sha} pair thereafter.
+  value = jsonencode({ image = var.relay_image, sha = "" })
 
   tags = { app = "pollis-relay" }
 
