@@ -33,20 +33,34 @@
 ///
 /// `Message` / `Edit` carry an MLS epoch and are epoch-gated (handled only once
 /// the shared group's replay reached — or provably can never reach — their
-/// epoch). `Delete` tombstones and any `Other` (unknown) type are
-/// epoch-independent and always handled.
+/// epoch). A delete tombstone is epoch-independent but is NOT unconditionally
+/// handled: its handled-ness is the outcome of applying its redaction on this
+/// device (#693 / #661 WS1), so the caller resolves it to one of two kinds:
+///   * `Delete` — the redaction took effect (applied now, already applied, or
+///     the target is permanently absent) ⇒ handled, the cursor may advance.
+///   * `DeletePending` — the redaction did NOT take effect and can still take
+///     effect on a later pass (target not yet ingested, or a transient local-DB
+///     error) ⇒ NOT handled, treated exactly like an unreached message so the
+///     cursor stops STRICTLY BELOW it and the next fetch re-applies it.
+///
+/// `Other` (unknown types) stay epoch-independent and always handled.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EnvKind {
     Message,
     Edit,
     Delete,
+    DeletePending,
     Other,
 }
 
 impl EnvKind {
-    /// Map a `message_envelope.type` string to the watermark's kind. Mirrors the
-    /// original `is_handled` match arms exactly: only `"message"` / `"edit"` are
-    /// epoch-gated; everything else (`"delete"`, unknown) is always handled.
+    /// Map a `message_envelope.type` string to the watermark's kind. This is the
+    /// STRING mapping only; a `"delete"` maps to `Delete` (the applied/handled
+    /// default) because a raw type string cannot know whether the redaction
+    /// landed. The real ingest path (`ingest_group_envelopes_interleaved`)
+    /// re-classifies a tombstone whose redaction did NOT take effect to
+    /// `DeletePending` before feeding it to [`next_watermark`]. `"message"` /
+    /// `"edit"` are epoch-gated; unknown types are always handled.
     pub fn from_type(env_type: &str) -> Self {
         match env_type {
             "message" => EnvKind::Message,
@@ -60,12 +74,18 @@ impl EnvKind {
 /// Is this envelope definitively handled (so the watermark may advance over it),
 /// or must a later pass retry it? `max_fired_epoch` is the furthest point the
 /// shared group's replay reached this pass (`None` = no local group, nothing
-/// could be decrypted). Kept private and byte-for-byte identical to the arms of
-/// the original inline `is_handled` closure.
+/// could be decrypted). `pub(crate)` (not public API) so the ingest path can ask
+/// the SAME question about a tombstone's target envelope when deciding whether a
+/// zero-row redaction is "not caught up yet" vs "permanently absent" — the arms
+/// are otherwise identical to the original inline `is_handled` closure.
 ///
 /// Generic over the epoch key `E` (see [`next_watermark`]): the only thing this
 /// asks of it is `<=`.
-fn is_handled<E: Ord + Copy>(kind: EnvKind, epoch: Option<E>, max_fired_epoch: Option<E>) -> bool {
+pub(crate) fn is_handled<E: Ord + Copy>(
+    kind: EnvKind,
+    epoch: Option<E>,
+    max_fired_epoch: Option<E>,
+) -> bool {
     match kind {
         EnvKind::Message | EnvKind::Edit => match (epoch, max_fired_epoch) {
             // Epoch within this pass's reach: decrypted now, or an unreachable
@@ -79,8 +99,12 @@ fn is_handled<E: Ord + Copy>(kind: EnvKind, epoch: Option<E>, max_fired_epoch: O
             // decrypted, so these must be retried once a group exists.
             (Some(_), None) => false,
         },
-        // delete tombstones / unknown types are epoch-independent.
+        // An applied tombstone / unknown type is epoch-independent and handled.
         EnvKind::Delete | EnvKind::Other => true,
+        // A tombstone whose redaction did not take effect this pass is held back
+        // exactly like an unreached message — the cursor must not advance past it
+        // (#693 / #661 WS1). Epoch is irrelevant: a tombstone carries none.
+        EnvKind::DeletePending => false,
     }
 }
 
@@ -139,6 +163,126 @@ pub fn next_watermark<S: Ord + Clone, E: Ord + Copy>(
     candidate
 }
 
+#[cfg(test)]
+mod delete_consumption_tests {
+    //! #693 / #661 (WS1): why a `delete` tombstone COULD be dropped where a
+    //! `message` never is — and the fix that closes the hole. These tests pin the
+    //! ASYMMETRY that `ingest_group_envelopes_interleaved` relies on, plus its
+    //! correction.
+    //!
+    //! A `message`/`edit` at an epoch this pass has not reached is NOT handled, so
+    //! `next_watermark` stops STRICTLY BELOW it and the next fetch re-delivers it
+    //! until it decrypts (message delivery is retried to success). A tombstone
+    //! whose redaction has APPLIED (`EnvKind::Delete`) is `is_handled == true`, so
+    //! the cursor advances past it — correct, it is done. The bug (now fixed) was
+    //! that ingest classified EVERY tombstone as `Delete` regardless of whether
+    //! its redaction `UPDATE` actually landed: a redaction matching zero rows, or
+    //! hitting a transient local-DB error, was consumed-and-lost and never
+    //! retried, leaving the deleted message readable on that device forever.
+    //!
+    //! The fix gives ingest a second classification, `EnvKind::DeletePending`, for
+    //! a tombstone whose redaction did NOT take effect but still can on a later
+    //! pass. `is_handled(DeletePending) == false`, so — exactly like an unreached
+    //! message — the cursor stops strictly below it and the next fetch re-applies
+    //! it. Which of the two a tombstone gets is decided by the redaction's outcome
+    //! (see `ingest::delete_resolution_tests`). The flows instrumentation
+    //! (`sealed_admin_delete_of_other_member_works`) still reports this live, and
+    //! the DS-side delivery is proven flake-free offline (`pollis_delivery`'s
+    //! `admin_delete_visibility_tests`).
+
+    use super::{next_watermark, EnvKind};
+
+    /// An APPLIED delete tombstone (`EnvKind::Delete`) is CONSUMED on the first
+    /// pass regardless of group state — the cursor jumps to its `sent_at`, because
+    /// its redaction is done. Contrast `a_pending_delete_...` (retry) and
+    /// `a_message_at_an_...` (retry).
+    #[test]
+    fn a_delete_tombstone_is_consumed_unconditionally() {
+        // No group state reached this pass (`max_fired_epoch = None`).
+        let envs: [(&str, EnvKind, Option<(i64, u64)>); 1] = [("t1", EnvKind::Delete, None)];
+        assert_eq!(
+            next_watermark(&envs, None),
+            Some("t1"),
+            "an APPLIED delete tombstone advances the watermark past itself — its \
+             redaction landed, so there is nothing to re-fetch"
+        );
+    }
+
+    /// THE FIX (#693 / #661 WS1): a tombstone whose redaction did NOT take effect
+    /// is classified `DeletePending` and is NOT consumed — the watermark refuses
+    /// to advance onto it, so the next fetch re-delivers and re-applies it. This
+    /// is the retry-to-success a dropped tombstone previously never got. Against
+    /// the pre-fix code (which had only `EnvKind::Delete`, `is_handled == true`
+    /// unconditionally) this same tombstone would have returned `Some("t1")` —
+    /// consumed and lost.
+    #[test]
+    fn a_pending_delete_is_retried_not_consumed() {
+        let envs: [(&str, EnvKind, Option<(i64, u64)>); 1] = [("t1", EnvKind::DeletePending, None)];
+        assert_eq!(
+            next_watermark(&envs, None),
+            None,
+            "a tombstone whose redaction did not take effect must NOT be consumed — \
+             it is re-fetched until the redaction lands (like an unreached message)"
+        );
+    }
+
+    /// A `DeletePending` tombstone stamped ABOVE an already-applied `Delete` holds
+    /// the cursor strictly below itself: the applied tombstone below it is not
+    /// re-consumed past the pending one, so the pending tombstone (and everything
+    /// at/above it) is re-fetched next pass. Mirrors the message/unreached-message
+    /// shape but with two tombstones.
+    #[test]
+    fn a_pending_delete_holds_the_cursor_below_itself() {
+        let envs: [(&str, EnvKind, Option<(i64, u64)>); 2] = [
+            ("t1", EnvKind::Delete, None),
+            ("t2", EnvKind::DeletePending, None),
+        ];
+        assert_eq!(
+            next_watermark(&envs, None),
+            Some("t1"),
+            "the cursor advances over the applied tombstone (t1) but stops strictly \
+             below the pending one (t2), which is re-fetched next pass"
+        );
+    }
+
+    /// The contrast: a message at an epoch the replay has not reached is NOT
+    /// consumed — the watermark refuses to advance onto it, so it is re-fetched
+    /// until decryptable. This is the retry-to-success a delete tombstone does NOT
+    /// get.
+    #[test]
+    fn a_message_at_an_unreached_epoch_is_retried_not_consumed() {
+        let envs: [(&str, EnvKind, Option<(i64, u64)>); 1] =
+            [("t1", EnvKind::Message, Some((0, 5)))];
+        assert_eq!(
+            next_watermark(&envs, None),
+            None,
+            "an undecryptable message must NOT be consumed — it is re-fetched until \
+             its epoch is reached (unlike a delete tombstone)"
+        );
+    }
+
+    /// The concrete #661 ordering: a delete tombstone stamped ABOVE a
+    /// still-undecryptable message is consumed while the message is held back, so
+    /// the cursor stops below the message and the tombstone is (correctly)
+    /// re-fetched next pass — the watermark logic itself never strands the
+    /// tombstone. The drop can therefore only come from the APPLICATION step
+    /// discarding the redaction outcome, not from the cursor.
+    #[test]
+    fn a_tombstone_above_an_unreached_message_does_not_advance_past_the_message() {
+        let envs: [(&str, EnvKind, Option<(i64, u64)>); 2] = [
+            ("t1", EnvKind::Message, Some((0, 5))),
+            ("t2", EnvKind::Delete, None),
+        ];
+        // The message (t1) is unhandled, so the cursor cannot reach t2 either.
+        assert_eq!(
+            next_watermark(&envs, None),
+            None,
+            "with an unreached message below it, the delete is not consumed this \
+             pass — so a lost delete is an application failure, not a cursor bug"
+        );
+    }
+}
+
 // ─── Kani proof harnesses ────────────────────────────────────────────────────
 //
 // Behind `#[cfg(kani)]` only — never compiled into the runtime crate. Bounded to
@@ -159,10 +303,15 @@ mod proofs {
 
     impl kani::Arbitrary for EnvKind {
         fn any() -> Self {
-            match kani::any::<u8>() % 4 {
+            // Cover all five kinds so the proofs exercise the `DeletePending`
+            // (never-handled) arm alongside the epoch-gated and always-handled
+            // ones — it participates in `is_handled` exactly like an unreached
+            // message, so P1/P2/P3 must hold with it in the mix.
+            match kani::any::<u8>() % 5 {
                 0 => EnvKind::Message,
                 1 => EnvKind::Edit,
                 2 => EnvKind::Delete,
+                3 => EnvKind::DeletePending,
                 _ => EnvKind::Other,
             }
         }

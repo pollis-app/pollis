@@ -1857,6 +1857,141 @@ async fn sealed_non_admin_self_delete_works() {
     drop((alice, bob));
 }
 
+/// #693 / #661 (WS1) — self-diagnosing report for a failed admin-delete
+/// redaction. When carol's copy is NOT redacted, this inspects the state that
+/// distinguishes the issue's candidates at the MOMENT of failure, so the next CI
+/// flake says WHICH mechanism it was instead of only "got bob's post":
+///
+///   * **tombstone never written** — no `type='delete'` row on the server ⇒ the
+///     admin branch didn't run (e.g. the client misresolved self-vs-admin).
+///   * **never fetched (candidate 1 — ordering/visibility)** — the tombstone
+///     exists but sorts at/under carol's reported watermark
+///     (`last_fetched_at`), so her `sent_at > watermark` fetch skipped it. The
+///     offline `admin_delete_visibility_tests` prove this cannot happen at the
+///     envelope layer, so seeing it here would be a genuine surprise worth the
+///     shout.
+///   * **fetched but not applied (candidate 2)** — the tombstone sorts strictly
+///     above carol's watermark (she DID fetch it) yet her local row is still
+///     unredacted ⇒ the drop is in `ingest.rs`'s APPLICATION of the tombstone
+///     (the redaction `UPDATE` is fire-and-forget and the watermark advances
+///     past a `delete` unconditionally — `is_handled(Delete) == true`).
+///
+/// Read-only: it only observes state, never waits or retries, so it cannot mask
+/// the flake (the hard rule in #693).
+async fn diagnose_admin_delete_failure(
+    carol: &TestClient,
+    conversation_id: &str,
+    msg_id: &str,
+) -> String {
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+
+    // The tombstone the admin delete should have written (if any).
+    let tombstone: Option<String> = {
+        let mut rows = conn
+            .query(
+                "SELECT sent_at FROM message_envelope \
+                 WHERE target_message_id = ?1 AND type = 'delete'",
+                libsql::params![msg_id.to_string()],
+            )
+            .await
+            .expect("tombstone query");
+        rows.next()
+            .await
+            .expect("row")
+            .map(|r| r.get::<String>(0).expect("sent_at"))
+    };
+    let original_present: bool = {
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM message_envelope WHERE id = ?1 AND type = 'message'",
+                libsql::params![msg_id.to_string()],
+            )
+            .await
+            .expect("original query");
+        rows.next().await.expect("row").is_some()
+    };
+
+    let carol_device = carol.state.device_id.lock().await.clone().unwrap_or_default();
+    let carol_user = carol.user_id();
+    let watermark: Option<String> = {
+        let mut rows = conn
+            .query(
+                "SELECT last_fetched_at FROM conversation_watermark \
+                 WHERE conversation_id = ?1 AND user_id = ?2 AND device_id = ?3",
+                libsql::params![
+                    conversation_id.to_string(),
+                    carol_user.to_string(),
+                    carol_device.clone()
+                ],
+            )
+            .await
+            .expect("watermark query");
+        rows.next()
+            .await
+            .expect("row")
+            .map(|r| r.get::<String>(0).expect("last_fetched_at"))
+    };
+
+    // carol's LOCAL row — the copy the assertion reads.
+    let (local_content, local_deleted_at): (Option<String>, Option<String>) = {
+        use rusqlite::OptionalExtension;
+        let guard = carol.state.local_db.lock().await;
+        let db = guard.as_ref().expect("carol local db");
+        db.conn()
+            .query_row(
+                "SELECT content, deleted_at FROM message WHERE id = ?1",
+                rusqlite::params![msg_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .expect("local row query")
+            .unwrap_or((None, None))
+    };
+
+    let classification = match (&tombstone, &watermark) {
+        (None, _) => {
+            "TOMBSTONE NEVER WRITTEN — the admin delete did not write a \
+             type='delete' row (self-vs-admin misresolution?)."
+                .to_string()
+        }
+        (Some(ts), wm) => {
+            let fetched = match wm {
+                // No watermark row, or a watermark strictly below the tombstone,
+                // means carol's `sent_at > watermark` fetch WOULD return it.
+                None => true,
+                Some(w) => ts.as_str() > w.as_str(),
+            };
+            if fetched {
+                "FETCHED-BUT-NOT-APPLIED (candidate 2) — the tombstone sorts \
+                 strictly above carol's watermark, so her ingest fetched it, yet \
+                 her local row is unredacted. The drop is in ingest.rs's \
+                 application of the tombstone, NOT its delivery."
+                    .to_string()
+            } else {
+                format!(
+                    "NEVER-FETCHED (candidate 1 — ordering/visibility) — tombstone \
+                     sent_at {ts} does NOT sort above carol's watermark {wm:?}, so \
+                     her `sent_at > watermark` fetch skipped it. This contradicts \
+                     the offline admin_delete_visibility_tests — investigate."
+                )
+            }
+        }
+    };
+
+    format!(
+        "\n─── #693 admin-delete diagnosis ───\n\
+         classification : {classification}\n\
+         tombstone.sent_at (server) : {tombstone:?}\n\
+         original envelope present  : {original_present}\n\
+         carol watermark (server)   : {watermark:?}\n\
+         carol local content        : {local_content:?}\n\
+         carol local deleted_at      : {local_deleted_at:?}\n\
+         carol device_id            : {carol_device}\n\
+         ───────────────────────────────────"
+    )
+}
+
 /// Sealed DELETE, admin: an admin (alice, the group creator) deletes ANOTHER
 /// member's (bob's) message via the tombstone path. The DS re-derives alice's
 /// admin role (a permission check, not an author check), removes the envelope,
@@ -1903,11 +2038,18 @@ async fn sealed_admin_delete_of_other_member_works() {
         .iter()
         .find(|m| m["id"] == msg_id)
         .expect("row present as a tombstone");
-    assert!(
-        m["content"].is_null(),
-        "carol's copy must be redacted by the admin tombstone, got {:?}",
-        m["content"]
-    );
+    // #693/#661 (WS1): on the flaky failure, report WHICH mechanism it was
+    // (tombstone never written / never fetched / fetched-but-not-applied) rather
+    // than only the observed content. Read-only — no wait/retry, so it can't mask
+    // the flake. Kept as a branch (not an `assert!` message) because gathering the
+    // diagnosis is async.
+    if !m["content"].is_null() {
+        let diag = diagnose_admin_delete_failure(&carol, &channel_id, &msg_id).await;
+        panic!(
+            "carol's copy must be redacted by the admin tombstone, got {:?}{diag}",
+            m["content"]
+        );
+    }
     assert!(
         m["deleted_at"].as_str().is_some(),
         "carol's copy must carry a deleted_at tombstone"

@@ -50,10 +50,11 @@ struct Input {
 }
 
 fn kind_of(raw: u8) -> EnvKind {
-    match raw % 4 {
+    match raw % 5 {
         0 => EnvKind::Message,
         1 => EnvKind::Edit,
         2 => EnvKind::Delete,
+        3 => EnvKind::DeletePending,
         _ => EnvKind::Other,
     }
 }
@@ -68,6 +69,9 @@ fn handled(kind: EnvKind, epoch: Option<u64>, max_fired: Option<u64>) -> bool {
             (Some(_), None) => false,
         },
         EnvKind::Delete | EnvKind::Other => true,
+        // A tombstone whose redaction did not take effect is held back like an
+        // unreached message (#693 / #661 WS1).
+        EnvKind::DeletePending => false,
     }
 }
 

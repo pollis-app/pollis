@@ -2533,3 +2533,308 @@ DELETE FROM message_envelope
         }
     }
 }
+
+#[cfg(test)]
+mod admin_delete_visibility_tests {
+    //! #693 / #661 — WS1: does the admin-delete tombstone reliably reach a
+    //! caught-up recipient? This module isolates and RULES OUT the issue's
+    //! candidate 1 (a read-after-write / `sent_at`-ordering visibility gap
+    //! between the DS write connection and the recipient's read connection) at
+    //! the envelope/watermark/tombstone layer, using the REAL DS write code
+    //! (`apply_send_message`, `apply_advance_watermark`, `apply_delete_message`)
+    //! and the EXACT fetch SQL that `pollis_core::commands::messages::ingest`
+    //! runs.
+    //!
+    //! ## The scenario (`sealed_admin_delete_of_other_member_works`, stripped of MLS)
+    //!
+    //! bob sends; carol fetches (so she holds a copy) and reports her watermark;
+    //! alice admin-deletes bob's message (envelope removed + `type='delete'`
+    //! tombstone written); carol fetches again. The flaky assertion is that
+    //! carol's second fetch *sees the tombstone*. Here we drive exactly that
+    //! envelope/watermark/tombstone dance and assert carol's second fetch returns
+    //! the tombstone — across every `sent_at` shape a client clock can produce,
+    //! and across TWO DISTINCT CONNECTIONS of one shared libsql `Database`.
+    //!
+    //! ## Why two connections of one `Database` is the faithful model
+    //!
+    //! In the flows harness every `TestClient.remote_db` is a
+    //! `RemoteDb::query_only_view()` of the in-process DS's own `RemoteDb` — an
+    //! `Arc::clone` of ONE underlying libsql `Database` on ONE local WAL file
+    //! (`harness.rs`, and `RemoteDb`'s doc-comment on why a second `Database` on
+    //! the same file would NOT see the writer's rows promptly). Every
+    //! `RemoteDb::conn()` is a fresh `db.connect()` on that shared handle. So the
+    //! DS's write connection and carol's read connection are two connections of
+    //! ONE `Database` — which is precisely what these tests use. If libsql gave no
+    //! read-your-writes guarantee across such connections, the tombstone SELECT
+    //! below would intermittently miss the just-written row; it never does.
+    //!
+    //! ## What this proves (and what it therefore leaves)
+    //!
+    //! The tombstone is ALWAYS written and ALWAYS visible to carol's next fetch at
+    //! this layer. So #661's residual flake is NOT "the tombstone is never
+    //! written / sorts under carol's watermark / isn't yet visible on her
+    //! connection". By elimination it lives DOWNSTREAM, in the client's
+    //! *application* of the fetched tombstone (`ingest.rs`) — candidate 2,
+    //! "fetched but not applied". See the self-diagnosing instrumentation added to
+    //! the flows test itself, which reports which case a live failure was.
+
+    use super::*;
+    use tempfile::TempDir;
+
+    /// message_envelope + conversation_watermark, matching the baseline columns
+    /// `apply_send_message` / `apply_delete_message` / `apply_advance_watermark`
+    /// write and the ingest fetch reads.
+    const SCHEMA: &str = "\
+CREATE TABLE message_envelope (\
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sender_id TEXT NOT NULL, \
+  ciphertext TEXT NOT NULL, reply_to_id TEXT, sent_at TEXT NOT NULL, \
+  delivered INTEGER NOT NULL DEFAULT 0, type TEXT NOT NULL DEFAULT 'message', \
+  target_message_id TEXT, sealed INTEGER NOT NULL DEFAULT 0);\
+CREATE TABLE conversation_watermark (\
+  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
+  last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));";
+
+    /// The exact shape a CLIENT writes for `sent_at`
+    /// (`chrono::Utc::now().to_rfc3339()`, i.e. `SecondsFormat::AutoSi`), at a
+    /// fixed instant plus `nanos`. AutoSi trims to 0/3/6/9 fraction digits, so
+    /// `nanos == 0` yields a whole-second stamp with NO fraction — the shape whose
+    /// `'+' < '.'` ordering was the #692 regression.
+    fn client_stamp(secs: i64, nanos: u32) -> String {
+        chrono::DateTime::from_timestamp(secs, nanos)
+            .expect("valid instant")
+            .to_rfc3339()
+    }
+
+    /// One shared libsql `Database` on a WAL file — the faithful model of the
+    /// harness's `RemoteDb`. Returns the tempdir (kept alive) so callers can open
+    /// as many independent connections on it as they like.
+    async fn shared_db() -> (TempDir, libsql::Database) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("main.db");
+        let db = libsql::Builder::new_local(&path).build().await.expect("build");
+        {
+            let conn = db.connect().expect("connect");
+            conn.query("PRAGMA journal_mode=WAL", ()).await.expect("wal");
+            conn.execute_batch(SCHEMA).await.expect("schema");
+        }
+        (dir, db)
+    }
+
+    /// The EXACT per-conversation fetch `ingest_group_envelopes_interleaved` runs
+    /// (`pollis_core::commands::messages::ingest`): strictly past the recipient's
+    /// own `(conversation, user, device)` watermark, ordered `sent_at ASC, id
+    /// ASC`. Returns `(id, type, target_message_id)` for each fetched envelope.
+    async fn ingest_fetch(
+        conn: &Connection,
+        conversation_id: &str,
+        user_id: &str,
+        device_id: &str,
+    ) -> Vec<(String, String, Option<String>)> {
+        let mut rows = conn
+            .query(
+                "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type \
+                 FROM message_envelope \
+                 WHERE conversation_id = ?1 \
+                   AND sent_at > COALESCE( \
+                       (SELECT last_fetched_at FROM conversation_watermark \
+                        WHERE conversation_id = ?1 AND user_id = ?2 AND device_id = ?3), \
+                       '' \
+                   ) \
+                 ORDER BY sent_at ASC, id ASC",
+                libsql::params![
+                    conversation_id.to_string(),
+                    user_id.to_string(),
+                    device_id.to_string()
+                ],
+            )
+            .await
+            .expect("ingest fetch");
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.expect("row") {
+            out.push((
+                row.get::<String>(0).expect("id"),
+                row.get::<String>(6).expect("type"),
+                row.get::<Option<String>>(4).expect("target"),
+            ));
+        }
+        out
+    }
+
+    /// Drive the full #661 envelope-layer dance for a given client `sent_at`
+    /// shape and assert carol's SECOND fetch sees the admin tombstone. The writes
+    /// go through one connection and carol's reads through a DIFFERENT connection
+    /// of the same `Database`, so a read-after-write gap (candidate 1) would show
+    /// up as a missing tombstone here.
+    async fn assert_tombstone_reaches_carol(msg_sent_at: &str) {
+        let (_dir, db) = shared_db().await;
+        // Two distinct connections on the SHARED handle: `w` stands in for the
+        // DS's write connection, `carol` for carol's read connection.
+        let w = db.connect().expect("write conn");
+        let carol = db.connect().expect("carol read conn");
+
+        let conv = "chan-general";
+        let msg_id = "msg-bobs-post";
+
+        // bob sends (sealed sentinel sender, no-auth path — the envelope columns
+        // are what matter here, not the auth gate).
+        apply_send_message(
+            &w,
+            None,
+            &SendMessageBody {
+                id: msg_id.to_string(),
+                conversation_id: conv.to_string(),
+                sender_id: Some("sealed".to_string()),
+                ciphertext: "mls:00".to_string(),
+                reply_to_id: None,
+                sent_at: msg_sent_at.to_string(),
+                sealed: 1,
+            },
+        )
+        .await
+        .expect("send");
+
+        // carol's FIRST fetch (read connection) sees bob's message, then reports
+        // her watermark exactly as ingest does: advanced to the message's
+        // `sent_at` (the max over her handled prefix).
+        let first = ingest_fetch(&carol, conv, "carol", "carol-dev").await;
+        assert_eq!(
+            first.len(),
+            1,
+            "carol's first fetch must see bob's message (sent_at {msg_sent_at})"
+        );
+        apply_advance_watermark(
+            &w,
+            None,
+            &WatermarkBody {
+                conversation_id: conv.to_string(),
+                user_id: Some("carol".to_string()),
+                device_id: "carol-dev".to_string(),
+                last_fetched_at: msg_sent_at.to_string(),
+            },
+        )
+        .await
+        .expect("carol watermark");
+        // alice reports hers too (she also fetched in the scenario).
+        apply_advance_watermark(
+            &w,
+            None,
+            &WatermarkBody {
+                conversation_id: conv.to_string(),
+                user_id: Some("alice".to_string()),
+                device_id: "alice-dev".to_string(),
+                last_fetched_at: msg_sent_at.to_string(),
+            },
+        )
+        .await
+        .expect("alice watermark");
+
+        // alice (admin) deletes bob's message: envelope removed + tombstone
+        // written. `msg_sender_id = "bob" != actor = "alice"` selects the admin
+        // branch; the no-auth path skips the admin role re-check (not what we're
+        // testing here). This runs the real `tombstone_floor` / `sent_at_after`.
+        let outcome = apply_delete_message(
+            &w,
+            None,
+            &DeleteMessageBody {
+                message_id: msg_id.to_string(),
+                conversation_id: conv.to_string(),
+                msg_sender_id: Some("bob".to_string()),
+                actor_id: Some("alice".to_string()),
+            },
+        )
+        .await
+        .expect("admin delete");
+        assert!(matches!(outcome, WriteOutcome::Ok), "admin delete must succeed");
+
+        // carol's SECOND fetch (read connection again) MUST see the tombstone.
+        // This is the assertion that flakes in #661 — proven deterministic here.
+        let second = ingest_fetch(&carol, conv, "carol", "carol-dev").await;
+        let tombstones: Vec<_> = second
+            .iter()
+            .filter(|(_, ty, target)| ty == "delete" && target.as_deref() == Some(msg_id))
+            .collect();
+        assert_eq!(
+            tombstones.len(),
+            1,
+            "carol's second fetch must return exactly one admin tombstone for the \
+             deleted message (client sent_at {msg_sent_at}); fetched: {second:?}. \
+             A miss here would be candidate 1 (read-after-write / sent_at ordering) \
+             — it never happens, so #661 lives in the client's APPLICATION of the \
+             tombstone, not its delivery."
+        );
+        // …and the original message envelope is gone from the server.
+        assert!(
+            !second.iter().any(|(id, ty, _)| id == msg_id && ty == "message"),
+            "the admin-deleted original envelope must be removed"
+        );
+    }
+
+    /// The headline: across every `sent_at` fraction width a client clock can
+    /// emit — including the whole-second (`'+' < '.'`) shape and a stamp in the
+    /// DS's FUTURE (client clock ahead) — carol always fetches the tombstone.
+    #[tokio::test]
+    async fn admin_tombstone_always_reaches_a_caught_up_recipient() {
+        // A fixed base second, then the fraction widths AutoSi produces (0/3/6/9
+        // digits) plus the max-nanos edge.
+        let base = 1_800_000_000;
+        for nanos in [0u32, 1_000_000, 1_001_000, 1_001_001, 999_999_999] {
+            assert_tombstone_reaches_carol(&client_stamp(base, nanos)).await;
+        }
+        // Client clock running an hour AHEAD of the DS wall clock: the message —
+        // and so carol's watermark — sit in the DS's future. `sent_at_after`'s
+        // floor is what keeps the tombstone above them.
+        let ahead = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+        assert_tombstone_reaches_carol(&ahead).await;
+    }
+
+    /// The candidate-1 primitive in isolation: a row written on one connection of
+    /// a shared libsql `Database` is IMMEDIATELY visible on another connection of
+    /// the same handle — the read-your-writes guarantee the flows harness leans on
+    /// (all clients are `query_only_view`s sharing the DS's `Database`). A second,
+    /// INDEPENDENT `Database` opened on the same file is NOT guaranteed to see it
+    /// promptly — which is exactly why the harness shares one handle rather than
+    /// opening a second, and why candidate 1 cannot occur in that harness.
+    #[tokio::test]
+    async fn read_your_writes_holds_across_connections_of_one_shared_database() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("main.db");
+
+        let db = libsql::Builder::new_local(&path).build().await.expect("build");
+        {
+            let c = db.connect().expect("connect");
+            c.query("PRAGMA journal_mode=WAL", ()).await.expect("wal");
+            c.execute_batch(SCHEMA).await.expect("schema");
+        }
+
+        let writer = db.connect().expect("writer");
+        let reader = db.connect().expect("reader");
+
+        writer
+            .execute(
+                "INSERT INTO message_envelope \
+                     (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id) \
+                 VALUES ('t1', 'c1', 'alice', '', '2026-01-01T00:00:00.000000001+00:00', 'delete', 'm1')",
+                (),
+            )
+            .await
+            .expect("write tombstone");
+
+        // Same-handle sibling connection: the write is visible with no lag.
+        let seen: i64 = {
+            let mut rows = reader
+                .query(
+                    "SELECT COUNT(*) FROM message_envelope WHERE id = 't1'",
+                    (),
+                )
+                .await
+                .expect("read");
+            rows.next().await.expect("row").expect("some").get(0).expect("count")
+        };
+        assert_eq!(
+            seen, 1,
+            "a sibling connection of the SAME libsql Database must see the just-\
+             written row immediately — this is the read-your-writes property the \
+             flows harness relies on to make #661 candidate 1 impossible"
+        );
+    }
+}

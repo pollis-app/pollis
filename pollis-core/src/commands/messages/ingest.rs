@@ -1,5 +1,5 @@
 use rusqlite::OptionalExtension;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::error::Result;
@@ -16,6 +16,73 @@ type EnvelopeRow = (
     String,
     String,
 );
+
+/// Whether a delete tombstone's redaction is done on this device, or must be
+/// retried on a later pass (#693 / #661 WS1). Consumed by
+/// [`ingest_group_envelopes_interleaved`] to choose the tombstone's `EnvKind`
+/// (`Delete` vs `DeletePending`) and thus whether the watermark advances past it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DeleteResolution {
+    /// Terminally handled — the cursor may advance past the tombstone. Covers:
+    /// the redaction was applied now; it was already applied (idempotent
+    /// re-application); or the target is a message this device will never receive
+    /// (a pre-join loss), so the redaction is vacuously satisfied.
+    Handled,
+    /// Not done, but still applicable on a later pass — the cursor must stop below
+    /// the tombstone so the next fetch re-applies it. Covers: a transient local-DB
+    /// error, or the target has not been ingested yet (still awaiting decryption).
+    Pending,
+}
+
+/// Decide a delete tombstone's fate from its redaction outcome. Pure so the
+/// edge-case matrix is unit-testable offline (`delete_resolution_tests`) without
+/// a DB:
+///   * `applied_rows` — `None` if the redaction `UPDATE` errored (transient →
+///     retry), else `Some(n)` rows redacted now.
+///   * `target_present` — a `message` row with this id exists locally (redacted
+///     or not). Only consulted on the zero-row path.
+///   * `target_awaiting_ingest` — the target's envelope is still in this
+///     conversation's fetch set at an epoch the replay has not reached, i.e.
+///     absent *because we have not caught up yet* (retry) rather than absent
+///     *because it is a pre-join message we will never receive* (terminal).
+///
+/// A tombstone that can never be applied on this device (target permanently
+/// absent) has a DEFINED terminal state — `Handled` — and is NOT silently
+/// consumed while still applicable: the only silent advance is over a target we
+/// provably will never receive, which is an accepted loss (a message sent before
+/// we joined the MLS tree). Ordering is a second guard: the target message is
+/// always stamped below its tombstone, so an awaiting target already holds the
+/// cursor below itself — this predicate makes that intent explicit rather than
+/// emergent.
+fn resolve_delete(
+    applied_rows: Option<usize>,
+    target_present: bool,
+    target_awaiting_ingest: bool,
+) -> DeleteResolution {
+    match applied_rows {
+        // The redaction UPDATE errored — treat as transient and retry. A truly
+        // permanent local-DB fault (corruption / disk-full) wedges far more than
+        // one tombstone and is out of scope; holding the cursor is the safe choice
+        // over silently dropping the redaction.
+        None => DeleteResolution::Pending,
+        // Rows redacted now — applied.
+        Some(n) if n >= 1 => DeleteResolution::Handled,
+        // Zero rows: nothing un-redacted matched.
+        Some(_) => {
+            if target_present {
+                // The row exists but was already redacted — idempotent, handled.
+                DeleteResolution::Handled
+            } else if target_awaiting_ingest {
+                // Absent only because we have not decrypted the target yet.
+                DeleteResolution::Pending
+            } else {
+                // Absent for good — a pre-join message we will never receive. The
+                // redaction is vacuously satisfied; retrying forever can't help.
+                DeleteResolution::Handled
+            }
+        }
+    }
+}
 
 /// Pull new envelopes for a channel from remote, decrypt, and persist into the
 /// local `message` table (the authoritative history for this device).
@@ -303,22 +370,80 @@ async fn ingest_group_envelopes_interleaved(
     // across all conversations after decryption, so a tombstone whose target was
     // just decrypted this pass still lands. The ciphertext is empty — there is
     // nothing to decrypt.
+    //
+    // The redaction's OUTCOME decides whether the tombstone is consumed (#693 /
+    // #661 WS1). A tombstone whose `UPDATE` did not take effect but still can on a
+    // later pass — the target message has not been ingested yet, or a transient
+    // local-DB error — is recorded in `pending_deletes` and re-classified to
+    // `EnvKind::DeletePending` below, so the watermark holds strictly below it and
+    // the next fetch re-applies it (mirroring the undecryptable-message retry
+    // path). A tombstone whose redaction landed, was already applied, or targets a
+    // message this device will never receive (a pre-join loss) is terminally
+    // handled and the cursor advances past it. See `resolve_delete`.
+    let mut pending_deletes: HashSet<(usize, usize)> = HashSet::new();
     {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        for (_cid, envs) in per_conv {
-            for (_, _, _, _, target_id, _, env_type) in envs {
-                if env_type == "delete" {
-                    if let Some(tid) = target_id.as_ref() {
-                        let now = chrono::Utc::now().to_rfc3339();
-                        let _ = db.conn().execute(
-                            "UPDATE message SET content = NULL, deleted_at = ?1
-                             WHERE id = ?2 AND deleted_at IS NULL",
-                            rusqlite::params![now, tid],
-                        );
-                    }
+        for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
+            for (ei, (_, _, _, _, target_id, _, env_type)) in envs.iter().enumerate() {
+                if env_type != "delete" {
+                    continue;
+                }
+                // A tombstone with no target cannot redact anything — there is
+                // nothing to apply and nothing a retry could fix. Terminally
+                // handled: leave it to advance the cursor.
+                let Some(tid) = target_id.as_ref() else {
+                    continue;
+                };
+                let now = chrono::Utc::now().to_rfc3339();
+                // `None` = the redaction UPDATE errored (treated as transient →
+                // retry). `Some(n)` = n rows redacted now.
+                let applied_rows: Option<usize> = db
+                    .conn()
+                    .execute(
+                        "UPDATE message SET content = NULL, deleted_at = ?1
+                         WHERE id = ?2 AND deleted_at IS NULL",
+                        rusqlite::params![now, tid],
+                    )
+                    .ok();
+                // Only meaningful on the zero-row path: does a row with this id
+                // exist at all (already redacted → present; genuinely absent →
+                // not)? Skip the query when the UPDATE already told us (>=1 row
+                // matched ⇒ present; error ⇒ Pending regardless).
+                let target_present = if applied_rows == Some(0) {
+                    db.conn()
+                        .query_row(
+                            "SELECT 1 FROM message WHERE id = ?1",
+                            rusqlite::params![tid],
+                            |_| Ok(true),
+                        )
+                        .optional()
+                        .ok()
+                        .flatten()
+                        .unwrap_or(false)
+                } else {
+                    true
+                };
+                // Is the target still awaiting ingest in THIS conversation's fetch
+                // set — a message/edit at an epoch the replay has not reached? That
+                // is "absent because we have not caught up yet" (must retry), as
+                // distinct from "absent because it is a pre-join message we will
+                // never receive" (terminal). Uses the same `is_handled` the
+                // watermark does, over the target envelope's parsed epoch.
+                let target_awaiting = envs.iter().enumerate().any(|(ej, e)| {
+                    &e.0 == tid
+                        && !super::watermark::is_handled(
+                            super::watermark::EnvKind::from_type(e.6.as_str()),
+                            epoch_of[ci][ej],
+                            max_fired_epoch,
+                        )
+                });
+                if let DeleteResolution::Pending =
+                    resolve_delete(applied_rows, target_present, target_awaiting)
+                {
+                    pending_deletes.insert((ci, ei));
                 }
             }
         }
@@ -337,11 +462,15 @@ async fn ingest_group_envelopes_interleaved(
             .iter()
             .enumerate()
             .map(|(ei, env)| {
-                (
-                    env.5.as_str(),
-                    super::watermark::EnvKind::from_type(env.6.as_str()),
-                    epoch_of[ci][ei],
-                )
+                // A tombstone whose redaction did not take effect this pass is
+                // held back as `DeletePending` (not `Delete`) so the cursor stops
+                // strictly below it — the fix for #693 / #661 WS1.
+                let kind = if env.6 == "delete" && pending_deletes.contains(&(ci, ei)) {
+                    super::watermark::EnvKind::DeletePending
+                } else {
+                    super::watermark::EnvKind::from_type(env.6.as_str())
+                };
+                (env.5.as_str(), kind, epoch_of[ci][ei])
             })
             .collect();
         let watermark =
@@ -566,4 +695,66 @@ pub async fn ingest_dm_envelopes(
     state: &Arc<AppState>,
 ) -> Result<()> {
     ingest_dm_envelopes_inner(state, &user_id, &dm_channel_id).await
+}
+
+#[cfg(test)]
+mod delete_resolution_tests {
+    //! #693 / #661 (WS1): the redaction-outcome → tombstone-fate decision, the
+    //! fix for a delete that was consumed-and-lost when its `UPDATE` matched zero
+    //! rows or errored. These pin the full edge-case matrix the reviewer called
+    //! out — applied, already-redacted, transient error, and the two flavours of
+    //! "target absent" that MUST be distinguished (not-caught-up vs pre-join). The
+    //! complementary watermark half is `watermark::delete_consumption_tests`.
+
+    use super::{resolve_delete, DeleteResolution};
+
+    /// The redaction matched a live row this pass — done.
+    #[test]
+    fn applied_now_is_handled() {
+        assert_eq!(
+            resolve_delete(Some(1), true, false),
+            DeleteResolution::Handled
+        );
+    }
+
+    /// Zero rows but the row exists (already redacted on a prior pass) — idempotent
+    /// re-application is handled, NOT a zero-row failure that wedges the cursor.
+    #[test]
+    fn already_redacted_is_handled() {
+        assert_eq!(
+            resolve_delete(Some(0), true, false),
+            DeleteResolution::Handled
+        );
+    }
+
+    /// Zero rows, no local row, but the target is still awaiting ingest (an
+    /// unreached epoch in this fetch set) — absent because we have not caught up
+    /// yet, so retry rather than consume.
+    #[test]
+    fn absent_but_awaiting_ingest_is_pending() {
+        assert_eq!(
+            resolve_delete(Some(0), false, true),
+            DeleteResolution::Pending
+        );
+    }
+
+    /// Zero rows, no local row, and the target is NOT awaiting ingest — a pre-join
+    /// message this device will never receive. Terminal: the redaction is
+    /// vacuously satisfied and retrying forever cannot help, so it is handled (and
+    /// does NOT spin).
+    #[test]
+    fn absent_pre_join_is_handled_terminally() {
+        assert_eq!(
+            resolve_delete(Some(0), false, false),
+            DeleteResolution::Handled
+        );
+    }
+
+    /// The redaction UPDATE errored (a transient local-DB fault) — retry, never
+    /// silently consume. Holds regardless of the (unknown) target state.
+    #[test]
+    fn transient_db_error_is_pending() {
+        assert_eq!(resolve_delete(None, false, false), DeleteResolution::Pending);
+        assert_eq!(resolve_delete(None, true, false), DeleteResolution::Pending);
+    }
 }
