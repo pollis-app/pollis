@@ -1,10 +1,12 @@
 # Design: STH Signing-Key Custody and Rotation
 
-**Status:** §5 (the key set + overlap window) is **BUILT** (#740). §4 custody is **DECIDED —
-Option A, the CI secret** (2026-08-03), knowingly against §4's own recommendation. **§6 (the
-anchor split) is the one decision still outstanding**, and §6's deadline has already passed:
-the hierarchy was fixed when #732 minted and pinned. See §9 for the full ledger. Resolves the
-design half of #700; part of #662. The runbook in §7 was executed by #732/#740.
+**Status:** every §9 decision is now made. §5 (the key set + overlap window) is **BUILT** (#740).
+§4 custody is **DECIDED — Option A, the CI secret** (2026-08-03), knowingly against §4's own
+recommendation. §6 (the anchor split) is **DECIDED — adopt** (2026-08-04), implementation tracked in
+**#754**; that choice follows directly from the custody one. Two items remain open but need no
+decision: the overlap-window length (unset until a rotation needs it) and whether gossip/witness
+monitoring (§8) gets its own ticket. See §9 for the ledger. Resolves the design half of #700; part
+of #662. The runbook in §7 was executed by #732/#740.
 **Scope:** the key that signs Signed Tree Heads for the three transparency trees. Not MLS keys, not
 account identity keys, not release code-signing certificates.
 
@@ -22,7 +24,7 @@ account identity keys, not release code-signing certificates.
 | Clients pin a **set**: `PINNED_LOG_PUBLIC_KEYS: &[PinnedKey]`, each with a `key_id` and an optional `not_after` (§5, #732) | `pollis-core/src/commands/transparency.rs` |
 | The set currently holds **one key with no expiry** — the material minted in #732 | same |
 | The served trust anchor `/v1/public_key.json` carries a **key list**, with the single `public_key` field retained for older verifiers | `verifiable-log-serve/src/bundle.rs` |
-| A rotation path, key set, overlap window and runbook now exist; custody (§4) is decided (Option A, the CI secret); **the anchor split (§6) remains undecided** | §5, §7, §9 |
+| A rotation path, key set, overlap window and runbook now exist; custody (§4) is decided (Option A, the CI secret) and the anchor split (§6) is decided (adopt — #754) | §5, §7, §9 |
 
 An absent or wholly expired pin set is safe by construction — `check_pin_at` resolves it to
 *Unavailable*, never *Ok* and never *Alarm*, so a missing pin can only withhold trust. The set is
@@ -60,8 +62,13 @@ their build of the "fix".
 **Recovering from a compromise currently requires trusting the thing the compromise undermines.** No
 amount of KMS hardening fixes this; it is a structural property of using one key for both roles.
 
-This is the strongest argument for §6, and it should be decided before, not after, #699 mints the v2 key
-— because the key hierarchy is baked in the moment we publish and pin.
+This is the strongest argument for §6, and it should have been decided before, not after, #699 minted
+the v2 key — the key hierarchy is baked in the moment we publish and pin. It was not: #732 minted and
+pinned first. §6 is now decided (adopt, 2026-08-04, tracked in **#754**), which costs a second
+rotation rather than riding along with the first.
+
+**Until #754 lands, this gap is open**, and anything describing our recovery posture should say so
+rather than imply a compromise is cleanly recoverable.
 
 ## 4. Custody options
 
@@ -185,6 +192,40 @@ fix.
 Cost: one more document type, one more verification step, and a ceremony we would want for the root
 anyway. Compared to "a leak is unrecoverable", this is cheap.
 
+### DECIDED 2026-08-04: adopt the split. Tracked in #754.
+
+**The custody decision made this one, and not in the direction that lets us skip it.** §4 was settled
+as Option A — the raw seed stays a CI secret. That is the *highest*-likelihood custody option on
+offer: anyone who can push a workflow change, compromise a dependency Action, or read GitHub's secret
+store gets the key. Choosing it is defensible on its own, but only if a compromise is *recoverable*.
+Without the split it is not (§3). Accepting "CI secret" **and** "no anchor split" together is the one
+combination that has no answer to a leak — a single exposed GitHub secret would be an unrecoverable
+compromise of the whole transparency system, because the fix must be shipped as a binary whose
+provenance is vouched for by the very tree the leaked key signs.
+
+So the two open decisions were never independent. Having taken the cheap custody option, the split is
+what pays for it.
+
+**What is already built.** #740 shipped most of the client half: `PINNED_LOG_PUBLIC_KEYS` is a *set*
+with per-key `key_id` and `not_after`, `Sth` carries a `key_id` selector, and the served
+`public_key.json` is a key list. What is missing is the part that makes the set *dynamic*: today the
+set is a compiled-in `const`, so retiring a key still needs a client release. The split adds a
+root-signed key-set statement the client fetches and verifies against a pinned root, so a retirement
+propagates without shipping a binary.
+
+**What is not decided here**, deliberately: the root's own custody mechanics and the ceremony
+schedule. Those belong with the implementation, where they can be specified against real code rather
+than in the abstract.
+
+**Sequencing note, stated honestly.** §6 said to decide this *before* minting, and #732 minted and
+pinned first — so adopting it now costs a second rotation rather than riding along with the first.
+That cost is real and was avoidable. It is materially smaller than it would have been before #740,
+because the overlap window means the next rotation is no longer a flag day: ship a release pinning
+both the current key and the new root, wait out the window, then cut over. The work is tracked in
+**#754** with no deadline attached; until it lands, `docs/backend-core-invariants.md` and the honest-
+limits section of the whitepaper should keep saying that a signing-key compromise is not cleanly
+recoverable.
+
 ## 7. Rotation runbook (what #699 executes)
 
 Written to be followed literally. Every step is checkable; none of it is "and then verify it works".
@@ -273,14 +314,16 @@ The two are different axes that happened to share letters.
       `PublicKeyEntry`/`retired_keys` in the served `public_key.json`, and `builder --retired-key`.
       §5 documents the mechanism.
 
-- [ ] **Anchor split (§6) — UNRESOLVED, and now foreclosed by default.** §6 said to decide
-      *before* the key was minted, because the hierarchy is fixed the moment we publish and pin.
-      #732 minted and pinned without a split, so the shipped answer is "no split" — arrived at by
-      sequence rather than by choice. The consequence is §3's circular dependency: one key signs
-      all three trees including `binaries`, and the pin is a `const` in the client, so recovering
-      from a key compromise means shipping a client update that users verify *through the tree the
-      compromised key signs*. This is a recovery-path gap, not a live vulnerability, and it is the
-      one item here that genuinely needs a decision.
+- [x] **Anchor split (§6): ADOPT. Decided 2026-08-04, tracked in #754.** Not because the gap is
+      urgent — it is a recovery path, not a live hole — but because the §4 custody choice made it
+      mandatory: "CI secret" plus "no split" is the one combination with no answer to a leak. §3's
+      circular dependency is the mechanism: one key signs all three trees including `binaries`, the
+      pin is a `const` in the client, so recovering from a compromise means shipping a client update
+      that users verify *through the tree the compromised key signs*. Having taken the cheap custody
+      option, the split is what pays for it. #740 already shipped the client-side key *set*; #754
+      adds the root-signed key-set statement so retiring a key no longer needs a client release.
+      Costs a second rotation because #732 minted first — real, avoidable, and much cheaper
+      post-#740, since the overlap window means it is no longer a flag day.
 
 - [ ] **Overlap window (§5) length — UNRESOLVED.** The machinery ships and enforces `not_after`
       client-side, but only one key is pinned today, so no window is in force. §5 recommends
