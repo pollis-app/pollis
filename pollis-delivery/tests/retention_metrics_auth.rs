@@ -149,3 +149,65 @@ async fn correct_token_before_first_sweep_is_computed_false() {
     assert_eq!(json["computed"], false, "authorized, but no snapshot yet");
     assert!(json["metrics"].is_null());
 }
+
+// ── GET /v1/config (#760) ────────────────────────────────────────────────────
+//
+// Same operator gate as the metrics route, and the same fail-closed shape. It
+// exists so deployed config is verifiable from OUTSIDE the container: #720's two
+// config values were inert in production because the Worker never forwarded them,
+// and nothing could observe that — the DS logs its config at startup, but
+// `wrangler tail` shows Worker logs, not container stdout.
+
+fn config_request(token: Option<&str>) -> Request<Body> {
+    let mut b = Request::builder().method("GET").uri("/v1/config");
+    if let Some(t) = token {
+        b = b.header("Authorization", format!("Bearer {t}"));
+    }
+    b.body(Body::empty()).unwrap()
+}
+
+/// Unset token → the route is not served at all. Identical posture to the metrics
+/// endpoint: an unconfigured deploy must not even advertise that it exists.
+#[tokio::test]
+async fn config_is_not_served_without_a_token() {
+    let state = AppState::new(fresh_db().await, true);
+    let (status, body) = call(&state, config_request(None)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body.is_empty(), "an unconfigured route must not describe itself");
+}
+
+/// Configured but unauthenticated → 401, NOT 404. This distinction is the entire
+/// diagnostic value of the endpoint: 404 means "config never arrived", 401 means
+/// "config arrived and auth rejected". Conflating them is what hid #758 for a
+/// full deploy cycle.
+#[tokio::test]
+async fn config_rejects_a_missing_or_wrong_token_with_401() {
+    let state = AppState::new(fresh_db().await, true).with_metrics_token(Some("right".into()));
+    assert_eq!(call(&state, config_request(None)).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        call(&state, config_request(Some("wrong"))).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+/// Correct token → the EFFECTIVE config, and never a secret's value.
+#[tokio::test]
+async fn config_reports_effective_values_and_no_secrets() {
+    let state = AppState::new(fresh_db().await, true).with_metrics_token(Some("right".into()));
+    let (status, body) = call(&state, config_request(Some("right"))).await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // The staleness window is reported as the modifier the GC actually binds, so
+    // a var that never reached the process shows its fallback rather than the
+    // value someone believes they configured.
+    let stale = v["watermark_stale_modifier"].as_str().expect("modifier reported");
+    assert!(stale.starts_with('-') && stale.contains("months") || stale.contains("years"),
+        "expected a SQLite datetime modifier, got {stale:?}");
+    assert_eq!(v["require_auth"], serde_json::json!(true));
+    assert_eq!(v["metrics_token_set"], serde_json::json!(true));
+
+    // The token's VALUE must never appear anywhere in the response.
+    let raw = String::from_utf8_lossy(&body);
+    assert!(!raw.contains("right"), "the endpoint leaked the operator token");
+}

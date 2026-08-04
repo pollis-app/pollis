@@ -212,3 +212,31 @@ jobs:
           APP_ID="$(pnpm exec wrangler containers list --json 2>/dev/null | jq -r --arg n "$APP" '.[]|select(.name==$n).id' 2>/dev/null || echo '')"
           [ -n "$APP_ID" ] && pnpm exec wrangler containers instances "$APP_ID" || true
           exit 1
+
+      # #760: /version proves the CODE rolled. It says nothing about whether the
+      # CONFIG reached the process — and those are different failures. #720's two
+      # config values were inert in prod through a fully green deploy: the secret
+      # existed in the store, the binding was registered, and the Worker still
+      # never forwarded either to the container.
+      #
+      # The tell was 404-with-a-correct-token. 404 means the route is not served,
+      # i.e. the DS has no token; 401 means it has one and is rejecting. Asserting
+      # "not 404" is therefore a direct check that config crossed the last
+      # boundary — the one nothing else observes.
+      - name: Verify config actually reached the container (#760)
+        if: steps.guard.outputs.ok == 'true'
+        run: |
+          set -uo pipefail
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 15 https://api.pollis.com/v1/config || echo 000)"
+          case "$CODE" in
+            401)
+              echo "✓ /v1/config answers 401 unauthenticated — the metrics token reached the DS." ;;
+            404)
+              echo "::error::/v1/config returned 404: the route is NOT served, so the DS never"
+              echo "::error::  received POLLIS_DS_METRICS_TOKEN. The deploy is green but the config"
+              echo "::error::  did not cross the Worker->container boundary. See #760 / #758."
+              exit 1 ;;
+            *)
+              echo "::error::/v1/config returned unexpected status $CODE (want 401 unauthenticated)."
+              exit 1 ;;
+          esac

@@ -245,6 +245,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/version", get(version))
         .route("/v1/retention/metrics", get(retention_metrics))
+        .route("/v1/config", get(effective_config))
         .route("/v1/commits", post(submit))
         .route("/v1/commits/since", post(report_commit_since))
         .route("/v1/commits/:conversation_id", get(commits))
@@ -412,6 +413,45 @@ async fn version() -> impl IntoResponse {
 /// This remains the SOURCE OF TRUTH for the numbers only. Alert ROUTING —
 /// thresholds/paging in Cloudflare/Grafana/email — is the owner's console and is
 /// explicitly out of scope.
+/// `GET /v1/config` — the config the DS is **actually running with**, gated by the
+/// same operator bearer token as the metrics route (#760).
+///
+/// Exists because deployed config was unverifiable from outside, and that let two
+/// values sit inert in production without anyone noticing. A DS config value has
+/// to cross five boundaries — Doppler, the sync script's key list, the wrangler
+/// binding, the Worker's env forwarding, then the process — and #720's two values
+/// were silently dropped at the fourth. The deploy went green, the secret existed
+/// in the store, the binding was registered, and the DS still never saw either.
+///
+/// The startup log already reports this, but nothing can read it: `wrangler tail`
+/// surfaces Worker logs, not container stdout (17k lines across a forced roll,
+/// zero DS output). So the log was a self-report nobody could hear.
+///
+/// NEVER returns a secret's value — only whether one is set. A wrong answer here
+/// is worth more than a hidden one: the whole point is to make "did the config
+/// actually arrive" answerable in one request.
+async fn effective_config(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let Some(expected) = state.metrics_token.as_deref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !bearer_token_matches(&headers, expected) {
+        return AuthRejection::Unauthorized.into_response();
+    }
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            // Effective, not configured: the SQLite modifier the GC actually
+            // binds, so a var that never arrived shows its fallback here.
+            "watermark_stale_modifier": messages::watermark_stale_modifier(),
+            "gc_sweep_secs": std::env::var("POLLIS_DS_GC_SWEEP_SECS").ok(),
+            "require_auth": state.require_auth,
+            // Presence only — never the token itself.
+            "metrics_token_set": true,
+        })),
+    )
+        .into_response()
+}
+
 async fn retention_metrics(State(state): State<AppState>, headers: HeaderMap) -> Response {
     // Fail closed: no token configured → the endpoint does not exist. 404 (a bare
     // status, no body) so an unconfigured deploy does not even advertise the route.
