@@ -39,6 +39,10 @@ const SECRET_KEYS = [
   "TURSO_ORG",
   "TURSO_DB",
   "DEV_OTP",
+  // #720: gates GET /v1/retention/metrics. Absent here means the DS never sees
+  // it, the route stays default-closed, and the endpoint 404s however correctly
+  // the secret is set in Doppler and bound in wrangler.
+  "POLLIS_DS_METRICS_TOKEN",
 ] as const;
 
 interface SecretStoreBinding {
@@ -50,6 +54,7 @@ type Env = {
   // Static (non-secret) container config, set as wrangler `vars`.
   PORT: string;
   POLLIS_DS_REQUIRE_AUTH: string;
+  POLLIS_DS_WATERMARK_STALE_MONTHS?: string;
 } & Record<(typeof SECRET_KEYS)[number], SecretStoreBinding | undefined>;
 
 // Derived from the base method so we don't depend on the (unexported)
@@ -84,6 +89,13 @@ export class PollisDelivery extends Container<Env> {
   envVars = {
     PORT: this.env.PORT ?? "8788",
     POLLIS_DS_REQUIRE_AUTH: this.env.POLLIS_DS_REQUIRE_AUTH ?? "true",
+    // #720: the device-staleness window. Forwarded explicitly — a wrangler `var`
+    // is bound to the WORKER, not to the container, so without this line the DS
+    // silently falls back to its 6-month code default no matter what the config
+    // says. Omitted from the map when unset so that fallback stays intact.
+    ...(this.env.POLLIS_DS_WATERMARK_STALE_MONTHS
+      ? { POLLIS_DS_WATERMARK_STALE_MONTHS: this.env.POLLIS_DS_WATERMARK_STALE_MONTHS }
+      : {}),
   };
 
   // Resolve every Secrets Store binding into a plain env map. Optional/unset
