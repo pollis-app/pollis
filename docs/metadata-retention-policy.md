@@ -310,13 +310,23 @@ Being specific here is what makes the rest of the document credible:
 
 Writing this document surfaced retention behaviour we have not decided on, only inherited:
 
-- [ ] **`security_event` has no retention bound.** A permanent, per-user, timestamped audit trail keyed
-      by `user_id` and `device_id` is exactly the kind of record a privacy-first product should age out.
-      Decide a period (90 days is the obvious default) or justify indefinite retention.
-- [ ] **`conversation_watermark` rows are never deleted**, including for conversations whose envelopes
-      are long gone. Harmless in size, but it is a per-device activity record with no expiry.
-- [ ] **`push_token` has no stale-token reap.** A token for an uninstalled app persists until the
-      account is deleted.
+- [x] **`security_event` retention: 90 days** (2026-08-04, #762). It is a per-user, timestamped,
+      device-attributed audit trail — precisely the record a privacy-first product should age out. 90 days
+      is long enough to investigate an incident someone noticed late, short enough that it is not a
+      standing longitudinal profile of when each user changed devices. Enforced on the GC sweep
+      (`sweep_aged_records`); `POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, `0` retains forever.
+- [x] **`conversation_watermark`: deliberately NOT reaped** (2026-08-04, #762). This is a decision to
+      leave it alone, not an omission. Since #720 these rows are load-bearing for envelope retention: the
+      GC floor is computed from `reported_at`, so deleting a live member's watermark makes their device
+      look like it never reported and can *advance* the floor past mail they have not collected. That is a
+      message-loss risk, taken on to reclaim rows the doc itself calls "harmless in size". The trade is
+      not worth it. Revisit only alongside a reap keyed on membership (the device is no longer in the
+      conversation), which is a genuinely different and safe predicate.
+- [x] **`push_token` reap: 180 days since last refresh** (2026-08-04, #762). Clients re-register on
+      launch, so `updated_at` is a direct liveness signal and a live device refreshes long before this.
+      Six months is deliberately generous: a reaped token costs a missed notification until the next
+      launch re-registers it — a nuisance, not data loss. Enforced on the same sweep;
+      `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, `0` disables.
 - [x] **No maximum retention for undelivered envelopes** (§1) — #720 landed a device-staleness bound
       (`POLLIS_DS_WATERMARK_STALE_MONTHS`). Retention is bounded by member watermarks **and** by
       recipient-device liveness. **Owner decision CLOSED 2026-08-04: N = 12 months**, configured
@@ -339,10 +349,16 @@ Writing this document surfaced retention behaviour we have not decided on, only 
       builder) is named in §6. The republish is a breaking wire change, so the served bundle now carries
       a `format_version` and `pollis-verify` (bumped to `v0.6.0`) reports a too-old binary as version
       skew, not a verification failure — see §6.
-- [ ] **The original filename is preserved in R2 object keys** (§5). Decide whether to hash it.
+- [x] **Original filenames removed from R2 object keys** (2026-08-04, #762). Keys are now
+      `media/<content_hash>.enc`; the filename was decorative (the content hash is the uniqueness anchor)
+      but readable by the operator from an object listing alone, without decrypting anything.
+      `budget-2026.pdf` is content. No migration needed: the key is stored per object in
+      `attachment_object.r2_key` and download paths take it explicitly, so objects written under the old
+      format keep resolving. Only new uploads take the new shape.
 
-None of these is a launch blocker on its own. All of them are questions a store privacy form or a
-security reviewer will ask, and the honest answer today is "indefinite".
+All four are now decided (#762). The honest answer is no longer "indefinite" for any of them — three
+carry a bound enforced on the GC sweep, and the fourth (`conversation_watermark`) is an explicit
+decision to retain, with the reason written down, because reaping it risks deleting undelivered mail.
 
 ---
 

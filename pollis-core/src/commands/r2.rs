@@ -333,10 +333,18 @@ pub async fn upload_media(
     let content_hash = hex::encode(hash_bytes);
 
     // Deterministic R2 key: same content → same path in R2.
-    // Sanitise the filename so the URL path only contains chars that are safe
-    // in both URLs and S3 keys without percent-encoding.  The content_hash is
-    // the actual uniqueness anchor, so the filename here is decorative.
-    let r2_key = format!("media/{}/{}.enc", content_hash, sanitize_key_segment(&filename));
+    //
+    // The original filename used to be appended here. It was decorative — the
+    // content_hash is the uniqueness anchor — but it was also metadata the
+    // operator could read at rest from the object listing alone, without
+    // decrypting anything (#762). "budget-2026.pdf" is content, and this product
+    // exists not to hold that. Dropped.
+    //
+    // Safe to change without a migration: the key is stored per object in
+    // `attachment_object.r2_key` and download paths take it explicitly, so
+    // objects written under the old format keep resolving under their stored
+    // keys. Only new uploads take this shape.
+    let r2_key = format!("media/{content_hash}.enc");
     let r2_url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), r2_key);
 
     // Derive encryption key and nonce from the content hash (convergent).
@@ -700,14 +708,6 @@ fn decrypt_chunked(ciphertext: &[u8], key: &[u8; 32], base_nonce: &[u8; 12]) -> 
     }
 
     Ok(out)
-}
-
-/// Keep only characters that are safe in a URL path segment without encoding.
-/// Replaces anything outside [A-Za-z0-9._-] with `_`.
-fn sanitize_key_segment(name: &str) -> String {
-    name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
-        .collect()
 }
 
 fn sha256_bytes(data: &[u8]) -> [u8; 32] {

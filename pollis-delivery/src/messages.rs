@@ -1088,6 +1088,94 @@ pub struct SweepReport {
 /// is a no-op — its roster join yields zero rows, `COUNT(ud) = COUNT(cw) = 0`, the
 /// CASE returns NULL and `sent_at < NULL` deletes nothing — so a misclassified id
 /// can never over-delete.
+// ── Aged-out records (#762) ──────────────────────────────────────────────────
+//
+// Three tables inherited "indefinite" retention — not because anyone chose it,
+// but because nothing ever deleted from them. #720 set the shape for fixing that:
+// pick N, write down why, disclose it, and configure it explicitly rather than
+// leaning on a code default.
+//
+// These run on the SAME sweep as envelope GC rather than as a second task, so
+// there is one schedule to reason about and one place that can fail.
+
+/// Days a `security_event` row is retained. Default 90.
+///
+/// It is a per-user, timestamped, device-attributed audit trail — precisely the
+/// record a privacy-first product should age out. 90 days is long enough to
+/// investigate an incident someone noticed late, short enough that it is not a
+/// standing longitudinal profile of when each user changed devices.
+///
+/// `0` disables the bound (retain forever), for an operator who would rather keep
+/// the trail than bound it.
+pub fn security_event_retention_days() -> u32 {
+    std::env::var("POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(90)
+}
+
+/// Days an unrefreshed `push_token` row is retained. Default 180.
+///
+/// A token for an uninstalled app otherwise persists until the account is
+/// deleted. Clients re-register on every launch, so `updated_at` tracks liveness
+/// directly and a live device refreshes long before this. Six months is
+/// deliberately generous: a reaped token means a missed notification until the
+/// next launch re-registers it, which is a nuisance, not data loss.
+///
+/// `0` disables the reap.
+pub fn push_token_retention_days() -> u32 {
+    std::env::var("POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(180)
+}
+
+/// Delete `security_event` rows older than [`security_event_retention_days`] and
+/// `push_token` rows unrefreshed for longer than [`push_token_retention_days`].
+/// Returns `(security_events_deleted, push_tokens_deleted)`.
+///
+/// Both are keyed on the row's own timestamp, which is safe here in a way it is
+/// NOT for envelopes: an envelope's age says nothing about whether its recipient
+/// collected it (that is why #688 removed the envelope TTL), whereas an audit
+/// record's age *is* the thing being bounded, and a push token's `updated_at` is
+/// its own liveness signal.
+///
+/// **`conversation_watermark` is deliberately NOT reaped here** — see the module
+/// docs and `docs/metadata-retention-policy.md`.
+///
+/// The windows are PARAMETERS, not globals read in here: `main` resolves them from
+/// the environment once at startup. Reading env inside the sweep would force every
+/// test to mutate process-wide state, which races the other tests in the same
+/// binary — the bounds are configuration, and configuration belongs at the edge.
+pub async fn sweep_aged_records(
+    conn: &Connection,
+    sec_days: u32,
+    tok_days: u32,
+) -> anyhow::Result<(u64, u64)> {
+    let mut events = 0u64;
+    if sec_days > 0 {
+        let modifier = format!("-{sec_days} days");
+        conn.execute(
+            "DELETE FROM security_event WHERE created_at < datetime('now', ?1)",
+            libsql::params![modifier.clone()],
+        )
+        .await?;
+        events = conn.changes();
+    }
+
+    let mut tokens = 0u64;
+    if tok_days > 0 {
+        let modifier = format!("-{tok_days} days");
+        conn.execute(
+            "DELETE FROM push_token WHERE updated_at < datetime('now', ?1)",
+            libsql::params![modifier.clone()],
+        )
+        .await?;
+        tokens = conn.changes();
+    }
+    Ok((events, tokens))
+}
+
 pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result<SweepReport> {
     // Only conversations that still hold envelopes are worth visiting; steady
     // state this set is small.

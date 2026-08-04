@@ -141,6 +141,22 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
                     Ok(report) => {
                         emit_retention_metrics(report.visited, &report.metrics);
                         *metrics.lock().unwrap() = Some(report.metrics);
+                        // #762: aged-out audit rows and dead push tokens, on the
+                        // same schedule so there is one sweep to reason about.
+                        // A failure here must not lose the envelope-GC result
+                        // above, so it is logged rather than propagated.
+                        match pollis_delivery::messages::sweep_aged_records(
+                            &conn,
+                            pollis_delivery::messages::security_event_retention_days(),
+                            pollis_delivery::messages::push_token_retention_days(),
+                        )
+                        .await {
+                            Ok((events, tokens)) if events > 0 || tokens > 0 => tracing::info!(
+                                "retention sweep: aged out {events} security_event, {tokens} push_token row(s)"
+                            ),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("aged-record sweep failed: {e}"),
+                        }
                     }
                     Err(e) => tracing::warn!("envelope-GC sweep failed: {e}"),
                 },
