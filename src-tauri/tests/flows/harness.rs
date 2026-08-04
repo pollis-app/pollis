@@ -3766,28 +3766,84 @@ pub(crate) async fn welcome_blobs(conversation_id: &str) -> Vec<Vec<u8>> {
     out
 }
 
-/// The largest single commit the Delivery Service is storing for
-/// `conversation_id`, in bytes, across every lineage.
+/// Ceiling for a commit that adds nobody, in bytes.
 ///
-/// The payload-budget probe: #666's whole point is that commits stop growing
-/// with the roster, and #454's hybrid suite multiplies whatever that size is by
-/// roughly eight. A test that only proves convergence would happily pass on a
-/// group whose commits had quietly become unshippable.
-pub(crate) async fn max_commit_bytes(conversation_id: &str) -> usize {
+/// This is the number that must NOT grow with the roster. A self-update or a
+/// remove carries an UpdatePath and nothing else, so its size is logarithmic in
+/// the tree once every leaf is merged (#666) — `pollis-core`'s
+/// `pq_payloads_stay_under_their_ceilings` pins the same 20 KiB for an 8-member
+/// merged commit on the hybrid suite.
+pub(crate) const COMMIT_CEILING_NO_ADDS: usize = 20_480;
+
+/// Ceiling for ONE added member's inlined KeyPackage, in bytes.
+///
+/// `add_members` puts Add proposals in the commit **by value**, so a commit that
+/// admits `k` members carries `k` KeyPackages. On the hybrid suite a KeyPackage
+/// is the most expensive routine object there is — two X-Wing public keys, a
+/// 1,312 B ML-DSA-44 signature key and a 2,420 B signature — and `pollis-core`
+/// asserts it stays under 12 KiB. Measured today it is ~8.7 KiB, so this leaves
+/// roughly 40% headroom without stopping being a bound.
+pub(crate) const COMMIT_CEILING_PER_ADD: usize = 12_288;
+
+/// Check every stored commit for `conversation_id` against the budget its own
+/// contents justify, returning a description of the worst offender.
+///
+/// The distinction this draws is the whole point. Two commits obey completely
+/// different growth laws, and collapsing them into one number is what let a
+/// roster-linear commit hide:
+///
+/// - A commit that adds nobody must be **logarithmic** in the roster
+///   ([`COMMIT_CEILING_NO_ADDS`]). This is the property #666 exists to defend,
+///   and it is the one where a regression means "a ratchet tree or a Welcome got
+///   inlined".
+/// - A commit that adds `k` members is **linear in `k` by construction**
+///   ([`COMMIT_CEILING_PER_ADD`] each), because it must convey each new member's
+///   KeyPackage. The migration opening commit is the extreme case: `super::
+///   migrate` builds the successor as a group of one and reconciles the whole
+///   roster into it, so a single commit carries `roster - 1` KeyPackages.
+///
+/// Checked per row rather than against `MAX(LENGTH(...))` so the budget can
+/// depend on what that specific commit admitted.
+pub(crate) async fn commit_budget_violation(conversation_id: &str) -> Option<String> {
     let log = world().await.log.clone();
-    let conn = log.conn().await.expect("log conn for commit sizes");
+    let conn = log.conn().await.expect("log conn for commit budgets");
     let mut rows = conn
         .query(
-            "SELECT MAX(LENGTH(commit_data)) FROM mls_commit_log WHERE conversation_id = ?1",
+            "SELECT generation, epoch, LENGTH(commit_data), added_device_ids \
+             FROM mls_commit_log WHERE conversation_id = ?1",
             libsql::params![conversation_id.to_string()],
         )
         .await
-        .expect("query commit sizes");
-    rows.next()
-        .await
-        .expect("size row")
-        .and_then(|row| row.get::<Option<i64>>(0).ok().flatten())
-        .unwrap_or(0) as usize
+        .expect("query commit budgets");
+
+    let mut worst: Option<(i64, String)> = None;
+    while let Some(row) = rows.next().await.expect("commit budget row") {
+        let generation: i64 = row.get(0).expect("generation");
+        let epoch: i64 = row.get(1).expect("epoch");
+        let size = row.get::<i64>(2).expect("commit length") as usize;
+        // `added_metadata` writes the added device ids as a comma-separated list,
+        // and NULL when the commit added nobody.
+        let added = row
+            .get::<Option<String>>(3)
+            .ok()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            .map_or(0, |s| s.split(',').count());
+
+        let allowed = COMMIT_CEILING_NO_ADDS + COMMIT_CEILING_PER_ADD * added;
+        if size > allowed {
+            let overage = size as i64 - allowed as i64;
+            let detail = format!(
+                "generation {generation} epoch {epoch}: {size} B against a {allowed} B budget \
+                 ({COMMIT_CEILING_NO_ADDS} B + {added} added × {COMMIT_CEILING_PER_ADD} B) \
+                 — {overage} B over"
+            );
+            if worst.as_ref().is_none_or(|(w, _)| overage > *w) {
+                worst = Some((overage, detail));
+            }
+        }
+    }
+    worst.map(|(_, detail)| detail)
 }
 
 impl TestClient {

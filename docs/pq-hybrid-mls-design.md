@@ -778,8 +778,8 @@ below carries them forward:
   own schedule, not a size cap that would have permanently stranded large groups on the
   classic suite for a reason that was never really about size. Pinned by
   `self_update_turns_linear_commit_growth_into_logarithmic`, which controls merge state
-  exactly, and by the absolute small-roster ceilings in `flows/pq_migration.rs`
-  (`MAX_HYBRID_COMMIT_BYTES`).
+  exactly, and by the per-commit budget in `flows/harness.rs`
+  (`commit_budget_violation`).
 - **The #668 signature cost: roughly ×3 on top, and the shape is unchanged.** Re-measured
   after the move to ML-DSA-44 (`hybrid_payloads_stay_under_their_ceilings`, pollis-core's
   MLS unit suite): **KeyPackage 8,670 B** (classic 307 B, and 2,659 B on the #454 suite),
@@ -791,8 +791,17 @@ below carries them forward:
   re-pinned about 1.4× above each measurement (12,288 B KeyPackage / 21,504 B Welcome /
   20,480 B commit) — tight enough that a doubling fails the build, loose enough to survive
   openmls padding and code-point churn. **The 20,480 B commit ceiling is the number to
-  watch now**, and `flows/pq_migration.rs`'s `MAX_HYBRID_COMMIT_BYTES` matches it exactly
-  so the flows harness and the unit suite cannot drift.
+  watch now**, and the flows harness's `COMMIT_CEILING_NO_ADDS` matches it exactly so the
+  flows harness and the unit suite cannot drift.
+- **A commit that adds members is linear in the adds, and that is not a regression.**
+  `add_members` carries Add proposals **by value**, so a commit admitting `k` members
+  inlines `k` KeyPackages — at 8,670 B each, the dominant term whenever `k > 0`. The
+  migration opening commit is the extreme case: `stage_successor_commit` builds the
+  successor as a group of one and reconciles the whole roster into it, so it carries
+  `roster - 1` KeyPackages in a single commit. The 20,480 B ceiling bounds the *no-add*
+  commit only; an adding commit gets `COMMIT_CEILING_PER_ADD` (12,288 B, the KeyPackage
+  ceiling) on top per added device. Collapsing the two into one number is what let a
+  legitimate 3-add migration commit read as a balloon.
 
 ### 4.2 Latency: negligible
 
@@ -835,9 +844,12 @@ header on every DS write (§3.5).
 - **KP pool size stays at 5 per suite** — resist inflating it; replenishment already
   tops up after each Welcome (`key_packages.rs:141`).
 - **Measure in-box** (§5): shipped. `flows/pq_migration.rs` pins absolute small-roster
-  commit/Welcome ceilings, and the marathon fuzzer carries a pool-scaled balloon detector
-  across the suite boundary — it cannot control merge state at measurement time, so it is
-  deliberately loose and the discriminating proof lives in the self-update test that can.
+  Welcome ceilings, and both it and the marathon fuzzer run every stored commit through
+  `harness::commit_budget_violation`, which charges each commit for the KeyPackages it
+  actually admitted (`added_device_ids`) rather than applying one number to the whole
+  conversation. The no-add term is still deliberately loose — neither test can control
+  merge state at measurement time — and the discriminating proof lives in the self-update
+  test that can.
 
 Net: hybrid MLS costs Pollis **microseconds per op** and, on the KEM change alone, roughly
 **8× the classic commit in constant factor** — with #668's ML-DSA-44 signatures roughly

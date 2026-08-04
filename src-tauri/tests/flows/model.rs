@@ -152,8 +152,8 @@ use proptest::test_runner::{Config, TestCaseError, TestRunner};
 use serial_test::serial;
 
 use crate::harness::{
-    arm_ds_fault, clear_ds_fault, ds_head_epoch, ds_head_generation, local_generation_of,
-    max_commit_bytes, republish_key_packages, set_current_suite, wipe, DsFault, TestClient,
+    arm_ds_fault, clear_ds_fault, commit_budget_violation, ds_head_epoch, ds_head_generation,
+    local_generation_of, republish_key_packages, set_current_suite, wipe, DsFault, TestClient,
     SUITE_LEGACY,
 };
 
@@ -170,24 +170,17 @@ const DEFAULT_CASES: u32 = 32;
 const MIN_OPS: usize = 4;
 const MAX_OPS: usize = 12;
 
-/// Payload-size sanity ceiling for a single commit, in bytes, as a function of
-/// the actor pool (§4.3 of `docs/pq-hybrid-mls-design.md`).
-///
-/// This is a **balloon detector**, not a tight budget. The thing it catches is a
-/// commit that stops being a commit — a ratchet tree or Welcome accidentally
-/// inlined per commit, a KeyPackage pool serialised into an UpdatePath — which
-/// shows up as hundreds of kilobytes, not a few. It is deliberately loose because
-/// the fuzzer cannot control how many leaves are merged at the moment it measures,
-/// and a tight ceiling would fail on a legitimately unmerged tree.
-///
-/// The *discriminating* proof — that commit growth is logarithmic in the roster
-/// rather than linear, on BOTH suites — is
-/// `pollis-core`'s `self_update_turns_linear_commit_growth_into_logarithmic`,
-/// which controls merge state exactly and compares marginal cost. Absolute
-/// fixed-roster ceilings live in `flows/pq_migration.rs`.
-fn commit_size_ceiling(nactors: usize) -> usize {
-    8 * 1024 + 4 * 1024 * nactors
-}
+// Payload-size budgets live in `harness::commit_budget_violation`, which charges
+// each commit for what it actually admitted rather than applying one number to
+// the whole conversation. A ceiling expressed as a function of the *actor pool*
+// was the bug: it made a commit's allowance depend on how many actors the case
+// could have used, when what a commit costs is set by how many members it added.
+//
+// The *discriminating* proof — that commit growth is logarithmic in the roster
+// rather than linear, on BOTH suites — is `pollis-core`'s
+// `self_update_turns_linear_commit_growth_into_logarithmic`, which controls merge
+// state exactly and compares marginal cost. Absolute fixed-roster ceilings live
+// in `flows/pq_migration.rs`.
 
 /// Convergence rounds — how many times every ever-member polls + processes +
 /// fetches to drain welcomes, replay all pending commits (decrypting each epoch's
@@ -706,17 +699,14 @@ async fn run_case(ops: &[Op], nactors: usize, start_legacy: bool) -> Result<(), 
 
     // ── Assertion 6: payload size (§4.3) ──────────────────────────────────────
     // An X-Wing encapsulation is ~35× an X25519 one, so the boundary is exactly
-    // where a size regression would hide. See `commit_size_ceiling` for what this
-    // does and does not claim.
-    let ceiling = commit_size_ceiling(nactors);
-    let largest = max_commit_bytes(&group_id).await;
-    if largest > ceiling {
+    // where a size regression would hide. See `harness::commit_budget_violation`
+    // for what this does and does not claim.
+    if let Some(detail) = commit_budget_violation(&group_id).await {
         return Err(fail_msg(
             ops,
             &format!(
-                "COMMIT BALLOON: largest commit is {largest} B against a {ceiling} B ceiling for \
-                 {nactors} actors. A commit that size is carrying something that does not belong \
-                 in an UpdatePath."
+                "COMMIT BALLOON: {detail}. A commit that size is carrying something that does not \
+                 belong in an UpdatePath."
             ),
         ));
     }

@@ -46,9 +46,9 @@
 //! the rest of the model-based suite.
 
 use crate::harness::{
-    arm_ds_fault, ds_group_info_suite, ds_head_generation, local_generation_of, max_commit_bytes,
-    republish_key_packages, set_current_suite, steal_leaf, welcome_blobs, wipe, DsFault,
-    TestClient, SUITE_LEGACY,
+    arm_ds_fault, commit_budget_violation, ds_group_info_suite, ds_head_generation,
+    local_generation_of, republish_key_packages, set_current_suite, steal_leaf, welcome_blobs,
+    wipe, DsFault, TestClient, SUITE_LEGACY,
 };
 use serial_test::serial;
 
@@ -65,16 +65,14 @@ const KEM_OUTPUT_X25519: usize = 32;
 /// labelled as such.
 const KEM_OUTPUT_XWING: usize = 1120;
 
-/// Ceiling for a single commit on the PQ suite, in bytes.
-///
-/// A PQ commit runs an order of magnitude above a classic one — every HPKE
-/// encapsulation in the tree carries an ML-KEM-768 ciphertext, and since #668
-/// every leaf carries a 1,312 B ML-DSA-44 key and every signature is 2,420 B —
-/// so the number is large. But it must still be a *number*, because the failure
-/// this guards is commits that grow without bound. Matches the 20 KiB ceiling
-/// `pq_payloads_stay_under_their_ceilings` pins for an 8-member merged commit in
-/// `pollis-core`'s unit suite.
-const MAX_COMMIT_BYTES: usize = 20_480;
+// Commit payload budgets live in `harness::commit_budget_violation`. A PQ commit
+// runs an order of magnitude above a classic one — every HPKE encapsulation in
+// the tree carries an ML-KEM-768 ciphertext, and since #668 every leaf carries a
+// 1,312 B ML-DSA-44 key and every signature is 2,420 B — so the numbers are
+// large. They must still be *numbers*, because the failure this guards is
+// commits that grow without bound; what changed is that a commit is now charged
+// for the KeyPackages it actually admits instead of every commit in a
+// conversation sharing one allowance.
 
 async fn contents(client: &TestClient, channel_id: &str) -> Vec<String> {
     client
@@ -282,9 +280,9 @@ async fn a_new_group_is_born_on_the_current_suite() {
         "a group born on the current suite must never open a successor lineage"
     );
     assert!(
-        max_commit_bytes(&group_id).await <= MAX_COMMIT_BYTES,
-        "commits must stay under the {MAX_COMMIT_BYTES}-byte budget, got {}",
-        max_commit_bytes(&group_id).await
+        commit_budget_violation(&group_id).await.is_none(),
+        "commits must stay within their payload budget: {}",
+        commit_budget_violation(&group_id).await.unwrap_or_default()
     );
 
     drop(alice);
@@ -408,9 +406,9 @@ async fn a_member_offline_across_the_boundary_loses_nothing() {
     );
 
     assert!(
-        max_commit_bytes(&group_id).await <= MAX_COMMIT_BYTES,
-        "commits must stay under the {MAX_COMMIT_BYTES}-byte budget across the boundary, got {}",
-        max_commit_bytes(&group_id).await
+        commit_budget_violation(&group_id).await.is_none(),
+        "commits must stay within their payload budget across the boundary: {}",
+        commit_budget_violation(&group_id).await.unwrap_or_default()
     );
 
     drop(alice);
@@ -534,6 +532,19 @@ async fn the_migration_waits_for_every_roster_device_to_republish() {
         contents(&dave, &channel_id).await.contains(&"dave-is-in".to_string()),
         "the device the gate held the migration for must end up inside the successor, \
          not stranded outside it"
+    );
+
+    // The only test in this file that migrates a roster of more than two, and so
+    // the only deterministic place the migration opening commit's roster-linear
+    // term is visible at all: `migrate` builds the successor as a group of one
+    // and reconciles everyone else into it, so this single commit inlines two
+    // KeyPackages. S1/S2 migrate two members, where that term is one KeyPackage
+    // and a per-conversation ceiling absorbs it — which is why the model fuzzer,
+    // at four actors, was the only thing that ever caught the growth.
+    assert!(
+        commit_budget_violation(&group_id).await.is_none(),
+        "the migration opening commit must stay within the budget its adds justify: {}",
+        commit_budget_violation(&group_id).await.unwrap_or_default()
     );
 
     drop(alice);
