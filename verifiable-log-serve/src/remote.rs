@@ -20,7 +20,10 @@ use verifiable_log_builder::account_key::{self, AccountKeyInvariant};
 use verifiable_log_builder::binaries::{self, BinaryInvariant};
 
 use crate::account::ACCOUNT_TENANT;
-use crate::bundle::{AccountManifest, BinaryManifest, Manifest, PublicKeyDoc, FORMAT_VERSION};
+use crate::bundle::{
+    AccountManifest, BinaryManifest, Manifest, PublicKeyDoc, FORMAT_VERSION,
+    MIN_LEAF_FORMAT_VERSION,
+};
 use crate::error::{Result, ServeError};
 use crate::release::BINARIES_TENANT;
 
@@ -48,6 +51,9 @@ struct FormatProbe {
 /// Applied to the commit-log manifest, which is the mandatory first fetch of both
 /// `remote` and `group`. The three trees are republished together under one
 /// bundle version, so gating that manifest covers the whole served bundle.
+///
+/// This is the **ceiling only**. Paths that decode leaf *contents* need the floor
+/// as well — see [`gate_leaf_format_version`], which `group` uses instead.
 pub(crate) fn gate_format_version(body: &str) -> Result<()> {
     let probe: FormatProbe = serde_json::from_str(body)
         .map_err(|e| ServeError::Http(format!("read manifest format_version: {e}")))?;
@@ -55,6 +61,28 @@ pub(crate) fn gate_format_version(body: &str) -> Result<()> {
         return Err(ServeError::VersionSkew {
             served: probe.format_version,
             supported: FORMAT_VERSION,
+        });
+    }
+    Ok(())
+}
+
+/// [`gate_format_version`] plus the [`MIN_LEAF_FORMAT_VERSION`] **floor**, for the
+/// paths that decode commit-log leaf contents rather than just checking bytes.
+///
+/// The ceiling alone is not enough for those paths. A verifier newer than the log
+/// passes the ceiling, then re-derives windowed pseudonyms (#701) against leaves
+/// that still carry raw ids, matches nothing, and reports `Found: no` with a
+/// confident `PASS` for a conversation the manifest itself lists. Refusing with
+/// [`ServeError::LogTooOld`] turns that silent wrong answer into an actionable
+/// one, which is the whole point of having a version gate.
+pub(crate) fn gate_leaf_format_version(body: &str) -> Result<()> {
+    gate_format_version(body)?;
+    let probe: FormatProbe = serde_json::from_str(body)
+        .map_err(|e| ServeError::Http(format!("read manifest format_version: {e}")))?;
+    if probe.format_version < MIN_LEAF_FORMAT_VERSION {
+        return Err(ServeError::LogTooOld {
+            served: probe.format_version,
+            required: MIN_LEAF_FORMAT_VERSION,
         });
     }
     Ok(())

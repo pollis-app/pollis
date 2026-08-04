@@ -30,6 +30,15 @@ pub enum ServeError {
     )]
     VersionSkew { served: u32, supported: u32 },
 
+    #[error(
+        "log format v{served} is older than this verifier can interpret per-conversation \
+         (needs v{required}+) — the log has not been republished since the commit-log leaf \
+         encoding changed, so a conversation lookup here would report an empty result rather \
+         than the truth. Re-run once the log is republished, or use a verifier from before \
+         the change"
+    )]
+    LogTooOld { served: u32, required: u32 },
+
     #[error("malformed bundle: {0}")]
     BadBundle(String),
 

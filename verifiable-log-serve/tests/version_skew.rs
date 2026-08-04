@@ -17,8 +17,16 @@
 //!    `#[serde(default)]`, so its removal was never a missing-field error. This is
 //!    the correction to the review note's exact mechanism, encoded as a test.
 //!
-//! The same gate guards `verify_group`, which decodes commit leaves whose encoding
-//! changed at the republish — checked here too.
+//! The gate has **two** bounds, and they apply to different paths:
+//!
+//! * The `FORMAT_VERSION` **ceiling** covers everything — a log newer than the
+//!   verifier is skew, on `remote` and `group` alike.
+//! * The `MIN_LEAF_FORMAT_VERSION` **floor** covers only `group`, which decodes
+//!   commit-leaf *contents*. Below the floor a current verifier re-derives #701
+//!   pseudonyms against raw-id leaves, matches nothing, and reports `Found: no`
+//!   with a confident `PASS` for a conversation that is really there. `remote`
+//!   never decodes a leaf (byte-level `UniqueDataInvariant`), so it deliberately
+//!   keeps verifying below the floor — the transition window must stay auditable.
 
 use std::path::Path;
 
@@ -26,7 +34,9 @@ use ml_dsa::Keypair;
 use serde_json::Value;
 use verifiable_log::SigningKey;
 use verifiable_log::{Entry, Sth, UniqueDataInvariant, VerifiableLog};
-use verifiable_log_serve::bundle::{Bundle, ConsistencyCheck, InclusionCheck, FORMAT_VERSION};
+use verifiable_log_serve::bundle::{
+    Bundle, ConsistencyCheck, InclusionCheck, FORMAT_VERSION, MIN_LEAF_FORMAT_VERSION,
+};
 use verifiable_log_serve::error::ServeError;
 use verifiable_log_serve::{group, layout, remote, DevServer};
 
@@ -194,5 +204,87 @@ fn legacy_manifest_still_verifies_and_is_not_skew() {
     let report = remote::verify_remote(&server.base_url())
         .expect("a legacy manifest must not error — it is backward-compatible");
     assert!(report.ok, "legacy-shape bundle must still verify; checks: {:?}", report.checks);
+    server.shutdown();
+}
+
+/// (3b) The floor, and the bug it fixes. `group` decodes commit leaves, and #701
+/// replaced their raw ids with windowed pseudonyms — so against a legacy (pre-#701)
+/// log a current verifier re-derives pseudonyms, matches nothing, and used to
+/// report `Found: no` + `PASS` + exit 0 for a conversation that is really there.
+/// Observed against the live log before this fix:
+///
+/// ```text
+/// Group:   01KYQHPBN33MFH0W6VFVXSCWV1
+/// Found:   no
+/// Commits: (none)
+/// PASS: group chain is valid
+/// ```
+///
+/// An empty answer wearing a confident PASS is worse than an error, so the floor
+/// makes it [`ServeError::LogTooOld`] instead.
+#[test]
+fn legacy_log_is_too_old_for_group_never_a_silent_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    generate_into(dir.path());
+    rewrite_index(dir.path(), |m| {
+        m.remove("format_version");
+    });
+
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+    let err = group::verify_group(&server.base_url(), "01KP443BSBXS3W1SZNTV5MXQ9C")
+        .expect_err("a legacy log must be LogTooOld for group, not an empty 'Found: no'");
+    match err {
+        ServeError::LogTooOld { served, required } => {
+            assert_eq!(served, 0, "absent format_version reads as 0");
+            assert_eq!(required, MIN_LEAF_FORMAT_VERSION);
+        }
+        other => panic!("expected LogTooOld, got {other:?}"),
+    }
+    server.shutdown();
+}
+
+/// The floor is applied ONLY where leaf contents are decoded. `remote` replays the
+/// commit tenant under `UniqueDataInvariant`, which compares bytes and never
+/// decodes a leaf, so it must keep verifying a not-yet-republished log — otherwise
+/// the fix would break auditing of the log during exactly the transition window it
+/// is meant to make safe. Test (3) covers the legacy case; this pins the boundary
+/// explicitly at one version below the floor.
+#[test]
+fn remote_still_verifies_a_log_below_the_leaf_floor() {
+    let dir = tempfile::tempdir().unwrap();
+    generate_into(dir.path());
+    rewrite_index(dir.path(), |m| {
+        m.insert(
+            "format_version".to_string(),
+            Value::from(MIN_LEAF_FORMAT_VERSION - 1),
+        );
+    });
+
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+    let report = remote::verify_remote(&server.base_url())
+        .expect("remote must not apply the leaf floor — it never decodes a leaf");
+    assert!(
+        report.ok,
+        "a below-floor log must still verify under `remote`; checks: {:?}",
+        report.checks
+    );
+    server.shutdown();
+}
+
+/// The floor must not fire on a current log — otherwise it would break `group`
+/// the moment it shipped. Guards against an off-by-one in the comparison.
+#[test]
+fn current_format_passes_the_leaf_floor() {
+    let dir = tempfile::tempdir().unwrap();
+    generate_into(dir.path());
+
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+    // The fixture conversation need not exist; what matters is that we get a
+    // report rather than LogTooOld.
+    let out = group::verify_group(&server.base_url(), "01KP443BSBXS3W1SZNTV5MXQ9C");
+    assert!(
+        !matches!(out, Err(ServeError::LogTooOld { .. })),
+        "a current-format log must clear the floor"
+    );
     server.shutdown();
 }

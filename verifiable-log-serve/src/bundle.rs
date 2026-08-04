@@ -43,6 +43,30 @@ use verifiable_log::{ConsistencyProof, Entry, InclusionProof, Sth};
 /// running a stale binary.
 pub const FORMAT_VERSION: u32 = 2;
 
+/// The oldest served `format_version` whose **commit-log leaves** this build can
+/// still interpret.
+///
+/// Distinct from [`FORMAT_VERSION`] because the two gates protect different
+/// things, in opposite directions:
+///
+/// * The [`FORMAT_VERSION`] *ceiling* protects a stale verifier from a newer log:
+///   it can still check signatures and proofs, so accepting older logs is right.
+/// * This *floor* protects a current verifier from an older log **on the paths
+///   that decode leaf contents**. #701 replaced the leaf's raw `conversation_id`
+///   and `sender_id` with windowed pseudonyms, so a v2 verifier re-deriving
+///   pseudonyms against v1 leaves matches nothing and reports `Found: no` for a
+///   conversation that is demonstrably present — an empty result carrying a
+///   confident `PASS`, which is precisely the failure the version gate exists to
+///   prevent, just in the direction the ceiling does not cover.
+///
+/// Signature, inclusion and consistency checking is format-agnostic (the
+/// commit tenant replays under `UniqueDataInvariant`, which compares bytes and
+/// never decodes a leaf), so `remote` deliberately does **not** apply this floor
+/// and stays backward-compatible with a log that has not been republished.
+///
+/// Raise this whenever the leaf encoding changes incompatibly again.
+pub const MIN_LEAF_FORMAT_VERSION: u32 = 2;
+
 /// The signed monitor bundle (input to the layout generator). Field names and
 /// shapes match the frozen wire contract; every section except `public_key` is
 /// optional so a minimal fixture still deserializes.

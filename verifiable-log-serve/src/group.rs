@@ -37,7 +37,7 @@ use verifiable_log_builder::{
 
 use crate::bundle::{Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
-use crate::remote::{build_agent, fetch_json, fetch_text, gate_format_version};
+use crate::remote::{build_agent, fetch_json, fetch_text, gate_leaf_format_version};
 
 /// One commit in a group's chain, as reported to a caller. Mirrors the
 /// structural fields of a [`CommitLeaf`] plus whether its inclusion proof
@@ -124,7 +124,7 @@ pub fn verify_group_via(
     // understand with VersionSkew ("upgrade your verifier") rather than a
     // misleading empty result.
     let index_body = fetch_text(&agent, &format!("{base}/v1/index.json"))?;
-    gate_format_version(&index_body)?;
+    gate_leaf_format_version(&index_body)?;
 
     // Prerequisites: the published key, the latest signed head, and the full
     // ordered entry list. Without these there is nothing to verify.
