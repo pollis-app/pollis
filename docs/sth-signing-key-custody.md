@@ -1,8 +1,10 @@
 # Design: STH Signing-Key Custody and Rotation
 
-**Status:** §5 (the key set + overlap window) is **BUILT** — #732. **Owner decision still
-required on §4 (custody) and §6 (the anchor split).** Resolves the design half of #700; part
-of #662. The runbook in §7 was executed by #732.
+**Status:** §5 (the key set + overlap window) is **BUILT** (#740). §4 custody is **DECIDED —
+Option A, the CI secret** (2026-08-03), knowingly against §4's own recommendation. **§6 (the
+anchor split) is the one decision still outstanding**, and §6's deadline has already passed:
+the hierarchy was fixed when #732 minted and pinned. See §9 for the full ledger. Resolves the
+design half of #700; part of #662. The runbook in §7 was executed by #732/#740.
 **Scope:** the key that signs Signed Tree Heads for the three transparency trees. Not MLS keys, not
 account identity keys, not release code-signing certificates.
 
@@ -20,7 +22,7 @@ account identity keys, not release code-signing certificates.
 | Clients pin a **set**: `PINNED_LOG_PUBLIC_KEYS: &[PinnedKey]`, each with a `key_id` and an optional `not_after` (§5, #732) | `pollis-core/src/commands/transparency.rs` |
 | The set currently holds **one key with no expiry** — the material minted in #732 | same |
 | The served trust anchor `/v1/public_key.json` carries a **key list**, with the single `public_key` field retained for older verifiers | `verifiable-log-serve/src/bundle.rs` |
-| A rotation path, key set, overlap window and runbook now exist; **custody (§4) and the anchor split (§6) remain undecided** | §5, §7 |
+| A rotation path, key set, overlap window and runbook now exist; custody (§4) is decided (Option A, the CI secret); **the anchor split (§6) remains undecided** | §5, §7, §9 |
 
 An absent or wholly expired pin set is safe by construction — `check_pin_at` resolves it to
 *Unavailable*, never *Ok* and never *Alarm*, so a missing pin can only withhold trust. The set is
@@ -248,17 +250,43 @@ The standard answer is gossip: independent monitors fetch STHs and compare, and 
 STH they saw against what a monitor saw. That is a separate piece of work and should be its own ticket
 rather than being smuggled into this one.
 
-## 9. Decisions required from the owner
+## 9. Decisions — what is settled and what is not
 
-- [ ] **Custody (§4):** Option A (status quo — only viable while the pin is `None`), B (KMS, *pending
-      verified ML-DSA-44 support*), or C (offline ceremony).
-- [ ] **Anchor split (§6):** adopt the root/online-key split, or accept that a key compromise is
-      unrecoverable without out-of-band trust. **Decide before #699 mints the key** — the hierarchy is
-      fixed the moment we publish and pin.
-- [ ] **Overlap window (§5):** the minimum period two pinned keys are simultaneously valid.
-      Recommendation: ≥ 90 days.
-- [ ] **Whether the key-set shape lands with #699** or is deferred. Recommendation: lands with it.
-- [ ] Whether gossip/witness monitoring (§8) gets its own ticket now.
+Two of these were decided by the owner on **2026-08-03** during the #732 rotation. Recording
+them here because they were made against a differently-labelled set of options and would
+otherwise read as un-answered. **Careful with the letters:** this section's A/B/C are *custody*
+options (§4). The rotation ticket separately offered an unrelated "A or B" — bake one key in now
+vs. ship the key set with an overlap window first — and that one is the last checkbox below.
+The two are different axes that happened to share letters.
 
-Related: #662 (parent), #672 (rotation runbook origin), #699 (executes §7), #668 (the ML-DSA-44
-migration), #687 (launch gate 4 depends on this).
+- [x] **Custody (§4): Option A — the raw seed stays a CI secret.** Decided 2026-08-03.
+      Diverges from §4's recommendation (C for the anchor key, revisit B once ML-DSA-44 KMS
+      support is confirmed) and from §4's own caveat that A is *"acceptable only while the pin is
+      `None` and nothing trusts the key"* — the pin is now set (#740), so this is a knowingly
+      accepted risk, not an oversight. Current state: `transparency-publish.yml` reads
+      `VLOG_SIGNING_KEY` from `secrets.STH_SIGNING_KEY`; no KMS key exists in the account.
+      A backup of the seed lives in Doppler `pollis/prd`. **Revisiting this is real follow-up
+      work, not a formality** — see the unresolved item directly below, which it interacts with.
+
+- [x] **Key-set shape lands with the rotation — yes.** Shipped in #740: `PinnedKey`
+      (`key_id` + `not_after`), `PINNED_LOG_PUBLIC_KEYS`, `Sth::verify_any_with_context`,
+      `PublicKeyEntry`/`retired_keys` in the served `public_key.json`, and `builder --retired-key`.
+      §5 documents the mechanism.
+
+- [ ] **Anchor split (§6) — UNRESOLVED, and now foreclosed by default.** §6 said to decide
+      *before* the key was minted, because the hierarchy is fixed the moment we publish and pin.
+      #732 minted and pinned without a split, so the shipped answer is "no split" — arrived at by
+      sequence rather than by choice. The consequence is §3's circular dependency: one key signs
+      all three trees including `binaries`, and the pin is a `const` in the client, so recovering
+      from a key compromise means shipping a client update that users verify *through the tree the
+      compromised key signs*. This is a recovery-path gap, not a live vulnerability, and it is the
+      one item here that genuinely needs a decision.
+
+- [ ] **Overlap window (§5) length — UNRESOLVED.** The machinery ships and enforces `not_after`
+      client-side, but only one key is pinned today, so no window is in force. §5 recommends
+      ≥ 90 days; the number is unset until the next rotation needs it.
+
+- [ ] **Gossip / witness monitoring (§8) — no ticket filed.**
+
+Related: #662 (parent), #672 (rotation runbook origin), #699/#732 (executed §7), #668 (the
+ML-DSA-44 migration), #740 (built §5, set the pin), #687 (launch gate 4 depends on this).
