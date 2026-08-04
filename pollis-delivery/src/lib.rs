@@ -443,7 +443,11 @@ async fn effective_config(State(state): State<AppState>, headers: HeaderMap) -> 
             // Effective, not configured: the SQLite modifier the GC actually
             // binds, so a var that never arrived shows its fallback here.
             "watermark_stale_modifier": messages::watermark_stale_modifier(),
-            "gc_sweep_secs": std::env::var("POLLIS_DS_GC_SWEEP_SECS").ok(),
+            // Also effective, not configured: the same function
+            // `spawn_envelope_gc_sweep` binds. Reading the raw env string here let
+            // this endpoint answer "1h" while the sweep ran at 3600 — the exact
+            // class of lie it exists to prevent.
+            "gc_sweep_secs": messages::gc_sweep_secs(),
             "require_auth": state.require_auth,
             // Presence only — never the token itself.
             "metrics_token_set": true,

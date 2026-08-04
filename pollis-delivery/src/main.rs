@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use pollis_delivery::messages::{
-    watermark_stale_modifier, RetentionMetricsHandle, RetentionSnapshot,
+    gc_sweep_secs, watermark_stale_modifier, RetentionMetricsHandle, RetentionSnapshot,
 };
 use pollis_delivery::{build_app_state, build_router_with_state, db::Db};
 
@@ -121,10 +121,7 @@ async fn main() -> Result<()> {
 /// (`watermark_stale_modifier`) and, on the same walk, gathers the identity-free
 /// growth snapshot it stores in `metrics` and logs (#720 checkbox 1).
 fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
-    let secs: u64 = std::env::var("POLLIS_DS_GC_SWEEP_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(3600);
+    let secs = gc_sweep_secs();
     if secs == 0 {
         tracing::info!("pollis-delivery: envelope-GC sweep disabled (POLLIS_DS_GC_SWEEP_SECS=0)");
         return;

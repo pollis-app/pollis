@@ -201,9 +201,23 @@ async fn config_reports_effective_values_and_no_secrets() {
     // The staleness window is reported as the modifier the GC actually binds, so
     // a var that never reached the process shows its fallback rather than the
     // value someone believes they configured.
+    // Parenthesised deliberately: `&&` binds tighter than `||`, so the unbraced
+    // form accepted any string containing "years" — including a POSITIVE offset,
+    // which as a SQLite modifier would move the staleness cutoff into the future
+    // and mark every device stale. The `0` case really does report "-1000 years",
+    // so the leading sign is the part that has to hold for both shapes.
     let stale = v["watermark_stale_modifier"].as_str().expect("modifier reported");
-    assert!(stale.starts_with('-') && stale.contains("months") || stale.contains("years"),
-        "expected a SQLite datetime modifier, got {stale:?}");
+    assert!(
+        stale.starts_with('-') && (stale.contains("months") || stale.contains("years")),
+        "expected a negative SQLite datetime modifier, got {stale:?}"
+    );
+    // Reported as the number the sweep binds, not the raw environment string —
+    // unset must therefore surface the real default, never null.
+    assert_eq!(
+        v["gc_sweep_secs"],
+        serde_json::json!(pollis_delivery::messages::DEFAULT_GC_SWEEP_SECS),
+        "unset POLLIS_DS_GC_SWEEP_SECS must report the cadence the sweep actually runs"
+    );
     assert_eq!(v["require_auth"], serde_json::json!(true));
     assert_eq!(v["metrics_token_set"], serde_json::json!(true));
 

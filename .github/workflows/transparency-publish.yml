@@ -392,15 +392,28 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p .sth-prev
-          # Absent object => genuinely the first run; `seeded` distinguishes that
-          # from "we had state and lost it", which must never pass silently.
-          if aws s3 cp "s3://${R2_BUCKET}/internal/tripwire-sths.tar" .sth-prev.tar \
-               --endpoint-url "${R2_ENDPOINT}" 2>/dev/null; then
-            tar -xf .sth-prev.tar -C .sth-prev && echo "tripwire: restored prior state from R2."
+          # ONLY an absent object may mean "first run". Treating every non-zero
+          # exit as absence would rebuild #759's failure in a new place: rotated
+          # credentials, an empty R2_TRANSPARENCY_* secret, or a transient R2
+          # error would all read as "nothing stored yet", set seeded=false, and
+          # let the tripwire pass without comparing anything — then the save step
+          # would re-seed and erase the evidence. Keep stderr; it is the only
+          # thing that can tell those two apart.
+          err="$(aws s3 cp "s3://${R2_BUCKET}/internal/tripwire-sths.tar" .sth-prev.tar \
+                   --endpoint-url "${R2_ENDPOINT}" 2>&1)"
+          rc=$?
+          if [ "${rc}" -eq 0 ]; then
+            tar -xf .sth-prev.tar -C .sth-prev
+            echo "tripwire: restored prior state from R2."
             echo "seeded=true" >> "$GITHUB_ENV"
-          else
+          elif printf '%s' "${err}" | grep -qiE '404|Not Found|NoSuchKey'; then
             echo "tripwire: no prior state in R2 — treating this as the first seeding run."
             echo "seeded=false" >> "$GITHUB_ENV"
+          else
+            echo "::error::tripwire: could NOT read prior state, and the object is not merely absent."
+            echo "::error::  Refusing to publish behind an equivocation check that cannot be armed."
+            echo "::error::  aws exit ${rc}: ${err}"
+            exit 1
           fi
 
       - name: Build pollis-verify (auditor CLI, cargo already warm)
@@ -432,6 +445,12 @@ jobs:
               # second is how this check silently disarmed itself for months
               # (#759): a missing file read as "first run" and passed. After the
               # first successful seed it must never recur, so it is a failure.
+              #
+              # OPERATIONAL NOTE: this also fires the first time a NEW tree is
+              # added to the three below, because restored state won't carry its
+              # baseline. That is the correct default (fail rather than pass
+              # unarmed) — seed the new tree by hand, or land it in the same
+              # change that clears `internal/tripwire-sths.tar`.
               if [ "${seeded:-false}" = "true" ]; then
                 echo "::error::${name}: tripwire state exists but this tree's prior STH is MISSING."
                 echo "::error::  Not a first run — prior state was restored. Refusing to pass an"

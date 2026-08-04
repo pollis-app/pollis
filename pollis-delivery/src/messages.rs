@@ -291,6 +291,29 @@ pub fn watermark_stale_modifier() -> String {
     }
 }
 
+/// Sweep cadence when `POLLIS_DS_GC_SWEEP_SECS` is unset or unparseable.
+pub const DEFAULT_GC_SWEEP_SECS: u64 = 3600;
+
+/// The envelope-GC cadence the sweep loop **actually binds**, in seconds; `0`
+/// disables the sweep.
+///
+/// Lives here, next to [`watermark_stale_modifier`], for the same reason: it is
+/// read by both the loop that uses it and `GET /v1/config`, which reports it, and
+/// those two must never be able to disagree. Reporting the raw environment string
+/// instead let the endpoint answer `"1h"` while the sweep ran at 3600 — a
+/// configured-not-effective answer, which is precisely the failure /v1/config
+/// exists to make impossible (#760).
+///
+/// An unparseable value falls back rather than failing, and the fallback is what
+/// gets reported, so a typo is visible as "the default is running" rather than
+/// silently believed.
+pub fn gc_sweep_secs() -> u64 {
+    std::env::var("POLLIS_DS_GC_SWEEP_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_GC_SWEEP_SECS)
+}
+
 // ── Retention growth metrics (#720 checkbox 1) ───────────────────────────────
 
 /// Identity-free growth metrics for `message_envelope`, computed by the sweep and
