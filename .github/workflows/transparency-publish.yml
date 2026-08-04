@@ -370,17 +370,38 @@ jobs:
       #     prior run's latest STH for each tree is restored from the cache; a
       #     previously-published immutable STH that changed (or vanished) means
       #     the server rewrote attested history — fail loudly.
+      # Tripwire state lives in R2, NOT actions/cache. The cache was the original
+      # home and it silently never worked: this repo runs permanently over
+      # GitHub's 10 GiB per-repo cache budget (gigabyte Rust build caches touched
+      # on every PR), so a few-KB entry touched once a day was always the LRU
+      # eviction victim. Every publish then took the "no prior STH cached (first
+      # run)" branch and passed WITHOUT COMPARING ANYTHING — a green check mark
+      # over an unarmed check, which is the worst possible failure shape for an
+      # equivocation detector (#759).
+      #
+      # Honest limit: this state shares a trust domain with the log it guards, so
+      # it does not defend against an attacker who already controls the
+      # publishing pipeline — nothing reachable from this job could. It defends
+      # against the thing that actually happens: an unnoticed rewrite or drift.
+      # Durability is the property that matters here, and R2 has it.
       - name: Restore prior published STHs (tripwire state)
         if: steps.decide.outputs.build == 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: .sth-prev
-          # A run-id key always misses; restore-keys then pulls the most recent
-          # prior run's cache (cache entries are immutable per key, so each run
-          # writes a fresh one and reads the latest older one).
-          key: transparency-sth-${{ github.run_id }}
-          restore-keys: |
-            transparency-sth-
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+        run: |
+          set -uo pipefail
+          mkdir -p .sth-prev
+          # Absent object => genuinely the first run; `seeded` distinguishes that
+          # from "we had state and lost it", which must never pass silently.
+          if aws s3 cp "s3://${R2_BUCKET}/internal/tripwire-sths.tar" .sth-prev.tar \
+               --endpoint-url "${R2_ENDPOINT}" 2>/dev/null; then
+            tar -xf .sth-prev.tar -C .sth-prev && echo "tripwire: restored prior state from R2."
+            echo "seeded=true" >> "$GITHUB_ENV"
+          else
+            echo "tripwire: no prior state in R2 — treating this as the first seeding run."
+            echo "seeded=false" >> "$GITHUB_ENV"
+          fi
 
       - name: Build pollis-verify (auditor CLI, cargo already warm)
         if: steps.decide.outputs.build == 'true'
@@ -407,7 +428,17 @@ jobs:
           check_tree() {
             name="$1"; prev="$2"; sth_base="$3"; latest_url="$4"
             if [ ! -f "${prev}" ]; then
-              echo "${name}: no prior STH cached (first run) — seeding tripwire."
+              # Distinguish "never seeded" from "we HAD state and lost it". The
+              # second is how this check silently disarmed itself for months
+              # (#759): a missing file read as "first run" and passed. After the
+              # first successful seed it must never recur, so it is a failure.
+              if [ "${seeded:-false}" = "true" ]; then
+                echo "::error::${name}: tripwire state exists but this tree's prior STH is MISSING."
+                echo "::error::  Not a first run — prior state was restored. Refusing to pass an"
+                echo "::error::  unarmed equivocation check; investigate before republishing."
+                return 1
+              fi
+              echo "${name}: no prior STH (first seeding run) — recording baseline."
               return 0
             fi
             old_size="$(jq -r '.tree_size' "${prev}")"
@@ -484,7 +515,15 @@ jobs:
 
       - name: Save published STHs for next run's tripwire
         if: steps.decide.outputs.build == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .sth-prev
-          key: transparency-sth-${{ github.run_id }}
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+        run: |
+          set -euo pipefail
+          # `internal/` is never synced into the served tree (see the pass-1/2
+          # --exclude lists and internal/binary-records.json, which already lives
+          # here) — this is build state, not a published artifact.
+          tar -cf .sth-prev.tar -C .sth-prev .
+          aws s3 cp .sth-prev.tar "s3://${R2_BUCKET}/internal/tripwire-sths.tar" \
+            --endpoint-url "${R2_ENDPOINT}" --only-show-errors
+          echo "tripwire: state persisted to R2 for the next run."

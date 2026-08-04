@@ -137,6 +137,14 @@ jobs:
           workspaces: |
             .
             src-tauri
+          # Only `main` WRITES the cache; PR branches still restore from it and
+          # get the same speedup. Without this every branch stored its own ~1.8 GiB
+          # copy under the same key, and this repo sat permanently over GitHub's
+          # 10 GiB per-repo budget (11.34 GiB observed, of which 7.1 GiB was four
+          # identical-keyed copies of THIS cache). Being over budget makes GitHub
+          # evict least-recently-used entries, which silently disarmed the
+          # transparency equivocation tripwire for months — see #759.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Same recipe as the desktop-release Linux job: webkit/gtk for Tauri,
       # alsa/pulse/pipewire + libva for the media stack, meson+ninja+clang for
