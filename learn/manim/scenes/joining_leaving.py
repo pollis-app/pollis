@@ -9,14 +9,6 @@ draws the backup trade as a fork where neither path is free.
 Render (see learn/manim/render.sh):
     learn/manim/render.sh JoiningLeaving joining-leaving m
 
-STALE — NEEDS RE-RENDER (#756). #720 added a THIRD accepted loss (a device silent
-past `POLLIS_DS_WATERMARK_STALE_MONTHS`, set to 12). This scene and
-`scripts/joining-leaving.md` are updated to say three; the SHIPPED
-`website/learn/media/joining-leaving.{mp4,webm}` and its `.vtt` transcript still
-say two, because they cannot be regenerated without the render + narration
-pipeline. The video therefore currently UNDERSTATES what we lose. The prose on
-the Learn page is correct and is what most readers see, but the video needs a
-re-render before that discrepancy is acceptable long-term.
 
 Accuracy anchors:
   - .codesight/wiki/mls.md → "Multi-Device Enrollment", "GroupInfo Publishing"

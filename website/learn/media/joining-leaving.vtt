@@ -26,4 +26,4 @@ Your own devices work exactly the same way. Your phone and your laptop are two s
 Which brings us to the trade-off we want you to hear from us, not discover later. A new device starts empty. There's no history backup. We could encrypt your history and store it on our servers behind a PIN, but watch what that builds: a copy of every conversation, on our infrastructure, behind a six-digit number.
 
 02:40.000 --> 02:55.000
-That's the exact thing this app exists to not have. So we don't do it. Two kinds of loss are acceptable: messages from before you joined, and a new device starting empty. Everything else has to arrive. Anything else going missing is a bug.
+That's the exact thing this app exists to not have. So we don't do it. Three kinds of loss are acceptable: messages from before you joined, a new device starting empty, and — if every device you own goes quiet for over a year — mail still waiting only for you. Everything else has to arrive. Anything else going missing is a bug.
