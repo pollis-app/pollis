@@ -50,6 +50,7 @@ number.
 
 **[02:40–02:55] Scene 6 — what we do promise**
 That's the exact thing this app exists to not have. So we don't do it. What we
-*do* promise is narrow and firm. Two kinds of loss are acceptable: messages from
-before you joined, and a new device starting empty. Everything else has to
-arrive. Anything else going missing is a bug, and we treat it as one.
+*do* promise is narrow and firm. Three kinds of loss are acceptable: messages from
+before you joined, a new device starting empty, and — if every device you own goes
+quiet for over a year — mail that was still waiting only for you. Everything else
+has to arrive. Anything else going missing is a bug, and we treat it as one.

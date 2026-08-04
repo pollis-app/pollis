@@ -9,6 +9,15 @@ draws the backup trade as a fork where neither path is free.
 Render (see learn/manim/render.sh):
     learn/manim/render.sh JoiningLeaving joining-leaving m
 
+STALE — NEEDS RE-RENDER (#756). #720 added a THIRD accepted loss (a device silent
+past `POLLIS_DS_WATERMARK_STALE_MONTHS`, set to 12). This scene and
+`scripts/joining-leaving.md` are updated to say three; the SHIPPED
+`website/learn/media/joining-leaving.{mp4,webm}` and its `.vtt` transcript still
+say two, because they cannot be regenerated without the render + narration
+pipeline. The video therefore currently UNDERSTATES what we lose. The prose on
+the Learn page is correct and is what most readers see, but the video needs a
+re-render before that discrepancy is acceptable long-term.
+
 Accuracy anchors:
   - .codesight/wiki/mls.md → "Multi-Device Enrollment", "GroupInfo Publishing"
   - CLAUDE.md → "Messages must work; history is bounded, not flaky" (the two
@@ -273,9 +282,9 @@ class JoiningLeaving(Scene):
         self.hold_until(160)
 
         promise = VGroup(
-            Text("Exactly two kinds of loss are acceptable:", color=FG).scale(0.44),
-            Text("Messages sent before you joined · a new device starting empty",
-                 color=MUTED).scale(0.4),
+            Text("Exactly three kinds of loss are acceptable:", color=FG).scale(0.44),
+            Text("Before you joined · a new device starts empty · every device quiet 1yr+",
+                 color=MUTED).scale(0.36),
             Text("Everything else must work. Anything else missing is a BUG.",
                  color=OK).scale(0.46),
         ).arrange(DOWN, buff=0.22).move_to([0, -2.8, 0])
