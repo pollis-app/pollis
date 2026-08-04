@@ -37,6 +37,13 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # `[[ ... == *glob* ]]` below is bash, and it replaces a `printf | grep -q`
+    # pattern that was a SIGPIPE trap under `pipefail`: grep exits on the first
+    # match, printf dies with 141, and the pipeline reports FAILURE because the
+    # text was found. It failed on this workflow's very first real run.
+    defaults:
+      run:
+        shell: bash
     env:
       SITE: https://pollis.com
     steps:
@@ -55,7 +62,7 @@ jobs:
             exit 1
           fi
           live_js="$(curl -fsSL -m 30 "$SITE/artifacts.js")"
-          if printf '%s' "$live_js" | grep -q "$repo_key"; then
+          if [[ "$live_js" == *"$repo_key"* ]]; then
             echo "✓ deployed artifacts.js pins the same key as pollis-core (${repo_key:0:16}…)"
           else
             echo "::error::pollis.com/artifacts.js does NOT pin the key pollis-core compiles in."
@@ -71,7 +78,7 @@ jobs:
           set -euo pipefail
           served="$(curl -fsSL -m 30 https://verify.pollis.com/v1/public_key.json | jq -r '.public_key')"
           live_js="$(curl -fsSL -m 30 "$SITE/artifacts.js")"
-          if printf '%s' "$live_js" | grep -q "$served"; then
+          if [[ "$live_js" == *"$served"* ]]; then
             echo "✓ deployed pin matches the served log key (${served:0:16}…)"
           else
             echo "::error::the deployed artifacts.js pin does not match the key verify.pollis.com serves."
@@ -97,13 +104,13 @@ jobs:
             echo "::error::/learn returned an empty body — check the redirect (curl needs -L)."
             exit 1
           fi
-          if printf '%s' "$page" | grep -q "$wrong kinds of loss are expected"; then
+          if [[ "$page" == *"$wrong kinds of loss are expected"* ]]; then
             echo "::error::/learn still says '$wrong kinds of loss are expected' but CLAUDE.md says $want."
             echo "::error::  A user-facing promise that stopped being true is worse than an awkward"
             echo "::error::  paragraph. Deploy the site, or fix the page."
             exit 1
           fi
-          if ! printf '%s' "$page" | grep -q "$want kinds of loss are expected"; then
+          if [[ "$page" != *"$want kinds of loss are expected"* ]]; then
             echo "::error::/learn does not state the accepted-loss count at all — the section moved or broke."
             exit 1
           fi
