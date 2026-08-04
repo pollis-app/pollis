@@ -82,13 +82,28 @@ const DISCLAIMER =
   'source of truth — the linked pages are authoritative. Nothing here changes what Pollis does; ' +
   'it only helps you find where the docs say it.';
 
-// Shown in the panel BEFORE the input, so a user reads it before they type. States what happens (the
-// question is sent to Pollis's servers) and what the fallback is — NOT any claim about how archon
-// retains, logs, or anonymises the question, which this repo does not control and cannot promise.
-const PRIVACY_NOTICE =
-  'Heads up: your question is sent to Pollis’s servers (archon.pollis.com) to be answered. If that ' +
-  'service can’t be reached, your question is instead answered locally, from an on-device index that ' +
-  'never leaves your browser.';
+// Is the remote answering path actually reachable by a browser?
+//
+// FALSE today, deliberately (#765). archon.pollis.com sits behind Cloudflare Access: every request
+// 302s to the Access login and the CORS preflight is refused at the edge with 403, so an anonymous
+// visitor's question could never reach it. The fallback always answered, which is why nothing looked
+// broken — but the panel was telling users their question is sent to Pollis's servers when in fact
+// NOTHING was ever sent. Over-disclosing is the safe direction to be wrong in; it is still wrong, and
+// on a privacy product the notice has to describe what actually happens.
+//
+// Flip to true in the same change that makes /query publicly reachable. The notice and the network
+// call are both gated on this one flag so they cannot disagree again.
+const REMOTE_ANSWERING_ENABLED = false;
+
+// Shown in the panel BEFORE the input, so a user reads it before they type. States what happens and
+// what the fallback is — NOT any claim about how archon retains, logs, or anonymises the question,
+// which this repo does not control and cannot promise.
+const PRIVACY_NOTICE = REMOTE_ANSWERING_ENABLED
+  ? 'Heads up: your question is sent to Pollis’s servers (archon.pollis.com) to be answered. If that ' +
+    'service can’t be reached, your question is instead answered locally, from an on-device index that ' +
+    'never leaves your browser.'
+  : 'Your question is answered entirely in your browser, from an on-device index. It is not sent to ' +
+    'Pollis’s servers or anywhere else.';
 
 // ── Remote answering via archon (Pollis's docs AI) ───────────────────────────────────────────────
 // Same pattern as transparency.js / artifacts.js: one const base URL, reached through one small helper.
@@ -142,7 +157,18 @@ async function archonAdapter(query, signal) {
 // on success, or null on EVERY failure path (offline / no fetch, network error, non-2xx, timeout,
 // malformed or empty body, missing answer) so the caller falls straight through to the on-device index.
 // `timeoutMs` is injectable so tests can exercise the timeout branch without waiting the full ceiling.
-async function queryArchon(query, timeoutMs = ARCHON_TIMEOUT_MS) {
+// `enabled` is injectable ONLY so the suite can still exercise the wire behaviour (normalization,
+// non-2xx, network error, timeout) while the path is switched off in production — otherwise those
+// tests would pass because the gate short-circuits, not because the adapter works, and the coverage
+// would rot silently until someone re-enabled it.
+async function queryArchon(query, timeoutMs = ARCHON_TIMEOUT_MS, enabled = REMOTE_ANSWERING_ENABLED) {
+  // Gated on the same flag as PRIVACY_NOTICE so what we SAY and what we DO cannot drift apart.
+  // While the remote path is unreachable (#765) this also stops every question emitting a failed
+  // cross-origin request and a console error on the way to the fallback that was always going to
+  // answer it.
+  if (!enabled) {
+    return null;
+  }
   if (typeof fetch !== 'function' || typeof AbortController !== 'function') {
     return null;
   }
@@ -714,7 +740,7 @@ function init() {
 
 // Export the resolution entry point and the archon adapter/wrapper for testing; the DOM bootstrap only
 // runs in a browser.
-export { handleQuery, archonAdapter, queryArchon };
+export { handleQuery, archonAdapter, queryArchon, REMOTE_ANSWERING_ENABLED };
 
 if (typeof document !== 'undefined') {
   if (document.readyState === 'loading') {

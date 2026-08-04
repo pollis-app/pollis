@@ -1,0 +1,129 @@
+name: Verify deployed website
+
+# Asserts that pollis.com is serving what `main` says it should — specifically the
+# claims a visitor is expected to TRUST (#761).
+#
+# Why this exists. Cloudflare Pages auto-deploy is off and `website-deploy.yml` is
+# manual (#406, deliberate: `main` stays always-deployable and publishing is an
+# explicit act). The cost is that the site can silently lag `main`, and the pages
+# that lag are the ones making cryptographic claims. It has bitten twice:
+#
+#   * #732 — production served a pre-#668 `artifacts.js` with the retired Ed25519
+#     constant compiled in, comparing a 64-char key against the 2624-char one the
+#     server now serves. It could only ever render "✗ served key DIFFERS": a red
+#     tamper alarm shown to every visitor, caused purely by a stale deploy.
+#   * #720/#753/#757 — the Learn page told users there were two accepted message
+#     losses while a second paragraph on the SAME page said three. The page
+#     contradicted itself in public until someone grepped it.
+#
+# Neither is "the site is down". Both are "the site is confidently wrong", which
+# no uptime check catches. So this asserts CONTENT, not availability.
+#
+# A NOTE ON REDIRECTS, because it already burned an hour: `/learn.html`
+# 308-redirects to `/learn`. `curl` without `-L` returns an EMPTY body, so a naive
+# grep reports "text not found" for the old AND the new wording — indistinguishable
+# from "not deployed yet". Every fetch here uses `-fsSL`.
+
+on:
+  # After a deploy, and on a schedule so a site that drifts (or a deploy nobody
+  # ran) is caught rather than waiting for a human to notice.
+  workflow_dispatch:
+  schedule:
+    - cron: "17 8 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      SITE: https://pollis.com
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. The pinned transparency key on /artifacts must equal the constant in
+      #    pollis-core. These are the same claim made to two audiences, and a
+      #    disagreement is indistinguishable to a visitor from a compromised log.
+      - name: Pinned log key matches pollis-core
+        run: |
+          set -euo pipefail
+          repo_key="$(grep -oE '"[0-9a-f]{2624}"' pollis-core/src/commands/transparency.rs \
+            | head -1 | tr -d '"')"
+          if [ -z "$repo_key" ]; then
+            echo "::error::could not read PINNED_LOG_PUBLIC_KEYS from pollis-core — has the shape changed?"
+            exit 1
+          fi
+          live_js="$(curl -fsSL -m 30 "$SITE/artifacts.js")"
+          if printf '%s' "$live_js" | grep -q "$repo_key"; then
+            echo "✓ deployed artifacts.js pins the same key as pollis-core (${repo_key:0:16}…)"
+          else
+            echo "::error::pollis.com/artifacts.js does NOT pin the key pollis-core compiles in."
+            echo "::error::  repo: ${repo_key:0:16}…  — the site is stale or the two have diverged."
+            echo "::error::  A visitor sees a key comparison that cannot be trusted either way (#732)."
+            exit 1
+          fi
+
+      # 2. The served key must also match what the log actually serves. Catches the
+      #    #732 shape directly: a deployed page comparing against a retired key.
+      - name: Deployed pin matches the live transparency log
+        run: |
+          set -euo pipefail
+          served="$(curl -fsSL -m 30 https://verify.pollis.com/v1/public_key.json | jq -r '.public_key')"
+          live_js="$(curl -fsSL -m 30 "$SITE/artifacts.js")"
+          if printf '%s' "$live_js" | grep -q "$served"; then
+            echo "✓ deployed pin matches the served log key (${served:0:16}…)"
+          else
+            echo "::error::the deployed artifacts.js pin does not match the key verify.pollis.com serves."
+            echo "::error::  This is the #732 failure: the page renders a red tamper alarm at every visitor."
+            exit 1
+          fi
+
+      # 3. The public accepted-loss count must match CLAUDE.md. #720 added a third
+      #    and the page said two — a promise that had quietly stopped being true.
+      - name: Accepted-loss count on /learn matches CLAUDE.md
+        run: |
+          set -euo pipefail
+          if grep -q "Exactly three acceptable losses" CLAUDE.md; then
+            want="Three"; wrong="Two"
+          elif grep -q "Exactly two acceptable losses" CLAUDE.md; then
+            want="Two"; wrong="Three"
+          else
+            echo "::error::could not read the accepted-loss count from CLAUDE.md"
+            exit 1
+          fi
+          page="$(curl -fsSL -m 30 "$SITE/learn")"
+          if [ -z "$page" ]; then
+            echo "::error::/learn returned an empty body — check the redirect (curl needs -L)."
+            exit 1
+          fi
+          if printf '%s' "$page" | grep -q "$wrong kinds of loss are expected"; then
+            echo "::error::/learn still says '$wrong kinds of loss are expected' but CLAUDE.md says $want."
+            echo "::error::  A user-facing promise that stopped being true is worse than an awkward"
+            echo "::error::  paragraph. Deploy the site, or fix the page."
+            exit 1
+          fi
+          if ! printf '%s' "$page" | grep -q "$want kinds of loss are expected"; then
+            echo "::error::/learn does not state the accepted-loss count at all — the section moved or broke."
+            exit 1
+          fi
+          echo "✓ /learn states $want accepted losses, matching CLAUDE.md"
+
+      # 4. Staleness. Not a claim being wrong, but the condition that produces it.
+      #    Warn rather than fail: a deliberate hold on publishing is legitimate
+      #    (#406), a *forgotten* one is what we are surfacing.
+      - name: Warn if the deployed site lags main
+        run: |
+          set -uo pipefail
+          # The assistant bundle is versioned in-repo; a cheap content fingerprint
+          # is enough to tell "same bytes as main" from "something older".
+          repo_hash="$(sha256sum website/artifacts.js | cut -c1-16)"
+          live_hash="$(curl -fsSL -m 30 "$SITE/artifacts.js" | sha256sum | cut -c1-16)"
+          if [ "$repo_hash" = "$live_hash" ]; then
+            echo "✓ deployed artifacts.js is byte-identical to main"
+          else
+            echo "::warning::pollis.com is serving an artifacts.js that differs from main"
+            echo "::warning::  (main ${repo_hash}, live ${live_hash}). If that is not deliberate,"
+            echo "::warning::  run website-deploy.yml. Checks 1-3 above still passed, so nothing"
+            echo "::warning::  currently reads as false — this is drift, not a wrong claim."
+          fi

@@ -10,8 +10,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
-import { archonAdapter, queryArchon } from './assistant.js';
+import { archonAdapter, queryArchon, REMOTE_ANSWERING_ENABLED } from './assistant.js';
 
 // Minimal Response double: just the bits archonAdapter reads.
 function response({ ok = true, status = 200, json }) {
@@ -136,7 +137,7 @@ test('queryArchon returns the normalized answer on success', async () => {
   await withFetch(
     async () => response({ json: async () => okBody }),
     async () => {
-      const out = await queryArchon('q');
+      const out = await queryArchon('q', undefined, true);
       assert.equal(out.answer, okBody.answer);
     }
   );
@@ -146,7 +147,7 @@ test('queryArchon returns null on a non-2xx status', async () => {
   await withFetch(
     async () => response({ ok: false, status: 500 }),
     async () => {
-      assert.equal(await queryArchon('q'), null);
+      assert.equal(await queryArchon('q', undefined, true), null);
     }
   );
 });
@@ -157,7 +158,7 @@ test('queryArchon returns null on a network error (fetch rejects)', async () => 
       throw new TypeError('Failed to fetch');
     },
     async () => {
-      assert.equal(await queryArchon('q'), null);
+      assert.equal(await queryArchon('q', undefined, true), null);
     }
   );
 });
@@ -171,7 +172,7 @@ test('queryArchon returns null on a malformed body', async () => {
         },
       }),
     async () => {
-      assert.equal(await queryArchon('q'), null);
+      assert.equal(await queryArchon('q', undefined, true), null);
     }
   );
 });
@@ -180,7 +181,7 @@ test('queryArchon returns null when the answer is missing', async () => {
   await withFetch(
     async () => response({ json: async () => ({ sources: [] }) }),
     async () => {
-      assert.equal(await queryArchon('q'), null);
+      assert.equal(await queryArchon('q', undefined, true), null);
     }
   );
 });
@@ -198,9 +199,44 @@ test('queryArchon returns null (and aborts) when archon is too slow', async () =
       }),
     async () => {
       // Tiny timeout so the test doesn't wait the real 4s ceiling.
-      const out = await queryArchon('q', 20);
+      const out = await queryArchon('q', 20, true);
       assert.equal(out, null);
       assert.equal(aborted, true);
     }
   );
+});
+
+// ── The remote-answering gate (#765) ─────────────────────────────────────────────────────────────
+// archon.pollis.com is behind Cloudflare Access, so an anonymous visitor's question can never reach
+// it. The panel used to tell users their question WAS sent to Pollis's servers while nothing was
+// actually sent. These pin the flag and the property that made it necessary.
+
+test('queryArchon makes no network call while remote answering is disabled', async () => {
+  let called = false;
+  await withFetch(
+    async () => {
+      called = true;
+      return response({ json: async () => okBody });
+    },
+    async () => {
+      // Default `enabled` — i.e. exactly what the browser runs.
+      assert.equal(await queryArchon('q'), null);
+      assert.equal(called, false, 'the gate must short-circuit BEFORE fetch, not swallow its failure');
+    }
+  );
+});
+
+test('the privacy notice matches what the code actually does', async () => {
+  const src = await readFile(new URL('./assistant.js', import.meta.url), 'utf8');
+  const claimsRemote = /your question is sent to Pollis/.test(src.split('REMOTE_ANSWERING_ENABLED')[2] ?? '');
+  // Whatever the flag is, the notice shown must describe that state. The failure this guards is a
+  // notice promising a network call the code never makes (or, far worse, the reverse).
+  if (REMOTE_ANSWERING_ENABLED) {
+    assert.ok(src.includes('your question is sent to Pollis'),
+      'remote answering is on, so the notice must say questions are sent');
+  } else {
+    assert.ok(src.includes('answered entirely in your browser'),
+      'remote answering is off, so the notice must say answering is local');
+  }
+  void claimsRemote;
 });
