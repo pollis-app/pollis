@@ -35,7 +35,11 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PollisDelivery"] }],
   "vars": {
     "PORT": "8788",
-    "POLLIS_DS_REQUIRE_AUTH": "true"
+    "POLLIS_DS_REQUIRE_AUTH": "true",
+    // #720: a member device silent this long stops pinning envelope retention.
+    // 12, not the code default of 6 — see docs/metadata-retention-policy.md §1.
+    // "0" would disable the bound entirely.
+    "POLLIS_DS_WATERMARK_STALE_MONTHS": "12"
   },
   // Synced from Doppler prd_prod into the account Secrets Store under DS_PROD_.
   "secrets_store_secrets": [
@@ -53,7 +57,8 @@
     { "binding": "R2_BUCKET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_R2_BUCKET" },
     { "binding": "TURSO_PLATFORM_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_PLATFORM_TOKEN" },
     { "binding": "TURSO_ORG", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_ORG" },
-    { "binding": "TURSO_DB", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_DB" }
+    { "binding": "TURSO_DB", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_DB" },
+    { "binding": "POLLIS_DS_METRICS_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_POLLIS_DS_METRICS_TOKEN" }
   ],
   "routes": [{ "pattern": "api.pollis.com", "custom_domain": true }]
 }

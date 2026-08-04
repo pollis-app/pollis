@@ -47,12 +47,34 @@ specifies **no TTL**.
 
 **Device-staleness bound (#720).** Since #720 the floor is bounded by member watermarks **and** by device
 *liveness*: a member device that has not **reported** a watermark within a configured window
-(`POLLIS_DS_WATERMARK_STALE_MONTHS`, default **6 months**) stops pinning retention and is excluded from
+(`POLLIS_DS_WATERMARK_STALE_MONTHS`, **set to 12 months** in both deployed environments; the code
+default when unset is 6) stops pinning retention and is excluded from
 the floor, mirroring how a revoked device is excluded (#685). This is **not** a TTL and does not reopen
 the #688 bug: the bound is on the device's own last **report** (`conversation_watermark.reported_at`, a
 server-stamped wall-clock time), never on the message's age. A device that reported yesterday still pins
 every envelope below its cursor, however old. Coming back and reporting makes the device live again
 immediately (reversible; the device is not revoked or removed from any roster).
+
+**Why 12 and not the code default of 6** (decided 2026-08-04). This window is the *only* thing
+standing between a returning user and missing mail, so its length is the blast radius of the third
+accepted loss below. The product principle in `CLAUDE.md` — *"given 'simpler but drops messages' vs
+'more complex but delivers,' pick the one that delivers"* — points at the longer window, and three
+things make it cheap:
+
+- **The cost of a longer window is small and bounded.** Retention is keyed on the device's last
+  *report*, not the message's age, so a live device already pins indefinitely; N only governs how
+  long a *dormant* device keeps doing so. Envelope volume at present scale is negligible (#720's own
+  follow-up: "not urgent at current scale; urgent before a large group with churn"), and
+  `GET /v1/retention/metrics` now exists precisely to catch that turning into a bill.
+- **The cost of too short a window is a silently broken promise.** Six months does not cover a phone
+  in a drawer over a long trip, a hospital stay, or parental leave — all ordinary, and all cases
+  where the user did nothing wrong and loses mail anyway.
+- **The direction is reversible; the other one is not.** Shortening N later only changes what future
+  sweeps collect. Lengthening it after a sweep has run cannot bring deleted envelopes back. When one
+  direction is recoverable and the other is not, start on the recoverable side.
+
+`0` disables the bound entirely, restoring pre-#720 watermark-only behaviour. That is deliberately
+available but not chosen: unbounded growth was the problem #720 set out to fix.
 
 The consequence, stated plainly because a privacy form will ask: **there is no wall-clock maximum
 retention period for an undelivered envelope, but there is now a bound tied to recipient-device
@@ -60,8 +82,9 @@ liveness.** A member who joins a busy conversation and keeps at least one device
 conversation's envelopes indefinitely; a member whose every device goes silent past the window stops
 pinning. The cost is a **third accepted message loss** — beyond "messages sent before you joined" and "a
 new device starts empty" — a device dormant past the window that later returns may find gaps. This is a
-deliberate storage/correctness trade; the window's **value is the owner's product call** and is held
-conservative. The mechanism is done; **the owner must decide N** (and may set `0` to disable the bound).
+deliberate storage/correctness trade. **N is decided: 12 months** (2026-08-04, rationale above), set
+explicitly in both deployed environments rather than left on the code default, and disclosed to users on
+the Learn page rather than only in this document.
 
 **Growth visibility (#720 checkbox 1).** The GC sweep computes an identity-free `message_envelope` growth
 snapshot on the same walk — total envelope count, how many conversations hold envelopes, the oldest
@@ -89,7 +112,7 @@ DB, split out in #420 Goal A).
 
 | Data | Table | Retention | Enforced by |
 |---|---|---|---|
-| Encrypted message envelopes | `message_envelope` | Until every current **live** member device has reported a watermark past the row. **No TTL** (age never deletes); since #720 a device silent past `POLLIS_DS_WATERMARK_STALE_MONTHS` (default 6) stops pinning, bounded on the device's last **report**, not the message's age. Also removed immediately on user-initiated delete. | `messages.rs` `CLEANUP_*`; #688/#716, #720 |
+| Encrypted message envelopes | `message_envelope` | Until every current **live** member device has reported a watermark past the row. **No TTL** (age never deletes); since #720 a device silent past `POLLIS_DS_WATERMARK_STALE_MONTHS` (set to 12) stops pinning, bounded on the device's last **report**, not the message's age. Also removed immediately on user-initiated delete. | `messages.rs` `CLEANUP_*`; #688/#716, #720 |
 | Reactions | `message_reaction` | Life of the account; cascade-deleted with the user | `000000_baseline.sql` FK |
 | Per-device fetch cursors | `conversation_watermark` | **Indefinite** — advanced, never deleted, except with the device. Carries `reported_at` (server-stamped last-report wall-clock, #720), the liveness signal the envelope floor reads | `apply_advance_watermark`; #720 |
 | MLS commit history | `mls_commit_log` (log DB) | Pruned to the tier-1 floor (min applied epoch across current member devices) with a tier-2 per-conversation hard cap | commit-log retention code + `retention_tests` |
@@ -295,9 +318,11 @@ Writing this document surfaced retention behaviour we have not decided on, only 
 - [ ] **`push_token` has no stale-token reap.** A token for an uninstalled app persists until the
       account is deleted.
 - [x] **No maximum retention for undelivered envelopes** (§1) — #720 landed a device-staleness bound
-      (`POLLIS_DS_WATERMARK_STALE_MONTHS`, default 6 months). Retention is now bounded by member watermarks
-      **and** by recipient-device liveness. **Owner decision still open:** the value of N (and whether to
-      surface the resulting third accepted-loss in the public "what we can and cannot see" page).
+      (`POLLIS_DS_WATERMARK_STALE_MONTHS`). Retention is bounded by member watermarks **and** by
+      recipient-device liveness. **Owner decision CLOSED 2026-08-04: N = 12 months**, configured
+      explicitly in both `wrangler.{dev,prod}.jsonc` rather than left on the code default of 6, and
+      the resulting third accepted-loss **is** surfaced publicly (`website/learn.html`) and in
+      `CLAUDE.md` / `docs/backend-core-invariants.md`. Rationale in §1.
 - [x] **Attachment deletion is not reference-counted** (#690). **Done** — the reference count is derived
       by joining `attachment_ref` to `message_envelope`, so a reference is released by deleting its message
       (self/admin delete, envelope GC #689, retention #720, teardown) and cannot outlive it; the Turso row

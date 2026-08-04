@@ -1493,7 +1493,9 @@ The copy-per-person approach piling up, then the tree being built, then one smal
 
         <div class="ln-limit">
           <div class="ln-limit-label">What we promise, and what we do not</div>
-          <p>Two kinds of loss are expected: messages sent before you joined, and a new device starting empty. Everything else should just work, including delivery to every current member, going offline and back, reconnecting, and accepting a message request. If a message goes missing for any other reason, that is a bug and we treat it as one.</p>
+          <p>Three kinds of loss are expected. Two come from the cryptography: messages sent before you joined, and a new device starting empty. The third is a choice we made, and it is only fair to say so plainly: <strong>if every one of your devices goes quiet for more than a year</strong>, messages that were still waiting to be delivered <em>only</em> to you may be cleared out before you come back.</p>
+          <p>That clock runs on when your device last checked in, not on how old the message is — so a device you still use holds its mail indefinitely, however far back it goes, and simply opening the app again makes it count once more. We set the window at a year rather than the six months the software defaults to, because a phone in a drawer through a long trip, an illness, or parental leave is ordinary and should not cost you your messages. The reason there is any limit at all is that undelivered mail waiting on a device that never returns would otherwise pile up forever.</p>
+          <p>Everything else should just work, including delivery to every current member, going offline and back, reconnecting, and accepting a message request. If a message goes missing for any other reason, that is a bug and we treat it as one.</p>
         </div>
 
         <figure class="ln-figure">

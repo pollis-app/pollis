@@ -30,15 +30,25 @@ signal we modeled the state wrong.
 >    commit chain has no gaps, ever), and
 > 2. **Receive and decrypt every message** sent in any epoch they were a member.
 
-The only history that is ever lost (the *bounded-history* caveats, unchanged):
+The only history that is ever lost (the *bounded-history* caveats):
 - **(a)** Messages sent **before you joined** the MLS tree (a cryptographic
   property of MLS).
 - **(b)** A **brand-new device** for an existing user starts empty (no key
   backup / Megolm).
+- **(c)** *(new in #720)* A device whose **every** copy has been silent for longer
+  than `POLLIS_DS_WATERMARK_STALE_MONTHS` (**12 months**, configured) stops pinning
+  envelope retention, so mail that was waiting only for that device may be
+  collected before it returns. Unlike (a) and (b) this one is a **policy** choice,
+  not a cryptographic property — it exists because retention with no bound at all
+  is unbounded storage growth. It is keyed on the device's last *report*, never on
+  the message's age, so it is not a TTL; reporting again makes the device live
+  immediately. Rationale for 12: `docs/metadata-retention-policy.md` §1.
 
 Everything else must be delivered. "Come back to a group you joined 4 years and
 300 commits ago, with dozens of adds/removals since, and receive every message"
-is the literal acceptance test.
+is the literal acceptance test — and note (c) does **not** weaken it, because that
+test describes a device that comes *back*, reports, and is live again. (c) bites
+only when a device is gone for over a year and mail was waiting solely on it.
 
 ## Failure taxonomy — invalid states that are *currently representable*
 
@@ -130,7 +140,7 @@ the invariant that makes it unrepresentable.
   *new* member starts at their join epoch (caveat (a) preserved).
 - **Device-liveness bound (#720).** Retention is additionally bounded by device
   *liveness*: a member device that has not **reported** a watermark within a
-  configured window (`POLLIS_DS_WATERMARK_STALE_MONTHS`, default 6 months) stops
+  configured window (`POLLIS_DS_WATERMARK_STALE_MONTHS`, set to 12 months) stops
   pinning and is excluded from the floor, mirroring the revoked-device exclusion
   (#685). The bound is on the device's own **last report**
   (`conversation_watermark.reported_at`, a server-stamped wall-clock time),

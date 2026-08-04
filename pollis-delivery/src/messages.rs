@@ -106,7 +106,8 @@ use crate::AppState;
 // never advances, so it holds `MIN(cw)` down indefinitely. #720 bounds this by
 // LIVENESS — a member device that has not REPORTED a watermark in N months stops
 // counting toward the gate (the `?2` staleness arm below; N is the `?2` modifier,
-// the owner's product call). It mirrors the revoked-device exclusion (#685): a
+// set to 12 months in both deployed environments — see
+// `DEFAULT_WATERMARK_STALE_MODIFIER`). It mirrors the revoked-device exclusion (#685): a
 // stale device is filtered out of the roster the gate measures against, exactly
 // as a revoked one is.
 //
@@ -260,13 +261,16 @@ DELETE FROM message_envelope
 
 // ── Device-liveness (staleness) window (#720) ────────────────────────────────
 
-/// The default staleness window, as a SQLite `datetime()` modifier: a member
+/// The **fallback** staleness window, as a SQLite `datetime()` modifier: a member
 /// device that has not reported a watermark in this long stops pinning envelope
-/// retention. **Deliberately conservative** — a device genuinely silent for six
-/// months in a conversation is treated as dormant. The VALUE of N is the owner's
-/// product call (it governs the third accepted-message-loss; see the GC block
-/// comment and `docs/metadata-retention-policy.md` §1); this is only the code
-/// default when `POLLIS_DS_WATERMARK_STALE_MONTHS` is unset.
+/// retention.
+///
+/// This is only what applies when `POLLIS_DS_WATERMARK_STALE_MONTHS` is unset —
+/// e.g. a local run or a test. **Both deployed environments set it explicitly to
+/// 12**, decided 2026-08-04 (`wrangler.{dev,prod}.jsonc`; rationale in
+/// `docs/metadata-retention-policy.md` §1). N governs the third
+/// accepted-message-loss, so the deployed value is a product decision that is
+/// disclosed to users, not a default anyone should rely on silently.
 pub const DEFAULT_WATERMARK_STALE_MODIFIER: &str = "-6 months";
 
 /// The configured device-staleness window as a SQLite `datetime()` modifier,
@@ -1508,11 +1512,18 @@ mod tombstone_floor_tests {
 
     use super::*;
 
+    // `reported_at` mirrors migration 000013 (#720). Without it this fixture
+    // diverges from the real schema and every test that writes a watermark
+    // through the production INSERT fails with "no column named reported_at" —
+    // which is exactly what `admin_tombstone_always_reaches_a_caught_up_recipient`
+    // did on main. Nullable, as in the migration: NULL reads as "report time
+    // unknown" and is treated as live, so a legacy row keeps pinning.
     const SCHEMA: &str = "\
 CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
 CREATE TABLE conversation_watermark (\
   conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));";
+  last_fetched_at TEXT NOT NULL, reported_at TEXT, \
+  PRIMARY KEY (conversation_id, user_id, device_id));";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
@@ -2980,7 +2991,8 @@ CREATE TABLE message_envelope (\
   target_message_id TEXT, sealed INTEGER NOT NULL DEFAULT 0);\
 CREATE TABLE conversation_watermark (\
   conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, PRIMARY KEY (conversation_id, user_id, device_id));";
+  last_fetched_at TEXT NOT NULL, reported_at TEXT, \
+  PRIMARY KEY (conversation_id, user_id, device_id));";
 
     /// The exact shape a CLIENT writes for `sent_at`
     /// (`chrono::Utc::now().to_rfc3339()`, i.e. `SecondsFormat::AutoSi`), at a
