@@ -399,9 +399,18 @@ jobs:
           # let the tripwire pass without comparing anything — then the save step
           # would re-seed and erase the evidence. Keep stderr; it is the only
           # thing that can tell those two apart.
+          #
+          # `|| rc=$?` is load-bearing, not style. GitHub invokes every step as
+          # `bash -e {0}`, and `set -uo pipefail` does NOT clear that errexit.
+          # Without the `||`, a failing command substitution aborts the step ON
+          # THE ASSIGNMENT, so the classification below never runs. That made the
+          # first-seeding path unreachable and broke the nightly publish the
+          # moment it shipped — on the very first run there is no object yet, by
+          # definition. Guarding the assignment makes the failure *tested*, which
+          # is what stops errexit firing.
+          rc=0
           err="$(aws s3 cp "s3://${R2_BUCKET}/internal/tripwire-sths.tar" .sth-prev.tar \
-                   --endpoint-url "${R2_ENDPOINT}" 2>&1)"
-          rc=$?
+                   --endpoint-url "${R2_ENDPOINT}" 2>&1)" || rc=$?
           if [ "${rc}" -eq 0 ]; then
             tar -xf .sth-prev.tar -C .sth-prev
             echo "tripwire: restored prior state from R2."
