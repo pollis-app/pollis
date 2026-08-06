@@ -14,9 +14,40 @@
 // the single source of truth (see the deploy workflows).
 import {
   Container,
-  getContainer,
   type ContainerStartConfigOptions,
 } from "@cloudflare/containers";
+
+// WHERE the DS container physically runs (#658).
+//
+// A Durable Object addressed by name is placed in the region nearest whoever
+// FIRST instantiated it, and that placement is PERMANENT for the life of that
+// object ID. `getContainer(binding, name)` — which this used to call — is exactly
+// `binding.idFromName(name)` + `binding.get(id)` with no placement argument
+// (@cloudflare/containers 0.3.7, dist/lib/utils.js), so placement was never
+// configured: it was decided by whichever request happened to arrive first.
+//
+// That went badly in dev and well in prod, purely by luck. Measured from one IAD
+// edge, same code and same image: prod `/version` ~47ms, dev ~287ms — a ~240ms
+// long-haul round trip dev pays before touching anything. Add one Turso read over
+// a per-request connection and dev's signed endpoints hit ~1.53s against prod's
+// ~68ms, while the dev database itself answers in ~20ms when queried directly.
+// The DB was never slow; the container was simply far from it.
+//
+// `enam` (eastern North America) matches the `aws-us-east-1` Turso primary that
+// BOTH environments use. Pinning it makes prod's current good placement a
+// declared property instead of an accident that a rename, a migration tag, or a
+// deploy from the wrong hemisphere could silently re-roll.
+const DS_LOCATION_HINT: DurableObjectLocationHint = "enam";
+
+// `locationHint` is honoured ONLY when the object is first created — an existing
+// object never migrates. So pinning the hint alone would have left dev exactly
+// where it was; the name had to change to force a new, correctly-placed object.
+// Safe to do: `PollisDelivery extends Container<Env>` keeps no state (there is no
+// `ctx.storage` use anywhere in this file) and every byte of DS state lives in
+// Turso, so recreating it costs one cold start and nothing else.
+//
+// Bumping this name again re-places the container. Only do that deliberately.
+const DS_SINGLETON_NAME = "pollis-delivery-singleton-enam";
 
 // Keys synced from Doppler into this env's Secrets Store, each bound under the
 // same name in wrangler config. Read at container start and passed through as
@@ -169,8 +200,11 @@ export default {
   // per-route allowlist (the nginx-vhost rot this migration kills, #515) —
   // the app owns its routing.
   async fetch(request: Request, env: Env): Promise<Response> {
-    return getContainer(env.POLLIS_DELIVERY, "pollis-delivery-singleton").fetch(
-      request,
-    );
+    // Same resolution getContainer performed (idFromName + get), plus the
+    // placement hint it gives no way to pass. See DS_LOCATION_HINT above.
+    const id = env.POLLIS_DELIVERY.idFromName(DS_SINGLETON_NAME);
+    return env.POLLIS_DELIVERY.get(id, {
+      locationHint: DS_LOCATION_HINT,
+    }).fetch(request);
   },
 };
