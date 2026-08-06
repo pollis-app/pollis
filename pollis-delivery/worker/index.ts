@@ -40,14 +40,25 @@ import {
 const DS_LOCATION_HINT: DurableObjectLocationHint = "enam";
 
 // `locationHint` is honoured ONLY when the object is first created — an existing
-// object never migrates. So pinning the hint alone would have left dev exactly
-// where it was; the name had to change to force a new, correctly-placed object.
-// Safe to do: `PollisDelivery extends Container<Env>` keeps no state (there is no
-// `ctx.storage` use anywhere in this file) and every byte of DS state lives in
-// Turso, so recreating it costs one cold start and nothing else.
+// object never migrates. So the hint below does NOT move either environment's
+// current container; it decides where the object lands the next time one is
+// created from scratch (new account, new namespace, a `migrations` class change,
+// or a deliberate rename per the procedure below). That is the point: it stops
+// prod's placement from being re-rolled by chance.
 //
-// Bumping this name again re-places the container. Only do that deliberately.
-const DS_SINGLETON_NAME = "pollis-delivery-singleton-enam";
+// DO NOT rename this to force a re-placement without following the procedure in
+// docs/deployments.md. Renaming was tried on 2026-08-06 and took dev down:
+//
+//   Failed to start container: Maximum number of running container instances
+//   exceeded. Try again later, or try configuring a higher value for max_instances
+//
+// A rename creates a SECOND durable object, and the wrangler configs pin
+// `max_instances: 1`. The outgoing object still held the single permitted
+// container instance, so the incoming one could never start and every request
+// 500'd until traffic was routed back to the original name. The DO itself is
+// stateless (no `ctx.storage` in this file; all DS state is in Turso), so the
+// blocker is purely the instance cap — not data.
+const DS_SINGLETON_NAME = "pollis-delivery-singleton";
 
 // Keys synced from Doppler into this env's Secrets Store, each bound under the
 // same name in wrangler config. Read at container start and passed through as
