@@ -67,12 +67,13 @@ jobs:
           node-version: "20"
           cache: "pnpm"
 
-      # Pinned to the EXACT version in rust-toolchain.toml (1.96.0) — not
-      # `@stable`, which floats and would let two builds of the same commit
-      # compile with different rustc versions and emit different bytes. Bump
-      # both in lockstep. (macOS reproducibility is best-effort — see
-      # docs/reproducible-builds-residuals.md — but a pinned compiler is a
-      # prerequisite for it and for a stable recorded build recipe.)
+      # Pinned to the EXACT version in rust-toolchain.toml (1.96.0), not `@stable`,
+      # which floats: the recorded build recipe has to name one compiler, or the
+      # recipe does not describe what actually built the release. Bump both in
+      # lockstep. (Since #750 this job builds ONCE, so the pin is no longer load
+      # bearing for a same-commit self-comparison — it is about the recipe being
+      # true. macOS rebuild-from-source remains best-effort; see
+      # docs/reproducible-builds-residuals.md.)
       - uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: aarch64-apple-darwin
@@ -124,67 +125,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      # WS3 (#603/#704): capture the PRE-SIGNATURE .app payload BEFORE the signed
-      # build below touches it. The shipped .dmg is signed + notarized, so its
-      # bytes embed Apple's CMS signature + a stapled notarization ticket that vary
-      # per signing operation and can never be reproduced — hashing them would log a
-      # payload leaf nobody, us included, could ever rebuild (worse than no leaf).
-      # So this build runs UNSIGNED and we hash the .app tree with the shared
-      # sha_tree helper, publishing the digest as a sidecar the attest job (and the
-      # attest-release.yml backfill) read back as payload_sha256. Details:
-      #   * UNSIGNED via env, reading the SAME config FILE as the signed build: the
-      #     signing identity is env-driven (APPLE_SIGNING_IDENTITY, which the signed
-      #     step below sets and which OVERRIDES any config value —
-      #     tauri-cli/src/interface/rust.rs:1467 `env::var_os("APPLE_SIGNING_IDENTITY")
-      #     … None => config.macos.signing_identity`). This step sets no APPLE_* env,
-      #     so tauri resolves signing_identity=None and does not sign. The redundant
-      #     hardcoded signingIdentity was removed from tauri.{conf,macos.conf}.json
-      #     in #704, so build 1 and build 2 read a byte-identical config file — no
-      #     jq round-trip. The one remaining difference is the --config override
-      #     below, not the file.
-      #   * gtar — sha_tree's `--sort=name` is a GNU extension macOS's BSD tar
-      #     lacks; the digest must match a rebuilder's byte-for-byte, so install and
-      #     use GNU tar via the helper's TAR override.
-      #   * createUpdaterArtifacts:false — the ONLY delta from the signed build. It
-      #     skips the minisign updater bundle (a Pollis signing secret this build
-      #     can't hold; the signed build MUST emit it for auto-update). Tauri's
-      #     codegen strips this field to its Default before embedding the config into
-      #     the binary (tauri-utils BundleConfig::to_tokens: create_updater_artifacts
-      #     = Default::default()), so it provably cannot change the compiled bytes —
-      #     and the WS3 fingerprint check below ENFORCES that, so we never rely on it.
-      #   * Runs FIRST, from a pristine target/. We record the compiled binary's
-      #     fingerprint here and re-check it after the signed build (see the "Verify
-      #     signed binary matches pre-signature payload" step) — that check, not a
-      #     comment, is what proves the payload leaf wraps the shipped binary.
-      - name: Capture pre-signature payload (unsigned .app)
-        run: |
-          set -euo pipefail
-          brew install gnu-tar
-          export TAR=gtar
-          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          export SOURCE_DATE_EPOCH
-          pnpm tauri build --target aarch64-apple-darwin \
-            --config '{"bundle":{"createUpdaterArtifacts":false}}'
-          app="$(find target/aarch64-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' -type d | head -1)"
-          if [ -z "${app:-}" ]; then
-            echo "::error::WS3: unsigned build produced no .app to hash for the pre-signature payload"
-            exit 1
-          fi
-          . scripts/lib/payload-hash.sh
-          sha_tree "$app" > "pollis-${GITHUB_REF_NAME}-macos.payload-sha256"
-          echo "pre-signature macOS payload_sha256: $(cat "pollis-${GITHUB_REF_NAME}-macos.payload-sha256")"
-          # Fingerprint the compiled binary (+ the externalBin capture-helper the
-          # .app payload embeds) so the post-sign step can prove the signed build
-          # reused THESE bytes. The signed build regenerates the bundle from the
-          # same compiled binary; if it recompiled to different bytes, the payload
-          # leaf would attest a binary that never shipped — the check catches that.
-          scripts/verify-presig-binary.sh record aarch64-apple-darwin \
-            "$RUNNER_TEMP/presig-binfp-macos.txt"
-          # Discard the UNSIGNED bundle so the signed build below regenerates it
-          # cleanly and no unsigned .dmg can ever reach the upload. Only the
-          # packaging output is removed; the compiled binary in target/ is reused.
-          rm -rf target/aarch64-apple-darwin/release/bundle
-
       # The macOS screen-capture helper (pollis-capture-macos) owns
       # ScreenCaptureKit in its own process — issue #283 Phase 2 — so an
       # uncatchable ObjC throw from SCK can no longer kill the app.
@@ -230,19 +170,6 @@ jobs:
         with:
           args: --target aarch64-apple-darwin
 
-      # WS3 (#603/#704) INVARIANT, not an assumption: the signed build recompiled
-      # the app crate (it saw a different TAURI_CONFIG than the capture build —
-      # tauri-build emits cargo:rerun-if-env-changed=TAURI_CONFIG). The config delta
-      # is confined to bundle fields Tauri's codegen strips from the embedded config,
-      # so the recompiled binary is EXPECTED to be byte-identical to the one the
-      # pre-signature payload hashed — this step ENFORCES it. If it differs, the
-      # payload leaf no longer corresponds to the shipped binary and the release is
-      # stopped before publishing a false verifiability claim.
-      - name: Verify signed binary matches pre-signature payload (WS3)
-        run: |
-          scripts/verify-presig-binary.sh verify aarch64-apple-darwin \
-            "$RUNNER_TEMP/presig-binfp-macos.txt"
-
       # WS3 (#603/#704): "the artifact we ship is signed" is a load-bearing claim —
       # our payload leaf + attestation are meaningless wrapped around a .dmg
       # Gatekeeper blocks. Assert it the same way we assert the binary fingerprint,
@@ -257,6 +184,40 @@ jobs:
             exit 1
           fi
           scripts/verify-signed-artifact.sh macos "$app"
+
+      # #750: the macOS payload digest is derived FROM THE BUNDLE WE SHIP, with
+      # Apple's signature and notarization ticket normalized back out (see the long
+      # note above sha_macos_payload in scripts/lib/payload-hash.sh).
+      #
+      # This replaces a two-build scheme: build once unsigned to hash, once signed
+      # to ship, then assert the two shared a compiled binary. That made the release
+      # gate depend on rustc emitting byte-identical output across two compiles of
+      # one source tree — which it does not reliably do (#750) — and it hashed a
+      # bundle that existed only inside the CI job, so no outside party could ever
+      # check the leaf against anything. Hashing the shipped bundle is both the
+      # thing we can actually guarantee and the thing a stranger can falsify.
+      #
+      # Ordered AFTER the signed/notarized assertion (so the input is known-good)
+      # and BEFORE the upload (so a normalization failure stops the release rather
+      # than publishing a leaf nobody can recompute).
+      #
+      # gtar: sha_tree's `--sort=name` is a GNU extension macOS's BSD tar lacks, and
+      # the digest has to match an outside verifier's byte-for-byte.
+      - name: Compute macOS payload digest (#750)
+        run: |
+          set -euo pipefail
+          brew install gnu-tar
+          export TAR=gtar
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          app="$(find target/aarch64-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' -type d | head -1)"
+          if [ -z "${app:-}" ]; then
+            echo "::error::#750: no signed .app found to hash for the macOS payload digest"
+            exit 1
+          fi
+          . scripts/lib/payload-hash.sh
+          sha_macos_payload "$app" > "pollis-${GITHUB_REF_NAME}-macos.payload-sha256"
+          echo "macOS payload_sha256: $(cat "pollis-${GITHUB_REF_NAME}-macos.payload-sha256")"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4

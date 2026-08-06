@@ -170,10 +170,15 @@ dmg="$(find_one '*.dmg' || true)"
 if [ -n "${dmg:-}" ]; then
   name="pollis-${RELEASE_TAG}-macos.dmg"
   art_sha="$(sha_file "$dmg")"
-  # payload_sha256 is the PRE-SIGNATURE .app payload, hashed in the build job
-  # before codesign/notarization and published as this sidecar — NOT a hash of
-  # anything extracted from this already-signed, notarized .dmg (those bytes carry
-  # Apple's CMS signature + stapled ticket and can never be reproduced).
+  # payload_sha256 is the NORMALIZED payload of the shipped .app: the bundle inside
+  # this very .dmg, with Apple's per-signing-operation material (CMS signature,
+  # stapled ticket, _CodeSignature manifests) stripped back out before hashing.
+  # Computed in the build job by sha_macos_payload and published as this sidecar.
+  # Before #750 it was instead a hash of a SEPARATE unsigned build — a bundle that
+  # existed only inside CI, which nobody outside could obtain and therefore nobody
+  # could check. Deriving it from the shipped artifact makes the leaf falsifiable by
+  # a stranger holding the public .dmg, and drops the release's dependence on rustc
+  # compiling one source tree to identical bytes twice.
   pay_sha="$(require_presig_payload "macOS .dmg" '*macos.payload-sha256')"
   need 7z "extract the .app payload from the .dmg"
   ex="$work/dmg"; mkdir -p "$ex"

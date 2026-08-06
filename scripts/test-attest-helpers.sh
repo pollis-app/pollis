@@ -174,12 +174,16 @@ fi
 echo
 echo "verify-presig-binary — the WS3 pre-signature/shipped-binary invariant (#603/#704)"
 
-# The macOS/Windows payload leaf hashes the UNSIGNED capture build; the signed
-# build recompiles the app crate (a config delta trips tauri-build's
-# rerun-if-changed). This script records the compiled binary's fingerprint after
-# the capture build and re-checks it after the signed build, so a divergence stops
-# the release rather than publishing a payload leaf for a binary that never
-# shipped. Exercised here against a fabricated target/ tree — no real release.
+# The WINDOWS payload leaf hashes an UNSIGNED capture build; the signed build
+# recompiles the app crate (a config delta trips tauri-build's rerun-if-changed).
+# This script records the compiled binary's fingerprint after the capture build and
+# re-checks it after the signed build, so a divergence stops the release rather than
+# publishing a payload leaf for a binary that never shipped. Exercised here against
+# a fabricated target/ tree — no real release.
+#
+# macOS no longer uses this path at all: since #750 it builds ONCE and derives its
+# payload digest from the shipped bundle (sha_macos_payload), so there are never two
+# compiles to reconcile. Windows still builds twice and so still needs the check.
 if ! command -v sha256sum >/dev/null 2>&1; then
   echo "  skip — verify-presig-binary needs sha256sum (absent on macOS); covered in CI"
 else
@@ -319,6 +323,166 @@ case "$out" in
   *) bad "windows error does not name the missing signtool: $out" ;;
 esac
 unset SIG_A SIG_B SIG_EMPTY SIG_E1 SIG_E2 2>/dev/null || true
+
+echo
+echo "sha_macos_payload — the shipped-bundle payload digest (#750)"
+
+# The macOS payload digest is derived from the SIGNED bundle we ship, normalizing
+# Apple's per-signing material back out. The property that has to hold is exact:
+# stripping must remove the signature and NOTHING ELSE, so the digest of a signed
+# bundle equals the digest that same build would have had unsigned — and two
+# separate signings of one build agree.
+#
+# codesign/stapler exist only on macOS runners, so they are stubbed here against a
+# fabricated bundle. The stubs model the shape the real tools present: an embedded
+# per-Mach-O signature (a trailing __SIG__ line), a stapled ticket file, and a
+# _CodeSignature manifest directory. That is enough to exercise every branch,
+# including the two fail-loud guards, which is the part that must never regress:
+# a silently-failing strip would publish a digest nobody could ever recompute.
+stub="$work/stub-bin"; mkdir -p "$stub"
+
+cat > "$stub/codesign" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --remove-signature)
+    shift
+    for f in "$@"; do
+      [ -f "$f" ] || continue
+      grep -v '^__SIG__' "$f" > "$f.stripped" || true
+      mv "$f.stripped" "$f"
+    done
+    ;;
+  -dv|-d|--verify)
+    shift
+    grep -rq '^__SIG__' "${1:-}" 2>/dev/null && exit 0
+    exit 1
+    ;;
+esac
+exit 0
+STUB
+
+cat > "$stub/xcrun" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = "stapler" ]; then
+  case "${2:-}" in
+    unstaple) rm -f "${3:-}/Contents/_Ticket"; exit 0 ;;
+    validate) [ -f "${3:-}/Contents/_Ticket" ] && exit 0; exit 1 ;;
+  esac
+fi
+exit 0
+STUB
+
+# `file -b <path>` — Mach-O iff the payload starts with our MACHO marker.
+cat > "$stub/file" <<'STUB'
+#!/usr/bin/env bash
+f="${2:-}"
+if [ -f "$f" ] && head -c 5 "$f" 2>/dev/null | grep -q 'MACHO'; then
+  echo "Mach-O 64-bit executable arm64"
+else
+  echo "ASCII text"
+fi
+exit 0
+STUB
+chmod +x "$stub"/*
+
+# build_app <dir> <signed:yes|no> [ticket-bytes]
+build_app() {
+  local d="$1" signed="$2" ticket="${3:-ticket-bytes}"
+  mkdir -p "$d/Contents/MacOS" "$d/Contents/Resources"
+  printf 'MACHO\nprogram-bytes\n' > "$d/Contents/MacOS/pollis"
+  printf 'MACHO\nhelper-bytes\n'  > "$d/Contents/MacOS/pollis-capture-macos"
+  printf 'console.log(1)\n'       > "$d/Contents/Resources/app.js"
+  if [ "$signed" = "yes" ]; then
+    printf '__SIG__cms-blob-a\n' >> "$d/Contents/MacOS/pollis"
+    printf '__SIG__cms-blob-b\n' >> "$d/Contents/MacOS/pollis-capture-macos"
+    mkdir -p "$d/Contents/_CodeSignature"
+    printf '<plist>resources</plist>\n' > "$d/Contents/_CodeSignature/CodeResources"
+    printf '%s\n' "$ticket" > "$d/Contents/_Ticket"
+  fi
+}
+
+if ! command -v sha256sum >/dev/null 2>&1; then
+  echo "  skip — sha_macos_payload tests need sha256sum; covered in CI"
+else
+  mroot="$work/macos"; mkdir -p "$mroot"
+  build_app "$mroot/Signed.app"   yes "ticket-from-submission-1"
+  build_app "$mroot/Signed2.app"  yes "ticket-from-submission-2"
+  build_app "$mroot/Unsigned.app" no
+
+  export SOURCE_DATE_EPOCH=1700000000
+  unsigned_digest="$(sha_tree "$mroot/Unsigned.app")"
+
+  sig_digest="$(PATH="$stub:$PATH" sha_macos_payload "$mroot/Signed.app")"; rc=$?
+  check "normalizing a signed bundle succeeds" "$rc" "0"
+
+  # THE load-bearing assertion. If these ever diverge, the digest is a function of
+  # the signing operation rather than of the build, and the leaf becomes something
+  # no outside party can reproduce from the public .dmg.
+  check "signed bundle normalizes to the SAME digest as the unsigned build" \
+    "$sig_digest" "$unsigned_digest"
+
+  sig2_digest="$(PATH="$stub:$PATH" sha_macos_payload "$mroot/Signed2.app")"
+  check "a second, independent signing of the same build agrees" \
+    "$sig2_digest" "$sig_digest"
+
+  # Normalization must not touch the bundle we ship — it runs on a copy.
+  check "the shipped bundle still carries its signature afterwards" \
+    "$(grep -c '^__SIG__' "$mroot/Signed.app/Contents/MacOS/pollis")" "1"
+  check "the shipped bundle still carries its notarization ticket" \
+    "$( [ -f "$mroot/Signed.app/Contents/_Ticket" ] && echo yes )" "yes"
+
+  # Fail-loud guard 1: codesign silently does nothing (wrong Xcode, SIP refusal,
+  # a future flag rename). Hashing anyway would publish an unrecomputable leaf.
+  cat > "$stub/codesign" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  -dv|-d|--verify) exit 0 ;;
+esac
+exit 0
+STUB
+  chmod +x "$stub/codesign"
+  out="$(PATH="$stub:$PATH" sha_macos_payload "$mroot/Signed.app" 2>&1)"; rc=$?
+  check "fails when the code signature survives the strip" "$rc" "1"
+  case "$out" in
+    *"STILL carries a code signature"*) ok "signature-survived error says what went wrong" ;;
+    *) bad "signature-survived error is unclear: $out" ;;
+  esac
+
+  # Fail-loud guard 2: the ticket survives unstaple.
+  cat > "$stub/codesign" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --remove-signature)
+    shift
+    for f in "$@"; do
+      [ -f "$f" ] || continue
+      grep -v '^__SIG__' "$f" > "$f.stripped" || true
+      mv "$f.stripped" "$f"
+    done
+    ;;
+  -dv|-d|--verify) exit 1 ;;
+esac
+exit 0
+STUB
+  cat > "$stub/xcrun" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "stapler" ] && [ "${2:-}" = "validate" ] && exit 0
+exit 0
+STUB
+  chmod +x "$stub/codesign" "$stub/xcrun"
+  out="$(PATH="$stub:$PATH" sha_macos_payload "$mroot/Signed2.app" 2>&1)"; rc=$?
+  check "fails when the notarization ticket survives unstaple" "$rc" "1"
+  case "$out" in
+    *"STILL carries a notarization ticket"*) ok "ticket-survived error says what went wrong" ;;
+    *) bad "ticket-survived error is unclear: $out" ;;
+  esac
+
+  # A path that is not a bundle fails before touching any Apple tooling.
+  ( PATH="$stub:$PATH" sha_macos_payload "$mroot/no-such.app" ) >/dev/null 2>&1
+  check "a missing bundle fails loudly" "$?" "1"
+
+  unset SOURCE_DATE_EPOCH
+fi
 
 echo
 echo "──────────────────────────────────────────"

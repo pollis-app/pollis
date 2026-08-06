@@ -189,15 +189,28 @@ reproducible, and pretending otherwise would be dishonest to auditors.
    have 3-day rolling validity, `.codesight/wiki/windows-signing.md`); the
    minisign `.sig` is over the signed artifact. **None of these can be
    reproduced** by a third party without Pollis's private keys. **Resolution:**
-   we reproduce and log the **pre-signature payload** (the built `.app`
-   bundle contents, the raw NSIS-input tree, the AppImage squashfs payload), and
-   log the signed wrapper as a *separate derived hash* with a documented,
-   verifiable **binding**: "signed artifact `X` wraps reproducible payload `P`."
-   The verifier's chain is: rebuild → get `P` → confirm `P` is logged → confirm
-   the shipped signed artifact strips to the same `P`. For macOS `.app` and
-   AppImage the payload is directly extractable; for Windows NSIS the reproducible
-   unit is the **unsigned `pollis.exe` + bundled resources** the installer wraps,
-   verified by extracting the installer.
+   we log a **payload** that excludes the signing layer, and log the signed wrapper
+   as a *separate derived hash* with a documented, verifiable **binding**: "signed
+   artifact `X` wraps payload `P`." The verifier's chain is: obtain `P` → confirm
+   `P` is logged → confirm the shipped signed artifact yields the same `P`.
+
+   How `P` is obtained differs by platform. For the **AppImage** the shipped bytes
+   *are* `P` (detached minisign). For **Windows NSIS** the unit is the **unsigned
+   `pollis.exe` + bundled resources** the installer wraps, captured by an unsigned
+   build before the Authenticode `signCommand` is injected (#704). For **macOS**,
+   as of **#750**, `P` is the **shipped bundle with Apple's per-signing material
+   normalized out** — the stapled ticket, each Mach-O's `LC_CODE_SIGNATURE`, and
+   the `_CodeSignature` manifests — computed by `sha_macos_payload`.
+
+   The macOS definition is deliberate and is the standard answer in this space: you
+   do not reproduce a signature, you exclude it (F-Droid requires APKs identical
+   "apart from the signature"; the Mach-O convention normalizes the code-signature
+   region away before comparing). It replaced a scheme that built the app twice —
+   once unsigned to hash, once signed to ship — which made the release gate depend
+   on rustc emitting identical bytes across two compiles, and which hashed a bundle
+   no third party could ever obtain. Deriving `P` from the shipped artifact makes it
+   recomputable by anyone holding the public `.dmg`. See
+   `docs/reproducible-builds-residuals.md` §2.
 
 2. **Notarization mutates the artifact.** Apple's notary service can staple a
    ticket, changing bytes post-build. We log the pre-staple hash and treat the
@@ -340,17 +353,18 @@ The release workflow currently ends by uploading artifacts, minisign manifests,
 `latest.json`, and the GitHub release. We insert a **new job, `attest-and-log`,
 after `release`** (it needs the built + signed artifacts in hand):
 
-1. **Compute hashes.** For each platform artifact: obtain the reproducible
-   **pre-signature** payload and hash it → `payload_sha256`; hash the shipped
-   signed file → `artifact_sha256`. On Linux the shipped AppImage/deb/rpm bytes
-   *are* the payload (detached minisign), so the attest job hashes them directly.
-   On macOS/Windows the pre-signature `.app` / unsigned exe+resources cannot be
-   recovered from the signed installer at all — as of #704 (WS3) the **build job**
-   builds the bundle unsigned, hashes it with the shared `sha_tree` helper, and
-   publishes the digest as a `*.payload-sha256` release-asset sidecar the attest
-   job reads (it must never re-hash the signed bytes, which embed a
-   per-signing-operation signature + notarization ticket and are unreproducible by
-   construction).
+1. **Compute hashes.** For each platform artifact: obtain the payload and hash it →
+   `payload_sha256`; hash the shipped signed file → `artifact_sha256`. On Linux the
+   shipped AppImage/deb/rpm bytes *are* the payload (detached minisign), so the
+   attest job hashes them directly. On **Windows** the unsigned exe+resources cannot
+   be recovered from the signed installer, so the **build job** builds the bundle
+   unsigned first and hashes it with `sha_tree` (#704). On **macOS** the build job
+   builds **once** and hashes the shipped bundle with `sha_macos_payload`, which
+   normalizes Apple's signature and notarization ticket out first (#750). In all
+   three cases the digest is published as a `*.payload-sha256` release-asset sidecar
+   the attest job reads; the attest job must never hash raw signed bytes for the
+   payload leaf, since those embed per-signing-operation material that is
+   unreproducible by construction.
 2. **Emit `BinaryRecord` leaves** into a small JSON the builder consumes.
 3. **Append to the binaries tree.** The `verifiable-log-builder` gains a
    `--binaries-in <records.json>` mode (analogous to `--account-out`): it appends
