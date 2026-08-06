@@ -242,6 +242,27 @@ resource "aws_autoscaling_group" "relay" {
   vpc_zone_identifier = [for s in aws_subnet.public : s.id]
   health_check_type   = "EC2"
 
+  # Stop the AZ-rebalance thrash loop.
+  #
+  # The group spans one subnet per AZ (three in most regions) while the pool holds
+  # two nodes. AWS's AZRebalance process continuously tries to even instances
+  # across zones, and 2 does not divide across 3 — so it launches a THIRD node
+  # ("resulting in more than desired number of instances"), then terminates one to
+  # get back to desired, then finds the zones uneven again. Forever.
+  #
+  # Observed in us-west-2: 27 rebalance events in one window of scaling history,
+  # each cascading into a replacement launch, several per minute. That churn is
+  # what was paging the owner ~6x/day — the alarms were reporting real instability,
+  # not misfiring. It also burns instance-hours and public-IPv4 allocations, which
+  # is most of the gap between ~$2 actual spend and the ~$23 forecast.
+  #
+  # Suspending AZRebalance does NOT weaken availability: the multi-AZ subnets still
+  # spread new launches, replacement still honours them, and a genuine AZ failure is
+  # still handled by the health-check path. It only stops AWS from *moving healthy
+  # nodes between zones* to satisfy an evenness constraint that a 2-node pool can
+  # never meet. Re-evaluate if the pool ever holds a multiple of the AZ count.
+  suspended_processes = ["AZRebalance"]
+
   # The reconciler marks a node Unhealthy (via SetInstanceHealth) when its relay
   # container is dead but the instance is still EC2-reachable. This grace period is
   # the window, measured from launch, in which that flag is ignored so a node still
