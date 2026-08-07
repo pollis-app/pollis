@@ -25,7 +25,22 @@
       // let wrangler build: docs/deployments.md (DS — the old path could never cache).
       "image": "registry.cloudflare.com/__CF_ACCOUNT_ID__/pollis-delivery-dev:__IMAGE_TAG__",
       "instance_type": "basic",
-      "max_instances": 1,
+      // 2, not 1 — and NOT a capacity decision (#658).
+      //
+      // The failed placement experiment left dev with TWO durable objects: the
+      // orphaned original `pollis-delivery-singleton` and the live
+      // `pollis-delivery-singleton-enam`. The orphan still holds a container
+      // instance, so a cap of 1 starves the live object and every request fails
+      // with "Maximum number of running container instances exceeded" — observed
+      // twice, both times taking dev down until the cap was raised again.
+      //
+      // The cap is a CEILING, not a reservation: instances still scale to zero
+      // after `sleepAfter`, so the idle orphan costs nothing to keep permitted.
+      //
+      // Return this to 1 ONLY after the orphaned object is actually deleted (the
+      // Cloudflare dashboard / API — wrangler exposes no delete for a durable
+      // object). Lowering it while the orphan exists breaks dev, every time.
+      "max_instances": 2,
       // Single instance: roll 100% in one step so a deploy replaces the running
       // instance immediately (gradual rollout stalls with max_instances 1, so the
       // /version gate never sees the new build).
