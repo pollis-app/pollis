@@ -19,10 +19,22 @@ on:
     paths:
       - "scripts/**"
       - ".github/workflows/scripts-check.yml"
+      - "pollis-delivery/worker/**"
+      - "pollis-delivery/wrangler.dev.jsonc"
+      - "pollis-delivery/wrangler.prod.jsonc"
+      - "pollis-delivery/ds-config-manifest.json"
+      - "pollis-delivery/src/**"
+      - ".github/scripts/sync-ds-secrets.sh"
   push:
     branches: [main]
     paths:
       - "scripts/**"
+      - "pollis-delivery/worker/**"
+      - "pollis-delivery/wrangler.dev.jsonc"
+      - "pollis-delivery/wrangler.prod.jsonc"
+      - "pollis-delivery/ds-config-manifest.json"
+      - "pollis-delivery/src/**"
+      - ".github/scripts/sync-ds-secrets.sh"
 
 permissions:
   contents: read
@@ -39,6 +51,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # #760: prove every DS config value actually traverses all five links to the
+      # running container. Three of five were silently missing for
+      # POLLIS_DS_METRICS_TOKEN and it took three PRs to notice — a deploy goes
+      # green and the value simply has no effect. Cheap, so it gates every change
+      # to any link, not just to scripts/.
+      - name: DS config chain (#760)
+        run: python3 ./scripts/check-ds-config-chain.py
 
       - name: Attest helper + payload-hash tests
         run: ./scripts/test-attest-helpers.sh

@@ -1,0 +1,81 @@
+{
+  "$comment": [
+    "THE declaration of every configuration value the Delivery Service reads (#760).",
+    "",
+    "A config value has to traverse five links to affect the running DS, and each is a",
+    "separate hand-maintained list: Doppler -> KEYS in .github/scripts/sync-ds-secrets.sh",
+    "-> the wrangler config -> worker/index.ts -> the DS reading the OS env var. Three of",
+    "the five were silently missing for POLLIS_DS_METRICS_TOKEN, and it took three PRs to",
+    "notice, because each broken link hid the next.",
+    "",
+    "Link 4 is the trap: a wrangler `var` binds to the WORKER, not to the container, and a",
+    "Secrets Store binding reaches the container only if worker/index.ts forwards it. So",
+    "config can be correct in Doppler, in the Secrets Store and in wrangler.jsonc, deploy",
+    "green, and still never reach the DS.",
+    "",
+    "scripts/check-ds-config-chain.py verifies this file against every link, in BOTH",
+    "directions: a declared key missing from a link fails, and an env var the DS reads that",
+    "is not declared here fails. Adding config without wiring it end to end is therefore a",
+    "CI failure rather than a silent no-op discovered months later."
+  ],
+
+  "secrets": {
+    "$comment": "Secrets Store -> container. Must appear in the sync script's KEYS, in each listed environment's `secrets_store_secrets`, and in SECRET_KEYS in worker/index.ts.",
+    "both": [
+      "TURSO_URL",
+      "TURSO_TOKEN",
+      "LOG_DB_URL",
+      "LOG_DB_ADMIN_TOKEN",
+      "RESEND_API_KEY",
+      "LIVEKIT_API_KEY",
+      "LIVEKIT_API_SECRET",
+      "LIVEKIT_URL",
+      "R2_S3_ENDPOINT",
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_KEY",
+      "R2_BUCKET",
+      "TURSO_PLATFORM_TOKEN",
+      "TURSO_ORG",
+      "TURSO_DB",
+      "POLLIS_DS_METRICS_TOKEN"
+    ],
+    "dev_only": ["DEV_OTP"]
+  },
+
+  "container_vars": {
+    "$comment": "Non-secret config that must reach the CONTAINER. Must appear in both wrangler configs' `vars` AND be forwarded through `envVars` in worker/index.ts. Forgetting the forward is the #720 bug.",
+    "keys": ["PORT", "POLLIS_DS_REQUIRE_AUTH", "POLLIS_DS_WATERMARK_STALE_MONTHS"]
+  },
+
+  "worker_vars": {
+    "$comment": "Read by the WORKER itself and deliberately NOT forwarded to the container. Declared so the checker does not demand a forward that would be meaningless.",
+    "keys": ["DS_SINGLETON_NAME"]
+  },
+
+  "aliases": {
+    "$comment": "Alternate names the DS accepts, each falling back to a delivered key (broker.rs). Never delivered under this name; nothing to wire.",
+    "keys": {
+      "R2_ENDPOINT": "R2_S3_ENDPOINT",
+      "R2_SECRET_ACCESS_KEY": "R2_SECRET_KEY"
+    }
+  },
+
+  "code_default_only": {
+    "$comment": [
+      "Read by the DS with a compiled-in default and NOT settable in any environment — there",
+      "is no wrangler var and no forward, so setting one would require a code change.",
+      "",
+      "Listed explicitly rather than fixed because the default IS the policy in each case, and",
+      "silently adding operator knobs is how #720 happened in reverse. If one of these ever",
+      "needs to be tunable, promote it to container_vars and wire all the links — the checker",
+      "will refuse a half-done job."
+    ],
+    "keys": [
+      "OTP_TTL_SECS",
+      "POLLIS_DS_GC_SWEEP_SECS",
+      "POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS",
+      "POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS",
+      "R2_REGION"
+    ]
+  }
+}
