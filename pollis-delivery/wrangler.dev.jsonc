@@ -45,7 +45,24 @@
     // #720: a member device silent this long stops pinning envelope retention.
     // 12, not the code default of 6 — see docs/metadata-retention-policy.md §1.
     // "0" would disable the bound entirely.
-    "POLLIS_DS_WATERMARK_STALE_MONTHS": "12"
+    "POLLIS_DS_WATERMARK_STALE_MONTHS": "12",
+    // #658: dev's container object. The `-enam` suffix records an EXPERIMENT THAT
+    // FAILED, kept because the name is now load-bearing (renaming it again means
+    // repeating the staged migration below for no benefit).
+    //
+    // Dev is slow: ~280ms on `/version` (no DB at all) and ~1.4s on a signed
+    // request, against prod's ~47ms/~65ms from the SAME Cloudflare edge (IAD,
+    // confirmed via cf-ray), while the dev Turso DB answers in ~20ms queried
+    // directly. So the database is not the problem and something between the edge
+    // and the DB is. The hypothesis was container placement, and the test was to
+    // create a fresh object under `locationHint: "enam"` — which required the
+    // staged max_instances 1 -> 2 -> 1 migration in docs/deployments.md, because a
+    // bare rename cannot work (the outgoing object holds the only instance).
+    //
+    // RESULT: no change. ~280ms and ~1.4s after re-placement, identical to before.
+    // `locationHint` did not move a container-backed durable object. The cause of
+    // the dev/prod gap is therefore still UNKNOWN — see the spike on #658.
+    "DS_SINGLETON_NAME": "pollis-delivery-singleton-enam"
   },
   // Doppler is the source of truth; the deploy workflow syncs each key into the
   // account's single Secrets Store under a DS_DEV_ prefix. Binding name == the

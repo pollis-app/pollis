@@ -39,7 +39,20 @@
     // #720: a member device silent this long stops pinning envelope retention.
     // 12, not the code default of 6 — see docs/metadata-retention-policy.md §1.
     // "0" would disable the bound entirely.
-    "POLLIS_DS_WATERMARK_STALE_MONTHS": "12"
+    "POLLIS_DS_WATERMARK_STALE_MONTHS": "12",
+    // #658: prod's LONG-STANDING container object. Prod is fast — ~47ms on
+    // `/version` and ~65ms on a signed request including its Turso read — and dev,
+    // on identical code and images, is not (~280ms / ~1.4s). WHY is unexplained;
+    // re-creating dev's object under a location hint changed nothing, so the
+    // difference is not something we currently know how to reproduce or move.
+    //
+    // Which is exactly why this name must NOT change casually: changing it destroys
+    // prod's object and creates a new one, and we have NO ability to guarantee the
+    // replacement lands as well as this one did. Treat prod's current performance
+    // as unreproducible until the hosting-strategy spike on #658 says otherwise.
+    // Stated explicitly rather than left to the code fallback so any rename is a
+    // visible, reviewable diff.
+    "DS_SINGLETON_NAME": "pollis-delivery-singleton"
   },
   // Synced from Doppler prd_prod into the account Secrets Store under DS_PROD_.
   "secrets_store_secrets": [

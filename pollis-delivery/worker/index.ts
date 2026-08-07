@@ -26,17 +26,26 @@ import {
 // (@cloudflare/containers 0.3.7, dist/lib/utils.js), so placement was never
 // configured: it was decided by whichever request happened to arrive first.
 //
-// That went badly in dev and well in prod, purely by luck. Measured from one IAD
-// edge, same code and same image: prod `/version` ~47ms, dev ~287ms — a ~240ms
-// long-haul round trip dev pays before touching anything. Add one Turso read over
-// a per-request connection and dev's signed endpoints hit ~1.53s against prod's
-// ~68ms, while the dev database itself answers in ~20ms when queried directly.
-// The DB was never slow; the container was simply far from it.
-//
 // `enam` (eastern North America) matches the `aws-us-east-1` Turso primary that
-// BOTH environments use. Pinning it makes prod's current good placement a
-// declared property instead of an accident that a rename, a migration tag, or a
-// deploy from the wrong hemisphere could silently re-roll.
+// BOTH environments use. It is declared so placement is at least a reviewable
+// property rather than silently inherited from whoever sent the first request.
+//
+// DO NOT TREAT THIS AS A PERFORMANCE LEVER — it was tested and it is not one.
+//
+// Dev is much slower than prod on identical code and images, measured from the
+// SAME edge (IAD, confirmed via cf-ray): `/version` ~280ms vs ~47ms with no
+// database involved at all, and ~1.4s vs ~65ms on a signed request. The dev Turso
+// database answers in ~20ms queried directly, so the database is not the cause.
+// The hypothesis was that dev's container sits far from it, and #658 tested that
+// directly by creating a FRESH object under this hint (via the staged
+// max_instances migration in docs/deployments.md).
+//
+// RESULT: no change whatsoever — ~280ms and ~1.4s after re-placement. A
+// `locationHint` evidently does not govern where a CONTAINER-backed durable
+// object's container is scheduled, whatever it does for the object itself. The
+// dev/prod gap is still unexplained; that is deferred to the hosting-strategy
+// spike on #658. Keep the hint (it is free and correct as a declaration), but do
+// not reach for it expecting latency to move.
 const DS_LOCATION_HINT: DurableObjectLocationHint = "enam";
 
 // `locationHint` is honoured ONLY when the object is first created — an existing
@@ -46,19 +55,24 @@ const DS_LOCATION_HINT: DurableObjectLocationHint = "enam";
 // or a deliberate rename per the procedure below). That is the point: it stops
 // prod's placement from being re-rolled by chance.
 //
-// DO NOT rename this to force a re-placement without following the procedure in
-// docs/deployments.md. Renaming was tried on 2026-08-06 and took dev down:
+// The object name comes from the per-environment `DS_SINGLETON_NAME` var so an
+// environment can be re-placed on its own. This is the fallback for a config that
+// sets no var — prod's long-standing object.
+//
+// CHANGING AN ENVIRONMENT'S NAME RE-PLACES ITS CONTAINER, and must follow the
+// staged procedure in docs/deployments.md. A bare rename was tried on 2026-08-06
+// and took dev down:
 //
 //   Failed to start container: Maximum number of running container instances
 //   exceeded. Try again later, or try configuring a higher value for max_instances
 //
-// A rename creates a SECOND durable object, and the wrangler configs pin
-// `max_instances: 1`. The outgoing object still held the single permitted
-// container instance, so the incoming one could never start and every request
-// 500'd until traffic was routed back to the original name. The DO itself is
-// stateless (no `ctx.storage` in this file; all DS state is in Turso), so the
-// blocker is purely the instance cap — not data.
-const DS_SINGLETON_NAME = "pollis-delivery-singleton";
+// A rename creates a SECOND durable object while `max_instances: 1` permits only
+// one container instance. The outgoing object still held it, so the incoming one
+// could never start and every request 500'd until traffic was routed back. The DO
+// is stateless (no `ctx.storage` in this file; all DS state is in Turso) — the
+// blocker is the instance cap, not data. Hence: raise the cap, switch the name,
+// let the orphan idle past `sleepAfter` and release, then lower the cap again.
+const DS_SINGLETON_NAME_FALLBACK = "pollis-delivery-singleton";
 
 // Keys synced from Doppler into this env's Secrets Store, each bound under the
 // same name in wrangler config. Read at container start and passed through as
@@ -97,6 +111,13 @@ type Env = {
   PORT: string;
   POLLIS_DS_REQUIRE_AUTH: string;
   POLLIS_DS_WATERMARK_STALE_MONTHS?: string;
+  // Which durable object hosts this environment's container — PER ENVIRONMENT,
+  // and deliberately so. The name determines object identity, and identity
+  // determines placement, so a name shared across environments means dev cannot
+  // be re-placed without also re-placing prod on its next deploy. That coupling
+  // is exactly how a routine dev migration would become a production outage.
+  // Absent → DS_SINGLETON_NAME_FALLBACK, which is prod's existing object.
+  DS_SINGLETON_NAME?: string;
 } & Record<(typeof SECRET_KEYS)[number], SecretStoreBinding | undefined>;
 
 // Derived from the base method so we don't depend on the (unexported)
@@ -213,7 +234,9 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Same resolution getContainer performed (idFromName + get), plus the
     // placement hint it gives no way to pass. See DS_LOCATION_HINT above.
-    const id = env.POLLIS_DELIVERY.idFromName(DS_SINGLETON_NAME);
+    const id = env.POLLIS_DELIVERY.idFromName(
+      env.DS_SINGLETON_NAME ?? DS_SINGLETON_NAME_FALLBACK,
+    );
     return env.POLLIS_DELIVERY.get(id, {
       locationHint: DS_LOCATION_HINT,
     }).fetch(request);
