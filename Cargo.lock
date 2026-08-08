@@ -6732,6 +6732,7 @@ dependencies = [
  "http-body-util",
  "jsonwebtoken",
  "libsql",
+ "libsql-hrana",
  "ml-dsa",
  "pollis-device-cert",
  "rand 0.8.6",

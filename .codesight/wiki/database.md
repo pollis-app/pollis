@@ -36,6 +36,39 @@ If you genuinely need to remove something, the pattern is: (1) ship an app versi
 
 Source: `pollis-core/src/db/migrations/000000_baseline.sql` + numbered migrations `000001`+.
 
+### How the DS connects to it (#777)
+
+`pollis-delivery/src/db.rs` **pools** libsql connections; `Db::conn()` returns a
+`ConnGuard` (derefs to `libsql::Connection`, parks it again on drop) rather than
+a fresh connection. It has to: for a remote database `Database::connect()` builds
+a whole new `hyper::Client`, and hyper's connection pool lives in the client — so
+one connection per request meant one TCP + TLS handshake per request, which
+multiplies the DS↔Turso distance instead of adding to it (a large part of the
+~1 530 ms/request dev regression in #658).
+
+Three rules keep reuse safe, all enforced in `db.rs` rather than by convention:
+
+- **Checkout is exclusive.** The connection is removed from the pool and only the
+  guard's `Drop` returns it, so no two callers hold one. Required: a connection
+  carries per-connection state (`changes()`, `last_insert_rowid()`) and one hrana
+  stream whose statements serialize on a single mutex — a process-wide shared
+  connection would corrupt the former and funnel every DS query through the
+  latter.
+- **Parked connections expire.** A `query()` leaves its hrana stream open
+  (describe + cursor never close it) and the server reaps idle streams, so
+  anything parked past `DEFAULT_MAX_IDLE` (3s) is discarded instead of reused.
+  That is precisely the sporadic-traffic case where the handshake cost is
+  irrelevant anyway.
+- **Checkout never blocks.** The pool is elastic (mint on miss, cap the *parked*
+  count, never the live count) because handlers nest checkouts — `submit` holds a
+  `log_db` connection while taking a `db` one, and in single-DB deploys those are
+  the same pool. A fixed-size blocking pool would deadlock there.
+
+Transactions are untouched: hrana's `transaction()` calls `open_stream()`, so
+every transaction runs on its own stream regardless of pooling. Pooling also does
+not widen concurrency — every request already had its own connection; they are
+now reused rather than rebuilt.
+
 ### users
 - `id` TEXT PK
 - `email` TEXT NOT NULL UNIQUE
