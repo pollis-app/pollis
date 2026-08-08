@@ -491,6 +491,50 @@ case "$out" in
   *) bad "windows error does not name the missing installer: $out" ;;
 esac
 
+# windows: the flags must reach signtool LITERALLY.
+#
+# Git-for-Windows bash rewrites Unix-looking arguments before calling a native binary,
+# which turned `/pa` into `C:/Program Files/Git/pa` and `/v` into `V:/` and failed a
+# real release for a correctly signed installer. MSYS2_ARG_CONV_EXCL suppresses that.
+#
+# This box is Linux, where no such rewriting happens, so the argv assertion alone would
+# pass with or without the fix and protect nothing. The load-bearing assertion is the
+# second one: that signtool is invoked with the exclusion actually set. Remove the env
+# var and that fails here, on Linux, instead of on the next release.
+stub="$work/signtool-stub.sh"
+cat > "$stub" <<'STUB'
+#!/usr/bin/env bash
+printf 'argv:%s\n' "$*"
+printf 'excl:%s\n' "${MSYS2_ARG_CONV_EXCL:-<unset>}"
+STUB
+chmod +x "$stub"
+printf 'pe' > "$work/signed.exe"
+out="$( "$sscript" windows "$work/signed.exe" "$stub" 2>&1 )"
+case "$out" in
+  *"argv:verify /pa /v $work/signed.exe"*) ok "signtool receives verify /pa /v <exe>" ;;
+  *) bad "unexpected signtool argv: $out" ;;
+esac
+case "$out" in
+  *"excl:"*"/pa"*) ok "the /pa flag is excluded from MSYS path conversion" ;;
+  *) bad "MSYS2_ARG_CONV_EXCL does not cover /pa — Git bash will mangle it: $out" ;;
+esac
+case "$out" in
+  *"excl:"*"/v"*) ok "the /v flag is excluded from MSYS path conversion" ;;
+  *) bad "MSYS2_ARG_CONV_EXCL does not cover /v — Git bash will mangle it: $out" ;;
+esac
+
+# windows: a non-zero signtool exit is a hard failure — an unsigned artifact must never
+# reach the upload.
+failstub="$work/signtool-fail.sh"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$failstub"
+chmod +x "$failstub"
+out="$( "$sscript" windows "$work/signed.exe" "$failstub" 2>&1 )"; rc=$?
+check "windows fails when signtool rejects the signature" "$rc" "1"
+case "$out" in
+  *"not"*"validly Authenticode-signed"*) ok "rejection explains the consequence" ;;
+  *) bad "signtool rejection error is unclear: $out" ;;
+esac
+
 # windows: with a real .exe present but no signtool resolvable, the signtool guard
 # fires (rather than a confusing failure deep in an invocation).
 printf 'pe' > "$work/present.exe"

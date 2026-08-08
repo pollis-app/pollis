@@ -138,7 +138,25 @@ case "$mode" in
     # signtool verify /pa: validate under the default Authenticode policy a normal
     # machine uses — the signature chains to a trusted root and the RFC-3161
     # timestamp is valid. /v for a verbose chain in the log.
-    if ! "$signtool" verify /pa /v "$exe"; then
+    #
+    # MSYS2_ARG_CONV_EXCL is LOAD-BEARING, not a precaution. This runs under
+    # Git-for-Windows bash, whose MSYS2 runtime rewrites any argument that looks like
+    # a Unix absolute path before handing it to a native Windows binary. `/pa` became
+    # `C:/Program Files/Git/pa` and `/v` became `V:/`, so signtool tried to verify two
+    # nonexistent files AND — having lost `/pa` — fell back to the stricter default
+    # policy for the real one, which an Azure Trusted Signing certificate does not
+    # satisfy. The result was three errors and a failed release for a correctly signed
+    # installer:
+    #
+    #   SignTool Error: File not found: C:/Program Files/Git/pa
+    #   SignTool Error: File not found: V:/
+    #   SignTool Error: A certificate chain processed, but terminated in a root ...
+    #
+    # The variable is a semicolon-separated list of argument PREFIXES to leave alone,
+    # so the flags pass through literally while `$exe` is still converted normally.
+    # Do not replace it with MSYS_NO_PATHCONV=1, which would disable conversion for
+    # the path argument too.
+    if ! MSYS2_ARG_CONV_EXCL='/pa;/v' "$signtool" verify /pa /v "$exe"; then
       echo "::error::WS3: signtool verify /pa FAILED for ${exe} — the shipped installer is not"
       echo "::error::  validly Authenticode-signed. An unsigned artifact must not be published (#704)."
       exit 1
