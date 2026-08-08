@@ -52,7 +52,11 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 - **From:** `website/`
 - **Pipeline:** `.github/workflows/website-deploy.yml` — `workflow_dispatch` (deploy-button pattern; `main` stays always-deployable).
 - **Ships to:** Cloudflare Pages → **pollis.com** / **www.pollis.com**.
-- **`/learn` section (Epic #589):** `website/learn.html` + `website/learn.js`, media under `website/learn/media/*` (mp4/webm/poster/vtt). The video artifacts are **committed to git** and served straight from the Pages build (no build step). Animation sources + narration scripts live in `learn/manim/`; regenerate with `learn/manim/render.sh <Scene> <slug>` (see `learn/README.md`). Long-term, rendered media may move to R2 (one-line base-URL swap) to cap clone size.
+- **`/learn` section (Epic #589):** `website/learn.html` + `website/learn.js`. Video artifacts are **on R2**, served from `cdn.pollis.com/learn/media/*` (mp4/webm/poster/vtt) — **not** committed to git (#697; they were 77 MB of the clone). Animation sources + narration scripts live in `learn/manim/`; regenerate with `learn/manim/render.sh <Scene> <slug>` (see `learn/README.md`).
+  - **Publishing a re-render:** upload with the same key under `learn/media/`, setting the content type explicitly — R2 does not infer it, and a `.vtt` served as anything but `text/vtt` makes `<track>` captions silently fail to load. Objects are cached `immutable, max-age=1y`, so a changed video needs a new filename (or a cache purge), not an overwrite.
+  - Two traps worth knowing. `R2_S3_ENDPOINT` in Doppler is **path-style and already ends in `/pollis`**, so passing it alongside `--bucket pollis` writes to `pollis/<key>` — the objects land and the CDN 404s them. Use the bare account endpoint, exactly as `desktop-release.yml` builds it from `CLOUDFLARE_ACCOUNT_ID`. And `aws s3 sync` fails against R2 for a prefix that does not exist yet (it lists the destination and gets `NoSuchKey`) — use `cp --recursive`.
+  - The `<video>` elements carry `crossorigin="anonymous"` because the media is now cross-origin; without it the browser refuses the `<track>` cue files. `cdn.pollis.com` reflects an `Access-Control-Allow-Origin` for both `pollis.com` and `www.pollis.com`, and www 308s to the apex, so both work.
+  - Release retention only prunes `releases/v*/`, so the `learn/` prefix is never touched by it.
 
 ### 4. pollis-verify (auditor CLI)
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)
