@@ -2076,3 +2076,76 @@ async fn sealed_admin_delete_of_other_member_works() {
 
     drop((alice, bob, carol));
 }
+
+/// Sealed DELETE, admin: the AUTHOR's own copy must be redacted too.
+///
+/// The existing admin-delete test proves a THIRD PARTY (carol) applies the
+/// tombstone. It never re-reads bob — the member whose message was removed — so
+/// nothing pinned the case a real user is most likely to notice: your post is
+/// gone for everyone else, and you are the only person still looking at it.
+///
+/// This is not the same code path as a self-delete. Bob did not initiate the
+/// delete and does not author the tombstone; he receives one authored by someone
+/// else and has to apply it to a row he wrote himself. Distinct enough from both
+/// the self-delete path and carol's path to be worth its own test.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn admin_delete_redacts_the_authors_own_copy() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Author Redaction").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
+
+    let msg_id = bob
+        .send_channel_message_id(&channel_id, "bob's post")
+        .await;
+
+    // Bob holds his own plaintext locally, and alice has fetched it — so the
+    // redaction below has to reach a row that already exists on both sides.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        bob_msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("bob holds his own message")["content"]
+            .as_str(),
+        Some("bob's post")
+    );
+    let alice_msgs = alice.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        alice_msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("alice received it")["content"]
+            .as_str(),
+        Some("bob's post")
+    );
+
+    // alice (admin) removes it.
+    alice.delete_message(&msg_id).await;
+
+    // THE ASSERTION: bob applies a tombstone he did not author, to his own row.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_m = bob_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("bob's row must remain present as a tombstone, not vanish");
+    assert!(
+        bob_m["content"].is_null(),
+        "the author's own copy must be redacted when an admin deletes it, got {:?}",
+        bob_m["content"]
+    );
+    assert!(
+        bob_m["deleted_at"].as_str().is_some(),
+        "the author's own copy must carry a deleted_at tombstone"
+    );
+
+    drop((alice, bob));
+}
