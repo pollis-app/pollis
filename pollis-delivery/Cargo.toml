@@ -55,3 +55,7 @@ tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 rand_core = { version = "0.6", features = ["getrandom"] }
+# The hrana wire types, so the #777 connection-pool test can stand up a
+# hrana-speaking double and exercise the REMOTE path (every other DS test uses a
+# local file and never touches hrana at all). Same version libsql itself pulls.
+libsql-hrana = "0.9"

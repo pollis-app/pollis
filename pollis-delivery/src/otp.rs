@@ -527,7 +527,7 @@ mod tests {
     // A local libsql connection for the account-write path. `with_users` toggles
     // whether the `users` table exists — omitting it makes the write fail, which is
     // exactly the transient/config DB failure #518 is about.
-    async fn conn_with(with_users: bool) -> (Db, libsql::Connection) {
+    async fn conn_with(with_users: bool) -> (Db, crate::db::ConnGuard) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("otp-test.db");
         std::mem::forget(dir);
