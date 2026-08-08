@@ -42,8 +42,9 @@ async function withFetch(impl, run) {
   }
 }
 
+// archon's real response shape, verified live 2026-08-08: { answer, usage }. No `sources`.
 const upstreamOk = () =>
-  new Response(JSON.stringify({ answer: 'MLS encrypts on your device.', sources: [] }), {
+  new Response(JSON.stringify({ answer: 'MLS encrypts on your device.', usage: { input: 14, output: 312 } }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -194,7 +195,7 @@ test('413 when the question exceeds the length ceiling', async () => {
 
 // ── The happy path, and what it does and does not forward ─────────────────────────────────────────
 
-test('forwards to archon with the Access service token and returns its body', async () => {
+test('forwards to archon /api/ask with the Access service token and returns the answer', async () => {
   let sentUrl = null;
   let sentInit = null;
   await withFetch(async (url, init) => { sentUrl = url; sentInit = init; return upstreamOk(); }, async () => {
@@ -202,11 +203,34 @@ test('forwards to archon with the Access service token and returns its body', as
     assert.equal(res.status, 200);
     assert.equal((await res.json()).answer, 'MLS encrypts on your device.');
   });
-  assert.equal(sentUrl, 'https://archon.pollis.com/query');
+  // /api/ask, NOT /query — the previously assumed path 405s.
+  assert.equal(sentUrl, 'https://archon.pollis.com/api/ask');
   assert.equal(sentInit.headers['CF-Access-Client-Id'], 'client-id-value');
   assert.equal(sentInit.headers['CF-Access-Client-Secret'], 'client-secret-value');
-  // Trimmed, and carrying nothing but the question.
-  assert.deepEqual(JSON.parse(sentInit.body), { query: 'is it e2ee?' });
+  // Trimmed, translated to archon's field name, and carrying no conversation history.
+  assert.deepEqual(JSON.parse(sentInit.body), { question: 'is it e2ee?', history: [] });
+});
+
+test('token usage is never exposed to the browser', async () => {
+  await withFetch(async () => upstreamOk(), async () => {
+    const res = await onRequestPost({ request: post({ query: 'hi' }), env: envWith() });
+    const body = await res.json();
+    assert.equal(body.usage, undefined, 'per-request token counts are internal cost data');
+    assert.deepEqual(Object.keys(body), ['answer']);
+  });
+});
+
+test('a caller cannot inflate the prompt by supplying history', async () => {
+  let sentBody = null;
+  await withFetch(async (_u, init) => { sentBody = JSON.parse(init.body); return upstreamOk(); }, async () => {
+    await onRequestPost({
+      // Small enough to clear the raw-body cap, so this exercises the history drop rather than the
+      // size guard (a huge history is already rejected as body_too_large).
+      request: post({ query: 'hi', history: [{ role: 'user', content: 'earlier turn' }] }),
+      env: envWith(),
+    });
+  });
+  assert.deepEqual(sentBody.history, [], 'history is always empty; the site assistant is single-shot');
 });
 
 test('a caller cannot smuggle extra fields upstream', async () => {
@@ -217,7 +241,7 @@ test('a caller cannot smuggle extra fields upstream', async () => {
       env: envWith(),
     });
   });
-  assert.deepEqual(sentBody, { query: 'hi' },
+  assert.deepEqual(sentBody, { question: 'hi', history: [] },
     'the upstream body is rebuilt from the validated question, never forwarded verbatim');
 });
 
@@ -229,13 +253,30 @@ test('ARCHON_BASE overrides the upstream origin', async () => {
       env: envWith({ ARCHON_BASE: 'https://archon-staging.pollis.com' }),
     });
   });
-  assert.equal(sentUrl, 'https://archon-staging.pollis.com/query');
+  assert.equal(sentUrl, 'https://archon-staging.pollis.com/api/ask');
 });
 
-test('an upstream non-2xx passes through so the browser falls back', async () => {
+test('an upstream non-2xx becomes a 502 so the browser falls back', async () => {
   await withFetch(async () => new Response('upstream boom', { status: 500 }), async () => {
     const res = await onRequestPost({ request: post({ query: 'hi' }), env: envWith() });
-    assert.equal(res.status, 500);
+    assert.equal(res.status, 502);
+    assert.equal((await res.json()).error, 'upstream_error');
+  });
+});
+
+test('502 when archon returns a body that is not JSON', async () => {
+  await withFetch(async () => new Response('<html>gateway</html>', { status: 200 }), async () => {
+    const res = await onRequestPost({ request: post({ query: 'hi' }), env: envWith() });
+    assert.equal(res.status, 502);
+    assert.equal((await res.json()).error, 'upstream_malformed');
+  });
+});
+
+test('502 when archon returns an empty answer', async () => {
+  await withFetch(async () => new Response(JSON.stringify({ answer: '   ' }), { status: 200 }), async () => {
+    const res = await onRequestPost({ request: post({ query: 'hi' }), env: envWith() });
+    assert.equal(res.status, 502);
+    assert.equal((await res.json()).error, 'upstream_empty');
   });
 });
 

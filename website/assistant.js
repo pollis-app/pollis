@@ -122,19 +122,21 @@ const PRIVACY_NOTICE = REMOTE_ANSWERING_ENABLED
 // request to configure in the first place.
 const ASSISTANT_ENDPOINT = '/api/assistant';
 
-// Hard ceiling on how long we wait for archon before giving up and using the on-device fallback. 4s is
-// the right order of magnitude: long enough for a genuine generative round-trip over a slow-but-working
-// link, short enough that a hung or black-holed request never leaves the panel spinning — a stalled
-// archon degrades to the instant local answer in ~4s, not "forever".
-const ARCHON_TIMEOUT_MS = 4000;
-
-// ⚠ PROVISIONAL CONTRACT — THE ONLY PLACE THE ARCHON WIRE FORMAT LIVES. CHANGE IT HERE AND NOWHERE ELSE. ⚠
-// The archon request/response shape is ASSUMED, not specified: nothing in this repo defines it and the
-// service was not reachable from the build box to verify against. Every assumption about archon's wire
-// format is confined to THIS function; the rest of assistant.js only ever sees the normalized
-// { answer, sources } it returns. When the real contract is known, edit ONLY this function.
+// Hard ceiling on how long we wait before giving up and using the on-device fallback.
 //
-// Assumed:  POST {ASSISTANT_ENDPOINT}   body {"query": "<user text>"}   (proxied to archon /query)
+// 20s, and that is not a guess: archon MEASURES at 6-8s per answer (2026-08-08: 6.2s / 6.6s / 7.5s),
+// generation-bound rather than cache-bound, so warming it does not help. The previous 4s predated the
+// endpoint ever being called successfully and would have aborted every request. This must stay ABOVE the
+// Function's own ceiling (18s) so the server gives up first and returns a clean error, rather than the
+// browser abandoning a generation that is still running and still being paid for.
+const ARCHON_TIMEOUT_MS = 20000;
+
+// THE ONLY PLACE THE PROXY WIRE FORMAT LIVES. CHANGE IT HERE AND NOWHERE ELSE.
+// This talks to OUR Pages Function, not to archon — the Function owns archon's shape and translates,
+// so this contract is ours and stable. The previously assumed archon contract (POST /query with
+// {"query"}) was never verified and was wrong in every particular; it would have 405'd.
+//
+// Contract:  POST {ASSISTANT_ENDPOINT}   body {"query": "<user text>"}
 //   → 2xx   {"answer": "<markdown or text>", "sources": [{"title": "...", "url": "..."}]}
 // Returns a validated { answer: string, sources: [{title, url}] }. Throws on ANYTHING unexpected — a
 // non-2xx status, a body that isn't JSON, a missing/blank answer — so the caller can fall back. This is

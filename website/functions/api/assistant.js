@@ -21,10 +21,17 @@
 // unmetered bill, so "configured" is not something an operator can half-do: missing either binding is a
 // 503 and the client falls straight through to the on-device answer. See ASSISTANT_BINDINGS below.
 //
-// WIRE FORMAT: NOT HERE. This is a transparent pass-through — it forwards the request body and returns
-// archon's status and body unchanged. The archon request/response shape is asserted in exactly one place,
-// `archonAdapter()` in website/assistant.js, and adding a second copy here is precisely how the two would
-// drift. This file cares about auth, limits and validation; it does not care what an answer looks like.
+// WIRE FORMAT: TRANSLATED HERE, ON PURPOSE. The browser speaks Pollis's own stable shape
+// ({query} -> {answer}); archon speaks {question, history} -> {answer, usage}. Something has to
+// translate, and it belongs server-side where it ships with the deploy rather than in a cached browser
+// bundle.
+//
+// The shapes were DISCOVERED, not specified — the contract previously assumed in assistant.js
+// (POST /query with {query}) was wrong in every particular and would have 405'd. Verified live against
+// archon on 2026-08-08.
+//
+// `usage` is deliberately dropped: it carries per-request token counts, which are internal cost data and
+// no business of a browser.
 //
 // It also does not log, store, or cache question text. A privacy-first product proxying its users'
 // questions should retain nothing by default; response caching would cut cost but is a separate,
@@ -35,10 +42,15 @@
 const ARCHON_BASE_DEFAULT = "https://archon.pollis.com";
 
 // Hard ceiling on the upstream round trip. Must stay UNDER the browser's own ARCHON_TIMEOUT_MS in
-// website/assistant.js (4s) — if this were the slower of the two, the browser would abandon the request
-// first and the user would wait the full client timeout to be told nothing, while this Function kept a
-// paid generation running that nobody would ever read.
-const ARCHON_TIMEOUT_MS = 3500;
+// website/assistant.js — if this were the slower of the two, the browser would abandon the request first
+// and the user would wait the full client timeout to be told nothing, while this Function kept a paid
+// generation running that nobody would ever read.
+//
+// 18s because archon MEASURES at 6-8s per answer (2026-08-08: 6.2s / 6.6s / 7.5s), and warming its
+// prompt cache does not help — the time is generation, not lookup. The previous 3.5s here and 4s in the
+// browser were guesses made when the endpoint had never been called, and would have aborted every single
+// request before it could answer.
+const ARCHON_TIMEOUT_MS = 18000;
 
 // Longest question accepted. Long enough for a real multi-sentence question, short enough that the
 // prompt cost per request has a fixed ceiling. Rejected rather than truncated: silently answering a
@@ -136,11 +148,13 @@ export async function onRequestPost(context) {
   }
 
   // Rebuild the upstream body from the VALIDATED query rather than forwarding the caller's bytes, so
-  // no unexpected field a caller invented can reach archon.
+  // no unexpected field a caller invented can reach archon. `history` is always empty: the website
+  // assistant is single-shot, and forwarding a caller-supplied conversation would let anyone inflate
+  // the prompt (and the bill) at will.
   const base = env.ARCHON_BASE || ARCHON_BASE_DEFAULT;
   let upstream;
   try {
-    upstream = await fetch(base + "/query", {
+    upstream = await fetch(base + "/api/ask", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -149,7 +163,7 @@ export async function onRequestPost(context) {
         "CF-Access-Client-Id": env.ARCHON_ACCESS_CLIENT_ID,
         "CF-Access-Client-Secret": env.ARCHON_ACCESS_CLIENT_SECRET,
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ question: query, history: [] }),
       signal: AbortSignal.timeout(ARCHON_TIMEOUT_MS),
     });
   } catch {
@@ -165,15 +179,29 @@ export async function onRequestPost(context) {
     return json({ error: "upstream_auth_failed" }, 502);
   }
 
-  // Pass the upstream body through untouched — the wire contract is asserted in assistant.js, not here.
-  // Only the status and the body travel; upstream headers are deliberately not forwarded, so nothing
-  // archon sets (cookies, cache directives, Access artifacts) leaks to the browser.
-  const body = await upstream.text();
-  return new Response(body, {
-    status: upstream.status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
+  // A non-2xx upstream is reported as a plain 502 rather than mirrored: archon's status codes are its
+  // own business, and the browser only needs "no answer, use the fallback".
+  if (!upstream.ok) {
+    return json({ error: "upstream_error" }, 502);
+  }
+
+  let answer;
+  try {
+    const parsed = JSON.parse(await upstream.text());
+    answer = parsed && typeof parsed.answer === "string" ? parsed.answer : "";
+  } catch {
+    return json({ error: "upstream_malformed" }, 502);
+  }
+  if (answer.trim().length === 0) {
+    return json({ error: "upstream_empty" }, 502);
+  }
+
+  // Only the answer travels. `usage` (token counts) is internal cost data; upstream headers are not
+  // forwarded either, so nothing archon sets — cookies, cache directives, Access artifacts — can leak
+  // to the browser.
+  //
+  // No `sources`: archon does not return citations. The on-device fallback does, so a remote answer is
+  // uncited where a local one is not — recorded here because the panel's disclaimer points users at the
+  // linked pages as authoritative, and for remote answers there are none to link.
+  return json({ answer }, 200);
 }
