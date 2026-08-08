@@ -51,7 +51,7 @@ test('archonAdapter returns the normalized answer + sources on a 2xx JSON body',
     return response({ json: async () => okBody });
   }, async () => {
     const out = await archonAdapter('is it end to end encrypted?', undefined);
-    assert.equal(sentUrl, 'https://archon.pollis.com/query');
+    assert.equal(sentUrl, '/api/assistant');
     assert.deepEqual(sentBody, { query: 'is it end to end encrypted?' });
     assert.equal(out.answer, okBody.answer);
     assert.deepEqual(out.sources, okBody.sources);
@@ -207,11 +207,16 @@ test('queryArchon returns null (and aborts) when archon is too slow', async () =
 });
 
 // ── The remote-answering gate (#765) ─────────────────────────────────────────────────────────────
-// archon.pollis.com is behind Cloudflare Access, so an anonymous visitor's question can never reach
-// it. The panel used to tell users their question WAS sent to Pollis's servers while nothing was
-// actually sent. These pin the flag and the property that made it necessary.
+// The remote path is ON, and reaches archon through this site's own Pages Function rather than calling
+// archon.pollis.com directly — a direct call is refused by Cloudflare Access at the edge, which is what
+// made every answer come from the fallback. These pin the flag, the kill switch, and the endpoint.
 
-test('queryArchon makes no network call while remote answering is disabled', async () => {
+test('remote answering is enabled', async () => {
+  assert.equal(REMOTE_ANSWERING_ENABLED, true,
+    'the assistant reaches archon through /api/assistant; the remote path should be live');
+});
+
+test('queryArchon makes no network call when remote answering is switched off', async () => {
   let called = false;
   await withFetch(
     async () => {
@@ -219,11 +224,28 @@ test('queryArchon makes no network call while remote answering is disabled', asy
       return response({ json: async () => okBody });
     },
     async () => {
-      // Default `enabled` — i.e. exactly what the browser runs.
-      assert.equal(await queryArchon('q'), null);
+      // The kill switch: turning the flag off must stop the request at the gate, not fire it and
+      // swallow the failure — otherwise "off" would still send the user's question.
+      assert.equal(await queryArchon('q', undefined, false), null);
       assert.equal(called, false, 'the gate must short-circuit BEFORE fetch, not swallow its failure');
     }
   );
+});
+
+// The #765 regression guard. Pointing the browser back at archon.pollis.com fails as a CORS error,
+// which reads like a header problem and is not one — it is Access refusing the request at the edge. The
+// symptom is invisible (the fallback answers anyway), so this pins the endpoint rather than trusting a
+// future reader to know why it is same-origin.
+test('the browser never calls archon directly', async () => {
+  const src = await readFile(new URL('./assistant.js', import.meta.url), 'utf8');
+  const inCode = src
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('//'))
+    .join('\n');
+  assert.ok(!/archon\.pollis\.com/.test(inCode),
+    'assistant.js must reach archon through /api/assistant, never the archon origin directly');
+  assert.ok(inCode.includes("'/api/assistant'"),
+    'the remote path must post to the same-origin Pages Function');
 });
 
 test('the privacy notice matches what the code actually does', async () => {

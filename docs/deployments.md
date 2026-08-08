@@ -53,6 +53,21 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 - **Pipeline:** `.github/workflows/website-deploy.yml` — `workflow_dispatch` (deploy-button pattern; `main` stays always-deployable).
 - **Ships to:** Cloudflare Pages → **pollis.com** / **www.pollis.com**.
 - **`/learn` section (Epic #589):** `website/learn.html` + `website/learn.js`, media under `website/learn/media/*` (mp4/webm/poster/vtt). The video artifacts are **committed to git** and served straight from the Pages build (no build step). Animation sources + narration scripts live in `learn/manim/`; regenerate with `learn/manim/render.sh <Scene> <slug>` (see `learn/README.md`). Long-term, rendered media may move to R2 (one-line base-URL swap) to cap clone size.
+- **Pages Function — the assistant proxy (#765):** `website/functions/api/assistant.js` serves `POST /api/assistant`. It is the site's only server-side code. `website/_routes.json` restricts the Functions runtime to `/api/*` so static pages are still served straight from the CDN.
+
+  The FAQ assistant's remote path calls **this**, not `archon.pollis.com` directly. archon is gated by Cloudflare Access, so a browser call is refused at the edge — it surfaces as a CORS error, which reads like a header problem and is not one. The Function holds an Access **service token** server-side and forwards; archon stays fully gated and the browser never leaves our origin.
+
+  **It fails closed.** Without *both* a service token and a rate-limit binding it answers `503` and the site falls back to on-device answering. That is deliberate: a proxy to a paid model backend with no rate limit is an unmetered bill, so a half-configured deployment must refuse rather than "work for now". Consequence: **the remote path stays dark until all three bindings exist**, and no code change can turn it on.
+
+  One-time setup in the Cloudflare dashboard:
+  1. **Zero Trust → Access → Service Auth** → create a service token for the archon application; add an Access policy on that application with action **Service Auth** including that token.
+  2. **Pages → pollis → Settings → Variables and Secrets** → add `ARCHON_ACCESS_CLIENT_ID` and `ARCHON_ACCESS_CLIENT_SECRET` as **secrets** (production, and preview if you want it live there).
+  3. **Pages → pollis → Settings → Bindings** → add a **Rate limiting** binding named `ASSISTANT_RATE_LIMIT`.
+  4. Optional: an `ARCHON_BASE` **var** to point a preview deployment at a staging archon.
+
+  Rotating the token is dashboard-only — revoke in Access, update the two Pages secrets, redeploy. A stale token does not return `401`; Access redirects it to the login page, so the Function reports `upstream_auth_failed` specifically to tell "rotate the token" apart from "archon is down".
+
+  Tests: `website/functions/api/assistant.test.mjs` (+ `website/assistant.test.mjs`), gated in CI by the `website` job in `frontend-check.yml`.
 
 ### 4. pollis-verify (auditor CLI)
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)

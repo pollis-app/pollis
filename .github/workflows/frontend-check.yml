@@ -42,3 +42,27 @@ jobs:
       # nothing and just fails on type errors (~3s).
       - name: Typecheck
         run: pnpm --filter frontend exec tsc
+
+  # The marketing site's JS had tests (website/assistant.test.mjs) that NOTHING
+  # ran — they were only ever executed by hand. #765 added the assistant's
+  # Cloudflare Pages Function, the one piece of Pollis code sitting between the
+  # public internet and a paid model backend, so its refusals (fail closed when
+  # unconfigured, rate limiting, body and question ceilings, no upstream header
+  # pass-through) need a gate rather than good intentions.
+  #
+  # No install step: these are plain `node --test` files with no dependencies.
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22, not 20: the Pages Function is ESM in a `.js` file (what
+      # Cloudflare requires) inside a package that is not `"type": "module"`.
+      # Automatic ESM syntax detection is only unflagged from 22.7, so Node 20
+      # would fail to import it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Website + assistant Function tests
+        run: node --test website/assistant.test.mjs website/functions/api/assistant.test.mjs

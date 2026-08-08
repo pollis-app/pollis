@@ -1,8 +1,9 @@
-// Pollis "Ask about how this works" assistant — remote answering via archon.pollis.com, with the
-// existing on-device extractive retrieval kept as a fallback.
+// Pollis "Ask about how this works" assistant — remote answering via archon, reached through this
+// site's own Pages Function, with the existing on-device extractive retrieval kept as a fallback.
 //
-// PRIMARY PATH (#731): the question is POSTed to archon (Pollis's docs AI) and its generated answer is
-// shown. This sends the question to Pollis's servers — a deliberate, DISCLOSED trade (see PRIVACY_NOTICE
+// PRIMARY PATH (#731, routed through our own origin in #765): the question is POSTed to
+// /api/assistant — a Cloudflare Pages Function that holds an Access service token and forwards to
+// archon (Pollis's docs AI) server-side — and its generated answer is shown. This sends the question to Pollis's servers — a deliberate, DISCLOSED trade (see PRIVACY_NOTICE
 // below; it is shown in the panel before the user types). Everything the archon wire format assumes is
 // confined to archonAdapter() and nowhere else.
 //
@@ -84,30 +85,42 @@ const DISCLAIMER =
 
 // Is the remote answering path actually reachable by a browser?
 //
-// FALSE today, deliberately (#765). archon.pollis.com sits behind Cloudflare Access: every request
-// 302s to the Access login and the CORS preflight is refused at the edge with 403, so an anonymous
-// visitor's question could never reach it. The fallback always answered, which is why nothing looked
-// broken — but the panel was telling users their question is sent to Pollis's servers when in fact
-// NOTHING was ever sent. Over-disclosing is the safe direction to be wrong in; it is still wrong, and
-// on a privacy product the notice has to describe what actually happens.
+// TRUE since #765. It was false while the assistant pointed straight at archon.pollis.com, which sits
+// behind Cloudflare Access — every request 302'd to the Access login and the CORS preflight was refused
+// at the edge with 403, so an anonymous visitor's question could never arrive. The fallback always
+// answered, which is why nothing looked broken, but the panel was telling users their question goes to
+// Pollis's servers when in fact NOTHING was ever sent.
 //
-// Flip to true in the same change that makes /query publicly reachable. The notice and the network
-// call are both gated on this one flag so they cannot disagree again.
-const REMOTE_ANSWERING_ENABLED = false;
+// The request now goes to this site's OWN origin (see ASSISTANT_ENDPOINT), a Cloudflare Pages Function
+// that holds an Access service token and forwards to archon server-side. archon stays fully gated; the
+// browser never talks to it directly and there is no cross-origin request at all.
+//
+// That also makes the notice below true the moment the site is deployed, independent of whether archon
+// itself is healthy: the question really does leave the browser for a Pollis server. If the Function is
+// unconfigured or archon is down it answers non-2xx, and the on-device index takes over exactly as it
+// always has. The notice and the network call remain gated on this one flag so they cannot disagree.
+const REMOTE_ANSWERING_ENABLED = true;
 
 // Shown in the panel BEFORE the input, so a user reads it before they type. States what happens and
 // what the fallback is — NOT any claim about how archon retains, logs, or anonymises the question,
 // which this repo does not control and cannot promise.
 const PRIVACY_NOTICE = REMOTE_ANSWERING_ENABLED
-  ? 'Heads up: your question is sent to Pollis’s servers (archon.pollis.com) to be answered. If that ' +
-    'service can’t be reached, your question is instead answered locally, from an on-device index that ' +
-    'never leaves your browser.'
+  ? 'Heads up: your question is sent to Pollis’s servers to be answered. If that service can’t be ' +
+    'reached, your question is instead answered locally, from an on-device index that never leaves ' +
+    'your browser.'
   : 'Your question is answered entirely in your browser, from an on-device index. It is not sent to ' +
     'Pollis’s servers or anywhere else.';
 
 // ── Remote answering via archon (Pollis's docs AI) ───────────────────────────────────────────────
-// Same pattern as transparency.js / artifacts.js: one const base URL, reached through one small helper.
-const ARCHON_BASE = 'https://archon.pollis.com';
+// SAME-ORIGIN, deliberately (#765). This is a path, not a URL: the browser posts to this site's own
+// Pages Function (website/functions/api/assistant.js), which holds a Cloudflare Access service token and
+// forwards to archon.pollis.com server-side.
+//
+// Do NOT point this back at archon directly. archon is Access-gated, so a direct call is refused at the
+// edge before it reaches the app — that was the #765 bug, and it fails as a CORS error, which reads like
+// a header problem and is not one. Going through our own origin also means there is no cross-origin
+// request to configure in the first place.
+const ASSISTANT_ENDPOINT = '/api/assistant';
 
 // Hard ceiling on how long we wait for archon before giving up and using the on-device fallback. 4s is
 // the right order of magnitude: long enough for a genuine generative round-trip over a slow-but-working
@@ -121,13 +134,13 @@ const ARCHON_TIMEOUT_MS = 4000;
 // format is confined to THIS function; the rest of assistant.js only ever sees the normalized
 // { answer, sources } it returns. When the real contract is known, edit ONLY this function.
 //
-// Assumed:  POST {ARCHON_BASE}/query   body {"query": "<user text>"}
+// Assumed:  POST {ASSISTANT_ENDPOINT}   body {"query": "<user text>"}   (proxied to archon /query)
 //   → 2xx   {"answer": "<markdown or text>", "sources": [{"title": "...", "url": "..."}]}
 // Returns a validated { answer: string, sources: [{title, url}] }. Throws on ANYTHING unexpected — a
 // non-2xx status, a body that isn't JSON, a missing/blank answer — so the caller can fall back. This is
 // strict validation, never best-effort rendering of a half-understood payload.
 async function archonAdapter(query, signal) {
-  const res = await fetch(ARCHON_BASE + '/query', {
+  const res = await fetch(ASSISTANT_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
@@ -163,9 +176,9 @@ async function archonAdapter(query, signal) {
 // would rot silently until someone re-enabled it.
 async function queryArchon(query, timeoutMs = ARCHON_TIMEOUT_MS, enabled = REMOTE_ANSWERING_ENABLED) {
   // Gated on the same flag as PRIVACY_NOTICE so what we SAY and what we DO cannot drift apart.
-  // While the remote path is unreachable (#765) this also stops every question emitting a failed
-  // cross-origin request and a console error on the way to the fallback that was always going to
-  // answer it.
+  // Switching it off is the kill switch for the remote path: no request leaves the browser at all and
+  // the on-device index answers everything, which is exactly the state the site shipped in while
+  // archon was unreachable (#765).
   if (!enabled) {
     return null;
   }
