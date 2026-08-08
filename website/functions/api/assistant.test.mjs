@@ -12,12 +12,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { onRequestPost } from './assistant.js';
 
+// An in-memory stand-in for the KV namespace, with the same get/put surface the Function uses.
+function kvStub(seed = {}) {
+  const store = new Map(Object.entries(seed));
+  return {
+    calls: [],
+    async get(k) {
+      this.calls.push(k);
+      return store.has(k) ? store.get(k) : null;
+    },
+    async put(k, v) {
+      store.set(k, v);
+    },
+    dump: () => Object.fromEntries(store),
+  };
+}
+
 // A fully-configured env. Individual tests knock out one piece at a time.
 function envWith(overrides = {}) {
   return {
     ARCHON_ACCESS_CLIENT_ID: 'client-id-value',
     ARCHON_ACCESS_CLIENT_SECRET: 'client-secret-value',
-    ASSISTANT_RATE_LIMIT: { limit: async () => ({ success: true }) },
+    ASSISTANT_KV: kvStub(),
     ...overrides,
   };
 }
@@ -81,19 +97,19 @@ test('503 when only the client secret is missing', async () => {
   assert.equal(res.status, 503);
 });
 
-test('503 when no rate limiter is bound', async () => {
+test('503 when no KV namespace is bound', async () => {
   let called = false;
   await withFetch(async () => { called = true; return upstreamOk(); }, async () => {
     const res = await quiet(() =>
-      onRequestPost({ request: post({ query: 'hi' }), env: envWith({ ASSISTANT_RATE_LIMIT: undefined }) }));
+      onRequestPost({ request: post({ query: 'hi' }), env: envWith({ ASSISTANT_KV: undefined }) }));
     assert.equal(res.status, 503);
     assert.equal(called, false, 'must not proxy to a paid backend with no rate limit');
   });
 });
 
-test('503 when the rate limit binding is present but the wrong shape', async () => {
+test('503 when the KV binding is present but the wrong shape', async () => {
   const res = await quiet(() =>
-    onRequestPost({ request: post({ query: 'hi' }), env: envWith({ ASSISTANT_RATE_LIMIT: {} }) }));
+    onRequestPost({ request: post({ query: 'hi' }), env: envWith({ ASSISTANT_KV: {} }) }));
   assert.equal(res.status, 503);
 });
 
@@ -106,42 +122,84 @@ test('the unconfigured error names no secret values', async () => {
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────────────────────────
 
-test('429 when the rate limiter denies the request', async () => {
-  let called = false;
-  await withFetch(async () => { called = true; return upstreamOk(); }, async () => {
-    const env = envWith({ ASSISTANT_RATE_LIMIT: { limit: async () => ({ success: false }) } });
-    const res = await onRequestPost({ request: post({ query: 'hi' }), env });
-    assert.equal(res.status, 429);
-    assert.equal((await res.json()).error, 'rate_limited');
-    assert.equal(called, false, 'a limited request must not reach archon');
-  });
-});
-
-test('the rate limit is keyed on the edge-supplied client IP', async () => {
-  let seenKey = null;
-  const env = envWith({
-    ASSISTANT_RATE_LIMIT: { limit: async ({ key }) => { seenKey = key; return { success: true }; } },
-  });
+// Ask n times from one visitor and report the statuses, so the budgets can be asserted directly.
+async function askTimes(env, n, headers = {}) {
+  const out = [];
   await withFetch(async () => upstreamOk(), async () => {
-    await onRequestPost({ request: post({ query: 'hi' }), env });
+    for (let i = 0; i < n; i++) {
+      const res = await onRequestPost({ request: post({ query: 'q' + i }, headers), env });
+      out.push(res.status);
+    }
   });
-  assert.equal(seenKey, '203.0.113.7');
+  return out;
+}
+
+test('a visitor gets 3 answers a minute, then 429', async () => {
+  const env = envWith();
+  assert.deepEqual(await askTimes(env, 5), [200, 200, 200, 429, 429]);
 });
 
-test('a request with no client IP still gets limited, under a shared key', async () => {
-  let seenKey = null;
-  const env = envWith({
-    ASSISTANT_RATE_LIMIT: { limit: async ({ key }) => { seenKey = key; return { success: true }; } },
+test('a different fingerprint on the same IP gets its own per-minute budget', async () => {
+  const env = envWith();
+  await askTimes(env, 3, { 'X-Pollis-Assistant-Fingerprint': 'browser-a' });
+  const second = await askTimes(env, 1, { 'X-Pollis-Assistant-Fingerprint': 'browser-b' });
+  assert.deepEqual(second, [200], 'two people behind one NAT must not share a per-minute budget');
+});
+
+// The forgeable half of the key cannot be used to mint unlimited budget: the IP-only ceiling is checked
+// first and cannot be rotated around from one address.
+test('rotating the fingerprint cannot exceed the per-IP daily ceiling', async () => {
+  const env = envWith();
+  let allowed = 0;
+  await withFetch(async () => upstreamOk(), async () => {
+    for (let i = 0; i < 450; i++) {
+      const res = await onRequestPost({
+        request: post({ query: 'q' }, { 'X-Pollis-Assistant-Fingerprint': 'forged-' + i }),
+        env,
+      });
+      if (res.status === 200) {
+        allowed++;
+      }
+    }
   });
-  const req = new Request('https://pollis.com/api/assistant', {
+  assert.equal(allowed, 400, 'the per-IP ceiling, not the forgeable fingerprint, is the real bound');
+});
+
+test('the rate-limit keys never contain the raw IP', async () => {
+  const kv = kvStub();
+  const env = envWith({ ASSISTANT_KV: kv });
+  await askTimes(env, 1);
+  const keys = kv.calls.join(' ');
+  assert.ok(keys.length > 0, 'the limiter must actually consult KV');
+  assert.ok(!keys.includes('203.0.113.7'),
+    'a KV namespace of raw IPs beside question traffic is a record of who asked what');
+});
+
+test('a request with no client IP still gets limited, under a shared bucket', async () => {
+  const env = envWith();
+  const req = () => new Request('https://pollis.com/api/assistant', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: 'hi' }),
   });
+  const out = [];
   await withFetch(async () => upstreamOk(), async () => {
-    await onRequestPost({ request: req, env });
+    for (let i = 0; i < 5; i++) {
+      out.push((await onRequestPost({ request: req(), env })).status);
+    }
   });
-  assert.equal(seenKey, 'unknown', 'an unknown origin must never be exempt from limiting');
+  assert.deepEqual(out, [200, 200, 200, 429, 429], 'an unknown origin must never be exempt');
+});
+
+test('a limited request never reaches archon', async () => {
+  const env = envWith();
+  await askTimes(env, 3);
+  let called = false;
+  await withFetch(async () => { called = true; return upstreamOk(); }, async () => {
+    const res = await onRequestPost({ request: post({ query: 'hi' }), env });
+    assert.equal(res.status, 429);
+  });
+  assert.equal(called, false);
 });
 
 // ── Input validation ──────────────────────────────────────────────────────────────────────────────

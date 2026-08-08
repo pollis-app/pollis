@@ -61,6 +61,35 @@ const MAX_QUERY_CHARS = 1000;
 // applies once a body has already been read and parsed.
 const MAX_BODY_BYTES = 4096;
 
+// ── Rate limiting: PER VISITOR, and it has to happen HERE ─────────────────────────────────────────
+//
+// archon rate-limits per client. Behind this proxy it cannot: every visitor arrives on Cloudflare's
+// egress, so archon would see the whole public internet as ONE client sharing one bucket — the first
+// few visitors each minute would consume the budget and everyone else, including the ops dashboard,
+// would be locked out. Proxying MOVES the responsibility for per-visitor limiting to the proxy. This is
+// that limiter.
+//
+// Budgets match archon's own: 3/min and 100/day. At the per-minute rate the daily budget is reachable
+// in about half an hour of sustained asking, which is far past any genuine reader of a FAQ.
+const PER_MINUTE = 3;
+const PER_DAY = 100;
+
+// A SECOND ceiling, keyed on IP alone. The fingerprint makes the key finer so that two people behind one
+// NAT do not share a budget — but it is client-supplied and therefore forgeable, and a forgeable
+// component in a rate-limit key is an evasion lever: rotate the fingerprint, get a fresh budget. So the
+// IP-only bucket is the real ceiling and cannot be evaded from a single address; the finer bucket only
+// ever hands out a SUBSET of it. Set well above PER_DAY so ordinary shared connections (offices, campus
+// wifi, mobile CGNAT) are unaffected.
+const PER_DAY_PER_IP = 400;
+
+// KV is eventually consistent, so a burst of simultaneous requests can read the same counter and each
+// write back the same increment — the effective limit can overshoot slightly under a deliberate flood.
+// That is an accepted trade: the purpose here is bounding cost, not enforcing a security boundary, and
+// the alternative (a Durable Object per visitor) is a great deal of machinery for a FAQ. The IP ceiling
+// above bounds how far an overshoot can go.
+const MINUTE_TTL_SECS = 120;
+const DAY_TTL_SECS = 172800;
+
 // The bindings this Function cannot run without. Named here so the failure message can say exactly
 // what an operator has to configure, rather than making them read the source.
 const ASSISTANT_BINDINGS = [
@@ -68,6 +97,26 @@ const ASSISTANT_BINDINGS = [
   "ARCHON_ACCESS_CLIENT_ID",
   "ARCHON_ACCESS_CLIENT_SECRET",
 ];
+
+// Stable, non-reversible bucket id. The visitor's IP is hashed rather than stored: a KV namespace full
+// of raw IP addresses next to question traffic is a log of who asked something, which is exactly what a
+// privacy-first product should not keep. A hash is enough to count against.
+async function bucketKey(parts) {
+  const data = new TextEncoder().encode(parts.join("\u0000"));
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Increment one counter and report whether it is now over its cap. Read-modify-write on KV; see the
+// eventual-consistency note above.
+async function overLimit(kv, key, cap, ttl) {
+  const current = Number(await kv.get(key)) || 0;
+  if (current >= cap) {
+    return true;
+  }
+  await kv.put(key, String(current + 1), { expirationTtl: ttl });
+  return false;
+}
 
 // JSON response with no-store: an answer is per-user and must not be held by any shared cache.
 function json(body, status) {
@@ -88,9 +137,9 @@ function missingBindings(env) {
       missing.push(name);
     }
   }
-  // The rate limiter is a binding object rather than a string, so it is checked by shape.
-  if (!env.ASSISTANT_RATE_LIMIT || typeof env.ASSISTANT_RATE_LIMIT.limit !== "function") {
-    missing.push("ASSISTANT_RATE_LIMIT");
+  // The KV namespace backing the rate limiter is a binding object, so it is checked by shape.
+  if (!env.ASSISTANT_KV || typeof env.ASSISTANT_KV.get !== "function" || typeof env.ASSISTANT_KV.put !== "function") {
+    missing.push("ASSISTANT_KV");
   }
   return missing;
 }
@@ -107,11 +156,27 @@ export async function onRequestPost(context) {
     return json({ error: "assistant_unconfigured" }, 503);
   }
 
-  // Rate limit per client IP, before the body is read — a flood should cost as little as possible.
-  // CF-Connecting-IP is set by the edge and cannot be spoofed by the client.
+  // Rate limit before the body is read — a flood should cost as little as possible.
+  //
+  // CF-Connecting-IP is set by the edge and cannot be forged by the client. The fingerprint is
+  // client-supplied and freely forgeable, which is why it only ever narrows a bucket and never widens
+  // one: see PER_DAY_PER_IP.
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  const { success } = await env.ASSISTANT_RATE_LIMIT.limit({ key: ip });
-  if (!success) {
+  const fingerprint = (request.headers.get("X-Pollis-Assistant-Fingerprint") || "none").slice(0, 128);
+  const now = Date.now();
+  const minuteWindow = Math.floor(now / 60000);
+  const dayWindow = Math.floor(now / 86400000);
+
+  const visitor = await bucketKey([ip, fingerprint]);
+  const address = await bucketKey([ip]);
+
+  // The IP ceiling is checked FIRST: it is the one an attacker cannot rotate around, so it should be
+  // what stops them, and it should not be reachable only after the finer buckets have been consumed.
+  if (
+    (await overLimit(env.ASSISTANT_KV, `d:${dayWindow}:ip:${address}`, PER_DAY_PER_IP, DAY_TTL_SECS)) ||
+    (await overLimit(env.ASSISTANT_KV, `m:${minuteWindow}:v:${visitor}`, PER_MINUTE, MINUTE_TTL_SECS)) ||
+    (await overLimit(env.ASSISTANT_KV, `d:${dayWindow}:v:${visitor}`, PER_DAY, DAY_TTL_SECS))
+  ) {
     return json({ error: "rate_limited" }, 429);
   }
 
