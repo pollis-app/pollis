@@ -190,7 +190,7 @@ tree can never stand in for another:
   per released build artifact on the SAME log infrastructure, a third independent
   tenant with its own tree and domain-separated STH context (so a binaries head
   can never be presented as a commit-log or account-key head). Each leaf commits
-  to an artifact's reproducible pre-signature payload hash + its signed sha256
+  to an artifact's reproducible signature-normalized payload hash + its signed sha256
   (`BinaryRecord` / `BinaryInvariant` in `verifiable-log-builder`). The release
   pipeline attests-and-logs every artifact; `pollis-verify release <tag>` verifies
   that every published artifact for a tag is provably included in the signed
@@ -243,10 +243,10 @@ makes every user's full history auditable by anyone.
 
   **The `exe` layer is what makes this work off Linux.** Originally the app
   compared `sha256(current_exe())` against `payload` leaves — but the `payload`
-  leaf is a `sha_tree` of a directory (Windows: the unsigned exe+resources the build
-  job captures before signing, #704; macOS: the shipped `.app` with Apple's
-  signature and notarization ticket normalized out, #750 — both a
-  `SOURCE_DATE_EPOCH`-pinned tar) or a `sha_file` of the *installer*, and an
+  leaf is a `sha_tree` of a directory (macOS: the shipped `.app` with Apple's
+  signature and notarization ticket normalized out; Windows: the tree extracted
+  from the shipped installer with Authenticode normalized out of every PE — both
+  #750, both a `SOURCE_DATE_EPOCH`-pinned tar) or a `sha_file` of the *installer*, and an
   installed process has neither preimage. The comparison therefore missed 100% of the time on macOS
   `.app`, Windows NSIS and deb/rpm, rendering the danger-styled "Build not in
   public log" on every genuine signed release. Only the AppImage (whose shipped

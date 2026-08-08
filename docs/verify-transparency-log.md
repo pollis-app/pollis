@@ -224,8 +224,9 @@ so the desktop client and an independent auditor reach the identical verdict.
 ## 5. Verify a shipped release — `pollis-verify release`
 
 Pollis publishes a third tree — the **binaries directory** — with one leaf per
-shipped release artifact **layer**: `payload` is the reproducible pre-signature
-bytes, `signed` is the wrapper users actually download, and the two are bound
+shipped release artifact **layer**: `payload` is the reproducible bytes with any
+signing material normalized out, `signed` is the wrapper users actually download,
+and the two are bound
 by a shared `payload_sha256`. To check that a release tag's artifacts are
 provably recorded in the signed binaries tree, pass the base URL and the tag:
 

@@ -48,7 +48,7 @@ jobs:
       # here embed a signature + notarization ticket from which that payload is
       # unrecoverable, so this backfill path depends on the sidecar. A tag released
       # before WS3 has no sidecar and cannot be attested for macOS/Windows — the
-      # attest script fails loudly with that exact diagnosis (see require_presig_payload).
+      # attest script fails loudly with that exact diagnosis (see require_payload_digest).
       - name: Download the release's published installers
         env:
           GH_TOKEN: ${{ github.token }}

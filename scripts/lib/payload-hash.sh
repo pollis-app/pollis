@@ -11,7 +11,7 @@
 # or (worse) a real divergence could hide behind an incidental formatting
 # difference. So there is exactly one copy, here, and everything sources it.
 #
-# It exposes three functions:
+# It exposes four functions:
 #
 #   sha_file <path>
 #       sha256 of a single file's bytes, lowercase hex. Used for artifacts whose
@@ -22,8 +22,8 @@
 #       Deterministic sha256 of a directory tree: a name-sorted tar with fixed
 #       mtime/owner/group so the hash depends ONLY on payload contents, never on
 #       filesystem or extraction-order noise. Used for artifacts whose shipped
-#       file WRAPS a payload (the macOS `.app` inside a `.dmg`, the unsigned
-#       exe+resources inside an NSIS installer). Requires SOURCE_DATE_EPOCH to be
+#       file WRAPS a payload (the macOS `.app` inside a `.dmg`, the exe+resources
+#       inside an NSIS installer). Requires SOURCE_DATE_EPOCH to be
 #       exported — the tag commit's unix seconds — so the archive mtime is a
 #       deterministic, independently-recoverable value (git), not `now`.
 #
@@ -32,9 +32,38 @@
 #       everything Apple's signing pipeline wrote into it normalized back out
 #       first. macOS only — it shells out to `codesign`/`stapler`. See the long
 #       note above the function for why the macOS payload is defined this way and
-#       the Linux/Windows ones are not.
+#       the Linux one is not.
+#
+#   sha_windows_payload <path/to/installer.exe>
+#       The same idea for the SHIPPED (Authenticode-signed) NSIS installer:
+#       extract its file tree, normalize the signature out of every PE inside,
+#       and hash that. Needs `7z` and a Python 3 interpreter.
 #
 # No side effects on source: sourcing this file only defines these functions.
+
+# Where the helper scripts this file shells out to live. Resolved at source time
+# so callers can source this from any working directory.
+PAYLOAD_HASH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# payload_hash_python — echo a working Python 3 interpreter, or fail loudly.
+#
+# Git-for-Windows bash does not reliably expose `python3`: the GitHub runner image
+# installs Python as `python`, and stock Windows ships a `python3.exe` App
+# Execution Alias that opens the Microsoft Store instead of running anything. So
+# resolve rather than assume, and REJECT an interpreter that cannot actually run —
+# which is what the alias looks like. `$PYTHON` overrides.
+payload_hash_python() {
+  local candidate
+  for candidate in ${PYTHON:+"$PYTHON"} python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 &&
+       "$candidate" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  echo "payload_hash_python: no working Python 3 interpreter found (tried \$PYTHON, python3, python)" >&2
+  return 1
+}
 
 # sha256 of a single file, lowercase hex.
 sha_file() { sha256sum "$1" | awk '{print $1}'; }
@@ -43,12 +72,12 @@ sha_file() { sha256sum "$1" | awk '{print $1}'; }
 # seconds) fixes the archive mtime so the hash is a pure function of contents.
 #
 # GNU tar only: `--sort=name` is a GNU extension (BSD/macOS tar lacks it). The
-# pre-signature payload for macOS is captured on a macOS runner, which ships BSD
-# tar, so that job installs GNU tar and exports `TAR=gtar`; everywhere else the
-# default `tar` is already GNU. Both must be GNU tar for the archive bytes — and
-# therefore the hash — to match between the party that LOGS and the party that
-# REBUILDS (see the file header). Windows captures run under Git-for-Windows bash,
-# whose `tar` is already GNU.
+# macOS payload digest is computed on a macOS runner, which ships BSD tar, so that
+# job installs GNU tar and exports `TAR=gtar`; everywhere else the default `tar`
+# is already GNU. Both must be GNU tar for the archive bytes — and therefore the
+# hash — to match between the party that LOGS and the party that REBUILDS (see the
+# file header). The Windows digest is computed under Git-for-Windows bash, whose
+# `tar` is already GNU.
 sha_tree() {
   : "${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH required for sha_tree (tag commit unix seconds)}"
   "${TAR:-tar}" --sort=name --mtime="@${SOURCE_DATE_EPOCH}" \
@@ -135,6 +164,86 @@ sha_macos_payload() {
   fi
 
   digest="$(sha_tree "$copy")" || { rm -rf "$work"; return 1; }
+  rm -rf "$work"
+  printf '%s\n' "$digest"
+}
+
+# ── Windows: the payload digest of a SIGNED NSIS installer ──────────────────
+#
+# The same move as sha_macos_payload, for the same reason, against a different
+# signing scheme. An Authenticode signature carries a mandatory RFC-3161
+# timestamp (timestamp.acs.microsoft.com — see the signCommand in
+# desktop-release.yml), so it differs on every signing and can never be
+# reproduced. Hashing the shipped tree as-is would log a payload leaf nobody can
+# recompute. So the signature is EXCLUDED, not reproduced.
+#
+# Windows used to answer this the way macOS did before #750, and inherited the
+# same defect: build the app TWICE — once unsigned to hash, once signed to ship —
+# and assert the two compiles produced an identical binary. That made the release
+# gate depend on rustc emitting byte-identical output across two compiles of one
+# source tree, which it does not reliably do (rust-lang #52044/#50556/#129080).
+# It failed on v1.8.3 twice in a row, with a DIFFERENT hash each time, for a
+# reason that had nothing to do with the release being unsound. #750 removed that
+# dependence on macOS; this removes the last of it.
+#
+# The digest is taken over the tree INSIDE the shipped installer, so anyone
+# holding the public .exe can recompute it: extract, run this, compare to the
+# logged leaf. The old digest described an unsigned installer that existed only
+# inside one CI job and that no outsider could ever obtain — a claim nobody could
+# evaluate, let alone falsify.
+#
+# `$PLUGINSDIR` and `Uninstall.exe` are NSIS installer scaffolding rather than
+# installed payload, and are dropped here exactly as scripts/attest-binaries.sh
+# drops them, so both see the same tree.
+#
+# The strip is VERIFIED, not assumed — see strip-pe-signature.py `check`. A
+# silently-failed strip would produce a digest over still-signed bytes: precisely
+# the unrecomputable leaf this whole path exists to prevent.
+sha_windows_payload() {
+  : "${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH required for sha_windows_payload}"
+  local installer="$1" work ex digest strip_py
+  if [ ! -f "$installer" ]; then
+    echo "sha_windows_payload: not a file: $installer" >&2
+    return 1
+  fi
+  strip_py="$PAYLOAD_HASH_LIB_DIR/strip-pe-signature.py"
+  if [ ! -f "$strip_py" ]; then
+    echo "sha_windows_payload: missing helper $strip_py" >&2
+    return 1
+  fi
+
+  work="$(mktemp -d)" || return 1
+  ex="$work/nsis"
+  mkdir -p "$ex" || { rm -rf "$work"; return 1; }
+  if ! 7z x -y -o"$ex" "$installer" >/dev/null; then
+    echo "sha_windows_payload: 7z could not extract $installer" >&2
+    rm -rf "$work"
+    return 1
+  fi
+
+  # Installer scaffolding, not installed payload.
+  rm -rf "$ex/\$PLUGINSDIR" "$ex/Uninstall.exe" 2>/dev/null || true
+
+  local py
+  if ! py="$(payload_hash_python)"; then
+    rm -rf "$work"
+    return 1
+  fi
+  # stdout is the DIGEST and nothing else — the stripper's per-file log goes to
+  # stderr, where it stays visible in the job output. Without this the sidecar
+  # would contain log lines and read_payload_sha256 would reject it mid-release.
+  if ! "$py" "$strip_py" strip "$ex" >&2; then
+    echo "sha_windows_payload: stripping Authenticode from the extracted tree failed" >&2
+    rm -rf "$work"
+    return 1
+  fi
+  if ! "$py" "$strip_py" check "$ex"; then
+    echo "sha_windows_payload: tree STILL carries an Authenticode signature after strip" >&2
+    rm -rf "$work"
+    return 1
+  fi
+
+  digest="$(sha_tree "$ex")" || { rm -rf "$work"; return 1; }
   rm -rf "$work"
   printf '%s\n' "$digest"
 }

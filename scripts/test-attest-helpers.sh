@@ -172,70 +172,248 @@ else
 fi
 
 echo
-echo "verify-presig-binary — the WS3 pre-signature/shipped-binary invariant (#603/#704)"
+echo "strip-pe-signature — normalizing Authenticode out of the Windows payload (#750)"
 
-# The WINDOWS payload leaf hashes an UNSIGNED capture build; the signed build
-# recompiles the app crate (a config delta trips tauri-build's rerun-if-changed).
-# This script records the compiled binary's fingerprint after the capture build and
-# re-checks it after the signed build, so a divergence stops the release rather than
-# publishing a payload leaf for a binary that never shipped. Exercised here against
-# a fabricated target/ tree — no real release.
+# The Windows payload digest is taken over the tree inside the SHIPPED, signed
+# NSIS installer, so every unreproducible byte Authenticode wrote has to come back
+# out first — the certificate table (which embeds an RFC-3161 timestamp that
+# differs on every signing) and the PE checksum signtool recomputes over it.
 #
-# macOS no longer uses this path at all: since #750 it builds ONCE and derives its
-# payload digest from the shipped bundle (sha_macos_payload), so there are never two
-# compiles to reconcile. Windows still builds twice and so still needs the check.
-if ! command -v sha256sum >/dev/null 2>&1; then
-  echo "  skip — verify-presig-binary needs sha256sum (absent on macOS); covered in CI"
+# The load-bearing property is the second check below: two DIFFERENT signings of
+# the same build must normalize to the same bytes. If they do not, the payload
+# leaf is unrecomputable and the whole verifiable-build claim is hollow.
+#
+# Exercised against synthetic PE images — no real installer, no signtool.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "  skip — strip-pe-signature needs python3; covered in CI"
 else
-  vscript="$here/verify-presig-binary.sh"
-  # Linux triple: main binary only (no macOS externalBin sidecar).
-  ltriple="x86_64-unknown-linux-gnu"
-  vroot="$work/vpb-linux"
-  mkdir -p "$vroot/target/$ltriple/release"
-  printf 'compiled-v1' > "$vroot/target/$ltriple/release/pollis"
-  ( cd "$vroot" && "$vscript" record "$ltriple" fp.txt ) >/dev/null 2>&1
-  check "record writes a fingerprint file" "$( [ -s "$vroot/fp.txt" ] && echo yes )" "yes"
-  ( cd "$vroot" && "$vscript" verify "$ltriple" fp.txt ) >/dev/null 2>&1
-  check "verify passes when the binary is unchanged" "$?" "0"
+  pescript="$here/lib/strip-pe-signature.py"
+  peroot="$work/pe"
+  mkdir -p "$peroot"
 
-  printf 'compiled-v2-DIFFERENT' > "$vroot/target/$ltriple/release/pollis"
-  out="$( cd "$vroot" && "$vscript" verify "$ltriple" fp.txt 2>&1 )"; rc=$?
-  check "verify fails when the compiled binary changed" "$rc" "1"
+  # Fabricate the fixtures: minimal PE32+ images. A "signed" one has a non-zero
+  # checksum and a certificate table appended and pointed to by data directory
+  # entry 4, exactly as signtool leaves it.
+  python3 - "$peroot" <<'MKPE'
+import struct, sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+
+def mkpe(body: bytes, cert: bytes | None) -> bytes:
+    dos = bytearray(64)
+    dos[0:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, 64)
+    coff = bytearray(20)
+    opt = bytearray(240)
+    struct.pack_into("<H", opt, 0, 0x20B)          # PE32+
+    struct.pack_into("<I", opt, 108, 16)           # NumberOfRvaAndSizes
+    data = bytearray(bytes(dos) + b"PE\0\0" + bytes(coff) + bytes(opt) + body)
+    if cert is not None:
+        struct.pack_into("<I", data, 88 + 64, 0xDEADBEEF)        # CheckSum
+        # signtool aligns the file to 8 bytes before appending the certificate
+        # table. Emulated so the padding case is actually exercised below.
+        data += b"\0" * (-len(data) % 8)
+        off = len(data)
+        # Security data directory: optional header at 88, its data directories
+        # at +112 (PE32+), entry 4 at +32 from there.
+        struct.pack_into("<II", data, 88 + 112 + 32, off, len(cert))
+        data += cert
+    return bytes(data)
+
+# Length chosen so the image is already 8-byte aligned: signtool adds no
+# padding, and normalizing recovers the unsigned bytes exactly.
+body = b"compiled application bytes" * 8
+(root / "unsigned.exe").write_bytes(mkpe(body, None))
+# Two signings of the SAME build: different timestamps, different lengths.
+(root / "signed-a.exe").write_bytes(mkpe(body, b"CERT-timestamp-2026-08-08T10:00:00Z-aaaa"))
+(root / "signed-b.exe").write_bytes(mkpe(body, b"CERT-timestamp-2026-08-09T22:41:07Z-bbbbbbbbbbbb"))
+# ...and a build whose length is NOT 8-aligned, so signing inserts padding that
+# truncation cannot distinguish from payload. See the assertions below.
+pbody = body + b"odd"
+(root / "pad-unsigned.exe").write_bytes(mkpe(pbody, None))
+(root / "pad-signed-a.exe").write_bytes(mkpe(pbody, b"CERT-aaaa"))
+(root / "pad-signed-b.exe").write_bytes(mkpe(pbody, b"CERT-bbbbbbbbbbbbbbbb"))
+# Not a PE at all — must be left completely alone.
+(root / "resource.dat").write_bytes(b"\x89PNG not a pe image at all")
+# Malformed: bytes follow the certificate table, so truncating would lose them.
+bad = bytearray(mkpe(body, b"CERT-short"))
+bad += b"TRAILING"
+(root / "trailing.exe").write_bytes(bytes(bad))
+MKPE
+
+  cp "$peroot/resource.dat" "$peroot/resource.dat.orig"
+
+  # A signed image really does look signed before we touch it.
+  python3 "$pescript" check "$peroot/signed-a.exe" >/dev/null 2>&1
+  check "check flags a signed PE" "$?" "1"
+  python3 "$pescript" check "$peroot/unsigned.exe" >/dev/null 2>&1
+  check "check passes an unsigned PE" "$?" "0"
+
+  # Refuse to truncate a layout the parser does not understand.
+  python3 "$pescript" strip "$peroot/trailing.exe" >/dev/null 2>&1
+  check "strip refuses when bytes follow the certificate table" "$?" "1"
+  rm -f "$peroot/trailing.exe"
+
+  python3 "$pescript" strip "$peroot" >/dev/null 2>&1
+  check "strip succeeds over a mixed tree" "$?" "0"
+  python3 "$pescript" check "$peroot" >/dev/null 2>&1
+  check "nothing in the tree is signed afterwards" "$?" "0"
+
+  # THE load-bearing assertion: two different signings normalize to identical
+  # bytes, so the payload digest does not depend on which signing produced the
+  # installer a verifier happens to hold.
+  sa="$(sha256sum "$peroot/signed-a.exe" | awk '{print $1}')"
+  sb="$(sha256sum "$peroot/signed-b.exe" | awk '{print $1}')"
+  check "two different signings normalize to the same bytes" "$sa" "$sb"
+
+  # ...and, when signing needed no alignment padding, to the same bytes as the
+  # build that was never signed at all.
+  su="$(sha256sum "$peroot/unsigned.exe" | awk '{print $1}')"
+  check "an unpadded signed image normalizes to the unsigned build" "$sa" "$su"
+
+  # When the image was NOT 8-byte aligned, signtool inserted padding before the
+  # certificate table, and truncation cannot tell that padding from payload. The
+  # guarantee that survives is the one that matters: every signing of a given
+  # build still normalizes to the SAME bytes, so the digest is recomputable by
+  # anyone holding any copy of the installer. Equality with the never-signed
+  # build is NOT claimed here, and chasing it by stripping trailing zeros would
+  # corrupt any binary that legitimately ends in them.
+  pa="$(sha256sum "$peroot/pad-signed-a.exe" | awk '{print $1}')"
+  pb="$(sha256sum "$peroot/pad-signed-b.exe" | awk '{print $1}')"
+  pu="$(sha256sum "$peroot/pad-unsigned.exe" | awk '{print $1}')"
+  check "padded signings still normalize to each other" "$pa" "$pb"
+  check "padding is retained, not guessed away" "$( [ "$pa" != "$pu" ] && echo differs )" "differs"
+
+  # Non-PE payload files are untouched — the digest must still cover them.
+  do1="$(sha256sum "$peroot/resource.dat" | awk '{print $1}')"
+  do2="$(sha256sum "$peroot/resource.dat.orig" | awk '{print $1}')"
+  check "non-PE files are left byte-identical" "$do1" "$do2"
+
+  # Idempotent: normalizing an already-normalized tree changes nothing.
+  before="$(cd "$peroot" && sha256sum ./*.exe | sha256sum)"
+  python3 "$pescript" strip "$peroot" >/dev/null 2>&1
+  after="$(cd "$peroot" && sha256sum ./*.exe | sha256sum)"
+  check "strip is idempotent" "$before" "$after"
+
+  # The interpreter resolver. Git-for-Windows bash does not reliably expose
+  # `python3`, and stock Windows ships a `python3.exe` Store alias that runs
+  # nothing — so the resolver must PROVE a candidate works, not just find it on
+  # PATH. Without this the Windows release would fail only at the very end of the
+  # job, after a ~30-minute signed build.
+  ( . "$here/lib/payload-hash.sh" && payload_hash_python >/dev/null ) 2>/dev/null
+  check "resolves a working interpreter" "$?" "0"
+
+  got="$( . "$here/lib/payload-hash.sh" && PYTHON=python3 payload_hash_python 2>/dev/null )"
+  check "honours a \$PYTHON override" "$got" "python3"
+
+  # A named interpreter that does not exist must fall back, not fail.
+  got="$( . "$here/lib/payload-hash.sh" && PYTHON=definitely-not-an-interpreter payload_hash_python 2>/dev/null )"
+  check "falls back when \$PYTHON does not exist" "$got" "python3"
+
+  # A candidate that EXISTS but is not Python 3 must be rejected — this is the
+  # Store-alias case, which is on PATH and does nothing useful.
+  fakebin="$work/fakepy"; mkdir -p "$fakebin"
+  printf '#!/bin/sh\nexit 9\n' > "$fakebin/python3"
+  chmod +x "$fakebin/python3"
+  got="$( . "$here/lib/payload-hash.sh" && PATH="$fakebin:$PATH" payload_hash_python 2>/dev/null )"
+  check "rejects a non-working interpreter on PATH" "$got" "python"
+
+  # Nothing usable at all is a loud failure, not a silent empty string.
+  out="$( . "$here/lib/payload-hash.sh" && PATH="$fakebin" PYTHON= payload_hash_python 2>&1 )"; rc=$?
+  check "fails when no interpreter works" "$rc" "1"
   case "$out" in
-    *"WS3 INVARIANT VIOLATED"*) ok "mismatch explains the meaning, not a bare diff" ;;
-    *) bad "mismatch error lacks the WS3 explanation: $out" ;;
+    *"no working Python 3 interpreter"*) ok "names the problem" ;;
+    *) bad "unhelpful resolver error: $out" ;;
   esac
-
-  ( cd "$vroot" && "$vscript" verify "$ltriple" no-such-file.txt ) >/dev/null 2>&1
-  check "verify fails when no fingerprint was recorded" "$?" "1"
-
-  ( cd "$vroot" && "$vscript" record "aarch64-unknown-none" x.txt ) >/dev/null 2>&1
-  check "record fails when the compiled binary is absent" "$?" "1"
-
-  # Windows triple: the main binary is <name>.exe, and there is no capture sidecar.
-  wtriple="x86_64-pc-windows-msvc"
-  vwin="$work/vpb-win"
-  mkdir -p "$vwin/target/$wtriple/release"
-  printf 'pe-bytes' > "$vwin/target/$wtriple/release/pollis.exe"
-  ( cd "$vwin" && "$vscript" record "$wtriple" fp.txt ) >/dev/null 2>&1
-  check "record resolves the Windows .exe binary" "$?" "0"
-
-  # macOS triple: the externalBin capture-helper sidecar is part of the payload,
-  # so a change to it alone must also fail the invariant.
-  mtriple="aarch64-apple-darwin"
-  vmac="$work/vpb-mac"
-  mkdir -p "$vmac/target/$mtriple/release" "$vmac/src-tauri/binaries"
-  printf 'macho' > "$vmac/target/$mtriple/release/pollis"
-  printf 'helper-v1' > "$vmac/src-tauri/binaries/pollis-capture-macos-$mtriple"
-  ( cd "$vmac" && "$vscript" record "$mtriple" fp.txt ) >/dev/null 2>&1
-  lines="$(wc -l < "$vmac/fp.txt" | tr -d ' ')"
-  check "macOS fingerprint covers binary + capture-helper sidecar" "$lines" "2"
-  printf 'helper-v2-DIFFERENT' > "$vmac/src-tauri/binaries/pollis-capture-macos-$mtriple"
-  ( cd "$vmac" && "$vscript" verify "$mtriple" fp.txt ) >/dev/null 2>&1
-  check "verify catches a changed sidecar (not just the main binary)" "$?" "1"
 fi
 
-echo
+echo "sha_windows_payload — the shipped-installer payload digest (#750)"
+
+# End-to-end over the real function, not just the stripper: extract an archive,
+# drop the NSIS scaffolding, normalize every PE, hash the tree. A .7z stands in
+# for the NSIS installer — sha_windows_payload only ever runs `7z x` on it, so the
+# container format is irrelevant to what is being tested.
+#
+# THE assertion is the third one: two independently signed builds of the same
+# source must produce the SAME payload digest. That is the whole claim the leaf
+# makes, and it is what the two-build scheme could not deliver.
+if ! command -v 7z >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+  echo "  skip — sha_windows_payload needs 7z + python3; covered in CI"
+else
+  . "$here/lib/payload-hash.sh"
+  export SOURCE_DATE_EPOCH=1700000000
+  wroot="$work/winpay"
+  mkdir -p "$wroot"
+
+  # Two "releases" of the same build, signed differently, plus scaffolding NSIS
+  # adds that is not installed payload and must not enter the digest.
+  for v in a b; do
+    d="$wroot/tree-$v/\$PLUGINSDIR"
+    mkdir -p "$d"
+    cp "$peroot/signed-$v.exe" "$wroot/tree-$v/pollis.exe" 2>/dev/null || true
+    printf 'resource payload' > "$wroot/tree-$v/resources.dat"
+    printf 'installer plugin %s' "$v" > "$d/System.dll"
+    printf 'uninstaller %s' "$v" > "$wroot/tree-$v/Uninstall.exe"
+    ( cd "$wroot/tree-$v" && 7z a -bso0 -bsp0 "../installer-$v.7z" . >/dev/null )
+  done
+
+  # signed-a/signed-b were already normalized in place by the block above, so
+  # re-sign them here to get genuinely different signed inputs.
+  python3 - "$wroot" <<'MKSIGNED'
+import struct, sys, subprocess, shutil
+from pathlib import Path
+root = Path(sys.argv[1])
+
+def mkpe(body: bytes, cert: bytes | None) -> bytes:
+    dos = bytearray(64); dos[0:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, 64)
+    opt = bytearray(240)
+    struct.pack_into("<H", opt, 0, 0x20B)
+    struct.pack_into("<I", opt, 108, 16)
+    data = bytearray(bytes(dos) + b"PE\0\0" + bytes(bytearray(20)) + bytes(opt) + body)
+    if cert is not None:
+        struct.pack_into("<I", data, 88 + 64, 0xDEADBEEF)
+        data += b"\0" * (-len(data) % 8)
+        struct.pack_into("<II", data, 88 + 112 + 32, len(data), len(cert))
+        data += cert
+    return bytes(data)
+
+body = b"identical compiled bytes" * 16
+for v, cert in (("a", b"CERT-signing-one"), ("b", b"CERT-signing-two-much-longer")):
+    (root / f"tree-{v}" / "pollis.exe").write_bytes(mkpe(body, cert))
+MKSIGNED
+
+  for v in a b; do
+    rm -f "$wroot/installer-$v.7z"
+    ( cd "$wroot/tree-$v" && 7z a -bso0 -bsp0 "../installer-$v.7z" . >/dev/null )
+  done
+
+  da="$(sha_windows_payload "$wroot/installer-a.7z" 2>/dev/null)"
+  check "produces a digest for a signed installer" "${#da}" "64"
+
+  db="$(sha_windows_payload "$wroot/installer-b.7z" 2>/dev/null)"
+  check "two independently signed builds agree" "$da" "$db"
+
+  # Deterministic across runs.
+  da2="$(sha_windows_payload "$wroot/installer-a.7z" 2>/dev/null)"
+  check "the digest is stable across invocations" "$da" "$da2"
+
+  # A real payload change MUST move the digest, or the leaf proves nothing.
+  printf 'DIFFERENT resource' > "$wroot/tree-a/resources.dat"
+  rm -f "$wroot/installer-a.7z"
+  ( cd "$wroot/tree-a" && 7z a -bso0 -bsp0 "../installer-a.7z" . >/dev/null )
+  dc="$(sha_windows_payload "$wroot/installer-a.7z" 2>/dev/null)"
+  check "a changed payload changes the digest" "$( [ "$dc" != "$da" ] && echo differs )" "differs"
+
+  sha_windows_payload "$wroot/no-such-installer.exe" >/dev/null 2>&1
+  check "a missing installer fails loudly" "$?" "1"
+
+  ( unset SOURCE_DATE_EPOCH; sha_windows_payload "$wroot/installer-b.7z" ) >/dev/null 2>&1
+  check "refuses to run without SOURCE_DATE_EPOCH" "$?" "1"
+  unset SOURCE_DATE_EPOCH
+fi
+
 echo "verify-signed-artifact — the WS3 'the shipped artifact is signed' gate (#603/#704)"
 
 # WS3 removed the hardcoded macOS signingIdentity from the config, so the whole

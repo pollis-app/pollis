@@ -298,57 +298,6 @@ jobs:
           echo "OPENSSL_DIR=$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md" >> $GITHUB_ENV
           echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
 
-      # WS3 (#603/#704): capture the PRE-SIGNATURE exe+resources payload BEFORE the
-      # signCommand is injected below. The shipped NSIS .exe is Authenticode-signed
-      # with a mandatory RFC-3161 timestamp from timestamp.acs.microsoft.com — bytes
-      # that vary per signing and can never be reproduced, so hashing the signed
-      # tree would log an unreproducible payload leaf forever. At THIS point no
-      # signCommand is in tauri.conf.json yet, so `tauri build` produces an UNSIGNED
-      # installer; we extract its tree exactly as the attest job does (dropping
-      # $PLUGINSDIR / Uninstall.exe), hash it with the shared sha_tree helper, and
-      # publish the digest as a sidecar the attest + backfill jobs read back as
-      # payload_sha256. Git-for-Windows bash ships GNU tar + sha256sum and the runner
-      # has 7-Zip, so the shared helper runs unchanged. createUpdaterArtifacts:false
-      # skips the minisign updater bundle (a Pollis secret; not in the payload).
-      #
-      # Unlike macOS, the Windows config is NOT byte-identical between the two
-      # builds: the signed build injects a `signCommand` into tauri.conf.json (see
-      # the "Inject Windows signCommand" step below) that this build must not have,
-      # or it would sign here. `signCommand` is a bundle field Tauri's codegen strips
-      # before embedding the config (tauri-utils WindowsConfig::to_tokens drops
-      # sign_command), so the compiled binary is EXPECTED to be identical anyway —
-      # but we do not assume that. This step records the compiled binary's
-      # fingerprint and the post-sign "Verify signed binary" step re-checks it, so a
-      # divergence stops the release instead of publishing a payload leaf for a
-      # binary that never shipped.
-      - name: Capture pre-signature payload (unsigned NSIS)
-        shell: bash
-        run: |
-          set -euo pipefail
-          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          export SOURCE_DATE_EPOCH
-          pnpm tauri build --target x86_64-pc-windows-msvc \
-            --config '{"bundle":{"createUpdaterArtifacts":false}}'
-          exe="$(find target/x86_64-pc-windows-msvc/release/bundle/nsis -maxdepth 1 -name '*.exe' | head -1)"
-          if [ -z "${exe:-}" ]; then
-            echo "::error::WS3: unsigned build produced no NSIS .exe to hash for the pre-signature payload"
-            exit 1
-          fi
-          ex="$RUNNER_TEMP/nsis-presig"; rm -rf "$ex"; mkdir -p "$ex"
-          7z x -y -o"$ex" "$exe" >/dev/null
-          rm -rf "$ex/\$PLUGINSDIR" "$ex/Uninstall.exe" 2>/dev/null || true
-          . scripts/lib/payload-hash.sh
-          sha_tree "$ex" > "pollis-${GITHUB_REF_NAME}-windows.payload-sha256"
-          echo "pre-signature Windows payload_sha256: $(cat "pollis-${GITHUB_REF_NAME}-windows.payload-sha256")"
-          # Fingerprint the compiled binary so the post-sign step can prove the
-          # signed build reused THESE bytes (Windows has no externalBin sidecar).
-          scripts/verify-presig-binary.sh record x86_64-pc-windows-msvc \
-            "$RUNNER_TEMP/presig-binfp-windows.txt"
-          # Discard the UNSIGNED installer so the signed build below regenerates it
-          # cleanly and no unsigned .exe can ever reach the upload. Only the
-          # packaging output is removed; the compiled binary in target/ is reused.
-          rm -rf target/x86_64-pc-windows-msvc/release/bundle
-
       - name: Install Artifact Signing client + SignTool
         shell: pwsh
         run: |
@@ -409,6 +358,20 @@ jobs:
             AZURE_SIGNING_ENDPOINT AZURE_SIGNING_ACCOUNT AZURE_CERT_PROFILE \
             AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET
 
+      # Fail here, in seconds, rather than after a ~30-minute signed build: the
+      # payload digest step at the end of this job shells out to Python for the PE
+      # signature strip, and Git-for-Windows bash does not reliably expose
+      # `python3` (stock Windows even ships a `python3.exe` Store alias that runs
+      # nothing). payload_hash_python resolves and PROVES an interpreter works.
+      - name: Verify the payload-digest toolchain is present (#750)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . scripts/lib/payload-hash.sh
+          py="$(payload_hash_python)"
+          echo "payload digest will use: $py ($("$py" --version 2>&1))"
+          command -v 7z >/dev/null || { echo "::error::#750: 7z is required to extract the NSIS payload"; exit 1; }
+
       - name: Inject Windows signCommand into tauri.conf.json
         shell: bash
         run: |
@@ -438,25 +401,12 @@ jobs:
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: pnpm build:tauri:windows
 
-      # WS3 (#603/#704) INVARIANT, not an assumption: the signed build recompiled
-      # the app crate (tauri.conf.json changed — the signCommand was injected —
-      # tripping cargo:rerun-if-changed). The change is confined to a bundle field
-      # Tauri's codegen strips from the embedded config, so the recompiled binary is
-      # EXPECTED to be byte-identical to the one the pre-signature payload hashed —
-      # this step ENFORCES it. If it differs, the payload leaf no longer corresponds
-      # to the shipped binary and the release is stopped.
-      - name: Verify signed binary matches pre-signature payload (WS3)
-        shell: bash
-        run: |
-          scripts/verify-presig-binary.sh verify x86_64-pc-windows-msvc \
-            "$RUNNER_TEMP/presig-binfp-windows.txt"
-
       # WS3 (#603/#704): prove the SHIPPED installer is Authenticode-signed before
       # any upload/publish — the payload leaf + attestation are meaningless around
       # an unsigned .exe. SIGNTOOL_PATH is already resolved earlier in this job, so
       # signtool verify /pa (does it chain to a trusted root under the default
-      # policy) is nearly free and is the same "assert, don't assume" discipline as
-      # the pre-signature check above.
+      # policy) is nearly free. It runs BEFORE the payload digest below so that
+      # digest is always taken over a tree we have proven is the signed one.
       - name: Verify Windows artifact is Authenticode-signed (WS3)
         shell: bash
         run: |
@@ -466,6 +416,37 @@ jobs:
             exit 1
           fi
           scripts/verify-signed-artifact.sh windows "$exe"
+
+      # #750: the payload digest, derived FROM THE INSTALLER WE SHIP.
+      #
+      # Windows used to build twice — once unsigned to hash, once signed to ship —
+      # and gate the release on the two compiles being byte-identical. That made
+      # the release depend on rustc emitting identical output across two compiles
+      # of one source tree, which it does not reliably do; it failed on v1.8.3
+      # twice in a row with a different hash each time. #750 removed that
+      # dependence on macOS and this removes the last of it: build ONCE, then
+      # normalize the unreproducible Authenticode material back out of the
+      # extracted tree before hashing (sha_windows_payload -> strip-pe-signature.py).
+      #
+      # The digest is now recomputable by anyone holding the public .exe, which
+      # the old one — describing an unsigned installer that only ever existed
+      # inside this job — never was. Git-for-Windows bash ships GNU tar +
+      # sha256sum, and the toolchain check above has already proven 7-Zip and a
+      # working Python 3 are present, so the shared helper runs unchanged.
+      - name: Compute Windows payload digest (#750)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          exe="$(find target/x86_64-pc-windows-msvc/release/bundle/nsis -maxdepth 1 -name '*.exe' | head -1)"
+          if [ -z "${exe:-}" ]; then
+            echo "::error::#750: no signed NSIS .exe found to hash for the Windows payload digest"
+            exit 1
+          fi
+          . scripts/lib/payload-hash.sh
+          sha_windows_payload "$exe" > "pollis-${GITHUB_REF_NAME}-windows.payload-sha256"
+          echo "Windows payload_sha256: $(cat "pollis-${GITHUB_REF_NAME}-windows.payload-sha256")"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4

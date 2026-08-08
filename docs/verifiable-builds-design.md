@@ -195,21 +195,24 @@ reproducible, and pretending otherwise would be dishonest to auditors.
    `P` is logged → confirm the shipped signed artifact yields the same `P`.
 
    How `P` is obtained differs by platform. For the **AppImage** the shipped bytes
-   *are* `P` (detached minisign). For **Windows NSIS** the unit is the **unsigned
-   `pollis.exe` + bundled resources** the installer wraps, captured by an unsigned
-   build before the Authenticode `signCommand` is injected (#704). For **macOS**,
-   as of **#750**, `P` is the **shipped bundle with Apple's per-signing material
-   normalized out** — the stapled ticket, each Mach-O's `LC_CODE_SIGNATURE`, and
-   the `_CodeSignature` manifests — computed by `sha_macos_payload`.
+   *are* `P` (detached minisign). On both **signed** platforms, as of **#750**, `P`
+   is the **shipped artifact with the signing material normalized out**: for
+   **macOS** the bundle minus the stapled ticket, each Mach-O's
+   `LC_CODE_SIGNATURE`, and the `_CodeSignature` manifests (`sha_macos_payload`);
+   for **Windows NSIS** the extracted installer tree with every PE's Authenticode
+   certificate table and recomputed `CheckSum` normalized away
+   (`sha_windows_payload` → `scripts/lib/strip-pe-signature.py`).
 
-   The macOS definition is deliberate and is the standard answer in this space: you
-   do not reproduce a signature, you exclude it (F-Droid requires APKs identical
-   "apart from the signature"; the Mach-O convention normalizes the code-signature
-   region away before comparing). It replaced a scheme that built the app twice —
-   once unsigned to hash, once signed to ship — which made the release gate depend
-   on rustc emitting identical bytes across two compiles, and which hashed a bundle
-   no third party could ever obtain. Deriving `P` from the shipped artifact makes it
-   recomputable by anyone holding the public `.dmg`. See
+   This is deliberate and is the standard answer in this space: you do not
+   reproduce a signature, you exclude it (F-Droid requires APKs identical "apart
+   from the signature"; the Mach-O convention normalizes the code-signature region
+   away before comparing). It replaced a scheme that built the app twice — once
+   unsigned to hash, once signed to ship — which made the release gate depend on
+   rustc emitting identical bytes across two compiles, and which hashed a bundle no
+   third party could ever obtain. Deriving `P` from the shipped artifact makes it
+   recomputable by anyone holding the public `.dmg` / `.exe`. macOS moved first;
+   Windows followed after the two-build gate failed the v1.8.3 release twice in a
+   row with a different hash each time. See
    `docs/reproducible-builds-residuals.md` §2.
 
 2. **Notarization mutates the artifact.** Apple's notary service can staple a
@@ -356,12 +359,11 @@ after `release`** (it needs the built + signed artifacts in hand):
 1. **Compute hashes.** For each platform artifact: obtain the payload and hash it →
    `payload_sha256`; hash the shipped signed file → `artifact_sha256`. On Linux the
    shipped AppImage/deb/rpm bytes *are* the payload (detached minisign), so the
-   attest job hashes them directly. On **Windows** the unsigned exe+resources cannot
-   be recovered from the signed installer, so the **build job** builds the bundle
-   unsigned first and hashes it with `sha_tree` (#704). On **macOS** the build job
-   builds **once** and hashes the shipped bundle with `sha_macos_payload`, which
-   normalizes Apple's signature and notarization ticket out first (#750). In all
-   three cases the digest is published as a `*.payload-sha256` release-asset sidecar
+   attest job hashes them directly. On **macOS** and **Windows** the build job
+   builds **once** and hashes the shipped artifact with `sha_macos_payload` /
+   `sha_windows_payload`, each of which normalizes that platform's signing material
+   back out first (#750). In all three cases the digest is published as a
+   `*.payload-sha256` release-asset sidecar
    the attest job reads; the attest job must never hash raw signed bytes for the
    payload leaf, since those embed per-signing-operation material that is
    unreproducible by construction.

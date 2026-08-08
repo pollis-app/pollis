@@ -65,13 +65,34 @@ the same normalization, compare to the logged leaf. Second, the release no longe
 depends on the Rust toolchain emitting byte-identical output across two compiles of
 one source tree — which it does **not** reliably do (see §2).
 
-**Windows.** Still the two-build scheme #704 introduced: an extra `tauri build`
-runs before the Authenticode `signCommand` is injected, its unsigned
-exe+resources are hashed with `sha_tree`, and `scripts/verify-presig-binary.sh`
-asserts the signed build reused the same compiled binary. Windows has not hit the
-non-determinism macOS did, and stripping Authenticode needs different tooling
-(`osslsigncode`/`signtool`) than the Apple path — so it keeps the old scheme until
-there is a reason to move it. Tracked separately from #750.
+**Windows (also since #750).** The same scheme, against a different signing
+format. The build job runs **once**, producing the Authenticode-signed NSIS
+installer we ship, and `sha_windows_payload` extracts its file tree, normalizes
+the signature out of every PE inside (`scripts/lib/strip-pe-signature.py`), and
+hashes the remainder with `sha_tree`.
+
+Windows needed its own stripper because it has no equivalent of
+`codesign --remove-signature`: `signtool remove /s` deletes the certificate table
+but leaves behind the PE checksum signtool recomputed, so a stripped file still
+differs from the unsigned one. Both fields are normalized — the certificate table
+(located via data directory entry 4, whose "VirtualAddress" is a file offset for
+that entry alone) is truncated away and its directory entry zeroed, and the
+optional header's `CheckSum` is zeroed.
+
+One honest limit: `signtool` pads the image to an 8-byte boundary before appending
+the certificate table, so up to 7 bytes of alignment padding can survive
+truncation, and the normalized form is then not byte-identical to the never-signed
+build. That is deliberate. The property the leaf needs is that the digest is
+**deterministic and independently recomputable from the shipped artifact** — every
+signing of a given build normalizes to the same bytes — not that it equals a build
+no outsider ever had. Chasing byte-identity by stripping trailing zeros would
+corrupt any binary that legitimately ends in them.
+`scripts/test-attest-helpers.sh` encodes both the guarantee and its limit.
+
+Windows kept the two-build scheme for one release cycle after macOS left it, on the
+grounds that it had not hit the non-determinism macOS did. That turned out to be
+false: it failed the v1.8.3 release twice in a row, with a **different** hash each
+time.
 
 On **every** platform the digest is published as a `*.payload-sha256` release-asset
 sidecar that `scripts/attest-binaries.sh` reads back as `payload_sha256`. The attest
@@ -86,24 +107,14 @@ two-build capture. #750 then found that the two-build scheme had bought correctn
 at the price of a release gate that depended on compiler determinism, and replaced
 it on macOS with normalization of the shipped bundle.
 
-**The payload leaf provably wraps the *shipped* binary — this is CI-enforced, not
-assumed.** The pre-signature payload is only meaningful if the signed installer
-wraps the *same* compiled binary the payload hashed; otherwise the leaf would
-attest a binary that never shipped (a false claim, worse than the unreproducible
-leaf it replaced). The macOS `signingIdentity` was removed from the committed
-config in #704 (it was redundant — the signed build's `APPLE_SIGNING_IDENTITY` env
-overrides config, so env alone drives signing; `tauri-cli` interface/rust.rs), so
-the two macOS builds read a byte-identical config. The remaining deltas
-(`createUpdaterArtifacts:false` on the capture build; the Windows `signCommand`
-injected only for the signed build) all live in `bundle` fields Tauri's codegen
-strips to their defaults before embedding the config into the binary
-(`tauri-utils` `BundleConfig::to_tokens`), so they **cannot** change the compiled
-bytes. Rather than *trust* that, `scripts/verify-presig-binary.sh` fingerprints the
-compiled binary (plus the macOS externalBin capture-helper sidecar) right after the
-capture build and re-checks it right after the signed build; a mismatch **fails the
-release loudly** and refuses to publish the payload leaf. So a future Tauri or
-config change that silently re-introduced divergence would stop the release, not
-ship a false leaf.
+**The payload leaf wraps the *shipped* binary by construction.** Under the
+two-build scheme this needed enforcing: the leaf hashed a capture build, so it was
+meaningful only if the signed build reused the same compiled binary, and
+`scripts/verify-presig-binary.sh` fingerprinted the binary after each build to
+prove it. That check — and the script — are gone, because there is no longer a
+second build to reconcile. Both signed platforms now derive the digest from the
+artifact they ship, so a leaf describing a binary that never shipped is not
+something CI has to catch; it is not expressible.
 
 **What is still not reproducible on macOS/Windows** is the *degree* to which those
 pre-signature payloads reproduce bit-for-bit — see §2. #704 changed *what we hash*
@@ -124,10 +135,11 @@ is empty (GitHub sets an unset secret's env var to `""`, so this catches the
 `Some("")` case the bundler's own filter would otherwise decide), and a **post-build
 verification** — macOS `codesign --verify --deep --strict` + a Developer ID
 Application authority + `spctl` Gatekeeper/notarization acceptance; Windows `signtool
-verify /pa` — that refuses to publish an unsigned/unnotarized artifact. This asserts
-signing the same way `verify-presig-binary.sh` asserts the payload leaf wraps the
-binary. (No identity string, team id, or cert thumbprint is written into the repo —
-the authority is matched by prefix only.)
+verify /pa` — that refuses to publish an unsigned/unnotarized artifact. Since #750
+that post-build verification runs *before* the payload digest is computed on both
+signed platforms, so the digest is only ever taken over a tree already proven to be
+the signed one. (No identity string, team id, or cert thumbprint is written into
+the repo — the authority is matched by prefix only.)
 
 The signed wrapper is logged as a separate derived `layer:"signed"` leaf whose
 `payload_sha256` equals the payload leaf's — an explicit, verifiable binding

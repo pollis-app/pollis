@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # verify-signed-artifact.sh — WS3 (#603/#704): make "the artifact we ship is
-# signed" something CI CHECKS, not an assumption sitting three lines below the
-# payload-leaf check that verify-presig-binary.sh already enforces.
+# signed" something CI CHECKS, not an assumption.
 #
 # WS3 removed the redundant hardcoded macOS signingIdentity from the committed
 # Tauri config (#704 — it was overridden by APPLE_SIGNING_IDENTITY anyway), which
@@ -22,8 +21,10 @@
 #                failure, full stop, and we never depend on how the bundler's own
 #                env filter treats an empty identity.
 #   macos/windows — AFTER the signed build: prove the SHIPPED artifact carries a
-#                signature the platform gatekeeper will accept, the same way
-#                verify-presig-binary.sh proves the payload leaf wraps the binary.
+#                signature the platform gatekeeper will accept. Since #750 both
+#                platforms also derive their payload digest from this same
+#                artifact, so this runs FIRST and the digest is only ever taken
+#                over a tree already proven to be the signed one.
 #                  * macOS: codesign --verify --deep --strict, a Developer ID
 #                    Application authority (rejects an ad-hoc / empty-identity
 #                    signature that --verify alone tolerates), and spctl Gatekeeper
@@ -37,10 +38,7 @@
 # The platform tools (codesign/spctl/signtool) exist only on their own runners, so
 # the `macos`/`windows` modes are exercised by a real release, not on this Linux
 # box; scripts/test-attest-helpers.sh covers the `preflight` logic and the
-# dispatch/guards that run anywhere. A new file rather than a mode of
-# verify-presig-binary.sh: that script's tight record/verify(<triple> <file>)
-# contract is a different operation (does the payload leaf wrap the binary) from
-# this one (is the shipped artifact signed), with a different arg shape.
+# dispatch/guards that run anywhere.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
