@@ -122,8 +122,8 @@ jobs:
       - name: Warn if the deployed site lags main
         run: |
           set -uo pipefail
-          # The assistant bundle is versioned in-repo; a cheap content fingerprint
-          # is enough to tell "same bytes as main" from "something older".
+          # artifacts.js is versioned in-repo; a cheap content fingerprint is enough
+          # to tell "same bytes as main" from "something older".
           repo_hash="$(sha256sum website/artifacts.js | cut -c1-16)"
           live_hash="$(curl -fsSL -m 30 "$SITE/artifacts.js" | sha256sum | cut -c1-16)"
           if [ "$repo_hash" = "$live_hash" ]; then
