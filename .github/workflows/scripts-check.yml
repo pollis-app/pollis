@@ -25,6 +25,11 @@ on:
       - "pollis-delivery/ds-config-manifest.json"
       - "pollis-delivery/src/**"
       - ".github/scripts/sync-ds-secrets.sh"
+      # Reproducibility recipe inputs: the release build, the rebuilder, and the
+      # client's option_env! surface must stay in agreement.
+      - ".github/workflows/desktop-release.yml"
+      - ".github/workflows/rebuild-verify.yml"
+      - "pollis-core/src/config.rs"
   push:
     branches: [main]
     paths:
@@ -35,6 +40,11 @@ on:
       - "pollis-delivery/ds-config-manifest.json"
       - "pollis-delivery/src/**"
       - ".github/scripts/sync-ds-secrets.sh"
+      # Reproducibility recipe inputs: the release build, the rebuilder, and the
+      # client's option_env! surface must stay in agreement.
+      - ".github/workflows/desktop-release.yml"
+      - ".github/workflows/rebuild-verify.yml"
+      - "pollis-core/src/config.rs"
 
 permissions:
   contents: read
@@ -59,6 +69,15 @@ jobs:
       # to any link, not just to scripts/.
       - name: DS config chain (#760)
         run: python3 ./scripts/check-ds-config-chain.py
+
+      # The reproducibility counterpart to the DS config-chain gate above. A value
+      # baked into the release but missing from the rebuilder's recipe makes
+      # independent Linux reproduction impossible, and the only symptom is a hash
+      # mismatch that reads like tampering. That is not hypothetical: it is why
+      # both of rebuild-verify.yml's runs failed while the docs described
+      # independent reproduction as a working, shipped property.
+      - name: Build recipe drift (reproducibility)
+        run: python3 ./scripts/check-build-recipe.py
 
       - name: Attest helper + payload-hash tests
         run: ./scripts/test-attest-helpers.sh

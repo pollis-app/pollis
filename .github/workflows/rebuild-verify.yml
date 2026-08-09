@@ -315,11 +315,20 @@ jobs:
           R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
           LIVEKIT_URL: ${{ vars.LIVEKIT_URL }}
           POLLIS_DELIVERY_URL: ${{ vars.POLLIS_DELIVERY_URL }}
+          # The signed relay directory's URL and its VERIFICATION key. Both are
+          # public by construction — the key is the public half, and the private
+          # half never leaves the minting script — so they belong in a published
+          # recipe rather than in secrets. They were baked into the release and
+          # omitted here, which is why no rebuild could match while the directory
+          # was live; scripts/check-build-recipe.py now fails CI on that drift.
+          POLLIS_OVERLAY_DIRECTORY_URL: ${{ vars.POLLIS_OVERLAY_DIRECTORY_URL }}
+          POLLIS_OVERLAY_DIRECTORY_KEY: ${{ vars.POLLIS_OVERLAY_DIRECTORY_KEY }}
         run: |
           set -euo pipefail
           for key in TURSO_URL TURSO_TOKEN LOG_DB_URL LOG_DB_TOKEN \
                      R2_S3_ENDPOINT R2_PUBLIC_URL LIVEKIT_URL \
-                     POLLIS_DELIVERY_URL; do
+                     POLLIS_DELIVERY_URL \
+                     POLLIS_OVERLAY_DIRECTORY_URL POLLIS_OVERLAY_DIRECTORY_KEY; do
             if [ -n "${!key}" ]; then
               echo "${key}=${!key}" >> "$GITHUB_ENV"
             fi
@@ -338,11 +347,38 @@ jobs:
       # in the binary (tauri-utils codegen tokenizes create_updater_artifacts
       # as Default::default() unconditionally), and the AppImage itself is
       # bundled identically either way.
+      # Build with the SAME tauri config the release used, rather than asserting a
+      # config override is harmless (#795).
+      #
+      # The release sets createUpdaterArtifacts:true and signs the updater bundle with
+      # a Pollis secret a reproducer can never hold, so this used to pass
+      # `--config '{"bundle":{"createUpdaterArtifacts":false}}'` and rely on a comment
+      # claiming that cannot change the compiled bytes. That claim was never tested,
+      # and a real rebuild of v1.8.3 showed `usr/bin/pollis` differing — so it is
+      # exactly the kind of assumption worth deleting instead of defending.
+      #
+      # A throwaway minisign key removes the difference entirely: the config now
+      # matches the release, and the only thing the ephemeral key touches is the
+      # detached updater `.sig`, which is outside the reproducible unit
+      # (docs/reproducible-builds-residuals.md §1).
+      - name: Mint a throwaway updater signing key
+        run: |
+          set -euo pipefail
+          pnpm tauri signer generate -p "" -w /tmp/rebuild-updater.key
+          # `echo "$key"`, not `cat`: the key file has no trailing newline, so cat runs
+          # the value straight into the heredoc delimiter and the env write fails with
+          # "Matching delimiter not found".
+          key="$(cat /tmp/rebuild-updater.key)"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<__EOF__"
+            echo "$key"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> "$GITHUB_ENV"
+
       - name: Rebuild Linux AppImage payload
         run: |
-          pnpm tauri build --target x86_64-unknown-linux-gnu \
-            --config '{"bundle":{"createUpdaterArtifacts":false}}' \
-            -- --locked
+          pnpm tauri build --target x86_64-unknown-linux-gnu -- --locked
 
       # Recompute payload_sha256 with the IDENTICAL method the release attest job
       # uses — scripts/lib/payload-hash.sh, sourced by both, so the reproducer
@@ -376,6 +412,9 @@ jobs:
       # the hash we independently reproduced is present in the log as the Linux
       # AppImage payload for this tag. Absent/mismatched → loud failure.
       - name: Assert reproduced hash is the logged Linux payload
+        env:
+          # `gh release download` in the failure diagnostic needs a token; contents:read suffices.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           HASH="${{ steps.rehash.outputs.hash }}"
@@ -397,5 +436,69 @@ jobs:
             echo "::error::from this source. Logged Linux payload hashes for the tag:"
             jq -r '.artifacts[] | select(.platform=="linux" and .layer=="payload")
                    | "  \(.bundle): \(.payload_sha256)"' release-report.json || true
+            echo "::error::"
+            echo "::error::A tag with NO logged linux payload above means the release is not"
+            echo "::error::in the transparency tree yet (it is built by the daily"
+            echo "::error::transparency-publish cron, not at release time) — that is a"
+            echo "::error::DIFFERENT condition from a byte divergence, so do not read it as one."
+
+            # Name the differing files rather than leaving a bare hash mismatch.
+            #
+            # "the hashes differ" is the least actionable possible output for the one
+            # tool whose entire job is telling a stranger whether our binary matches our
+            # source. Without this, every investigation starts by rebuilding locally and
+            # guessing. With it, the job says which paths diverged and by how much, which
+            # is usually enough to name the cause on sight (an embedded timestamp, a
+            # differing sidecar helper, a non-deterministic asset bundle).
+            echo "::group::What actually differs"
+            set +e
+            gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+               --pattern '*.AppImage' --dir /tmp/shipped 2>/dev/null
+            shipped="$(find /tmp/shipped -name '*.AppImage' | head -1)"
+            rebuilt="$(find "$GITHUB_WORKSPACE/target/x86_64-unknown-linux-gnu/release/bundle/appimage" -name '*.AppImage' | head -1)"
+            if [ -n "$shipped" ] && [ -n "$rebuilt" ]; then
+              echo "shipped: $(stat -c%s "$shipped") bytes  $shipped"
+              echo "rebuilt: $(stat -c%s "$rebuilt") bytes  $rebuilt"
+
+              # Byte-level first: identical sizes with a handful of differing bytes is a
+              # completely different diagnosis (an embedded stamp or build id) from a
+              # wholesale content change, and it costs one command to tell them apart.
+              ndiff="$(cmp -l "$shipped" "$rebuilt" 2>/dev/null | wc -l)"
+              echo "differing bytes: ${ndiff}"
+              echo "first differing offsets (byte, shipped-octal, rebuilt-octal):"
+              cmp -l "$shipped" "$rebuilt" 2>/dev/null | head -20
+
+              # Then the file-level view, so a differing byte can be attributed to a path.
+              mkdir -p /tmp/xa /tmp/xb
+              cp "$shipped" /tmp/xa/app.AppImage; cp "$rebuilt" /tmp/xb/app.AppImage
+              chmod +x /tmp/xa/app.AppImage /tmp/xb/app.AppImage
+              ( cd /tmp/xa && ./app.AppImage --appimage-extract >/dev/null 2>&1 )
+              ( cd /tmp/xb && ./app.AppImage --appimage-extract >/dev/null 2>&1 )
+              if [ -d /tmp/xa/squashfs-root ] && [ -d /tmp/xb/squashfs-root ]; then
+                echo "--- differing files ---"
+                diff -rq /tmp/xa/squashfs-root /tmp/xb/squashfs-root 2>&1 | head -30
+
+                # diffoscope is the standard tool for exactly this question and names the
+                # cause where a hash comparison only says "different" — an embedded path,
+                # a build id, a differing debug section, reordered symbols. Installed only
+                # on the failure path so a passing run stays fast.
+                echo "--- diffoscope on the differing binaries ---"
+                sudo apt-get update -qq >/dev/null 2>&1
+                sudo apt-get install -y -qq diffoscope >/dev/null 2>&1
+                diff -rq /tmp/xa/squashfs-root /tmp/xb/squashfs-root 2>/dev/null \
+                  | sed -n 's/^Files \(.*\) and \(.*\) differ$/\1|\2/p' \
+                  | while IFS='|' read -r f1 f2; do
+                      echo "### $(basename "$f1")"
+                      diffoscope --max-report-size 40000 --text - "$f1" "$f2" 2>/dev/null | head -60
+                    done
+              else
+                echo "extraction unavailable (no FUSE / not self-extracting here);"
+                echo "the byte offsets above are still the actionable signal."
+              fi
+            else
+              echo "shipped=${shipped:-<none>} rebuilt=${rebuilt:-<none>} — nothing to diff"
+            fi
+            set -e
+            echo "::endgroup::"
             exit 1
           fi

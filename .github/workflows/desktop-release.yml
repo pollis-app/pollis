@@ -480,9 +480,23 @@ jobs:
       # float on @stable, or the same commit can produce different bytes.
       - uses: dtolnay/rust-toolchain@1.96.0
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
+      # NO build cache on the Linux path, deliberately (#795).
+      #
+      # A restored `target/` lets cargo reuse artifacts compiled under earlier
+      # conditions, so the linked output stops being a pure function of the source.
+      # That is exactly what made v1.8.3 unreproducible: a warm-cache release and a
+      # cold-cache rebuild produced `.text` sections differing by 64 bytes, with every
+      # other input identical — same pinned rustc, same runner image, same RUSTFLAGS,
+      # codegen-units=1, lto=true.
+      #
+      # The asymmetry is not fixable by caching the reproducer too: a third party
+      # starts cold BY DEFINITION, so a build that only reproduces from our cache
+      # reproduces for nobody. Reproducible builds start from a clean tree — the same
+      # choice Debian, Tails and F-Droid make. The cost is a full cold compile per
+      # release, which is the price of the claim.
+      #
+      # macOS/Windows keep their caches: they are not bit-reproducible (no rebuilder
+      # asserts them), so paying cold-compile time there would buy nothing.
 
       - name: Install PipeWire build dependencies
         run: |
@@ -500,9 +514,25 @@ jobs:
       # would fail to compile the helper there. We hand the finished
       # binary to the app job via an artifact; the app job's build.rs
       # detects the pre-staged file and skips rebuilding.
+      # The SAME determinism inputs the app job applies (#795). This helper is
+      # embedded in the AppImage, so it is part of the reproducible payload — but it
+      # was being built with none of them, baking absolute runner paths (/home/runner,
+      # the cargo registry) into the binary. The rebuilder DOES apply them, so the two
+      # helpers could never match and no Linux rebuild could ever reproduce, whatever
+      # else was fixed. Confirmed by diffing a real rebuild against v1.8.3: exactly two
+      # files differed, and this was one of them.
+      - name: Configure reproducible build flags (capture helper)
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+          CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+          echo "RUSTFLAGS=--remap-path-prefix=${HOME}=/pollis-home --remap-path-prefix=${CARGO_HOME_DIR}=/pollis-cargo --remap-path-prefix=${GITHUB_WORKSPACE}=/pollis-src" >> "$GITHUB_ENV"
+
       - name: Build and stage screen-capture helper
         run: |
-          cargo build --release --target x86_64-unknown-linux-gnu -p pollis-capture-linux
+          # --locked matches the rebuilder and the app job: a drifted Cargo.lock fails
+          # rather than silently resolving different crate versions into the payload.
+          cargo build --release --locked --target x86_64-unknown-linux-gnu -p pollis-capture-linux
           mkdir -p src-tauri/binaries
           cp target/x86_64-unknown-linux-gnu/release/pollis-capture-linux \
              src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
@@ -532,9 +562,14 @@ jobs:
       # float on @stable, or the same commit can produce different bytes.
       - uses: dtolnay/rust-toolchain@1.96.0
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      # NO build cache here, deliberately (#795). A restored `target/` lets cargo
+      # reuse artifacts compiled under earlier conditions, so the output stops being
+      # a pure function of the source — that is what made v1.8.3 unreproducible
+      # (`.text` differing by 64 bytes with every other input identical). It cannot
+      # be fixed by caching the reproducer too: a third party starts cold BY
+      # DEFINITION, so a build that reproduces only from our cache reproduces for
+      # nobody. macOS/Windows keep their caches — they are not bit-reproducible, so
+      # cold-compiling them would buy nothing.
 
       - name: Stamp version from git tag
         run: |

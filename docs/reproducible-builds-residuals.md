@@ -218,6 +218,24 @@ These bytes are part of the reproducible payload, so a reproducer must bake the
 - Most are **non-secret by design** (public URLs, the RO token)
   and can be published as a build recipe; `rebuild-verify.yml` reads them from
   non-secret repository/environment `vars`.
+- **The recipe is now CI-enforced, because it silently drifted (#697 sweep).**
+  `POLLIS_OVERLAY_DIRECTORY_URL` and `POLLIS_OVERLAY_DIRECTORY_KEY` were added to the
+  Linux release build and never to the rebuilder's recipe, so from the moment the
+  relay directory went live no independent rebuild could match — and the only symptom
+  is a hash mismatch, which reads like tampering rather than like a missing input.
+  Both of `rebuild-verify.yml`'s runs failed on exactly this while these documents
+  described independent Linux reproduction as a working, shipped property.
+  `scripts/check-build-recipe.py` now fails CI whenever the three hand-maintained
+  lists disagree — `option_env!` in `config.rs`, the release job's exports, and the
+  rebuilder's recipe — so the gap cannot silently reopen. Both directory values are
+  public by construction (the key is the *verification* half; the private half never
+  leaves the minting script), so publishing them in the recipe costs nothing.
+- **Status, stated plainly:** independent Linux reproduction has **not yet been
+  demonstrated end to end**. The mechanism exists and the recipe is now complete and
+  enforced, but the recipe `vars` must be populated in the repository before a run can
+  succeed, and no green `rebuild-verify.yml` run exists to date. Until one does, treat
+  "the Linux payload is independently reproducible" as *implemented and unverified*
+  rather than *proven*.
 - **As of #506 (secrets-broker cutover, finishing #393) the client bakes no R2 or
   LiveKit credentials at all.** `R2_ACCESS_KEY_ID`, `R2_SECRET_KEY`, `R2_REGION`,
   `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are no longer read anywhere in the
