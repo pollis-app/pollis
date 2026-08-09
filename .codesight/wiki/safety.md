@@ -154,7 +154,7 @@ Renderer plumbing:
 | Turso swaps a peer's `account_id_pub` | Next DM ingest OR next group reconcile via TOFU helper; permanently visible in the account-key transparency log (#330) | Pin refreshed, verified cleared, KeyChanged event surfaces inline banner; swap is absent from / accountable in the published log (`pollis-verify account`, `audit_peer_account_key`) |
 | Turso adds a rogue device under an existing user (account-key unchanged) | Cross-signing check on inbound MLS commit (`mls.rs`) | Logs warning; commit currently proceeds (advisory — known gap, see whitepaper §13.2) |
 | Turso adds a rogue device under a *swapped* account-key | Both layers fire: TOFU detects the key swap; cross-sign detects the cert mismatch | Banner + warning |
-| Network MITM between two clients (no Turso write) | MLS cipher integrity (AES-128-GCM AEAD) | Decryption fails — cannot impersonate anyone |
+| Network MITM between two clients (no Turso write) | MLS cipher integrity (ChaCha20-Poly1305 AEAD) | Decryption fails — cannot impersonate anyone |
 | Local DB tampering on attacker's own machine | Out of scope — that machine's user can do whatever they want to their own DB |
 
 ## Key transparency (verifiable logs)

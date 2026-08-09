@@ -221,8 +221,10 @@ gated by `may_rejoin_via_external_join`, which requires **two** things before it
 lets a device rebuild:
 
 1. `local_device_registered` — this device's `user_device` row still exists and
-   is not revoked (fails **open** on error: a transient blip must never lock a
-   legitimate device out of recovery);
+   is not revoked. Fails **closed** on a conn/query error (`group_state.rs:845`
+   — "Fails CLOSED"): an unconfirmable device does not rebuild, and a legitimate
+   one recovers on the next pass. The only fail-open case is an absent local
+   device id, i.e. pre-enrollment;
 2. `local_user_is_member` — the user is still a CURRENT member of the group
    (`group_member` / `dm_channel_member` / channel→group), mirroring the DS-side
    `writes::is_member`. Fails **closed** on error: this guards a membership
@@ -230,7 +232,10 @@ lets a device rebuild:
    permanent lockout — a real member recovers on the next pass).
 
 **Why membership, not just revocation (fuzzer finding #2).** The DS
-`/v1/commits` endpoint does NOT gate submissions on membership. A member who was
+`/v1/commits` endpoint did not gate submissions on membership when this was
+found. It does now — `pollis-delivery/src/lib.rs:570` rejects with `Forbidden`
+when `writes::is_member` is false — and the client-side gate below is the other
+half of the same invariant. A member who was
 *removed* (their `group_member` row deleted) but whose device was NOT revoked
 would pass the revocation gate, self-evict on catch-up, then external-join and
 WIN its epoch on the CAS — climbing back into the tree and decrypting

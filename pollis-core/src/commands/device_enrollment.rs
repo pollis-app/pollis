@@ -68,6 +68,27 @@ const ENROLLMENT_TTL_SECS: i64 = 10 * 60;
 /// other KDF-based scheme in the system.
 const ENROLL_HKDF_INFO: &[u8] = b"pollis-enrollment-wrap-v1";
 
+/// HKDF info for the human-compared verification code (#793). Domain-separated
+/// from the wrap-key derivation so the two can never collide.
+const ENROLL_SAS_INFO: &[u8] = b"pollis-enrollment-sas-v1";
+
+/// Alphabet for the verification code — the same 32 characters the Secret Key
+/// uses (`0-9A-Z` minus I, L, O, U, which are easy to misread). Exactly 5 bits
+/// per character.
+const SAS_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// Length of the verification code, in characters.
+///
+/// EIGHT, not six digits, and the width is load-bearing rather than cosmetic.
+/// The code is now a deterministic function of the new device's ephemeral public
+/// key, so a hostile server that swaps that key changes the code the approving
+/// device shows and the mismatch is visible. But a *bound* code is only as strong
+/// as it is *wide*: the server can grind ephemeral keypairs until one happens to
+/// derive the victim's code. Six digits is 2^20 — about a million X25519 keygens,
+/// which is seconds of work and no protection at all. Eight characters over a
+/// 32-symbol alphabet is 40 bits, so the same attack costs ~10^12 keygens.
+const SAS_LEN: usize = 8;
+
 const X25519_PUB_LEN: usize = 32;
 const AES_NONCE_LEN: usize = 12;
 const ACCOUNT_ID_PRIVATE_LEN: usize = 32;
@@ -117,10 +138,44 @@ pub struct SecurityEvent {
 
 // ── Crypto helpers ───────────────────────────────────────────────────────────
 
-fn derive_wrap_key(shared_secret: &[u8]) -> [u8; 32] {
+/// The verification code the human compares, derived from the new device's
+/// ephemeral public key (#793).
+///
+/// It used to be a random number the new device generated and POSTed to the
+/// server, which the approving device then read back — so the server both knew
+/// the code and could swap the ephemeral key underneath it while leaving the code
+/// alone. Both screens still matched, the user approved, and the account identity
+/// key was wrapped to the attacker's key. The digits proved the two screens were
+/// discussing the same request; they proved nothing about *which key* was being
+/// wrapped to.
+///
+/// Deriving it from the key fixes exactly that: substitute the key and the code
+/// the approver displays changes. The code is NOT a secret — it is a function of
+/// a public value, and the server can compute it too. Its job is binding, not
+/// confidentiality.
+fn derive_verification_code(ephemeral_pub: &[u8]) -> String {
+    let hk = Hkdf::<Sha256>::new(None, ephemeral_pub);
+    let mut out = [0u8; SAS_LEN];
+    hk.expand(ENROLL_SAS_INFO, &mut out)
+        .expect("HKDF expand SAS_LEN bytes is infallible");
+    out.iter()
+        .map(|b| SAS_ALPHABET[(b & 0x1f) as usize] as char)
+        .collect()
+}
+
+/// Wrap key for the account-identity transfer, bound to the full transcript.
+///
+/// Both ephemeral public keys are mixed in, so the derived key commits to the
+/// exact pair of parties that ran the exchange rather than to the ECDH output
+/// alone.
+fn derive_wrap_key(shared_secret: &[u8], requester_pub: &[u8], approver_pub: &[u8]) -> [u8; 32] {
     let hk = Hkdf::<Sha256>::new(None, shared_secret);
+    let mut info = Vec::with_capacity(ENROLL_HKDF_INFO.len() + requester_pub.len() + approver_pub.len());
+    info.extend_from_slice(ENROLL_HKDF_INFO);
+    info.extend_from_slice(requester_pub);
+    info.extend_from_slice(approver_pub);
     let mut out = [0u8; 32];
-    hk.expand(ENROLL_HKDF_INFO, &mut out)
+    hk.expand(&info, &mut out)
         .expect("HKDF expand 32 bytes is infallible");
     out
 }
@@ -186,16 +241,11 @@ pub async fn start_device_enrollment(
     let ephemeral_secret = StaticSecret::from(private_bytes);
     let ephemeral_public = PublicKey::from(&ephemeral_secret);
 
-    // Generate a 6-digit verification code. Zero-padded. Shown on BOTH
-    // screens so the user can confirm the two devices are talking to each
-    // other (and not that someone else just happened to start an
-    // enrollment at the same time).
-    let verification_code: String = {
-        let mut bytes = [0u8; 4];
-        rng.fill_bytes(&mut bytes);
-        let n = u32::from_be_bytes(bytes) % 1_000_000;
-        format!("{n:06}")
-    };
+    // The verification code is DERIVED from this device's ephemeral public key
+    // (#793), not chosen at random. Both screens compute it from the same public
+    // value, so if anything substitutes that key in flight the two codes diverge
+    // and the user sees it. See `derive_verification_code`.
+    let verification_code: String = derive_verification_code(ephemeral_public.as_bytes());
 
     let request_id = Ulid::new().to_string();
     let now = chrono::Utc::now();
@@ -387,9 +437,15 @@ fn unwrap_account_key(wrapped: &[u8], requester_private: &[u8]) -> Result<Vec<u8
     let ct = &wrapped[X25519_PUB_LEN + AES_NONCE_LEN..];
 
     let requester_priv = x25519_private_from_bytes(requester_private)?;
+    let requester_pub = PublicKey::from(&requester_priv);
     let approver_pub = x25519_public_from_bytes(approver_pub_bytes)?;
     let shared = requester_priv.diffie_hellman(&approver_pub);
-    let wrap_key = derive_wrap_key(shared.as_bytes());
+    // Same transcript the approver bound in: our own public key, then theirs.
+    let wrap_key = derive_wrap_key(
+        shared.as_bytes(),
+        requester_pub.as_bytes(),
+        approver_pub.as_bytes(),
+    );
 
     let mut nonce = [0u8; AES_NONCE_LEN];
     nonce.copy_from_slice(nonce_bytes);
@@ -489,10 +545,28 @@ pub async fn approve_device_enrollment(
         }
     }
 
-    // Constant-time code comparison to avoid leaking prefix-match timing.
-    if !constant_time_eq(stored_code.as_bytes(), verification_code.as_bytes()) {
+    // #793: derive the expected code from the ephemeral key WE fetched, and check
+    // the user's input against that — never against `stored_code`. The stored value
+    // is server-controlled; the derived one is a function of the key this device is
+    // about to wrap the account identity key to. Checking the server's copy would
+    // re-introduce exactly the substitution this fix exists to stop.
+    let expected_code = derive_verification_code(&ephemeral_pub);
+
+    // Constant-time comparison to avoid leaking prefix-match timing.
+    if !constant_time_eq(expected_code.as_bytes(), verification_code.as_bytes()) {
         return Err(Error::Other(anyhow::anyhow!(
             "verification code does not match"
+        )));
+    }
+
+    // The server's stored copy disagreeing with the derived value means the
+    // ephemeral key was altered after the new device published it. The check above
+    // has already protected the user; this reports the tampering rather than
+    // letting it pass silently.
+    if !constant_time_eq(stored_code.as_bytes(), expected_code.as_bytes()) {
+        return Err(Error::Other(anyhow::anyhow!(
+            "enrollment request {request_id}: the stored verification code does not match \
+             the one derived from the published ephemeral key — the request was altered in transit"
         )));
     }
 
@@ -514,7 +588,11 @@ pub async fn approve_device_enrollment(
 
         let requester_pub = x25519_public_from_bytes(&ephemeral_pub)?;
         let shared = approver_priv.diffie_hellman(&requester_pub);
-        let wrap_key = derive_wrap_key(shared.as_bytes());
+        let wrap_key = derive_wrap_key(
+            shared.as_bytes(),
+            requester_pub.as_bytes(),
+            approver_pub.as_bytes(),
+        );
 
         let mut nonce = [0u8; AES_NONCE_LEN];
         rng.fill_bytes(&mut nonce);
@@ -1012,7 +1090,11 @@ mod tests {
         let approver_pub = PublicKey::from(&approver_priv);
 
         let shared_send = approver_priv.diffie_hellman(&requester_pub);
-        let wrap_key = derive_wrap_key(shared_send.as_bytes());
+        let wrap_key = derive_wrap_key(
+            shared_send.as_bytes(),
+            requester_pub.as_bytes(),
+            approver_pub.as_bytes(),
+        );
 
         let mut nonce = [0u8; AES_NONCE_LEN];
         rng.fill_bytes(&mut nonce);
@@ -1045,7 +1127,11 @@ mod tests {
         let approver_secret = StaticSecret::from(approver_priv);
         let approver_pub = PublicKey::from(&approver_secret);
         let shared = approver_secret.diffie_hellman(&requester_pub);
-        let wrap_key = derive_wrap_key(shared.as_bytes());
+        let wrap_key = derive_wrap_key(
+            shared.as_bytes(),
+            requester_pub.as_bytes(),
+            approver_pub.as_bytes(),
+        );
 
         let mut nonce = [0u8; AES_NONCE_LEN];
         rng.fill_bytes(&mut nonce);
@@ -1066,5 +1152,149 @@ mod tests {
         assert!(!constant_time_eq(b"123456", b"123457"));
         assert!(!constant_time_eq(b"123", b"1234"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    // ── #793: the verification code must BIND the ephemeral key ──────────────
+    //
+    // The defect these pin: the code used to be a random number the new device
+    // POSTed to the server, and the approver read it back. A server that swapped
+    // `new_device_ephemeral_pub` and left the code alone produced two matching
+    // screens, a confirming user, and the account identity key wrapped to the
+    // attacker.
+
+    #[test]
+    fn the_verification_code_is_determined_by_the_ephemeral_key() {
+        let pub_a = [7u8; 32];
+        assert_eq!(
+            derive_verification_code(&pub_a),
+            derive_verification_code(&pub_a),
+            "both devices derive from the same public value, so they must agree"
+        );
+    }
+
+    #[test]
+    fn substituting_the_ephemeral_key_changes_the_code() {
+        // Exactly the attack in #793: the key is swapped in flight.
+        let honest = [7u8; 32];
+        let attacker = [8u8; 32];
+        assert_ne!(
+            derive_verification_code(&honest),
+            derive_verification_code(&attacker),
+            "a swapped key MUST change the code the approver shows, or the human check is decorative"
+        );
+    }
+
+    #[test]
+    fn a_one_bit_change_in_the_key_changes_the_code() {
+        let mut a = [0u8; 32];
+        let mut b = [0u8; 32];
+        b[31] = 1;
+        assert_ne!(derive_verification_code(&a), derive_verification_code(&b));
+        a[0] = 1;
+        assert_ne!(derive_verification_code(&a), derive_verification_code(&b));
+    }
+
+    #[test]
+    fn the_code_is_wide_enough_that_grinding_is_not_cheap() {
+        // Width is the other half of the fix. A bound code is only as strong as it
+        // is wide: the server can grind ephemeral keypairs until one derives the
+        // victim's code. At six digits that is 2^20 — about a million keygens, or
+        // seconds. Eight characters over 32 symbols is 40 bits.
+        let code = derive_verification_code(&[3u8; 32]);
+        assert_eq!(code.chars().count(), SAS_LEN);
+        assert_eq!(SAS_LEN, 8);
+        assert!(
+            (SAS_ALPHABET.len() as f64).log2() * SAS_LEN as f64 >= 40.0,
+            "the human-compared code must carry at least 40 bits"
+        );
+    }
+
+    #[test]
+    fn the_code_only_uses_unambiguous_characters() {
+        // I, L, O and U are excluded so a user reading digits aloud cannot
+        // manufacture a false mismatch (or a false match).
+        for seed in 0u8..64 {
+            for c in derive_verification_code(&[seed; 32]).chars() {
+                assert!(SAS_ALPHABET.contains(&(c as u8)), "unexpected character {c}");
+                assert!(!"ILOU".contains(c), "ambiguous character {c} in the code");
+            }
+        }
+    }
+
+    // ── Transcript binding on the wrap key ───────────────────────────────────
+
+    #[test]
+    fn the_wrap_key_is_bound_to_both_public_keys() {
+        let shared = [9u8; 32];
+        let req = [1u8; 32];
+        let app = [2u8; 32];
+        let base = derive_wrap_key(&shared, &req, &app);
+        assert_ne!(base, derive_wrap_key(&shared, &[3u8; 32], &app));
+        assert_ne!(base, derive_wrap_key(&shared, &req, &[4u8; 32]));
+        // Order matters: swapping the roles must not derive the same key.
+        assert_ne!(base, derive_wrap_key(&shared, &app, &req));
+    }
+
+    #[test]
+    fn wrap_and_unwrap_round_trip_under_transcript_binding() {
+        let mut rng = OsRng;
+        let mut req_priv_bytes = [0u8; 32];
+        rng.fill_bytes(&mut req_priv_bytes);
+        let req_priv = StaticSecret::from(req_priv_bytes);
+        let req_pub = PublicKey::from(&req_priv);
+
+        let mut app_priv_bytes = [0u8; 32];
+        rng.fill_bytes(&mut app_priv_bytes);
+        let app_priv = StaticSecret::from(app_priv_bytes);
+        let app_pub = PublicKey::from(&app_priv);
+
+        let secret = [42u8; ACCOUNT_ID_PRIVATE_LEN];
+        let shared = app_priv.diffie_hellman(&req_pub);
+        let wrap_key = derive_wrap_key(shared.as_bytes(), req_pub.as_bytes(), app_pub.as_bytes());
+        let nonce = [5u8; AES_NONCE_LEN];
+        let ct = aead_encrypt(&wrap_key, &nonce, &secret).expect("encrypt");
+
+        let mut blob = Vec::new();
+        blob.extend_from_slice(app_pub.as_bytes());
+        blob.extend_from_slice(&nonce);
+        blob.extend_from_slice(&ct);
+
+        let out = unwrap_account_key(&blob, &req_priv_bytes).expect("unwrap");
+        assert_eq!(out, secret.to_vec(), "the legitimate pair must still round-trip");
+    }
+
+    #[test]
+    fn a_blob_wrapped_to_a_different_requester_does_not_unwrap() {
+        let mut rng = OsRng;
+        let mut victim_bytes = [0u8; 32];
+        rng.fill_bytes(&mut victim_bytes);
+        let victim_priv = StaticSecret::from(victim_bytes);
+        let victim_pub = PublicKey::from(&victim_priv);
+
+        let mut attacker_bytes = [0u8; 32];
+        rng.fill_bytes(&mut attacker_bytes);
+        let attacker_priv = StaticSecret::from(attacker_bytes);
+        let attacker_pub = PublicKey::from(&attacker_priv);
+
+        let mut app_bytes = [0u8; 32];
+        rng.fill_bytes(&mut app_bytes);
+        let app_priv = StaticSecret::from(app_bytes);
+        let app_pub = PublicKey::from(&app_priv);
+
+        // The approver wrapped to the ATTACKER's key (the #793 scenario).
+        let shared = app_priv.diffie_hellman(&attacker_pub);
+        let wrap_key =
+            derive_wrap_key(shared.as_bytes(), attacker_pub.as_bytes(), app_pub.as_bytes());
+        let nonce = [6u8; AES_NONCE_LEN];
+        let ct = aead_encrypt(&wrap_key, &nonce, &[1u8; ACCOUNT_ID_PRIVATE_LEN]).expect("encrypt");
+        let mut blob = Vec::new();
+        blob.extend_from_slice(app_pub.as_bytes());
+        blob.extend_from_slice(&nonce);
+        blob.extend_from_slice(&ct);
+
+        // The real new device cannot open it — and, with the code now bound to the
+        // key, would never have been approved in the first place.
+        assert!(unwrap_account_key(&blob, &victim_bytes).is_err());
+        let _ = victim_pub;
     }
 }

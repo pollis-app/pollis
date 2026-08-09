@@ -19,8 +19,9 @@ build for each platform.
 
 Messages are encrypted on your device using MLS (Messaging Layer Security) before
 they ever leave your machine. The Rust backend connects directly to Turso
-(libSQL) for group and channel metadata. There is no intermediate server — the
-desktop binary is the backend. Encrypted message envelopes are stored remotely for
+(libSQL) to read group and channel metadata. Every write goes through the
+Delivery Service, an in-repo, self-hostable axum server that serializes MLS
+commits; neither it nor the database can read plaintext. Encrypted message envelopes are stored remotely for
 offline delivery, and decrypted message history lives in a local SQLite database
 encrypted at rest.
 
@@ -30,11 +31,11 @@ encrypted at rest.
 - **Backend**: Rust split into `pollis-core` (reusable crate; also consumed by
   mobile via uniffi) and `src-tauri` (the Tauri host that exposes `pollis-core`
   to the renderer via `invoke`).
-- **Encryption**: MLS for group channel encryption, AES-256-GCM. Voice channels
+- **Encryption**: MLS for group channel encryption (ChaCha20-Poly1305 AEAD); AES-256-GCM for attachments and cached media. Voice channels
   are end-to-end encrypted too — per-frame AES-128-GCM via libwebrtc's
   `FrameCryptor`, keyed from the MLS group's exporter secret, so the LiveKit SFU
   forwards ciphertext only.
-- **Remote DB**: Turso (libSQL) — direct from the Rust core, no middleman
+- **Remote DB**: Turso (libSQL) — reads direct from the Rust core; writes via the Delivery Service
 - **Local DB**: SQLite via rusqlite (encrypted at rest, key in OS keystore)
 - **Auth**: Email OTP, session stored in the OS keystore
 - **Real-time**: LiveKit (voice calls via Rust `livekit` crate, real-time presence)

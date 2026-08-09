@@ -286,7 +286,7 @@ const ChoosePane: React.FC<{
       className="text-xs font-mono mb-4"
       style={{ color: "var(--c-text-muted)" }}
     >
-      You'll see a 6-digit code here. Open Pollis on a device you're already
+      You'll see a verification code here. Open Pollis on a device you're already
       signed in to and confirm the code.
     </p>
 

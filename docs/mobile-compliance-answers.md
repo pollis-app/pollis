@@ -117,7 +117,7 @@ JSON.
 
 ## 2. iOS export compliance — the non-trivial part
 
-Pollis provides **end-to-end encryption** (MLS / RFC 9420: AES-128/256-GCM, HKDF-SHA-256, ECDH,
+Pollis provides **end-to-end encryption** (MLS / RFC 9420: ChaCha20-Poly1305, HKDF-SHA-384, X25519 + ML-KEM-768, ML-DSA-44; AES-256-GCM for attachments,
 Ed25519, plus a PQ-hybrid layer using standardized ML-KEM / ML-DSA — see `docs/pq-hybrid-mls-design.md`,
 migration `000011_device_pq_signature_pub.sql`). This is **not** the trivial "No" path that
 HTTPS-only apps take.

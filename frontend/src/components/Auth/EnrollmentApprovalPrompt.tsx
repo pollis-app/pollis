@@ -115,7 +115,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
                 style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
               >
                 Only approve if you started this on another device just now.
-                The 6-digit code below MUST match the code shown on the new
+                The code below MUST match the code shown on the new
                 device. If it doesn't match, reject this request.
               </p>
             </div>

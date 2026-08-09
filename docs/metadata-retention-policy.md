@@ -194,10 +194,10 @@ client IPs from the first-party services, and is opt-in and off by default. This
 
 ## 5. Media (Cloudflare R2)
 
-- Object keys are `media/{sha256-of-plaintext}/{sanitized-filename}.enc`
-  (`pollis-core/src/commands/r2.rs`). The key contains no user, device, group, or conversation
-  identifier — but note the **original filename is preserved in the key**, so a distinctive filename is
-  itself metadata visible to the storage operator.
+- Object keys are `media/{sha256-of-plaintext}.enc` (`pollis-core/src/commands/r2.rs`). The key contains
+  no user, device, group, or conversation identifier, and **no filename** — #762 removed the filename
+  segment precisely because a distinctive name was itself metadata visible to the storage operator. See
+  §9, which has described the current shape since that change.
 - Objects are client-side encrypted (AES-256-GCM) before upload; R2 holds ciphertext only.
 - Deletion is **reference-counted**, and the count is **derived** (#690): a declaration counts only while
   its `message_envelope` exists, so a reference is released by deleting the message envelope — through the
