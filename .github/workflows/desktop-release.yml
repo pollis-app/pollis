@@ -1258,6 +1258,10 @@ jobs:
   attest-and-log:
     needs: [release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed only to dispatch transparency-publish at the end of this job.
+      actions: write
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
@@ -1358,3 +1362,20 @@ jobs:
             --content-type "application/json" \
             --cache-control "no-cache"
           echo "merged records uploaded to s3://${R2_BUCKET}/${KEY}"
+
+      # Publish the tree NOW rather than waiting for the daily cron (#795).
+      #
+      # The leaves above only become publicly verifiable once transparency-publish
+      # rebuilds and signs the tree. Left to the 06:47 cron that is up to 24h, during
+      # which `pollis-verify release <tag>` finds nothing and the in-app build check
+      # sits in Pending — and the independent rebuilder, which now runs automatically
+      # after each release, reports "not the logged payload" for a release that is
+      # simply not logged yet. verifiable-builds-design.md §2.4 recommends exactly
+      # this and marked it shipped; it was not.
+      - name: Publish the transparency tree with the new leaves
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run transparency-publish.yml --repo "$GITHUB_REPOSITORY"
+          echo "dispatched transparency-publish; the binaries tree will carry ${GITHUB_REF_NAME} shortly"

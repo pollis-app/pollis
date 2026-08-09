@@ -50,6 +50,15 @@ name: Rebuild & Verify (independent reproducer)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
+  # Runs itself after every successful release (#795). Reproducibility that only
+  # gets checked when someone remembers to check it is reproducibility nobody
+  # knows the state of — this workflow existed for months, ran twice, failed both
+  # times, and three documents went on describing it as a working property. An
+  # automatic run after each release means the claim is either continuously
+  # demonstrated or continuously, visibly broken.
+  workflow_run:
+    workflows: ["Desktop Release (Tauri)"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -59,6 +68,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # A release runs on a tag ref, so the triggering run's head_branch IS the tag.
+  TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
 
 # Pinned so the reproduced key can never silently change under us: the log's
 # ML-DSA-44 public key (2624 hex chars each). During a rotation overlap, list
@@ -75,18 +88,24 @@ jobs:
   # (a) in the header): this job passes or fails on its own. It produces no
   # shipped bytes, so its runner image doesn't need to match the release.
   verify-log-inclusion:
+    # Only when the release actually succeeded and was a real tag build — a failed
+    # or branch-triggered release has nothing published to reproduce.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
 
       - uses: dtolnay/rust-toolchain@1.96.0
 
       # Build pollis-verify FROM THE TAG'S OWN SOURCE (no prebuilt binary to
       # trust) so the verifier code is itself part of what is being verified.
       - name: Build pollis-verify from source
-        # Stamp the commit actually checked out — this job builds at `inputs.tag`,
+        # Stamp the commit actually checked out — this job builds at the resolved tag,
         # not at the workflow's own ref, so `github.sha` would name the wrong
         # tree. The rebuild log is auditor-facing evidence, so the verifier it
         # used should be identifiable too (#670).
@@ -136,9 +155,28 @@ jobs:
       - name: Verify the tag is included in the transparency log
         run: |
           set -euo pipefail
-          ./target/release/pollis-verify release "${VERIFY_BASE_URL}" "${{ inputs.tag }}" --json \
+          # Wait for the tag to appear before asserting anything about it.
+          #
+          # When this runs automatically after a release, the release has just
+          # dispatched transparency-publish and the tree takes a few minutes to
+          # rebuild and sign. Asserting immediately would report "not the logged
+          # payload" for a release that is merely not logged YET — the single most
+          # misleading thing a verifiability tool can say, and exactly the false
+          # alarm that cost an afternoon of investigation. Bounded, so a genuinely
+          # absent tag still fails rather than hanging.
+          for attempt in $(seq 1 20); do
+            if ./target/release/pollis-verify release "${VERIFY_BASE_URL}" "${{ env.TAG }}" --json \
+                 > release-report.json 2>/dev/null; then
+              echo "tag ${{ env.TAG }} is in the log (attempt ${attempt})"
+              break
+            fi
+            echo "waiting for ${{ env.TAG }} to appear in the binaries tree (attempt ${attempt}/20)…"
+            sleep 30
+          done
+          # Re-run unguarded so a genuine absence fails loudly with its real error.
+          ./target/release/pollis-verify release "${VERIFY_BASE_URL}" "${{ env.TAG }}" --json \
             > release-report.json
-          echo "── transparency log report for ${{ inputs.tag }} ──"
+          echo "── transparency log report for ${{ env.TAG }} ──"
           jq '.' release-report.json
 
       # Hand the VERIFIED report to rebuild-linux (and keep it as a run
@@ -161,11 +199,17 @@ jobs:
   # build-capture-helper job, this deliberately does NOT stamp the tag version —
   # the helper is built from the committed placeholder versions in both.
   rebuild-capture-helper:
+    # Only when the release actually succeeded and was a real tag build — a failed
+    # or branch-triggered release has nothing published to reproduce.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
 
       - uses: dtolnay/rust-toolchain@1.96.0
 
@@ -210,6 +254,12 @@ jobs:
   # meaningless, so being skipped in that case is correct (the inclusion job's
   # own failure is the loud signal).
   rebuild-linux:
+    # Only when the release actually succeeded and was a real tag build — a failed
+    # or branch-triggered release has nothing published to reproduce.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     needs: [rebuild-capture-helper, verify-log-inclusion]
     # ubuntu-22.04 to match the release build-linux runner (low glibc floor).
     # Reproducibility is per-target: the reproducer must match the OS image.
@@ -217,7 +267,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
 
       - uses: pnpm/action-setup@v4
 
@@ -233,12 +283,12 @@ jobs:
       # tauri.conf.json versions are PLACEHOLDERS that CI overwrites before the
       # build sees them. Without this the rebuild produces
       # Pollis_<placeholder>_amd64.AppImage — different bytes, wrong verdict.
-      # Same script; the version derives from inputs.tag because
+      # Same script; the version derives from the resolved tag because
       # workflow_dispatch runs on a branch ref, not the tag ref
       # ($GITHUB_REF_NAME here is the branch, not the tag).
       - name: Stamp version from git tag
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ env.TAG }}
         run: |
           VERSION="${TAG#v}"
           ./scripts/bump-version.sh "$VERSION"
@@ -426,11 +476,11 @@ jobs:
           if [ "${match}" -ge 1 ]; then
             echo "✅ REPRODUCED: ${HASH}"
             echo "   is present in the public transparency log as the Linux"
-            echo "   AppImage payload for ${{ inputs.tag }}, verified against the"
+            echo "   AppImage payload for ${{ env.TAG }}, verified against the"
             echo "   pinned key ${PINNED_LOG_KEY}."
           else
             echo "::error::reproduced Linux AppImage payload hash ${HASH} is NOT the"
-            echo "::error::logged payload for ${{ inputs.tag }}. Either the build did not"
+            echo "::error::logged payload for ${{ env.TAG }}. Either the build did not"
             echo "::error::reproduce (see docs/reproducible-builds-residuals.md — e.g. a"
             echo "::error::build-recipe var left unset) or the shipped payload diverges"
             echo "::error::from this source. Logged Linux payload hashes for the tag:"
@@ -452,7 +502,7 @@ jobs:
             # differing sidecar helper, a non-deterministic asset bundle).
             echo "::group::What actually differs"
             set +e
-            gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            gh release download "${{ env.TAG }}" --repo "$GITHUB_REPOSITORY" \
                --pattern '*.AppImage' --dir /tmp/shipped 2>/dev/null
             shipped="$(find /tmp/shipped -name '*.AppImage' | head -1)"
             rebuilt="$(find "$GITHUB_WORKSPACE/target/x86_64-unknown-linux-gnu/release/bundle/appimage" -name '*.AppImage' | head -1)"
