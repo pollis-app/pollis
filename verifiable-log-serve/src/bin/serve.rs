@@ -51,6 +51,15 @@ enum Command {
         /// commit-log and account-key trees.
         #[arg(long)]
         binaries_bundle: Option<PathBuf>,
+        /// Optional path to the root-signed key-set statement (`builder key-set`).
+        /// When given it is verified against `--root-key` and published at
+        /// `/v1/key-set.json` (#754). Publishing one that does not verify would be
+        /// worse than publishing none, so a bad statement fails the generate.
+        #[arg(long, requires = "root_key")]
+        key_set: Option<PathBuf>,
+        /// Hex ML-DSA-44 public key of the offline root, to verify `--key-set`.
+        #[arg(long)]
+        root_key: Option<String>,
         /// Output directory root; the `/v1/...` tree is written under it.
         #[arg(long)]
         out: PathBuf,
@@ -123,11 +132,15 @@ fn main() -> ExitCode {
             bundle,
             account_bundle,
             binaries_bundle,
+            key_set,
+            root_key,
             out,
         } => match run_generate(
             &bundle,
             account_bundle.as_deref(),
             binaries_bundle.as_deref(),
+            key_set.as_deref(),
+            root_key.as_deref(),
             &out,
         ) {
             Ok(()) => ExitCode::SUCCESS,
@@ -172,10 +185,36 @@ fn run_generate(
     bundle_path: &PathBuf,
     account_bundle_path: Option<&std::path::Path>,
     binaries_bundle_path: Option<&std::path::Path>,
+    key_set_path: Option<&std::path::Path>,
+    root_key_hex: Option<&str>,
     out: &PathBuf,
 ) -> Result<()> {
     let bundle = layout::load_bundle(bundle_path)?;
     let manifest = layout::generate(&bundle, out)?;
+
+    // Publish the root-signed key set alongside the trees (#754). Verified against
+    // the pinned root FIRST: a statement that does not verify is not a degraded
+    // artifact, it is one that takes the whole log down for every client, because a
+    // client that cannot validate the key set trusts no signer at all.
+    if let (Some(path), Some(root_hex)) = (key_set_path, root_key_hex) {
+        let raw = std::fs::read_to_string(path)?;
+        let statement: verifiable_log_serve::KeySetStatement = serde_json::from_str(&raw)
+            .map_err(|e| ServeError::BadBundle(format!("key set is not readable: {e}")))?;
+        let mut one = std::collections::BTreeMap::new();
+        layout::insert_key_set(&mut one, &statement, root_hex)?;
+        for (rel, bytes) in one {
+            let dest = out.join(&rel);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&dest, bytes)?;
+            println!(
+                "published key set -> {} ({} signer(s))",
+                dest.display(),
+                statement.signers.len()
+            );
+        }
+    }
     println!(
         "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
         manifest.entry_count,

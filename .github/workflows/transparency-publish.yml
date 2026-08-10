@@ -284,8 +284,22 @@ jobs:
           # generate emits every tree into ./site (the account tree under
           # v1/account-keys/ + verify/account/<id>; the binaries tree under
           # v1/binaries/ + verify/release/<tag>, when present).
+          # The root-signed key set (#754) is committed, not minted here: the root
+          # is offline and CI must never hold it. `serve generate` verifies the
+          # statement against the pinned root before publishing, so a tampered or
+          # stale key set fails the publish instead of reaching clients — for whom
+          # an unverifiable key set means no signer is trusted at all.
+          KEYSET_ARG=()
+          if [ -f key-set.json ]; then
+            ROOT_HEX="$(python3 -c "import re,sys; s=open('pollis-core/src/commands/transparency.rs').read(); m=re.search(r'PINNED_LOG_ROOT_KEYS.*?public_key: \"([0-9a-f]+)\"', s, re.S); print(m.group(1) if m else '')")"
+            if [ -n "$ROOT_HEX" ]; then
+              KEYSET_ARG=(--key-set key-set.json --root-key "$ROOT_HEX")
+            else
+              echo "::warning::key-set.json is present but no root is pinned; not publishing it"
+            fi
+          fi
           ./target/release/serve generate --bundle bundle.json \
-            --account-bundle account-bundle.json "${BIN_ARG[@]}" --out ./site
+            --account-bundle account-bundle.json "${BIN_ARG[@]}" "${KEYSET_ARG[@]}" --out ./site
           # The bundles carry hashed commit identities / public keys only — no
           # plaintext — but remove them anyway so they can never be synced. The
           # records JSON is a build input, never part of the published tree.
