@@ -411,10 +411,41 @@ jobs:
       # matches the release, and the only thing the ephemeral key touches is the
       # detached updater `.sig`, which is outside the reproducible unit
       # (docs/reproducible-builds-residuals.md §1).
-      - name: Mint a throwaway updater signing key
+      # TEMPORARY DIAGNOSTIC (#795) — do not merge.
+      #
+      # Both rebuilds of v1.8.4 produced the SAME hash, so the rebuild environment is
+      # deterministic and the divergence is systematic between the two workflows. After
+      # eliminating the runner image, toolchain, flags, cache, recipe and tauri config,
+      # the only remaining deltas are the env vars the release exports and this one does
+      # not, plus the real signing key. Set them all: if the hash then matches the logged
+      # payload, the cause is in this set and can be bisected; if it does not, the cause
+      # is deeper than environment.
+      - name: DIAGNOSTIC — mirror the release's extra build env
         run: |
           set -euo pipefail
-          pnpm tauri signer generate -p "" -w /tmp/rebuild-updater.key
+          {
+            echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}"
+            echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}"
+            echo "R2_REGION=${{ secrets.R2_REGION }}"
+            echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}"
+            echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}"
+            echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
+          } >> "$GITHUB_ENV"
+          echo "mirrored the six release-only env vars"
+
+      - name: Mint a throwaway updater signing key
+        env:
+          REAL_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # DIAGNOSTIC: prefer the real key so the updater path matches the release
+          # exactly; fall back to a throwaway if it is unavailable.
+          if [ -n "${REAL_SIGNING_KEY:-}" ]; then
+            printf '%s' "$REAL_SIGNING_KEY" > /tmp/rebuild-updater.key
+            echo "using the real updater signing key (diagnostic)"
+          else
+            pnpm tauri signer generate -p "" -w /tmp/rebuild-updater.key
+          fi
           # `echo "$key"`, not `cat`: the key file has no trailing newline, so cat runs
           # the value straight into the heredoc delimiter and the env write fails with
           # "Matching delimiter not found".
@@ -424,7 +455,7 @@ jobs:
             echo "$key"
             echo "__EOF__"
           } >> "$GITHUB_ENV"
-          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
 
       - name: Rebuild Linux AppImage payload
         run: |
