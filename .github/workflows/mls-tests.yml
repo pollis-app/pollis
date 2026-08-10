@@ -84,14 +84,37 @@ jobs:
               - '!website/**'
               - '!docs/**'
               - '!**/*.md'
+              # Surfaces that cannot change Rust behaviour. Before these were listed,
+              # a workflow-or-docs-only PR paid the full ~31-minute integration gate:
+              # five such PRs in one day cost ~2.5 hours of CI for changes that could
+              # not affect a single test.
+              - '!.github/**'
+              - '!scripts/**'
+              - '!.codesight/**'
+              - '!infra/**'
+              - '!learn/**'
+              - '!specs/**'
+              - '!e2e/**'
+            # ...but this workflow DEFINES the gate, so editing it must still run it.
+            # Exempting `.github/**` wholesale would let a change to the harness skip
+            # the very suite it configures — the one edit that most needs proving.
+            harness:
+              - '.github/workflows/mls-tests.yml'
       - name: Decide whether the heavy Rust gate must run
         id: decide
         env:
           EVENT: ${{ github.event_name }}
           FILTERED: ${{ steps.filter.outputs.rust }}
+          HARNESS: ${{ steps.filter.outputs.harness }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
-            echo "run_tests=$FILTERED" >> "$GITHUB_OUTPUT"
+            # Either a real Rust change, or an edit to this workflow itself.
+            if [ "$FILTERED" = "true" ] || [ "$HARNESS" = "true" ]; then
+              echo "run_tests=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run_tests=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "rust=$FILTERED harness=$HARNESS"
           else
             # workflow_dispatch / schedule / any non-PR trigger: always run the
             # full gate (the marathon step keys off event_name inside the job).
