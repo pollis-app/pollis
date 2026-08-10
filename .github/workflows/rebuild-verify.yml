@@ -461,6 +461,17 @@ jobs:
       # The verdict that makes this a REBUILDER, not just a log reader: assert
       # the hash we independently reproduced is present in the log as the Linux
       # AppImage payload for this tag. Absent/mismatched → loud failure.
+      # Keep the rebuilt artifact so a divergence can be analysed off-CI, instead of
+      # re-running a 20-minute job for every hypothesis.
+      - name: Keep the rebuilt AppImage for offline comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebuilt-appimage
+          if-no-files-found: warn
+          retention-days: 7
+          path: target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+
       - name: Assert reproduced hash is the logged Linux payload
         env:
           # `gh release download` in the failure diagnostic needs a token; contents:read suffices.
@@ -539,7 +550,7 @@ jobs:
                   | sed -n 's/^Files \(.*\) and \(.*\) differ$/\1|\2/p' \
                   | while IFS='|' read -r f1 f2; do
                       echo "### $(basename "$f1")"
-                      diffoscope --max-report-size 40000 --text - "$f1" "$f2" 2>/dev/null | head -60
+                      diffoscope --max-report-size 200000 --text - "$f1" "$f2" 2>/dev/null | head -400
                     done
               else
                 echo "extraction unavailable (no FUSE / not self-extracting here);"
