@@ -264,15 +264,17 @@ These bytes are part of the reproducible payload, so a reproducer must bake the
   as a repository variable adds no exposure that shipping the binary did not. Scoping
   it out of the client remains the better end state (see below); until then, publishing
   it is what makes the reproduction claim true for everyone rather than for us alone.
-- **Open limit — C/C++ build paths are not remapped.** `--remap-path-prefix` is a
-  *rustc* flag; it does not reach C/C++ compiled by build scripts through `cc-rs`. The
-  shipped binary embeds
-  `/home/runner/.cargo/registry/src/.../cxx-1.0.194/src/cxx.cc`. Both the release and
-  the reproducer run at `/home/runner`, so this does not affect the CI-to-CI result
-  above — but a third party building anywhere else will embed *their* path and fail to
-  reproduce. Until `-ffile-prefix-map` is added to `CFLAGS`/`CXXFLAGS`, "reproducible
-  by anyone" is precisely "reproducible by anyone building at the same path", and the
-  demonstrated result should be read that way.
+- **C/C++ build paths are remapped too.** `--remap-path-prefix` is a *rustc* flag and
+  does not reach C/C++ compiled by build scripts through `cc-rs`, so v1.8.4 shipped
+  with `/home/runner/.cargo/.../cxx-1.0.194/src/cxx.cc` embedded. Both the release and
+  the reproducer ran at `/home/runner`, so the CI-to-CI result held — but a third
+  party building anywhere else would embed *their* path and fail, which made
+  "reproducible by anyone" really mean "by anyone building at the same path".
+  `-ffile-prefix-map` is now applied to `CFLAGS`/`CXXFLAGS` in all four reproducible
+  jobs; `scripts/check-build-recipe.py` fails CI if a job remaps Rust paths without
+  remapping C/C++ ones; and the release **asserts** the finished binary embeds no
+  absolute build path, and that the remapped prefixes ARE present, so the check cannot
+  pass merely because something failed to compile.
 - **As of #506 (secrets-broker cutover, finishing #393) the client bakes no R2 or
   LiveKit credentials at all.** `R2_ACCESS_KEY_ID`, `R2_SECRET_KEY`, `R2_REGION`,
   `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are no longer read anywhere in the

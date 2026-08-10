@@ -202,10 +202,10 @@ signed. Beyond that binding:
   `v1.8.4` an independent rebuild from public source matched the payload hash in the
   transparency log exactly (`1a4213a1…`), verified against the pinned log key alone.
   The rebuilder now runs automatically after every release, so the property is
-  continuously checked. Two bounds worth stating: it covers the **Linux AppImage
-  payload**, and reproduction currently requires building at the same filesystem
-  path, because `--remap-path-prefix` is a rustc flag and does not cover C/C++ built
-  through `cc-rs`.
+  continuously checked. One bound worth stating: it covers the **Linux AppImage
+  payload**. Reproduction is not tied to our filesystem layout — Rust *and* C/C++
+  build paths are remapped, and the release fails if the finished binary embeds an
+  absolute build path.
 - **macOS and Windows payload digests are recomputable from the artifact you
   downloaded** — the shipped bundle with the platform's signing material normalized
   back out — but they are **not** yet rebuilt-from-source, so they are a weaker claim
