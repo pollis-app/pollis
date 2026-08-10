@@ -232,6 +232,18 @@ jobs:
           echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
           CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
           echo "RUSTFLAGS=--remap-path-prefix=${HOME}=/pollis-home --remap-path-prefix=${CARGO_HOME_DIR}=/pollis-cargo --remap-path-prefix=${GITHUB_WORKSPACE}=/pollis-src" >> "$GITHUB_ENV"
+          # The SAME remapping for C/C++ (#795). `--remap-path-prefix` is a RUSTC flag:
+          # it does not reach the C and C++ that build scripts compile through `cc-rs`,
+          # so those objects embed the absolute build path. The shipped v1.8.4 binary
+          # carried `/home/runner/.cargo/.../cxx-1.0.194/src/cxx.cc` for exactly this
+          # reason. Our release and our reproducer both happen to run at /home/runner,
+          # so it did not break the CI-to-CI result — but a third party building
+          # anywhere else embeds THEIR path and cannot reproduce, which is the entire
+          # point of the exercise. `-ffile-prefix-map` is the C/C++ equivalent and
+          # cc-rs honours CFLAGS/CXXFLAGS.
+          MAP="-ffile-prefix-map=${HOME}=/pollis-home -ffile-prefix-map=${CARGO_HOME_DIR}=/pollis-cargo -ffile-prefix-map=${GITHUB_WORKSPACE}=/pollis-src"
+          echo "CFLAGS=${CFLAGS:-} ${MAP}" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=${CXXFLAGS:-} ${MAP}" >> "$GITHUB_ENV"
 
       - name: Rebuild and stage screen-capture helper
         run: |
@@ -341,6 +353,18 @@ jobs:
           echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
           CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
           echo "RUSTFLAGS=--remap-path-prefix=${HOME}=/pollis-home --remap-path-prefix=${CARGO_HOME_DIR}=/pollis-cargo --remap-path-prefix=${GITHUB_WORKSPACE}=/pollis-src" >> "$GITHUB_ENV"
+          # The SAME remapping for C/C++ (#795). `--remap-path-prefix` is a RUSTC flag:
+          # it does not reach the C and C++ that build scripts compile through `cc-rs`,
+          # so those objects embed the absolute build path. The shipped v1.8.4 binary
+          # carried `/home/runner/.cargo/.../cxx-1.0.194/src/cxx.cc` for exactly this
+          # reason. Our release and our reproducer both happen to run at /home/runner,
+          # so it did not break the CI-to-CI result — but a third party building
+          # anywhere else embeds THEIR path and cannot reproduce, which is the entire
+          # point of the exercise. `-ffile-prefix-map` is the C/C++ equivalent and
+          # cc-rs honours CFLAGS/CXXFLAGS.
+          MAP="-ffile-prefix-map=${HOME}=/pollis-home -ffile-prefix-map=${CARGO_HOME_DIR}=/pollis-cargo -ffile-prefix-map=${GITHUB_WORKSPACE}=/pollis-src"
+          echo "CFLAGS=${CFLAGS:-} ${MAP}" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=${CXXFLAGS:-} ${MAP}" >> "$GITHUB_ENV"
 
       # The published, NON-SECRET build recipe (see the header). Read from
       # repository/environment `vars` — never `secrets` — so this file stays

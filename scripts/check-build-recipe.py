@@ -61,10 +61,15 @@ def baked_by_client() -> set[str]:
 
 
 def job_block(text: str, job: str) -> str:
-    """The YAML body of one job, from its header to the next top-level job."""
-    m = re.search(rf"^  {re.escape(job)}:$(.*?)(?=^  [a-z][a-z0-9_-]*:$)", text, re.S | re.M)
+    """The YAML body of one job, from its header to the next top-level job.
+
+    The terminator is "the next job header OR end of file" — without the latter the
+    LAST job in a file never matches, which is silent and looks like the job is
+    missing rather than like a parsing bug.
+    """
+    m = re.search(rf"^  {re.escape(job)}:$(.*?)(?=^  [a-z][a-z0-9_-]*:$|\Z)", text, re.S | re.M)
     if not m:
-        fail(f"{RELEASE.name}: could not locate the `{job}` job to read its build recipe")
+        fail(f"could not locate the `{job}` job to read its build recipe")
         return ""
     return m.group(1)
 
@@ -153,6 +158,21 @@ def main() -> int:
             f"it cannot affect the binary, so publishing it as part of the recipe misleads "
             f"anyone auditing the reproduction."
         )
+
+    # C/C++ paths remapped too, or only the Rust half is path-independent.
+    for name, text in (("release", RELEASE.read_text()), ("rebuilder", REBUILD.read_text())):
+        for job in (REPRODUCIBLE_JOBS if name == "release" else ("rebuild-linux", "rebuild-capture-helper")):
+            block = job_block(text, job)
+            if not block:
+                continue
+            if "--remap-path-prefix" in block and "-ffile-prefix-map" not in block:
+                fail(
+                    f"the `{job}` job ({name}) remaps Rust paths but not C/C++ ones — "
+                    f"`--remap-path-prefix` is a rustc flag and does not reach code compiled "
+                    f"through cc-rs, so the binary embeds the absolute build path and only "
+                    f"someone building at that same path can reproduce it. Add "
+                    f"`-ffile-prefix-map` to CFLAGS/CXXFLAGS."
+                )
 
     # No build cache on the reproducible path.
     for job in cached_reproducible_jobs(RELEASE.read_text()):
