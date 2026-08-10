@@ -25,6 +25,9 @@ on:
       - "pollis-delivery/ds-config-manifest.json"
       - "pollis-delivery/src/**"
       - ".github/scripts/sync-ds-secrets.sh"
+      # Any workflow change: an invalid one is invisible until something silently
+      # stops running.
+      - ".github/workflows/**"
       # Reproducibility recipe inputs: the release build, the rebuilder, and the
       # client's option_env! surface must stay in agreement.
       - ".github/workflows/desktop-release.yml"
@@ -40,6 +43,9 @@ on:
       - "pollis-delivery/ds-config-manifest.json"
       - "pollis-delivery/src/**"
       - ".github/scripts/sync-ds-secrets.sh"
+      # Any workflow change: an invalid one is invisible until something silently
+      # stops running.
+      - ".github/workflows/**"
       # Reproducibility recipe inputs: the release build, the rebuilder, and the
       # client's option_env! surface must stay in agreement.
       - ".github/workflows/desktop-release.yml"
@@ -76,6 +82,14 @@ jobs:
       # mismatch that reads like tampering. That is not hypothetical: it is why
       # both of rebuild-verify.yml's runs failed while the docs described
       # independent reproduction as a working, shipped property.
+      # An unparseable workflow fails SILENTLY — GitHub makes a run with zero jobs,
+      # lists the workflow under its file path, and every trigger it declares stops
+      # working with nothing saying so. A duplicate top-level `env:` did exactly that
+      # to rebuild-verify.yml, and `yaml.safe_load` missed it because PyYAML allows
+      # duplicate keys under last-one-wins while GitHub rejects the document.
+      - name: Workflow files parse the way GitHub parses them
+        run: python3 ./scripts/check-workflows.py
+
       - name: Build recipe drift (reproducibility)
         run: python3 ./scripts/check-build-recipe.py
 
