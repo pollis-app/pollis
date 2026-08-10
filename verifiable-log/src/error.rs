@@ -51,6 +51,12 @@ pub enum Error {
 
     #[error("invalid ML-DSA-44 signature encoding")]
     BadSignature,
+
+    /// A key-set statement that is malformed, unsupported, or does not verify.
+    /// Carries a message because these failures are operator-facing: "which key,
+    /// and why" is the difference between a five-minute fix and an incident.
+    #[error("invalid key-set statement: {0}")]
+    KeySet(String),
 }
 
 /// Convenience alias used throughout the crate.

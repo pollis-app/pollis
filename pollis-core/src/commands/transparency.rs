@@ -83,6 +83,111 @@ pub const PINNED_LOG_PUBLIC_KEYS: &[PinnedKey] = &[PinnedKey {
     not_after: None,
 }];
 
+/// A pinned ROOT key — the offline anchor that vouches for signer keys (#754).
+///
+/// This is what a client will pin instead of a signer. The difference matters only
+/// when something goes wrong: pinning the signer means a leaked signing seed can
+/// only be repaired by shipping a release, and that release is itself verified
+/// through the binaries tree the leaked key signs. Pinning the root means the repair
+/// is a statement the root signs, which the online signer cannot forge.
+#[derive(Debug, Clone, Copy)]
+pub struct PinnedRoot {
+    pub key_id: &'static str,
+    /// ML-DSA-44 public key, lowercase hex (1312 bytes).
+    pub public_key: &'static str,
+    /// Milliseconds since epoch after which this root is no longer accepted, for
+    /// root rotation. `None` = current.
+    pub not_after: Option<u64>,
+}
+
+/// The pinned offline roots.
+///
+/// Minted by the root ceremony on 2026-08-10 (#754). The private half is held
+/// offline and signs nothing but key-set statements; it is deliberately absent from
+/// CI, Doppler and this repository, which is the entire point — a compromise of the
+/// build system cannot re-authorise a signer.
+///
+/// `not_after: None` = current. During a root rotation both roots are listed with
+/// the outgoing one carrying the end of its overlap window, exactly as
+/// [`PINNED_LOG_PUBLIC_KEYS`] does for signers.
+pub const PINNED_LOG_ROOT_KEYS: &[PinnedRoot] = &[PinnedRoot {
+    key_id: "511fed0e9f262467",
+    public_key: "c415c83da3d9035a0cd86087d7f4850299e45213f4e28d6b979c791165fdeeb4ca8430eb91c8106f65075649455525a902ce1b10a661d7129d6aa7d25d99ab5033fdadf902d89fc9a5d5740f46c2665e33868336e4002cca6d94359eca45d4dd83e0f6509986d3959fe0a0990ab8b5f7dd6c60b4def0c2a3122e03f654332db10c41d1b9e19d88d659add64f9b3485687bd7fab5fe0b01242f9d74d0ebfa8d5436b3180f72cfdf78873ec5d04251ed25f898b37db5c9b71e0bf1bd15c1cf71e84db053462b55c80870f8aec1351196b6c0459fd5e1683d00d1a27f33b21b195bd0e3238d76ea9f613b46556e3b86a6df71e64af8a0a78327fe248f158a902152413b1d6e0e8bfb43b0186d4b34b34dc3e71c6bacc6770e88ac52f5f5989b550025e016091efa3245fedd7b12997288b0b3e1f2b01e0924f2c80044198ad90a6f595a0d06ffe851f33bd4487f293c6a63970c2432c538180700495ba755bdbaf525fce59f6c75fcfbced8e0df1b16e00c185438d437cd4fc6fe8aa1dccc52dc6757958766ecce9064a19ff6f441cb823601cc20a2bf27e0b59499f7e4a5d5c0ed117012ede65982ffc160d20256eb42f5eaa06230a91b999afaa4514b74fb2896d049251d912016c5dae3767f3a08f079ce96ce34dbf7a8bbd677a9008ebcd45f214438788db8dfde3276ff2de38a42217025f3e86da8afe2278357f0fd80ae10c010e1f1bf74acb774f3bfe8d26cefe9004e16d7ee2267ee0358664853c0d5ae71c8f9a0e5376cee3ccb5f0d956f7db7253ce1f035bd446bda49dbf3461aae23ce685a4c7d4dfb9c14429685e55d84dc0f819f0bcb3ee7b02b4901f8c2fb87f3bd10606096716fb9862787717e2e3c3930340ce7d9c2a8bd591297130f55edb6398e6b8243012b22dd8d7ff9937c651bca6cb45373a433b500f9a219d488ac2320742e89128f0799a834e5e01dacf500e2b0998954edc87dfffc3cf85bebe6bca9608a34e4efc4092de97b2ddef75a2669060fe2522ad5ac8157d15e0e983055145f824b4a4705a6a5a6952d6c3b234932505d9274157bed8aa77cfa836e63e79f41a881da33257dec31b5aa85be39746310db532b65639bae569e56fbbf05019bdb8ab1f7ef0cdc6adb3854d73534d78d96dcd6e1d9d357fa9a7ac5d90c5c4680c08e46cf3f9103c3b4aaa2e12115bf9d428e6754ec11430846025a4e03abf3df748e1cb446d518d0bb57584f94bf14dc407cce3321d2545b7d03d35f247149ca842d29796f6de0f0bb61b18143dbe1bac184eefaca43fad62abd7443eeb8d55f6640701e34373b1417c36bb0caee24762efc85f26eb4b369cdf9cb281d825ed924eb83b48d1f00586d0e893d0f87345b31bdb2efca8ae77200accc33f8292ea927af781f3de0f5ad761c1f3adb83d78067a79f78fb816e22877aa6caf565bfa6493de957b89d48c840018dcaa9856880648d55f6b341fe8caf5cb5c611ba6b5d0554c368017cac85bdd06989631ceb9d976bbdce89804584bc9b92678dee148631e1805ae1155798e9d6c2c223f27297fd1ca7510d14f9f4ccd47a032a0ffc02840cf84ee2286c7b5db863b8ca1ea86f08f29798a2be748ecf283ad5e11304c72a6254737b69c278951ae5b0611ac01576edda99fca114e2f5a3b4dc913d07bb7313a8a907b5544e22cfffd35166357a0e0cfafc70d1ef8f9eb22fc96bd3f00a165c0f64d0f01d2f050445570d7d292502ca37004633b401796d2372f1881d64bc86cf9722e4a34e8bd97e36fa129e58cec74fe87d7ef6b568549013d7aacff4086ccce0dfab996dcd613a7b920187f05efae94711972372aebd7a7bcea19e",
+    not_after: None,
+}];
+
+/// What a fetched key set told us about who may sign a given tree.
+#[derive(Debug, PartialEq, Eq)]
+pub enum KeySetOutcome {
+    /// The statement verified under a pinned root; these signer keys (lowercase
+    /// hex) are acceptable for the requested tree right now.
+    Signers(Vec<String>),
+    /// This build pins no root, so the statement cannot be checked against
+    /// anything. Withhold trust; never alarm.
+    NoRootPinned,
+    /// The statement did not verify under any live pinned root, is malformed, or
+    /// has expired. An ALARM condition: something is serving a key set we cannot
+    /// attribute to our root.
+    Untrusted(String),
+}
+
+/// Derive the acceptable signer keys for `context` from a served key-set document.
+///
+/// Pure: no network, no clock, no I/O — `now_ms` is passed in so expiry is testable.
+/// Every trust decision this feature adds lives here.
+pub fn signers_from_key_set(
+    document: &str,
+    roots: &[PinnedRoot],
+    context: &[u8],
+    now_ms: u64,
+) -> KeySetOutcome {
+    let live: Vec<&PinnedRoot> = roots
+        .iter()
+        .filter(|r| !r.not_after.is_some_and(|exp| now_ms > exp))
+        .collect();
+    if live.is_empty() {
+        return KeySetOutcome::NoRootPinned;
+    }
+
+    let statement: verifiable_log_serve::KeySetStatement = match serde_json::from_str(document) {
+        Ok(s) => s,
+        Err(e) => return KeySetOutcome::Untrusted(format!("key set is not readable: {e}")),
+    };
+
+    let mut verified = false;
+    for r in &live {
+        let Ok(vk) = verifiable_log_serve::root_key_from_hex(r.public_key) else {
+            // A malformed pin is our bug, not the server's; it must not be read as
+            // the server misbehaving.
+            continue;
+        };
+        if statement.verify(&vk).is_ok() {
+            verified = true;
+            break;
+        }
+    }
+    if !verified {
+        return KeySetOutcome::Untrusted(
+            "the served key set is not signed by any root this build pins".into(),
+        );
+    }
+
+    let active = statement.active_signers_for(context, now_ms);
+    if active.is_empty() {
+        // Verified, but grants nothing — an expired statement, or one naming no
+        // signer for this tree. Distinct from a forgery, and reported as such.
+        return KeySetOutcome::Untrusted(
+            "the key set verified but authorises no signer for this tree right now".into(),
+        );
+    }
+    KeySetOutcome::Signers(
+        active
+            .iter()
+            .map(|s| s.public_key.to_ascii_lowercase())
+            .collect(),
+    )
+}
+
 /// Default base URL of the published transparency log.
 const DEFAULT_TRANSPARENCY_URL: &str = "https://verify.pollis.com";
 
@@ -1516,5 +1621,165 @@ mod tests {
             derive_build_verify(&r, &mine(), "1.1.0", None).status,
             BuildVerifyStatus::Verified
         );
+    }
+}
+
+#[cfg(test)]
+mod key_set_client_tests {
+    use super::*;
+
+    const CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v2";
+    const NOW: u64 = 1_700_000_000_000;
+
+    /// Build a real root-signed statement, so these exercise actual signatures
+    /// rather than a stub that could diverge from the verifier.
+    fn fixture(root_seed: u8, signer_seed: u8, stmt_expiry: Option<u64>) -> (String, String) {
+        use ml_dsa::{Keypair, MlDsa44, SigningKey};
+        let root = SigningKey::<MlDsa44>::from_seed(&[root_seed; 32].into());
+        let signer = SigningKey::<MlDsa44>::from_seed(&[signer_seed; 32].into());
+        let svk = signer.verifying_key();
+        let entry = verifiable_log_serve::SignerEntry {
+            key_id: verifiable_log_serve::key_id_for(&svk),
+            public_key: hex::encode(svk.encode()),
+            trees: vec![String::from_utf8_lossy(CONTEXT).to_string()],
+            not_after_ms: None,
+        };
+        let st = verifiable_log_serve::KeySetStatement::create(&root, NOW, stmt_expiry, vec![entry])
+            .expect("create");
+        (
+            serde_json::to_string(&st).expect("json"),
+            hex::encode(root.verifying_key().encode()),
+        )
+    }
+
+    fn pins(hex_key: &str, not_after: Option<u64>) -> Vec<PinnedRoot> {
+        vec![PinnedRoot {
+            key_id: "test",
+            public_key: Box::leak(hex_key.to_string().into_boxed_str()),
+            not_after,
+        }]
+    }
+
+    #[test]
+    fn a_statement_signed_by_the_pinned_root_yields_its_signers() {
+        let (doc, root_hex) = fixture(1, 2, None);
+        match signers_from_key_set(&doc, &pins(&root_hex, None), CONTEXT, NOW) {
+            KeySetOutcome::Signers(keys) => assert_eq!(keys.len(), 1),
+            other => panic!("expected signers, got {other:?}"),
+        }
+    }
+
+    // The attack the whole feature exists to stop: someone who holds the online
+    // signing seed serving their own key set to authorise themselves.
+    #[test]
+    fn a_statement_signed_by_anyone_else_is_untrusted() {
+        let (doc, _) = fixture(1, 2, None);
+        let (_, other_root) = fixture(9, 3, None);
+        assert!(matches!(
+            signers_from_key_set(&doc, &pins(&other_root, None), CONTEXT, NOW),
+            KeySetOutcome::Untrusted(_)
+        ));
+    }
+
+    // Withholding trust and raising an alarm are different states, and a build with
+    // no root pinned has learned nothing — it must not accuse the server.
+    #[test]
+    fn a_build_with_no_root_pinned_withholds_trust_rather_than_alarming() {
+        let (doc, _) = fixture(1, 2, None);
+        assert_eq!(
+            signers_from_key_set(&doc, &[], CONTEXT, NOW),
+            KeySetOutcome::NoRootPinned
+        );
+    }
+
+    #[test]
+    fn an_expired_root_pin_is_treated_as_no_pin() {
+        let (doc, root_hex) = fixture(1, 2, None);
+        assert_eq!(
+            signers_from_key_set(&doc, &pins(&root_hex, Some(NOW - 1)), CONTEXT, NOW + 1),
+            KeySetOutcome::NoRootPinned
+        );
+    }
+
+    // The anti-freeze property: an attacker who can stop a client reaching fresh
+    // statements must not be able to keep a compromised signer authorised forever.
+    #[test]
+    fn an_expired_statement_authorises_nobody() {
+        let (doc, root_hex) = fixture(1, 2, Some(NOW + 1000));
+        assert!(matches!(
+            signers_from_key_set(&doc, &pins(&root_hex, None), CONTEXT, NOW + 5000),
+            KeySetOutcome::Untrusted(_)
+        ));
+    }
+
+    #[test]
+    fn a_signer_authorised_for_another_tree_does_not_count_for_this_one() {
+        let (doc, root_hex) = fixture(1, 2, None);
+        assert!(matches!(
+            signers_from_key_set(&doc, &pins(&root_hex, None), b"pollis-verifiable-log:sth:v2:binaries", NOW),
+            KeySetOutcome::Untrusted(_)
+        ));
+    }
+
+    #[test]
+    fn an_unreadable_document_is_untrusted_not_a_panic() {
+        let (_, root_hex) = fixture(1, 2, None);
+        assert!(matches!(
+            signers_from_key_set("{not json", &pins(&root_hex, None), CONTEXT, NOW),
+            KeySetOutcome::Untrusted(_)
+        ));
+    }
+
+    #[test]
+    fn tampering_with_a_served_signer_key_is_untrusted() {
+        let (doc, root_hex) = fixture(1, 2, None);
+        let mut v: serde_json::Value = serde_json::from_str(&doc).expect("json");
+        v["signers"][0]["public_key"] = serde_json::json!("00".repeat(1312));
+        assert!(matches!(
+            signers_from_key_set(&v.to_string(), &pins(&root_hex, None), CONTEXT, NOW),
+            KeySetOutcome::Untrusted(_)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod pinned_root_tests {
+    use super::*;
+
+    /// The shipped pin must be a real, decodable ML-DSA-44 key. A typo here is
+    /// indistinguishable at runtime from a hostile key set, so it is caught at
+    /// build time instead.
+    #[test]
+    fn every_pinned_root_is_a_wellformed_key() {
+        for r in PINNED_LOG_ROOT_KEYS {
+            assert!(
+                verifiable_log_serve::root_key_from_hex(r.public_key).is_ok(),
+                "pinned root {} is not a valid ML-DSA-44 key",
+                r.key_id
+            );
+            assert_eq!(r.public_key, r.public_key.to_ascii_lowercase());
+        }
+    }
+
+    /// The `key_id` is a diagnostic label, but a label that disagrees with the key
+    /// it names would send whoever is debugging a compromise after the wrong key.
+    #[test]
+    fn each_pinned_root_key_id_matches_its_key() {
+        for r in PINNED_LOG_ROOT_KEYS {
+            let vk = verifiable_log_serve::root_key_from_hex(r.public_key).expect("valid key");
+            assert_eq!(r.key_id, verifiable_log_serve::key_id_for(&vk));
+        }
+    }
+
+    /// The committed statement must verify under a root this build pins — otherwise
+    /// the shipped client and the published key set disagree, and every log check
+    /// degrades to "cannot verify".
+    #[test]
+    fn the_committed_key_set_verifies_under_a_pinned_root() {
+        let doc = include_str!("../../../key-set.json");
+        match signers_from_key_set(doc, PINNED_LOG_ROOT_KEYS, b"pollis-verifiable-log:sth:v2", 1_786_400_000_000) {
+            KeySetOutcome::Signers(keys) => assert!(!keys.is_empty()),
+            other => panic!("committed key set is not usable by this build: {other:?}"),
+        }
     }
 }

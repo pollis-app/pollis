@@ -123,6 +123,27 @@ pub const ACCOUNT_API_PREFIX: &str = "v1/account-keys";
 /// the request-relative path (no leading `/`) means a server looks an artifact
 /// up with the same `path.trim_start_matches('/')` it uses for the static host,
 /// so on-disk and in-memory serving cannot diverge.
+/// Emit the root-signed key-set statement at `/v1/key-set.json` (#754).
+///
+/// The statement is produced OFFLINE by the root ceremony (`builder key-set`), so it
+/// is not derived from any bundle — it is carried through. What this does add is a
+/// gate: the statement is verified against the supplied root pin before it can be
+/// written. Publishing a key set that does not verify would be the worst possible
+/// artifact to serve, because a client that cannot validate the set falls back to
+/// trusting nothing and the whole log reads as unverifiable.
+pub fn insert_key_set(
+    map: &mut BTreeMap<String, Vec<u8>>,
+    statement: &verifiable_log::KeySetStatement,
+    root_public_key_hex: &str,
+) -> Result<()> {
+    let root = verifiable_log::root_key_from_hex(root_public_key_hex)
+        .map_err(|e| crate::error::ServeError::BadBundle(format!("root key: {e}")))?;
+    statement
+        .verify(&root)
+        .map_err(|e| crate::error::ServeError::BadBundle(format!("refusing to publish an unverifiable key set: {e}")))?;
+    insert_json(map, format!("{API_VERSION}/key-set.json"), statement)
+}
+
 pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
     let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
@@ -553,4 +574,57 @@ fn insert_json<T: Serialize>(
     let json = serde_json::to_vec_pretty(value)?;
     map.insert(rel, json);
     Ok(())
+}
+
+#[cfg(test)]
+mod key_set_artifact_tests {
+    use super::*;
+    use ml_dsa::{Keypair, MlDsa44, SigningKey};
+    use verifiable_log::{KeySetStatement, SignerEntry};
+
+    fn root() -> SigningKey<MlDsa44> {
+        SigningKey::<MlDsa44>::from_seed(&[42u8; 32].into())
+    }
+
+    fn signer() -> SignerEntry {
+        let sk = SigningKey::<MlDsa44>::from_seed(&[7u8; 32].into());
+        let vk = sk.verifying_key();
+        SignerEntry {
+            key_id: verifiable_log::sth::key_id_for(&vk),
+            public_key: hex::encode(vk.encode()),
+            trees: vec!["pollis-verifiable-log:sth:v2".into()],
+            not_after_ms: None,
+        }
+    }
+
+    #[test]
+    fn a_verifying_statement_is_published_at_the_expected_path() {
+        let r = root();
+        let st = KeySetStatement::create(&r, 1, None, vec![signer()]).expect("create");
+        let mut map = BTreeMap::new();
+        insert_key_set(&mut map, &st, &hex::encode(r.verifying_key().encode())).expect("insert");
+        assert!(map.contains_key(&format!("{API_VERSION}/key-set.json")));
+    }
+
+    // The gate: a statement the pinned root did not sign must never reach the
+    // published tree. A client that cannot validate the key set trusts nothing, so
+    // serving a bad one takes the whole log down rather than just this file.
+    #[test]
+    fn a_statement_the_root_did_not_sign_is_refused() {
+        let other = SigningKey::<MlDsa44>::from_seed(&[9u8; 32].into());
+        let st = KeySetStatement::create(&other, 1, None, vec![signer()]).expect("create");
+        let mut map = BTreeMap::new();
+        let err = insert_key_set(&mut map, &st, &hex::encode(root().verifying_key().encode()));
+        assert!(err.is_err());
+        assert!(map.is_empty(), "nothing may be written when verification fails");
+    }
+
+    #[test]
+    fn a_malformed_root_pin_is_refused() {
+        let r = root();
+        let st = KeySetStatement::create(&r, 1, None, vec![signer()]).expect("create");
+        let mut map = BTreeMap::new();
+        assert!(insert_key_set(&mut map, &st, "not-a-key").is_err());
+        assert!(map.is_empty());
+    }
 }

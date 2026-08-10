@@ -24,6 +24,7 @@
 
 pub mod error;
 pub mod hash;
+pub mod keyset;
 pub mod log;
 pub mod merkle;
 pub mod proof;
@@ -31,6 +32,9 @@ pub mod sth;
 
 pub use error::{Error, InvariantViolation, Result};
 pub use hash::Hash;
+pub use keyset::{
+    root_key_from_hex, KeySetStatement, SignerEntry, KEYSET_DOMAIN, KEYSET_FORMAT_VERSION,
+};
 pub use log::{Entry, TenantInvariant, UniqueDataInvariant, VerifiableLog};
 pub use proof::{
     verify_consistency_proof, verify_inclusion_proof, ConsistencyProof, InclusionProof,
