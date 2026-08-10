@@ -115,6 +115,29 @@
           <span class="download-detail">Arch Linux: <a href="https://aur.archlinux.org/packages/pollis" class="aur-link" target="_blank" rel="noopener noreferrer">AUR</a></span>
         </div>
       </div>
+
+      <!-- Every release's hash is already public in the transparency log; this puts
+           it next to the download so checking is one command, not a research task. -->
+      <section class="verify-downloads" aria-labelledby="verify-downloads-heading">
+        <h3 class="verify-heading" id="verify-downloads-heading">
+          Check what you downloaded
+          <span class="verify-tag" data-verify-tag></span>
+        </h3>
+        <p class="verify-intro">
+          Pollis publishes the SHA-256 of every release into a public, append-only
+          transparency log. Hash the file you just downloaded and compare it with the
+          value below — if they match, you have exactly the bytes Pollis published,
+          and not a copy someone altered in transit or on a mirror.
+        </p>
+        <ul class="verify-list" data-verify-list>
+          <li class="verify-note">Loading published hashes…</li>
+        </ul>
+        <p class="verify-foot">
+          This compares bytes, not intent. For the full picture — inclusion proofs
+          against the signed log, and whether a build reproduces from source —
+          see <a href="/artifacts">artifacts</a>.
+        </p>
+      </section>
     </section>
 
       <div class="install-block">
@@ -253,6 +276,7 @@
     }
   </script>
   <script src="script.js"></script>
+  <script type="module" src="verify-downloads.js"></script>
 </body>
 
 </html>

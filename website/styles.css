@@ -397,3 +397,143 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+/* ── Download verification (#801) ──────────────────────────────────────────
+   Deliberately quieter than the download cards: this is for the person who
+   wants it, and it must not compete with the primary action or read as a
+   warning. Same 1px border / 8px radius / single accent as the rest of the
+   page — no new visual language for a subordinate block. */
+.verify-downloads {
+  margin-top: 2.5rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--c-border);
+}
+
+.verify-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-text);
+  margin: 0 0 0.5rem;
+}
+
+/* The version these hashes belong to. Empty until resolved, so the heading never
+   claims a version the list has not actually been filled from. */
+.verify-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--c-accent);
+}
+
+.verify-intro,
+.verify-foot {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--c-text-muted);
+  margin: 0 0 1rem;
+  max-width: 62ch;
+}
+
+.verify-foot {
+  margin: 1rem 0 0;
+}
+
+.verify-intro a,
+.verify-foot a,
+.verify-note a {
+  color: var(--c-accent);
+}
+
+.verify-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.verify-row {
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+}
+
+.verify-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.verify-plat {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--c-text);
+  white-space: nowrap;
+}
+
+/* The exact command to run, so nobody has to know their platform's spelling of
+   "hash this file". */
+.verify-cmd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--c-text-muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.verify-row-hash {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Full 64 chars, wrapping rather than truncated: a hash you cannot see in full is
+   a hash you cannot compare, and truncation is where a near-miss hides. */
+.verify-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+  flex: 1;
+  user-select: all;
+}
+
+.verify-copy {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.verify-copy:hover {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.verify-note {
+  font-size: 0.85rem;
+  color: var(--c-text-muted);
+}
+
+@media (max-width: 560px) {
+  .verify-row-top {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .verify-cmd {
+    text-align: left;
+  }
+}
