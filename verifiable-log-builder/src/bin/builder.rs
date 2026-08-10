@@ -128,6 +128,85 @@ enum Command {
     },
     /// Mint a fresh Ed25519 keypair (hex) for dev/throwaway use.
     Keygen,
+    /// Sign a key-set statement with the OFFLINE root key (#754).
+    ///
+    /// This is the ceremony command. It is the only thing the root ever signs, and
+    /// it is deliberately the whole job: mint the statement here, on the machine
+    /// holding the root, and publish the resulting JSON. Nothing in CI needs the
+    /// root, which is the entire point — a compromise of the build system cannot
+    /// re-authorise a signer.
+    KeySet {
+        /// Env var holding the 32-byte hex ROOT signing seed.
+        #[arg(long, default_value = "VLOG_ROOT_SIGNING_KEY")]
+        root_key_env: String,
+
+        /// File holding the 32-byte hex root seed (used if the env var is unset).
+        #[arg(long)]
+        root_key_file: Option<PathBuf>,
+
+        /// Issue time, milliseconds since epoch. Explicit so the output is
+        /// deterministic and re-mintable, never read from the system clock.
+        #[arg(long)]
+        issued_at: u64,
+
+        /// When this statement stops being accepted (ms since epoch). Bounds how
+        /// long a client cut off from the log keeps trusting a stale set.
+        #[arg(long)]
+        not_after: Option<u64>,
+
+        /// A signer, as `<public_key_hex>:<tree,tree,...>[:<not_after_ms>]`.
+        /// Repeatable. `trees` are the STH domain-separation contexts this key may
+        /// sign under.
+        #[arg(long = "signer", value_name = "HEX:TREES[:NOT_AFTER_MS]")]
+        signer: Vec<String>,
+
+        /// Where to write the signed statement.
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
+/// Parse `<public_key_hex>:<tree,tree>[:<not_after_ms>]` into a signer entry.
+///
+/// The tree contexts themselves contain colons (`pollis-verifiable-log:sth:v2`), so
+/// this splits the key off the FRONT and the optional expiry off the BACK — and only
+/// treats a trailing segment as an expiry when it is entirely digits. A naive
+/// `split(':')` silently mangles every real context, which is how the first version
+/// of this failed.
+fn parse_signer(spec: &str) -> std::result::Result<verifiable_log::SignerEntry, String> {
+    let (key_hex, rest) = spec
+        .split_once(':')
+        .ok_or_else(|| format!("signer must be <public_key_hex>:<trees>[:<not_after_ms>], got {spec:?}"))?;
+
+    let key = verifiable_log::root_key_from_hex(key_hex.trim()).map_err(|e| e.to_string())?;
+
+    let (trees_part, not_after_ms) = match rest.rsplit_once(':') {
+        Some((head, tail)) if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) => (
+            head,
+            Some(
+                tail.parse::<u64>()
+                    .map_err(|_| format!("not_after_ms does not fit in u64: {tail:?}"))?,
+            ),
+        ),
+        _ => (rest, None),
+    };
+
+    let trees: Vec<String> = trees_part
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .collect();
+    if trees.is_empty() {
+        return Err(format!("signer {spec:?} names no trees"));
+    }
+
+    Ok(verifiable_log::SignerEntry {
+        key_id: verifiable_log::sth::key_id_for(&key),
+        public_key: key_hex.trim().to_string(),
+        trees,
+        not_after_ms,
+    })
 }
 
 fn main() -> ExitCode {
@@ -173,6 +252,21 @@ fn main() -> ExitCode {
             run_keygen();
             Ok(())
         }
+        Command::KeySet {
+            root_key_env,
+            root_key_file,
+            issued_at,
+            not_after,
+            signer,
+            out,
+        } => run_key_set(
+            &root_key_env,
+            root_key_file.as_deref(),
+            issued_at,
+            not_after,
+            &signer,
+            &out,
+        ),
     };
 
     match result {
@@ -371,9 +465,121 @@ fn run_build_binaries(
     Ok(())
 }
 
+/// Sign a key-set statement with the offline root and write it out.
+fn run_key_set(
+    root_key_env: &str,
+    root_key_file: Option<&std::path::Path>,
+    issued_at: u64,
+    not_after: Option<u64>,
+    signer_specs: &[String],
+    out: &std::path::Path,
+) -> std::result::Result<(), BuilderError> {
+    let root = keys::load_signing_key(root_key_env, root_key_file)?;
+
+    let mut signers = Vec::with_capacity(signer_specs.len());
+    for spec in signer_specs {
+        signers.push(parse_signer(spec).map_err(BuilderError::SigningKey)?);
+    }
+
+    let statement = verifiable_log::KeySetStatement::create(&root, issued_at, not_after, signers)
+        .map_err(|e| BuilderError::SigningKey(e.to_string()))?;
+
+    // Verify what we just signed before writing it. A ceremony that emits an
+    // unverifiable statement is worse than one that fails: it is discovered by
+    // clients, at the moment they most need the key set to work.
+    statement
+        .verify(&ml_dsa::Keypair::verifying_key(&root))
+        .map_err(|e| BuilderError::SigningKey(format!("refusing to write an unverifiable statement: {e}")))?;
+
+    let json = serde_json::to_string_pretty(&statement)?;
+    std::fs::write(out, format!("{json}\n"))?;
+
+    eprintln!(
+        "wrote {} — {} signer(s), issued {}, {}",
+        out.display(),
+        statement.signers.len(),
+        issued_at,
+        match not_after {
+            Some(t) => format!("expires {t}"),
+            None => "no expiry".to_string(),
+        }
+    );
+    for s in &statement.signers {
+        eprintln!("  {} -> {}", s.key_id, s.trees.join(", "));
+    }
+    Ok(())
+}
+
 fn run_keygen() {
     let g = keys::generate();
     println!("# verifiable-log signing keypair (dev/throwaway — not for prod custody)");
     println!("VLOG_SIGNING_KEY={}", g.secret_hex);
     println!("public_key={}", g.public_hex);
+}
+
+#[cfg(test)]
+mod signer_spec_tests {
+    use super::parse_signer;
+
+    /// A real ML-DSA-44 public key, hex — generated here so the test needs no fixture.
+    fn pubkey() -> String {
+        use ml_dsa::{Keypair, MlDsa44, SigningKey};
+        let sk = SigningKey::<MlDsa44>::from_seed(&[7u8; 32].into());
+        hex::encode(sk.verifying_key().encode())
+    }
+
+    // The bug this pins: tree contexts contain colons, so splitting the spec on
+    // every ':' mangles them. Caught live during the first ceremony run.
+    #[test]
+    fn a_tree_context_containing_colons_survives_parsing() {
+        let s = parse_signer(&format!("{}:pollis-verifiable-log:sth:v2", pubkey())).expect("parse");
+        assert_eq!(s.trees, vec!["pollis-verifiable-log:sth:v2"]);
+        assert_eq!(s.not_after_ms, None);
+    }
+
+    #[test]
+    fn several_colon_bearing_trees_parse() {
+        let s = parse_signer(&format!(
+            "{}:pollis-verifiable-log:sth:v2,pollis-verifiable-log:sth:v2:binaries",
+            pubkey()
+        ))
+        .expect("parse");
+        assert_eq!(s.trees.len(), 2);
+        assert!(s.trees.contains(&"pollis-verifiable-log:sth:v2:binaries".to_string()));
+    }
+
+    #[test]
+    fn a_trailing_number_is_read_as_the_expiry() {
+        let s = parse_signer(&format!("{}:pollis-verifiable-log:sth:v2:1707776000000", pubkey()))
+            .expect("parse");
+        assert_eq!(s.trees, vec!["pollis-verifiable-log:sth:v2"]);
+        assert_eq!(s.not_after_ms, Some(1_707_776_000_000));
+    }
+
+    // `:binaries` is a tree suffix, not an expiry — only an all-digit tail is.
+    #[test]
+    fn a_non_numeric_tail_stays_part_of_the_tree() {
+        let s = parse_signer(&format!("{}:pollis-verifiable-log:sth:v2:binaries", pubkey()))
+            .expect("parse");
+        assert_eq!(s.trees, vec!["pollis-verifiable-log:sth:v2:binaries"]);
+        assert_eq!(s.not_after_ms, None);
+    }
+
+    #[test]
+    fn the_key_id_is_derived_from_the_key_not_supplied() {
+        let s = parse_signer(&format!("{}:t", pubkey())).expect("parse");
+        assert_eq!(s.key_id.len(), 16);
+        assert_eq!(s.public_key, pubkey());
+    }
+
+    #[test]
+    fn a_malformed_key_is_rejected() {
+        assert!(parse_signer("not-hex:pollis-verifiable-log:sth:v2").is_err());
+        assert!(parse_signer("deadbeef:pollis-verifiable-log:sth:v2").is_err());
+    }
+
+    #[test]
+    fn a_spec_naming_no_trees_is_rejected() {
+        assert!(parse_signer(&format!("{}:", pubkey())).is_err());
+    }
 }
