@@ -230,12 +230,49 @@ These bytes are part of the reproducible payload, so a reproducer must bake the
   rebuilder's recipe — so the gap cannot silently reopen. Both directory values are
   public by construction (the key is the *verification* half; the private half never
   leaves the minting script), so publishing them in the recipe costs nothing.
-- **Status, stated plainly:** independent Linux reproduction has **not yet been
-  demonstrated end to end**. The mechanism exists and the recipe is now complete and
-  enforced, but the recipe `vars` must be populated in the repository before a run can
-  succeed, and no green `rebuild-verify.yml` run exists to date. Until one does, treat
-  "the Linux payload is independently reproducible" as *implemented and unverified*
-  rather than *proven*.
+- **Status: DEMONSTRATED, as of v1.8.4.** `rebuild-verify.yml` rebuilt the Linux
+  AppImage payload from public source at `v1.8.4` and the result matched the payload
+  hash in the transparency log, verified against the pinned ML-DSA-44 key:
+  `1a4213a162521a3bf9b3d60f34060222c64a47a083a47700e34efa0b6ead26d5` (run
+  `31361471279`). This is the first green run; before it the claim had never been
+  true, and three documents asserted it anyway.
+
+  **What it took, because each cause hid the next.** (1) The recipe was missing
+  `POLLIS_OVERLAY_DIRECTORY_URL`/`_KEY`. (2) The recipe `vars` did not exist at all,
+  so every value resolved empty. (3) The release built the capture helper — embedded
+  in the AppImage — with no determinism inputs, while the rebuilder applied all
+  three. (4) The release built from a warm `Swatinem/rust-cache`, so its output was
+  not a pure function of its source. (5) `LOG_DB_TOKEN` was baked by the release and
+  withheld from the recipe.
+
+  Ruled out with evidence rather than assumption, and recorded so nobody re-runs the
+  search: runner image (identical, `20260720.234.2`), apt package set (identical, 30
+  packages), meson version, the pinned toolchain, RUSTFLAGS, `SOURCE_DATE_EPOCH`, the
+  tauri config override, the baked git commit, the embedded frontend (vite content
+  hashes match), and compiler nondeterminism — two independent rebuilds produced
+  byte-identical output, which is what proved the divergence systematic.
+
+  A missing baked value presents as ~64 bytes of `.text` and a shifted `.rodata`, not
+  as an obviously absent string: one absent constant changes layout throughout. The
+  actionable signal was `strings` set-difference between the shipped and rebuilt
+  binaries, which named `LOG_DB_TOKEN` directly.
+
+- **`LOG_DB_TOKEN` is published in the recipe, and that costs nothing.** It is a
+  read-only bearer token to the commit-log DB, and it is compiled into every shipped
+  binary — it was recovered from the public `v1.8.4` AppImage with `strings` while
+  diagnosing the above. Anyone who downloads Pollis already holds it, so publishing it
+  as a repository variable adds no exposure that shipping the binary did not. Scoping
+  it out of the client remains the better end state (see below); until then, publishing
+  it is what makes the reproduction claim true for everyone rather than for us alone.
+- **Open limit — C/C++ build paths are not remapped.** `--remap-path-prefix` is a
+  *rustc* flag; it does not reach C/C++ compiled by build scripts through `cc-rs`. The
+  shipped binary embeds
+  `/home/runner/.cargo/registry/src/.../cxx-1.0.194/src/cxx.cc`. Both the release and
+  the reproducer run at `/home/runner`, so this does not affect the CI-to-CI result
+  above — but a third party building anywhere else will embed *their* path and fail to
+  reproduce. Until `-ffile-prefix-map` is added to `CFLAGS`/`CXXFLAGS`, "reproducible
+  by anyone" is precisely "reproducible by anyone building at the same path", and the
+  demonstrated result should be read that way.
 - **As of #506 (secrets-broker cutover, finishing #393) the client bakes no R2 or
   LiveKit credentials at all.** `R2_ACCESS_KEY_ID`, `R2_SECRET_KEY`, `R2_REGION`,
   `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are no longer read anywhere in the

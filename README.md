@@ -196,12 +196,28 @@ inspector if you like.
 
 **A note on verifiable builds (honest status).** The binaries tree proves that the
 release artifacts you downloaded are byte-for-byte the ones the pipeline logged and
-signed — it is a tamper-evident **binding**, not yet a *reproducible* build. Today
-binary integrity at install time still rests on platform code-signing (Apple
-Developer ID + notarization, Azure Trusted Signing). Full bit-for-bit
-reproducibility, cosign/SLSA provenance, and an in-app "verify this build" button
-are designed but **not shipped** — tracked in
-[#484](https://github.com/actuallydan/pollis/issues/484) and
+signed. Beyond that binding:
+
+- **Linux is reproducible, and that is demonstrated rather than asserted.** At
+  `v1.8.4` an independent rebuild from public source matched the payload hash in the
+  transparency log exactly (`1a4213a1…`), verified against the pinned log key alone.
+  The rebuilder now runs automatically after every release, so the property is
+  continuously checked. Two bounds worth stating: it covers the **Linux AppImage
+  payload**, and reproduction currently requires building at the same filesystem
+  path, because `--remap-path-prefix` is a rustc flag and does not cover C/C++ built
+  through `cc-rs`.
+- **macOS and Windows payload digests are recomputable from the artifact you
+  downloaded** — the shipped bundle with the platform's signing material normalized
+  back out — but they are **not** yet rebuilt-from-source, so they are a weaker claim
+  than Linux.
+- **Shipped:** cosign/SLSA build provenance anchored in public Rekor, and an in-app
+  "verify this build" check.
+- Install-time integrity still additionally rests on platform code-signing (Apple
+  Developer ID + notarization, Azure Trusted Signing) — transparency is *added to*,
+  not a replacement for, signing.
+
+Details and the full residual list:
+[docs/reproducible-builds-residuals.md](docs/reproducible-builds-residuals.md),
 [docs/verifiable-builds-design.md](docs/verifiable-builds-design.md).
 
 ## Releases
