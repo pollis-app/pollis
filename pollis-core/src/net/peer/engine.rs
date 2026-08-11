@@ -157,7 +157,17 @@ impl PeerEngine {
     /// cert only means anything once something has published it for clients to
     /// pin, and nothing publishes it yet, so persisting one would be storing a
     /// credential with no reader.
-    pub fn start(counters: Arc<PeerCounters>) -> anyhow::Result<PeerEngine> {
+    ///
+    /// `revocations` is not optional by accident. A peer's whole job is to
+    /// `Extend` to the next hop, and a node that cannot evaluate revocation
+    /// refuses to extend (#813 phase C, enforced in `serve_extend`) — so an
+    /// engine handed [`RevocationStore::unconfigured`] forwards nothing at all.
+    /// Taking it as a parameter makes that a decision at the call site instead
+    /// of a silent default that looks like it works.
+    pub fn start(
+        counters: Arc<PeerCounters>,
+        revocations: pollis_relay::policy::RevocationStore,
+    ) -> anyhow::Result<PeerEngine> {
         let identity = tls::generate_self_signed(tls::RELAY_SERVER_NAME)?;
         // Empty allowlist — permits nothing. See the module docs: this is what
         // makes "a peer is never an exit" structural.
@@ -168,6 +178,7 @@ impl PeerEngine {
         );
         // Forwarding to the next relay is the entire job.
         config.allow_extend = true;
+        config.revocations = revocations;
         config.max_concurrent_connections = MAX_CONCURRENT_CONNECTIONS;
         config.rate_limits = RateLimitConfig {
             // Loopback source addresses identify nothing behind the bridge; the
@@ -397,6 +408,38 @@ mod tests {
         ))
     }
 
+    /// A revocation store holding a freshly-signed list that revokes nobody.
+    ///
+    /// A node that cannot evaluate revocation refuses to extend circuits (#813
+    /// phase C, wired into `serve_extend` by phase E2), so "keyed, with a current
+    /// list" is the production shape of a middle hop and is what these tests must
+    /// run. Without this every `Extend` here fails `ExtendFailed`. Mirrors
+    /// `healthy_revocations()` in `pollis-relay/tests/onion.rs`; the unkeyed and
+    /// revoked cases are covered directly in `pollis-relay/tests/revocation.rs`.
+    fn healthy_revocations() -> pollis_relay::policy::RevocationStore {
+        use base64::Engine as _;
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let sk = SigningKey::from_bytes(&[42u8; 32]);
+        let now = pollis_relay::proto::now_unix();
+        let payload = format!(
+            r#"{{"version":1,"type":"pollis-relay-revocations","seq":1,"issued_at":{now},"expires_at":{},"revoked":[]}}"#,
+            now + 300
+        );
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let envelope = serde_json::json!({
+            "payload_b64": b64.encode(payload.as_bytes()),
+            "signature_b64": b64.encode(sk.sign(payload.as_bytes()).to_bytes()),
+        });
+        let store = pollis_relay::policy::RevocationStore::enforcing(
+            b64.encode(sk.verifying_key().to_bytes()),
+        );
+        store
+            .install(&serde_json::to_vec(&envelope).unwrap(), now, 0)
+            .expect("a freshly-signed empty list installs");
+        store
+    }
+
     /// A first-party relay: allowlists the origin and resolves it to loopback.
     fn spawn_first_party_relay() -> (
         SocketAddr,
@@ -409,6 +452,7 @@ mod tests {
             Allowlist::from_patterns([ORIGIN_NAME]),
         )
         .unwrap();
+        config.revocations = healthy_revocations();
         config
             .resolve_overrides
             .insert(ORIGIN_NAME.to_string(), IpAddr::V4(Ipv4Addr::LOCALHOST));
@@ -446,7 +490,7 @@ mod tests {
     async fn a_peer_cannot_be_a_circuits_exit() {
         let (origin, connections) = spawn_echo().await;
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters).unwrap();
+        let peer = PeerEngine::start(counters, healthy_revocations()).unwrap();
 
         let circuit = Circuit::build_single_hop(
             Hop::new(peer.quic_addr(), peer.cert_der().clone()),
@@ -469,7 +513,7 @@ mod tests {
     async fn a_peer_refuses_named_destinations_too() {
         let (origin, connections) = spawn_echo().await;
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters).unwrap();
+        let peer = PeerEngine::start(counters, healthy_revocations()).unwrap();
 
         let circuit = Circuit::build_single_hop(
             Hop::new(peer.quic_addr(), peer.cert_der().clone()),
@@ -489,7 +533,7 @@ mod tests {
         let (origin, connections) = spawn_echo().await;
         let (fp_addr, fp_cert, fp_stats, _fp_task) = spawn_first_party_relay();
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters.clone()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), healthy_revocations()).unwrap();
 
         let circuit = Circuit::build(
             vec![
@@ -525,7 +569,7 @@ mod tests {
         let (origin, connections) = spawn_echo().await;
         let (fp_addr, fp_cert, _fp_stats, _fp_task) = spawn_first_party_relay();
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters.clone()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), healthy_revocations()).unwrap();
 
         // Tunnel: client bridge ⇄ link ⇄ peer engine. Nothing dials the peer's
         // loopback endpoint from outside this process.
@@ -570,7 +614,7 @@ mod tests {
     async fn a_peer_reached_over_a_link_still_refuses_to_exit() {
         let (origin, connections) = spawn_echo().await;
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters.clone()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), healthy_revocations()).unwrap();
 
         let (client_end, peer_end) = loopback_pair();
         peer.serve_link(peer_end);
@@ -590,7 +634,7 @@ mod tests {
     #[tokio::test]
     async fn link_counters_return_to_zero_when_a_link_ends() {
         let counters = PeerCounters::new();
-        let peer = PeerEngine::start(counters.clone()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), healthy_revocations()).unwrap();
 
         let (client_end, peer_end) = loopback_pair();
         peer.serve_link(peer_end);
@@ -622,7 +666,7 @@ mod tests {
             f.fetch_add(1, Ordering::Relaxed);
         }));
 
-        let peer = PeerEngine::start(counters.clone()).unwrap();
+        let peer = PeerEngine::start(counters.clone(), healthy_revocations()).unwrap();
         let (client_end, peer_end) = loopback_pair();
         peer.serve_link(peer_end);
         for _ in 0..50 {
@@ -638,7 +682,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_stops_the_node() {
         let counters = PeerCounters::new();
-        let mut peer = PeerEngine::start(counters).unwrap();
+        let mut peer = PeerEngine::start(counters, healthy_revocations()).unwrap();
         let addr = peer.quic_addr();
         peer.shutdown().await;
 

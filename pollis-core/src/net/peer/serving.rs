@@ -187,7 +187,19 @@ impl RelayServingManager {
             .is_none();
 
         if engine_wanted && inner.engine.is_none() {
-            match PeerEngine::start(self.counters.clone()) {
+            // OPEN SEAM (#813): unconfigured means this engine will refuse every
+            // `Extend`, so it carries nothing. That is the honest state today —
+            // a peer is not reachable until the first-party reverse hop exists
+            // and nothing publishes peers into the directory yet, so no circuit
+            // can select one either. Wiring the client's directory-backed
+            // `RevocationStore` in here is the last step of making peer relaying
+            // live, and it must land with those two, not before: a peer that
+            // forwards without being able to evaluate revocation is exactly the
+            // fail-open this phase exists to prevent.
+            match PeerEngine::start(
+                self.counters.clone(),
+                pollis_relay::policy::RevocationStore::unconfigured(),
+            ) {
                 Ok(engine) => {
                     inner.engine = Some(engine);
                 }
