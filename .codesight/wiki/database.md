@@ -32,6 +32,14 @@ Unsafe (requires a multi-release dance — don't do these casually):
 
 If you genuinely need to remove something, the pattern is: (1) ship an app version that no longer reads/writes the doomed thing, (2) wait long enough that nearly all users have updated, (3) *then* drop it in a later migration. Stage over multiple releases.
 
+> **A note on migration numbers.** Numbers below the baseline (`000000_baseline.sql`)
+> refer to a **pre-baseline** series that no longer exists as files — the baseline
+> collapsed them. Where this doc says e.g. "migration 13" or "migration 18" it means
+> that historical series, not `pollis-core/src/db/migrations/`. Post-baseline
+> migrations are cited with their full six-digit name. The commit-log DB has its own
+> independent series under `migrations-log/`, starting again at `000001`; do not
+> confuse the two. Main-DB `000007` is a permanent hole — never reuse it.
+
 ## Remote Database (Turso)
 
 Source: `pollis-core/src/db/migrations/000000_baseline.sql` + numbered migrations `000001`+.
@@ -74,11 +82,12 @@ now reused rather than rebuilt.
 - `email` TEXT NOT NULL UNIQUE
 - `username` TEXT
 - `phone` TEXT
-- `identity_key` TEXT _(legacy, unused)_
 - `avatar_url` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
-- `account_id_pub` BLOB _(ML-DSA-44 pub key, 1312 bytes since #668 — was 32-byte Ed25519; added migration 13)_
-- `identity_version` INTEGER NOT NULL DEFAULT 1 _(increments on reset, migration 13)_
+- `account_id_pub` BLOB _(ML-DSA-44 pub key, 1312 bytes since #668 — was 32-byte Ed25519. Folded into the baseline)_
+- `identity_version` INTEGER NOT NULL DEFAULT 1 _(increments on identity reset. Folded into the baseline)_
+- `preferred_name` TEXT _(migration `000001`)_
+- There is **no** `identity_key` column. This doc used to list one as "legacy, unused"; it does not exist in the schema (#804). The local DB has an unrelated table of that name — see below.
 
 ### groups
 - `id` TEXT PK
@@ -202,7 +211,7 @@ anonymous-membership (not shipped — tracked in #489).
 - `inviter_id` TEXT NOT NULL FK users
 - `invitee_id` TEXT NOT NULL FK users
 - `created_at` TEXT NOT NULL DEFAULT now
-- **No `status` column.** All rows are implicitly pending. Deleted on accept or decline.
+- `status` TEXT NOT NULL DEFAULT 'pending' CHECK (`pending`, `accepted`, `declined`)
 
 ### group_join_request
 - `id` TEXT PK
@@ -509,8 +518,18 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 - UNIQUE INDEX `idx_account_key_log_user_version` on `(user_id, identity_version)` — one row per version per user; a duplicate INSERT conflicts rather than silently forking the history.
 - Dual-written in lock-step with `users.account_id_pub` by `generate_account_identity` (v1 at signup) and `reset_identity` (+1 per rotation). Migration backfills the current key of every user that already has an `account_id_pub`.
 
+### push_token _(migration 000006)_
+- `token` TEXT PK _(one Expo push token per device install)_
+- `user_id` TEXT NOT NULL
+- `platform` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+- Mobile only — desktop never registers, so the fanout is a no-op for desktop-only users.
+- **Content bound:** the notification this routes carries only `{conversationId, kind}` — never plaintext, sender, or any content. Consulted solely by `commands::push::notify_new_message`.
+- `token` is the PK so a re-register from the same device upserts rather than duplicating.
+- Retention: rows unrefreshed for `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS` are swept by the DS.
+
 ### user_groups / user_dms _(migration 000009 — created, then unused)_
-Empty, unread tables. Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned), and the maintenance + reads were reverted — but the migration is append-only history and the tables were already applied to prod/dev/test, so they remain **empty and unreferenced**. No code writes or reads them. Left in place; a future tightening migration can `DROP` them if desired.
+Backfilled-then-stale, unread tables. Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned), and the maintenance + reads were reverted — but the migration is append-only history and the tables were already applied to prod/dev/test, so they remain **unreferenced**. Note they are not empty: the migration backfills them from current membership at the bottom of the file, so they hold a frozen snapshot of the roster as of the moment it was applied — stale, and misleading if anyone assumes otherwise. No code writes or reads them. Left in place; a future tightening migration can `DROP` them if desired.
 
 ---
 
@@ -559,6 +578,33 @@ See [Local message retention](#local-message-retention) below.
 - `key` TEXT PK
 - `value` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL DEFAULT now
+
+### contact_verification _(account-key TOFU pins)_
+- `peer_user_id` TEXT PK
+- `account_id_pub` BLOB NOT NULL _(first key ever seen for this peer)_
+- `identity_version` INTEGER NOT NULL
+- `verified` INTEGER NOT NULL DEFAULT 0 _(1 once the user confirms the safety number)_
+- `first_seen_at`, `updated_at` TEXT NOT NULL DEFAULT now
+- **Why it is local.** This is the pin that makes a malicious Turso write to `users.account_id_pub` *detectable*. Storing it remotely would let the same attacker rewrite the evidence. Written by `batch_check_and_pin_account_keys` (`commands/safety.rs`) on every group reconcile and DM ingest; a mismatch emits a `KeyChanged` realtime event and clears `verified`.
+- The pin is per **user**, not per conversation, so verifying a peer once shields them everywhere they appear.
+
+### mls_generation _(suite-migration lineage, #454 P4)_
+- `conversation_id` TEXT PK
+- `generation` INTEGER NOT NULL
+- `updated_at` TEXT NOT NULL DEFAULT now
+- Which suite *generation* of a conversation's MLS group this device is on. MLS binds the ciphersuite into the group, so moving a live conversation to a new suite means a **successor group** restarting at epoch 0 — a second lineage. `GroupId` is the conversation id verbatim at generation 0 and `"{conversation_id}#g{generation}"` after.
+
+### mls_self_update _(PCS sweep bookkeeping, #666)_
+- `conversation_id` TEXT PK
+- `last_epoch` INTEGER NOT NULL
+- `last_at` TEXT NOT NULL
+- When this device last rotated its own leaf in this conversation, so the launch-driven sweep can honour `SELF_UPDATE_INTERVAL` (7 days + per-conversation jitter) without a background timer.
+
+### user_cache
+- `id` TEXT PK
+- `username` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL DEFAULT now
+- Username lookup cache so the UI can render a sender without a remote round trip. Not authoritative — `users` in Turso is.
 
 ### mls_kv _(OpenMLS storage provider)_
 - PK: (`scope`, `key`)

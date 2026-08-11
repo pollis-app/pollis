@@ -393,7 +393,7 @@ These go through `upload_file` / `download_file` (the non-`upload_media` path) a
 
 ## 10. Real-Time Media (LiveKit)
 
-Source: `pollis-core/src/commands/livekit.rs`, `voice.rs`, `realtime.rs`.
+Source: `pollis-core/src/commands/livekit/`, `voice/`, `realtime.rs`.
 
 ### 10.1 Authentication
 
@@ -406,7 +406,7 @@ LiveKit uses room-scoped JWT tokens (`make_token`, `make_admin_token`):
 
 LiveKit is a Selective Forwarding Unit (SFU). The peer-to-SFU hop is encrypted with **DTLS-SRTP** (RFC 5763, RFC 5764) like every WebRTC application, but DTLS-SRTP terminates at the SFU — in a vanilla deployment that means the SFU sees plaintext audio, the same posture Slack Huddles, Microsoft Teams, and Google Meet ship.
 
-Pollis adds a second layer of encryption applied per-frame, post-Opus and pre-SRTP. The cipher is **AES-128-GCM**; the implementation is libwebrtc's native `FrameCryptor` (the same machinery that backs the `livekit-client` JS SDK's `setupE2EE` and Discord's 2024 DAVE protocol). It is wired up via `livekit::e2ee::E2eeOptions { encryption_type: EncryptionType::Gcm, key_provider }` passed into `RoomOptions::encryption` at `Room::connect` time in `pollis-core/src/commands/voice.rs::join_voice_channel`. The SFU still routes the RTP packets — packet headers stay readable — but the payload is opaque ciphertext to anyone without the shared key.
+Pollis adds a second layer of encryption applied per-frame, post-Opus and pre-SRTP. The cipher is **AES-128-GCM**; the implementation is libwebrtc's native `FrameCryptor` (the same machinery that backs the `livekit-client` JS SDK's `setupE2EE` and Discord's 2024 DAVE protocol). It is wired up via `livekit::e2ee::E2eeOptions { encryption_type: EncryptionType::Gcm, key_provider }` passed into `RoomOptions::encryption` at `Room::connect` time in `pollis-core/src/commands/voice/lifecycle.rs::join_voice_channel`. The SFU still routes the RTP packets — packet headers stay readable — but the payload is opaque ciphertext to anyone without the shared key.
 
 **Key derivation.** The shared 32-byte voice key is exported from the channel's MLS group at the current epoch:
 

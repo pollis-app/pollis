@@ -118,7 +118,7 @@ DB, split out in #420 Goal A).
 | MLS commit history | `mls_commit_log` (log DB) | Pruned to the tier-1 floor (min applied epoch across current member devices) with a tier-2 per-conversation hard cap | commit-log retention code + `retention_tests` |
 | Latest MLS group state | `mls_group_info` | Latest epoch only; overwritten, no history | `000001_commit_log_db.sql` |
 | Per-device commit catch-up | `mls_commit_since` | Indefinite, upserted monotonically | `000003_mls_commit_since.sql` |
-| Welcome messages | `mls_welcome` | Deduplicated per `(conversation, recipient, recipient_device, generation)`; superseded rows are replaced on upsert; cascade-deleted with the user | `000002_mls_welcome_unique_recipient.sql` |
+| Welcome messages | `mls_welcome` | Deduplicated per `(conversation_id, recipient_id, recipient_device_id)`; a resend for that tuple replaces the blob and re-arms delivery rather than stacking a row; cascade-deleted with the user | `migrations-log/000002_mls_welcome_unique_recipient.sql` |
 | Key packages | `mls_key_package` | Claimed packages are marked `claimed=1`, not hard-deleted; cascade-deleted with the user | `000000_baseline.sql`, `000010` |
 | Accounts | `users` | Life of the account; deleted on account deletion | `account.rs:808` |
 | Devices | `user_device` | Revocation writes a `revoked_at` tombstone (the row is retained so revoked devices stop pinning retention and cannot re-authenticate); rows are hard-deleted on logout and on account deletion | `000004_user_device_revoked_at.sql`; `account.rs:626,715,722` |

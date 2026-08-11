@@ -4,7 +4,8 @@
 //! per-OS difference is which helper binary is spawned
 //! (`capture_helper_name()`); everything after — socket accept, the
 //! `pollis-capture-proto` Format/Frame/Error decode, LiveKit publish,
-//! FPS cap, libyuv ARGB->I420 — is identical. This is exactly the
+//! libyuv ARGB->I420 — is identical (there is no FPS cap; see the
+//! module-wide constants note in `screenshare/mod.rs`). This is exactly the
 //! de-risking #283 Phase 2 buys: every SCK call now runs in a process
 //! whose death the parent already tolerates.
 //!

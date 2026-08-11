@@ -6,6 +6,14 @@ both pre-LiveKit:
 - **RNNoise** (via [`nnnoiseless`](https://crates.io/crates/nnnoiseless)) — optional ML denoiser, off by default. Handles transients APM misses.
 - **APM** (via [`webrtc-audio-processing`](https://crates.io/crates/webrtc-audio-processing)) — the PulseAudio repackage of WebRTC's AudioProcessing module. AGC2 + spectral NS + HPF + AEC. Replaces libwebrtc's internal APM, which we cannot tune from Rust.
 
+> **Windows: APM does not run.** `webrtc-audio-processing-sys` has no MSVC support
+> upstream, so on Windows `ApmStage` compiles against a **no-op `Processor`**
+> (`#[cfg(target_os = "windows")]` in `voice_apm.rs`). Construction still succeeds and
+> the requested config is still stored and reported — so settings round-trip and the UI
+> behaves — but **no frame is processed**: no AGC, no NS, no HPF, no AEC. Windows users
+> get raw mic audio into LiveKit. This is a real platform gap, not a detail; everything
+> below describes the Linux/macOS path unless it says otherwise.
+
 ## What APM does
 
 One `Processor` instance per voice session handles:
@@ -73,7 +81,7 @@ speaking (plug a mic in mid-call) currently requires a rejoin —
 
 - `pollis-core/src/commands/voice_apm.rs` — `ApmStage`, `ApmConfig`, helpers (`run_capture`, `analyze_render`).
 - `pollis-core/src/commands/voice_denoiser.rs` — `DenoiserStage` wrapping `nnnoiseless::DenoiseState`. 48 kHz only.
-- `pollis-core/src/commands/voice.rs` — pipeline wiring: `start_mic_stream`, `start_speaker_stream`, `run_drain_task`, `run_mixer_task`, `ensure_playback`, `register_remote_track`. Backend commands `join_voice_channel` / `set_voice_audio_processing` / `set_voice_input_device` / `set_voice_output_device`.
+- `pollis-core/src/commands/voice/` — pipeline wiring: `start_mic_stream`, `start_speaker_stream`, `run_drain_task`, `run_mixer_task`, `ensure_playback`, `register_remote_track`. Backend commands `join_voice_channel` / `set_voice_audio_processing` / `set_voice_input_device` / `set_voice_output_device`.
 - `pollis-core/src/commands/voice_e2ee.rs` — derives the per-room shared symmetric key from the channel's MLS exporter secret (`MlsGroup::export_secret("pollis/voice/v1", epoch, 32)`), builds the `livekit::e2ee::E2eeOptions` passed into `Room::connect`, and rotates the live `KeyProvider` on MLS epoch advance.
 - `frontend/src/hooks/queries/usePreferences.ts` — `ApmConfig`, `preferencesToApmConfig`, `APM_DEFAULTS`.
 - `frontend/src/pages/VoiceSettingsPage.tsx` — UI surface (mic boost slider, AGC switch + target slider, NS dropdown, AEC switch, Click Suppression switch). Mid-call changes push via `set_voice_audio_processing`.
@@ -113,8 +121,8 @@ SFU forwards ciphertext; no server (LiveKit, Pollis, or otherwise) can decrypt.
 APM is locked to the cpal mic input rate at construction. WebRTC supports 8 / 16 / 32 / 48 kHz. The pipeline:
 
 - prefers 48 kHz everywhere.
-- will use 16 / 24 kHz if the mic only advertises that (Bluetooth SCO on macOS / Linux).
-- disables APM for the session if the mic returns anything else (very rare; e.g. legacy 44.1 kHz USB cards). The session falls back to libwebrtc's internal APM in that case — the configurable submodules just stop applying.
+- will use 8 / 16 / 32 kHz if the mic only advertises one of those (Bluetooth SCO on macOS / Linux). **24 kHz is not supported** — WebRTC accepts only 8/16/32/48, and this doc previously listed 24 in error (#804).
+- refuses to construct for any other rate (very rare; e.g. legacy 44.1 kHz USB cards): `ApmStage::new` returns `Err("APM only supports 8/16/32/48 kHz, got …")` and the session simply runs **without APM**. There is no fallback to libwebrtc's internal APM — `AudioSourceOptions` has echo cancellation, noise suppression, and AGC all set to `false`, so nothing picks up the slack. The signal goes through unprocessed.
 
 Speaker is asked for the same rate as the mic; `start_speaker_stream` falls back to the device's native rate if it can't honour the request. When speaker rate ≠ APM rate the AEC render reference would be aliased, so the mixer skips `analyze_render_frame` for that session and AEC runs without a reference (capture-side adaptation only).
 
@@ -160,7 +168,7 @@ The vendored build runs meson + ninja on the C++ source. CI installs:
 
 - **Linux** (`apt`): `cmake clang meson ninja-build` (in addition to existing GTK/audio deps).
 - **macOS** (`brew`): `meson ninja` (clang/cmake come with Xcode CLT).
-- **Windows** (`choco`): `meson ninja` (cmake / MSVC come with VS2022 on the runner).
+- **Windows** (`choco`): `meson ninja` — installed for consistency, though the vendored APM is not actually built into the Windows binary (see the no-op note above).
 
 For local Linux dev: `pacman -S meson ninja clang cmake` (Arch) or the equivalent for your distro.
 
@@ -168,11 +176,13 @@ For local Linux dev: `pacman -S meson ninja clang cmake` (Arch) or the equivalen
 
 - **Voice Settings test harness** (`commands/voice_test.rs`). The mic test, record/playback, and tone playback all bypass APM intentionally: users want to verify the device is delivering audio at all, not what it sounds like after processing. The level meter shows the raw pre-APM signal.
 - **Speaker monitor loopback** (the "Hear myself" toggle). Same reason — diagnostic only.
+- **Windows**, entirely — see the note at the top.
 
 ## Known gaps
 
 - No resampler in the AEC reference path. Speaker-rate ≠ APM-rate sessions run without a render reference (logged at session start). Adding `rubato` for these edge cases is on the radar but unnecessary for the 99% case.
 - No per-host calibration of `stream_delay_ms`; we let APM3 estimate. Worth profiling per-platform before tuning.
+- **No APM on Windows at all** (no MSVC support upstream in `webrtc-audio-processing-sys`). The largest of these gaps by far: it is a whole platform running unprocessed mic audio, not an edge case.
 - RNNoise (the click-suppression path) is 48 kHz only. Bluetooth SCO devices at 16/24 kHz can't run it. Discord uses a heavier proprietary denoiser (Krisp) for higher quality; an open-source upgrade path is DeepFilterNet, which isn't published to crates.io yet (would require a git dep + ~5 MB model).
 
 ---

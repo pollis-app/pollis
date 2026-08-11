@@ -63,7 +63,25 @@ turso db show pollis-selfhost --url        # -> libsql://...turso.io
 turso db tokens create pollis-selfhost     # -> the auth token
 ```
 
-The schema is created/migrated by the client on first connect — no manual SQL.
+**You have to create the schema yourself — the client will not do it.** The client
+connects with a read-only token and has no code path that creates tables, so
+skipping this leaves you with an empty database and an app that fails on first
+query. Apply the baseline and then every numbered migration, in order:
+
+```bash
+turso db shell pollis-selfhost < pollis-core/src/db/migrations/000000_baseline.sql
+for f in pollis-core/src/db/migrations/0000[1-9]*.sql; do
+  echo "applying $f"
+  turso db shell pollis-selfhost < "$f"
+done
+```
+
+If you also run a separate commit-log DB (optional — see `LOG_DB_URL` in step 6),
+apply `pollis-core/src/db/migrations-log/*.sql` to *that* database the same way.
+Skip it and the MLS control-plane tables live in the main DB instead, which works
+fine for a single-operator deployment.
+
+New migrations land in those directories over time; re-run the loop after pulling.
 
 ## 3. Stand up your own LiveKit SFU
 
@@ -137,32 +155,59 @@ key/secret, and note the S3 endpoint and a public URL for serving objects.
 
 Copy the sample and fill in everything you provisioned:
 
-```bash
-cp .env.example .env.development
-```
+The split matters: **shared secrets belong to the Delivery Service, not the
+client.** The R2 access key, the LiveKit API secret, and the Resend key used to
+ship inside the client binary, where anyone could extract them; #393/#506 moved
+them server-side and the client no longer reads them at all. Putting them in the
+client env does not enable anything — it just puts a secret on every desktop you
+install on.
+
+**Client** — `.env.development` at the repo root:
 
 ```ini
 TURSO_URL=libsql://pollis-selfhost-....turso.io
-TURSO_TOKEN=<token from step 2>
+TURSO_TOKEN=<a READ-ONLY token from step 2>
 
+# Required. The client has no direct-write path; without this, every write fails.
 POLLIS_DELIVERY_URL=https://<your-ds-domain>   # the reverse proxy in front of step 4
 
-R2_ACCESS_KEY_ID=<from step 5>
-R2_SECRET_KEY=<from step 5>
+# Non-secret R2 values — where to fetch from, not credentials to write with.
 R2_S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com/<bucket>
 R2_PUBLIC_URL=https://<your-public-r2-url>
+
+# Non-secret LiveKit value — the ws URL only. The API key/secret are DS-side.
+LIVEKIT_URL=wss://<your-livekit-domain>
+
+# Optional: separate commit-log DB. LOG_DB_TOKEN must be READ-ONLY.
+# LOG_DB_URL=libsql://pollis-selfhost-log-....turso.io
+# LOG_DB_TOKEN=<read-only token>
+```
+
+**Delivery Service** — passed to `docker run` in step 4, never to the client:
+
+```ini
+TURSO_URL=libsql://pollis-selfhost-....turso.io
+TURSO_TOKEN=<a READ-WRITE token from step 2>
+
+R2_ACCESS_KEY_ID=<from step 5>
+R2_SECRET_ACCESS_KEY=<from step 5>
+R2_BUCKET=<your bucket>
 
 LIVEKIT_URL=wss://<your-livekit-domain>
 LIVEKIT_API_KEY=<from step 3>
 LIVEKIT_API_SECRET=<from step 3>
 
-# Resend is required to build Config; a placeholder is fine if you bypass email:
-RESEND_API_KEY=placeholder
-DEV_OTP=000000          # skip the email send; type 000000 as the OTP code
+RESEND_API_KEY=<your Resend key>   # the DS sends the OTP email
+DEV_OTP=000000                     # or set this to skip email entirely
+
+# LOG_DB_URL + LOG_DB_ADMIN_TOKEN (read-write) if you split the commit-log DB.
 ```
 
-(See [`pollis-core/src/config.rs`](../pollis-core/src/config.rs) for the exact
-variables the core reads.)
+`pnpm dev` sources `.env.development` automatically. The authoritative list of what
+the *client* reads is the `option_env!`/`env::var` calls in
+[`pollis-core/src/config.rs`](../pollis-core/src/config.rs); for the DS it is the
+header comment in [`pollis-delivery/src/main.rs`](../pollis-delivery/src/main.rs).
+If a variable is in neither, nothing reads it.
 
 ## 7. Run it
 

@@ -512,8 +512,9 @@ Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
 
 The only tier that drives the **actual shipped app** — the real WebKitGTK
 WebView inside the Tauri shell, real Rust core, real Tauri IPC — rather than
-`MockRuntime` or a browser build of the frontend. Three scripts under `e2e/`,
-sharing `e2e/lib/harness.js` for the `tauri-driver`/WebKitWebDriver plumbing
+`MockRuntime` or a browser build of the frontend. **Thirteen scenario scripts**
+under `e2e/` (plus `run.js`, the single entry point), sharing
+`e2e/lib/harness.js` for the `tauri-driver`/WebKitWebDriver plumbing
 (raw `webdriverio` `remote()` calls, not the wdio test runner — the runner
 intermittently stalls the first WebView command against this webkit2gtk
 build):
@@ -523,6 +524,22 @@ build):
 | `smoke.js` | app launches, login screen renders | no |
 | `e2e.js` | full signup: email → OTP → secret key → PIN → app-ready | yes (writable test Turso) |
 | `invalid-otp.js` | wrong OTP code is rejected, doesn't advance past code entry | yes (writable test Turso) |
+| `restart-persistence.js` | sign up, kill the app, relaunch on the same data dir → session and data survive | yes |
+| `two-client.js` | DM request → accept → message, across two real app instances | yes |
+| `two-client-dm-reply.js` | the reverse direction: B replies, A sees it | yes |
+| `two-client-channel.js` | group + channel convergence: create, invite, accept, post, receive | yes |
+| `two-client-delete.js` | delete convergence — the peer sees the tombstone | yes |
+| `two-client-call.js` | 1:1 call place + accept, both sides see each other | yes (+ LiveKit) |
+| `two-client-camera.js` | camera on → the peer renders the remote tile | yes (+ LiveKit) |
+| `two-client-screenshare.js` | screenshare → the peer renders the remote tile | yes (+ LiveKit) |
+| `two-client-voice-channel.js` | voice channel join/leave, participant counts converge | yes (+ LiveKit) |
+| `voice-channel-no-mic.js` | joining a voice channel with no microphone degrades instead of failing | yes (+ LiveKit) |
+
+Scenario coverage against the full intended matrix — including what is **not** yet
+automated — is tracked in [`e2e/SCENARIOS.md`](../../e2e/SCENARIOS.md), which ranks
+candidates by value × (1 − confidence). Each two-client scenario also has its own
+dispatch-only workflow (`.github/workflows/e2e-*.yml`); they are deliberately not
+merge-blocking, since they need real LiveKit and a writable Turso.
 
 Every scenario runs through one entry point — `pnpm e2e <scenario>` (one
 package.json script, not one per test; the scenario list is the `e2e/*.js`
@@ -537,12 +554,12 @@ pnpm --filter @pollis/e2e e2e invalid-otp
 `smoke.js` is the fast, backend-free one: the logged-out path
 (`checkStoredSession()` in `frontend/src/App.tsx`) resolves entirely from
 local Tauri commands, so it never calls out to the delivery service or
-Turso. `.github/workflows/e2e-smoke.yml` runs it on `workflow_dispatch`. The
-other two need a writable test Turso with the schema applied plus a running
+Turso. `.github/workflows/e2e-smoke.yml` runs it on `workflow_dispatch`. Every
+other scenario needs a writable test Turso with the schema applied plus a running
 delivery service — all stood up automatically by
 `e2e/scripts/start-backend.sh` (a libsql server + `scripts/db-apply.sh` +
 the real `pollis-delivery` binary; issue #570, M1). `.github/workflows/e2e-full.yml`
-runs both on `workflow_dispatch` behind that script; locally,
+runs them on `workflow_dispatch` behind that script; locally,
 `eval "$(e2e/scripts/start-backend.sh)"` then run the scripts (see
 `e2e/README.md`).
 

@@ -1,6 +1,15 @@
 # Goal A — Commit-log DB deploy runbook
 
-**Scope:** the infra + human steps that take #420 (Goal A — commit-log
+> **STATUS: COMPLETE.** This cutover shipped. Prod and dev both run a separate
+> commit-log DB — `LOG_DB_URL` + `LOG_DB_ADMIN_TOKEN` are wired into
+> `delivery-deploy-prod.yml` / `delivery-deploy-dev.yml`, which migrate the log DB
+> on every deploy. The runbook is kept as the record of *how* it was done and as
+> the procedure to re-run when standing up a new environment; it is no longer a
+> list of pending work. Two sections that described the world before the cutover
+> have been marked obsolete in place rather than deleted, because the reasoning in
+> them still explains why the current shape is what it is.
+
+**Scope:** the infra + human steps that took #420 (Goal A — commit-log
 sole-writer) from "code merged" to "live in prod". Design and rationale live in
 [`goal-a-commit-log-sole-writer.md`](./goal-a-commit-log-sole-writer.md); this
 file is only the ordered operational checklist.
@@ -26,13 +35,24 @@ impossible.
 ## CODE vs INFRA/HUMAN
 
 Everything below the line in each section is a **human action**. The CODE side
-(merged via PR) is already covered by streams S1–S6 plus S7's CI wiring. The one
-remaining CODE prerequisite that this runbook depends on is called out in the
-**000007 hazard** section — it must land before a release tag is pushed.
+(merged via PR) is already covered by streams S1–S6 plus S7's CI wiring. The one CODE prerequisite this runbook depended on — the **000007 hazard** — was
+resolved in #420 and is retained below only as history.
 
 ---
 
-## 000007 hazard — read before applying any migration
+## ~~000007 hazard~~ — RESOLVED in #420, kept as history
+
+> **Obsolete.** The fix below was applied: the log-DB schema no longer sits in the
+> shared migration directory. It lives in its own series at
+> `pollis-core/src/db/migrations-log/`, starting at `000001_commit_log_db.sql`, with
+> its own `schema_migrations` table in the log DB. There is no `000007` in
+> `pollis-core/src/db/migrations/` and no way for a log-DB migration to be applied
+> to the main DB. Nothing here is actionable; it is preserved because it explains
+> why the two migration series exist.
+
+<details>
+<summary>Original hazard text</summary>
+
 
 `scripts/db-apply.sh` applies **every** `*.sql` in `MIGRATIONS_DIR` that the
 target DB has not already recorded, then records each version into **that DB's
@@ -74,6 +94,10 @@ the log DB to be provisioned until that move has merged.**
 harmless-but-misleading v7 record on main + manually pre-create the log DB
 schema by hand. Rejected — it pollutes the log DB with the full main schema as
 described above. The dedicated-dir move is the clean answer.)
+
+---
+
+</details>
 
 ---
 
@@ -139,48 +163,36 @@ Per env config, store all three:
 
 ---
 
-## 3. VPS — point the DS at the log DB
+## 3. Point the DS at the log DB
 
-The DS reads its env from `/root/ds.env` on the VPS. It keeps its existing
-**main-DB** `TURSO_URL`/`TURSO_TOKEN` (used for auth + `user_device` lookups,
-which stay in the main DB) and gains the log-DB pair:
+> **Superseded (#515).** This step originally edited `/root/ds.env` on a VPS and
+> poked Watchtower to recreate the container. The DS no longer runs on a VPS: it
+> runs on **Cloudflare Containers** (a Worker + Durable Object fronting the same
+> image), deployed by `delivery-deploy-prod.yml` / `delivery-deploy-dev.yml`. The
+> `DEV_OTP` co-location warning below no longer applies either — prod and dev are
+> separate Workers with separate `wrangler.*.jsonc` configs and separate secret
+> stores, so a dev value cannot reach prod by sharing a file.
 
-```sh
-# /root/ds.env  (append; keep the existing TURSO_URL/TURSO_TOKEN main-DB lines)
-LOG_DB_URL=libsql://pollis-log-prod-….turso.io
-LOG_DB_ADMIN_TOKEN=<read-write token for pollis-log-prod>
+Secrets live in Doppler and are synced into Wrangler's Secrets Store by the deploy
+workflow. The DS needs, in its own environment:
+
+```ini
+TURSO_URL / TURSO_TOKEN              # main DB — auth + user_device lookups
+LOG_DB_URL / LOG_DB_ADMIN_TOKEN      # commit-log DB, READ-WRITE (sole writer)
 ```
 
-The DS uses the **admin (read-write)** token — it is the sole writer. When both
-`LOG_DB_URL` and `LOG_DB_ADMIN_TOKEN` are set it routes MLS control-plane writes
-to the log DB; when unset it falls back to the main DB (see
-`pollis-delivery/src/main.rs`). **Do not** put `LOG_DB_TOKEN` (read-only) on the
-DS.
+The DS uses the **admin (read-write)** token because it is the sole writer. When
+both `LOG_DB_URL` and `LOG_DB_ADMIN_TOKEN` are set it routes MLS control-plane
+writes to the log DB; when unset it falls back to the main DB (see
+`pollis-delivery/src/main.rs`). **Never** give the DS `LOG_DB_TOKEN` (the
+read-only token) — that one is for client builds.
 
-Then redeploy the DS so it picks up the new env: run the **Deploy Delivery
-(prod)** workflow (`.github/workflows/delivery-deploy-prod.yml`,
-`workflow_dispatch`). It rebuilds the image and pokes Watchtower to recreate the
-`delivery` container in place, re-reading `/root/ds.env`.
-
-(Dev DS at `/root/ds.env` on its host + **Deploy Delivery (dev)** equivalently.)
-
-> **⚠️ Co-located dev + prod on one host — keep `DEV_OTP` off prod.** Dev builds
-> can auto-enroll via a fixed `DEV_OTP` (the DS skips the email send and accepts
-> only that code; see `pollis-delivery/src/otp.rs`). That is a deliberate sign-in
-> **bypass** — on the prod `delivery` container it would make the production OTP a
-> fixed, publicly-guessable code (account takeover). If a single host runs **both**
-> `delivery` (`:prod`) and `delivery-dev` (`:dev`), do **NOT** append `DEV_OTP` to a
-> shared `/root/ds.env` — both containers would read it. Scope it to dev only:
->
-> - **compose-managed:** put `DEV_OTP=000000` under the `delivery-dev` service's own
->   `environment:` block (per-service; physically can't reach `delivery`), or
-> - **run-managed:** give dev its own file (e.g. `/root/ds-dev.env` = the shared
->   lines **plus** `DEV_OTP`) and point only `delivery-dev` at it; leave
->   `/root/ds.env` untouched for prod.
->
-> Confirm the env-file → container mapping (read-only) before changing anything —
-> e.g. `docker inspect delivery --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1`
-> to list prod's env **key names** (no values) and verify `DEV_OTP` is not among them.
+To apply: set the values in Doppler, then run the **Deploy Delivery (prod)** or
+**Deploy Delivery (dev)** workflow. Each deploy also runs `db-apply.sh` against
+the log DB, so the migration series in `migrations-log/` is applied before the new
+image goes live. Confirm the rollout with `curl https://api.pollis.com/version`
+and check the returned SHA is the commit you deployed — a workflow that merely
+succeeded is not proof the new container is serving.
 
 ---
 
@@ -227,8 +239,8 @@ The token flip is the last thing that happens. Do these strictly in order:
 
 If the log DB misbehaves after cutover:
 
-1. **Unset `LOG_DB_URL` + `LOG_DB_ADMIN_TOKEN` in `/root/ds.env`** and redeploy
-   the DS (Deploy Delivery workflow). With `LOG_DB_*` unset the DS falls back to
+1. **Remove `LOG_DB_URL` + `LOG_DB_ADMIN_TOKEN` from the DS's Doppler config** and
+   redeploy (Deploy Delivery workflow). With `LOG_DB_*` unset the DS falls back to
    writing the **main** DB's copies of the three tables (the fallback path in
    `pollis-delivery/src/main.rs`) — old shipped clients still read/write those,
    so the system is back to pre-Goal-A behavior.

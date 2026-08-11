@@ -10,6 +10,10 @@ The path in each section header below points at the implementation in `pollis-co
 >
 > At that point the app registered **167** commands in `tauri::generate_handler![…]`. The prose sections below describe roughly **half** of them; the rest (voice calls/ringing, camera, screenshare, tray, terminal, reactions, safety numbers, retention/eviction, media permissions, transparency self-audit, sound effects, update gating, clipboard, and several groups/messages commands) have **no prose here at all**. Nothing below has been re-verified line by line beyond the corrections noted in this pass, so treat an entry's *arguments and return shape* as a hint, not a contract.
 >
+> A **complete index of all 167 registered names** is now appended at the bottom of this
+> file, so nothing is invisible — but the *prose* coverage is still partial, and the
+> arguments/return shapes below remain a hint rather than a contract.
+>
 > **The authoritative list is the code, not this file.** To get it:
 >
 > ```bash
@@ -47,7 +51,7 @@ PIN is cryptographically load-bearing — see `pin-design.md`.
 - `save_preferences(user_id, preferences_json)`
 - ~~`upload_avatar(user_id, file_data, file_name, content_type)`~~ / ~~`get_avatar_url(user_id)`~~ — **neither exists** anywhere in `pollis-core` or `src-tauri` as of 2026-08-03 (#714). Struck out rather than replaced with a guess: `avatar_url` is a field on the user profile returned by `get_user_profile`; whatever writes it is not one of these two commands. Trace it from `frontend/src/hooks/queries/useUserProfile.ts` before documenting a replacement.
 
-## groups (`commands/groups.rs`)
+## groups (`commands/groups/`)
 - `list_user_groups(user_id)` → `Group[]`
 - `list_user_groups_with_channels(user_id)` → `GroupWithChannels[]`
 - `list_group_channels(group_id)` → `Channel[]`
@@ -116,13 +120,13 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `reset_identity(user_id)` → new secret key. **Not a registered Tauri command** as of 2026-08-03 (#714): it is `pollis_core::commands::account_identity::reset_identity`, reached from the registered `reset_identity_and_recover`.
 - Also registered in this module but undocumented here: `list_security_events`. See Appendix A.
 
-## livekit (`commands/livekit.rs`)
+## livekit (`commands/livekit/`)
 - Tokens are minted by the DS now (#393) — no on-device signer. `get_livekit_token` and friends call `ds_livekit_token` (`POST /v1/livekit/token`); server-side fan-out/roster go through `ds_livekit_send_data` / `ds_livekit_participants`. The client holds no LiveKit API secret.
 - `get_livekit_token(room_id, user_id, username)` → token string (identity/name derived server-side; the args are ignored)
 - `subscribe_realtime(on_event: Channel)`
 - `connect_rooms(room_ids, user_id, username)`
 
-## voice (`commands/voice.rs`)
+## voice (`commands/voice/`)
 **Participant identity** is per-device: `voice-{user_id}:{device_id}` (device_id from `AppState.device_id`; falls back to legacy `voice-{user_id}` pre-login). This lets two devices of the same user coexist in one room instead of colliding on the SFU (#140) — mirrors the realtime/inbox scheme in `livekit/realtime.rs`. Parse the user back out with `voice::user_id_from_voice_identity` (Rust) / `voice/identity.ts` (frontend). The voice event loop **does not play back** audio tracks whose parsed user_id is the local user's (self-hear mute) but still shows them as participants. `RoomEvent::Disconnected` now fully tears down the room + mic stream via `release_voice_resources` (previously leaked).
 - `prepare_voice_connection(channel_id, user_id, display_name)` — best-effort warmup fired on user "intent" (hover, route entry). Pre-fetches + caches the DS-minted voice token (identity derived server-side, so it matches the join) and runs a one-shot HTTPS probe to warm DNS / TLS / connection pool. Idempotent; safe to call eagerly. Consumed by the next `join_voice_channel` for the same channel + identity.
 - `join_voice_channel(channel_id, user_id, display_name, input_device, output_device, audio_processing)` — connect to LiveKit and publish the local mic. `audio_processing` is the `ApmConfig` struct (AGC + NS + AEC settings) — see [Audio Processing](./audio-processing.md). Consumes a fresh warmup if present and runs `Room::connect` + cpal mic init concurrently to minimise cold-start latency.
@@ -189,4 +193,66 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 If this appendix and `src-tauri/src/lib.rs` disagree, `lib.rs` is right and this file is stale.
 
 ---
+_Back to [index.md](./index.md)_
+
+---
+
+## Complete registered-command index
+
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **167 commands** in 25 shim modules.
+Prose above covers roughly half of these; this index covers all of them, so a name that
+appears here but not above is registered and real, just undocumented. Regenerate rather
+than hand-edit.
+
+**`(root)`** (3) — `hide_window`, `read_clipboard_files`, `read_clipboard_image_to_temp`
+
+**`tray`** (4) — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
+
+**`media_permissions`** (4) — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
+
+**`auth`** (15) — `delete_account`, `dev_login`, `get_identity`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
+
+**`pin`** (4) — `get_unlock_state`, `lock`, `set_pin`, `unlock`
+
+**`device_enrollment`** (9) — `approve_device_enrollment`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
+
+**`safety`** (3) — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
+
+**`transparency`** (3) — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
+
+**`overlay`** (2) — `get_overlay_mode`, `set_overlay_mode`
+
+**`user`** (5) — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
+
+**`groups`** (23) — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_user_groups`, `list_user_groups_with_channels`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
+
+**`dm`** (8) — `accept_dm_request`, `add_user_to_dm_channel`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`, `remove_user_from_dm_channel`
+
+**`blocks`** (3) — `block_user`, `list_blocked_users`, `unblock_user`
+
+**`messages`** (19) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `read_channel_messages`, `read_dm_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
+
+**`mls`** (3) — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
+
+**`livekit`** (12) — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
+
+**`r2`** (5) — `download_file`, `download_media`, `get_media_url`, `upload_file`, `upload_media`
+
+**`update`** (2) — `is_update_required`, `mark_update_required`
+
+**`install_kind`** (1) — `detect_managed_install`
+
+**`voice`** (11) — `get_last_join_timings`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_output_device`, `subscribe_voice_events`, `toggle_voice_mute`
+
+**`voice_test`** (7) — `play_test_tone`, `record_and_play_back`, `set_mic_test_monitor`, `start_mic_test`, `stop_mic_test`, `stop_test_playback`, `subscribe_voice_test_events`
+
+**`screenshare`** (7) — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`, `subscribe_screen_share_frames`
+
+**`camera`** (6) — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
+
+**`sfx`** (3) — `play_sfx`, `start_ring`, `stop_ring`
+
+**`terminal`** (5) — `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
+
+
 _Back to [index.md](./index.md)_

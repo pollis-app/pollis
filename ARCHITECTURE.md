@@ -13,12 +13,12 @@ For deeper, file-anchored documentation see `.codesight/wiki/index.md`. For the 
 | Desktop shell | Tauri 2 (Rust host + system WebView renderer) |
 | Frontend | React 19 + TypeScript, Vite, TailwindCSS, TanStack Router (memory history), TanStack Query, MobX (UI state only) |
 | Backend | Rust split into `pollis-core` (reusable crate; also exposed to mobile via uniffi) and `src-tauri` (the Tauri host), invoked from the renderer via `invoke(cmd, args)` |
-| End-to-end encryption | MLS (RFC 9420) via OpenMLS 0.8 for messages and files; AES-128-GCM frame-level encryption via libwebrtc's `FrameCryptor` for voice, keyed by the MLS group's exporter secret |
-| Remote DB | Turso (libSQL) via `libsql` 0.6, native Hrana/HTTP2 protocol over TLS |
-| Local DB | SQLite via `rusqlite` 0.31 with bundled SQLCipher; per-user file `pollis_{user_id}.db` |
+| End-to-end encryption | MLS (RFC 9420) via OpenMLS 0.8 for messages and files, ciphersuite `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` (post-quantum; the classical suite was retired in #669); AES-128-GCM frame-level encryption via libwebrtc's `FrameCryptor` for voice, keyed from a 32-byte MLS exporter secret |
+| Remote DB | Turso (libSQL) via `libsql` 0.9, native Hrana/HTTP2 protocol over TLS. **Reads only** from the client — every write goes through the Delivery Service |
+| Local DB | SQLite via `rusqlite` 0.37 with bundled SQLCipher; per-user file `pollis_{user_id}.db` |
 | Auth | Email OTP (Resend) + 4-digit per-user local PIN unlocking PIN-wrapped key blobs in the OS keystore |
-| Object storage | Cloudflare R2 (S3-compatible) via AWS SigV4, with convergent encryption for attachments |
-| Real-time signalling + voice | LiveKit (Rust crate), JWT-signed room tokens |
+| Object storage | Cloudflare R2, with convergent encryption for attachments. The client holds **no** R2 credentials (#506) — uploads use a short-lived presigned URL minted by the Delivery Service |
+| Real-time signalling + voice | LiveKit (Rust crate). The client holds no LiveKit API key (#393/#506) — room tokens are minted by the Delivery Service |
 | Audio capture | `cpal` mic → optional RNNoise → WebRTC APM (AGC2 + NS + HPF + AEC) → LiveKit publish (all in Rust — the renderer never touches media) |
 | Packaging + auto-update | Tauri bundler (DMG + app, NSIS, AppImage + deb + rpm) and the Tauri updater plugin reading `update-{{bundle_type}}.json` manifests from `cdn.pollis.com`; OS code signature (Apple Developer ID + notarization, Azure Trusted Signing) is the trust root |
 | Secrets | Doppler → GitHub Actions; local dev uses `.env.development` |
@@ -30,8 +30,8 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 ## Core Principles
 
 1. **End-to-end encrypted messaging, files, and voice.** All message content is MLS-encrypted on the device before it leaves; the server never sees plaintext. Files are convergent-encrypted with the key delivered inside the MLS-encrypted message. Voice frames are AES-128-GCM-encrypted by libwebrtc's `FrameCryptor`, keyed by the channel's MLS-exporter secret, so the LiveKit SFU forwards ciphertext only.
-2. **Zero-knowledge server.** Turso stores ciphertext envelopes, public MLS material, and metadata. It cannot read messages or recover any private key.
-3. **Direct to Turso.** The Rust backend runs inside the Tauri host process (`src-tauri` over `pollis-core`) and opens a libSQL connection directly to Turso — there is no intermediate API server. All business logic runs in the host process.
+2. **Zero-knowledge servers.** Turso stores ciphertext envelopes, public MLS material, and metadata; the Delivery Service handles the writes. Neither can read messages or recover any private key — both are untrusted parties in the security model below.
+3. **Reads direct, writes through the Delivery Service.** The Rust backend runs inside the Tauri host process (`src-tauri` over `pollis-core`) and reads directly from Turso over libSQL with a read-only token. **Every remote write goes through `pollis-delivery`** (`api.pollis.com`), an axum service in this repo — it is the single writer that serializes MLS commits (#419/#420), and it also brokers the credentials the client no longer holds: R2 presigned uploads, LiveKit room tokens, and the Turso token itself. Crypto stays client-side; the DS sees ciphertext and metadata, never plaintext or a private key. There is no client-side remote `INSERT`/`UPDATE`/`DELETE` anywhere in the codebase.
 4. **Local-first secrets.** Private keys, MLS group state, and decrypted plaintext only exist on the user's device. Disk copies are protected by SQLCipher (local DB) and Argon2id-derived AEAD wrapping (keystore).
 5. **Bounded but reliable history.** Members joining at MLS epoch N cannot decrypt messages from epoch < N (an MLS property), and new devices for an existing user start empty (no Megolm-style key backup). Within those limits, every message that was sent while a member was a member must be deliverable and decryptable on every device that user owns. See `CLAUDE.md` § "Messages must work" for the product principle.
 
@@ -40,29 +40,67 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 ## Network architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│ Tauri desktop app                           │
-│  ├─ Renderer (system WebView): React UI     │
-│  │     invoke(cmd, args)                     │
-│  │     ipc::Channel<…> for streamed events   │
-│  └─ Tauri host process (Rust)               │ ◀── #[tauri::command] dispatch ───┐
-│        src-tauri shims                       │                                   │
-│        → pollis-core (Rust)                 │                                   │
-└──────┬──────────────────────────────────────┘                                   │
-       │                                                                          │
-       │ direct libSQL/Hrana over TLS                                              │ no HTTP server in
-       ▼                                                                          │ the middle — all
-┌────────────────┐   ┌──────────────┐   ┌────────────────┐                        │ logic runs in the
-│ Turso          │   │ Cloudflare R2│   │ LiveKit (SFU)  │                        │ host process via
-│ (metadata,     │   │ (encrypted   │   │ (signalling + │ ───────────────────────┘ src-tauri/pollis-core
-│ ciphertext,    │   │ attachments, │   │ voice frames   │
-│ MLS commit log,│   │ avatars)     │   │ AES-GCM        │
-│ welcomes,      │   └──────────────┘   │ E2EE at SFU)   │
-│ GroupInfo)     │                      └────────────────┘
-└────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ Tauri desktop app                                    │
+│  ├─ Renderer (system WebView): React UI              │
+│  │     invoke(cmd, args)                             │
+│  │     ipc::Channel<…> for streamed events           │
+│  └─ Tauri host process (Rust)                        │
+│        src-tauri shims → pollis-core                 │
+│        · all MLS crypto, all plaintext               │
+└───┬──────────────────────────────────────────┬───────┘
+    │                                          │
+    │ READS: libSQL/Hrana over TLS,            │ WRITES: typed HTTPS
+    │ read-only token, SELECT only             │ POST /v1/… , Ed25519
+    │                                          │ device-signed headers
+    ▼                                          ▼
+┌────────────────┐                  ┌──────────────────────────┐
+│ Turso (libSQL) │ ◀────writes───── │ pollis-delivery (axum)   │
+│ metadata,      │                  │ api.pollis.com           │
+│ ciphertext     │                  │ · single writer: commits │
+│ envelopes,     │                  │   serialize per group    │
+│ MLS commit log,│                  │ · mints R2 presigned URL │
+│ welcomes,      │                  │ · mints LiveKit token    │
+│ GroupInfo      │                  │ · Resend OTP, push fan-  │
+└────────────────┘                  │   out, retention sweeps  │
+                                    └────┬──────────┬──────────┘
+    ┌──────────────┐   ┌────────────────┐│          │
+    │ Cloudflare R2│◀──┤ LiveKit (SFU)  ││          │
+    │ encrypted    │   │ forwards AES-  │◀┘          ▼
+    │ attachments, │   │ GCM ciphertext │      ┌───────────┐
+    │ avatars      │   │ frames only    │      │ Resend,   │
+    └──────────────┘   └────────────────┘      │ APNs/FCM  │
+          ▲ presigned PUT/GET from the client  └───────────┘
 ```
 
-There is **no HTTP/gRPC backend between the desktop app and Turso.** All CRUD, MLS group operations, R2 uploads, LiveKit token minting, and Resend OTP requests run inside the Tauri host process via `pollis-core`, and are reached by the renderer through the `invoke` bridge.
+**Reads are direct; every write goes through the Delivery Service.** The client opens a
+libSQL connection to Turso with a **read-only** token and issues `SELECT`s only. It has no
+credential that can write, so "don't write from the client" is enforced by the token, not by
+discipline. Remote mutations are typed `POST /v1/…` calls to `pollis-delivery`
+(`api.pollis.com`, `api-dev.pollis.com`), made through
+`pollis-core/src/commands/mls/ds_client.rs`:
+
+| Helper | Authenticated by | Used for |
+|---|---|---|
+| `ds_post` / `ds_post*` | Ed25519 device signature in `X-Pollis-*` headers | everything a signed-in device does |
+| `ds_post_session*` | OTP-session bearer token | bootstrap and pre-enrolment writes, before a device key exists |
+| `ds_post_plain` | nothing | the OTP endpoints themselves |
+
+The DS exists for three reasons, in order of importance:
+
+1. **MLS needs a serialization point.** Two devices committing at epoch *N* both produce a
+   valid epoch *N+1*; whoever writes second must be rejected, not merged. The DS is the
+   single writer that decides (#419/#420) — a property no amount of client-side care can
+   provide.
+2. **The client should not hold shared credentials.** R2 keys and the LiveKit API secret
+   used to ship inside the binary, where anyone could extract them (#393/#506). The DS holds
+   them and hands back short-lived presigned URLs and room tokens instead.
+3. **Server-side policy.** Retention sweeps, push fan-out, and rate limiting need to run
+   where the client cannot bypass them.
+
+What did **not** move is the crypto. Group state, key material, and plaintext never leave
+the device; the DS validates structure and authorization over ciphertext it cannot read, so
+it stays in the *untrusted* column of the security model below.
 
 **IPC shape.** The renderer calls `invoke(cmd, args)` through the shell-agnostic wrapper at `frontend/src/bridge/invoke.ts`, which routes to Tauri's `invoke`. The host (`src-tauri/src/lib.rs`) registers one `#[tauri::command]` shim per command in its `invoke_handler!`; each shim forwards the call into `pollis_core::commands::*`. Streaming events flow the other direction over Tauri's `ipc::Channel`: `pollis-core` pushes envelopes through the `EventSink` abstraction, `src-tauri`'s `ChannelSink` adapter wraps a `tauri::ipc::Channel`, and the renderer subscribes via the bridge's `Channel`/`listen` helpers. This is the path used for voice frames, screenshare frames, realtime events, and terminal output.
 
@@ -74,9 +112,15 @@ Media stays in Rust by design. The renderer's Chromium does have WebRTC availabl
 
 | Store | Stores | Never stores |
 |---|---|---|
-| **Turso** (remote) | `users`, `groups`, `channels`, `group_member`, `dm_channel*`, `group_invite`, `group_join_request`, `user_block`, `message_envelope` (MLS ciphertext), `mls_key_package`, `mls_commit_log`, `mls_welcome`, `mls_group_info`, `user_device` (incl. cross-signing `device_cert`), `account_recovery` (wrapped account-identity key), `device_enrollment_request`, `security_event`, `attachment_object` (content-hash → R2 key) | Message plaintext, private keys |
+| **Turso** (remote) | Identity and devices (`users`, `user_device` with its cross-signing `device_cert` and PQ signature key, `account_recovery` holding the *wrapped* account-identity key, `account_key_log`); the social graph (groups, channels, DM membership, invites, blocks); delivery state (`message_envelope` — MLS ciphertext, reactions, per-device `conversation_watermark`, push tokens); public MLS material (`mls_key_package`, `mls_commit_log`, `mls_welcome`, `mls_group_info`); and `attachment_object`/`attachment_ref` mapping content hashes to R2 keys | Message plaintext, private keys |
 | **Local SQLite (SQLCipher)** | Decrypted message plaintext (`message.content`), MLS group state (`mls_kv`), preferences cache, UI state | User profiles, groups, channels (fetched from Turso) |
 | **OS Keystore** (Keychain / Secret Service / Credential Manager) | `device_id_{uid}`, `db_key_wrapped_{uid}` (SQLCipher key, AEAD-wrapped under PIN-derived KEK), `account_id_key_wrapped_{uid}` (Ed25519 account-identity private, same wrapping), `pin_meta_{uid}` (Argon2 params + verifier blob + attempt counter) | The unwrapped DB key or account-identity key (after PIN setup) |
+
+Turso is two databases, not one. The main DB holds user/device metadata and message
+envelopes; a separate **commit-log DB** (`LOG_DB_URL`) holds the MLS control plane —
+`mls_commit_log`, `mls_group_info`, `mls_welcome` — with the Delivery Service as its sole
+writer. Splitting them means the tables whose ordering the whole protocol depends on have
+exactly one writer and their own migration series (`pollis-core/src/db/migrations-log/`).
 
 The local DB file is encrypted under a 32-byte random key sourced from the OS keystore, which itself only exists on disk as ciphertext under a key derived from the user's PIN via Argon2id.
 
@@ -88,8 +132,8 @@ For the full schema with column-by-column annotations see `.codesight/wiki/datab
 
 Pollis carries three nested identities. They are kept distinct on purpose.
 
-1. **Account identity** — one long-lived Ed25519 keypair per user. Public half is in `users.account_id_pub`. Private half is on each enrolled device as ciphertext under the PIN-derived KEK, and on the server as a single `account_recovery` blob wrapped under a key derived from a user-held *Secret Key* (a 30-character Crockford base32 string with 150 bits of entropy, shown to the user once).
-2. **Device identity** — a stable ULID `device_id` per device, plus a stable per-device MLS Ed25519 signing keypair. The device's MLS signing public is **cross-signed** by the account-identity private key, producing a `device_cert` stored in `user_device`. Other clients verify these certs before accepting a device into an MLS group.
+1. **Account identity** — one long-lived **ML-DSA-44** keypair per user (FIPS 204; moved from Ed25519 in #668). Public half is in `users.account_id_pub` — 1312 bytes, and its signatures are 2420. The private half is canonically a 32-byte seed, exactly like the Ed25519 key it replaced, which is why every wrap, recovery, and device-transfer path kept working unchanged. That seed lives on each enrolled device as ciphertext under the PIN-derived KEK, and on the server as a single `account_recovery` blob wrapped under a key derived from a user-held *Secret Key* (a 30-character Crockford base32 string carrying 150 bits of entropy, shown to the user once).
+2. **Device identity** — a stable ULID `device_id` per device, plus a stable MLS signing keypair **per signature scheme** (Ed25519 and ML-DSA-44), since the scheme is a function of the ciphersuite. One v2 `device_cert` binds *both* leaf keys at once, signed by the account-identity private key and stored in `user_device`. Clients verify that cert before accepting a device into an MLS group, and the Delivery Service re-verifies it at publish time.
 3. **MLS leaf identity** — every device's `BasicCredential` carries `{user_id}:{device_id}` UTF-8 in its serialized content. One credential covers every KeyPackage and every leaf node that device produces.
 
 ### Authentication & unlock
@@ -104,7 +148,7 @@ The unlock factor is a 4-digit PIN, local to the device. The PIN is fed through 
 
 A new device for an existing user can be enrolled two ways:
 
-- **Approval path.** New device generates an ephemeral X25519 keypair and a 6-digit verification code, posts a request row, and fires a LiveKit inbox event. An already-enrolled sibling device confirms the matching code (constant-time compared) and AEAD-wraps the account-identity key under ECDH(approver_priv, requester_pub) → HKDF-SHA256 → AES-256-GCM. The new device unwraps with its in-memory ephemeral private key.
+- **Approval path.** The new device generates an ephemeral X25519 keypair and posts a request row, then fires a LiveKit inbox event. The verification code is **derived from the ephemeral public key**, not generated beside it: `HKDF-SHA256(ephemeral_pub, info="pollis-enrollment-sas-v1")` → 8 characters over a 32-symbol Crockford-style alphabet, 40 bits. Deriving it is the point (#793) — the approver recomputes the expected code from the key it *fetched*, so a swapped key produces a different code and the mismatch is visible to the user. A code merely stored alongside the key would still match after substitution. The approver then AEAD-wraps the account-identity seed under ECDH(approver_priv, requester_pub) → HKDF-SHA256, with both public keys bound into the KDF info, → AES-256-GCM. The new device unwraps with its in-memory ephemeral private key.
 - **Secret Key recovery.** New device unwraps the server-stored `account_recovery` blob using the user-typed Secret Key (HKDF-SHA256 → AES-256-GCM).
 
 Either path ends with the new device populating `AppState.unlock`, the user setting a PIN (which writes the PIN-wrapped slots), the device publishing its own `device_cert` and KeyPackages, and external-joining every existing MLS group via the published `GroupInfo`.
@@ -120,9 +164,9 @@ Either path ends with the new device populating `AppState.unlock`, the user sett
 - **Suite migration** (#454 P4) does not change a running group's suite, which RFC 9420 forbids. `migrate_to_current_suite_if_due` stands up a **successor group** in `CS_PQ` for any conversation whose stored suite is not `CS_PQ`, moves the roster by Welcome, and retires the predecessor. It survives the classic suite's retirement because `0x0052` is a provisional code point: a renumber is this same migration with a different constant. Ordering is the monotone key `(conversation_id, generation, epoch)`; local `GroupId` is the conversation id verbatim at generation 0 and `"{conversation_id}#g{generation}"` after, tracked in the `mls_generation` table. The DS accepts generation N+1 at epoch 0 only when its `closes_epoch` names the head of generation N (`pollis_delivery::commit::accepts()`, Kani-proved) — a compare-and-swap that makes two competing successors unrepresentable. No member is stranded: a KeyPackage in the target suite is claimed for every roster device before anything is created, and the first miss aborts the whole migration. Forward-only: pre-crossing traffic stays sealed under the predecessor's suite.
 - **Self-update / PCS** (#666): each device rotates its own leaf on join and, sweep-driven, whenever its leaf in a conversation is older than `SELF_UPDATE_INTERVAL` (7 days) plus a deterministic per-conversation jitter of up to 2 days, capped at `MAX_SELF_UPDATES_PER_SWEEP` (3) per sweep. Launch-driven by design — no background timer. This is also what keeps commit size logarithmic rather than linear: unmerged leaves are the expensive part of a hybrid UpdatePath (hybrid 8→16 members costs +10.6 KB unmerged vs +2.4 KB merged).
 - **Group topology:** one MLS group per Pollis Group (shared by all its channels); one MLS group per DM channel.
-- **Membership changes** flow through `reconcile_group_mls_impl` in `pollis-core/src/commands/mls.rs`. It diffs the desired roster vs. the actual MLS tree and emits a single combined commit with `Add` + `Remove` proposals. The commit is *staged* locally, persisted to Turso (`mls_commit_log` + per-recipient `mls_welcome` rows) on a fresh libSQL connection, and only then merged locally — this ordering is the invariant that prevents "local epoch ahead of remote" split-brain.
+- **Membership changes** flow through `reconcile_group_mls_impl` in `pollis-core/src/commands/mls/reconcile.rs`. It diffs the desired roster against the actual MLS tree and emits a single combined commit carrying `Add` + `Remove` proposals. The commit is *staged* locally, submitted to the Delivery Service via `POST /v1/commits` (commit, `GroupInfo`, and the per-recipient welcomes in one request — `mls/delivery.rs`), and only merged locally once the DS accepts it. That ordering is the invariant preventing "local epoch ahead of remote" split-brain, and the DS is what makes it enforceable: a second device committing from the same epoch gets `409 Conflict` (`SubmitResult::LostRace`) and retries against the new epoch rather than forking the group.
 - **External commits** (RFC 9420 §11.2.1) handle new-device joins without requiring a sibling Welcome: the device fetches the latest `GroupInfo` from `mls_group_info` and externally commits into the group.
-- **Cross-signing verification** runs on inbound commits that add devices: receivers fetch the added device's `device_cert` from `user_device` and verify against the user's `account_id_pub`. Verification is currently advisory (warn-and-proceed) — the security whitepaper documents this gap.
+- **Cross-signing verification** runs at two points. The Delivery Service verifies a cert against the account's stored `account_id_pub` before accepting the publish (`pollis-delivery/src/cert.rs` — the format itself lives in the shared `pollis-device-cert` crate, so client and servers cannot drift). Receivers verify again on inbound commits that add devices (`verify_added_devices`). A failing cert does **not** cause the commit to be dropped: a commit that won the epoch CAS is canonical and immutable, and deleting one forks the group — that was a real production wedge. Instead the commit is applied to stay on the single canonical branch, and the uncertified device is evicted the MLS-native way by the next reconcile, one epoch later. Verification failure is thus enforced by eviction rather than rejection, bounded to one epoch of exposure.
 - **Account-key TOFU** runs on every group reconcile and every DM message ingest. `batch_check_and_pin_account_keys` in `pollis-core/src/commands/safety.rs` bulk-fetches every roster peer's `account_id_pub` from Turso, pins first-seen values locally (`contact_verification` table), and emits a `KeyChanged` realtime event on mismatch. This closes the historical group MITM hole — previously only the DM path detected Turso-side key swaps; groups inherited the gap. The pin is per-USER (not per-conversation), so verifying a peer once propagates a shield badge to every surface where they appear.
 - **Roster-change banners.** A non-empty reconcile commit emits a `RosterChanged` realtime event with the per-user diff (joined / left / device added / device removed). The reconciler emits locally + broadcasts to the conversation's LiveKit room so already-connected peers render the inline timeline banner without refetching. See `pollis-core/src/commands/mls/reconcile.rs` and `frontend/src/stores/rosterChangeStore.ts`.
 
@@ -138,8 +182,9 @@ React component
     → tauri invoke(cmd, args)                   // bridge → @tauri-apps/api/core
       → #[tauri::command] shim                  // src-tauri/src/commands/*.rs
         → pollis_core::commands::*              // pollis-core/src/commands/*.rs
-          → Turso (metadata + ciphertext) and/or
-            SQLCipher local (secrets, MLS state)
+          → Turso  (SELECT only, read-only token)
+          → pollis-delivery  (POST /v1/… — every remote write)
+          → SQLCipher local  (plaintext, MLS state, secrets)
         ← Result<T>
       ← Result<T>
     ← Result<T>
@@ -154,72 +199,49 @@ Routing uses TanStack Router with **memory history** (no browser URL bar in a de
 
 ---
 
-## Backend commands (selected)
+## Backend commands
 
-Dispatched in `src-tauri/src/commands/` — one thin `#[tauri::command]` shim per command, forwarding the JSON-shaped `invoke(cmd, args)` from the renderer into `pollis_core::commands::*`. The real implementations are in `pollis-core/src/commands/` (one module per row in the table below).
+Roughly 170 `#[tauri::command]`s are registered in `src-tauri/src/lib.rs`'s `invoke_handler!`,
+grouped by module under `pollis-core/src/commands/`: `auth`, `pin`, `account_identity`,
+`device_enrollment`, `user`, `groups`, `dm`, `messages`, `mls`, `livekit`, `voice`, `r2`,
+`blocks`, `transparency`, and the media/capture helpers.
 
-| Module | Commands |
-|---|---|
-| `auth` | `request_otp`, `verify_otp`, `get_session`, `dev_login` (debug only), `initialize_identity`, `logout` |
-| `pin` | `set_pin`, `unlock`, `lock`, `get_unlock_state` |
-| `account_identity` | (internal) `generate_account_identity`, `reset_identity`, `verify_device_cert` |
-| `device_enrollment` | `start_device_enrollment`, `poll_enrollment_status`, `list_pending_enrollment_requests`, `approve_device_enrollment`, `reject_device_enrollment`, `recover_with_secret_key`, `reset_identity_and_recover`, `finalize_device_enrollment`, `list_security_events` |
-| `user` | `get_user_profile`, `update_user_profile`, `search_user_by_username` |
-| `groups` | `list_user_groups`, `list_group_channels`, `create_group`, `create_channel`, `invite_to_group`, `approve_join_request`, `remove_member_from_group`, `leave_group` |
-| `dm` | `create_dm_channel`, `list_dm_channels`, `list_dm_requests`, `add_user_to_dm_channel`, `accept_dm_request` |
-| `messages` | `list_messages`, `send_message`, `poll_pending_messages`, `edit_message`, `delete_message`, `add_reaction`, `remove_reaction` |
-| `mls` | `create_mls_group`, `process_welcome`, `poll_mls_welcomes`, `process_pending_commits`, `reconcile_group_mls`, `generate_mls_key_package`, `publish_mls_key_package`, `fetch_mls_key_package` |
-| `livekit` | `get_livekit_token`, `list_voice_participants`, `list_voice_room_counts` |
-| `voice` | `join_voice_channel`, `leave_voice_channel`, `set_voice_audio_processing`, … (see `.codesight/wiki/audio-processing.md`) |
-| `r2` | `upload_file`, `download_file`, `upload_media`, `download_media` |
-| `blocks` | `block_user`, `unblock_user`, `list_blocks` |
-
-For the full reference see `.codesight/wiki/commands.md`.
+**The inventory is deliberately not repeated here.** It changes every release and a copy in
+this file is a copy that goes stale — which is exactly how this document came to name four
+commands that no longer exist (#803). `invoke_handler!` is the only complete list, and
+`.codesight/wiki/commands.md` is the annotated reference. Note that not every public function
+in `commands/` is a registered command: `reconcile_group_mls_impl`, `create_mls_group`, and
+the key-package helpers are internal and reached only from other commands.
 
 ---
 
 ## Project structure
 
-The Rust workspace splits the backend into `pollis-core` (reusable, no shell-runtime dependency) and the shell-specific `src-tauri` (the Tauri desktop host — the shipping path). The split lets other front-ends — a CLI, a TUI, mobile via uniffi — consume the same command/state/db/MLS code without dragging in any particular shell.
+The workspace splits the backend into `pollis-core` — reusable, with no shell-runtime
+dependency — and the shells that consume it. That split is what lets the desktop host, a
+TUI, and mobile-via-uniffi share one copy of the command/state/db/MLS code.
 
-```
-pollis-core/              # Reusable Rust backend (no shell-runtime types)
-  src/
-    commands/             # Real command implementations (auth, groups, messages, mls, voice, …)
-    db/                   # libSQL (remote) + SQLCipher (local) + migrations
-    config.rs             # Env-var config (Turso, R2, LiveKit, Resend)
-    accounts.rs           # accounts.json (atomic, crash-safe)
-    keystore.rs           # OS keystore abstraction (+ in-memory impl for tests)
-    state.rs              # AppState shared across commands
-    realtime.rs           # LiveKit room manager + event dispatch
-    sink.rs               # EventSink trait (frontend-channel abstraction)
-    signal/               # Legacy Signal-protocol vestige (mls_storage backend; the rest is removed)
-    error.rs              # Error / Result types
-    lib.rs                # uniffi exports for mobile bindings
+| Crate | Role |
+|---|---|
+| `pollis-core` | The backend. Commands, `AppState`, both DB layers, MLS, media, uniffi exports for mobile |
+| `src-tauri` | The shipping desktop host: `#[tauri::command]` shims, `ChannelSink`, the integration test harness |
+| `pollis-delivery` | The Delivery Service (axum). Every remote write, plus credential brokering and retention sweeps |
+| `pollis-tui` | Terminal client — a second consumer of `pollis-core`, and a cheap check that the crate stays shell-agnostic |
+| `pollis-capture-linux`, `pollis-capture-macos`, `pollis-capture-proto` | Camera/screen capture helper subprocesses and their shared wire protocol |
+| `verifiable-log`, `verifiable-log-builder`, `verifiable-log-serve` | The transparency log: tree/statement types, the CI-side builder, and the read path |
+| `pollis-relay` | Overlay relay node (see `docs/relay-overlay-design.md`) |
+| `pollis-device-cert` | Device cross-signing certificate types |
 
-src-tauri/                # Tauri desktop host (the shipping shell)
-  src/
-    commands/             # Thin #[tauri::command] shims forwarding to pollis_core
-    sink.rs               # ChannelSink adapter — wraps tauri::ipc::Channel into EventSink
-    test_harness.rs       # Multi-client integration harness (feature = "test-harness")
-    lib.rs                # tauri::Builder, plugin setup, invoke_handler!, lifecycle hooks
-    main.rs               # Binary entry
+Outside the Rust workspace: `frontend/` (React renderer — the renderer reaches the host only
+through `frontend/src/bridge`, never `@tauri-apps/*` directly) and `website/` (static
+marketing HTML on Cloudflare Pages, not part of the app).
 
-frontend/                 # React app
-  src/
-    bridge/               # Runtime-host bridge — invoke/Channel/window/dialog/fs/shell/app/updater route through Tauri's invoke
-    components/           # UI components (auth, layout, message, voice, ui/, …)
-    pages/                # Route pages
-    hooks/queries/        # TanStack Query hooks
-    services/             # Frontend-side helpers (R2 upload, etc.)
-    stores/               # MobX (UI state only)
-    types/                # TypeScript types — kept aligned with Rust structs
-    router.tsx, main.tsx  # TanStack Router setup, app entry
-
-website/                  # Static marketing HTML on Cloudflare Pages (not part of the app)
-.codesight/wiki/          # Authoritative deep-dive docs
-docs/security-whitepaper.md   # Auditor-facing protocol/threat model
-```
+Within `pollis-core`, the pieces worth knowing before reading the code: `commands/` (the real
+implementations), `db/` (libSQL remote + SQLCipher local + the numbered migrations), `state.rs`
+(`AppState`), `sink.rs` (the `EventSink` trait that keeps `pollis-core` unaware of Tauri),
+`net/` (overlay/relay transport), `media_server.rs` (the loopback HTTP server serving decrypted
+media bytes to the WebView), and `signal/` — which is now only `mls_storage.rs`, the MLS state
+backend; the Signal protocol itself is long gone and the directory name is a fossil.
 
 ---
 
@@ -227,7 +249,12 @@ docs/security-whitepaper.md   # Auditor-facing protocol/threat model
 
 | | Trusted | Untrusted |
 |---|---|---|
-| | User's device, OS keystore, the SQLCipher local DB, the signed Tauri binary (host + WebView renderer + `pollis-core`) at the installed version, the user-held Secret Key, the user-held PIN | Network, Turso, Cloudflare R2, LiveKit, Resend, server operators |
+| | User's device, OS keystore, the SQLCipher local DB, the signed Tauri binary (host + WebView renderer + `pollis-core`) at the installed version, the user-held Secret Key, the user-held PIN | Network, Turso, **`pollis-delivery` (the Delivery Service)**, Cloudflare R2, LiveKit, Resend, server operators |
+
+The Delivery Service is ours and it is still untrusted. It authenticates devices, orders MLS
+commits, and brokers credentials — all over material it cannot read. A fully compromised DS
+can censor, delay, or reorder delivery and can observe the same metadata Turso does; it cannot
+decrypt a message, forge a commit that members' clients will accept, or recover a private key.
 
 Binary integrity at install and at every auto-update rests on the OS-native code signature: Apple Developer ID + notarization (Gatekeeper checks both at launch and at install) on macOS, Azure Trusted Signing (Authenticode) on Windows. The Tauri updater verifies the same signature before invoking the installer, so a tampered download cannot replace the running binary.
 
@@ -235,7 +262,7 @@ What the server can see: user metadata, social graph, encrypted message envelope
 
 What the server cannot see: message plaintext, MLS application secrets, attachment plaintext, account-identity private keys, the PIN, the Secret Key, the SQLCipher key.
 
-Voice traffic is end-to-end encrypted at the frame level: each audio frame is AES-128-GCM-encrypted by libwebrtc's `FrameCryptor` post-Opus / pre-SRTP, keyed by a 32-byte secret derived from the channel's MLS group via `MlsGroup::export_secret("pollis/voice/v1", epoch, 32)`. LiveKit acts as an SFU but forwards ciphertext only — it never sees plaintext audio. The same shape Discord ships in their 2024 DAVE protocol. See `docs/security-whitepaper.md` § 10.2 for the full design and `pollis-core/src/commands/voice_e2ee.rs` for the implementation.
+Voice traffic is end-to-end encrypted at the frame level: each audio frame is AES-128-GCM-encrypted by libwebrtc's `FrameCryptor` post-Opus / pre-SRTP. The keying is two steps, and conflating them causes confusion: MLS exports a **32-byte** secret per epoch (`MlsGroup::export_secret("pollis/voice/v1", epoch, 32)`), which is then fed to LiveKit's `KeyProvider::with_shared_key` and PBKDF2-derived into the **128-bit** AES-GCM frame key — defaults matched to `livekit-client` JS so peers interoperate across SDKs. Every MLS epoch advance re-derives and rotates the key on the live provider (`on_mls_epoch_changed`); libwebrtc's 16-key ring keeps the previous key available for frames still in flight. LiveKit acts as an SFU but forwards ciphertext only — it never sees plaintext audio. The same shape Discord ships in their 2024 DAVE protocol. See `docs/security-whitepaper.md` § 10.2 for the full design and `pollis-core/src/commands/voice_e2ee.rs` for the implementation.
 
 ---
 
@@ -244,3 +271,7 @@ Voice traffic is end-to-end encrypted at the frame level: each audio frame is AE
 - `.codesight/wiki/index.md` — full doc tree (database, MLS, commands, UI components, testing harness, audio pipeline, PIN design, notifications, Windows signing).
 - `docs/security-whitepaper.md` — auditor-facing protocol/threat model and standards references.
 - `CLAUDE.md` — operating principles and constraints (what to build, what not to build).
+- `docs/deployments.md` — what ships where, and the CI pipelines that put it there.
+- `src-tauri/src/lib.rs` (`invoke_handler!`) and `pollis-core/src/db/migrations/` — the two
+  authoritative inventories. This document deliberately links to them rather than copying
+  them, because copies go stale silently and a stale architecture doc is worse than none.

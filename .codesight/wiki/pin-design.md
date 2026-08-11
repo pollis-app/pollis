@@ -10,6 +10,9 @@ The rest of this document is the design note that drove the work — kept for co
 
 - `verify_otp` does not return `pin_required_to_complete_signup`; the frontend reads `get_unlock_state` to decide between pin-create and pin-entry.
 - A new backend command, `finalize_device_enrollment`, runs the cert / key-package / external-join work after `set_pin` completes (formerly bundled into the enrollment commands themselves).
+- `migrate_set_initial_pin` was never built. The migration path it describes (§ "Migration for existing installs") did not ship as a distinct command — existing installs go through the ordinary `set_pin` flow.
+- `enroll_with_secret_key` is not the shipped name. The command is **`recover_with_secret_key`** (with `reset_identity_and_recover` for the reset-and-recover case), in `pollis-core/src/commands/device_enrollment.rs`.
+- The enrollment verification code is not user-chosen or separately generated: it is **derived** from the requesting device's ephemeral public key via HKDF (`derive_verification_code`, 8 characters over a 32-symbol alphabet), so a swapped key yields a different code. See #793 and `ARCHITECTURE.md` § Multi-device enrollment.
 - The "we just produced raw key material and have no PIN yet" handoff goes through `account_identity::unlock_state_with_fresh_db_key`, which generates a fresh `db_key` alongside the account_id_key and replaces `AppState.unlock`. `set_pin` reads from there instead of the legacy keystore slots (which remain only as a migration fallback for upgraders coming from a pre-PIN build).
 
 ---
