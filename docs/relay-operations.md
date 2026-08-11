@@ -1,4 +1,4 @@
-# Relay operations & the operational-separation commitment (v0)
+# Relay operations & the operational-separation commitment (v0 + v1)
 
 *Companion to `docs/relay-overlay-design.md` (esp. §11.1, §12, §14). Required
 before the v0 overlay ships, per the §11.1 open question and issue #455. This
@@ -17,10 +17,21 @@ v0 is the **single-hop, first-party-operated fallback relay pool** (design §6.1
   (design §2.1). This is **breach / subpoena defense + IP-unlinking from the
   metadata plane.**
 - **Does NOT defend:** a *malicious* first-party operator who runs both the relay
-  tier and Turso and can join their logs. Removing that trust assumption is
-  **v1** (multi-hop onion, peer-hosted relays, first-party last hop — design
-  §6.2, §14.0). The roadmap north star is explicitly Option B; v0 is the
-  waypoint that ships the plumbing and the honest win in the meantime.
+  tier and Turso and can join their logs. **v1 (#813) is now built** — multi-hop
+  onion, peer-hosted middle hops, first-party guard *and* last hop (design §6.2,
+  §7.1, §13) — and it makes the per-relay position structural: no *single* relay
+  holds both the client's IP and the destination. Read the limit precisely
+  before repeating it as an operator claim:
+  - **Every hop verifies the client's device cert, so every hop learns which
+    account built the circuit.** v1 delivers network-address unlinkability, not
+    anonymity. Hiding the account needs anonymous credentials, which is a
+    separate effort and is not built (design §13).
+  - **A pool of only first-party nodes is still one operator at both ends.** With
+    a guard and an exit that we both run, we can still join IP↔destination by
+    correlating our own two nodes; what v1 removes is any *one* node holding
+    both. The arrangement that genuinely breaks the join is a **peer** middle
+    hop in a different trust domain — which is why volunteer relays exist, and
+    why a peer is never allowed the guard or exit position.
 - **Does NOT defend:** the application-layer social graph (that is sealed sender,
   a separate project — design §2.2), the global passive adversary (§2.3), or
   traffic-fingerprinting by cadence (§11.2). And the relay is **never** part of
@@ -141,9 +152,25 @@ plane.
 - **First-party pool guarantees messages-must-work.** The pool exists so the
   network functions even with zero volunteer peers (design §7, §10.3); overlay
   use is opt-in (`off → prefer → strict`), and `strict` surfaces a degraded state
-  rather than silently dropping a send. **Peers are NOT relays in v0** — peer-run
-  relays are a v1 feature. Relaying grants no read access of any kind: a relay
-  only ever forwards sealed TLS bytes to a pinned first-party host (design §8).
+  rather than silently dropping a send. **Peers are NOT relays in v0**; peer-run
+  relays landed with v1 (#813) and are a **middle hop only** — never the guard,
+  never the exit — so the pool is still what carries every circuit's first and
+  last hop. Relaying grants no read access of any kind: a relay only ever
+  forwards sealed TLS bytes to a pinned first-party host (design §8).
+- **Parked peer relays (#813 v1).** A consenting device cannot accept inbound
+  connections, so it **dials out** to each node in the pool, runs the ordinary
+  device handshake, and leaves the connection parked (design §7.1). A node
+  therefore holds a small in-memory registry of parked peers and, on an `Extend`
+  naming a parked peer's leaf fingerprint, splices into that connection instead
+  of dialling. Operationally this needs **no configuration** — a v4 node that is
+  keyed (above) does it automatically — and it changes nothing about what a node
+  stores: the registry is `sha256(peer relay leaf) -> live socket` plus that
+  leaf, held in memory only, reaped when the connection ends, and never
+  persisted or logged. No client identity, no address, no traffic metadata, no
+  counts of who is connected. A peer's leaf is public in the signed directory by
+  construction (clients must pin it), which is why the health port may publish
+  it; nothing else about the registry may ever follow it out. Revocation applies
+  to a parked next hop exactly as it does to a dialled one.
 
 ### Relay pool & failover (client-side)
 
@@ -487,10 +514,26 @@ against its own advertised cert.
   `protocol` is the relay's ALPN/wire identity, which the hydra reconciler uses to
   keep a wrong-generation node out of the signed directory and to cycle stale
   builds (#703). `curl http://<host>:9445/health` → `ok`.
+- **Middle-hop readiness — `/version` and `/health` do NOT tell you this, so check
+  it separately.** A v4 node rolled **without** `directory_key_b64` +
+  `revocation_url` comes up perfectly **healthy**, reports `pollis-relay/4`, is
+  admitted to the signed directory, and serves single-hop `CONNECT` normally —
+  while **silently refusing every `Extend`**. It cannot evaluate revocation, and
+  "cannot evaluate" resolves the same way as "revoked" (see "Live relay
+  revocation" above), so multi-hop just quietly does not work and nothing in the
+  probes says so. Confirm both keys are actually in the running node's config
+  before calling a roll done, and confirm the reconciler is publishing
+  `revocations.json`; a client that reaches the node sees only an `ExtendFailed`,
+  which is indistinguishable from an unreachable next hop.
 - **Traffic actually routes:** a client with the overlay in **Prefer** mode (and a
   reachable pool) sends its control-plane traffic (Turso reads, DS writes) through
   a relay — the node's logs show authorized handshakes + dials to the allowlisted
   hosts, and the client's source IP no longer appears at Turso/DS.
+- **Parked peers (only once volunteers exist):** `curl http://<host>:9445/peers` →
+  `{"peers":[{"cert_b64":"..."}]}`, or `{"peers":[]}` when nobody is parked. This
+  is what the directory reconciler aggregates into the directory's additive
+  `peers` field; an empty list is the normal state for a fresh pool and is not a
+  fault.
 
 ### The ops boundary, stated plainly
 

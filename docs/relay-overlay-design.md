@@ -253,14 +253,27 @@ Design implications:
 - **Availability floor:** if the overlay is enabled and no peer relay is reachable, the client uses a first-party relay (still IP-unlinking from *Turso* if the relay tier is operationally separated from the Turso metadata plane, §6.1). If even that is unreachable and the user has opted into "overlay required," the client must surface a clear degraded state — it must **not** silently drop a send (violates the messages-must-work invariant). A sensible default is "prefer overlay, fall back to **direct** on total overlay failure unless the user set strict mode."
 - **Health / circuit rebuild:** dead-relay detection with fast failover to another relay or the fallback pool, mirroring the existing `RemoteDb::with_retry` reconnect discipline (`pollis-core/src/db/remote.rs`) — the client already knows how to transparently reconnect a dropped Hrana stream; overlay circuit failure should reuse that resilience posture.
 
-### 7.1 NAT traversal
+### 7.1 NAT traversal — DECIDED in v1: parked outbound connections, not ICE
 
-Most consumer peers can't accept inbound connections. Two existing assets to reuse rather than reinvent:
+Most consumer peers can't accept inbound connections. This section originally recommended reusing the shipped **WebRTC/ICE** stack for hole-punching (with `rust-libp2p`'s DCUtR + AutoNAT + relay-v2 as the alternative). **v1 (#813) deliberately did neither, and the recommendation is superseded — do not build against it.**
 
-- **LiveKit's ICE/TURN infrastructure.** Pollis already ships a full WebRTC stack (libwebrtc via the `livekit` crate, `pollis-core/src/commands/voice/`) and already depends on LiveKit for signalling. WebRTC data channels do ICE (STUN for hole-punching, TURN for relay-of-last-resort) out of the box. A peer-relay transport built on **WebRTC data channels** would inherit NAT traversal essentially for free and reuse a battle-tested, already-shipped stack. TURN-relayed fallback is itself a first-party relay hop (Pollis runs the TURN server), which dovetails with §7's fallback pool.
-- **libp2p hole-punching (DCUtR).** If the relay layer is built on `rust-libp2p` (§9), its DCUtR + AutoNAT + relay-v2 machinery is purpose-built for exactly this: NATed peers discover reachability, hole-punch when possible, and fall back to circuit-relay through a public node when not. This is the most "batteries-included" path for a peer-to-peer relay mesh, at the cost of a heavier dependency and a second networking stack alongside libwebrtc.
+**Why the original recommendation does not apply.** It assumed a peer must accept an **inbound** connection from *somewhere*. Under the shipped design a peer is only ever a **middle** hop, so the only party that ever needs to reach it is the **previous relay** — which is always first-party (§1.2, §4.4). A first-party relay is not an ICE agent and holds no WebRTC stack: there was never a pair of ICE agents between which a hole could be punched. Hole-punching was not a hard option we rejected; between those two endpoints it was never on the table at all.
 
-**Recommendation:** for **v0**, don't do peer-to-peer NAT traversal at all — v0 relays are the **first-party fallback pool** (publicly reachable, no NAT problem). Peer-hosted relays (which need NAT traversal) arrive with **v1**, and at that point prefer **reusing the WebRTC/ICE stack already in the tree** over adding libp2p, unless a multi-hop mesh's routing needs push you toward libp2p's relay/DHT primitives. Adding a whole second networking stack is a real cost to weigh (§9).
+**What shipped instead: the peer opens the connection.** The one connection that always exists between a NATed device and a public relay is the one the **device dials outbound**. So a consenting peer dials each first-party relay it knows from the signed directory, runs the ordinary device handshake (no new credential, no second trust root), sends a `Park` frame naming the relay leaf cert it serves under, and **leaves that connection open**. When a later `Extend` names that leaf's fingerprint, the relay **splices into the parked connection** instead of dialling: it opens one stream on it per circuit and tunnels the next hop's QUIC through it, length-delimited. Nothing about the onion wire changes — only who dialled whom, and the peer sees a `Layer` arriving on a QUIC connection exactly as a dialled relay would.
+
+Why this is the better answer even setting the ICE-agent problem aside:
+
+- **Traverses NAT/CGNAT by construction.** An outbound connection needs no hole-punching, no STUN, no TURN, and no relay-of-last-resort — the NAT is doing what it already does for every other connection the app makes.
+- **No second networking stack.** libwebrtc stays out of the relay path entirely (it remains where §6.4 puts it: media). No libp2p either. The transport is a plain bidirectional datagram pipe over the QUIC the crate already speaks.
+- **No firewall prompt, no new listening port.** A volunteer opens nothing. The peer's own relay engine binds **loopback only** and is reachable solely through the parked connection — so consenting costs a user no externally-reachable surface.
+- **It removes the ICE-reveals-IPs footnote.** ICE hands addresses to the other agent by design, which is an awkward thing to embed in a feature whose entire purpose is address unlinkability.
+- **The pin still binds.** The tunnelled TLS terminates at the peer's own leaf, so a device that parks under a fingerprint it does not hold the key for fails the handshake and carries nothing. That is what makes `Park` safe without minting a new credential: possession is proven by use, not by the frame. Residual, filed rather than hidden: an authenticated device can *squat* a fingerprint it does not own and deny service to the real peer (first-registration-wins makes that the harder of the two denials). Closing it entirely needs a possession proof.
+
+The cost is that the relay side has to hold a small map of parked connections (fingerprint → live socket, and nothing else). That is infrastructure liveness, not user metadata, and §5.2/§11.7 are unaffected — see `docs/relay-operations.md` and `pollis-relay/src/park.rs` for the limits that keep it so.
+
+**Still true for v0:** v0 relays are the **first-party fallback pool** (publicly reachable, no NAT problem), and v0 does no peer-to-peer traversal at all.
+
+If parking is ever rejected in favour of ICE, that decision brings a DS-side signalling endpoint back with it; parking deliberately needs none, because the peer dials a relay it already knows from the signed directory.
 
 ---
 
@@ -360,8 +373,8 @@ Safeguards so the incentive never distorts safety: a relay **cannot** gain any r
   Delivers the real, shippable value: **IP unlinkability from Turso and the DS** for users who opt in, plus breach/subpoena resistance on connection metadata. It is mostly transport plumbing (§9.2), not a cryptography project, so it is the lowest-risk way to get a genuine privacy improvement into users' hands. Keep media (LiveKit) direct (§6.4). Reuse device-signature auth (§9.4). Commit to (and document) operational separation of the relay tier from the Turso metadata plane, or scope v0 honestly as breach/subpoena defense (§11.1).
 
 **Build later, gated on demand and threat model:**
-- **v1 — Multi-hop onion for the control plane, with peer-hosted relays.**
-  Removes the single-relay trust assumption (§6.2), adds the anonymity set from real peers, needs NAT traversal (§7.1) and guard/path selection (§4.4). Build only once v0 has adoption and there's evidence the "don't trust even the relay operator" threat is real for the user base.
+- **v1 — Multi-hop onion for the control plane, with peer-hosted relays. — SINCE BUILT (#813); see §13 for the authoritative status and for the precise limit of what it delivers.**
+  Removes the single-relay trust assumption (§6.2), adds the anonymity set from real peers, needs NAT traversal (§7.1 — solved by parking, not ICE) and guard/path selection (§4.4). The gate written here was "build only once v0 has adoption and there's evidence the 'don't trust even the relay operator' threat is real"; v1 was built ahead of that evidence as defence-in-depth, and it stays **opt-in and off by default** precisely because the gate was not met.
 - **v2 — Timing defenses (padding / batching), as a distinct opt-in "maximum privacy" mode.**
   Only if a whistleblower-grade threat model materializes (§6.3). Almost certainly over-scoped for a fast consumer messenger; keep as a documented lever, not a roadmap commitment.
 
@@ -381,7 +394,7 @@ Safeguards so the incentive never distorts safety: a relay **cannot** gain any r
 
 ## 13. Status & GitHub-issue summary
 
-**Status (#455): v0 BUILT — opt-in, OFF by default. Not "deployed", and not deferred.** This paragraph is the single source of truth for this doc, the README, and `docs/metadata-minimization-design.md`; nothing else may assert a different status.
+**Status (#455, #813): v0 and v1 BUILT — opt-in, OFF by default. Not "deployed", and not deferred.** This paragraph is the single source of truth for this doc, the README, and `docs/metadata-minimization-design.md`; nothing else may assert a different status.
 
 What that means concretely, verifiable in the tree:
 
@@ -389,7 +402,10 @@ What that means concretely, verifiable in the tree:
 - **Off by default, and inert when off.** `Config::overlay_mode` defaults to `Off` (`pollis-core/src/config.rs`; unknown/empty values also fail safe to off). With the overlay off no shim is started, `AppState.overlay` is `None`, and every network path is byte-for-byte the pre-overlay direct path. A non-off mode is selected either by the user in Settings (persisted in the synced preferences blob and re-applied on load) or by the `POLLIS_OVERLAY` env/`option_env!` value at boot — release builds do **not** set it.
 - **Relay tier: build-and-publish only, no auto-deploy.** `.github/workflows/relay-image.yml` builds the image and publishes it to GHCR; it never rolls a node. Nodes are stood up either by an operator (`docs/relay-operations.md`) or by the automated AWS pool (`infra/relay-hydra/`, #616). Release builds bake `POLLIS_OVERLAY_DIRECTORY_URL` / `_KEY` so a pool is reachable *if* a user opts in; `POLLIS_OVERLAY` itself is never baked. See `docs/deployments.md` → "Relay pool" for how the pool is operated — **this doc does not claim any particular node is currently running.**
 - **Latency is measured (§14.3 Slice 3, 2026-08-11) and the §6.4 budget holds only for a nearby relay.** Against the live pool, the added cost is ≈+21 ms via the `us-east-2` node but ≈+123 ms via `us-west-2`, and relay selection is health-ordered round-robin with **no latency term** — so a US-East client takes the slow path about half the time. This does not affect anyone today (the overlay is off by default) and **#812** has since made the client prefer the nearest healthy relay, so the ≈+21 ms figure is the one that applies.
-- **v1 (multi-hop onion, peer-hosted relays, scoped as #813) and v2 (timing defenses) are NOT built.** v0 is a waypoint toward the §14.0 north star (Option B), not the destination.
+- **v1 (multi-hop onion + peer-hosted relays, #813) is BUILT** — the §6.4/§14.0 north star (Option B) is reached, still opt-in and still off by default. What that means concretely: layered per-hop crypto where an onion layer *is* a nested TLS 1.3 session to the hop's pinned leaf (`pollis-relay/src/onion.rs`, wire generation 4 with v3 kept interoperable); path/guard selection with a structurally-enforced first-party exit (`pollis-core/src/net/path.rs`); a short-lived signed revocation list that fails **closed** at dial time (`infra/relay-hydra` producer, `pollis-core/src/net/revocation.rs` consumer); transparency-log account anchoring at the relay (`pollis-relay/src/anchor.rs`); LiveKit *signalling* eligible for the overlay while media stays direct (§6.4); and peer-hosted middle hops reachable over parked outbound connections (§7.1, `pollis-relay/src/park.rs` + `pollis-core/src/net/peer/`), behind the separate be-a-relay consent of §10.2.
+- **What v1 delivers, stated precisely — and this is the limit product copy must respect.** Multi-hop delivers **network-address unlinkability**: no single relay holds both the client's IP and the destination. It does **not** deliver anonymity. **Every hop verifies the client's device certificate, so every hop learns which account built the circuit.** This is deliberate and it is not a regression — the single v0 relay already saw account, IP *and* destination, whereas now no one node sees IP *and* destination — and dropping the handshake at middle/last hops would turn our first-party exits into open proxies reachable by anyone who can talk to a middle relay. Hiding the account from later hops needs **anonymous credentials** (blind signatures): a separate, much larger effort, explicitly **not** in #813 and not built. Per §3/§12's non-negotiable guardrails, do not describe multi-hop as making a user anonymous to the relay tier, in product copy or in code comments.
+- **Peers are excluded from the GUARD position as well as the exit** — stronger than "no peer exits" (§1.2, §4.4), and it follows directly from the line above. Every hop learns the account; a guard additionally sees the client's IP. A peer guard would therefore hand a volunteer *exactly* the account↔IP link this feature exists to break, so a volunteer may only ever be a **middle** hop, where it learns neither the client's address nor the destination — the safest position for the user and the least informative for the volunteer. A first-party guard already holds account↔IP and is accountable for it, which a volunteer is not. Enforced three ways rather than by review: path selection cannot even *construct* the type the guard and exit positions require (`FirstPartyEndpoint`), the peer's own engine runs an empty destination allowlist so a `Connect` is refused before any socket opens, and the engine binds loopback only. A path carries at most one peer.
+- **v2 (timing/padding defenses, mixnet batching) is NOT built** and remains out of scope.
 
 Do not describe this as "deployed", "shipped to users", or "on" — it is built, opt-in, and off unless a user turns it on. The earlier sequencing note (defer until sealed sender lands, so the app layer isn't still leaking a plaintext sender column) was **not** followed: the network half landed first. That ordering caveat still holds as a *framing* rule — the relay hides IP only. Sealed sender has since landed as well (`docs/metadata-minimization-design.md` v1/v2 SHIPPED), but it is **at-rest only**: the DS still sees the sender live via the `X-Pollis-User` auth header, and the `group_member` / `dm_channel_member` social graph is still plaintext. Neither layer substitutes for the other (§6 layer table there).
 
@@ -401,7 +417,7 @@ Do not describe this as "deployed", "shipped to users", or "on" — it is built,
 >
 > **Phased milestones** (§12):
 > - **v0** — single-hop, first-party-operated fallback relay pool; opt-in; control-plane only. De-risk first: prototype the shim + endpoint re-resolution, a minimal `quinn`/TLS relay with destination allowlist, and a one-hop latency measurement against the §6.4 budget.
-> - **v1** — multi-hop onion for the control plane with peer-hosted relays (NAT traversal via the shipped WebRTC/ICE stack, guard/path selection, first-party last hop). Gated on v0 adoption and evidence of the "don't trust even the relay operator" threat.
+> - **v1** — multi-hop onion for the control plane with peer-hosted relays (NAT traversal by **parked outbound connections**, not ICE — see §7.1; guard/path selection; first-party guard *and* last hop, so a peer is a middle hop only). Gated on v0 adoption and evidence of the "don't trust even the relay operator" threat.
 > - **v2** — timing defenses (padding/batching) as a distinct opt-in "maximum privacy" mode. Only if a whistleblower-grade threat model materializes.
 >
 > **Acceptance criteria** (consolidated from §5, §7, §10, §11, §12):
@@ -582,8 +598,9 @@ removes the per-call-`Client::new()` anti-pattern (connection-pool win for free)
   number is ever needed — but the selection-policy gap above is independent of that precision and is
   the thing to fix first.
 
-v1 (multi-hop, peer relays, NAT traversal via the shipped WebRTC/ICE stack, guard/path selection,
-first-party last hop) builds on Slice 1's `n`-hop `Circuit` — no re-plumb.
+v1 (multi-hop, peer relays, NAT traversal by parked outbound connections rather than the shipped
+WebRTC/ICE stack — §7.1 — guard/path selection, first-party guard and last hop) built on Slice 1's
+`n`-hop `Circuit` as expected: no re-plumb.
 
 ### 14.4 Residual leaks to state honestly in v0 (do not paper over)
 
