@@ -7,7 +7,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { verifyDirectory, DirectoryRejected } from "../lib/directory-verify.mjs";
+import { verifyDirectory, DirectoryRejected, directoryPeers, admitPeers } from "../lib/directory-verify.mjs";
+import { createHash } from "node:crypto";
 
 // A fresh signing keypair, and its raw 32-byte public key as base64 — exactly
 // the POLLIS_OVERLAY_DIRECTORY_KEY the client pins.
@@ -125,6 +126,118 @@ test("OLD CLIENT: unknown future payload fields are ignored, not rejected", () =
     now,
   );
   assert.equal(dir.relays.length, 1);
+});
+
+// ── Peer-hosted relays: the SECOND additive field (#813 wave 3) ──────────────
+//
+// Everything above is the guarantee phase C established for `revocation`. These
+// re-establish it for `peers`, because "we did it right last time" is not a test.
+
+const PEER_CERT_B64 = Buffer.from("peer-leaf-der").toString("base64");
+const PEER_DIGEST_B64 = createHash("sha256").update(Buffer.from("peer-leaf-der")).digest("base64");
+
+function withPeers(overrides = {}) {
+  return freshDirectory({
+    peers: [{ cert_b64: PEER_CERT_B64, parked_at: ["203.0.113.7:9444"] }],
+    ...overrides,
+  });
+}
+
+test("OLD CLIENT: a peers-carrying directory still verifies unchanged", () => {
+  // Verbatim the pre-#813 verification path — the one baked into shipped builds.
+  const dir = verifyDirectory(signEnvelope(withPeers()), pubRawB64, now);
+  assert.equal(dir.version, 1, "version stays 1 — bumping it would make every shipped client reject");
+  assert.equal(dir.relays.length, 1);
+  assert.equal(dir.relays[0].addr, "203.0.113.7:9444");
+  assert.equal(dir.relays[0].cert_b64, "ZHVtbXktY2VydA==");
+});
+
+test("OLD CLIENT: peers ride at the TOP level, so relay entries gain no new fields", () => {
+  const dir = verifyDirectory(signEnvelope(withPeers()), pubRawB64, now);
+  assert.deepEqual(Object.keys(dir.relays[0]).sort(), ["addr", "cert_b64", "region"]);
+});
+
+test("OLD CLIENT: both additive fields together still verify", () => {
+  const dir = verifyDirectory(
+    signEnvelope(withPeers({ revocation: { seq: 42, path: "revocations.json", count: 0 } })),
+    pubRawB64,
+    now,
+  );
+  assert.equal(dir.version, 1);
+  assert.equal(dir.relays.length, 1);
+});
+
+test("a directory with no parked peers is byte-identical to the old shape", () => {
+  // The reconciler omits the key entirely when there is nothing to say, so a pool
+  // with no consenting devices publishes exactly what it published before #813.
+  const before = JSON.stringify(freshDirectory());
+  const envelope = JSON.parse(signEnvelope(freshDirectory()));
+  assert.equal(Buffer.from(envelope.payload_b64, "base64").toString("utf8"), before);
+  assert.equal(JSON.parse(before).peers, undefined);
+});
+
+test("absent peers means NO peers, never unknown", () => {
+  assert.deepEqual(directoryPeers(verifyDirectory(signEnvelope(freshDirectory()), pubRawB64, now)), []);
+});
+
+test("a peer parked at no relay in this directory is dropped as unreachable", () => {
+  // A peer never listens for inbound connections — it is reachable only through a
+  // relay that holds its parked link, so one naming no live relay is unusable.
+  const dir = verifyDirectory(
+    signEnvelope(freshDirectory({ peers: [{ cert_b64: PEER_CERT_B64, parked_at: ["198.51.100.9:9444"] }] })),
+    pubRawB64,
+    now,
+  );
+  assert.deepEqual(directoryPeers(dir), []);
+  const dirNoParking = verifyDirectory(
+    signEnvelope(freshDirectory({ peers: [{ cert_b64: PEER_CERT_B64 }] })),
+    pubRawB64,
+    now,
+  );
+  assert.deepEqual(directoryPeers(dirNoParking), []);
+});
+
+test("a revoked peer is rejected CLIENT-side even when the directory still lists it", () => {
+  // Belt and braces: the reconciler excludes revoked peers at publication, but a
+  // client holding an older directory must refuse the same peer on its own.
+  const dir = verifyDirectory(signEnvelope(withPeers({ revocation: { seq: 3, count: 1 } })), pubRawB64, now);
+  assert.equal(directoryPeers(dir).length, 1, "the directory does still advertise it");
+
+  const list = { seq: 3, expires_at: now + 300, addrs: new Set(), certDigests: new Set([PEER_DIGEST_B64]) };
+  assert.deepEqual(admitPeers(dir, list, now), [], "a revoked peer was admitted");
+
+  // ...and an unrelated revocation leaves it usable.
+  const other = { seq: 3, expires_at: now + 300, addrs: new Set(), certDigests: new Set(["Zm9v"]) };
+  assert.equal(admitPeers(dir, other, now).length, 1);
+});
+
+test("peers fail closed when revocation cannot be evaluated", () => {
+  const dir = verifyDirectory(signEnvelope(withPeers({ revocation: { seq: 7, count: 1 } })), pubRawB64, now);
+  const fresh = { seq: 7, expires_at: now + 300, addrs: new Set(), certDigests: new Set() };
+  assert.equal(admitPeers(dir, fresh, now).length, 1);
+  // No list at all, an expired one, and one behind the anchor all mean "cannot
+  // evaluate", which resolves identically to "revoked".
+  assert.deepEqual(admitPeers(dir, null, now), []);
+  assert.deepEqual(admitPeers(dir, { ...fresh, expires_at: now }, now), []);
+  assert.deepEqual(admitPeers(dir, { ...fresh, seq: 6 }, now), []);
+});
+
+test("the deploy-order carve-out is as narrow for peers as it is for relays", () => {
+  // A client that ships before the reconciler publishes revocations.json must not
+  // fail closed fleet-wide on day one — so while the directory anchors NOTHING (or
+  // anchors count == 0), a missing list means "no revocations known".
+  const noAnchor = verifyDirectory(signEnvelope(withPeers()), pubRawB64, now);
+  assert.equal(admitPeers(noAnchor, null, now).length, 1);
+  const zeroCount = verifyDirectory(signEnvelope(withPeers({ revocation: { seq: 5, count: 0 } })), pubRawB64, now);
+  assert.equal(admitPeers(zeroCount, null, now).length, 1);
+  // ...and an anchor whose count this build cannot read is ambiguity, not
+  // permission: it enforces.
+  const unreadableCount = verifyDirectory(
+    signEnvelope(withPeers({ revocation: { seq: 5, count: "lots" } })),
+    pubRawB64,
+    now,
+  );
+  assert.deepEqual(admitPeers(unreadableCount, null, now), []);
 });
 
 test("a directory with revocation NOT configured is byte-identical to the old shape", () => {

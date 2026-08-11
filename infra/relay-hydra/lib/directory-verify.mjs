@@ -133,6 +133,86 @@ export function admitRelays(directory, list, nowSeconds = Math.floor(Date.now() 
   return usable;
 }
 
+// ─── Peer-hosted relays (#813 wave 3) ───────────────────────────────────────
+//
+// The §3 payload gained a SECOND additive, optional top-level field:
+//
+//   "peers": [ { "cert_b64": "<peer relay leaf DER>", "parked_at": ["ip:port"] } ]
+//
+// Same terms as the revocation anchor: `version` stays 1, relay entries are
+// untouched, and an already-shipped client — which either ignores unknown payload
+// fields (pollis-core) or reads only version/expires_at/relays (this module) — is
+// unaffected. test/directory-contract.test.mjs pins that, and its Rust twin is
+// `net::directory::tests::an_old_client_still_parses_a_peers_carrying_directory`.
+//
+// ABSENT MEANS NONE. There is no "unknown" state to represent: a directory with
+// no `peers` key is a directory with no peer relays, which is the shape the pool
+// published before this existed. Hence an array with an empty default rather than
+// a nullable field — the fail-closed answer and the default are the same value.
+
+// The peer entries a verified directory carries, normalized. Entries that are not
+// usable (no cert, or parked at nowhere) are DROPPED rather than throwing: a peer
+// can only ever be a middle hop, so an unusable one costs a shorter path, which is
+// where the pool was before peers existed. Compare revocation, where the same
+// leniency would be a safety hole — hence the different direction there.
+export function directoryPeers(directory) {
+  if (!Array.isArray(directory?.peers)) {
+    return [];
+  }
+  const out = [];
+  for (const entry of directory.peers) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    if (typeof entry.cert_b64 !== "string" || entry.cert_b64.length === 0) {
+      continue;
+    }
+    const parkedAt = Array.isArray(entry.parked_at)
+      ? entry.parked_at.filter((a) => typeof a === "string" && a.length > 0)
+      : [];
+    // A peer never listens for inbound connections, so one parked at no relay in
+    // this directory is not reachable by any circuit we could build.
+    const reachable = parkedAt.filter((a) => directory.relays.some((r) => r.addr === a));
+    if (reachable.length === 0) {
+      continue;
+    }
+    out.push({ cert_b64: entry.cert_b64, parked_at: reachable });
+  }
+  return out;
+}
+
+// The peers a client may actually use: the reachable ones, minus anything the
+// revocation list covers. Belt and braces with the reconciler, which excludes a
+// revoked peer at publication — this is what protects a client still holding an
+// older directory.
+//
+// Mirrors the SHIPPING client (`pollis-core`'s `net::revocation::RelayAdmission`)
+// exactly, including its deploy-order carve-out: while the directory carries no
+// anchor, or an anchor saying `count == 0`, unusable evidence means "no
+// revocations known" and the peers stand; once the anchor advertises revocations,
+// "cannot evaluate" resolves identically to "revoked" and the peer set is EMPTY.
+// That is a looser rule than `admitRelays` above, which throws on a missing list
+// unconditionally because it backs the operator's end-to-end verifier, where a
+// missing artifact must be loud. The client's rule is the one peers are selected
+// by, so it is the one reproduced here.
+export function admitPeers(directory, list, nowSeconds = Math.floor(Date.now() / 1000)) {
+  const peers = directoryPeers(directory);
+  if (peers.length === 0) {
+    return [];
+  }
+  const anchor = revocationAnchor(directory);
+  const required = anchor !== null && anchor.count !== 0;
+  const evaluable =
+    list !== null &&
+    list !== undefined &&
+    nowSeconds < list.expires_at &&
+    (anchor === null || list.seq >= anchor.seq);
+  if (!evaluable) {
+    return required ? [] : peers;
+  }
+  return peers.filter((p) => !list.certDigests.has(sha256B64(Buffer.from(p.cert_b64, "base64"))));
+}
+
 // Kept local (rather than importing revocation-verify.mjs) so this module stays
 // the single dependency the directory path needs; the matching rule is the same
 // one pollis-relay's RevocationList::revokes implements.
