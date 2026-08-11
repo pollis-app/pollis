@@ -388,7 +388,8 @@ What that means concretely, verifiable in the tree:
 - **Client half: built and shipped.** The `pollis-relay` transport crate, the consumer side in `pollis-core/src/net/{overlay,directory}.rs`, the live off/prefer/strict engine in `pollis-core/src/commands/overlay.rs`, the `get_overlay_mode` / `set_overlay_mode` Tauri commands (`src-tauri/src/lib.rs`), and the Preferences → "Network privacy (relay)" control (`frontend/src/pages/PreferencesPage.tsx`, `overlay_mode` in `usePreferences.ts`).
 - **Off by default, and inert when off.** `Config::overlay_mode` defaults to `Off` (`pollis-core/src/config.rs`; unknown/empty values also fail safe to off). With the overlay off no shim is started, `AppState.overlay` is `None`, and every network path is byte-for-byte the pre-overlay direct path. A non-off mode is selected either by the user in Settings (persisted in the synced preferences blob and re-applied on load) or by the `POLLIS_OVERLAY` env/`option_env!` value at boot — release builds do **not** set it.
 - **Relay tier: build-and-publish only, no auto-deploy.** `.github/workflows/relay-image.yml` builds the image and publishes it to GHCR; it never rolls a node. Nodes are stood up either by an operator (`docs/relay-operations.md`) or by the automated AWS pool (`infra/relay-hydra/`, #616). Release builds bake `POLLIS_OVERLAY_DIRECTORY_URL` / `_KEY` so a pool is reachable *if* a user opts in; `POLLIS_OVERLAY` itself is never baked. See `docs/deployments.md` → "Relay pool" for how the pool is operated — **this doc does not claim any particular node is currently running.**
-- **v1 (multi-hop onion, peer-hosted relays) and v2 (timing defenses) are NOT built.** v0 is a waypoint toward the §14.0 north star (Option B), not the destination.
+- **Latency is measured (§14.3 Slice 3, 2026-08-11) and the §6.4 budget holds only for a nearby relay.** Against the live pool, the added cost is ≈+21 ms via the `us-east-2` node but ≈+123 ms via `us-west-2`, and relay selection is health-ordered round-robin with **no latency term** — so a US-East client takes the slow path about half the time. This does not affect anyone today (the overlay is off by default) but it is the open item before any "turn it on" recommendation (**#812**).
+- **v1 (multi-hop onion, peer-hosted relays, scoped as #813) and v2 (timing defenses) are NOT built.** v0 is a waypoint toward the §14.0 north star (Option B), not the destination.
 
 Do not describe this as "deployed", "shipped to users", or "on" — it is built, opt-in, and off unless a user turns it on. The earlier sequencing note (defer until sealed sender lands, so the app layer isn't still leaking a plaintext sender column) was **not** followed: the network half landed first. That ordering caveat still holds as a *framing* rule — the relay hides IP only. Sealed sender has since landed as well (`docs/metadata-minimization-design.md` v1/v2 SHIPPED), but it is **at-rest only**: the DS still sees the sender live via the `X-Pollis-User` auth header, and the `group_member` / `dm_channel_member` social graph is still plaintext. Neither layer substitutes for the other (§6 layer table there).
 
@@ -539,8 +540,42 @@ removes the per-call-`Client::new()` anti-pattern (connection-pool win for free)
     pinned to its own QUIC cert) so there is no harvest-now/forge-later exposure — see
     `docs/relay-operations.md` §Step 3. The static `POLLIS_OVERLAY_RELAY` path (Slice 2a) remains the
     operator/hand-provisioned fallback; the directory supersedes it when both vars are set.
-- **Slice 3 — one-hop latency measurement** against the §6.4 budget (de-risk item 3), on the real
-  control plane, before any "ship v0" call.
+- **Slice 3 (measured 2026-08-11) — one-hop latency against the §6.4 budget.** Verdict: **the budget
+  holds for the near relay and is blown by the far one, and v0 has no way to prefer the near one.**
+
+  Measured from a US-East client against the **live** pool (both nodes healthy, same build
+  `3a28f55`), 8 samples each, median TCP-connect RTT to the relay health port (`:9445`) and to the
+  first-party hosts:
+
+  | Leg | Median RTT |
+  |---|---|
+  | client → relay `us-east-2` (18.227.73.93) | **15.1 ms** (13.1–17.1) |
+  | client → relay `us-west-2` (54.189.118.176) | **69.0 ms** (63.9–71.6) |
+  | client → Turso (`aws-us-east-1`), direct baseline | 6.2 ms (4.8–13.1) |
+  | client → DS (`api.pollis.com`, CF edge), direct baseline | 4.0 ms (3.6–5.3) |
+
+  Added latency for a control-plane op is `RTT(client→relay) + RTT(relay→dest) − RTT(client→dest)`.
+  The first and third terms are measured above; `relay→dest` is **not measurable from a client** and
+  is estimated from standard AWS inter-region figures (us-east-2→us-east-1 ≈ 12 ms,
+  us-west-2→us-east-1 ≈ 60 ms):
+
+  - via the **us-east-2** relay: ≈ **+21 ms** — inside the §6.4 "+10–40 ms typical" band. ✅
+  - via the **us-west-2** relay: ≈ **+123 ms** — roughly 3× the top of the band. ❌
+
+  **The finding that matters is not the numbers, it is the selection policy.** `RelayPool::
+  candidate_order()` (`pollis-core/src/net/overlay.rs`) orders endpoints by *health*, rotating with
+  `next_start.fetch_add(1)` to spread load — there is no latency or geography term. With both nodes
+  healthy a client therefore **round-robins**, so a US-East user takes the ≈+123 ms path for about
+  half of all control-plane dials. §6.4's "the user should never wait on the overlay" holds on
+  average only if the pool happens to be near the user; today it is a coin flip. Filed as **#812**, which gates the ship-v0 call.
+
+  Caveats, stated so this is not over-read: the relay legs are measured against the health port
+  (TCP) rather than the QUIC data port, which the locked security groups do not expose to probing;
+  this measures the **network path**, not a full end-to-end control-plane operation with the relay's
+  handshake and stream setup included, so treat these as a floor on the added latency, not the whole
+  of it. Re-run against a client build (`POLLIS_OVERLAY=strict`) before the ship call if a tighter
+  number is ever needed — but the selection-policy gap above is independent of that precision and is
+  the thing to fix first.
 
 v1 (multi-hop, peer relays, NAT traversal via the shipped WebRTC/ICE stack, guard/path selection,
 first-party last hop) builds on Slice 1's `n`-hop `Circuit` — no re-plumb.
