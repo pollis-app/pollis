@@ -288,6 +288,15 @@ impl RealRelayFactory {
         guards: Arc<GuardBook>,
     ) -> Self {
         let n = endpoints.len();
+        // Peers only pay for themselves as an EXTRA hop (see `path::hops_for`), so
+        // the target length is raised exactly when the pool contains one. A pool
+        // with no peers therefore builds byte-for-byte the paths it built before
+        // wave 3 — no peers, no change.
+        let target_hops = if endpoints.iter().any(|e| e.tier == path::RelayTier::Peer) {
+            path::MAX_PATH_HOPS
+        } else {
+            path::TARGET_HOPS
+        };
         RealRelayFactory {
             state,
             endpoints,
@@ -299,7 +308,7 @@ impl RealRelayFactory {
             dial_timeout,
             admission,
             guards,
-            target_hops: path::TARGET_HOPS,
+            target_hops,
         }
     }
 
@@ -470,7 +479,7 @@ impl CircuitFactory for RealRelayFactory {
         }
         // Pinned entry relays, restricted to what is admissible right now. Only
         // needed once a path is longer than one hop.
-        let guards = if path::desired_hops(admitted.len(), self.target_hops) > 1 {
+        let guards = if path::is_multi_hop(&self.endpoints, &admitted, self.target_hops) {
             self.guards.guards_for(&self.endpoints, &admitted, now_secs)
         } else {
             Vec::new()
@@ -679,22 +688,76 @@ const DIRECTORY_MIN_REFETCH: Duration = Duration::from_secs(15);
 /// shares one across the pool, but we consume whatever is listed). Entries whose
 /// `cert_b64` is not valid base64/DER are skipped — never dial a relay we cannot
 /// pin.
-fn directory_to_endpoints(dir: &directory::Directory) -> Vec<RelayEndpoint> {
+pub(crate) fn directory_to_endpoints(dir: &directory::Directory) -> Vec<RelayEndpoint> {
     use base64::Engine as _;
-    dir.relays
+    let mut endpoints: Vec<RelayEndpoint> = dir
+        .relays
         .iter()
         .filter_map(|r| {
             let der = base64::engine::general_purpose::STANDARD
                 .decode(r.cert_b64.trim())
                 .ok()?;
-            // Everything the SIGNED directory advertises is ours: the reconciler
-            // only lists nodes it runs. Peer-hosted relays (phase D1) arrive from
-            // a different source and are tiered `Peer` there, which is what keeps
-            // them out of the guard and exit positions.
+            // Everything in `relays[]` is ours: the reconciler only lists nodes it
+            // runs. Peer-hosted relays are a separate array and are tiered `Peer`
+            // below, which is what keeps them out of the guard and exit positions.
             Some(RelayEndpoint::first_party(
                 r.addr.clone(),
                 r.region.clone(),
                 CertificateDer::from(der),
+            ))
+        })
+        .collect();
+    let peers = directory_to_peer_endpoints(dir, &endpoints);
+    endpoints.extend(peers);
+    endpoints
+}
+
+/// The peer-hosted middle hops a verified directory offers (#813 wave 3).
+///
+/// The signed directory is the **only** channel a peer can arrive through
+/// (`crate::net::peer::discovery`'s module docs spell out why an unsigned one
+/// would undo the design), and this is the only producer of [`RelayTier::Peer`]
+/// endpoints. Everything here fails toward *fewer peers*, which is the pool as it
+/// was before peers existed:
+///
+/// - an entry whose `cert_b64` is not valid base64/DER is skipped — a hop we
+///   cannot pin is a hop we will not build a layer to;
+/// - an entry parked at no relay in **this** directory is skipped as unreachable.
+///   A peer accepts no inbound connections, so a relay we are not advertising
+///   cannot be asked to splice into its link;
+/// - the rendezvous address recorded on the endpoint is the first parked relay
+///   that IS advertised, so a peer is never pinned to a node clients have stopped
+///   using.
+///
+/// Revocation is deliberately **not** applied here: it is evaluated per candidate
+/// at dial time by [`RelayAdmission`], on the same `cert_sha256_b64` selector
+/// relays use, so a peer revoked after this directory was fetched is refused too.
+fn directory_to_peer_endpoints(
+    dir: &directory::Directory,
+    first_party: &[RelayEndpoint],
+) -> Vec<RelayEndpoint> {
+    use base64::Engine as _;
+    dir.peers
+        .iter()
+        .filter_map(|p| {
+            let der = base64::engine::general_purpose::STANDARD
+                .decode(p.cert_b64.trim())
+                .ok()?;
+            let parked_at: Vec<String> = p
+                .parked_at
+                .iter()
+                .filter(|a| first_party.iter().any(|e| &&e.addr == a))
+                .cloned()
+                .collect();
+            let rendezvous = parked_at.first()?.clone();
+            Some(RelayEndpoint::peer_parked_at(
+                rendezvous,
+                // The directory carries no region for a peer, and inventing one
+                // would be worse than none: the selector treats an unknown region
+                // as "not known to be diverse", never as diverse.
+                String::new(),
+                CertificateDer::from(der),
+                parked_at,
             ))
         })
         .collect()
@@ -2337,6 +2400,21 @@ mod tests {
     /// Build an enforcing admission gate holding a freshly-signed list that
     /// revokes `revoked_addrs`, anchored by a directory with a matching seq.
     fn enforcing_gate(revoked_addrs: &[&str], now: i64, expires_at: i64) -> Arc<RelayAdmission> {
+        let revoked: Vec<serde_json::Value> = revoked_addrs
+            .iter()
+            .map(|a| serde_json::json!({ "addr": a }))
+            .collect();
+        enforcing_gate_for(revoked, now, expires_at)
+    }
+
+    /// The same, for revocation entries written out in full — the
+    /// `cert_sha256_b64` selector is the only one that can name a peer, which has
+    /// no address of its own.
+    fn enforcing_gate_for(
+        revoked: Vec<serde_json::Value>,
+        now: i64,
+        expires_at: i64,
+    ) -> Arc<RelayAdmission> {
         use base64::Engine as _;
         use ed25519_dalek::{Signer, SigningKey};
 
@@ -2345,10 +2423,7 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(sk.verifying_key().to_bytes());
         let gate = Arc::new(RelayAdmission::enforcing(&key_b64));
 
-        let revoked: Vec<serde_json::Value> = revoked_addrs
-            .iter()
-            .map(|a| serde_json::json!({ "addr": a }))
-            .collect();
+        let revoked_count = revoked.len();
         let payload = serde_json::to_string(&serde_json::json!({
             "version": pollis_relay::REVOCATION_VERSION,
             "type": pollis_relay::REVOCATION_TYPE,
@@ -2366,8 +2441,7 @@ mod tests {
         .unwrap();
 
         let dir_json = format!(
-            r#"{{"version":1,"issued_at":1,"expires_at":9999999999,"relays":[{{"addr":"x:1","cert_b64":"QUJD"}}],"revocation":{{"seq":5,"count":{}}}}}"#,
-            revoked_addrs.len()
+            r#"{{"version":1,"issued_at":1,"expires_at":9999999999,"relays":[{{"addr":"x:1","cert_b64":"QUJD"}}],"revocation":{{"seq":5,"count":{revoked_count}}}}}"#
         );
         let dir: directory::Directory = serde_json::from_str(&dir_json).unwrap();
         gate.observe_directory(&dir);
@@ -2470,6 +2544,232 @@ mod tests {
             "an expired list is not evidence; the pool must close"
         );
         assert_eq!(relay.stats.dials(), 0);
+    }
+
+    // ── (g2) #813 wave 3: peers published by the directory ────────────────────
+
+    fn cert_b64_of(cert: &CertificateDer<'static>) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(cert.as_ref())
+    }
+
+    fn cert_digest_b64_of(cert: &CertificateDer<'static>) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .encode(pollis_relay::proto::cert_fingerprint(cert.as_ref()))
+    }
+
+    /// A directory JSON carrying `relays` and (optionally) `peers`, parsed the way
+    /// `verify_directory` hands it to the pool builder.
+    fn directory_with(relays: &[(&str, &CertificateDer<'static>)], peers: serde_json::Value) -> directory::Directory {
+        let relays: Vec<serde_json::Value> = relays
+            .iter()
+            .map(|(addr, cert)| {
+                serde_json::json!({ "addr": addr, "region": "us-west-2", "cert_b64": cert_b64_of(cert) })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "issued_at": 1,
+            "expires_at": 9_999_999_999i64,
+            "relays": relays,
+            "peers": peers,
+        }))
+        .expect("directory parses")
+    }
+
+    /// THE PRODUCER: peer entries in the signed directory become `Peer`-tier
+    /// endpoints in the pool — the one channel a peer may arrive through.
+    #[test]
+    fn directory_peers_become_peer_tier_endpoints() {
+        let a = CertificateDer::from(vec![1u8; 24]);
+        let b = CertificateDer::from(vec![2u8; 24]);
+        let p = CertificateDer::from(vec![9u8; 24]);
+        let dir = directory_with(
+            &[("203.0.113.7:9444", &a), ("203.0.113.8:9444", &b)],
+            serde_json::json!([{ "cert_b64": cert_b64_of(&p), "parked_at": ["203.0.113.8:9444", "203.0.113.7:9444"] }]),
+        );
+
+        let endpoints = directory_to_endpoints(&dir);
+        assert_eq!(endpoints.len(), 3);
+        assert!(endpoints[..2]
+            .iter()
+            .all(|e| e.tier == path::RelayTier::FirstParty));
+        let peer = &endpoints[2];
+        assert_eq!(peer.tier, path::RelayTier::Peer);
+        assert_eq!(peer.cert.as_ref(), p.as_ref(), "the client pins the peer's own leaf");
+        // The rendezvous is the first ADVERTISED relay it is parked at, so a peer
+        // is never pinned to a node clients have stopped using.
+        assert_eq!(peer.addr, "203.0.113.8:9444");
+    }
+
+    /// A directory with no `peers` produces exactly the pool it produced before
+    /// wave 3 — and the factory built from it keeps the pre-wave-3 path length,
+    /// so "no peers, no change" is a property of the code, not of the config.
+    #[test]
+    fn a_directory_without_peers_is_unchanged() {
+        let a = CertificateDer::from(vec![1u8; 24]);
+        let b = CertificateDer::from(vec![2u8; 24]);
+        let dir: directory::Directory = serde_json::from_value(serde_json::json!({
+            "version": 1, "issued_at": 1, "expires_at": 9_999_999_999i64,
+            "relays": [
+                { "addr": "203.0.113.7:9444", "region": "us-west-2", "cert_b64": cert_b64_of(&a) },
+                { "addr": "203.0.113.8:9444", "region": "us-west-2", "cert_b64": cert_b64_of(&b) },
+            ],
+        }))
+        .unwrap();
+        let endpoints = directory_to_endpoints(&dir);
+        assert_eq!(endpoints.len(), 2);
+        assert!(endpoints.iter().all(|e| e.tier == path::RelayTier::FirstParty));
+    }
+
+    /// Unusable peer entries are dropped — never dialed, never fatal to the
+    /// directory. Each of these fails toward "fewer peers", i.e. shorter paths.
+    #[test]
+    fn unusable_peer_entries_are_dropped() {
+        let a = CertificateDer::from(vec![1u8; 24]);
+        let p = CertificateDer::from(vec![9u8; 24]);
+        let dir = directory_with(
+            &[("203.0.113.7:9444", &a)],
+            serde_json::json!([
+                // Not decodable as base64 → we could not pin this hop.
+                { "cert_b64": "!!!not base64!!!", "parked_at": ["203.0.113.7:9444"] },
+                // Parked only at a relay this directory does not advertise → no
+                // relay we can reach can splice into its link.
+                { "cert_b64": cert_b64_of(&p), "parked_at": ["198.51.100.9:9444"] },
+                // Parked nowhere at all → same, and the reason `parked_at` is not
+                // optional in practice.
+                { "cert_b64": cert_b64_of(&p) },
+            ]),
+        );
+        let endpoints = directory_to_endpoints(&dir);
+        assert_eq!(endpoints.len(), 1, "an unusable peer entered the pool");
+        assert_eq!(endpoints[0].tier, path::RelayTier::FirstParty);
+    }
+
+    /// THE PRODUCER MEETS THE SELECTOR: a peer published by the signed directory
+    /// is planned into the MIDDLE of a real 3-hop path — `first-party guard →
+    /// peer → first-party exit` — and the pool raises its own path length to make
+    /// room for it (the factory is built the production way, with no injected
+    /// `target_hops`).
+    ///
+    /// This stops at the plan rather than the wire **because a parked peer is not
+    /// dialable, which is the whole point of parking**: its endpoint address is a
+    /// rendezvous — the first-party relay holding its link — and reaching it needs
+    /// that relay to splice the `Extend` into the parked connection instead of
+    /// dialing (wave 3's relay half). The byte-level proof that this selector's
+    /// output carries traffic is `a_peer_relay_is_usable_as_a_middle_hop_on_the_wire`,
+    /// which runs the same `plan_path` over a directly-dialable peer.
+    #[test]
+    fn a_directory_published_peer_is_planned_as_the_middle_hop() {
+        let a = CertificateDer::from(vec![1u8; 24]);
+        let b = CertificateDer::from(vec![2u8; 24]);
+        let c = CertificateDer::from(vec![3u8; 24]);
+        let p = CertificateDer::from(vec![9u8; 24]);
+        let dir = directory_with(
+            &[
+                ("203.0.113.7:9444", &a),
+                ("203.0.113.8:9444", &b),
+                ("203.0.113.9:9444", &c),
+            ],
+            // v1 parks at every first-party relay, so any of them can reach it.
+            serde_json::json!([{
+                "cert_b64": cert_b64_of(&p),
+                "parked_at": ["203.0.113.7:9444", "203.0.113.8:9444", "203.0.113.9:9444"],
+            }]),
+        );
+        let endpoints = directory_to_endpoints(&dir);
+        assert_eq!(endpoints.len(), 4);
+
+        // A pool holding a peer raises its own target length; one without a peer
+        // keeps the pre-wave-3 length. `RealRelayFactory::new` decides this, so it
+        // is checked through the factory rather than restated here.
+        let with_peer = pool_factory_for(&endpoints);
+        assert_eq!(with_peer, path::MAX_PATH_HOPS);
+        assert_eq!(
+            pool_factory_for(&endpoints[..3]),
+            path::TARGET_HOPS,
+            "a peerless pool must not grow paths"
+        );
+
+        let order: Vec<usize> = (0..endpoints.len()).collect();
+        let path = path::plan_path(&endpoints, &order, &[0], 1, 0, with_peer).expect("path");
+        let hops = path.endpoints();
+        assert_eq!(hops.len(), 3, "the peer did not earn its middle hop");
+        assert_eq!(hops[0].tier, path::RelayTier::FirstParty, "the guard is ours");
+        assert_eq!(hops[1].tier, path::RelayTier::Peer);
+        assert_eq!(hops[1].cert.as_ref(), p.as_ref());
+        assert_eq!(hops[2].tier, path::RelayTier::FirstParty, "the exit is ours");
+    }
+
+    /// The `target_hops` a production factory settles on for this pool.
+    fn pool_factory_for(endpoints: &[RelayEndpoint]) -> usize {
+        let state: Weak<AppState> = Weak::new();
+        RealRelayFactory::new(
+            state,
+            endpoints.to_vec(),
+            Duration::from_secs(30),
+            Duration::from_secs(4),
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
+        )
+        .target_hops
+    }
+
+    /// BELT AND BRACES with the reconciler: a peer whose cert is revoked is
+    /// refused CLIENT-side even though the directory still advertises it — which
+    /// is the case that matters, because a client can be holding a directory
+    /// signed before the revocation. `cert_sha256_b64` is the only selector that
+    /// can name a peer; its address belongs to the relay parking it.
+    #[tokio::test]
+    async fn a_revoked_peer_is_never_used_as_a_middle() {
+        let origin = spawn_plain_http("revoked-peer-target").await;
+        let a = spawn_pool_relay();
+        let b = spawn_pool_relay();
+        let c = spawn_pool_relay();
+        let peer = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let dir = directory_with(
+            &[
+                (&a.addr.to_string(), &a.cert),
+                (&b.addr.to_string(), &b.cert),
+                (&c.addr.to_string(), &c.cert),
+            ],
+            serde_json::json!([{
+                "cert_b64": cert_b64_of(&peer.cert),
+                "parked_at": [a.addr.to_string(), b.addr.to_string(), c.addr.to_string()],
+            }]),
+        );
+        let now = now_unix_secs() as i64;
+        let gate = enforcing_gate_for(
+            vec![serde_json::json!({ "cert_sha256_b64": cert_digest_b64_of(&peer.cert) })],
+            now,
+            now + 3_600,
+        );
+
+        let factory = RealRelayFactory::new(
+            Arc::downgrade(&state),
+            directory_to_endpoints(&dir),
+            Duration::from_secs(30),
+            Duration::from_secs(4),
+            gate,
+            Arc::new(GuardBook::ephemeral()),
+        );
+
+        const N: u64 = 4;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert_eq!(peer.stats.extends(), 0, "a REVOKED peer carried traffic");
+        assert_eq!(peer.stats.dials(), 0);
+        // Delivery still works — the pool routes around the revoked peer and
+        // simply builds the shorter, first-party-only path.
+        assert_eq!(
+            a.stats.dials() + b.stats.dials() + c.stats.dials(),
+            N,
+            "revoking a peer must not cost delivery"
+        );
     }
 
     // ── (h) #813 phase E1: LiveKit signaling over the overlay, media direct ───

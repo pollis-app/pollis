@@ -26,7 +26,22 @@
 //!    position multi-hop exists to prevent. [`RelayPath::multi`] rejects it.
 //!
 //! Peer-hosted relays (phase D1) are [`RelayTier::Peer`] and are selectable as
-//! **middle hops only** — never the guard, never the exit.
+//! **middle hops only** — never the guard, never the exit, and **at most one per
+//! path** ([`RelayPath::multi`] refuses a second).
+//!
+//! Two things about a peer are unlike a first-party relay and shape the code
+//! below:
+//!
+//! - **Its address is a rendezvous, not its own.** A peer never listens for
+//!   inbound connections; it is reached through a first-party relay holding its
+//!   parked link. So a peer's `addr` is one of ours, which is why "does this path
+//!   repeat a node" compares a peer by CERT and a first-party relay by ADDRESS
+//!   (see `RelayEndpoint::identity_key`).
+//! - **It lengthens a path rather than filling a slot in one.** The spare rule
+//!   counts first-party relays only ([`hops_for`]), because they are the only
+//!   ones that can be a guard or an exit; a peer then adds the middle hop that a
+//!   pool of our own nodes could never supply — a hop in a different trust
+//!   domain.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -89,12 +104,13 @@ pub(crate) enum RelayTier {
     /// Ours: published by the signed directory (or the static v0 config). The
     /// only tier allowed to be a guard or an exit.
     FirstParty,
-    /// A peer-hosted relay (phase D1). **Middle hops only** — never terminal.
+    /// A peer-hosted relay (phase D1). **Middle hops only** — never terminal,
+    /// never the guard, and at most one per path.
     ///
-    /// Constructed by [`RelayEndpoint::peer`], whose only producer today is the
-    /// test suite: D1 owns peer discovery and has not landed. The variant exists
-    /// now, and is exercised now, because the position restriction it carries is
-    /// exactly the thing that must already be true when peers do arrive.
+    /// Produced from the signed directory's additive `peers` array
+    /// ([`crate::net::overlay::directory_to_endpoints`]) and nowhere else: an
+    /// unsigned discovery channel would be a way to feed a target a hand-picked
+    /// set of relays, which is the attack the directory design exists to stop.
     Peer,
 }
 
@@ -104,28 +120,54 @@ pub(crate) enum RelayTier {
 #[derive(Clone)]
 pub(crate) struct RelayEndpoint {
     /// As configured/advertised; resolved to a `SocketAddr` per dial.
+    ///
+    /// For a **peer** this is a *rendezvous* address, not the peer's own: a peer
+    /// never listens for inbound connections, so what goes in the `Extend` frame
+    /// is a first-party relay holding its parked link. The previous hop matches
+    /// the frame's cert fingerprint against its parked map and splices into that
+    /// connection rather than dialing. Should the parked link have gone away, the
+    /// dial that follows reaches a first-party relay whose leaf does not match
+    /// the pinned fingerprint — a clean `ExtendFailed`, never a wrong hop.
     pub(crate) addr: String,
     /// Advertised region. Only ever used as a *diversity* hint — an empty or
     /// unknown region is never treated as diverse from another unknown one.
     pub(crate) region: String,
     pub(crate) cert: CertificateDer<'static>,
     pub(crate) tier: RelayTier,
+    /// For a peer: the first-party relays it is parked at, i.e. the relays that
+    /// can reach it. **Empty means "no constraint"**, which is v1's park-at-every-
+    /// relay topology — not "nowhere": an entry that is parked nowhere never
+    /// becomes an endpoint at all (`crate::net::overlay` drops it as unreachable).
+    /// Always empty for a first-party endpoint.
+    parked_at: Vec<String>,
 }
 
 impl RelayEndpoint {
-    /// A peer-hosted endpoint (phase D1's discovery will produce these).
-    /// Selectable as a middle hop only — never a guard, never an exit.
+    /// A peer-hosted endpoint reachable from any first-party relay — v1's
+    /// park-at-all topology. Selectable as a middle hop only.
     #[allow(dead_code)]
     pub(crate) fn peer(
         addr: String,
         region: String,
         cert: CertificateDer<'static>,
     ) -> RelayEndpoint {
+        RelayEndpoint::peer_parked_at(addr, region, cert, Vec::new())
+    }
+
+    /// A peer-hosted endpoint that is reachable only from `parked_at`, with
+    /// `addr` one of those relays. This is what the signed directory produces.
+    pub(crate) fn peer_parked_at(
+        addr: String,
+        region: String,
+        cert: CertificateDer<'static>,
+        parked_at: Vec<String>,
+    ) -> RelayEndpoint {
         RelayEndpoint {
             addr,
             region,
             cert,
             tier: RelayTier::Peer,
+            parked_at,
         }
     }
 
@@ -141,6 +183,41 @@ impl RelayEndpoint {
             region,
             cert,
             tier: RelayTier::FirstParty,
+            parked_at: Vec::new(),
+        }
+    }
+
+    /// Can the relay at `addr` reach this endpoint as its next hop?
+    ///
+    /// Always true for a first-party relay, which is directly dialable. For a
+    /// peer it is true when that relay holds its parked link — or when the
+    /// endpoint names no parking at all, which is how v1's park-at-every-relay
+    /// topology is expressed. The check is here rather than assumed so that
+    /// moving to subset parking is a reconciler change only.
+    fn reachable_from(&self, addr: &str) -> bool {
+        match self.tier {
+            RelayTier::FirstParty => true,
+            RelayTier::Peer => self.parked_at.is_empty() || self.parked_at.iter().any(|a| a == addr),
+        }
+    }
+
+    /// How two endpoints are compared for "is this the same node" when a path is
+    /// assembled.
+    ///
+    /// **First-party nodes are identified by ADDRESS.** Every hydra node
+    /// currently presents the same shared pinned QUIC leaf, so comparing certs
+    /// would collapse the whole pool into one node and make every multi-hop path
+    /// look like it repeated a relay.
+    ///
+    /// **A peer is identified by its CERT**, because its `addr` is a rendezvous
+    /// it necessarily shares with the first-party relay holding its link and with
+    /// every other peer parked there. Comparing a peer by address would read
+    /// "guard A, peer parked at A, exit B" as repeating A — which is exactly the
+    /// path we want, and which really is two distinct machines.
+    fn identity_key(&self) -> String {
+        match self.tier {
+            RelayTier::FirstParty => format!("addr:{}", self.addr),
+            RelayTier::Peer => format!("peer:{}", self.cert_digest_b64()),
         }
     }
 
@@ -202,9 +279,9 @@ pub(crate) enum RelayPath {
 
 impl RelayPath {
     /// A multi-hop path. Rejects (rather than silently repairing) a path that
-    /// repeats a node or exceeds [`MAX_PATH_HOPS`] — a repeated node means one
-    /// operator occupies two positions, and guard == exit is precisely the
-    /// both-ends position the design exists to prevent.
+    /// repeats a node, carries more than one peer, or exceeds [`MAX_PATH_HOPS`] —
+    /// a repeated node means one operator occupies two positions, and guard ==
+    /// exit is precisely the both-ends position the design exists to prevent.
     pub(crate) fn multi(
         guard: FirstPartyEndpoint,
         middles: Vec<RelayEndpoint>,
@@ -219,12 +296,26 @@ impl RelayPath {
         if len > MAX_PATH_HOPS {
             anyhow::bail!("relay path of {len} hops exceeds the {MAX_PATH_HOPS}-hop cap");
         }
-        let mut seen: Vec<&str> = Vec::with_capacity(len);
+        let mut seen: Vec<String> = Vec::with_capacity(len);
+        let mut peers = 0usize;
         for endpoint in path.endpoints() {
-            if seen.contains(&endpoint.addr.as_str()) {
+            let key = endpoint.identity_key();
+            if seen.contains(&key) {
                 anyhow::bail!("relay path repeats node {}", endpoint.addr);
             }
-            seen.push(&endpoint.addr);
+            seen.push(key);
+            if endpoint.tier == RelayTier::Peer {
+                peers += 1;
+            }
+        }
+        // **At most one peer per path.** A peer middle is worth having because it
+        // is a different trust domain from the guard and the exit; a SECOND one
+        // buys no further separation (the positions it could take are already
+        // between two first-party hops) while doubling the chance that a Sybil
+        // adversary holds a hop on this circuit. Refusing to build the path is the
+        // right failure: the selector then produces a shorter one it can build.
+        if peers > 1 {
+            anyhow::bail!("relay path carries {peers} peer relays; at most one is allowed");
         }
         Ok(path)
     }
@@ -292,6 +383,37 @@ pub(crate) fn desired_hops(usable: usize, target: usize) -> usize {
     usable.saturating_sub(1).clamp(1, target.min(MAX_PATH_HOPS))
 }
 
+/// How many hops to build, given how many **first-party** relays are admissible
+/// and whether a peer can take a middle slot.
+///
+/// The spare rule counts first-party nodes only, because they are the only ones
+/// that can hold the guard and exit positions: a pool of two of our nodes plus
+/// twenty volunteers still has no first-party node to fail over to, and letting
+/// the volunteers inflate the count would silently trade the availability
+/// property B established for a longer path.
+///
+/// A peer then adds ONE hop on top rather than consuming one of the slots, which
+/// is the whole reason it is worth an extra RTT: it is a middle in a genuinely
+/// different trust domain, which two of our own nodes can never be for each
+/// other. Without a peer available the length is exactly what it was before.
+pub(crate) fn hops_for(first_party_usable: usize, peer_available: bool, target: usize) -> usize {
+    let base = desired_hops(first_party_usable, target);
+    if base > 1 && peer_available {
+        return (base + 1).min(target).min(MAX_PATH_HOPS);
+    }
+    base
+}
+
+/// Does a pool of this shape build paths longer than one hop? (Guard pins are
+/// only needed then.) `usable` indexes `pool`.
+pub(crate) fn is_multi_hop(pool: &[RelayEndpoint], usable: &[usize], target: usize) -> bool {
+    let first_party = usable
+        .iter()
+        .filter(|&&i| pool[i].tier == RelayTier::FirstParty)
+        .count();
+    desired_hops(first_party, target) > 1
+}
+
 /// Pick the guard to use for attempt `attempt`, given the pinned guard order and
 /// the exit already chosen. Returns an index into `pool`.
 ///
@@ -319,11 +441,20 @@ fn pick_guard(guards: &[usize], attempt: usize, exit: usize) -> Option<usize> {
 /// nodes share a region would mean never using the overlay at all. A distinct
 /// node is still a distinct trust unit against §4.3 (one compromised relay), and
 /// that is the property a same-region second hop still buys.
+/// A peer is preferred over a first-party node for a middle slot, and at most one
+/// peer is ever taken. `path_len` is the length of the path being built and
+/// `guard_addr` is the hop that will precede the first middle — a peer is only
+/// admissible where [`peer_position_admissible`] allows it AND where the relay
+/// that must reach it holds its parked link.
+///
+/// [`peer_position_admissible`]: crate::net::peer::discovery::peer_position_admissible
 fn pick_middles(
     pool: &[RelayEndpoint],
     candidates: &[usize],
     on_path: &[usize],
     count: usize,
+    path_len: usize,
+    guard_addr: &str,
 ) -> Vec<usize> {
     if count == 0 {
         return Vec::new();
@@ -335,22 +466,45 @@ fn pick_middles(
         .collect();
     let mut chosen = Vec::with_capacity(count);
     let mut taken: Vec<usize> = on_path.to_vec();
-    for _ in 0..count {
+    let mut peer_taken = false;
+    for slot in 0..count {
+        // The path position this slot will occupy: middles sit between the guard
+        // (0) and the exit (path_len - 1).
+        let position = 1 + slot;
         let next = candidates
             .iter()
             .copied()
             .filter(|i| !taken.contains(i))
-            // Diverse regions first; `position` order (health/latency) breaks ties.
+            .filter(|&i| {
+                if pool[i].tier != RelayTier::Peer {
+                    return true;
+                }
+                // The position rule is `net::peer::discovery`'s, called rather
+                // than re-derived so there is exactly one statement of where a
+                // peer may sit (D1's request).
+                !peer_taken
+                    && crate::net::peer::discovery::peer_position_admissible(position, path_len)
+                    && pool[i].reachable_from(guard_addr)
+            })
+            // A peer first — a middle in a different trust domain is the reason
+            // the hop exists at all, and a same-domain middle only buys latency.
+            // Then diverse regions; `position` order (health/latency) breaks ties.
             .min_by_key(|&i| {
                 let region = pool[i].region.as_str();
                 let duplicate = !region.is_empty() && regions.contains(&region);
-                (duplicate as u8, candidates.iter().position(|&c| c == i).unwrap_or(usize::MAX))
+                let not_peer = (pool[i].tier != RelayTier::Peer) as u8;
+                (
+                    not_peer,
+                    duplicate as u8,
+                    candidates.iter().position(|&c| c == i).unwrap_or(usize::MAX),
+                )
             });
         match next {
             Some(i) => {
                 if !pool[i].region.is_empty() {
                     regions.push(pool[i].region.as_str());
                 }
+                peer_taken |= pool[i].tier == RelayTier::Peer;
                 taken.push(i);
                 chosen.push(i);
             }
@@ -381,8 +535,12 @@ pub(crate) fn plan_path(
     // The exit must be first-party. This is the type-level gate: a peer endpoint
     // cannot produce a `FirstPartyEndpoint`, so it cannot terminate a path.
     let exit_fp = FirstPartyEndpoint::new(pool.get(exit)?)?;
-    let hops = desired_hops(order.len(), target_hops);
-    if hops <= 1 {
+    // The spare rule counts first-party relays only — see `hops_for`.
+    let first_party_usable = order
+        .iter()
+        .filter(|&&i| pool[i].tier == RelayTier::FirstParty)
+        .count();
+    if desired_hops(first_party_usable, target_hops) <= 1 {
         return Some(RelayPath::Single(exit_fp));
     }
     let guard = pick_guard(guards, attempt, exit)?;
@@ -390,12 +548,28 @@ pub(crate) fn plan_path(
     // `GuardBook::guards_for`), but re-prove it here rather than assume it: the
     // entry hop is the one that sees the client's IP.
     let guard_fp = FirstPartyEndpoint::new(pool.get(guard)?)?;
+    // A peer only lengthens the path if one is actually usable here: not already
+    // on the path, and reachable from the guard that would have to extend to it.
+    let peer_available = order.iter().any(|&i| {
+        i != guard
+            && i != exit
+            && pool[i].tier == RelayTier::Peer
+            && pool[i].reachable_from(&pool[guard].addr)
+    });
+    let hops = hops_for(first_party_usable, peer_available, target_hops);
     // Shorten rather than fail when the pool cannot supply enough distinct
     // middles — a 2-hop path still beats falling back to a direct dial.
-    let middles = pick_middles(pool, order, &[guard, exit], hops - 2)
-        .into_iter()
-        .map(|i| pool[i].clone())
-        .collect();
+    let middles = pick_middles(
+        pool,
+        order,
+        &[guard, exit],
+        hops - 2,
+        hops,
+        &pool[guard].addr,
+    )
+    .into_iter()
+    .map(|i| pool[i].clone())
+    .collect();
     RelayPath::multi(guard_fp, middles, exit_fp).ok()
 }
 
@@ -749,6 +923,101 @@ mod tests {
         assert_eq!(hops[2].tier, RelayTier::FirstParty);
     }
 
+    /// **At most one peer per path**, held by the constructor rather than by the
+    /// selector remembering — so no future caller can assemble a two-peer path.
+    #[test]
+    fn a_path_carries_at_most_one_peer() {
+        let a = FirstPartyEndpoint::new(&first_party("a:1", "us", 1)).unwrap();
+        let b = FirstPartyEndpoint::new(&first_party("b:1", "us", 2)).unwrap();
+        let one = vec![peer("a:1", "eu", 9)];
+        let two = vec![peer("a:1", "eu", 9), peer("b:1", "ap", 8)];
+        assert!(RelayPath::multi(a.clone(), one, b.clone()).is_ok());
+        assert!(
+            RelayPath::multi(a, two, b).is_err(),
+            "a path with two peer relays must not be constructible"
+        );
+    }
+
+    /// ...and the selector never produces one either, over every pool shape and
+    /// path length it can be asked for.
+    #[test]
+    fn the_selector_never_puts_two_peers_on_a_path() {
+        let pool = vec![
+            first_party("a:1", "us-west-2", 1),
+            first_party("b:1", "us-east-1", 2),
+            first_party("c:1", "eu-west-1", 3),
+            first_party("d:1", "ap-south-1", 4),
+            peer("a:1", "", 9),
+            peer("b:1", "", 8),
+            peer("c:1", "", 7),
+        ];
+        let order = all(pool.len());
+        let guards = vec![0, 1];
+        for exit in 0..pool.len() {
+            for attempt in 0..4 {
+                for target in 1..=MAX_PATH_HOPS {
+                    let Some(path) = plan_path(&pool, &order, &guards, exit, attempt, target) else {
+                        continue;
+                    };
+                    let peers = path
+                        .endpoints()
+                        .iter()
+                        .filter(|e| e.tier == RelayTier::Peer)
+                        .count();
+                    assert!(peers <= 1, "path carried {peers} peer relays");
+                }
+            }
+        }
+    }
+
+    /// A peer's address is a RENDEZVOUS — the first-party relay holding its
+    /// parked link — so sharing it with a hop on the same path is not a repeat.
+    /// Comparing peers by address would refuse exactly the path we want on a
+    /// two-node pool, where the rendezvous is necessarily the guard or the exit.
+    #[test]
+    fn a_peer_sharing_a_hop_s_rendezvous_address_is_not_a_repeat() {
+        let pool = vec![
+            first_party("a:1", "us-west-2", 1),
+            first_party("b:1", "us-west-2", 2),
+            first_party("c:1", "us-west-2", 3),
+            // Parked at (and therefore addressed as) the guard itself.
+            peer("a:1", "", 9),
+        ];
+        let path = plan_path(&pool, &all(4), &[0], 1, 0, 3).expect("path");
+        let hops = path.endpoints();
+        assert_eq!(hops.len(), 3);
+        assert_eq!(hops[0].addr, "a:1");
+        assert_eq!(hops[1].tier, RelayTier::Peer);
+        assert_eq!(hops[1].addr, "a:1", "the peer rides the guard's rendezvous");
+        assert_eq!(hops[2].tier, RelayTier::FirstParty);
+        // ...but two FIRST-PARTY hops at one address still are a repeat.
+        let a = FirstPartyEndpoint::new(&first_party("a:1", "us", 1)).unwrap();
+        let b = FirstPartyEndpoint::new(&first_party("b:1", "us", 2)).unwrap();
+        assert!(RelayPath::multi(a, vec![first_party("a:1", "us", 9)], b).is_err());
+    }
+
+    /// A peer is only offered as a middle by a relay that can actually reach it.
+    /// With subset parking (the v1 topology parks everywhere, so this is the
+    /// forward-compatibility half) a peer parked elsewhere is simply not used,
+    /// and the path shortens rather than failing.
+    #[test]
+    fn a_peer_parked_elsewhere_is_not_reachable_from_this_guard() {
+        let pool = vec![
+            first_party("a:1", "us-west-2", 1),
+            first_party("b:1", "us-west-2", 2),
+            first_party("c:1", "us-west-2", 3),
+            RelayEndpoint::peer_parked_at("b:1".into(), String::new(), cert(9), vec!["b:1".into()]),
+        ];
+        // Guard "a:1" cannot reach a peer parked only at "b:1" — 2 hops, no peer.
+        let path = plan_path(&pool, &all(4), &[0], 1, 0, 3).expect("path");
+        assert_eq!(path.len(), 2);
+        assert!(path.endpoints().iter().all(|e| e.tier == RelayTier::FirstParty));
+        // Guard "b:1" can, so the same pool yields the 3-hop path with the peer.
+        let path = plan_path(&pool, &all(4), &[1], 2, 0, 3).expect("path");
+        assert_eq!(path.len(), 3);
+        assert_eq!(path.endpoints()[1].tier, RelayTier::Peer);
+    }
+
     // ── Path shape ─────────────────────────────────────────────────────────
 
     /// Leave-a-spare: a pool with no node to fail over to builds single-hop.
@@ -762,6 +1031,24 @@ mod tests {
         assert_eq!(desired_hops(3, 3), 2);
         assert_eq!(desired_hops(4, 3), 3);
         assert_eq!(desired_hops(9, 99), MAX_PATH_HOPS);
+    }
+
+    /// Peers do not count toward the spare rule — they cannot hold a terminal
+    /// position, so a pool of two of our nodes plus twenty volunteers still has
+    /// nothing to fail over to and stays single-hop. A peer instead ADDS a hop.
+    #[test]
+    fn peers_lengthen_a_path_without_inflating_the_spare_rule() {
+        // No peer available: exactly the pre-wave-3 lengths.
+        assert_eq!(hops_for(2, false, 3), 1);
+        assert_eq!(hops_for(3, false, 3), 2);
+        assert_eq!(hops_for(3, false, TARGET_HOPS), 2);
+        // A peer adds one — but never rescues a pool too small to be multi-hop,
+        // because the terminal hops it would need are still not there.
+        assert_eq!(hops_for(2, true, 3), 1);
+        assert_eq!(hops_for(3, true, 3), 3);
+        // ...and never exceeds the target or the cap.
+        assert_eq!(hops_for(3, true, TARGET_HOPS), 2);
+        assert_eq!(hops_for(9, true, 99), MAX_PATH_HOPS);
     }
 
     /// A path may never repeat a node, and guard == exit is refused outright.
@@ -835,7 +1122,7 @@ mod tests {
         ];
         // On-path = {0 (us-west-2), 1 (us-west-2)}; "same" duplicates the region,
         // "far" does not, so "far" wins despite sorting later in `order`.
-        let picked = pick_middles(&pool, &all(4), &[0, 1], 1);
+        let picked = pick_middles(&pool, &all(4), &[0, 1], 1, 3, "a:1");
         assert_eq!(picked, vec![3]);
     }
 
