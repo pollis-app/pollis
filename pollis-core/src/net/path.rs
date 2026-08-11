@@ -293,29 +293,36 @@ impl RelayPath {
             exit,
         };
         let len = path.len();
+        // **At most one peer per path.** A peer middle is worth having because it
+        // is a different trust domain from the guard and the exit; a SECOND one
+        // buys no further separation (the positions it could take are already
+        // between two first-party hops) while doubling the chance that a Sybil
+        // adversary holds a hop on this circuit.
+        //
+        // Checked BEFORE the hop cap so that it is the rule that reports, and so
+        // that removing it is visible: at today's [`MAX_PATH_HOPS`] of 3 the rule
+        // is *also* implied by arithmetic (a first-party guard and a first-party
+        // exit leave exactly one middle slot), and a check that can only ever fire
+        // behind another check is one nobody would notice losing. It is written
+        // out because the hop cap is a tuning constant and this is not.
+        let peers = path
+            .endpoints()
+            .iter()
+            .filter(|e| e.tier == RelayTier::Peer)
+            .count();
+        if peers > 1 {
+            anyhow::bail!("relay path carries {peers} peer relays; at most one is allowed");
+        }
         if len > MAX_PATH_HOPS {
             anyhow::bail!("relay path of {len} hops exceeds the {MAX_PATH_HOPS}-hop cap");
         }
         let mut seen: Vec<String> = Vec::with_capacity(len);
-        let mut peers = 0usize;
         for endpoint in path.endpoints() {
             let key = endpoint.identity_key();
             if seen.contains(&key) {
                 anyhow::bail!("relay path repeats node {}", endpoint.addr);
             }
             seen.push(key);
-            if endpoint.tier == RelayTier::Peer {
-                peers += 1;
-            }
-        }
-        // **At most one peer per path.** A peer middle is worth having because it
-        // is a different trust domain from the guard and the exit; a SECOND one
-        // buys no further separation (the positions it could take are already
-        // between two first-party hops) while doubling the chance that a Sybil
-        // adversary holds a hop on this circuit. Refusing to build the path is the
-        // right failure: the selector then produces a shorter one it can build.
-        if peers > 1 {
-            anyhow::bail!("relay path carries {peers} peer relays; at most one is allowed");
         }
         Ok(path)
     }
@@ -925,6 +932,10 @@ mod tests {
 
     /// **At most one peer per path**, held by the constructor rather than by the
     /// selector remembering — so no future caller can assemble a two-peer path.
+    ///
+    /// The assertion is on the REASON, not merely on failure: at today's
+    /// `MAX_PATH_HOPS` a two-peer path is over the hop cap anyway, so a test that
+    /// only checked `is_err()` would keep passing with the peer rule deleted.
     #[test]
     fn a_path_carries_at_most_one_peer() {
         let a = FirstPartyEndpoint::new(&first_party("a:1", "us", 1)).unwrap();
@@ -932,9 +943,13 @@ mod tests {
         let one = vec![peer("a:1", "eu", 9)];
         let two = vec![peer("a:1", "eu", 9), peer("b:1", "ap", 8)];
         assert!(RelayPath::multi(a.clone(), one, b.clone()).is_ok());
+        let Err(err) = RelayPath::multi(a, two, b) else {
+            panic!("a path with two peer relays must not be constructible");
+        };
+        let err = err.to_string();
         assert!(
-            RelayPath::multi(a, two, b).is_err(),
-            "a path with two peer relays must not be constructible"
+            err.contains("at most one"),
+            "rejected for the wrong reason: {err}"
         );
     }
 
