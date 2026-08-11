@@ -4,17 +4,21 @@ IaC + reconciler + signed directory for the Pollis closed-overlay relay pool.
 This is the **AWS-hosting half**; the relay binary, its image, the client, and the
 client's directory-fetch are the monorepo/#455 workstream. The only coupling is
 the **§3 signed-directory contract** (`lib/directory-verify.mjs`), proven byte-
-exact by `test/directory-contract.test.mjs`.
+exact by `test/directory-contract.test.mjs` — plus its #813 sibling, the signed
+**revocation list** (`lib/revocation-verify.mjs`, `test/revocation-contract.test.mjs`).
 
 ```
 Terraform ──> per-region VPC + locked SG + mixed-instances ASG (t4g.nano, Spot), one per
               ALLOWED region, all standing by at desired capacity 0
-          ──> S3 (private) + CloudFront (OAC)  ── serves the signed directory
+          ──> S3 (private) + CloudFront (OAC)  ── serves the signed directory (~1h TTL)
+                                                + the signed revocation list (~5m TTL)
           ──> reconciler Lambda (EventBridge every 2 min) ── draws random placement, scales the
                                                               ASGs, health-checks /version,
-                                                              signs + publishes the directory
+                                                              enforces revocations, signs +
+                                                              publishes both artifacts
           ──> Budgets $20 alert + CloudWatch alarms
-SSM (free) ── signing private key · pool QUIC identity (SecureString) · desired-state · placement · intended-image
+SSM (free) ── signing private key · pool QUIC identity (SecureString) · desired-state · placement
+              · intended-image · revocations
 ```
 
 There is **no load balancer**: clients fetch the signed directory and do their own
@@ -33,7 +37,8 @@ client pins the cert, never the address.
 | Output | Where it comes from |
 | --- | --- |
 | `POLLIS_OVERLAY_DIRECTORY_URL` | `terraform output POLLIS_OVERLAY_DIRECTORY_URL` (default `https://relays.pollis.com/directory.json`) |
-| `POLLIS_OVERLAY_DIRECTORY_KEY` | printed by `scripts/mint-signing-key.sh` (base64 of the 32-byte Ed25519 public key) |
+| `POLLIS_OVERLAY_REVOCATION_URL` | `terraform output POLLIS_OVERLAY_REVOCATION_URL` (default `https://relays.pollis.com/revocations.json`) — #813; the client may also derive it from the directory's `revocation.path` |
+| `POLLIS_OVERLAY_DIRECTORY_KEY` | printed by `scripts/mint-signing-key.sh` (base64 of the 32-byte Ed25519 public key) — signs **both** artifacts, so there is no third constant |
 
 ---
 
@@ -199,6 +204,68 @@ make every `UpdateAutoScalingGroup` call throw with no way back out.
 `jurisdiction.tf` **fails the plan** if a candidate region maps to a denied or
 unmapped state, or if it lacks provider/module wiring — the allowed set and the set
 the reconciler can actually drive are kept identical by construction.
+
+### Revoke a relay NOW (#813)
+
+Use this when a node is seized, believed compromised, or must stop being trusted
+for any reason that will not wait for the directory's ~1 hour TTL.
+
+```bash
+PARAM="$(terraform output -raw revocations_param)"
+
+# 1. REVOKE. `ip` is sugar for "<ip>:<relay_port>"; `addr` and `cert_sha256_b64`
+#    (base64 of SHA-256 over the node's DER leaf) are the other selectors.
+aws ssm put-parameter --region us-west-2 --name "$PARAM" --type String --overwrite \
+  --value '{"revoked":[{"ip":"203.0.113.7","reason":"seized 2026-08-11"}]}'
+
+# 2. Converge now instead of waiting up to 2 min for the schedule.
+aws lambda invoke --function-name "$(terraform output -raw reconciler_function_name)" /dev/stdout
+#    Its JSON return reports { revocation: { seq, count, nodesDestroyed } }.
+
+# 3. VERIFY end to end — this runs the client's exact fail-closed path.
+node scripts/verify-directory.mjs "$(terraform output -raw POLLIS_OVERLAY_DIRECTORY_URL)" "<POLLIS_OVERLAY_DIRECTORY_KEY>"
+
+# 4. UN-revoke by writing an EMPTY array. Never delete the parameter (below).
+aws ssm put-parameter --region us-west-2 --name "$PARAM" --type String --overwrite \
+  --value '{"revoked":[]}'
+```
+
+**What actually happens, and how fast.**
+
+1. The revoked node leaves `relays[]` on the next reconcile (≤2 min) and is
+   marked Unhealthy, so its ASG terminates and replaces it — on a fresh instance
+   with a fresh IP.
+2. The reconciler signs `revocations.json` naming it, with a **5-minute** TTL,
+   re-signed every cycle. Up-to-date clients and relays must hold an unexpired
+   list to use *any* relay, so the revoked node stops being usable within that
+   window regardless of what directory a client is holding.
+3. While anything is revoked the **directory TTL drops to 5 minutes too**. That
+   is the only lever that reaches clients built before #813, which know nothing
+   about the revocation list; it bounds their exposure to minutes instead of an
+   hour.
+
+**The sequence number is the SSM parameter's `Version`.** Parameter Store bumps it
+server-side on every write, so the monotonic counter clients use for rollback
+protection is free and cannot be mis-set. The published directory carries
+`revocation: { seq, path, count }`, which binds revocation freshness to directory
+freshness — an on-path attacker cannot pair a fresh directory with a
+stale-but-unexpired revocation list.
+
+> ### ⚠️ NEVER `aws ssm delete-parameter` on the revocations param
+> Recreating it resets `Version` to 1. Every client that has already seen a higher
+> sequence rejects that as a rollback, and — being fail-closed — stops using the
+> overlay entirely until the counter climbs back past its high-water mark. To
+> clear a revocation write `{"revoked":[]}`; to clear the whole feature, unset
+> `REVOCATIONS_PARAM` (see `revocations_param` in `modules/reconciler`).
+
+**Revoking the shared pool identity is a different, slower operation.** Every
+hydra node currently presents the *same* pinned QUIC leaf, so a
+`cert_sha256_b64` revocation naming it would take the entire pool down at once —
+which is why `addr`/`ip` is the fast path here. If the pool's identity *key* is
+believed stolen, address revocation is not enough (the thief can present that leaf
+from anywhere): rotate the pool QUIC identity and ship a client rebuild, per the
+section below. The cert selector exists for the per-node and peer-hosted
+identities of design §7/#813-D1, where the leaf really is the relay's name.
 
 ### Rotate the directory signing key
 Coordinated with a client rebuild (the client pins the public key).
@@ -442,6 +509,14 @@ Re-denying is one line in `state_denylist`; the mechanism is unchanged.
 
 ```bash
 node --test                 # §3 directory contract (byte-exact + every reject case)
+                            #   INCLUDING the backward-compatibility guarantees: an
+                            #   already-shipped client still parses a directory that
+                            #   carries the #813 revocation anchor
+                            # + live relay revocation (#813): the producer's parameter
+                            #   validation, the client's verify path, and every
+                            #   fail-closed case — forged, tampered, expired, replayed,
+                            #   cross-artifact confusion, unenforceable entry
+                            #   (test/revocation-contract.test.mjs)
                             # + the random placement / rotation policy (seeded rng)
                             # + the stale-node detection predicate (#703): unreachable
                             #   != stale, bounded + floor-guarded cycling, protocol
@@ -458,6 +533,13 @@ terraform fmt -recursive -check
   binary's `POLLIS_RELAY_ALLOWLIST` is the real egress boundary.
 - Least-privilege IAM: nodes read only the two identity params; the reconciler
   reads only its params, scales only `app=pollis-relay` ASGs, and writes only the
-  one directory object.
+  two signed objects (directory + revocation list). It can **read** the revocation
+  parameter but never write it: an operator revokes, the reconciler only enforces,
+  so a compromised reconciler cannot un-revoke a relay at the source.
+- **Revocation is fail-closed everywhere.** A forged, unsigned, expired or
+  replayed revocation list never grants access — it removes the evidence, and the
+  answer to "I cannot evaluate revocation" is the same as the answer to "revoked".
+  The reconciler will publish **nothing** for a cycle rather than sign a directory
+  while the revocation state is unreadable.
 - No SSH — shell access is SSM Session Manager only. IMDSv2 required.
 - Signing/identity private material lives in SSM SecureStrings, never in TF state.
