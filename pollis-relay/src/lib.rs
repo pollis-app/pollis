@@ -15,7 +15,8 @@
 //! - [`client`] — the QUIC relay client.
 //! - [`circuit`] — an n-hop `Circuit` (v0: n = 1) + a [`circuit::CircuitFactory`].
 //! - [`shim`] — the local SOCKS5 CONNECT server on loopback.
-//! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4).
+//! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4),
+//!   and the fail-closed **live relay revocation** store (#813).
 //! - [`ratelimit`] — in-memory per-account / per-IP abuse control (§11.5).
 //! - [`config`] — the deployable bin's TOML config.
 //! - [`health`] — the opt-in HTTP/1.1 health/version probe endpoint.
@@ -46,7 +47,11 @@ pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory};
 pub use client::{ClientIdentity, RelayClient};
 pub use config::{RateLimitFileConfig, RelayFileConfig};
 pub use http::{http_client, http_client_builder};
-pub use policy::{FinalAction, OverlayMode, PlannedRoute, RoutingPolicy};
+pub use policy::{
+    verify_revocations, Admission, FinalAction, OverlayMode, PlannedRoute, RelayIdentity,
+    RevocationError, RevocationList, RevocationStore, RoutingPolicy, REVOCATION_TYPE,
+    REVOCATION_VERSION,
+};
 pub use proto::{DeviceCertMaterial, RejectReason, VerifiedClient};
 // Re-exported so consumers (pollis-core's `net::overlay`) can name the pinned
 // relay leaf type without taking a direct `rustls`/`rustls-pki-types` dependency.

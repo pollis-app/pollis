@@ -23,6 +23,7 @@ locals {
   desired_state_param  = "${local.param_prefix}/desired-state"  # String: {"total": N}
   placement_param      = "${local.param_prefix}/placement"      # String: the reconciler's current random draw
   intended_image_param = "${local.param_prefix}/intended-image" # String: {"image": "<immutable ref>", "sha": "<git sha>"}
+  revocations_param    = "${local.param_prefix}/revocations"    # String: {"revoked": [{addr|ip|cert_sha256_b64, reason?}, ...]}
 
   # Conventional ARNs (the params exist by name; no data-source dependency so
   # `plan` works before the mint scripts have run).
@@ -35,6 +36,7 @@ locals {
   desired_state_param_arn  = "${local.param_arn_prefix}${local.desired_state_param}"
   placement_param_arn      = "${local.param_arn_prefix}${local.placement_param}"
   intended_image_param_arn = "${local.param_arn_prefix}${local.intended_image_param}"
+  revocations_param_arn    = "${local.param_arn_prefix}${local.revocations_param}"
 }
 
 # Desired-state IS Terraform-managed (non-secret) and seeded from pool_node_count.
@@ -84,6 +86,37 @@ resource "aws_ssm_parameter" "placement" {
 # yet" — the operator/CI must record a real immutable ref before nodes can launch
 # (see the runbook). The value shape is {"image": "<immutable ref>", "sha": "<git
 # sha>"}: user-data reads .image, the reconciler reads .sha.
+# LIVE RELAY REVOCATION (#813). The operator-authored set of relays that must
+# stop being trusted RIGHT NOW, rather than whenever the signed directory's ~1h
+# TTL lapses. The reconciler reads it every cycle, drops those relays from the
+# directory, destroys the matching nodes, and signs the short-lived
+# revocations.json that clients and relays enforce.
+#
+# THE PARAMETER VERSION IS THE PUBLISHED SEQUENCE NUMBER. SSM increments Version
+# server-side on every PutParameter, so the monotonic counter clients use for
+# rollback protection is free, cannot collide, and cannot be forgotten by the
+# operator. Two consequences, both important:
+#
+#   1. NEVER DELETE THIS PARAMETER. Recreating it resets Version to 1, which every
+#      client that has seen a higher sequence will reject as a rollback — the pool
+#      fails closed until the counter climbs back past the old high-water mark.
+#      To clear a revocation, write {"revoked": []}; do not delete.
+#   2. Terraform SEEDS it empty once, then never touches the value again
+#      (ignore_changes), exactly like placement/desired_state/intended_image — so
+#      an apply can never silently un-revoke a relay, and operator writes are not
+#      clobbered.
+resource "aws_ssm_parameter" "revocations" {
+  name  = local.revocations_param
+  type  = "String"
+  value = jsonencode({ revoked = [] })
+
+  tags = { app = "pollis-relay" }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 resource "aws_ssm_parameter" "intended_image" {
   name = local.intended_image_param
   type = "String"

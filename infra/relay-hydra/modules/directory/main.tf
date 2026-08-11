@@ -99,6 +99,32 @@ resource "aws_cloudfront_distribution" "directory" {
     }
   }
 
+  # The revocation list (#813) gets its OWN, tighter cache behaviour. Its
+  # staleness is a security property, not just a freshness one: the whole design
+  # bounds a seized relay's usable life to this artifact's TTL, and an edge cache
+  # holding it for 60s is 60s of that budget spent on nothing. The reconciler also
+  # sends `Cache-Control: max-age=10` on the object; these TTLs are the hard cap
+  # around it.
+  ordered_cache_behavior {
+    path_pattern           = "/${var.revocation_object_key}"
+    target_origin_id       = "directory-s3"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+
+    min_ttl     = 0
+    default_ttl = 10
+    max_ttl     = 20
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+  }
+
   default_root_object = var.directory_object_key
 
   restrictions {

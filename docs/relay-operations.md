@@ -100,10 +100,12 @@ abuse-at-scale defenses are a v1 concern that rides on multi-hop path selection.
   one an attacker generated wholesale — which is fine for v0, whose gate is
   "well-formed device + closed allowlist + rate limit," not "this specific
   account." Log-anchoring the account id is a documented **v1** hardening.
-- **No live revocation (v1).** A revoked device's cert still verifies until the
-  account's `identity_version` rotates (which re-issues sibling certs). There is
-  no per-connection revocation check in v0 (that would be a metadata-plane
-  query). Documented tradeoff; live revocation is a v1 item.
+- **No live DEVICE revocation (v1).** A revoked device's cert still verifies until
+  the account's `identity_version` rotates (which re-issues sibling certs). There
+  is no per-connection revocation check in v0 (that would be a metadata-plane
+  query). Documented tradeoff; live device revocation is still a v1 item.
+  **Live RELAY revocation is a different thing and is built** — see "Live relay
+  revocation (#813)" below.
 
 ## 3. Rate limiting & abuse control
 
@@ -174,6 +176,59 @@ identity).
 - **Bounded dial.** Each dial has an upper timeout (8s) so an *unreachable* relay
   (packets dropped, no ICMP) fails over fast instead of hanging on the QUIC
   handshake timeout.
+
+### Live relay revocation (#813)
+
+Distinct from **device** revocation, which is still the v1 item noted above. This
+is how a *relay* stops being trusted without waiting for the signed directory's
+~1 hour TTL to lapse.
+
+**The shape.** A second signed artifact — `revocations.json` — sits beside the
+directory, signed by the same Ed25519 directory key, with a **5-minute** TTL and
+re-signed on every 2-minute reconcile. It names revoked relays by advertised
+`addr` and/or by `cert_sha256_b64` (base64 of SHA-256 over the DER leaf). The
+directory carries an additive `revocation: { seq, path, count }` anchor stating
+the minimum sequence a paired list must have.
+
+**Why two artifacts instead of just shortening the directory TTL.** The
+directory's long TTL is a deliberate *availability* property: a wedged reconciler
+must not take the pool down with it. Freshness is a *safety* property and wants
+the opposite. Splitting them lets both be right — the same reason a certificate
+and its CRL have different lifetimes. The exposure window for a seized relay is
+now the revocation TTL, not the directory TTL.
+
+**Fail-closed, in every direction.** A forged, unsigned, expired or replayed
+revocation list never *grants* access; it removes the evidence, and "cannot
+evaluate revocation" resolves the same way as "revoked". Concretely:
+
+- No list, an expired list, or a list below the directory's anchored sequence ⇒
+  **no usable relays** (in `prefer` that means a direct dial, in `strict` a
+  surfaced degrade — never a silent send over a possibly-seized relay).
+- A revocation entry keyed on a selector the build does not understand fails the
+  **whole list** closed, rather than being skipped — skipping would silently
+  downgrade a real revocation into an admission.
+- A relay with no directory key configured cannot evaluate revocation, so it
+  refuses to **extend** circuits to other relays (single-hop `CONNECT` is
+  unaffected — there is no next hop to vouch for). The unconfigured case is the
+  strictest state, not the loosest; making it permissive is how revocation
+  quietly becomes decoration.
+- Sequence numbers come from the revocation parameter's SSM `Version`, so
+  rollback protection is server-side and monotonic by construction. Clients keep a
+  high-water mark and reject anything below it.
+
+**Enforcement points.** `pollis_relay::policy::RevocationStore` is the shared,
+pure decision point (`admit` → `Admit | Revoked | Unevaluable`, and only `Admit`
+is an admission); the reconciler is the producer and additionally drops revoked
+relays from the directory and terminates the matching nodes. Runbook:
+`infra/relay-hydra/README.md` → "Revoke a relay NOW".
+
+**Backward compatibility.** The §3 directory payload stays at `version: 1` and
+every existing field keeps its exact meaning; the anchor is one additive optional
+top-level field that already-shipped clients ignore. Those clients do not enforce
+revocation — nothing can make a shipped binary do that — but they are not left
+where they were: a revoked node leaves `relays[]` within one reconcile, and the
+directory TTL is cut to 5 minutes while any revocation is active, so their
+exposure drops from up to an hour to minutes with no client change.
 
 ## 5. Turnkey deploy runbook
 

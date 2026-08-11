@@ -35,6 +35,13 @@ pollis-device-cert = { path = "../pollis-device-cert" }
 sha2 = "0.10"
 base64 = "0.22"
 getrandom = "0.2"
+# Verification ONLY, for the signed relay-revocation list (#813): the same
+# Ed25519 directory-signing key that pins the directory also signs revocations,
+# and the relay must be able to check one before extending a circuit to a next
+# hop. Already in the workspace lockfile via pollis-core — no new supply-chain
+# surface, and no private-key handling ever lands in the relay binary.
+ed25519-dalek = "2.1"
+serde_json = "1"
 # Deployable-bin config: a TOML file for bind/allowlist/identity/rate-limits.
 # Both already in the workspace lockfile — no new supply-chain surface.
 serde = { version = "1", features = ["derive"] }
