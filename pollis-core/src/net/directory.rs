@@ -74,6 +74,53 @@ pub struct Directory {
     pub issued_at: i64,
     pub expires_at: i64,
     pub relays: Vec<DirectoryRelay>,
+    /// #813 revocation anchor. `None` for a directory published before
+    /// revocation existed, or by a pool that has not enabled it.
+    ///
+    /// One additive **optional** field; `version` stays `1` deliberately (Phase C
+    /// decision) — bumping it would make every already-shipped client reject the
+    /// directory outright, a fleet-wide outage strictly worse than the exposure
+    /// window it was meant to close. See [`crate::net::revocation`] for what the
+    /// client does with it.
+    #[serde(default)]
+    pub revocation: Option<RevocationAnchor>,
+}
+
+/// The directory's binding to the separately-published, short-lived
+/// `revocations.json`.
+///
+/// Both artifacts are signed by the same key and neither can be forged, but they
+/// can be **paired dishonestly**: serve a fresh directory beside a
+/// stale-but-unexpired revocation list and the newest revocation disappears.
+/// Carrying the sequence inside the signed directory makes that pairing
+/// detectable — which is the difference between "signed" and "fresh".
+#[derive(Debug, Clone, Deserialize)]
+pub struct RevocationAnchor {
+    /// Monotonic publisher sequence (the SSM parameter's `Version`). A list
+    /// below this is a replay.
+    pub seq: u64,
+    /// Where the list lives, relative to the directory URL unless absolute.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// How many relays the anchored list revokes. `Some(0)` is the only value
+    /// that lets a client tolerate an unreachable list (see
+    /// [`crate::net::revocation`]'s deploy-order carve-out).
+    #[serde(default)]
+    pub count: Option<u32>,
+}
+
+/// The default artifact name, matching the reconciler's `REVOCATIONS_KEY`.
+const DEFAULT_REVOCATION_PATH: &str = "revocations.json";
+
+impl RevocationAnchor {
+    /// The path to fetch, defaulted. An empty string is treated as absent —
+    /// mirroring `directory-verify.mjs`'s `length > 0` guard.
+    pub fn resolved_path(&self) -> &str {
+        match self.path.as_deref().map(str::trim) {
+            Some(p) if !p.is_empty() => p,
+            _ => DEFAULT_REVOCATION_PATH,
+        }
+    }
 }
 
 /// One relay advertised by the directory. `cert_b64` is base64 (STANDARD) of the
@@ -93,6 +140,14 @@ pub struct DirectoryRelay {
 /// Fetch the raw envelope bytes from `url` over a DIRECT (non-overlay) client.
 /// See the module docs for why the fetch cannot route through the overlay.
 pub async fn fetch_directory(url: &str) -> Result<Vec<u8>, DirectoryError> {
+    fetch_signed(url).await
+}
+
+/// Fetch any of the pool's signed artifacts (the directory itself, or the
+/// `revocations.json` its anchor names) over the same DIRECT client. Both are
+/// Ed25519-signed, so their integrity does not depend on the transport, and both
+/// must bootstrap without the pool they describe.
+pub async fn fetch_signed(url: &str) -> Result<Vec<u8>, DirectoryError> {
     let client = reqwest::Client::builder()
         .timeout(FETCH_TIMEOUT)
         .build()
@@ -274,6 +329,36 @@ mod tests {
             verify_directory(&env, &pinned_b64(&sk), 1500),
             Err(DirectoryError::EmptyRelays)
         ));
+    }
+
+    /// The #813 anchor is additive: a directory WITHOUT it still verifies (this
+    /// is what keeps already-shipped clients working), and `version` stays 1.
+    #[test]
+    fn a_directory_without_a_revocation_anchor_still_verifies() {
+        let sk = signing_key();
+        let dir = verify_directory(&envelope_for(&sk, &valid_payload(2000)), &pinned_b64(&sk), 1500)
+            .expect("valid");
+        assert_eq!(dir.version, 1);
+        assert!(dir.revocation.is_none());
+    }
+
+    /// ...and a directory WITH it parses the anchor, defaulting `path`.
+    #[test]
+    fn parses_the_revocation_anchor() {
+        let sk = signing_key();
+        let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"x:1","cert_b64":"QUJD"}],"revocation":{"seq":12,"count":2}}"#;
+        let dir =
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
+        let anchor = dir.revocation.expect("anchor present");
+        assert_eq!(anchor.seq, 12);
+        assert_eq!(anchor.count, Some(2));
+        assert_eq!(anchor.resolved_path(), "revocations.json");
+
+        // An explicit path wins; an empty one falls back to the default.
+        let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"x:1","cert_b64":"QUJD"}],"revocation":{"seq":1,"path":"  ","count":0}}"#;
+        let dir =
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
+        assert_eq!(dir.revocation.unwrap().resolved_path(), "revocations.json");
     }
 
     #[test]
