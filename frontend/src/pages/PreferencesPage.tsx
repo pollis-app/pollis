@@ -14,12 +14,21 @@ import {
   applyDeviceFontSize,
   normalizeOverlayMode,
   type OverlayMode,
+  type PreferencesData,
 } from "../hooks/queries/usePreferences";
 import {
   useMessageRetention,
   useSetMessageRetention,
   MESSAGE_RETENTION_OPTIONS,
 } from "../hooks/queries/useMessageRetention";
+import {
+  useRelayServingStatus,
+  useApplyRelayServing,
+  relayServingConfigEquals,
+  RELAY_SERVING_DEFAULTS,
+  type RelayServingConfig,
+} from "../hooks/queries/useRelayServing";
+import { RelayServingSection } from "../components/Preferences/RelayServingSection";
 import {
   hslToHex,
   hexToHsl,
@@ -49,6 +58,17 @@ function isValidHex(val: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(val);
 }
 
+// Project the three synced `relay_serving*` fields onto the config shape the
+// backend and the section component both speak. Absent fields fall back to
+// RELAY_SERVING_DEFAULTS (consent off, both conditions on).
+function relayServingFromPrefs(prefs: PreferencesData): RelayServingConfig {
+  return {
+    enabled: prefs.relay_serving ?? RELAY_SERVING_DEFAULTS.enabled,
+    wifi_only: prefs.relay_serving_wifi_only ?? RELAY_SERVING_DEFAULTS.wifi_only,
+    power_only: prefs.relay_serving_power_only ?? RELAY_SERVING_DEFAULTS.power_only,
+  };
+}
+
 export const PreferencesPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
@@ -70,10 +90,20 @@ export const PreferencesPage: React.FC = observer(() => {
   // Inline status line under the relay control: an apply error (e.g. Strict
   // with no relay reachable) surfaces here rather than throwing.
   const [overlayStatus, setOverlayStatus] = useState<string | null>(null);
+  // "Be a relay" consent + its conditions (#813 §10.2). Entirely separate
+  // from `overlayMode` above — that routes this user's traffic, this carries
+  // other people's. Defaults to consent off, both conditions on.
+  const [relayServing, setRelayServing] = useState<RelayServingConfig>(RELAY_SERVING_DEFAULTS);
+  const [relayServingError, setRelayServingError] = useState<string | null>(null);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
   const { query, save: savePrefs } = usePreferences();
+
+  // Live relay-serving status. `null` data means the host can't report it —
+  // the section says so plainly rather than implying the device is relaying.
+  const relayStatusQuery = useRelayServingStatus();
+  const applyRelayServing = useApplyRelayServing();
 
   // Device-local message retention window (see useMessageRetention). Selecting
   // an option fires the mutation immediately — the backend sweep is immediate.
@@ -104,6 +134,7 @@ export const PreferencesPage: React.FC = observer(() => {
         setMenubarIcon(query.data.menubar_icon);
       }
       setOverlayMode(normalizeOverlayMode(query.data.overlay_mode));
+      setRelayServing(relayServingFromPrefs(query.data));
     }
   }, [query.data, currentUser?.id]);
 
@@ -143,6 +174,7 @@ export const PreferencesPage: React.FC = observer(() => {
     closeToTray?: boolean;
     menubarIcon?: boolean;
     overlayMode?: OverlayMode;
+    relayServing?: RelayServingConfig;
   }) => {
     const ah = opts.accentH ?? hue;
     const as_ = opts.accentS ?? saturation;
@@ -155,6 +187,7 @@ export const PreferencesPage: React.FC = observer(() => {
     const tray = opts.closeToTray ?? closeToTray;
     const menubar = opts.menubarIcon ?? menubarIcon;
     const overlay = opts.overlayMode ?? overlayMode;
+    const relay = opts.relayServing ?? relayServing;
     const skinVal = opts.skin ?? skin;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
@@ -175,8 +208,11 @@ export const PreferencesPage: React.FC = observer(() => {
       close_to_tray: tray,
       menubar_icon: menubar,
       overlay_mode: overlay,
+      relay_serving: relay.enabled,
+      relay_serving_wifi_only: relay.wifi_only,
+      relay_serving_power_only: relay.power_only,
     });
-  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode]);
+  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode, relayServing]);
 
   // Drive the merged overlay engine (`set_overlay_mode`) to `val`, live. Never
   // throws: a rejected apply (e.g. Strict with no relay reachable — the engine
@@ -243,6 +279,55 @@ export const PreferencesPage: React.FC = observer(() => {
     setOverlayMode(val);
     setOverlayStatus(null);
     void applyOverlayMode(val, true);
+  };
+
+  // Drive the running relay to `next`, live. Unlike the overlay control, a
+  // failed apply does NOT snap the toggle back: the consent is the user's
+  // choice, not the backend's, so we keep it, persist it, and say plainly in
+  // the status line that we can't confirm what the device is doing.
+  const applyRelayServingConfig = useCallback(async (next: RelayServingConfig, persist: boolean) => {
+    try {
+      const status = await applyRelayServing(next);
+      setRelayServingError(null);
+      // The backend is the authority on what actually took effect.
+      setRelayServing(status.config);
+      if (persist) {
+        save({ relayServing: status.config });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setRelayServingError(msg);
+      if (persist) {
+        save({ relayServing: next });
+      }
+    }
+  }, [applyRelayServing, save]);
+
+  // Re-apply the saved relay-serving choice after login/restart, so the
+  // synced consent takes effect. Guarded on the live config the backend
+  // reports, so a redundant apply never restarts the relay.
+  useEffect(() => {
+    if (!query.data) {
+      return;
+    }
+    const desired = relayServingFromPrefs(query.data);
+    const live = relayStatusQuery.data?.config;
+    if (live !== undefined && relayServingConfigEquals(live, desired)) {
+      return;
+    }
+    void applyRelayServingConfig(desired, false);
+  }, [
+    query.data?.relay_serving,
+    query.data?.relay_serving_wifi_only,
+    query.data?.relay_serving_power_only,
+    relayStatusQuery.data?.config,
+    applyRelayServingConfig,
+  ]);
+
+  const handleRelayServing = (next: RelayServingConfig) => {
+    setRelayServing(next);
+    setRelayServingError(null);
+    void applyRelayServingConfig(next, true);
   };
 
   const handleAccentColor = (hex: string) => {
@@ -768,6 +853,16 @@ export const PreferencesPage: React.FC = observer(() => {
                 </p>
               )}
             </section>
+
+            {/* Run a relay for others (#813 §10.2) — a SEPARATE consent from
+                the mode control above. Never implied by turning the overlay
+                on; off by default; conditions default to Wi-Fi + power. */}
+            <RelayServingSection
+              config={relayServing}
+              status={relayStatusQuery.data ?? null}
+              applyError={relayServingError}
+              onChange={handleRelayServing}
+            />
 
             {/* Voice */}
             <section className="flex flex-col gap-4 mb-12">
