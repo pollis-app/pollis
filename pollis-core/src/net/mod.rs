@@ -8,3 +8,7 @@
 
 pub mod directory;
 pub mod overlay;
+// Peer-hosted relays (#813 D1): this device forwarding OTHER people's traffic,
+// off by default behind explicit consent. Inert until `set_relay_serving`
+// enables it, and structurally incapable of being a circuit's exit.
+pub mod peer;
