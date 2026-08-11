@@ -6,6 +6,12 @@
 //! runtime `commands::overlay::set_overlay_mode` (the Settings toggle). Off is
 //! the default in both cases.
 
+//! Layout: [`directory`] verifies the signed relay directory, [`revocation`]
+//! enforces the revocation list it anchors, [`path`] chooses which relays a
+//! circuit is made of (guards, hop count, the first-party-exit invariant), and
+//! [`overlay`] wires all three into the running shim.
+
 pub mod directory;
 pub mod overlay;
 pub mod path;
+pub mod revocation;
