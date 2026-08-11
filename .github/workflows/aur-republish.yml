@@ -1,0 +1,74 @@
+name: AUR republish
+
+# Push an already-released version to the AUR, without rebuilding it.
+#
+# desktop-release.yml publishes to the AUR as its last act, but the AUR's ssh
+# gateway goes into maintenance for days at a time and that step is (correctly)
+# allowed to fail — the installers are already on R2 and GitHub by then. When
+# that happens the release is fine and only the AUR is stale, so the fix should
+# not be "re-run the 35-minute release job", which rebuilds nothing useful and
+# re-uploads to R2 and regenerates the GitHub release notes as a side effect.
+#
+# This is the recovery path: it takes the .deb that was already published to
+# cdn.pollis.com and hands it to the same scripts/publish-aur.sh the release
+# pipeline uses, so the PKGBUILD it pushes is identical to the one that release
+# would have pushed. Takes about a minute.
+#
+#   gh workflow run aur-republish.yml -f version=1.8.5
+#
+# Deliberately a separate workflow rather than a job in desktop-release.yml:
+# that pipeline is tag-driven and its preflight job hard-fails any
+# workflow_dispatch run, because a dispatch ref is a branch and every artifact
+# there is versioned off the tag name.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Released version to publish to the AUR, e.g. 1.8.5"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  republish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Accept either "1.8.5" or "v1.8.5" and reject anything that is not a
+      # release version, so a typo fails here rather than pushing a bogus
+      # pkgver to the AUR where every Arch user would see it.
+      - name: Normalize and validate the version
+        id: v
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'${{ inputs.version }}' is not a stable release version (expected X.Y.Z). Prereleases are never published to the AUR."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Fetch the exact bytes the release published. The PKGBUILD's sha256sums
+      # must match what a user's makepkg will download from this same URL, so
+      # hashing the CDN copy is not just convenient — it is the only artifact
+      # whose hash is guaranteed to be the right one.
+      - name: Download the released .deb from the CDN
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.v.outputs.version }}"
+          URL="https://cdn.pollis.com/releases/v${VERSION}/pollis-v${VERSION}-linux.deb"
+          if ! curl -fSL --retry 3 -o pollis.deb "$URL"; then
+            echo "::error::No .deb at ${URL} — is v${VERSION} actually released?"
+            exit 1
+          fi
+          echo "Downloaded $(stat -c%s pollis.deb) bytes from ${URL}"
+
+      - name: Publish to AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: ./scripts/publish-aur.sh "${{ steps.v.outputs.version }}" "$GITHUB_WORKSPACE/pollis.deb"
