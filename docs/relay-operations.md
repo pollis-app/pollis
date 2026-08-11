@@ -299,6 +299,14 @@ allowlist = [
 identity_path = "/var/lib/pollis-relay/identity.key"
 health_bind = "0.0.0.0:9445"
 
+# Act as a MIDDLE HOP of a multi-hop circuit — honour `Extend` by dialing the
+# next relay (wire v4, design §6.2). Default true. Set false to make this node
+# last-hop-only; it still serves circuits that terminate here, and the
+# destination allowlist above is enforced exactly the same either way (a middle
+# hop never sees a destination at all, so the allowlist simply never applies to
+# forwarded traffic).
+allow_extend = true
+
 [rate_limit]
 new_circuits_per_min_per_ip = 600
 new_circuits_per_min_per_account = 600
@@ -391,7 +399,12 @@ against its own advertised cert.
 ### Step 4 — verify
 
 - **Image is live:** `curl http://<host>:9445/version` →
-  `{"service":"pollis-relay","sha":"<GIT_SHA>","protocol":"pollis-relay/3","protocol_version":3}`.
+  `{"service":"pollis-relay","sha":"<GIT_SHA>","protocol":"pollis-relay/4","protocol_version":4}`.
+  (`protocol` reports the **newest** generation the node speaks; a v4 node also
+  still accepts `pollis-relay/3` clients, so an upgraded node keeps serving the
+  shipped single-hop fleet. The reconciler's expected-protocol setting must be
+  moved to `pollis-relay/4` in the same roll, or it will exclude every upgraded
+  node from the signed directory.)
   `sha` is the build `relay-image.yml` produced (mirrors the DS `/version`
   tripwire — don't trust "container started", confirm the running build);
   `protocol` is the relay's ALPN/wire identity, which the hydra reconciler uses to
