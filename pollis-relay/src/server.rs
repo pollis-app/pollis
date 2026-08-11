@@ -21,6 +21,15 @@
 //!   an onion layer to that next hop straight through it (design §6.2,
 //!   [`crate::onion`]).
 //!
+//! A third terminal frame exists for one kind of client: a **`Park`** (v4+) from
+//! a peer-hosted relay, which offers the connection it just opened as a middle
+//! hop and keeps it open. A later `Extend` naming that peer's leaf fingerprint is
+//! spliced into that connection instead of dialling — a peer behind NAT cannot
+//! be dialled, and the relay is not an ICE agent, so the connection the peer
+//! opened is the only one that can exist. See [`crate::park`]; the onion wire is
+//! unchanged, and revocation applies to a parked next hop exactly as to a dialled
+//! one.
+//!
 //! Between the handshake and that command a client may present one optional
 //! **`Anchor`** frame (v4+): a transparency-log inclusion proof for its account
 //! key, verified with zero I/O against this node's pinned log key (#813 Phase E2,
@@ -57,8 +66,9 @@ use tokio_rustls::TlsAcceptor;
 
 use crate::anchor::AnchorPolicy;
 use crate::onion;
+use crate::park::{ParkedPeer, ParkedPeers, Tunnel};
 use crate::policy::{RelayIdentity, RevocationStore};
-use crate::proto::{self, ClientFrame, Command, Connect, Extend, Handshake, RejectReason};
+use crate::proto::{self, ClientFrame, Command, Connect, Extend, Handshake, Park, RejectReason};
 use crate::ratelimit::{RateLimitConfig, RateLimiter};
 use crate::stream::{DuplexStream, RelayStream};
 use crate::tls::{self, FingerprintPinnedVerifier, SelfSignedIdentity};
@@ -140,6 +150,10 @@ pub struct RelayStats {
     /// `Extend` frames honoured — how many times this node was a middle hop and
     /// forwarded to another relay without learning the destination.
     pub extends: AtomicU64,
+    /// Of those, how many were spliced into a **parked peer** rather than dialled
+    /// (#813 Phase P1). An aggregate count of a mechanism, like every other field
+    /// here — it names no peer and no client.
+    pub splices: AtomicU64,
     /// Onion layers peeled — how many streams reached this node from another
     /// relay rather than straight from a client.
     pub layers: AtomicU64,
@@ -179,6 +193,9 @@ impl RelayStats {
     }
     pub fn extends(&self) -> u64 {
         self.extends.load(Ordering::Relaxed)
+    }
+    pub fn splices(&self) -> u64 {
+        self.splices.load(Ordering::Relaxed)
     }
     pub fn layers(&self) -> u64 {
         self.layers.load(Ordering::Relaxed)
@@ -244,6 +261,10 @@ pub struct RelayConfig {
     /// Transparency-log account anchoring (#813 Phase E2). Defaults to
     /// [`AnchorPolicy::Ignore`] — no log key, no claim.
     pub anchor: AnchorPolicy,
+    /// Peers currently parked at this node (#813 Phase P1). Shared like
+    /// [`RelayConfig::stats`] so the health endpoint can publish the parked
+    /// fingerprints — and nothing else — for the directory reconciler.
+    pub parked: Arc<ParkedPeers>,
     /// Shared counters.
     pub stats: Arc<RelayStats>,
     /// Optional peer-address observation hook. `None` in production — see
@@ -272,6 +293,7 @@ impl RelayConfig {
             allow_extend: true,
             revocations: RevocationStore::unconfigured(),
             anchor: AnchorPolicy::Ignore,
+            parked: ParkedPeers::new(),
             stats: Arc::new(RelayStats::default()),
             peer_observer: None,
         }
@@ -292,6 +314,7 @@ struct RelayInner {
     allow_extend: bool,
     revocations: RevocationStore,
     anchor: AnchorPolicy,
+    parked: Arc<ParkedPeers>,
     peer_observer: Option<PeerObserver>,
     /// Terminates an onion layer addressed to this node. Built once — it holds
     /// only our own leaf cert, which is what clients pin.
@@ -374,6 +397,7 @@ impl RelayServer {
             allow_extend: config.allow_extend,
             revocations: config.revocations,
             anchor: config.anchor,
+            parked: config.parked,
             peer_observer: config.peer_observer,
             layer_acceptor,
             extend_endpoint_v4: OnceCell::new(),
@@ -425,6 +449,20 @@ impl RelayServer {
     }
 }
 
+/// What a stream that arrived **straight off this node's QUIC endpoint** brings
+/// with it: the transport address it came from, and the connection it belongs
+/// to.
+///
+/// A stream that arrived inside an onion layer has neither, and gets `None` —
+/// which is what makes two rules structural rather than remembered. Per-IP rate
+/// limits cannot key on a previous relay's address because there is no address
+/// to key on, and a `Park` cannot be smuggled through a layer because parking
+/// needs the connection handle that only a direct arrival has.
+struct DirectOrigin {
+    ip: IpAddr,
+    connection: quinn::Connection,
+}
+
 async fn handle_connection(connection: quinn::Connection, inner: Arc<RelayInner>) {
     let peer = connection.remote_address();
     if let Some(observer) = &inner.peer_observer {
@@ -433,8 +471,12 @@ async fn handle_connection(connection: quinn::Connection, inner: Arc<RelayInner>
     // Each target gets its own bi-stream; serve them until the peer goes away.
     while let Ok((send, recv)) = connection.accept_bi().await {
         let inner = inner.clone();
+        let origin = DirectOrigin {
+            ip: peer.ip(),
+            connection: connection.clone(),
+        };
         tokio::spawn(async move {
-            if let Err(e) = handle_quic_stream(send, recv, inner, peer.ip()).await {
+            if let Err(e) = handle_quic_stream(send, recv, inner, origin).await {
                 tracing::debug!("relay: stream ended: {e}");
             }
         });
@@ -448,7 +490,7 @@ async fn handle_quic_stream(
     send: quinn::SendStream,
     recv: quinn::RecvStream,
     inner: Arc<RelayInner>,
-    peer_ip: IpAddr,
+    origin: DirectOrigin,
 ) -> anyhow::Result<()> {
     let mut stream = RelayStream::new(send, recv, None, None);
 
@@ -489,7 +531,7 @@ async fn handle_quic_stream(
                     return Ok(());
                 }
             };
-            serve_authenticated(stream, inner, Some(peer_ip), handshake, header.version).await
+            serve_authenticated(stream, inner, Some(origin), handshake, header.version).await
         }
         other => {
             inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
@@ -551,12 +593,12 @@ impl Drop for LiveCircuitGuard {
 }
 
 /// Verify the device-cert handshake, admit under the rate limits, then serve the
-/// single command that follows. `peer_ip` is `Some` only when the stream came
-/// straight from a client.
+/// single command that follows. `origin` is `Some` only when the stream came
+/// straight off this node's QUIC endpoint rather than through an onion layer.
 async fn serve_authenticated<S: DuplexStream>(
     mut stream: S,
     inner: Arc<RelayInner>,
-    peer_ip: Option<IpAddr>,
+    origin: Option<DirectOrigin>,
     handshake: Handshake,
     version: u8,
 ) -> anyhow::Result<()> {
@@ -574,8 +616,10 @@ async fn serve_authenticated<S: DuplexStream>(
     // 2. Rate / concurrency limits, keyed on the authenticated account and — for
     //    a stream that came straight from a client — its source IP too (§11.5).
     //    The guard frees the concurrency slots when this stream ends.
-    let admitted = match peer_ip {
-        Some(ip) => inner.rate_limiter.admit(ip, verified.account_fingerprint),
+    let admitted = match &origin {
+        Some(origin) => inner
+            .rate_limiter
+            .admit(origin.ip, verified.account_fingerprint),
         None => inner
             .rate_limiter
             .admit_account_only(verified.account_fingerprint),
@@ -591,12 +635,14 @@ async fn serve_authenticated<S: DuplexStream>(
     };
 
     // Admitted, so this stream is a circuit this node is carrying until it ends.
-    let _live = LiveCircuitGuard::new(inner.stats.clone());
+    // (A parked peer's stream gives this back below: it carries no circuit.)
+    let live = LiveCircuitGuard::new(inner.stats.clone());
 
     // 3. An OPTIONAL transparency-log account anchor (v4+, #813 Phase E2), then
-    //    exactly one command: terminate here, or forward to the next relay.
+    //    exactly one terminal frame: a command (terminate here, or forward to the
+    //    next relay) or a park (offer this connection as a middle hop).
     let mut anchored = false;
-    let command = loop {
+    let terminal = loop {
         let frame = match proto::read_client_frame(&mut stream).await {
             Ok(f) => f,
             Err(_) => {
@@ -608,7 +654,10 @@ async fn serve_authenticated<S: DuplexStream>(
         };
         match frame {
             ClientFrame::Command(command) => {
-                break command;
+                break Terminal::Command(command);
+            }
+            ClientFrame::Park(park) => {
+                break Terminal::Park(park);
             }
             // A second anchor on one stream is not a legitimate shape — it would
             // only ever be an attempt to have a later one overwrite an earlier
@@ -666,10 +715,67 @@ async fn serve_authenticated<S: DuplexStream>(
         return Ok(());
     }
 
-    match command {
-        Command::Connect(connect) => serve_connect(stream, inner, connect, version).await,
-        Command::Extend(extend) => serve_extend(stream, inner, extend, version).await,
+    match terminal {
+        Terminal::Command(Command::Connect(connect)) => {
+            serve_connect(stream, inner, connect, version).await
+        }
+        Terminal::Command(Command::Extend(extend)) => {
+            serve_extend(stream, inner, extend, version).await
+        }
+        Terminal::Park(park) => {
+            // Parking needs the connection itself, so a stream that arrived
+            // inside an onion layer cannot park: there is nothing to park.
+            let Some(origin) = origin else {
+                inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                let _ =
+                    proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+                return Ok(());
+            };
+            // A parked connection is not a circuit — it carries none until an
+            // `Extend` is spliced into it, and each of those is counted where it
+            // is served.
+            drop(live);
+            serve_park(stream, inner, park, origin, version).await
+        }
     }
+}
+
+/// The single frame that ends a client's negotiation.
+enum Terminal {
+    Command(Command),
+    Park(Park),
+}
+
+/// A peer offering this connection as a middle hop (#813 Phase P1).
+///
+/// Registration lasts exactly as long as this stream: the peer unparks by
+/// closing it, a dead connection ends it, and either way the guard drops and the
+/// entry goes. Nothing is written back afterwards and nothing may be read — a
+/// parked connection is kept alive by QUIC keep-alives, not by traffic here.
+async fn serve_park<S: DuplexStream>(
+    mut stream: S,
+    inner: Arc<RelayInner>,
+    park: Park,
+    origin: DirectOrigin,
+    version: u8,
+) -> anyhow::Result<()> {
+    let Some(_registration) = inner.parked.park(park.relay_leaf_der, origin.connection) else {
+        // Already parked here by a live connection — see `ParkedPeers::park` for
+        // why the incumbent keeps it.
+        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+        let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+        return Ok(());
+    };
+
+    // Acknowledged with the ordinary `Ok` response: no second codec, and a
+    // refusal above already reported a typed reason on the same frame.
+    proto::write_response(&mut stream, Ok(()), version).await?;
+
+    // Hold the registration until the stream ends. A byte arriving here is a
+    // protocol violation, not a keep-alive, and unparks just as a close does.
+    let mut byte = [0u8; 1];
+    let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut byte).await;
+    Ok(())
 }
 
 /// Last hop: allowlist, dial, splice.
@@ -726,6 +832,13 @@ fn predial_identity(addr: &str) -> RelayIdentity<'_> {
 /// Middle hop: open the next leg, announce the layer, splice. Everything that
 /// crosses this splice afterwards is addressed to a hop further along and is
 /// unreadable here — which is the entire point of the frame.
+///
+/// The next leg is opened one of two ways, and which one is invisible to every
+/// other party: a **dial** to the address the frame names, or — when the frame's
+/// fingerprint matches a peer parked here — a **splice into the connection that
+/// peer already opened** ([`crate::park`]). A parked peer is unreachable by dial,
+/// so the address a client sends for one carries no weight; the fingerprint is
+/// what selects the hop, and the pinned TLS handshake is what proves it.
 async fn serve_extend<S: DuplexStream>(
     mut stream: S,
     inner: Arc<RelayInner>,
@@ -738,25 +851,35 @@ async fn serve_extend<S: DuplexStream>(
         return Ok(());
     }
 
-    // Live revocation (#813 Phase C), BEFORE the dial, so a seized next hop is
-    // never even contacted. `admitted()` is the single fail-closed encoding:
-    // `Unevaluable` — no list held, expired at USE time, or no directory key
-    // configured on this node — resolves identically to `Revoked`. A node that
-    // cannot evaluate revocation does not get to guess.
+    let parked = inner.parked.lookup(&extend.next_cert_sha256);
+
+    // Live revocation (#813 Phase C), BEFORE the dial or the splice, so a seized
+    // next hop is never even contacted. `admitted()` is the single fail-closed
+    // encoding: `Unevaluable` — no list held, expired at USE time, or no
+    // directory key configured on this node — resolves identically to `Revoked`.
+    // A node that cannot evaluate revocation does not get to guess, and parking
+    // buys no exemption: a parked peer is checked here exactly as a dialled one
+    // is, on MORE of its identity, because its DER leaf is already in hand.
     let addr = extend.addr.to_string();
-    if !inner
-        .revocations
-        .admit(&predial_identity(&addr), proto::now_unix())
-        .admitted()
-    {
+    let identity = match &parked {
+        Some(peer) => RelayIdentity {
+            addr: &addr,
+            cert_der: peer.leaf_der(),
+        },
+        None => predial_identity(&addr),
+    };
+    if !inner.revocations.admit(&identity, proto::now_unix()).admitted() {
         tracing::debug!("relay: refusing to extend to {addr} — not admitted by revocation");
         inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
         let _ = proto::write_response(&mut stream, Err(RejectReason::ExtendFailed), version).await;
         return Ok(());
     }
 
-    let mut next = match open_next_hop(&inner, &extend).await {
-        Ok(s) => s,
+    let spliced = parked.is_some();
+    // `_tunnel` is held for the life of the splice: dropping the last handle
+    // tears down the loopback pump the tunnelled QUIC is riding on.
+    let (mut next, _tunnel) = match open_extend_leg(&inner, &extend, parked).await {
+        Ok(leg) => leg,
         Err(e) => {
             tracing::debug!("relay: extend to {} failed: {e}", extend.addr);
             inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
@@ -765,19 +888,58 @@ async fn serve_extend<S: DuplexStream>(
         }
     };
     inner.stats.extends.fetch_add(1, Ordering::Relaxed);
+    if spliced {
+        inner.stats.splices.fetch_add(1, Ordering::Relaxed);
+    }
 
     proto::write_response(&mut stream, Ok(()), version).await?;
     let _ = tokio::io::copy_bidirectional(&mut stream, &mut next).await;
     Ok(())
 }
 
-/// Dial the next relay of a circuit and get it ready to receive an onion layer.
+/// Open the next leg of a circuit: splice into a parked peer if the frame named
+/// one, else dial.
+///
+/// Both paths end in the same [`open_next_hop`] — same pinned fingerprint, same
+/// post-handshake revocation re-check, same `Layer` announcement — because the
+/// only thing parking changes is which address carries the packets.
+async fn open_extend_leg(
+    inner: &RelayInner,
+    extend: &Extend,
+    parked: Option<ParkedPeer>,
+) -> anyhow::Result<(RelayStream, Option<Tunnel>)> {
+    match parked {
+        Some(peer) => {
+            let tunnel = peer.splice().await?;
+            let next = open_next_hop(inner, extend, tunnel.addr()).await?;
+            Ok((next, Some(tunnel)))
+        }
+        None => {
+            let next = open_next_hop(inner, extend, extend.addr).await?;
+            Ok((next, None))
+        }
+    }
+}
+
+/// Dial the next relay of a circuit at `dial_addr` and get it ready to receive
+/// an onion layer.
 ///
 /// The QUIC hop is pinned to the exact cert fingerprint the `Extend` carried, so
 /// this is not a "connect anywhere" primitive; and it offers only the current
 /// ALPN, so a node that does not speak the onion generation fails negotiation
 /// rather than receiving something it would misparse.
-async fn open_next_hop(inner: &RelayInner, extend: &Extend) -> anyhow::Result<RelayStream> {
+///
+/// `dial_addr` is the address the frame named for an ordinary next hop, and a
+/// **loopback tunnel** address for a parked peer. That the pin is applied
+/// identically either way is what makes parking safe without a new credential:
+/// a device that parked under a leaf it does not hold the key for cannot
+/// complete this handshake, so it can deny that peer's traffic but never carry
+/// or read it.
+async fn open_next_hop(
+    inner: &RelayInner,
+    extend: &Extend,
+    dial_addr: SocketAddr,
+) -> anyhow::Result<RelayStream> {
     tls::ensure_crypto_provider();
 
     let mut client_crypto = rustls::ClientConfig::builder()
@@ -788,9 +950,9 @@ async fn open_next_hop(inner: &RelayInner, extend: &Extend) -> anyhow::Result<Re
     let quic_crypto = QuicClientConfig::try_from(client_crypto)?;
     let client_config = quinn::ClientConfig::new(Arc::new(quic_crypto));
 
-    let endpoint = inner.extend_endpoint(extend.addr.is_ipv6()).await?;
+    let endpoint = inner.extend_endpoint(dial_addr.is_ipv6()).await?;
     let connection = endpoint
-        .connect_with(client_config, extend.addr, tls::RELAY_SERVER_NAME)?
+        .connect_with(client_config, dial_addr, tls::RELAY_SERVER_NAME)?
         .await?;
 
     // Now the peer's DER leaf exists, so the revocation check can run on the FULL

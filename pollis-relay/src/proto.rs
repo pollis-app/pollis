@@ -52,6 +52,11 @@
 //! │ [32] sth_root                                             │
 //! │ [2420] sth_signature    (ML-DSA-44, account-keys domain)  │
 //! └────────────────────────────────────────────────────────────┘
+//! ┌──────────── Park (peer → relay, v4+) ──────────────────────┐
+//! │ u8   version            (>= 4)                            │
+//! │ u8   msg_type           (== MSG_PARK)                     │
+//! │ u16  der_len | relay_leaf_der bytes                       │
+//! └────────────────────────────────────────────────────────────┘
 //! ┌──────────────── Response (relay → client) ─────────────────┐
 //! │ u8   version            (3 or 4)                          │
 //! │ u8   status             (0 = Ok, 1 = Rejected)            │
@@ -152,6 +157,23 @@
 //! `Extend` / `Layer` are, so a v3 stream can neither send one nor be required to.
 //! Whether a relay *requires* one is node policy ([`crate::anchor::AnchorPolicy`]),
 //! not protocol.
+//!
+//! # Parking — the reverse hop (v4+, #813 Phase D1/P1)
+//!
+//! A **peer-hosted** relay is a consumer device behind NAT: a first-party relay
+//! cannot dial it, and neither end is an ICE agent, so the only connection that
+//! can exist is the one the peer opens **outbound**. `Park` is how it offers
+//! that connection as a middle hop: after the ordinary device handshake — the
+//! same one every client runs, no new credential — the peer names the relay leaf
+//! cert it serves under, and the relay keeps the connection open, keyed on
+//! `sha256(relay_leaf_der)`. A later `Extend` naming that fingerprint is spliced
+//! into the parked connection instead of dialling ([`crate::park`]).
+//!
+//! `Park` is gated at version ≥ 4 at both the writer and the reader, exactly as
+//! the onion and anchor frames are, so a v3-negotiated stream cannot introduce a
+//! v4 concept. The relay acknowledges with the ordinary [`Response`] `Ok`
+//! ([`write_response`]) rather than a frame of its own — no new codec, and a
+//! refused park reports a typed [`RejectReason`] like every other refusal.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
@@ -216,6 +238,7 @@ pub(crate) const MSG_CONNECT: u8 = 2;
 pub(crate) const MSG_EXTEND: u8 = 3;
 pub(crate) const MSG_LAYER: u8 = 4;
 pub(crate) const MSG_ANCHOR: u8 = 5;
+pub(crate) const MSG_PARK: u8 = 6;
 
 /// First version in which [`MSG_EXTEND`] / [`MSG_LAYER`] are legal.
 pub const ONION_MIN_VERSION: u8 = 4;
@@ -224,6 +247,20 @@ pub const ONION_MIN_VERSION: u8 = 4;
 /// frames are: a v3-negotiated stream must not be able to introduce a v4 concept,
 /// in either direction.
 pub const ANCHOR_MIN_VERSION: u8 = 4;
+
+/// First version in which [`MSG_PARK`] is legal. Gated the same way the onion
+/// and anchor frames are, at the writer and at the reader.
+///
+/// There is no distinct `ParkAck` frame: a parked connection is acknowledged
+/// with the ordinary [`write_response`] `Ok`, which costs no new codec on either
+/// side and gives a refusal a typed [`RejectReason`] for free.
+pub const PARK_MIN_VERSION: u8 = 4;
+
+/// Cap on the DER leaf a `Park` may carry. A self-signed relay leaf is a few
+/// hundred bytes; the bound exists so a peer cannot force an allocation, and it
+/// is deliberately separate from [`MAX_STRING_LEN`] rather than a loosening of
+/// it.
+const MAX_RELAY_LEAF_DER: usize = 8192;
 
 /// Cap on an anchor's audit path. An RFC-6962 path is `ceil(log2(tree_size))`
 /// long, so 64 covers a tree with 2^64 leaves — the bound exists to stop a peer
@@ -434,6 +471,21 @@ pub struct Extend {
     pub next_cert_sha256: [u8; 32],
 }
 
+/// The parking frame (v4+): "keep this connection; I serve the relay identity
+/// `relay_leaf_der`, and I am reachable only through it."
+///
+/// It carries the **whole DER**, not the digest, for two reasons: the relay
+/// re-checks live revocation on the full identity (the `cert_sha256_b64`
+/// selector needs the preimage), and the fingerprint an `Extend` names is then
+/// derived here rather than trusted from the peer. The frame is *not* proof that
+/// the sender holds the leaf's private key — that is proven later, and
+/// unavoidably, by the pinned TLS handshake the relay runs into the parked
+/// connection before it splices anything (see [`crate::park`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Park {
+    pub relay_leaf_der: Vec<u8>,
+}
+
 /// A command a client may send once its handshake has verified.
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -444,7 +496,8 @@ pub enum Command {
 }
 
 /// What a client may legally send after its handshake: at most one optional
-/// [`AccountAnchor`], then exactly one [`Command`].
+/// [`AccountAnchor`], then exactly one [`Command`] — or, for a peer-hosted
+/// relay, a single [`Park`] instead of a command.
 ///
 /// Modelled as one enum with one reader so the ordering is enforced by the type
 /// the caller matches on, rather than by remembering to peek a header first.
@@ -452,6 +505,9 @@ pub enum Command {
 pub enum ClientFrame {
     /// A transparency-log account anchor (v4+, #813 Phase E2).
     Anchor(AccountAnchor),
+    /// A peer offering this connection as a middle hop (v4+, #813 Phase P1).
+    /// Terminal like a command: nothing follows it on the stream.
+    Park(Park),
     /// The single command that ends the negotiation.
     Command(Command),
 }
@@ -884,6 +940,37 @@ pub async fn read_anchor_body<R: AsyncRead + Unpin>(
     })
 }
 
+/// Write a park frame. v4+ only, like the onion and anchor frames.
+pub async fn write_park<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    p: &Park,
+    version: u8,
+) -> Result<(), ProtoError> {
+    if version < PARK_MIN_VERSION || !version_supported(version) {
+        return Err(ProtoError::BadVersion(version));
+    }
+    if p.relay_leaf_der.is_empty() || p.relay_leaf_der.len() > MAX_RELAY_LEAF_DER {
+        return Err(ProtoError::Malformed("bad relay leaf length"));
+    }
+    w.write_u8(version).await?;
+    w.write_u8(MSG_PARK).await?;
+    w.write_u16(p.relay_leaf_der.len() as u16).await?;
+    w.write_all(&p.relay_leaf_der).await?;
+    w.flush().await?;
+    Ok(())
+}
+
+/// Read a park frame's body, the header having already been consumed.
+pub async fn read_park_body<R: AsyncRead + Unpin>(r: &mut R) -> Result<Park, ProtoError> {
+    let len = r.read_u16().await? as usize;
+    if len == 0 || len > MAX_RELAY_LEAF_DER {
+        return Err(ProtoError::Malformed("bad relay leaf length"));
+    }
+    let mut relay_leaf_der = vec![0u8; len];
+    r.read_exact(&mut relay_leaf_der).await?;
+    Ok(Park { relay_leaf_der })
+}
+
 /// Read a command frame (header + body) — what a relay expects once a client's
 /// handshake has verified. `Extend` is refused below [`ONION_MIN_VERSION`] so a
 /// v3-negotiated stream can never request multi-hop forwarding.
@@ -891,15 +978,17 @@ pub async fn read_command<R: AsyncRead + Unpin>(r: &mut R) -> Result<Command, Pr
     match read_client_frame(r).await? {
         ClientFrame::Command(command) => Ok(command),
         ClientFrame::Anchor(_) => Err(ProtoError::BadMessageType(MSG_ANCHOR)),
+        ClientFrame::Park(_) => Err(ProtoError::BadMessageType(MSG_PARK)),
     }
 }
 
-/// Read the next post-handshake frame: an optional `Anchor`, or the terminal
-/// `Command`.
+/// Read the next post-handshake frame: an optional `Anchor`, then either the
+/// terminal `Command` or a terminal `Park`.
 ///
-/// Both v4-only frame types are refused below their minimum version here as well
-/// as at the writers, so a v3-negotiated stream can neither request multi-hop
-/// forwarding nor claim a transparency-log anchor.
+/// Every v4-only frame type is refused below its minimum version here as well as
+/// at the writers, so a v3-negotiated stream can neither request multi-hop
+/// forwarding, nor claim a transparency-log anchor, nor park itself as a middle
+/// hop.
 pub async fn read_client_frame<R: AsyncRead + Unpin>(
     r: &mut R,
 ) -> Result<ClientFrame, ProtoError> {
@@ -913,6 +1002,9 @@ pub async fn read_client_frame<R: AsyncRead + Unpin>(
         )),
         MSG_ANCHOR if header.version >= ANCHOR_MIN_VERSION => {
             Ok(ClientFrame::Anchor(read_anchor_body(r).await?))
+        }
+        MSG_PARK if header.version >= PARK_MIN_VERSION => {
+            Ok(ClientFrame::Park(read_park_body(r).await?))
         }
         other => Err(ProtoError::BadMessageType(other)),
     }
@@ -1059,6 +1151,118 @@ mod tests {
         let mut forged = sign_handshake(&device, "u1", "d1", ED_PUB, cert, now, [1u8; 32]);
         forged.signature[0] ^= 0xFF;
         assert_eq!(verify_handshake(&forged, now).unwrap_err(), RejectReason::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn park_frames_roundtrip() {
+        let park = Park {
+            relay_leaf_der: vec![0xAB; 300],
+        };
+        let mut buf = Vec::new();
+        write_park(&mut buf, &park, PROTOCOL_VERSION).await.expect("write");
+        let mut r = buf.as_slice();
+        match read_client_frame(&mut r).await.expect("read") {
+            ClientFrame::Park(read) => assert_eq!(read, park),
+            other => panic!("expected a park frame, got {other:?}"),
+        }
+
+        // The acknowledgement is the ordinary Ok response — the device side
+        // reads it with `read_response`, so there is no second codec.
+        let mut ack = Vec::new();
+        write_response(&mut ack, Ok(()), PROTOCOL_VERSION).await.expect("write ack");
+        read_response(&mut ack.as_slice()).await.expect("read ack");
+    }
+
+    /// A refused park reports its reason through that same response, so a peer
+    /// learns *why* instead of seeing a stream close.
+    #[tokio::test]
+    async fn a_refused_park_decodes_as_its_reason() {
+        let mut buf = Vec::new();
+        write_response(&mut buf, Err(RejectReason::RateLimited), PROTOCOL_VERSION)
+            .await
+            .expect("write");
+        let err = read_response(&mut buf.as_slice()).await.unwrap_err();
+        assert!(matches!(
+            err,
+            ProtoError::Rejected(RejectReason::RateLimited)
+        ));
+    }
+
+    /// The v3 gate, at the writer. Same shape as the `Extend` / `Anchor` gates:
+    /// there is no v3 encoding of this frame, so emitting one is a programming
+    /// error rather than a downgrade.
+    #[tokio::test]
+    async fn park_cannot_be_written_at_v3() {
+        let park = Park {
+            relay_leaf_der: vec![1u8; 32],
+        };
+        let mut buf = Vec::new();
+        assert!(matches!(
+            write_park(&mut buf, &park, MIN_PROTOCOL_VERSION).await,
+            Err(ProtoError::BadVersion(3))
+        ));
+        assert!(buf.is_empty(), "nothing may be emitted at v3");
+    }
+
+    /// The v3 gate, at the reader — the one that actually protects the relay,
+    /// because a hostile peer does not use our writer. A hand-rolled v3-versioned
+    /// park frame is refused as an unknown message type.
+    #[tokio::test]
+    async fn a_v3_stream_cannot_smuggle_a_park() {
+        let mut raw = vec![MIN_PROTOCOL_VERSION, MSG_PARK, 0, 4, 1, 2, 3, 4];
+        let err = read_client_frame(&mut raw.as_slice()).await.unwrap_err();
+        assert!(matches!(err, ProtoError::BadMessageType(MSG_PARK)));
+
+        // …and the same bytes at v4 parse, so the test is pinning the VERSION
+        // gate and not a typo in the frame body.
+        raw[0] = PROTOCOL_VERSION;
+        assert!(matches!(
+            read_client_frame(&mut raw.as_slice()).await,
+            Ok(ClientFrame::Park(_))
+        ));
+    }
+
+    /// A park is not a command: `read_command` refuses it rather than silently
+    /// treating it as one.
+    #[tokio::test]
+    async fn read_command_refuses_a_park() {
+        let park = Park {
+            relay_leaf_der: vec![7u8; 16],
+        };
+        let mut buf = Vec::new();
+        write_park(&mut buf, &park, PROTOCOL_VERSION).await.expect("write");
+        assert!(matches!(
+            read_command(&mut buf.as_slice()).await,
+            Err(ProtoError::BadMessageType(MSG_PARK))
+        ));
+    }
+
+    /// An empty or oversized leaf is refused at both ends, so neither can force
+    /// an allocation or park under a degenerate identity.
+    #[tokio::test]
+    async fn park_leaf_bounds_are_enforced() {
+        let mut buf = Vec::new();
+        assert!(write_park(
+            &mut buf,
+            &Park {
+                relay_leaf_der: Vec::new()
+            },
+            PROTOCOL_VERSION
+        )
+        .await
+        .is_err());
+        assert!(write_park(
+            &mut buf,
+            &Park {
+                relay_leaf_der: vec![0u8; MAX_RELAY_LEAF_DER + 1]
+            },
+            PROTOCOL_VERSION
+        )
+        .await
+        .is_err());
+
+        let empty = [PROTOCOL_VERSION, MSG_PARK, 0, 0];
+        assert!(read_client_frame(&mut empty.as_slice()).await.is_err());
     }
 
     #[tokio::test]
