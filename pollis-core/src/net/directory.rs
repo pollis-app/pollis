@@ -84,6 +84,18 @@ pub struct Directory {
     /// client does with it.
     #[serde(default)]
     pub revocation: Option<RevocationAnchor>,
+    /// #813 wave-3 peer-hosted relays. Empty for a directory published before
+    /// peers existed, by a pool with no consenting devices parked, or by one
+    /// that has excluded them all as revoked.
+    ///
+    /// The second additive **optional** field, on the same terms as
+    /// `revocation`: `version` stays `1`. **Absent means "no peers", never
+    /// "unknown"** — hence a `Vec` that defaults to empty rather than an
+    /// `Option`: there is no third state for a caller to mishandle, and the
+    /// fail-closed answer (use no peers) is the one an absent field already
+    /// produces.
+    #[serde(default)]
+    pub peers: Vec<DirectoryPeer>,
 }
 
 /// The directory's binding to the separately-published, short-lived
@@ -135,6 +147,36 @@ pub struct DirectoryRelay {
     #[serde(default)]
     pub region: String,
     pub cert_b64: String,
+}
+
+/// One **peer-hosted** relay the pool advertises (#813 wave 3), published from
+/// the parked-peer fingerprints the first-party relays report on their health
+/// port. A peer entry is deliberately NOT shaped like a [`DirectoryRelay`]:
+///
+/// - there is **no `addr`**, because a peer never listens for inbound
+///   connections. It is reached only through a first-party relay it has parked
+///   an outbound link with, so a directly-dialable peer is not a state this
+///   design can be in;
+/// - there is **no id, no region and nothing about the volunteer** — a relay
+///   identity must not be linkable to an account. The cert IS the identity (§7),
+///   and it is the selector phase C's revocation list already understands.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DirectoryPeer {
+    /// Base64 (STANDARD) of the DER bytes of the peer's relay leaf. The client
+    /// pins the layer it runs to this hop against exactly these bytes, so
+    /// whichever relay carries the parked link cannot substitute itself for it.
+    pub cert_b64: String,
+    /// The first-party relay addresses this peer is currently parked at, i.e.
+    /// the relays that can reach it. Defaulted so a directory that omits it
+    /// still parses; an entry with none is unreachable and the client drops it.
+    ///
+    /// In v1 a peer parks at **every** first-party relay in the directory, so
+    /// this is informational — the field exists so the scaling path (park at a
+    /// subset, have selection target a relay that holds the link) needs no
+    /// schema change later. [`crate::net::overlay`] already honours it, so that
+    /// change is a reconciler change only.
+    #[serde(default)]
+    pub parked_at: Vec<String>,
 }
 
 /// Fetch the raw envelope bytes from `url` over a DIRECT (non-overlay) client.
@@ -359,6 +401,57 @@ mod tests {
         let dir =
             verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
         assert_eq!(dir.revocation.unwrap().resolved_path(), "revocations.json");
+    }
+
+    /// The #813 wave-3 `peers` field is additive on the same terms: a directory
+    /// WITHOUT it still verifies and reads as "no peers", and `version` stays 1.
+    #[test]
+    fn a_directory_without_peers_still_verifies_and_means_no_peers() {
+        let sk = signing_key();
+        let dir = verify_directory(&envelope_for(&sk, &valid_payload(2000)), &pinned_b64(&sk), 1500)
+            .expect("valid");
+        assert_eq!(dir.version, 1);
+        assert!(
+            dir.peers.is_empty(),
+            "an absent `peers` must mean NO peers, never 'unknown'"
+        );
+    }
+
+    /// ...and a directory WITH it parses peer entries, defaulting `parked_at`.
+    #[test]
+    fn parses_peer_entries() {
+        let sk = signing_key();
+        let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"x:1","cert_b64":"QUJD"}],"peers":[{"cert_b64":"UEVFUg==","parked_at":["203.0.113.7:9444","203.0.113.8:9444"]},{"cert_b64":"UEVFUjI="}]}"#;
+        let dir =
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
+        assert_eq!(dir.version, 1);
+        assert_eq!(dir.peers.len(), 2);
+        assert_eq!(dir.peers[0].cert_b64, "UEVFUg==");
+        assert_eq!(dir.peers[0].parked_at.len(), 2);
+        // A peer that reports no parking is parsed, not rejected — the client
+        // drops it as unreachable rather than the whole directory.
+        assert!(dir.peers[1].parked_at.is_empty());
+    }
+
+    /// **Backward compatibility of the frozen §3 contract.** A directory
+    /// carrying BOTH additive fields must still satisfy everything an
+    /// already-shipped client checks: version 1, its relay entries unchanged,
+    /// and no new required field anywhere. The Rust struct ignores unknown
+    /// fields, which is the property this pins — the JS half of the same
+    /// guarantee is `infra/relay-hydra/test/directory-contract.test.mjs`.
+    #[test]
+    fn an_old_client_still_parses_a_peers_carrying_directory() {
+        let sk = signing_key();
+        let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"203.0.113.7:9444","region":"us-west-2","cert_b64":"QUJD"}],"revocation":{"seq":9,"count":0},"peers":[{"cert_b64":"UEVFUg==","parked_at":["203.0.113.7:9444"]}],"some_field_from_2028":{"nested":true}}"#;
+        let dir =
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
+        assert_eq!(dir.version, 1, "version must stay 1 — see the module docs");
+        assert_eq!(dir.relays.len(), 1);
+        assert_eq!(dir.relays[0].addr, "203.0.113.7:9444");
+        assert_eq!(dir.relays[0].region, "us-west-2");
+        assert_eq!(dir.relays[0].cert_b64, "QUJD");
+        assert_eq!(dir.revocation.expect("anchor").seq, 9);
+        assert_eq!(dir.peers.len(), 1);
     }
 
     #[test]
