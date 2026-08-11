@@ -418,4 +418,49 @@ mod tests {
         let peers = ParkedPeers::new();
         assert_eq!(format!("{peers:?}"), "ParkedPeers { parked: 0 }");
     }
+
+    /// The tunnel framing is shared wire — `pollis-core`'s device side reads and
+    /// writes these exact bytes — so packet boundaries have to survive a stream
+    /// that concatenates them, and an empty packet has to stay distinguishable
+    /// from an end of stream.
+    #[tokio::test]
+    async fn tunnel_datagrams_round_trip_and_keep_their_boundaries() {
+        let mut buf = Vec::new();
+        write_tunnel_datagram(&mut buf, b"first").await.unwrap();
+        write_tunnel_datagram(&mut buf, b"second one").await.unwrap();
+        write_tunnel_datagram(&mut buf, b"").await.unwrap();
+
+        let mut slice = &buf[..];
+        assert_eq!(
+            read_tunnel_datagram(&mut slice).await.unwrap().unwrap(),
+            b"first"
+        );
+        assert_eq!(
+            read_tunnel_datagram(&mut slice).await.unwrap().unwrap(),
+            b"second one"
+        );
+        assert_eq!(
+            read_tunnel_datagram(&mut slice).await.unwrap().unwrap(),
+            Vec::<u8>::new()
+        );
+        // Clean end of stream, not an error.
+        assert_eq!(read_tunnel_datagram(&mut slice).await.unwrap(), None);
+    }
+
+    /// The ceiling binds at both ends, and the reader refuses an over-long
+    /// length prefix *before* allocating for it.
+    #[tokio::test]
+    async fn an_oversized_tunnel_datagram_is_refused_rather_than_allocated() {
+        let mut buf = Vec::new();
+        assert!(
+            write_tunnel_datagram(&mut buf, &vec![0u8; MAX_TUNNEL_DATAGRAM + 1])
+                .await
+                .is_err()
+        );
+
+        let mut framed = Vec::new();
+        framed.extend_from_slice(&((MAX_TUNNEL_DATAGRAM + 1) as u16).to_be_bytes());
+        let mut slice = &framed[..];
+        assert!(read_tunnel_datagram(&mut slice).await.is_err());
+    }
 }

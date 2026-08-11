@@ -15,8 +15,8 @@
 //! 2. run the **normal device handshake** on a bi-stream ([`ClientIdentity::fresh_handshake`],
 //!    verified relay-side by `proto::verify_handshake` — no new authentication
 //!    mechanism, no second trust root);
-//! 3. write one [`MSG_PARK`] frame carrying **this device's relay leaf DER**, the
-//!    identity a client pins when it selects this peer as a hop;
+//! 3. write one [`proto::Park`] frame carrying **this device's relay leaf DER**,
+//!    the identity a client pins when it selects this peer as a hop;
 //! 4. read the acknowledgement, then leave the connection parked and accept the
 //!    streams the relay opens on it.
 //!
@@ -28,6 +28,15 @@
 //! is exactly the transport [`super::engine::PeerEngine::serve_link`] was
 //! written against. **Nothing about the onion wire changes; only who dialled
 //! whom.**
+//!
+//! # One codec, and it lives in `pollis-relay`
+//!
+//! The `Park` frame and the tunnel's length-delimited datagram framing are
+//! defined **once**, on the relay side — [`proto::Park`] / [`proto::write_park`]
+//! and [`pollis_relay::park::write_tunnel_datagram`] — and this module calls
+//! them rather than restating the bytes. Both ends of a wire in one crate is
+//! what stops the relay half and the device half drifting into two protocols
+//! that no longer talk to each other.
 //!
 //! # Park at every relay (contract §2)
 //!
@@ -71,33 +80,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pollis_relay::client::ClientIdentity;
-use pollis_relay::proto;
+use pollis_relay::park::{read_tunnel_datagram, write_tunnel_datagram};
+use pollis_relay::proto::{self, Park};
 use pollis_relay::tls::{self, PinnedServerCertVerifier, RELAY_SERVER_NAME};
 use pollis_relay::CertificateDer;
 use quinn::crypto::rustls::QuicClientConfig;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::link::{PeerLink, LINK_QUEUE_DEPTH};
-
-/// Frame type for `Park`, continuing `pollis_relay::proto`'s sequence
-/// (1 handshake, 2 connect, 3 extend, 4 layer, 5 anchor).
-pub const MSG_PARK: u8 = 6;
-
-/// `Park` is a v4 frame and is gated at `>= 4` exactly as `Extend`/`Layer`/
-/// `Anchor` are. A v3-negotiated connection cannot smuggle a registration.
-pub const PARK_MIN_VERSION: u8 = proto::ONION_MIN_VERSION;
-
-/// Largest relay leaf DER a `Park` frame may carry. A self-signed leaf is well
-/// under 1 KB; the ceiling exists so a length prefix can never steer the
-/// relay's allocations.
-pub const MAX_PARK_CERT_LEN: usize = 8192;
-
-/// Largest datagram the tunnel will move, matching the engine's own ceiling.
-/// QUIC's path-MTU is far below this; the slack stops a jumbo-frame path
-/// silently truncating a packet into a corrupt one.
-pub const MAX_TUNNEL_DATAGRAM: usize = 4096;
 
 /// Hold the parked connection's NAT binding open. See the module docs for why
 /// this is not the polling CLAUDE.md bans.
@@ -285,10 +276,11 @@ async fn park_once(relay: &ParkedRelay, state: &Arc<ParkingState>) -> anyhow::Re
     // connection's lifetime.
     let (_endpoint, connection) = dial(relay).await?;
     let version = negotiated_version(&connection)?;
-    if version < PARK_MIN_VERSION {
+    if version < proto::PARK_MIN_VERSION {
         anyhow::bail!(
-            "relay {} negotiated wire v{version}; parking needs v{PARK_MIN_VERSION}",
-            relay.addr
+            "relay {} negotiated wire v{version}; parking needs v{}",
+            relay.addr,
+            proto::PARK_MIN_VERSION
         );
     }
 
@@ -298,7 +290,12 @@ async fn park_once(relay: &ParkedRelay, state: &Arc<ParkingState>) -> anyhow::Re
     tokio::time::timeout(PARK_HANDSHAKE_TIMEOUT, async {
         let handshake = state.identity.fresh_handshake()?;
         proto::write_handshake(&mut send, &handshake, version).await?;
-        write_park(&mut send, state.leaf_der.as_ref(), version).await?;
+        // The relay crate owns the codec; the DER is copied into the frame once
+        // per parked connection, which is not a path that runs often.
+        let park = Park {
+            relay_leaf_der: state.leaf_der.as_ref().to_vec(),
+        };
+        proto::write_park(&mut send, &park, version).await?;
         // The acknowledgement is the existing Response frame: `Ok` means parked,
         // and a rejection carries the reason the relay refused.
         proto::read_response(&mut recv).await?;
@@ -422,89 +419,6 @@ async fn pump_link_to_stream(mut send: quinn::SendStream, mut from_engine: mpsc:
     let _ = send.finish();
 }
 
-// ── Wire ────────────────────────────────────────────────────────────────────
-
-/// Write a `Park` frame: "I am available as a middle hop, and this is the leaf a
-/// client will pin for me."
-///
-/// ```text
-/// ┌──────────── Park (peer → first-party relay, v4+) ──────────┐
-/// │ u8   version            (>= 4)                            │
-/// │ u8   msg_type           (== MSG_PARK)                     │
-/// │ u16  der_len | relay_leaf_der bytes                       │
-/// └────────────────────────────────────────────────────────────┘
-/// ```
-pub async fn write_park<W: AsyncWrite + Unpin>(
-    w: &mut W,
-    relay_leaf_der: &[u8],
-    version: u8,
-) -> anyhow::Result<()> {
-    if version < PARK_MIN_VERSION {
-        anyhow::bail!("Park is a v{PARK_MIN_VERSION}+ frame, not v{version}");
-    }
-    if relay_leaf_der.is_empty() || relay_leaf_der.len() > MAX_PARK_CERT_LEN {
-        anyhow::bail!("Park carries an implausible leaf ({} bytes)", relay_leaf_der.len());
-    }
-    w.write_u8(version).await?;
-    w.write_u8(MSG_PARK).await?;
-    w.write_u16(relay_leaf_der.len() as u16).await?;
-    w.write_all(relay_leaf_der).await?;
-    w.flush().await?;
-    Ok(())
-}
-
-/// Read a `Park` frame's body, the two-byte header having been consumed. Present
-/// so both sides of the wire can be exercised from one definition.
-pub async fn read_park_body<R: AsyncRead + Unpin>(r: &mut R) -> std::io::Result<Vec<u8>> {
-    let len = r.read_u16().await? as usize;
-    if len == 0 || len > MAX_PARK_CERT_LEN {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Park carries an implausible leaf length",
-        ));
-    }
-    let mut der = vec![0u8; len];
-    r.read_exact(&mut der).await?;
-    Ok(der)
-}
-
-/// One tunnelled datagram: `u16` big-endian length, then that many bytes.
-pub async fn write_tunnel_datagram<W: AsyncWrite + Unpin>(
-    w: &mut W,
-    datagram: &[u8],
-) -> std::io::Result<()> {
-    if datagram.len() > MAX_TUNNEL_DATAGRAM {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "tunnelled datagram exceeds the ceiling",
-        ));
-    }
-    w.write_u16(datagram.len() as u16).await?;
-    w.write_all(datagram).await?;
-    w.flush().await?;
-    Ok(())
-}
-
-/// Read one tunnelled datagram. `Ok(None)` at a clean end of stream.
-pub async fn read_tunnel_datagram<R: AsyncRead + Unpin>(
-    r: &mut R,
-) -> std::io::Result<Option<Vec<u8>>> {
-    let len = match r.read_u16().await {
-        Ok(len) => len as usize,
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    if len > MAX_TUNNEL_DATAGRAM {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "tunnelled datagram exceeds the ceiling",
-        ));
-    }
-    let mut datagram = vec![0u8; len];
-    r.read_exact(&mut datagram).await?;
-    Ok(Some(datagram))
-}
-
 // ── Backoff ─────────────────────────────────────────────────────────────────
 
 /// Exponential backoff with full jitter, reset by a connection that actually
@@ -557,6 +471,7 @@ mod tests {
     use pollis_relay::proto::DeviceCertMaterial;
     use pollis_relay::server::{Allowlist, RelayConfig, RelayServer};
     use quinn::crypto::rustls::QuicServerConfig;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     use crate::net::peer::engine::{bridge_to_link, PeerCounters, PeerEngine};
@@ -600,13 +515,19 @@ mod tests {
     /// A stand-in first-party relay that speaks **only** the parking half of the
     /// wire: device handshake, `Park`, acknowledge, then splice on demand.
     ///
-    /// It exists because the relay-side implementation lives in
-    /// `pollis-relay/src/{proto,server}.rs`, which this phase does not own — so
-    /// this is the contract §1 encoding written out independently, which is
-    /// exactly what makes these tests a check on the *wire* rather than on one
-    /// shared helper. `splice` is the `serve_extend` branch in miniature: open a
-    /// stream on the parked connection and tunnel the next-hop QUIC through it,
-    /// instead of dialling an address the peer does not have.
+    /// It exists so this side can be exercised without standing up a real
+    /// `RelayServer`. It reads the park with `proto::read_client_frame` — the
+    /// same dispatcher the real relay uses — so what these tests check is that
+    /// the device drives the shared codec correctly, not that two hand-written
+    /// encodings happen to agree. (They used to: this module carried its own
+    /// copy of the `Park` and tunnel codecs until the two were unified into
+    /// `pollis-relay`, which is where the wire is now defined once. The
+    /// cross-implementation check that copy provided is not lost — the relay's
+    /// own `tests/park.rs` drives the real server with a stand-in *device*.)
+    ///
+    /// `splice` is the `serve_extend` branch in miniature: open a stream on the
+    /// parked connection and tunnel the next-hop QUIC through it, instead of
+    /// dialling an address the peer does not have.
     struct StandInRelay {
         addr: SocketAddr,
         cert: CertificateDer<'static>,
@@ -651,6 +572,9 @@ mod tests {
                         let Ok(connection) = incoming.await else {
                             return;
                         };
+                        let Ok(version) = negotiated_version(&connection) else {
+                            return;
+                        };
                         let Ok((mut send, mut recv)) = connection.accept_bi().await else {
                             return;
                         };
@@ -661,24 +585,20 @@ mod tests {
                         if proto::verify_handshake(&handshake, proto::now_unix()).is_err() {
                             return;
                         }
-                        let Ok(header) = proto::read_frame_header(&mut recv).await else {
+                        // The same reader the real relay dispatches on, so the
+                        // v4 gate is the crate's own: a `Park` on a
+                        // v3-negotiated stream is refused as an unknown type.
+                        let Ok(proto::ClientFrame::Park(park)) =
+                            proto::read_client_frame(&mut recv).await
+                        else {
                             return;
                         };
-                        if header.msg_type != MSG_PARK || header.version < PARK_MIN_VERSION {
-                            return;
-                        }
-                        let Ok(leaf) = read_park_body(&mut recv).await else {
-                            return;
-                        };
-                        parked
-                            .lock()
-                            .unwrap()
-                            .insert(proto::cert_fingerprint(&leaf), connection.clone());
+                        parked.lock().unwrap().insert(
+                            proto::cert_fingerprint(&park.relay_leaf_der),
+                            connection.clone(),
+                        );
                         seen.fetch_add(1, StdOrdering::Relaxed);
-                        if proto::write_response(&mut send, Ok(()), header.version)
-                            .await
-                            .is_err()
-                        {
+                        if proto::write_response(&mut send, Ok(()), version).await.is_err() {
                             return;
                         }
                         // Hold the park stream open for the connection's life.
@@ -1025,77 +945,6 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(750)).await;
         assert!(!supervisor.reachable(), "parked at an unpinned relay");
         assert!(impostor.parked_fingerprints().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_park_frame_round_trips() {
-        let der = vec![0x30, 0x82, 0x01, 0x02, 0xAA];
-        let mut buf = Vec::new();
-        write_park(&mut buf, &der, PARK_MIN_VERSION).await.unwrap();
-
-        assert_eq!(buf[0], PARK_MIN_VERSION);
-        assert_eq!(buf[1], MSG_PARK);
-
-        let mut body = &buf[2..];
-        assert_eq!(read_park_body(&mut body).await.unwrap(), der);
-    }
-
-    /// Gated at v4 on the writer, exactly as `Extend`/`Layer`/`Anchor` are. A
-    /// v3-negotiated connection cannot smuggle a registration.
-    #[tokio::test]
-    async fn a_park_frame_is_refused_below_v4() {
-        let mut buf = Vec::new();
-        assert!(write_park(&mut buf, &[1, 2, 3], 3).await.is_err());
-        assert!(buf.is_empty());
-    }
-
-    #[tokio::test]
-    async fn an_implausible_leaf_is_refused_in_both_directions() {
-        let mut buf = Vec::new();
-        assert!(write_park(&mut buf, &[], PARK_MIN_VERSION).await.is_err());
-        assert!(write_park(&mut buf, &vec![0u8; MAX_PARK_CERT_LEN + 1], PARK_MIN_VERSION)
-            .await
-            .is_err());
-
-        // A reader handed an over-long prefix refuses before allocating it.
-        let mut oversized = Vec::new();
-        oversized.extend_from_slice(&((MAX_PARK_CERT_LEN + 1) as u16).to_be_bytes());
-        let mut slice = &oversized[..];
-        assert!(read_park_body(&mut slice).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn tunnel_datagrams_round_trip_and_keep_their_boundaries() {
-        let mut buf = Vec::new();
-        write_tunnel_datagram(&mut buf, b"first").await.unwrap();
-        write_tunnel_datagram(&mut buf, b"second one").await.unwrap();
-        write_tunnel_datagram(&mut buf, b"").await.unwrap();
-
-        let mut slice = &buf[..];
-        assert_eq!(read_tunnel_datagram(&mut slice).await.unwrap().unwrap(), b"first");
-        assert_eq!(
-            read_tunnel_datagram(&mut slice).await.unwrap().unwrap(),
-            b"second one"
-        );
-        assert_eq!(
-            read_tunnel_datagram(&mut slice).await.unwrap().unwrap(),
-            Vec::<u8>::new()
-        );
-        // Clean end of stream, not an error.
-        assert_eq!(read_tunnel_datagram(&mut slice).await.unwrap(), None);
-    }
-
-    #[tokio::test]
-    async fn an_oversized_tunnel_datagram_is_refused_rather_than_allocated() {
-        let mut buf = Vec::new();
-        assert!(write_tunnel_datagram(&mut buf, &vec![0u8; MAX_TUNNEL_DATAGRAM + 1])
-            .await
-            .is_err());
-
-        let mut framed = Vec::new();
-        framed.extend_from_slice(&((MAX_TUNNEL_DATAGRAM + 1) as u16).to_be_bytes());
-        let mut slice = &framed[..];
-        assert!(read_tunnel_datagram(&mut slice).await.is_err());
     }
 
     /// Backoff grows, is bounded, and a successful park resets it — so a
