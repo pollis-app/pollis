@@ -390,6 +390,12 @@ pub fn run() {
                     }
                 }
 
+                // Hand the relay-serving manager the signed directory + device
+                // identity it needs to park outbound connections (#813). Without
+                // this a consenting device runs its node but nothing can reach
+                // it, and the status line says exactly that.
+                pollis_core::commands::relay_serving::attach_app_state(&state);
+
                 app.manage(state);
                 Ok::<(), String>(())
             })?;

@@ -57,17 +57,16 @@
 //! datagram pipe the right shape, and the peer's leaf cert is pinned end to end
 //! through it, so whatever carries the pipe cannot read or substitute anything.
 //!
-//! **What is not built here (and is honestly reported, not faked):** the
-//! first-party side of that reverse hop — a relay accepting "I am available as a
-//! middle hop" and splicing an `Extend` into an existing peer connection instead
-//! of dialing a `SocketAddr` — lives in `pollis-relay/src/{server,proto}.rs`,
-//! which phase D1 does not own. Until it lands, a consenting device has no
-//! [`PeerLink`] producer, reports [`RelayServingHold::NoInboundPath`], and
-//! carries nothing. The UI already renders exactly that ("other devices can't
-//! reach this one through your network"). Everything on this side of the seam —
-//! the engine, the datagram bridge, the consent/condition state machine, the
-//! counters, and the position policy — is complete and tested against real
-//! multi-hop circuits.
+//! **Since #813 wave 3 the device side of that reverse hop is built** — see
+//! [`park`]. A consenting device opens one outbound QUIC connection to *every*
+//! first-party relay in the signed directory, runs the ordinary device
+//! handshake, registers with a `Park` frame carrying its relay leaf, and keeps
+//! the connection open. Every stream a relay then opens on it is an `Extend`
+//! being spliced into this device, which becomes a [`PeerLink`] and goes
+//! straight to [`engine::PeerEngine::serve_link`]. So
+//! [`RelayServingHold::NoInboundPath`] is no longer the steady state: it now
+//! means what it says, "nothing can reach this device right now", and clears the
+//! moment a parked connection is live.
 //!
 //! # Layout
 //!
@@ -77,23 +76,36 @@
 //! - [`platform`] — the OS probes behind those signals (`None` = can't tell).
 //! - [`engine`] — the loopback relay node + the [`PeerLink`] ↔ QUIC bridge.
 //! - [`link`] — the datagram pipe itself.
+//! - [`park`] — the outbound parked connections that make the device reachable,
+//!   the `Park` frame, and the tunnel framing a splice rides.
+//! - [`reachability`] — reads the signed directory, keeps the peer's revocation
+//!   evidence current, and keeps the parked set matching the pool.
+//! - [`context`] — the one trait through which the app hands the manager a
+//!   directory and a device identity.
 //! - [`discovery`] — where peer candidates come from (the signed directory,
 //!   never an unauthenticated channel) and where they may sit in a path.
 //! - [`serving`] — the live manager behind `get_relay_serving_status` /
 //!   `set_relay_serving` and the `relay-serving-status` event.
 
 pub mod conditions;
+pub mod context;
 pub mod discovery;
 pub mod engine;
 pub mod link;
+pub mod park;
 pub mod platform;
+pub mod reachability;
 pub mod serving;
 
 pub use conditions::{
     LinkSignals, RelayServingConfig, RelayServingHold, RelayServingState, RelayServingStatus,
     ServingSignals,
 };
+pub use context::{AppStateContext, ServingContext};
 pub use discovery::{peer_position_admissible, PeerCandidate, PeerCatalog};
 pub use engine::{PeerCounters, PeerEngine};
 pub use link::{loopback_pair, PeerLink};
-pub use serving::{manager, set_event_sink, RelayServingManager, RELAY_SERVING_EVENT};
+pub use park::{LinkAcceptor, ParkedRelay, ParkingSupervisor};
+pub use serving::{
+    manager, set_event_sink, set_serving_context, RelayServingManager, RELAY_SERVING_EVENT,
+};

@@ -14,8 +14,9 @@
 use std::sync::Arc;
 
 use crate::error::Result;
-use crate::net::peer::{self, RelayServingConfig, RelayServingStatus};
+use crate::net::peer::{self, AppStateContext, RelayServingConfig, RelayServingStatus};
 use crate::sink::EventSink;
+use crate::state::AppState;
 
 pub use crate::net::peer::RELAY_SERVING_EVENT;
 
@@ -45,6 +46,20 @@ pub async fn set_relay_serving(config: RelayServingConfig) -> Result<RelayServin
 /// to `AppHandle::emit` during setup.
 pub fn set_status_sink(sink: Arc<dyn EventSink<RelayServingStatus>>) {
     peer::set_event_sink(sink);
+}
+
+/// Hand the peer-serving manager the two app-shaped inputs a device needs to be
+/// **reachable**: the signed relay directory (where the first-party relays it
+/// parks at come from) and the device identity a parked connection
+/// authenticates with.
+///
+/// Called once during setup, and deliberately separate from the two commands —
+/// D2's command shape takes no state, and reachability is a property of the
+/// device rather than of a call. Without it the device still runs its node,
+/// simply parks nowhere, and reports `waiting` + `no_inbound_path` rather than
+/// pretending to serve.
+pub fn attach_app_state(state: &Arc<AppState>) {
+    peer::set_serving_context(Arc::new(AppStateContext::new(state)));
 }
 
 #[cfg(test)]
