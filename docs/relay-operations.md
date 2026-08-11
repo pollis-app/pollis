@@ -222,13 +222,23 @@ is an admission); the reconciler is the producer and additionally drops revoked
 relays from the directory and terminates the matching nodes. Runbook:
 `infra/relay-hydra/README.md` → "Revoke a relay NOW".
 
-**Backward compatibility.** The §3 directory payload stays at `version: 1` and
-every existing field keeps its exact meaning; the anchor is one additive optional
-top-level field that already-shipped clients ignore. Those clients do not enforce
-revocation — nothing can make a shipped binary do that — but they are not left
-where they were: a revoked node leaves `relays[]` within one reconcile, and the
-directory TTL is cut to 5 minutes while any revocation is active, so their
-exposure drops from up to an hour to minutes with no client change.
+On a **relay node** the store gates `Extend` in `server.rs::serve_extend`, twice:
+
+1. **before the dial**, on the next hop's advertised address — so a seized node is
+   never even contacted;
+2. **after the QUIC handshake**, on the full identity including the DER leaf the
+   peer actually presented — which is what binds the `cert_sha256_b64` selector,
+   the one that matters once nodes stop sharing a pooled identity (§7 / peer-hosted
+   relays).
+
+Both refuse with the existing typed `ExtendFailed`. **Operator consequence: a node
+with no `directory_key_b64` configured cannot be a middle hop at all** — it cannot
+evaluate revocation, and "cannot evaluate" resolves the same way as "revoked". It
+still serves circuits that terminate on it, so single-hop is unaffected. A node
+keeps its list current by fetching `revocation_url` every ~60s with backoff
+(`pollis_relay::revocation_sync`); a wedged fetch degrades the node to
+"no longer a middle hop", never to "still trusting a stale list", because expiry
+is checked when `admit` is called rather than when a list is installed.
 
 ## 5. Turnkey deploy runbook
 
@@ -306,6 +316,15 @@ health_bind = "0.0.0.0:9445"
 # hop never sees a destination at all, so the allowlist simply never applies to
 # forwarded traffic).
 allow_extend = true
+
+# Base64 (STANDARD) of the 32-byte Ed25519 key that signs the relay directory AND
+# the revocation list — the same POLLIS_OVERLAY_DIRECTORY_KEY clients pin.
+# REQUIRED to actually be a middle hop: without it this node cannot evaluate
+# revocation, and "cannot evaluate" resolves the same way as "revoked", so every
+# `Extend` is refused regardless of `allow_extend` above. Omitting it is safe,
+# never permissive.
+directory_key_b64 = "<terraform output relay_directory_public_key>"
+revocation_url = "https://relays.pollis.com/revocations.json"
 
 [rate_limit]
 new_circuits_per_min_per_ip = 600

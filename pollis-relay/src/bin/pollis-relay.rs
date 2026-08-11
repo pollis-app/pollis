@@ -10,6 +10,13 @@
 //!   (generated on first start; cert written to `<path>.crt`).
 //! - `--health-bind <addr>` / `POLLIS_RELAY_HEALTH_BIND` — TCP bind for the opt-in
 //!   HTTP `/health` + `/version` endpoint (unset ⇒ not started).
+//! - `--directory-key <b64>` / `POLLIS_RELAY_DIRECTORY_KEY` — the pinned Ed25519
+//!   key that signs the relay directory and the revocation list. **Required to be
+//!   a middle hop:** without it this node cannot evaluate revocation, and
+//!   "cannot evaluate" resolves the same way as "revoked", so every `Extend` is
+//!   refused (#813 Phase C).
+//! - `--revocation-url <url>` / `POLLIS_RELAY_REVOCATION_URL` — where the signed
+//!   revocation list is published.
 //!
 //! Authentication is the OFFLINE device-cert chain verified per handshake — the
 //! relay holds NO Turso credentials and makes NO metadata-plane query (design
@@ -25,6 +32,8 @@ use std::time::Duration;
 
 use pollis_relay::config::{RelayFileConfig, DEFAULT_BIND, DEFAULT_IDENTITY_PATH};
 use pollis_relay::health;
+use pollis_relay::policy::RevocationStore;
+use pollis_relay::revocation_sync;
 use pollis_relay::server::{Allowlist, RelayConfig, RelayServer};
 use pollis_relay::tls;
 
@@ -92,6 +101,26 @@ async fn main() -> anyhow::Result<()> {
         config.allow_extend = allow_extend;
     }
 
+    // Live relay revocation (#813 Phase C). No key ⇒ the store stays
+    // `unconfigured`, which admits NOTHING — this node still serves circuits that
+    // terminate here, it just will not hand one to a next hop it cannot vouch
+    // for. That is the intended strict state, not a misconfiguration to paper
+    // over, so it is a warning and the node comes up.
+    let directory_key = arg_or_env(&args, "directory-key", "POLLIS_RELAY_DIRECTORY_KEY")
+        .or_else(|| file.directory_key_b64.clone());
+    let revocation_url = arg_or_env(&args, "revocation-url", "POLLIS_RELAY_REVOCATION_URL")
+        .unwrap_or_else(|| file.revocation_url());
+    match &directory_key {
+        Some(key) => {
+            config.revocations = RevocationStore::enforcing(key.trim());
+        }
+        None => {
+            tracing::warn!(
+                "no directory key configured — this node cannot evaluate relay revocation and will refuse to extend circuits"
+            );
+        }
+    }
+
     // One OS shutdown signal fans out to both the QUIC relay and the auxiliary
     // health endpoint via a watch channel, so a single SIGTERM/SIGINT stops both.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -114,12 +143,24 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Something has to keep the (pure) revocation store loaded. A missed refresh
+    // is safe: `admit` re-checks expiry at USE time, so the worst case is a node
+    // that stops being a middle hop, never one that trusts a stale list.
+    let revocation_task = revocation_sync::spawn(
+        config.revocations.clone(),
+        revocation_url,
+        wait_for_shutdown(shutdown_rx.clone()),
+    );
+
     let (handle, addr) = RelayServer::spawn_with_shutdown(config, relay_shutdown, DRAIN_TIMEOUT)?;
     tracing::info!("pollis-relay listening on {addr} (identity: {identity_path})");
 
     // The spawn task returns once shutdown has fired and draining completes.
     handle.await?;
     if let Some(h) = health_handle {
+        let _ = h.await;
+    }
+    if let Some(h) = revocation_task {
         let _ = h.await;
     }
     tracing::info!("pollis-relay shut down cleanly");
