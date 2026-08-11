@@ -124,7 +124,7 @@ replay. Instrument before fixing — do not patch the assertion until the mechan
 | ID | Ticket | Priority | Effort |
 |---|---|---|---|
 | PL-06 | ~~Cache device pubkeys in the DS.~~ **✅ done.** `DeviceKeyCache` in `pollis-delivery/src/auth.rs` holds `(user_id, device_id) → verifying key` in process, invalidated on revoke/logout/resign/cert-publish, positive entries only. **#658 stays open** as a wider hosting-strategy spike — the cache removed the per-request Turso round trip, but the dev/prod latency gap it was found through is not fully explained. | P0 UX blocker | M |
-| PL-07 | ~~Drop `sleepAfter = "10m"`.~~ **✅ done — #515.** No `sleepAfter` remains in `wrangler.prod.jsonc`. | P1 | S |
+| PL-07 | Drop `sleepAfter = "10m"`. **STILL OPEN** — previously marked done in error: the check looked at `wrangler.prod.jsonc` (where it correctly does not appear) instead of `pollis-delivery/worker/index.ts:146`, which the ticket named and where it is still set. The real lever is not the duration at all: `@cloudflare/containers` 0.3.7 stops the container from `onActivityExpired()`, whose default implementation calls `this.stop()`. Override it to a no-op and the container never sleeps — the worker comment claiming "the only lever is a large FINITE duration" is wrong. | P1 | S |
 | PL-08 | ~~Add dependency-layer caching to the DS Dockerfile.~~ **✅ done.** Layered with `cargo-chef`, so third-party dependency compilation lives in its own cached layer; chosen over a `--mount=type=cache` because the `cook` result is a real image layer the registry can reuse across runners. | P2 | S |
 | PL-09 | ~~Move ~120 MB of committed media to R2.~~ **✅ done.** `website/` is now 412 KB; `learn/` and `vendor/` are served from R2. | P2 | S |
 | PL-10 | ~~Make `mls-tests.yml` genuinely merge-blocking.~~ **✅ done — #698.** Rather than rely on unverified "skipped = pass" behaviour, the workflow always runs and always reports: a seconds-cheap `changes` job decides exemption (frontend/website/docs/markdown), the heavy `tests` job is gated on it, and a final `gate` job (`if: always()`) collapses the outcome to pass-or-exempt/fail. Mark the **`gate`** check required. The 11 `e2e-*.yml` workflows stay dispatch-only by design. | P2 | S |
@@ -194,7 +194,7 @@ All five must be true. Four are:
 
 1. ✅ No deliverable message is deleted before every current member device has collected it — #688 removed the TTL arm, #691 added the schema-layer triggers, and both ship with tests that try to create the invalid state.
 2. ⏳ Signed writes complete in ~300 ms or better (from 2–4.5 s); first message in a new group under ~3 s end to end. **The pubkey cache landed; the end-to-end number is unverified** because measuring it needs the mobile suite on real hardware (PL-21). Tracked by #658.
-3. ✅ The DS no longer sleeps; no user pays a cold-start penalty.
+3. ⏳ The DS no longer sleeps; no user pays a cold-start penalty. **Not yet true** — `sleepAfter = "10m"` is still set in `worker/index.ts`. Measured worst case is ~213 ms, so the penalty is small, but the gate item is not met.
 4. ✅ In-app verification reports *verified* against the rotated key on all three trees.
 5. ⏳ Both mobile apps reached store review, with the Maestro suite passing on real phone and tablet hardware. **Blocked on #723**, which is an account-registration decision, not engineering.
 
