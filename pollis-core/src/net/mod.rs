@@ -20,3 +20,6 @@ pub mod path;
 // enables it, and structurally incapable of being a circuit's exit.
 pub mod peer;
 pub mod revocation;
+
+#[cfg(test)]
+pub(crate) mod testing;
