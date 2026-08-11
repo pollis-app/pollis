@@ -152,11 +152,19 @@ Runtime application of the closed-overlay relay mode (design `docs/relay-overlay
 - `set_overlay_mode(mode)` — parse + APPLY LIVE. Off→non-off builds the `RealRelayFactory`, starts the loopback SOCKS5 shim, and reconnects both remote DBs through it (`RemoteDb::set_overlay_shim`) so reqwest control-plane calls AND libsql route through the relay; non-off→Off tears the shim down and reconnects direct; Prefer↔Strict flips the shim's policy mode live (no restart, no DB reconnect). Idempotent — safe to call on every app start / login (the UI calls it after loading the saved preference; boot calls the same `apply_overlay_mode` with `POLLIS_OVERLAY`). On failure to bring the overlay up it rolls back to the previous working state and errors — never a half-routed app; Strict degrades (surfaced error) rather than silently going direct. Config: `POLLIS_OVERLAY` (mode), `POLLIS_OVERLAY_RELAY` (comma-sep relay endpoints — a POOL: `RealRelayFactory` tries them in health order and fails over to the first success, marking a failed relay dead for a cooldown, fail-open if all dead, single-hop), `POLLIS_OVERLAY_RELAY_CERT` (path or base64 DER of the pinned relay QUIC leaf). Persisting the choice is the settings-UI slice's job.
 - **Frontend surface:** Preferences → "Network privacy (relay)" (`PreferencesPage.tsx`) — an Off/Prefer/Strict `radiogroup`. `overlay_mode` lives in `PreferencesData` (`usePreferences.ts`, synced blob, default `off`); selecting a mode persists it (`save_preferences`) and applies it live (`set_overlay_mode`); on login/restart the saved mode is re-applied once, guarded by a `get_overlay_mode` diff so an unchanged mode never reconnects the DBs. An apply error (e.g. Strict with no relay) surfaces inline and the control reflects the real resulting mode from `get_overlay_mode` — never a silent direct.
 
+## relay_serving (`commands/relay_serving.rs`)
+The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *your* traffic goes through the overlay, this decides whether *other people's* traffic goes through *your* device. Neither implies the other, and this one is off by default behind explicit consent. Engine: `pollis-core/src/net/peer/`.
+- `get_relay_serving_status()` → `RelayServingStatus` — the CURRENT live state, the same role `get_overlay_mode` plays for the mode control. Shape (serde snake_case, mirrored by `frontend/src/hooks/queries/useRelayServing.ts`): `{ config: { enabled, wifi_only, power_only }, state: "off" | "serving" | "waiting" | "unsupported", hold: "metered_network" | "on_battery" | "offline" | "no_inbound_path" | null, on_wifi: bool | null, on_power: bool | null, active_circuits, bytes_forwarded }`. `hold` is non-null exactly when `state == "waiting"`. `on_wifi`/`on_power` are `null` when the platform cannot report them (Linux reads sysfs/procfs, macOS shells out to `pmset`/`route`, Windows reports neither yet) — and **a null signal never satisfies a condition**: if `wifi_only` is set and we cannot tell whether the link is unmetered, the device does not relay. Reading the status re-probes and reconciles, which is how a change (charger unplugged) gets noticed without a poll (CLAUDE.md bans polling).
+- `set_relay_serving(config)` → `RelayServingStatus` — apply live, idempotent, and it returns the status it **settled on**, not an echo of the request: consent given while on battery settles to `waiting` + `on_battery`. Consent plus the user's own conditions decide whether the relay node runs; reachability decides whether the state is `serving`, so a device nothing can reach honestly reports `waiting` + `no_inbound_path` while the node runs and tries. `unsupported` is the answer on platforms that cannot serve at all (mobile). Persisting the choice is the settings-UI slice's job.
+- **Event `relay-serving-status`** — carries a `RelayServingStatus` whenever the state, a platform signal, or the live circuit count changes. Wired in `src-tauri/src/lib.rs` setup via `commands::relay_serving::install_status_sink`. Required rather than optional: without it the status line only refreshes on remount.
+- **What a relaying device can do is bounded structurally**, not by policy: the node runs with an **empty destination allowlist** (so a `Connect` frame — the only frame naming a destination — is refused before any socket is opened; a peer can never be a circuit's exit) and listens on **loopback only** (no new externally-reachable port; traffic arrives over a link the device opened outbound). Path selection additionally refuses a peer at the guard or exit position (`net::peer::discovery`).
+- **Frontend surface:** Preferences → "Run a relay for others" (`PreferencesPage.tsx`). Consent + both conditions persist as three flat booleans in the synced prefs blob (`relay_serving`, `relay_serving_wifi_only`, `relay_serving_power_only`; defaults off / true / true). Every toggle calls `set_relay_serving`, as does login/restart once, guarded by a config diff against the live status. A failed call does **not** revert the toggle (consent is the user's statement, not the backend's) — the status line is the single place that says what is actually true.
+
 ---
 
 ## Appendix A — full registered-command inventory (names only)
 
-Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714). **167 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
+Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813. **169 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
 
 Regenerate with:
 
@@ -179,6 +187,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`overlay`** — `get_overlay_mode`, `set_overlay_mode`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 - **`r2`** — `download_file`, `download_media`, `get_media_url`, `upload_file`, `upload_media`
+- **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
 - **`safety`** — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
 - **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`, `subscribe_screen_share_frames`
 - **`sfx`** — `play_sfx`, `start_ring`, `stop_ring`
@@ -199,7 +208,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **167 commands** in 25 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **169 commands** in 26 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -221,6 +230,8 @@ than hand-edit.
 **`transparency`** (3) — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
 
 **`overlay`** (2) — `get_overlay_mode`, `set_overlay_mode`
+
+**`relay_serving`** (2) — `get_relay_serving_status`, `set_relay_serving`
 
 **`user`** (5) — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
 

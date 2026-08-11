@@ -399,6 +399,12 @@ pub fn run() {
             tray_handle.manage(tray::TrayState::default());
             tray::setup(&tray_handle);
 
+            // Push relay-serving status changes to the renderer as a global
+            // event. Required rather than optional: CLAUDE.md bans polling, so
+            // without this the "Run a relay for others" status line would only
+            // refresh when Preferences remounts.
+            commands::relay_serving::install_status_sink(tray_handle.clone());
+
             // Holds the "revoke media permissions on quit" preference so the
             // ExitRequested hook can read it synchronously at shutdown.
             tray_handle.manage(commands::media_permissions::MediaPermissionsState::default());
@@ -466,6 +472,8 @@ pub fn run() {
             commands::transparency::verify_own_build,
             commands::overlay::get_overlay_mode,
             commands::overlay::set_overlay_mode,
+            commands::relay_serving::get_relay_serving_status,
+            commands::relay_serving::set_relay_serving,
             commands::user::get_user_profile,
             commands::user::update_user_profile,
             commands::user::search_user_by_username,

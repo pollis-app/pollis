@@ -34,6 +34,10 @@ pub mod overlay;
 // send_message fanout. Pure libsql + reqwest, so it compiles on every target.
 pub mod push;
 pub mod r2;
+// "Run a relay for others" (design §10.2, #813 D1): the consent + conditions
+// surface for letting THIS device forward other people's traffic. The mirror
+// image of `overlay` above, and independent of it.
+pub mod relay_serving;
 pub mod safety;
 pub mod transparency;
 pub mod turso_token;
