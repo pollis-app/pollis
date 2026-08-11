@@ -13,6 +13,9 @@
 //      keep only the ones that answer 200.
 //   6. Read the operator-authored REVOCATION set, exclude every revoked node
 //      from the directory, and destroy those nodes (#813).
+//   6b. Ask the surviving nodes which PEER-hosted relays are parked with them,
+//      aggregate those identities pool-wide and drop any that are revoked (#813
+//      wave 3, reconciler/peers.mjs).
 //   7. Assemble the surviving healthy set into the signed Directory (§3 of the
 //      ticket), sign the exact payload bytes with the Ed25519 private key from
 //      SSM, and publish the envelope to S3 (CloudFront serves it at the stable
@@ -39,6 +42,7 @@ import { createPrivateKey, sign } from "node:crypto";
 import { readDesiredTotal, drawPlacement, placementNeedsRedraw, placementTotal, mayDrain, clamp } from "./placement.mjs";
 import { parseVersion, protocolMismatch, directoryEligible, selectCycleTargets } from "./staleness.mjs";
 import { parseRevocationSet, revokesRelay, buildRevocationPayload, directoryAnchor, directoryTtlFor } from "./revocation.mjs";
+import { PEERS_PATH, parsePeerReport, aggregatePeers, excludeRevokedPeers } from "./peers.mjs";
 
 // --- Config from the Lambda environment (set by Terraform) -------------------
 
@@ -110,6 +114,8 @@ export const handler = async () => {
   // directory on protocol grounds still lands here: it is a real, reachable node
   // and is exactly the wrong-generation instance we want to cycle out.
   const healthyNodes = [];
+  // Nodes that made it into `relays` — the set polled for parked peers (#813).
+  const directoryNodes = [];
   let excludedFromDirectory = 0;
 
   for (const [region, asgName] of Object.entries(REGIONS)) {
@@ -154,6 +160,11 @@ export const handler = async () => {
         }
         if (directoryEligible(node.version, EXPECTED_PROTOCOL)) {
           relays.push(candidate);
+          // Only a node we are actually advertising is asked about its parked
+          // peers: a peer is reachable through a relay clients can use, so a
+          // node excluded on protocol or revocation grounds has nothing useful
+          // to report (`parked_at` would name a relay no client will dial).
+          directoryNodes.push({ ip: node.ip, addr: candidate.addr });
         } else {
           excludedFromDirectory += 1;
           console.log(
@@ -215,6 +226,19 @@ export const handler = async () => {
   // replacements on fresh instances (and fresh IPs) on its own.
   reconcileFailures += await destroyRevokedNodes(revokedNodes);
 
+  // Peer-hosted relays (#813 wave 3). Asked of the nodes we are advertising, and
+  // filtered through the SAME revocation set the relays are — a revoked peer must
+  // leave the directory on the same reconcile a revoked relay would. Deliberately
+  // cannot fail the cycle: peers are an availability field, so "no peers this
+  // cycle" is the pre-#813 shape, not an outage.
+  const collectedPeers = await collectPeers(directoryNodes);
+  const { peers, excluded: revokedPeers } = revocations.ok
+    ? excludeRevokedPeers(collectedPeers, revocations.revoked)
+    : { peers: [], excluded: 0 };
+  if (revokedPeers > 0) {
+    console.log(`excluded ${revokedPeers} REVOKED peer relay(s) from the directory`);
+  }
+
   // Publishing order is load-bearing: the revocation list FIRST, then the
   // directory that anchors it. A directory advertising `revocation.seq = N` that
   // reached clients before the list satisfying N would fail every up-to-date
@@ -238,7 +262,7 @@ export const handler = async () => {
     if (revocations.configured) {
       await publishRevocations(revocations);
     }
-    await publishDirectory(relays, revocations);
+    await publishDirectory(relays, revocations, peers);
     published = true;
   }
 
@@ -248,6 +272,8 @@ export const handler = async () => {
     excludedFromDirectory,
     revokedRelays: revocations.ok ? revocations.revoked.length : 0,
     revokedNodesDestroyed: revokedNodes.length,
+    peerRelays: peers.length,
+    revokedPeers,
   });
 
   return {
@@ -266,8 +292,46 @@ export const handler = async () => {
       count: revocations.revoked.length,
       nodesDestroyed: revokedNodes.length,
     },
+    peers: { count: peers.length, revoked: revokedPeers },
   };
 };
+
+// --- Peer-hosted relays (#813 wave 3) ----------------------------------------
+
+// Ask every node we are advertising which peer relays are parked with it, and
+// aggregate the answers into the directory's additive `peers` array.
+//
+// The report comes from the relays because it can come from nowhere else: a
+// parked peer is a live socket inside ONE relay process, and that pointer cannot
+// live in S3 or SSM. The relay exposes only the parked peers' own relay-leaf
+// certs — public identities that are bound for the signed directory anyway —
+// and nothing about the clients it is serving.
+//
+// Every failure mode here yields FEWER peers, never a failed cycle: a node that
+// 404s (a relay build from before peer parking), times out, or answers something
+// unreadable simply contributes nothing. That is the pre-#813 directory shape,
+// which is why this needs no rollout flag and no ordering against the image roll.
+async function collectPeers(nodes) {
+  if (nodes.length === 0) {
+    return [];
+  }
+  const reports = await Promise.all(nodes.map(async (node) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+    try {
+      const res = await fetch(`http://${node.ip}:${HEALTH_PORT}${PEERS_PATH}`, { signal: controller.signal });
+      if (!res.ok) {
+        return { addr: node.addr, peers: [] };
+      }
+      return { addr: node.addr, peers: parsePeerReport(await res.text()) };
+    } catch {
+      return { addr: node.addr, peers: [] };
+    } finally {
+      clearTimeout(timer);
+    }
+  }));
+  return aggregatePeers(reports);
+}
 
 // --- Live relay revocation (#813) --------------------------------------------
 
@@ -510,7 +574,7 @@ async function readDesiredTotalFromSsm() {
 
 // --- Directory assembly + signing (§3 frozen contract) -----------------------
 
-async function publishDirectory(relays, revocations) {
+async function publishDirectory(relays, revocations, peers = []) {
   // issued_at/expires_at are unix seconds. Kept short (default +1h) and re-signed
   // every reconcile so a rolled-back/stale directory expires quickly — and cut
   // further while anything is revoked (see directoryTtlFor).
@@ -540,6 +604,16 @@ async function publishDirectory(relays, revocations) {
     directory.revocation = anchor;
   }
 
+  // The SECOND additive optional field (#813 wave 3), on exactly the same terms:
+  // `version` stays 1, relay entries are untouched, and the key is OMITTED when
+  // there is nothing to say — so a pool with no parked peers publishes bytes
+  // identical to what it published before this shipped. An already-shipped client
+  // ignores unknown payload fields; a client that reads it treats an absent
+  // `peers` as "no peers", never as "unknown", so omission is not ambiguous.
+  if (peers.length > 0) {
+    directory.peers = peers;
+  }
+
   // Sign-then-encode LITERAL bytes: we sign the exact UTF-8 bytes we base64 into
   // payload_b64. No canonicalization — the client verifies over the exact bytes
   // it base64-decodes, so both sides are byte-for-byte identical.
@@ -555,7 +629,7 @@ async function publishDirectory(relays, revocations) {
     CacheControl: "public, max-age=30",
   }));
 
-  console.log(`published directory: ${relays.length} relay(s), expires_at=${directory.expires_at}${anchor ? ` revocation.seq=${anchor.seq}` : ""}`);
+  console.log(`published directory: ${relays.length} relay(s), ${peers.length} peer relay(s), expires_at=${directory.expires_at}${anchor ? ` revocation.seq=${anchor.seq}` : ""}`);
 }
 
 // Sign an object into the §3 envelope shape. Shared by both signed artifacts so
@@ -748,6 +822,13 @@ async function emitMetrics(perRegionHealthy, reconcileFailures, stale = {}) {
     // revocation is pinned to an address the ASG keeps re-issuing.
     { MetricName: "RevokedRelays", Value: stale.revokedRelays ?? 0, Unit: "Count", Timestamp: timestamp },
     { MetricName: "RevokedNodesDestroyed", Value: stale.revokedNodesDestroyed ?? 0, Unit: "Count", Timestamp: timestamp },
+    // Peer-hosted relay visibility (#813 wave 3). PeerRelays is how many peers the
+    // directory advertises this cycle; a drop to zero while consenting devices are
+    // known to be running means parking is broken (peers unreachable ⇒ paths get
+    // shorter, silently, which is otherwise invisible). RevokedPeers is how many
+    // parked peers matched a revocation and were withheld.
+    { MetricName: "PeerRelays", Value: stale.peerRelays ?? 0, Unit: "Count", Timestamp: timestamp },
+    { MetricName: "RevokedPeers", Value: stale.revokedPeers ?? 0, Unit: "Count", Timestamp: timestamp },
     // Pool-wide healthy count. This is what the floor alarm watches: with random
     // placement an individual region legitimately holds zero nodes, so a
     // per-region floor alarm would page on every rotation that skipped it.

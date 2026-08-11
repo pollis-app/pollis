@@ -267,6 +267,41 @@ from anywhere): rotate the pool QUIC identity and ship a client rebuild, per the
 section below. The cert selector exists for the per-node and peer-hosted
 identities of design §7/#813-D1, where the leaf really is the relay's name.
 
+### Peer-hosted relays in the directory (#813 wave 3)
+
+Consenting user devices can carry traffic as **middle** hops. A peer never listens
+for inbound connections — it opens an outbound link to a first-party relay, which
+parks it — so nothing about a peer is discoverable by scanning, and it can only
+reach clients through the artifact they already pin a key for: this directory.
+
+Each reconcile asks every node it is about to advertise for its parked peers
+(`GET /peers` on the health port, alongside `/version`), aggregates them pool-wide
+and publishes them as an **additive, optional** `peers` array:
+
+```json
+"peers": [ { "cert_b64": "<peer relay leaf DER>", "parked_at": ["18.227.73.93:9444"] } ]
+```
+
+`version` stays **1** and relay entries are untouched, so already-shipped clients
+are unaffected (`test/directory-contract.test.mjs` pins that). The key is omitted
+entirely when nothing is parked, so a pool with no volunteers publishes exactly the
+bytes it published before this shipped.
+
+- **No flag, no rollout ordering.** A relay build that predates peer parking answers
+  404 and contributes no peers; a timeout or an unreadable body does the same.
+  Every failure yields *fewer* peers — i.e. shorter paths, which is where the pool
+  already was — so this can never fail a cycle.
+- **Revoked peers are excluded here AND rejected client-side.** A peer has no
+  address, so `cert_sha256_b64` is its only selector — the case that selector was
+  added for. Revoke one exactly as you would a relay (above), with its leaf digest.
+- **What is disclosed:** the peer's own relay leaf and the relays holding its link.
+  No id, no region, no address, nothing about the clients any relay is serving.
+- **Watch `PeerRelays`** in the `PollisRelayHydra` namespace. A drop to zero while
+  volunteers are known to be consenting means parking is broken, which is otherwise
+  invisible: paths just get shorter.
+- `node scripts/verify-directory.mjs <url> <key>` prints the usable peer set,
+  running the client's own admission rule over it.
+
 ### Rotate the directory signing key
 Coordinated with a client rebuild (the client pins the public key).
 ```bash

@@ -12,7 +12,7 @@
 // FAILURE here, not a warning: that is precisely the state in which a client has
 // nothing it may safely dial.
 
-import { verifyDirectory, revocationAnchor, admitRelays } from "../lib/directory-verify.mjs";
+import { verifyDirectory, revocationAnchor, admitRelays, directoryPeers, admitPeers } from "../lib/directory-verify.mjs";
 import { verifyRevocations } from "../lib/revocation-verify.mjs";
 
 const [, , url, pubKeyB64] = process.argv;
@@ -51,6 +51,7 @@ if (anchor === null) {
   for (const r of dir.relays) {
     console.log(`  ${r.region}\t${r.addr}\tcert_b64=${r.cert_b64.slice(0, 16)}…`);
   }
+  reportPeers(dir, null);
   process.exit(0);
 }
 
@@ -62,10 +63,11 @@ if (!revRes.ok) {
 }
 
 let usable;
+let list;
 try {
   // The anchor is the seq floor: a list below it is a stale artifact paired with
   // a fresh directory, which is the on-path downgrade this check exists to catch.
-  const list = verifyRevocations(await revRes.text(), pubKeyB64, undefined, anchor.seq);
+  list = verifyRevocations(await revRes.text(), pubKeyB64, undefined, anchor.seq);
   console.log(`OK — revocation list valid. seq=${list.seq} expires_at=${list.expires_at} revoked=${list.count}`);
   usable = admitRelays(dir, list);
 } catch (err) {
@@ -80,4 +82,23 @@ const suppressed = dir.relays.length - usable.length;
 if (suppressed > 0) {
   console.log(`  (${suppressed} advertised relay(s) suppressed by revocation)`);
 }
+
+reportPeers(dir, list);
 process.exit(0);
+
+// Peer-hosted relays (#813 wave 3). Advisory: peers are middle hops only, so an
+// empty set means shorter paths, never an unusable pool — this is NOT a reason to
+// exit non-zero. `admitPeers` runs the same revocation rule the shipping client
+// runs, so a revoked or unevaluable peer shows up here as suppressed.
+function reportPeers(directory, list) {
+  const advertised = directoryPeers(directory);
+  if (advertised.length === 0) {
+    console.log("  (no peer-hosted relays advertised — paths are first-party only)");
+    return;
+  }
+  const usablePeers = admitPeers(directory, list);
+  console.log(`OK — ${usablePeers.length}/${advertised.length} peer relay(s) usable as middle hops.`);
+  for (const p of usablePeers) {
+    console.log(`  peer\tparked_at=${p.parked_at.join(",")}\tcert_b64=${p.cert_b64.slice(0, 16)}…`);
+  }
+}
