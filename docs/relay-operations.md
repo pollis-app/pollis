@@ -90,16 +90,17 @@ abuse-at-scale defenses are a v1 concern that rides on multi-hop path selection.
 
 ### Honest limits of the offline chain (v0 → v1)
 
-- **No transparency-log anchoring of `account_id_pub` (v1).** Verifying the cert
-  proves *device ∈ account* offline. It does **not** prove that `account_id_pub`
-  is the account's *published* key in the account-key transparency log — doing so
-  requires either a fetch or a client-presented inclusion proof. v0 deliberately
-  does **not** build a transparency-log fetch into the relay, because that would
-  re-introduce the network coupling this whole design removes. Consequence: the
-  relay accepts any self-consistent `(account key, device key)` pair, including
-  one an attacker generated wholesale — which is fine for v0, whose gate is
-  "well-formed device + closed allowlist + rate limit," not "this specific
-  account." Log-anchoring the account id is a documented **v1** hardening.
+- **Transparency-log anchoring of `account_id_pub` — built in v1, off by
+  default.** Verifying the cert proves *device ∈ account* offline. It does **not**
+  prove that `account_id_pub` is the account's *published* key in the account-key
+  transparency log. Without that, the relay accepts any self-consistent
+  `(account key, device key)` pair, including one an attacker generated
+  wholesale — and since per-account rate limits key on `sha256(account_id_pub)`,
+  an attacker with an unlimited supply of self-consistent account keys has an
+  unlimited supply of distinct rate-limiting identities.
+  #813 closes this with the **client-presented inclusion proof**, not a fetch —
+  see "Account anchoring (#813 Phase E2)" below. It is enabled per node and off
+  until clients ship the frame.
 - **No live DEVICE revocation (v1).** A revoked device's cert still verifies until
   the account's `identity_version` rotates (which re-issues sibling certs). There
   is no per-connection revocation check in v0 (that would be a metadata-plane
@@ -240,6 +241,56 @@ keeps its list current by fetching `revocation_url` every ~60s with backoff
 "no longer a middle hop", never to "still trusting a stale list", because expiry
 is checked when `admit` is called rather than when a list is installed.
 
+### Account anchoring (#813 Phase E2)
+
+The relay can require a client to **prove its account key is published in the
+account-key transparency log**, and does it with **zero I/O** — the client
+presents the leaf, an RFC-6962 inclusion proof, and the ML-DSA-44 signed tree
+head, all in one optional v4 `Anchor` frame; the relay checks them against one
+pinned log key. A relay-side *fetch* was the alternative and is ruled out: it
+would put the relay back inside the metadata plane, which is the coupling §2
+exists to remove.
+
+The relay verifies, cheapest check first:
+
+1. the leaf's `(user_id, identity_version, account_id_pub)` are **exactly** the
+   handshake's — anchors are public data, so an unbound proof proves nothing;
+2. the head is inside `anchor_max_age_secs`;
+3. the head verifies under the pinned key **in the account-keys domain context**
+   (one key signs three trees; only the context separates them);
+4. the audit path carries the leaf into that head's root.
+
+Three enforcement rungs, set by config:
+
+| `transparency_key_hex` | `require_account_anchor` | Behaviour |
+|---|---|---|
+| unset | false | No anchoring claim. An anchor is neither required nor judged. **Default.** |
+| set | false | Every presented anchor is verified; a bad one is `Unauthorized`. Absence is served. |
+| set | true | As above, plus a client presenting none is refused with `AnchorRequired`. |
+
+Setting `require_account_anchor` without the key **aborts startup** rather than
+coming up unenforcing.
+
+**Roll it out publish-then-enforce.** Requiring anchors before clients ship the
+frame locks the fleet out; so does requiring them for an account that has not yet
+reached the log's **daily** publish (a signup or key rotation is invisible for up
+to ~24h — the same window that produces `AuditStatus::Pending` in the app). Ship
+the mechanism, get clients presenting anchors, then flip the flag.
+
+**What it does not prove.** That the presented `identity_version` is the account's
+*current* one — that needs the whole tree, i.e. a fetch. A rotated-away key keeps
+verifying, exactly as its device certs do; this is the same "no live DEVICE
+revocation" limit below, not a new one. `anchor_max_age_secs` bounds how stale a
+*head* may be and cannot bound key rotation.
+
+**Backward compatibility.** The §3 directory payload stays at `version: 1` and
+every existing field keeps its exact meaning; the anchor is one additive optional
+top-level field that already-shipped clients ignore. Those clients do not enforce
+revocation — nothing can make a shipped binary do that — but they are not left
+where they were: a revoked node leaves `relays[]` within one reconcile, and the
+directory TTL is cut to 5 minutes while any revocation is active, so their
+exposure drops from up to an hour to minutes with no client change.
+
 ## 5. Turnkey deploy runbook
 
 The steps below are the **manual VPS/host** roll. For a **hands-off AWS pool** that
@@ -325,6 +376,13 @@ allow_extend = true
 # never permissive.
 directory_key_b64 = "<terraform output relay_directory_public_key>"
 revocation_url = "https://relays.pollis.com/revocations.json"
+
+# Transparency-log account anchoring (#813 Phase E2). Omitted ⇒ this node makes
+# no anchoring claim. Do NOT set require_account_anchor until clients ship the
+# `Anchor` frame — see "Account anchoring" above.
+# transparency_key_hex = "<the account-key tree's ML-DSA-44 public key, hex>"
+# require_account_anchor = false
+# anchor_max_age_secs = 604800
 
 [rate_limit]
 new_circuits_per_min_per_ip = 600

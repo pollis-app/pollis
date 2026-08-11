@@ -42,6 +42,16 @@ getrandom = "0.2"
 # surface, and no private-key handling ever lands in the relay binary.
 ed25519-dalek = "2.1"
 serde_json = "1"
+# Verification ONLY, for #813 Phase E2 account-anchoring: the RFC-6962 Merkle
+# core, the ML-DSA-44 signed tree head, and the inclusion-proof verifier are
+# shared VERBATIM with the transparency log rather than reimplemented here, so
+# the relay and `pollis-verify` can never drift on what "included" means. This
+# crate is pure CPU — no network, no DB, no clock — which is what lets the relay
+# check an anchor without making a metadata-plane query (§11.1). Deliberately
+# NOT `verifiable-log-builder`: that one carries libsql, and a Turso client has
+# no business inside a relay binary.
+verifiable-log = { path = "../verifiable-log" }
+hex = "0.4"
 # Deployable-bin config: a TOML file for bind/allowlist/identity/rate-limits.
 # Both already in the workspace lockfile — no new supply-chain surface.
 serde = { version = "1", features = ["derive"] }

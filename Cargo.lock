@@ -6766,6 +6766,7 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "getrandom 0.2.17",
+ "hex",
  "ml-dsa",
  "pollis-device-cert",
  "quinn",
@@ -6782,6 +6783,7 @@ dependencies = [
  "tokio-socks",
  "toml 0.8.2",
  "tracing",
+ "verifiable-log",
 ]
 
 [[package]]

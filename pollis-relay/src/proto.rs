@@ -41,6 +41,17 @@
 //! │ u8   version            (>= 4)                            │
 //! │ u8   msg_type           (== MSG_LAYER)                    │
 //! └────────────────────────────────────────────────────────────┘
+//! ┌──────────── Anchor (client → relay, v4+, optional) ────────┐
+//! │ u8   version            (>= 4)                            │
+//! │ u8   msg_type           (== MSG_ANCHOR)                   │
+//! │ u16  leaf_len | leaf bytes    (account-key leaf, as hashed)│
+//! │ u64  leaf_index                                           │
+//! │ u64  tree_size          (of the head AND the proof)       │
+//! │ u8   path_len | path_len × [32] sibling hashes            │
+//! │ u64  sth_timestamp_ms                                     │
+//! │ [32] sth_root                                             │
+//! │ [2420] sth_signature    (ML-DSA-44, account-keys domain)  │
+//! └────────────────────────────────────────────────────────────┘
 //! ┌──────────────── Response (relay → client) ─────────────────┐
 //! │ u8   version            (3 or 4)                          │
 //! │ u8   status             (0 = Ok, 1 = Rejected)            │
@@ -87,8 +98,9 @@
 //! frame's version byte. Anything outside the supported range fails the QUIC ALPN
 //! negotiation outright, so a mismatched peer never gets as far as writing a
 //! frame: versions never silently half-speak, and a stream is never corrupted.
-//! `Extend` / `Layer` additionally require version ≥ 4 at the frame level, so a
-//! v3-negotiated connection cannot smuggle a multi-hop request.
+//! `Extend` / `Layer` / `Anchor` additionally require version ≥ 4 at the frame
+//! level, at both the writer and the reader, so a v3-negotiated connection can
+//! smuggle neither a multi-hop request nor an account anchor.
 //!
 //! The Handshake frame and its canonical signed message are **byte-identical
 //! between v3 and v4** — v4 is purely additive — which is exactly what lets one
@@ -121,11 +133,25 @@
 //! classic MLS suite's leaf key until #669 retires that suite — but nothing in
 //! this handshake verifies under it.
 //!
-//! Together: "a cryptographically self-consistent Pollis device." v0 does NOT
-//! anchor `account_id_pub` to the account-key transparency log (that needs a
-//! fetch, which would re-introduce network coupling) — see `docs/relay-operations.md`.
-//! Because destinations are allowlisted to first-party hosts only (§1.2), "a
-//! well-formed device, rate-limited" is sufficient anti-abuse for v0.
+//! Together: "a cryptographically self-consistent Pollis device." Because
+//! destinations are allowlisted to first-party hosts only (§1.2), "a well-formed
+//! device, rate-limited" is sufficient anti-abuse for v0.
+//!
+//! # Account anchoring — the optional third check (v4+, #813 Phase E2)
+//!
+//! Self-consistency is not membership: an attacker can mint an account key and a
+//! matching device cert offline, in a loop, and each one is a fresh per-account
+//! rate-limiting identity. The `Anchor` frame closes that by having the client
+//! **present** an inclusion proof binding its `account_id_pub` to the account-key
+//! transparency log, which the relay verifies with **zero I/O** against one
+//! pinned log key — see [`crate::anchor`] for the full argument and its limits.
+//! A relay fetch was the alternative and is ruled out: it would put the relay
+//! back inside the metadata plane, which is the coupling §11.1 removes.
+//!
+//! The frame is optional on the wire and gated at version ≥ 4 exactly as
+//! `Extend` / `Layer` are, so a v3 stream can neither send one nor be required to.
+//! Whether a relay *requires* one is node policy ([`crate::anchor::AnchorPolicy`]),
+//! not protocol.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
@@ -133,7 +159,13 @@ use ml_dsa::{EncodedSignature, EncodedVerifyingKey, Keypair, MlDsa44, Signer, Ve
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crate::anchor::AccountAnchor;
+
 pub use pollis_device_cert::{MLDSA44_PUB_LEN, MLDSA44_SIG_LEN};
+/// The signed-tree-head signature length (ML-DSA-44, 2420 bytes). Named from the
+/// log's own constant rather than the device-cert one so the `Anchor` frame is
+/// tied to the artifact it actually carries.
+pub use verifiable_log::STH_SIG_LEN;
 
 /// An ML-DSA-44 signing key — the device key that proves possession, and the
 /// account key that mints certs. Re-exported so callers need not depend on
@@ -183,9 +215,26 @@ pub(crate) const MSG_HANDSHAKE: u8 = 1;
 pub(crate) const MSG_CONNECT: u8 = 2;
 pub(crate) const MSG_EXTEND: u8 = 3;
 pub(crate) const MSG_LAYER: u8 = 4;
+pub(crate) const MSG_ANCHOR: u8 = 5;
 
 /// First version in which [`MSG_EXTEND`] / [`MSG_LAYER`] are legal.
 pub const ONION_MIN_VERSION: u8 = 4;
+
+/// First version in which [`MSG_ANCHOR`] is legal. Gated the same way the onion
+/// frames are: a v3-negotiated stream must not be able to introduce a v4 concept,
+/// in either direction.
+pub const ANCHOR_MIN_VERSION: u8 = 4;
+
+/// Cap on an anchor's audit path. An RFC-6962 path is `ceil(log2(tree_size))`
+/// long, so 64 covers a tree with 2^64 leaves — the bound exists to stop a peer
+/// forcing an allocation, not to limit the log.
+const MAX_AUDIT_PATH: usize = 64;
+
+/// Cap on an anchor's leaf bytes. An account-key leaf is dominated by the hex of
+/// the 1312-byte ML-DSA-44 account key (2624 chars), so a real one is ~2.7 KB;
+/// [`MAX_STRING_LEN`] is far too small for it and this bound is deliberately
+/// separate rather than a loosening of the host/id one.
+const MAX_ANCHOR_LEAF: usize = 4096;
 
 const STATUS_OK: u8 = 0;
 const STATUS_REJECTED: u8 = 1;
@@ -257,6 +306,13 @@ pub enum RejectReason {
     /// cannot act differently on the distinction, and collapsing them keeps the
     /// relay from reporting anything about its neighbours.
     ExtendFailed,
+    /// This node requires a transparency-log account anchor (#813 Phase E2) and
+    /// the client presented none. Deliberately distinct from `Unauthorized`: it
+    /// is the one rejection the client can *act* on — fetch a fresh inclusion
+    /// proof and retry — whereas a presented-but-invalid anchor is an
+    /// authentication failure like any forged credential and reports as
+    /// `Unauthorized`.
+    AnchorRequired,
     /// Relay-side failure.
     Internal,
 }
@@ -270,6 +326,7 @@ impl RejectReason {
             RejectReason::BadRequest => 4,
             RejectReason::RateLimited => 6,
             RejectReason::ExtendFailed => 7,
+            RejectReason::AnchorRequired => 8,
             RejectReason::Internal => 5,
         }
     }
@@ -282,6 +339,7 @@ impl RejectReason {
             4 => RejectReason::BadRequest,
             6 => RejectReason::RateLimited,
             7 => RejectReason::ExtendFailed,
+            8 => RejectReason::AnchorRequired,
             _ => RejectReason::Internal,
         }
     }
@@ -383,6 +441,19 @@ pub enum Command {
     Connect(Connect),
     /// Forward the circuit to another relay (v4+).
     Extend(Extend),
+}
+
+/// What a client may legally send after its handshake: at most one optional
+/// [`AccountAnchor`], then exactly one [`Command`].
+///
+/// Modelled as one enum with one reader so the ordering is enforced by the type
+/// the caller matches on, rather than by remembering to peek a header first.
+#[derive(Debug, Clone)]
+pub enum ClientFrame {
+    /// A transparency-log account anchor (v4+, #813 Phase E2).
+    Anchor(AccountAnchor),
+    /// The single command that ends the negotiation.
+    Command(Command),
 }
 
 /// The two bytes every frame starts with. Read separately so a relay can
@@ -738,15 +809,110 @@ pub async fn write_layer<W: AsyncWrite + Unpin>(w: &mut W, version: u8) -> Resul
     Ok(())
 }
 
+/// Write an account-anchor frame. v4+ only — like the onion frames, there is no
+/// older encoding of it, so emitting one at v3 is a programming error rather
+/// than a downgrade.
+pub async fn write_anchor<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    a: &AccountAnchor,
+    version: u8,
+) -> Result<(), ProtoError> {
+    if version < ANCHOR_MIN_VERSION || !version_supported(version) {
+        return Err(ProtoError::BadVersion(version));
+    }
+    if a.leaf_bytes.len() > MAX_ANCHOR_LEAF {
+        return Err(ProtoError::Malformed("anchor leaf too long"));
+    }
+    if a.audit_path.len() > MAX_AUDIT_PATH {
+        return Err(ProtoError::Malformed("anchor audit path too long"));
+    }
+    if a.sth_signature.len() != STH_SIG_LEN {
+        return Err(ProtoError::Malformed("anchor signature is not ML-DSA-44"));
+    }
+    w.write_u8(version).await?;
+    w.write_u8(MSG_ANCHOR).await?;
+    w.write_u16(a.leaf_bytes.len() as u16).await?;
+    w.write_all(&a.leaf_bytes).await?;
+    w.write_u64(a.leaf_index).await?;
+    w.write_u64(a.tree_size).await?;
+    w.write_u8(a.audit_path.len() as u8).await?;
+    for sibling in &a.audit_path {
+        w.write_all(sibling).await?;
+    }
+    w.write_u64(a.sth_timestamp_ms).await?;
+    w.write_all(&a.sth_root).await?;
+    w.write_all(&a.sth_signature).await?;
+    w.flush().await?;
+    Ok(())
+}
+
+/// Read an anchor frame's body, the header having already been consumed.
+pub async fn read_anchor_body<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<AccountAnchor, ProtoError> {
+    let leaf_len = r.read_u16().await? as usize;
+    if leaf_len > MAX_ANCHOR_LEAF {
+        return Err(ProtoError::Malformed("anchor leaf too long"));
+    }
+    let mut leaf_bytes = vec![0u8; leaf_len];
+    r.read_exact(&mut leaf_bytes).await?;
+    let leaf_index = r.read_u64().await?;
+    let tree_size = r.read_u64().await?;
+    let path_len = r.read_u8().await? as usize;
+    if path_len > MAX_AUDIT_PATH {
+        return Err(ProtoError::Malformed("anchor audit path too long"));
+    }
+    let mut audit_path = Vec::with_capacity(path_len);
+    for _ in 0..path_len {
+        let mut sibling = [0u8; 32];
+        r.read_exact(&mut sibling).await?;
+        audit_path.push(sibling);
+    }
+    let sth_timestamp_ms = r.read_u64().await?;
+    let mut sth_root = [0u8; 32];
+    r.read_exact(&mut sth_root).await?;
+    let mut sth_signature = vec![0u8; STH_SIG_LEN];
+    r.read_exact(&mut sth_signature).await?;
+    Ok(AccountAnchor {
+        leaf_bytes,
+        leaf_index,
+        tree_size,
+        audit_path,
+        sth_root,
+        sth_timestamp_ms,
+        sth_signature,
+    })
+}
+
 /// Read a command frame (header + body) — what a relay expects once a client's
 /// handshake has verified. `Extend` is refused below [`ONION_MIN_VERSION`] so a
 /// v3-negotiated stream can never request multi-hop forwarding.
 pub async fn read_command<R: AsyncRead + Unpin>(r: &mut R) -> Result<Command, ProtoError> {
+    match read_client_frame(r).await? {
+        ClientFrame::Command(command) => Ok(command),
+        ClientFrame::Anchor(_) => Err(ProtoError::BadMessageType(MSG_ANCHOR)),
+    }
+}
+
+/// Read the next post-handshake frame: an optional `Anchor`, or the terminal
+/// `Command`.
+///
+/// Both v4-only frame types are refused below their minimum version here as well
+/// as at the writers, so a v3-negotiated stream can neither request multi-hop
+/// forwarding nor claim a transparency-log anchor.
+pub async fn read_client_frame<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<ClientFrame, ProtoError> {
     let header = read_frame_header(r).await?;
     match header.msg_type {
-        MSG_CONNECT => Ok(Command::Connect(read_connect_body(r).await?)),
-        MSG_EXTEND if header.version >= ONION_MIN_VERSION => {
-            Ok(Command::Extend(read_extend_body(r).await?))
+        MSG_CONNECT => Ok(ClientFrame::Command(Command::Connect(
+            read_connect_body(r).await?,
+        ))),
+        MSG_EXTEND if header.version >= ONION_MIN_VERSION => Ok(ClientFrame::Command(
+            Command::Extend(read_extend_body(r).await?),
+        )),
+        MSG_ANCHOR if header.version >= ANCHOR_MIN_VERSION => {
+            Ok(ClientFrame::Anchor(read_anchor_body(r).await?))
         }
         other => Err(ProtoError::BadMessageType(other)),
     }

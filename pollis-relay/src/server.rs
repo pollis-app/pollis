@@ -21,6 +21,11 @@
 //!   an onion layer to that next hop straight through it (design §6.2,
 //!   [`crate::onion`]).
 //!
+//! Between the handshake and that command a client may present one optional
+//! **`Anchor`** frame (v4+): a transparency-log inclusion proof for its account
+//! key, verified with zero I/O against this node's pinned log key (#813 Phase E2,
+//! [`crate::anchor`]). Whether one is *required* is node policy.
+//!
 //! A stream that opens with a `Layer` frame is one another relay is extending
 //! into us. We acknowledge, terminate the layer with our own leaf cert, and serve
 //! whatever is inside exactly as if it had arrived directly — the difference
@@ -50,9 +55,10 @@ use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
+use crate::anchor::AnchorPolicy;
 use crate::onion;
 use crate::policy::{RelayIdentity, RevocationStore};
-use crate::proto::{self, Command, Connect, Extend, Handshake, RejectReason};
+use crate::proto::{self, ClientFrame, Command, Connect, Extend, Handshake, RejectReason};
 use crate::ratelimit::{RateLimitConfig, RateLimiter};
 use crate::stream::{DuplexStream, RelayStream};
 use crate::tls::{self, FingerprintPinnedVerifier, SelfSignedIdentity};
@@ -146,6 +152,13 @@ pub struct RelayStats {
     /// (requested by phase D1 for the be-a-relay status line). It is a bare
     /// number — it says nothing about who, from where, or to what.
     pub live_circuits: AtomicI64,
+    /// Transparency-log account anchors that verified (#813 Phase E2).
+    pub anchors_verified: AtomicU64,
+    /// Anchors that were presented and refused. Counted separately from
+    /// `rejected` so an operator can tell "clients are failing to anchor" from
+    /// "clients are failing to authenticate" — both are aggregate counters, and
+    /// neither records anything about who connected (§5.2, §11.7).
+    pub anchors_refused: AtomicU64,
 }
 
 impl RelayStats {
@@ -174,6 +187,12 @@ impl RelayStats {
     /// decrements is created at the same point the increment happens.
     pub fn live_circuits(&self) -> i64 {
         self.live_circuits.load(Ordering::Relaxed)
+    }
+    pub fn anchors_verified(&self) -> u64 {
+        self.anchors_verified.load(Ordering::Relaxed)
+    }
+    pub fn anchors_refused(&self) -> u64 {
+        self.anchors_refused.load(Ordering::Relaxed)
     }
 }
 
@@ -222,6 +241,9 @@ pub struct RelayConfig {
     /// meaning anything. `allow_extend` is the orthogonal coarse switch ("never
     /// be a middle hop"); this is "be one only for hops you can still vouch for".
     pub revocations: RevocationStore,
+    /// Transparency-log account anchoring (#813 Phase E2). Defaults to
+    /// [`AnchorPolicy::Ignore`] — no log key, no claim.
+    pub anchor: AnchorPolicy,
     /// Shared counters.
     pub stats: Arc<RelayStats>,
     /// Optional peer-address observation hook. `None` in production — see
@@ -249,6 +271,7 @@ impl RelayConfig {
             max_concurrent_connections: crate::config::DEFAULT_MAX_CONCURRENT_CONNECTIONS,
             allow_extend: true,
             revocations: RevocationStore::unconfigured(),
+            anchor: AnchorPolicy::Ignore,
             stats: Arc::new(RelayStats::default()),
             peer_observer: None,
         }
@@ -268,6 +291,7 @@ struct RelayInner {
     stats: Arc<RelayStats>,
     allow_extend: bool,
     revocations: RevocationStore,
+    anchor: AnchorPolicy,
     peer_observer: Option<PeerObserver>,
     /// Terminates an onion layer addressed to this node. Built once — it holds
     /// only our own leaf cert, which is what clients pin.
@@ -349,6 +373,7 @@ impl RelayServer {
             stats: config.stats,
             allow_extend: config.allow_extend,
             revocations: config.revocations,
+            anchor: config.anchor,
             peer_observer: config.peer_observer,
             layer_acceptor,
             extend_endpoint_v4: OnceCell::new(),
@@ -568,15 +593,79 @@ async fn serve_authenticated<S: DuplexStream>(
     // Admitted, so this stream is a circuit this node is carrying until it ends.
     let _live = LiveCircuitGuard::new(inner.stats.clone());
 
-    // 3. Exactly one command: terminate here, or forward to the next relay.
-    let command = match proto::read_command(&mut stream).await {
-        Ok(c) => c,
-        Err(_) => {
-            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
-            return Ok(());
+    // 3. An OPTIONAL transparency-log account anchor (v4+, #813 Phase E2), then
+    //    exactly one command: terminate here, or forward to the next relay.
+    let mut anchored = false;
+    let command = loop {
+        let frame = match proto::read_client_frame(&mut stream).await {
+            Ok(f) => f,
+            Err(_) => {
+                inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                let _ =
+                    proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+                return Ok(());
+            }
+        };
+        match frame {
+            ClientFrame::Command(command) => {
+                break command;
+            }
+            // A second anchor on one stream is not a legitimate shape — it would
+            // only ever be an attempt to have a later one overwrite an earlier
+            // verdict — so it is a malformed exchange, not a re-check.
+            ClientFrame::Anchor(_) if anchored => {
+                inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                let _ =
+                    proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+                return Ok(());
+            }
+            ClientFrame::Anchor(anchor) => {
+                anchored = true;
+                // A node with no pinned log key has no basis to judge an anchor,
+                // so it does not pretend to: it neither accepts nor rejects on
+                // it. A node that HAS one treats a bad anchor exactly like a
+                // forged cert — presenting one is never better than presenting
+                // none.
+                if let Some(verifier) = inner.anchor.verifier() {
+                    let verdict = verifier.verify(
+                        &anchor,
+                        &verified.user_id,
+                        &handshake.cert.account_id_pub,
+                        handshake.cert.identity_version,
+                        proto::now_unix(),
+                    );
+                    if let Err(e) = verdict {
+                        tracing::debug!("relay: account anchor refused: {e}");
+                        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                        inner.stats.anchors_refused.fetch_add(1, Ordering::Relaxed);
+                        let _ = proto::write_response(
+                            &mut stream,
+                            Err(RejectReason::Unauthorized),
+                            version,
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                    inner.stats.anchors_verified.fetch_add(1, Ordering::Relaxed);
+                }
+            }
         }
     };
+
+    // A node that REQUIRES an anchor refuses a client that presented none. A v3
+    // client cannot present one at all, so it gets the reason code its generation
+    // understands rather than one that would decode as `Internal`.
+    if inner.anchor.is_required() && !anchored {
+        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+        let reason = if version >= proto::ANCHOR_MIN_VERSION {
+            RejectReason::AnchorRequired
+        } else {
+            RejectReason::Unauthorized
+        };
+        let _ = proto::write_response(&mut stream, Err(reason), version).await;
+        return Ok(());
+    }
+
     match command {
         Command::Connect(connect) => serve_connect(stream, inner, connect, version).await,
         Command::Extend(extend) => serve_extend(stream, inner, extend, version).await,

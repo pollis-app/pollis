@@ -17,6 +17,12 @@
 //!   refused (#813 Phase C).
 //! - `--revocation-url <url>` / `POLLIS_RELAY_REVOCATION_URL` — where the signed
 //!   revocation list is published.
+//! - `--transparency-key <hex>` / `POLLIS_RELAY_TRANSPARENCY_KEY` — the pinned
+//!   account-key transparency log key. Unset ⇒ this node makes no anchoring
+//!   claim (#813 Phase E2).
+//! - `--require-anchor` (`true`/`false`) / `POLLIS_RELAY_REQUIRE_ANCHOR` — refuse
+//!   clients that present no account anchor. Requires the key above; startup
+//!   **aborts** rather than coming up silently unenforcing.
 //!
 //! Authentication is the OFFLINE device-cert chain verified per handshake — the
 //! relay holds NO Turso credentials and makes NO metadata-plane query (design
@@ -30,6 +36,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use pollis_relay::anchor::AnchorPolicy;
 use pollis_relay::config::{RelayFileConfig, DEFAULT_BIND, DEFAULT_IDENTITY_PATH};
 use pollis_relay::health;
 use pollis_relay::policy::RevocationStore;
@@ -120,6 +127,25 @@ async fn main() -> anyhow::Result<()> {
             );
         }
     }
+
+    // Transparency-log account anchoring (#813 Phase E2).
+    let transparency_key = arg_or_env(&args, "transparency-key", "POLLIS_RELAY_TRANSPARENCY_KEY")
+        .or_else(|| file.transparency_key_hex.clone());
+    let require_anchor = arg_or_env(&args, "require-anchor", "POLLIS_RELAY_REQUIRE_ANCHOR")
+        .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
+        .or(file.require_account_anchor)
+        .unwrap_or(false);
+    config.anchor = match &transparency_key {
+        Some(key) => AnchorPolicy::configured(key, file.anchor_max_age_secs(), require_anchor)?,
+        None if require_anchor => {
+            // Refusing to start beats coming up "requiring" something this node
+            // has no key to check — that would be enforcement in name only.
+            anyhow::bail!(
+                "require_account_anchor is set but no transparency log key is configured"
+            );
+        }
+        None => AnchorPolicy::Ignore,
+    };
 
     // One OS shutdown signal fans out to both the QUIC relay and the auxiliary
     // health endpoint via a watch channel, so a single SIGTERM/SIGINT stops both.
