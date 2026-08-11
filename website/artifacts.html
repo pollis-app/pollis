@@ -260,10 +260,16 @@
     }
 
     /* ── Copy chip ────────────────────────────────────────────── */
+    /* The pinned ML-DSA-44 key is shown in full: ~2624 hex chars with no space
+       or hyphen to break on. `anywhere` (not `break-word`) is required — it is
+       the only value that also shrinks the chip's min-content width, so the
+       chip stops forcing its flex parent wider than the card. */
     .art-copy {
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
+      overflow-wrap: anywhere;
+      text-align: left;
       font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
       font-size: inherit;
       color: var(--c-text);
