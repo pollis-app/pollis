@@ -29,18 +29,40 @@
 //! whether the node runs, and reachability decides whether the status says
 //! `Serving`. The user is told the truth either way — "paused: other devices
 //! can't reach this one" is exactly that state.
+//!
+//! Since #813 wave 3 that state is no longer the steady state: starting the node
+//! also starts [`super::reachability`], which parks an outbound connection at
+//! every first-party relay in the signed directory and reports back the moment
+//! one is live. `NoInboundPath` now means what it says — nothing can reach this
+//! device *right now* — rather than "this feature is not finished".
+//!
+//! # The engine's revocation store
+//!
+//! [`PeerEngine::start`] takes a [`RevocationStore`] because a node that cannot
+//! evaluate revocation refuses to extend, and extending is a peer's entire job.
+//! The store built here is **directory-backed**: keyed on the same pinned
+//! `POLLIS_OVERLAY_DIRECTORY_KEY` clients pin the directory with, and kept
+//! current by the reachability loop that already reads that directory. A build
+//! with no directory key gets [`RevocationStore::unconfigured`], which admits
+//! nothing — so such a device runs a node, parks nowhere, and forwards nothing,
+//! which is the honest composition rather than a fail-open shortcut.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+use pollis_relay::policy::RevocationStore;
 
 use crate::sink::EventSink;
 
 use super::conditions::{
     hold_for, RelayServingConfig, RelayServingStatus, ServingSignals,
 };
+use super::context::ServingContext;
 use super::engine::{PeerCounters, PeerEngine};
 use super::link::PeerLink;
+use super::park::LinkAcceptor;
 use super::platform;
+use super::reachability::{Reachability, ReachabilityConfig};
 
 /// The global event name the renderer listens on. Must match
 /// `RELAY_SERVING_EVENT` in `frontend/src/hooks/queries/useRelayServing.ts`.
@@ -68,9 +90,19 @@ pub fn set_event_sink(sink: Arc<dyn EventSink<RelayServingStatus>>) {
     manager().set_sink(sink);
 }
 
+/// Give the process-wide manager the app-shaped inputs it needs to become
+/// reachable (the signed directory and the device identity). Called once at
+/// setup; until then the device runs its node but parks nowhere.
+pub fn set_serving_context(context: Arc<dyn ServingContext>) {
+    manager().set_context(context);
+}
+
 struct Inner {
     config: RelayServingConfig,
     engine: Option<PeerEngine>,
+    /// Owns the parked connections. Dropped with the engine, which is what makes
+    /// withdrawing consent stop reachability immediately.
+    reachability: Option<Reachability>,
 }
 
 pub struct RelayServingManager {
@@ -80,11 +112,18 @@ pub struct RelayServingManager {
     /// The last status pushed, so an unchanged reconcile pushes nothing.
     last: Mutex<Option<RelayServingStatus>>,
     counters: Arc<PeerCounters>,
-    /// True once something can hand this device circuits. Set by the transport
-    /// that attaches the device to a first-party relay; **false** until then,
-    /// which is why a consenting device today settles on
-    /// `Waiting{NoInboundPath}` rather than claiming to be serving.
+    /// True once something can hand this device circuits. Set by
+    /// [`super::reachability`] when a parked connection goes live or is lost;
+    /// **false** until then, which is why a consenting device with no directory
+    /// (or a down pool) settles on `Waiting{NoInboundPath}` rather than claiming
+    /// to be serving.
     inbound_path: AtomicBool,
+    /// Installed at setup by the shell. `None` in a build that never installs
+    /// one — that device runs its node and is simply not reachable.
+    context: Mutex<Option<Arc<dyn ServingContext>>>,
+    /// A handle back to the `Arc` this manager lives in, so a reconcile can hand
+    /// a `Weak` to the tasks it spawns without threading one through every call.
+    me: OnceLock<Weak<RelayServingManager>>,
 }
 
 impl RelayServingManager {
@@ -95,12 +134,16 @@ impl RelayServingManager {
             inner: tokio::sync::Mutex::new(Inner {
                 config: RelayServingConfig::default(),
                 engine: None,
+                reachability: None,
             }),
             sink: Mutex::new(None),
             last: Mutex::new(None),
             counters: PeerCounters::new(),
             inbound_path: AtomicBool::new(false),
+            context: Mutex::new(None),
+            me: OnceLock::new(),
         });
+        let _ = manager.me.set(Arc::downgrade(&manager));
 
         // Weak so the hook never keeps the manager alive, and so a dropped
         // test-local manager's late-firing hook is a no-op rather than a panic.
@@ -166,6 +209,72 @@ impl RelayServingManager {
         *self.sink.lock().unwrap() = Some(sink);
     }
 
+    /// Install the app-shaped inputs reachability needs. Replaces any previous
+    /// one; a context installed after the node started takes effect at the next
+    /// reconcile, which the caller triggers with an apply or a status read.
+    fn set_context(&self, context: Arc<dyn ServingContext>) {
+        *self.context.lock().unwrap() = Some(context);
+    }
+
+    fn context(&self) -> Option<Arc<dyn ServingContext>> {
+        self.context.lock().unwrap().clone()
+    }
+
+    /// The engine's revocation store, keyed on the same pinned directory key the
+    /// client pins the directory with.
+    ///
+    /// [`RevocationStore::unconfigured`] when there is no key. That admits
+    /// nothing, so such a device forwards nothing — deliberately, and not as an
+    /// oversight: a peer's only job is to extend to a next hop, and extending
+    /// without being able to check whether that hop has been revoked is the
+    /// fail-open this whole phase exists to prevent.
+    fn revocation_store(&self) -> RevocationStore {
+        match self.context().and_then(|c| c.directory()) {
+            Some((_, key)) => RevocationStore::enforcing(key),
+            None => RevocationStore::unconfigured(),
+        }
+    }
+
+    /// Start parking outbound connections for the running engine.
+    ///
+    /// Returns `None` when there is no context to park with, in which case the
+    /// device stays on `Waiting{NoInboundPath}` — the truthful answer.
+    fn start_reachability(
+        &self,
+        leaf_der: pollis_relay::CertificateDer<'static>,
+        revocations: RevocationStore,
+    ) -> Option<Reachability> {
+        let context = self.context()?;
+        let me = self.me.get()?.clone();
+
+        // Reachability changed ⇒ push a status event. Event-driven, so an
+        // unplugged relay is noticed without anything polling for it.
+        let on_change: Arc<dyn Fn(usize) + Send + Sync> = {
+            let me = me.clone();
+            Arc::new(move |live: usize| {
+                let Some(manager) = me.upgrade() else {
+                    return;
+                };
+                manager.set_inbound_path(live > 0);
+                // The hook fires from a park task (and from `Drop`), so it must
+                // not block: hand the reconcile to the runtime, if there is one.
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        manager.refresh().await;
+                    });
+                }
+            })
+        };
+
+        Some(Reachability::start(ReachabilityConfig {
+            context,
+            revocations,
+            leaf_der,
+            acceptor: Arc::new(ManagerAcceptor(me)),
+            on_change,
+        }))
+    }
+
     /// The whole state machine in one place: probe, decide whether the node
     /// should be up, make that true, then report what is actually the case.
     async fn reconcile(&self, config: RelayServingConfig) -> RelayServingStatus {
@@ -187,20 +296,19 @@ impl RelayServingManager {
             .is_none();
 
         if engine_wanted && inner.engine.is_none() {
-            // OPEN SEAM (#813): unconfigured means this engine will refuse every
-            // `Extend`, so it carries nothing. That is the honest state today —
-            // a peer is not reachable until the first-party reverse hop exists
-            // and nothing publishes peers into the directory yet, so no circuit
-            // can select one either. Wiring the client's directory-backed
-            // `RevocationStore` in here is the last step of making peer relaying
-            // live, and it must land with those two, not before: a peer that
-            // forwards without being able to evaluate revocation is exactly the
-            // fail-open this phase exists to prevent.
-            match PeerEngine::start(
-                self.counters.clone(),
-                pollis_relay::policy::RevocationStore::unconfigured(),
-            ) {
+            // The store is directory-backed and shared with the reachability
+            // loop that keeps it current (see the module docs). It starts empty,
+            // which means the node refuses to extend until it holds a verified,
+            // unexpired list — fail-closed from the first instant, not from the
+            // first refresh.
+            let revocations = self.revocation_store();
+            match PeerEngine::start(self.counters.clone(), revocations.clone()) {
                 Ok(engine) => {
+                    // Parking carries the engine's leaf: that cert IS this
+                    // peer's identity, and it is what a client pins when the
+                    // directory offers this device as a hop.
+                    inner.reachability =
+                        self.start_reachability(engine.cert_der().clone(), revocations);
                     inner.engine = Some(engine);
                 }
                 Err(e) => {
@@ -212,6 +320,9 @@ impl RelayServingManager {
             }
         } else if !engine_wanted && inner.engine.is_some() {
             self.inbound_path.store(false, Ordering::Relaxed);
+            // Dropping this closes every parked connection, so the device stops
+            // being reachable at the same moment it stops being willing.
+            inner.reachability = None;
             if let Some(mut engine) = inner.engine.take() {
                 // Let someone else's in-flight message finish.
                 engine.shutdown().await;
@@ -268,6 +379,22 @@ impl RelayServingManager {
     }
 }
 
+/// Hands a spliced link to whatever node the manager is currently running.
+///
+/// `Weak`, so an aborted-but-still-draining park task cannot keep a manager (and
+/// with it a relay node) alive after consent is withdrawn.
+struct ManagerAcceptor(Weak<RelayServingManager>);
+
+#[async_trait::async_trait]
+impl LinkAcceptor for ManagerAcceptor {
+    async fn accept(&self, link: PeerLink) -> bool {
+        match self.0.upgrade() {
+            Some(manager) => manager.attach_link(link).await,
+            None => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +408,21 @@ mod tests {
         fn send(&self, event: RelayServingStatus) -> Result<(), String> {
             self.0.lock().unwrap().push(event);
             Ok(())
+        }
+    }
+
+    /// A context that reports a directory but can never produce an identity —
+    /// enough to exercise the store wiring without standing up a signed pool.
+    struct FakeContext(Option<(String, String)>);
+
+    #[async_trait::async_trait]
+    impl ServingContext for FakeContext {
+        fn directory(&self) -> Option<(String, String)> {
+            self.0.clone()
+        }
+
+        async fn identity(&self) -> anyhow::Result<Arc<pollis_relay::client::ClientIdentity>> {
+            anyhow::bail!("no identity in this test")
         }
     }
 
@@ -367,6 +509,45 @@ mod tests {
         assert!(!manager.attach_link(peer_end).await);
         // And reachability does not survive the node it belonged to.
         assert!(!manager.inbound_path.load(Ordering::Relaxed));
+    }
+
+    /// **Contract §5.** The engine is handed the client's *directory-backed*
+    /// store, keyed on the same pinned key the directory is verified with — so a
+    /// serving peer can actually extend once it holds a list.
+    #[tokio::test]
+    async fn a_directory_backed_context_gives_the_engine_an_enforcing_store() {
+        let manager = RelayServingManager::new();
+        manager.set_context(Arc::new(FakeContext(Some((
+            "https://relays.pollis.com/v1/directory.json".to_string(),
+            "aGVsbG8gd29ybGQgdGhpcyBpcyAzMiBieXRlcyEh".to_string(),
+        )))));
+        assert!(
+            manager.revocation_store().is_configured(),
+            "a peer with a directory must be able to evaluate revocation"
+        );
+    }
+
+    /// And the other half of §5: no directory ⇒ no key ⇒ the store admits
+    /// nothing, so the device runs a node and forwards nothing. Being unable to
+    /// evaluate revocation is a refusal, never a default-open.
+    #[tokio::test]
+    async fn without_a_directory_the_engine_cannot_evaluate_revocation() {
+        let manager = RelayServingManager::new();
+        assert!(!manager.revocation_store().is_configured());
+
+        manager.set_context(Arc::new(FakeContext(None)));
+        assert!(!manager.revocation_store().is_configured());
+    }
+
+    /// A device with no way to be reached settles on the reachability hold and
+    /// stays there — the honest answer, and the one the UI renders.
+    #[tokio::test]
+    async fn consent_without_a_directory_settles_on_no_inbound_path() {
+        let manager = RelayServingManager::new();
+        manager.set_context(Arc::new(FakeContext(None)));
+        let status = manager.apply(consent_without_conditions()).await;
+        assert_eq!(status.state, RelayServingState::Waiting);
+        assert_eq!(status.hold, Some(RelayServingHold::NoInboundPath));
     }
 
     #[tokio::test]
