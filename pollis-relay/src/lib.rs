@@ -11,9 +11,11 @@
 //!
 //! Layout:
 //! - [`proto`] — the wire protocol + the offline device-CERTIFICATE handshake.
-//! - [`server`] — the QUIC relay: handshake → rate limit → allowlist → dial → pipe.
+//! - [`server`] — the QUIC relay: handshake → rate limit → allowlist → dial → pipe,
+//!   or → extend to the next relay when it is a middle hop.
 //! - [`client`] — the QUIC relay client.
-//! - [`circuit`] — an n-hop `Circuit` (v0: n = 1) + a [`circuit::CircuitFactory`].
+//! - [`circuit`] — an n-hop `Circuit` + a [`circuit::CircuitFactory`].
+//! - [`onion`] — the per-hop layer: one nested TLS 1.3 session per hop (§6.2).
 //! - [`shim`] — the local SOCKS5 CONNECT server on loopback.
 //! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4),
 //!   and the fail-closed **live relay revocation** store (#813).
@@ -34,6 +36,7 @@ pub mod client;
 pub mod config;
 pub mod health;
 pub mod http;
+pub mod onion;
 pub mod policy;
 pub mod proto;
 pub mod ratelimit;
@@ -43,8 +46,8 @@ pub mod stream;
 pub mod tls;
 
 // Re-export the load-bearing types at the crate root for ergonomic consumers.
-pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory};
-pub use client::{ClientIdentity, RelayClient};
+pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory, StaticPathFactory, MAX_HOPS};
+pub use client::{ClientIdentity, RelayClient, RelayLink};
 pub use config::{RateLimitFileConfig, RelayFileConfig};
 pub use http::{http_client, http_client_builder};
 pub use policy::{
@@ -57,6 +60,6 @@ pub use proto::{DeviceCertMaterial, RejectReason, VerifiedClient};
 // relay leaf type without taking a direct `rustls`/`rustls-pki-types` dependency.
 pub use rustls::pki_types::CertificateDer;
 pub use ratelimit::{RateLimitConfig, RateLimiter};
-pub use server::{Allowlist, HostPattern, RelayConfig, RelayServer, RelayStats};
+pub use server::{Allowlist, HostPattern, PeerObserver, RelayConfig, RelayServer, RelayStats};
 pub use shim::{OverlayHandle, OverlayShim};
 pub use stream::{BoxedStream, RelayStream};

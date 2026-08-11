@@ -9,7 +9,7 @@
 //!
 //! ```text
 //! ┌──────────────── Handshake (client → relay) ────────────────┐
-//! │ u8     version          (== PROTOCOL_VERSION)              │
+//! │ u8     version          (3 or 4)                           │
 //! │ u8     msg_type         (== MSG_HANDSHAKE)                 │
 //! │ u16    user_id_len | user_id bytes          (UTF-8)        │
 //! │ u16    device_id_len | device_id bytes      (UTF-8)        │
@@ -24,13 +24,25 @@
 //! │ [2420] signature          (device ML-DSA key, canonical)   │
 //! └────────────────────────────────────────────────────────────┘
 //! ┌──────────────── Connect (client → relay) ──────────────────┐
-//! │ u8   version            (== PROTOCOL_VERSION)              │
+//! │ u8   version            (3 or 4)                          │
 //! │ u8   msg_type           (== MSG_CONNECT)                  │
 //! │ u16  host_len | host bytes                  (UTF-8)       │
 //! │ u16  port                                                 │
 //! └────────────────────────────────────────────────────────────┘
+//! ┌──────────────── Extend (client → relay, v4+) ──────────────┐
+//! │ u8   version            (>= 4)                            │
+//! │ u8   msg_type           (== MSG_EXTEND)                   │
+//! │ u8   addr_family        (4 = IPv4, 6 = IPv6)              │
+//! │ [4|16] next_hop_ip                                        │
+//! │ u16  next_hop_port                                        │
+//! │ [32] next_cert_sha256   (SHA-256 of the next hop's DER)   │
+//! └────────────────────────────────────────────────────────────┘
+//! ┌──────────────── Layer (relay → relay, v4+) ────────────────┐
+//! │ u8   version            (>= 4)                            │
+//! │ u8   msg_type           (== MSG_LAYER)                    │
+//! └────────────────────────────────────────────────────────────┘
 //! ┌──────────────── Response (relay → client) ─────────────────┐
-//! │ u8   version            (== PROTOCOL_VERSION)              │
+//! │ u8   version            (3 or 4)                          │
 //! │ u8   status             (0 = Ok, 1 = Rejected)            │
 //! │ -- if Rejected: --                                        │
 //! │ u8   reason_code                                          │
@@ -38,10 +50,51 @@
 //! └────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! The client pipelines Handshake + Connect without waiting; the relay reads
-//! both, then sends exactly one Response communicating the final outcome. On any
-//! rejection the relay closes the stream. After an `Ok`, the stream becomes the
-//! raw byte pipe to the target.
+//! For a single-hop circuit the client pipelines Handshake + Connect without
+//! waiting; the relay reads both, then sends exactly one Response communicating
+//! the final outcome. On any rejection the relay closes the stream. After an
+//! `Ok`, the stream becomes the raw byte pipe to the target.
+//!
+//! # Onion layering (v4, design §6.2)
+//!
+//! A multi-hop circuit is built by **telescoping**. Against hop *i* the client
+//! sends Handshake + `Extend(hop i+1)`; that relay dials hop i+1 over QUIC,
+//! announces itself with a `Layer` frame, and — once hop i+1 acknowledges —
+//! splices the two streams and answers `Ok`. The client then runs **one TLS 1.3
+//! session per hop, nested**, over that spliced pipe (see [`crate::onion`]),
+//! pinning hop i+1's leaf cert. Every subsequent frame the client writes is
+//! therefore wrapped in one encryption layer per remaining hop, and each relay
+//! peels exactly one.
+//!
+//! Consequences, which are the whole point:
+//! - hop 1 sees the client's address and hop 2's address — never the destination;
+//! - a middle hop sees only its two neighbours;
+//! - the last hop sees the destination and its predecessor — never the client's
+//!   address. It still authenticates the client's *device cert*, exactly as the
+//!   single relay does in v0, so the account is not hidden from it; the property
+//!   this protocol delivers is **network-address unlinkability**, not anonymity.
+//!
+//! Hop-to-hop QUIC/TLS is unchanged and still carries everything; the onion
+//! layer rides on top of it rather than replacing it.
+//!
+//! # Versioning
+//!
+//! [`PROTOCOL_VERSION`] is the newest generation this build speaks and
+//! [`MIN_PROTOCOL_VERSION`] the oldest it still accepts. The ALPN token carries
+//! the generation, and a relay offers **every** supported ALPN ([`SUPPORTED_ALPNS`],
+//! newest first) so a v4 client keeps working against the shipped v3 fleet for
+//! single-hop — it simply negotiates `pollis-relay/3` and writes `3` in every
+//! frame's version byte. Anything outside the supported range fails the QUIC ALPN
+//! negotiation outright, so a mismatched peer never gets as far as writing a
+//! frame: versions never silently half-speak, and a stream is never corrupted.
+//! `Extend` / `Layer` additionally require version ≥ 4 at the frame level, so a
+//! v3-negotiated connection cannot smuggle a multi-hop request.
+//!
+//! The Handshake frame and its canonical signed message are **byte-identical
+//! between v3 and v4** — v4 is purely additive — which is exactly what lets one
+//! client speak either generation with a single signing path. That is why
+//! [`HANDSHAKE_DOMAIN`] is unchanged: its job is separation from other protocols,
+//! not from other generations of this one.
 //!
 //! # Handshake auth — OFFLINE device-certificate chain (design §9.4, §11.1)
 //!
@@ -74,6 +127,8 @@
 //! Because destinations are allowlisted to first-party hosts only (§1.2), "a
 //! well-formed device, rate-limited" is sufficient anti-abuse for v0.
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
 use ml_dsa::{EncodedSignature, EncodedVerifyingKey, Keypair, MlDsa44, Signer, Verifier};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -85,31 +140,86 @@ pub use pollis_device_cert::{MLDSA44_PUB_LEN, MLDSA44_SIG_LEN};
 /// `ml-dsa` directly to name the type.
 pub type MlDsaSigningKey = ml_dsa::SigningKey<MlDsa44>;
 
-/// Wire protocol version. Bumped 2 → 3 for post-quantum authentication (#668):
-/// the account key, the device cert and the possession signature are all
-/// ML-DSA-44, none of which fit v2's fixed-width Ed25519 slots.
-pub const PROTOCOL_VERSION: u8 = 3;
+/// Newest wire protocol version this build speaks. Bumped 3 → 4 for the
+/// multi-hop onion protocol (#813): `Extend` and `Layer` are new frames and a
+/// relay may now forward to another relay instead of only to a destination.
+/// Bumped 2 → 3 for post-quantum authentication (#668).
+pub const PROTOCOL_VERSION: u8 = 4;
 
-/// ALPN for the outer relay-hop QUIC transport. Bumped alongside
-/// [`PROTOCOL_VERSION`] so a v2 client cannot silently half-speak to a v3 relay.
-pub const ALPN: &[u8] = b"pollis-relay/3";
+/// Oldest wire protocol version this build still accepts. v3 stays supported so
+/// a v4 client keeps working single-hop against the already-deployed v3 fleet;
+/// multi-hop needs v4 at every hop.
+pub const MIN_PROTOCOL_VERSION: u8 = 3;
 
-/// Domain-separation prefix for the handshake canonical message.
+/// ALPN for the outer relay-hop QUIC transport, newest generation. Bumped
+/// alongside [`PROTOCOL_VERSION`] so a peer cannot silently half-speak a
+/// generation it does not implement.
+pub const ALPN: &[u8] = b"pollis-relay/4";
+
+/// The v3 ALPN, still offered so the shipped single-hop fleet stays reachable.
+pub const ALPN_V3: &[u8] = b"pollis-relay/3";
+
+/// Every ALPN this build accepts, **newest first** — a rustls server picks the
+/// first entry of its own list that the client also offered, so this ordering is
+/// what makes two v4 peers negotiate v4 while a v4 peer still meets a v3 one.
+pub const SUPPORTED_ALPNS: [&[u8]; 2] = [ALPN, ALPN_V3];
+
+/// The ALPN of the **inner** onion layer (the nested TLS 1.3 session a client
+/// runs to each hop past the first). Distinct from the outer QUIC ALPN so a
+/// misrouted stream fails negotiation instead of being misparsed.
+pub const ONION_ALPN: &[u8] = b"pollis-onion/1";
+
+/// Domain-separation prefix for the handshake canonical message. Deliberately
+/// **not** bumped with [`PROTOCOL_VERSION`]: the handshake frame is identical in
+/// v3 and v4, and keeping one canonical form is what lets a single client sign
+/// once and speak either generation.
 pub const HANDSHAKE_DOMAIN: &str = "pollis-relay-v3";
 
 /// Accepted clock skew, in seconds, on either side of the relay clock. Matches
 /// the DS replay window (`pollis-delivery` `REPLAY_WINDOW_SECS`).
 pub const MAX_SKEW_SECS: i64 = 300;
 
-const MSG_HANDSHAKE: u8 = 1;
-const MSG_CONNECT: u8 = 2;
+pub(crate) const MSG_HANDSHAKE: u8 = 1;
+pub(crate) const MSG_CONNECT: u8 = 2;
+pub(crate) const MSG_EXTEND: u8 = 3;
+pub(crate) const MSG_LAYER: u8 = 4;
+
+/// First version in which [`MSG_EXTEND`] / [`MSG_LAYER`] are legal.
+pub const ONION_MIN_VERSION: u8 = 4;
 
 const STATUS_OK: u8 = 0;
 const STATUS_REJECTED: u8 = 1;
 
+const ADDR_V4: u8 = 4;
+const ADDR_V6: u8 = 6;
+
 /// Cap host/id string reads so a peer can't force an unbounded allocation.
 const MAX_STRING_LEN: usize = 1024;
 const NONCE_LEN: usize = 32;
+
+/// Map an ALPN token (`pollis-relay/N`) to its numeric generation, or `None` if
+/// it is not a generation this build supports.
+pub fn version_from_alpn(alpn: &[u8]) -> Option<u8> {
+    if !SUPPORTED_ALPNS.iter().any(|candidate| *candidate == alpn) {
+        return None;
+    }
+    let text = std::str::from_utf8(alpn).ok()?;
+    let (_, digits) = text.rsplit_once('/')?;
+    digits.parse::<u8>().ok()
+}
+
+/// True if `version` is a generation this build can parse.
+pub fn version_supported(version: u8) -> bool {
+    (MIN_PROTOCOL_VERSION..=PROTOCOL_VERSION).contains(&version)
+}
+
+/// SHA-256 of a relay's DER leaf cert — the compact pin an `Extend` carries so
+/// the forwarding relay refuses to hand the circuit to the wrong next hop.
+pub fn cert_fingerprint(cert_der: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(cert_der);
+    hasher.finalize().into()
+}
 
 /// Errors reading or writing the wire protocol.
 #[derive(Debug, thiserror::Error)]
@@ -141,6 +251,12 @@ pub enum RejectReason {
     /// The client tripped a per-account or per-source-IP rate/concurrency limit
     /// (design §11.5). Returned cleanly rather than dropping the stream.
     RateLimited,
+    /// An `Extend` could not be honoured: this relay does not act as a middle
+    /// hop, or the next hop was unreachable / presented the wrong pinned cert /
+    /// did not speak the onion generation. Deliberately one code — a client
+    /// cannot act differently on the distinction, and collapsing them keeps the
+    /// relay from reporting anything about its neighbours.
+    ExtendFailed,
     /// Relay-side failure.
     Internal,
 }
@@ -153,6 +269,7 @@ impl RejectReason {
             RejectReason::DialFailed => 3,
             RejectReason::BadRequest => 4,
             RejectReason::RateLimited => 6,
+            RejectReason::ExtendFailed => 7,
             RejectReason::Internal => 5,
         }
     }
@@ -164,6 +281,7 @@ impl RejectReason {
             3 => RejectReason::DialFailed,
             4 => RejectReason::BadRequest,
             6 => RejectReason::RateLimited,
+            7 => RejectReason::ExtendFailed,
             _ => RejectReason::Internal,
         }
     }
@@ -243,6 +361,36 @@ pub struct Handshake {
 pub struct Connect {
     pub host: String,
     pub port: u16,
+}
+
+/// The circuit-extension frame (v4+): "hand this stream to the relay at `addr`".
+///
+/// `next_cert_sha256` is the SHA-256 of the next hop's DER leaf cert. The
+/// forwarding relay pins on it, which keeps `Extend` from being a "dial anything"
+/// primitive; the client *independently* pins the full DER inside the onion layer
+/// it then runs to that hop, so a forwarding relay that ignored the pin still
+/// could not read or substitute the layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Extend {
+    pub addr: SocketAddr,
+    pub next_cert_sha256: [u8; 32],
+}
+
+/// A command a client may send once its handshake has verified.
+#[derive(Debug, Clone)]
+pub enum Command {
+    /// Terminate the circuit here and pipe to a destination (allowlist applies).
+    Connect(Connect),
+    /// Forward the circuit to another relay (v4+).
+    Extend(Extend),
+}
+
+/// The two bytes every frame starts with. Read separately so a relay can
+/// dispatch on the message type without committing to a body shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameHeader {
+    pub version: u8,
+    pub msg_type: u8,
 }
 
 /// What a verified handshake yields the relay: the authenticated `user_id` plus
@@ -389,9 +537,28 @@ async fn read_string<R: AsyncRead + Unpin>(r: &mut R) -> Result<String, ProtoErr
     String::from_utf8(buf).map_err(|_| ProtoError::Malformed("invalid utf-8"))
 }
 
-/// Write a handshake frame.
-pub async fn write_handshake<W: AsyncWrite + Unpin>(w: &mut W, hs: &Handshake) -> Result<(), ProtoError> {
-    w.write_u8(PROTOCOL_VERSION).await?;
+/// Read the two-byte frame header, rejecting any version this build does not
+/// speak. Callers dispatch on `msg_type` and then read the matching body.
+pub async fn read_frame_header<R: AsyncRead + Unpin>(r: &mut R) -> Result<FrameHeader, ProtoError> {
+    let version = r.read_u8().await?;
+    if !version_supported(version) {
+        return Err(ProtoError::BadVersion(version));
+    }
+    let msg_type = r.read_u8().await?;
+    Ok(FrameHeader { version, msg_type })
+}
+
+/// Write a handshake frame at wire generation `version`. The frame body is
+/// identical in every supported generation; only the version byte differs.
+pub async fn write_handshake<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    hs: &Handshake,
+    version: u8,
+) -> Result<(), ProtoError> {
+    if !version_supported(version) {
+        return Err(ProtoError::BadVersion(version));
+    }
+    w.write_u8(version).await?;
     w.write_u8(MSG_HANDSHAKE).await?;
     write_string(w, &hs.user_id).await?;
     write_string(w, &hs.device_id).await?;
@@ -419,16 +586,17 @@ pub async fn write_handshake<W: AsyncWrite + Unpin>(w: &mut W, hs: &Handshake) -
     Ok(())
 }
 
-/// Read a handshake frame.
+/// Read a whole handshake frame (header + body).
 pub async fn read_handshake<R: AsyncRead + Unpin>(r: &mut R) -> Result<Handshake, ProtoError> {
-    let version = r.read_u8().await?;
-    if version != PROTOCOL_VERSION {
-        return Err(ProtoError::BadVersion(version));
+    let header = read_frame_header(r).await?;
+    if header.msg_type != MSG_HANDSHAKE {
+        return Err(ProtoError::BadMessageType(header.msg_type));
     }
-    let msg_type = r.read_u8().await?;
-    if msg_type != MSG_HANDSHAKE {
-        return Err(ProtoError::BadMessageType(msg_type));
-    }
+    read_handshake_body(r).await
+}
+
+/// Read a handshake frame's body, the header having already been consumed.
+pub async fn read_handshake_body<R: AsyncRead + Unpin>(r: &mut R) -> Result<Handshake, ProtoError> {
     let user_id = read_string(r).await?;
     let device_id = read_string(r).await?;
     let mut device_ed25519_pub = [0u8; 32];
@@ -467,9 +635,16 @@ pub async fn read_handshake<R: AsyncRead + Unpin>(r: &mut R) -> Result<Handshake
     })
 }
 
-/// Write a connect frame.
-pub async fn write_connect<W: AsyncWrite + Unpin>(w: &mut W, c: &Connect) -> Result<(), ProtoError> {
-    w.write_u8(PROTOCOL_VERSION).await?;
+/// Write a connect frame at wire generation `version`.
+pub async fn write_connect<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    c: &Connect,
+    version: u8,
+) -> Result<(), ProtoError> {
+    if !version_supported(version) {
+        return Err(ProtoError::BadVersion(version));
+    }
+    w.write_u8(version).await?;
     w.write_u8(MSG_CONNECT).await?;
     write_string(w, &c.host).await?;
     w.write_u16(c.port).await?;
@@ -477,27 +652,121 @@ pub async fn write_connect<W: AsyncWrite + Unpin>(w: &mut W, c: &Connect) -> Res
     Ok(())
 }
 
-/// Read a connect frame.
+/// Read a whole connect frame (header + body).
 pub async fn read_connect<R: AsyncRead + Unpin>(r: &mut R) -> Result<Connect, ProtoError> {
-    let version = r.read_u8().await?;
-    if version != PROTOCOL_VERSION {
-        return Err(ProtoError::BadVersion(version));
+    let header = read_frame_header(r).await?;
+    if header.msg_type != MSG_CONNECT {
+        return Err(ProtoError::BadMessageType(header.msg_type));
     }
-    let msg_type = r.read_u8().await?;
-    if msg_type != MSG_CONNECT {
-        return Err(ProtoError::BadMessageType(msg_type));
-    }
+    read_connect_body(r).await
+}
+
+/// Read a connect frame's body, the header having already been consumed.
+pub async fn read_connect_body<R: AsyncRead + Unpin>(r: &mut R) -> Result<Connect, ProtoError> {
     let host = read_string(r).await?;
     let port = r.read_u16().await?;
     Ok(Connect { host, port })
 }
 
-/// Write the terminal response frame.
+/// Write an extend frame. v4+ only — there is no v3 encoding of this frame, so
+/// attempting it on a v3-negotiated connection is a programming error, not a
+/// downgrade.
+pub async fn write_extend<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    e: &Extend,
+    version: u8,
+) -> Result<(), ProtoError> {
+    if version < ONION_MIN_VERSION || !version_supported(version) {
+        return Err(ProtoError::BadVersion(version));
+    }
+    w.write_u8(version).await?;
+    w.write_u8(MSG_EXTEND).await?;
+    match e.addr.ip() {
+        IpAddr::V4(ip) => {
+            w.write_u8(ADDR_V4).await?;
+            w.write_all(&ip.octets()).await?;
+        }
+        IpAddr::V6(ip) => {
+            w.write_u8(ADDR_V6).await?;
+            w.write_all(&ip.octets()).await?;
+        }
+    }
+    w.write_u16(e.addr.port()).await?;
+    w.write_all(&e.next_cert_sha256).await?;
+    w.flush().await?;
+    Ok(())
+}
+
+/// Read an extend frame's body, the header having already been consumed.
+pub async fn read_extend_body<R: AsyncRead + Unpin>(r: &mut R) -> Result<Extend, ProtoError> {
+    let family = r.read_u8().await?;
+    let ip = match family {
+        ADDR_V4 => {
+            let mut octets = [0u8; 4];
+            r.read_exact(&mut octets).await?;
+            IpAddr::V4(Ipv4Addr::from(octets))
+        }
+        ADDR_V6 => {
+            let mut octets = [0u8; 16];
+            r.read_exact(&mut octets).await?;
+            IpAddr::V6(Ipv6Addr::from(octets))
+        }
+        _ => {
+            return Err(ProtoError::Malformed("bad address family"));
+        }
+    };
+    let port = r.read_u16().await?;
+    let mut next_cert_sha256 = [0u8; 32];
+    r.read_exact(&mut next_cert_sha256).await?;
+    Ok(Extend {
+        addr: SocketAddr::new(ip, port),
+        next_cert_sha256,
+    })
+}
+
+/// Write the relay→relay layer announcement: "the bytes after this are an onion
+/// layer addressed to you; terminate it and serve what's inside." Carries no
+/// payload — everything about the circuit past this point is inside the layer,
+/// which is precisely what keeps it invisible to the sender.
+pub async fn write_layer<W: AsyncWrite + Unpin>(w: &mut W, version: u8) -> Result<(), ProtoError> {
+    if version < ONION_MIN_VERSION || !version_supported(version) {
+        return Err(ProtoError::BadVersion(version));
+    }
+    w.write_u8(version).await?;
+    w.write_u8(MSG_LAYER).await?;
+    w.flush().await?;
+    Ok(())
+}
+
+/// Read a command frame (header + body) — what a relay expects once a client's
+/// handshake has verified. `Extend` is refused below [`ONION_MIN_VERSION`] so a
+/// v3-negotiated stream can never request multi-hop forwarding.
+pub async fn read_command<R: AsyncRead + Unpin>(r: &mut R) -> Result<Command, ProtoError> {
+    let header = read_frame_header(r).await?;
+    match header.msg_type {
+        MSG_CONNECT => Ok(Command::Connect(read_connect_body(r).await?)),
+        MSG_EXTEND if header.version >= ONION_MIN_VERSION => {
+            Ok(Command::Extend(read_extend_body(r).await?))
+        }
+        other => Err(ProtoError::BadMessageType(other)),
+    }
+}
+
+/// Write the terminal response frame at wire generation `version`.
 pub async fn write_response<W: AsyncWrite + Unpin>(
     w: &mut W,
     result: Result<(), RejectReason>,
+    version: u8,
 ) -> Result<(), ProtoError> {
-    w.write_u8(PROTOCOL_VERSION).await?;
+    // A response to a peer whose generation we could not parse still has to go
+    // out; fall back to the oldest supported generation rather than emitting a
+    // version byte nobody can read.
+    let version = if version_supported(version) {
+        version
+    } else {
+        MIN_PROTOCOL_VERSION
+    };
+    w.write_u8(version).await?;
     match result {
         Ok(()) => {
             w.write_u8(STATUS_OK).await?;
@@ -515,7 +784,7 @@ pub async fn write_response<W: AsyncWrite + Unpin>(
 /// Read the terminal response frame. `Ok(())` means the byte pipe is live.
 pub async fn read_response<R: AsyncRead + Unpin>(r: &mut R) -> Result<(), ProtoError> {
     let version = r.read_u8().await?;
-    if version != PROTOCOL_VERSION {
+    if !version_supported(version) {
         return Err(ProtoError::BadVersion(version));
     }
     let status = r.read_u8().await?;
@@ -635,7 +904,7 @@ mod tests {
         let hs = sign_handshake(&device, "u1", "d1", ED_PUB, cert, now, [1u8; 32]);
 
         let mut buf = Vec::new();
-        write_handshake(&mut buf, &hs).await.expect("write");
+        write_handshake(&mut buf, &hs, PROTOCOL_VERSION).await.expect("write");
         let read = read_handshake(&mut buf.as_slice()).await.expect("read");
 
         assert_eq!(read.user_id, hs.user_id);

@@ -161,6 +161,81 @@ impl PinnedServerCertVerifier {
     }
 }
 
+/// A `ServerCertVerifier` that accepts exactly one leaf cert **by SHA-256**.
+///
+/// Used only by a relay dialing the next hop of a circuit it is extending: the
+/// `Extend` frame carries 32 bytes rather than the ~500-byte DER, which keeps the
+/// frame small. Security-wise this is a belt on top of braces — the client
+/// independently pins the full DER inside the onion layer it runs to that hop
+/// (`onion::client_layer`), so this check bounds what `Extend` can be pointed at
+/// rather than being the thing that authenticates the hop.
+#[derive(Debug)]
+pub struct FingerprintPinnedVerifier {
+    fingerprint: [u8; 32],
+    provider: Arc<CryptoProvider>,
+}
+
+impl FingerprintPinnedVerifier {
+    pub fn new(fingerprint: [u8; 32]) -> Arc<Self> {
+        ensure_crypto_provider();
+        Arc::new(Self {
+            fingerprint,
+            provider: ring_provider(),
+        })
+    }
+}
+
+impl ServerCertVerifier for FingerprintPinnedVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        if crate::proto::cert_fingerprint(end_entity.as_ref()) == self.fingerprint {
+            Ok(ServerCertVerified::assertion())
+        } else {
+            Err(rustls::Error::General(
+                "next-hop cert does not match the pinned fingerprint".into(),
+            ))
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.provider.signature_verification_algorithms.supported_schemes()
+    }
+}
+
 impl ServerCertVerifier for PinnedServerCertVerifier {
     fn verify_server_cert(
         &self,

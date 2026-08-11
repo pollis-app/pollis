@@ -25,6 +25,11 @@
 //! # Global cap on simultaneously-open QUIC connections. Default 4096.
 //! max_concurrent_connections = 4096
 //!
+//! # Act as a MIDDLE HOP of a multi-hop circuit: honour `Extend` by dialing the
+//! # next relay (design §6.2). Default true. Set false to make this node
+//! # last-hop-only — it will still serve circuits that terminate here.
+//! allow_extend = true
+//!
 //! # Opt-in HTTP/1.1 health/version endpoint (TCP). Orchestrators/load-balancers
 //! # probe this (the relay itself is QUIC/UDP-only). Omitted ⇒ NOT started.
 //! health_bind = "0.0.0.0:9445"
@@ -54,6 +59,9 @@ pub struct RelayFileConfig {
     pub allowlist: Option<Vec<String>>,
     pub identity_path: Option<String>,
     pub max_concurrent_connections: Option<u32>,
+    /// Whether this node acts as a middle hop (honours `Extend`). `None` ⇒ the
+    /// [`crate::server::RelayConfig`] default, which is `true`.
+    pub allow_extend: Option<bool>,
     /// TCP bind for the opt-in HTTP health/version endpoint. `None` ⇒ not started.
     pub health_bind: Option<String>,
     pub rate_limit: Option<RateLimitFileConfig>,
@@ -112,6 +120,7 @@ mod tests {
             allowlist = ["turso.io", "*.pollis.com"]
             identity_path = "/tmp/id.key"
             max_concurrent_connections = 100
+            allow_extend = false
             health_bind = "0.0.0.0:9445"
 
             [rate_limit]
@@ -126,6 +135,7 @@ mod tests {
         );
         assert_eq!(cfg.identity_path.as_deref(), Some("/tmp/id.key"));
         assert_eq!(cfg.max_concurrent_connections, Some(100));
+        assert_eq!(cfg.allow_extend, Some(false));
         assert_eq!(cfg.health_bind.as_deref(), Some("0.0.0.0:9445"));
 
         // Filled fields override; omitted ones fall to the default.
@@ -145,6 +155,17 @@ mod tests {
         let cfg = RelayFileConfig::from_toml("").unwrap();
         assert_eq!(cfg, RelayFileConfig::default());
         assert_eq!(cfg.rate_limits(), RateLimitConfig::default());
+        // Omitted `allow_extend` leaves the server default in force, which is
+        // "yes, act as a middle hop".
+        assert_eq!(cfg.allow_extend, None);
+        assert!(
+            crate::server::RelayConfig::new(
+                "127.0.0.1:0".parse().unwrap(),
+                crate::server::Allowlist::default()
+            )
+            .unwrap()
+            .allow_extend
+        );
     }
 
     #[test]

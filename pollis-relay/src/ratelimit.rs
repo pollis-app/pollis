@@ -137,7 +137,39 @@ impl RateLimiter {
 
         Some(CircuitGuard {
             limiter: self.clone(),
-            ip,
+            ip: Some(ip),
+            account,
+        })
+    }
+
+    /// Admit a circuit that reached this relay through **another relay** (a
+    /// multi-hop `Extend`), applying only the per-account limits.
+    ///
+    /// The per-IP limits are deliberately skipped: the source address of such a
+    /// stream belongs to the previous hop, not to a client, so keying on it would
+    /// make one busy guard's traffic throttle every account behind it — and it
+    /// identifies nothing worth limiting. The per-account limits still apply and
+    /// are the ones that matter, since they bound what a single captured device
+    /// can do to the first-party services at the end of the circuit.
+    pub fn admit_account_only(self: &Arc<Self>, account: [u8; 32]) -> Option<CircuitGuard> {
+        if !self.reserve_account(account) {
+            return None;
+        }
+        let now = Instant::now();
+        let account_ok = self
+            .account_buckets
+            .lock()
+            .unwrap()
+            .entry(account)
+            .or_insert_with(|| TokenBucket::new(self.cfg.new_circuits_per_min_per_account, now))
+            .try_take(now);
+        if !account_ok {
+            self.release_account(account);
+            return None;
+        }
+        Some(CircuitGuard {
+            limiter: self.clone(),
+            ip: None,
             account,
         })
     }
@@ -184,16 +216,19 @@ impl RateLimiter {
 }
 
 /// Held for a circuit's lifetime; frees the per-IP and per-account concurrency
-/// slots when dropped.
+/// slots when dropped. `ip` is `None` for a circuit admitted via
+/// [`RateLimiter::admit_account_only`], which reserved no per-IP slot.
 pub struct CircuitGuard {
     limiter: Arc<RateLimiter>,
-    ip: IpAddr,
+    ip: Option<IpAddr>,
     account: [u8; 32],
 }
 
 impl Drop for CircuitGuard {
     fn drop(&mut self) {
-        self.limiter.release_ip(self.ip);
+        if let Some(ip) = self.ip {
+            self.limiter.release_ip(ip);
+        }
         self.limiter.release_account(self.account);
     }
 }

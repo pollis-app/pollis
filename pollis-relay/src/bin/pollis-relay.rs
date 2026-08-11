@@ -88,6 +88,9 @@ async fn main() -> anyhow::Result<()> {
     if let Some(max) = file.max_concurrent_connections {
         config.max_concurrent_connections = max;
     }
+    if let Some(allow_extend) = file.allow_extend {
+        config.allow_extend = allow_extend;
+    }
 
     // One OS shutdown signal fans out to both the QUIC relay and the auxiliary
     // health endpoint via a watch channel, so a single SIGTERM/SIGINT stops both.
