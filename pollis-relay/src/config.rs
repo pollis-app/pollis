@@ -34,6 +34,32 @@
 //! # probe this (the relay itself is QUIC/UDP-only). Omitted ⇒ NOT started.
 //! health_bind = "0.0.0.0:9445"
 //!
+//! # Base64 (STANDARD) of the 32-byte Ed25519 key that signs the relay directory
+//! # AND the revocation list — the same POLLIS_OVERLAY_DIRECTORY_KEY clients pin.
+//! # REQUIRED to act as a middle hop: without it this node cannot evaluate
+//! # revocation, and "cannot evaluate" resolves the same way as "revoked", so it
+//! # will refuse every `Extend`. Omitting it is safe, never permissive.
+//! directory_key_b64 = "…"
+//!
+//! # Where the signed revocation list is published. Only used when
+//! # `directory_key_b64` is set.
+//! revocation_url = "https://relays.pollis.com/revocations.json"
+//!
+//! # Hex of the account-key transparency log's ML-DSA-44 public key (what
+//! # https://verify.pollis.com/v1/account-keys/public_key.json serves, and what
+//! # PINNED_LOG_PUBLIC_KEYS pins in the client). Omitted ⇒ this node makes no
+//! # anchoring claim: it neither requires an anchor nor judges one (#813 E2).
+//! transparency_key_hex = "…"
+//!
+//! # Refuse a client that presents no transparency-log account anchor. Requires
+//! # `transparency_key_hex`. Default false — turning it on before clients send
+//! # the frame, or before a new account reaches the log's daily publish, locks
+//! # those users out. Publish first, enforce second.
+//! require_account_anchor = false
+//!
+//! # How stale a presented signed tree head may be, in seconds. Default 7 days.
+//! anchor_max_age_secs = 604800
+//!
 //! [rate_limit]
 //! new_circuits_per_min_per_ip = 600
 //! new_circuits_per_min_per_account = 600
@@ -49,6 +75,9 @@ pub const DEFAULT_BIND: &str = "0.0.0.0:9444";
 pub const DEFAULT_IDENTITY_PATH: &str = "relay-identity.key";
 /// The default global concurrent-connection cap.
 pub const DEFAULT_MAX_CONCURRENT_CONNECTIONS: u32 = 4096;
+/// Where the signed relay revocation list is published by default. Matches the
+/// client-side `POLLIS_OVERLAY_REVOCATION_URL` default (`infra/relay-hydra`).
+pub const DEFAULT_REVOCATION_URL: &str = "https://relays.pollis.com/revocations.json";
 
 /// The relay bin's on-disk config, as parsed from TOML. Optional fields let the
 /// binary layer env / CLI overrides on top (env overrides file).
@@ -64,6 +93,20 @@ pub struct RelayFileConfig {
     pub allow_extend: Option<bool>,
     /// TCP bind for the opt-in HTTP health/version endpoint. `None` ⇒ not started.
     pub health_bind: Option<String>,
+    /// Base64 of the pinned Ed25519 directory/revocation signing key. `None` ⇒
+    /// this node cannot evaluate revocation and therefore cannot extend circuits.
+    pub directory_key_b64: Option<String>,
+    /// Where the signed revocation list lives. `None` ⇒ [`DEFAULT_REVOCATION_URL`].
+    pub revocation_url: Option<String>,
+    /// Hex of the account-key transparency log's ML-DSA-44 public key. `None` ⇒
+    /// this node makes no anchoring claim (#813 Phase E2).
+    pub transparency_key_hex: Option<String>,
+    /// Refuse clients that present no account anchor. Meaningless — and rejected
+    /// at startup — without `transparency_key_hex`.
+    pub require_account_anchor: Option<bool>,
+    /// Bound on a presented tree head's age, seconds. `None` ⇒
+    /// [`crate::anchor::DEFAULT_ANCHOR_MAX_AGE_SECS`].
+    pub anchor_max_age_secs: Option<u64>,
     pub rate_limit: Option<RateLimitFileConfig>,
 }
 
@@ -89,6 +132,19 @@ impl RelayFileConfig {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("read relay config {path}: {e}"))?;
         Self::from_toml(&contents)
+    }
+
+    /// Where to fetch the signed revocation list from.
+    pub fn revocation_url(&self) -> String {
+        self.revocation_url
+            .clone()
+            .unwrap_or_else(|| DEFAULT_REVOCATION_URL.to_string())
+    }
+
+    /// Bound on a presented tree head's age.
+    pub fn anchor_max_age_secs(&self) -> u64 {
+        self.anchor_max_age_secs
+            .unwrap_or(crate::anchor::DEFAULT_ANCHOR_MAX_AGE_SECS)
     }
 
     /// Resolve the effective [`RateLimitConfig`], filling omitted fields from the

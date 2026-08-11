@@ -11,6 +11,7 @@
 //!
 //! Layout:
 //! - [`proto`] — the wire protocol + the offline device-CERTIFICATE handshake.
+//! - [`anchor`] — offline transparency-log account anchoring (#813 Phase E2).
 //! - [`server`] — the QUIC relay: handshake → rate limit → allowlist → dial → pipe,
 //!   or → extend to the next relay when it is a middle hop.
 //! - [`client`] — the QUIC relay client.
@@ -20,6 +21,7 @@
 //! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4),
 //!   and the fail-closed **live relay revocation** store (#813).
 //! - [`ratelimit`] — in-memory per-account / per-IP abuse control (§11.5).
+//! - [`revocation_sync`] — keeps a deployed node's revocation store loaded.
 //! - [`config`] — the deployable bin's TOML config.
 //! - [`health`] — the opt-in HTTP/1.1 health/version probe endpoint.
 //! - [`http`] — the shared reqwest client helper.
@@ -31,6 +33,7 @@
 //! keys (§8). Auth is the OFFLINE device-cert chain (`pollis-device-cert`), so
 //! the relay makes no metadata-plane query per connection (§11.1).
 
+pub mod anchor;
 pub mod circuit;
 pub mod client;
 pub mod config;
@@ -40,6 +43,7 @@ pub mod onion;
 pub mod policy;
 pub mod proto;
 pub mod ratelimit;
+pub mod revocation_sync;
 pub mod server;
 pub mod shim;
 pub mod stream;
@@ -48,6 +52,7 @@ pub mod tls;
 // Re-export the load-bearing types at the crate root for ergonomic consumers.
 pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory, StaticPathFactory, MAX_HOPS};
 pub use client::{ClientIdentity, RelayClient, RelayLink};
+pub use anchor::{AccountAnchor, AccountKeyLeaf, AnchorError, AnchorPolicy, AnchorVerifier};
 pub use config::{RateLimitFileConfig, RelayFileConfig};
 pub use http::{http_client, http_client_builder};
 pub use policy::{
@@ -55,7 +60,7 @@ pub use policy::{
     RevocationError, RevocationList, RevocationStore, RoutingPolicy, REVOCATION_TYPE,
     REVOCATION_VERSION,
 };
-pub use proto::{DeviceCertMaterial, RejectReason, VerifiedClient};
+pub use proto::{ClientFrame, DeviceCertMaterial, RejectReason, VerifiedClient};
 // Re-exported so consumers (pollis-core's `net::overlay`) can name the pinned
 // relay leaf type without taking a direct `rustls`/`rustls-pki-types` dependency.
 pub use rustls::pki_types::CertificateDer;

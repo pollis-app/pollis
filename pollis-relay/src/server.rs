@@ -11,11 +11,20 @@
 //!   against the **static allowlist** (policy, not protocol — design §14.0),
 //!   TCP-dials the target, and pipes bytes until either side closes. It never
 //!   terminates the inner TLS — it forwards opaque bytes only (design §8).
-//! - **`Extend`** (v4+) — this node is a middle hop. It opens a QUIC connection
-//!   to the named next relay (pinning the fingerprint the frame carries),
-//!   announces itself with a `Layer` frame, and splices the two streams. From
-//!   there it forwards ciphertext it cannot read: the client runs an onion layer
-//!   to that next hop straight through it (design §6.2, [`crate::onion`]).
+//! - **`Extend`** (v4+) — this node is a middle hop. It checks the next hop
+//!   against the live **revocation** store (#813 Phase C — fail-closed, and a
+//!   node with no directory key configured admits nothing, so it cannot extend
+//!   at all), opens a QUIC connection to the named next relay (pinning the
+//!   fingerprint the frame carries), re-checks the identity the peer actually
+//!   presented, announces itself with a `Layer` frame, and splices the two
+//!   streams. From there it forwards ciphertext it cannot read: the client runs
+//!   an onion layer to that next hop straight through it (design §6.2,
+//!   [`crate::onion`]).
+//!
+//! Between the handshake and that command a client may present one optional
+//! **`Anchor`** frame (v4+): a transparency-log inclusion proof for its account
+//! key, verified with zero I/O against this node's pinned log key (#813 Phase E2,
+//! [`crate::anchor`]). Whether one is *required* is node policy.
 //!
 //! A stream that opens with a `Layer` frame is one another relay is extending
 //! into us. We acknowledge, terminate the layer with our own leaf cert, and serve
@@ -36,7 +45,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,8 +55,10 @@ use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
+use crate::anchor::AnchorPolicy;
 use crate::onion;
-use crate::proto::{self, Command, Connect, Extend, Handshake, RejectReason};
+use crate::policy::{RelayIdentity, RevocationStore};
+use crate::proto::{self, ClientFrame, Command, Connect, Extend, Handshake, RejectReason};
 use crate::ratelimit::{RateLimitConfig, RateLimiter};
 use crate::stream::{DuplexStream, RelayStream};
 use crate::tls::{self, FingerprintPinnedVerifier, SelfSignedIdentity};
@@ -132,6 +143,22 @@ pub struct RelayStats {
     /// Onion layers peeled — how many streams reached this node from another
     /// relay rather than straight from a client.
     pub layers: AtomicU64,
+    /// Circuits open on this node **right now** — incremented once a stream is
+    /// admitted and decremented when it ends, on every exit path.
+    ///
+    /// A gauge, not a counter: every other field here only ever grows, so
+    /// "how many circuits am I carrying" could previously only be approximated by
+    /// counting live links, which under-counts a link carrying several circuits
+    /// (requested by phase D1 for the be-a-relay status line). It is a bare
+    /// number — it says nothing about who, from where, or to what.
+    pub live_circuits: AtomicI64,
+    /// Transparency-log account anchors that verified (#813 Phase E2).
+    pub anchors_verified: AtomicU64,
+    /// Anchors that were presented and refused. Counted separately from
+    /// `rejected` so an operator can tell "clients are failing to anchor" from
+    /// "clients are failing to authenticate" — both are aggregate counters, and
+    /// neither records anything about who connected (§5.2, §11.7).
+    pub anchors_refused: AtomicU64,
 }
 
 impl RelayStats {
@@ -155,6 +182,17 @@ impl RelayStats {
     }
     pub fn layers(&self) -> u64 {
         self.layers.load(Ordering::Relaxed)
+    }
+    /// Circuits carried right now. Never negative in practice — the guard that
+    /// decrements is created at the same point the increment happens.
+    pub fn live_circuits(&self) -> i64 {
+        self.live_circuits.load(Ordering::Relaxed)
+    }
+    pub fn anchors_verified(&self) -> u64 {
+        self.anchors_verified.load(Ordering::Relaxed)
+    }
+    pub fn anchors_refused(&self) -> u64 {
+        self.anchors_refused.load(Ordering::Relaxed)
     }
 }
 
@@ -193,6 +231,19 @@ pub struct RelayConfig {
     /// and the existing per-account limits cap how many a device may hold open.
     /// An operator who wants a node to be last-hop-only sets this `false`.
     pub allow_extend: bool,
+    /// Live relay revocation (#813 Phase C), consulted before this node hands a
+    /// circuit to a next hop.
+    ///
+    /// Defaults to [`RevocationStore::unconfigured`], which admits **nothing** —
+    /// so a node that was never given the pinned directory key cannot act as a
+    /// middle hop at all. That is deliberate and is the whole reason the feature
+    /// is not decoration: the permissive default is how revocation quietly stops
+    /// meaning anything. `allow_extend` is the orthogonal coarse switch ("never
+    /// be a middle hop"); this is "be one only for hops you can still vouch for".
+    pub revocations: RevocationStore,
+    /// Transparency-log account anchoring (#813 Phase E2). Defaults to
+    /// [`AnchorPolicy::Ignore`] — no log key, no claim.
+    pub anchor: AnchorPolicy,
     /// Shared counters.
     pub stats: Arc<RelayStats>,
     /// Optional peer-address observation hook. `None` in production — see
@@ -219,6 +270,8 @@ impl RelayConfig {
             rate_limits: RateLimitConfig::default(),
             max_concurrent_connections: crate::config::DEFAULT_MAX_CONCURRENT_CONNECTIONS,
             allow_extend: true,
+            revocations: RevocationStore::unconfigured(),
+            anchor: AnchorPolicy::Ignore,
             stats: Arc::new(RelayStats::default()),
             peer_observer: None,
         }
@@ -237,6 +290,8 @@ struct RelayInner {
     rate_limiter: Arc<RateLimiter>,
     stats: Arc<RelayStats>,
     allow_extend: bool,
+    revocations: RevocationStore,
+    anchor: AnchorPolicy,
     peer_observer: Option<PeerObserver>,
     /// Terminates an onion layer addressed to this node. Built once — it holds
     /// only our own leaf cert, which is what clients pin.
@@ -317,6 +372,8 @@ impl RelayServer {
             rate_limiter: RateLimiter::new(config.rate_limits),
             stats: config.stats,
             allow_extend: config.allow_extend,
+            revocations: config.revocations,
+            anchor: config.anchor,
             peer_observer: config.peer_observer,
             layer_acceptor,
             extend_endpoint_v4: OnceCell::new(),
@@ -474,6 +531,25 @@ async fn serve_layered_stream<S: DuplexStream>(
     serve_authenticated(stream, inner, None, handshake, header.version).await
 }
 
+/// Holds [`RelayStats::live_circuits`] up for as long as one admitted stream is
+/// being served, and puts it back down however that stream ends — clean close,
+/// error, or dropped future. An explicit decrement at each `return` would be one
+/// forgotten branch away from a gauge that only climbs.
+struct LiveCircuitGuard(Arc<RelayStats>);
+
+impl LiveCircuitGuard {
+    fn new(stats: Arc<RelayStats>) -> LiveCircuitGuard {
+        stats.live_circuits.fetch_add(1, Ordering::Relaxed);
+        LiveCircuitGuard(stats)
+    }
+}
+
+impl Drop for LiveCircuitGuard {
+    fn drop(&mut self) {
+        self.0.live_circuits.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// Verify the device-cert handshake, admit under the rate limits, then serve the
 /// single command that follows. `peer_ip` is `Some` only when the stream came
 /// straight from a client.
@@ -514,15 +590,81 @@ async fn serve_authenticated<S: DuplexStream>(
         }
     };
 
-    // 3. Exactly one command: terminate here, or forward to the next relay.
-    let command = match proto::read_command(&mut stream).await {
-        Ok(c) => c,
-        Err(_) => {
-            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
-            return Ok(());
+    // Admitted, so this stream is a circuit this node is carrying until it ends.
+    let _live = LiveCircuitGuard::new(inner.stats.clone());
+
+    // 3. An OPTIONAL transparency-log account anchor (v4+, #813 Phase E2), then
+    //    exactly one command: terminate here, or forward to the next relay.
+    let mut anchored = false;
+    let command = loop {
+        let frame = match proto::read_client_frame(&mut stream).await {
+            Ok(f) => f,
+            Err(_) => {
+                inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                let _ =
+                    proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+                return Ok(());
+            }
+        };
+        match frame {
+            ClientFrame::Command(command) => {
+                break command;
+            }
+            // A second anchor on one stream is not a legitimate shape — it would
+            // only ever be an attempt to have a later one overwrite an earlier
+            // verdict — so it is a malformed exchange, not a re-check.
+            ClientFrame::Anchor(_) if anchored => {
+                inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                let _ =
+                    proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+                return Ok(());
+            }
+            ClientFrame::Anchor(anchor) => {
+                anchored = true;
+                // A node with no pinned log key has no basis to judge an anchor,
+                // so it does not pretend to: it neither accepts nor rejects on
+                // it. A node that HAS one treats a bad anchor exactly like a
+                // forged cert — presenting one is never better than presenting
+                // none.
+                if let Some(verifier) = inner.anchor.verifier() {
+                    let verdict = verifier.verify(
+                        &anchor,
+                        &verified.user_id,
+                        &handshake.cert.account_id_pub,
+                        handshake.cert.identity_version,
+                        proto::now_unix(),
+                    );
+                    if let Err(e) = verdict {
+                        tracing::debug!("relay: account anchor refused: {e}");
+                        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                        inner.stats.anchors_refused.fetch_add(1, Ordering::Relaxed);
+                        let _ = proto::write_response(
+                            &mut stream,
+                            Err(RejectReason::Unauthorized),
+                            version,
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                    inner.stats.anchors_verified.fetch_add(1, Ordering::Relaxed);
+                }
+            }
         }
     };
+
+    // A node that REQUIRES an anchor refuses a client that presented none. A v3
+    // client cannot present one at all, so it gets the reason code its generation
+    // understands rather than one that would decode as `Internal`.
+    if inner.anchor.is_required() && !anchored {
+        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+        let reason = if version >= proto::ANCHOR_MIN_VERSION {
+            RejectReason::AnchorRequired
+        } else {
+            RejectReason::Unauthorized
+        };
+        let _ = proto::write_response(&mut stream, Err(reason), version).await;
+        return Ok(());
+    }
 
     match command {
         Command::Connect(connect) => serve_connect(stream, inner, connect, version).await,
@@ -566,6 +708,21 @@ async fn serve_connect<S: DuplexStream>(
     Ok(())
 }
 
+/// The next hop's identity as far as it is knowable **before** its QUIC
+/// handshake: its advertised address, and no cert, because the DER leaf does not
+/// exist until the peer presents it.
+///
+/// So only the `addr` selector can match here. That is not the whole check — the
+/// full identity, including the DER the peer actually presented, is re-checked in
+/// [`open_next_hop`] before a single byte is spliced. Passing an empty DER can
+/// only ever fail *closed* (it hashes to a digest no relay cert has), never open.
+fn predial_identity(addr: &str) -> RelayIdentity<'_> {
+    RelayIdentity {
+        addr,
+        cert_der: &[],
+    }
+}
+
 /// Middle hop: open the next leg, announce the layer, splice. Everything that
 /// crosses this splice afterwards is addressed to a hop further along and is
 /// unreadable here — which is the entire point of the frame.
@@ -576,6 +733,23 @@ async fn serve_extend<S: DuplexStream>(
     version: u8,
 ) -> anyhow::Result<()> {
     if !inner.allow_extend {
+        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+        let _ = proto::write_response(&mut stream, Err(RejectReason::ExtendFailed), version).await;
+        return Ok(());
+    }
+
+    // Live revocation (#813 Phase C), BEFORE the dial, so a seized next hop is
+    // never even contacted. `admitted()` is the single fail-closed encoding:
+    // `Unevaluable` — no list held, expired at USE time, or no directory key
+    // configured on this node — resolves identically to `Revoked`. A node that
+    // cannot evaluate revocation does not get to guess.
+    let addr = extend.addr.to_string();
+    if !inner
+        .revocations
+        .admit(&predial_identity(&addr), proto::now_unix())
+        .admitted()
+    {
+        tracing::debug!("relay: refusing to extend to {addr} — not admitted by revocation");
         inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
         let _ = proto::write_response(&mut stream, Err(RejectReason::ExtendFailed), version).await;
         return Ok(());
@@ -618,6 +792,30 @@ async fn open_next_hop(inner: &RelayInner, extend: &Extend) -> anyhow::Result<Re
     let connection = endpoint
         .connect_with(client_config, extend.addr, tls::RELAY_SERVER_NAME)?
         .await?;
+
+    // Now the peer's DER leaf exists, so the revocation check can run on the FULL
+    // identity — address *and* cert digest — not just the address. The cert
+    // selector is the one that binds a per-node or peer-hosted relay identity
+    // (§7 / phase D1), where every node no longer shares one pooled leaf. A peer
+    // that will not say what cert it presented cannot be evaluated, and
+    // "cannot evaluate" is not an admission.
+    let addr = extend.addr.to_string();
+    let leaf = peer_leaf_der(&connection)
+        .ok_or_else(|| anyhow::anyhow!("next hop {addr} presented no leaf certificate"))?;
+    if !inner
+        .revocations
+        .admit(
+            &RelayIdentity {
+                addr: &addr,
+                cert_der: &leaf,
+            },
+            proto::now_unix(),
+        )
+        .admitted()
+    {
+        return Err(anyhow::anyhow!("next hop {addr} is not admitted by revocation"));
+    }
+
     let (send, recv) = connection.open_bi().await?;
     let mut next = RelayStream::new(send, recv, Some(connection), None);
 
@@ -627,6 +825,18 @@ async fn open_next_hop(inner: &RelayInner, extend: &Extend) -> anyhow::Result<Re
     proto::write_layer(&mut next, proto::PROTOCOL_VERSION).await?;
     proto::read_response(&mut next).await?;
     Ok(next)
+}
+
+/// The DER leaf certificate the peer of an outbound QUIC connection presented.
+///
+/// `None` when the transport cannot report one, which callers must treat as
+/// "cannot evaluate this peer's identity" — never as "no objection".
+fn peer_leaf_der(connection: &quinn::Connection) -> Option<Vec<u8>> {
+    let identity = connection.peer_identity()?;
+    let chain = identity
+        .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
+        .ok()?;
+    chain.first().map(|cert| cert.as_ref().to_vec())
 }
 
 /// Resolve `connect.host` (honoring overrides) and open a TCP connection.

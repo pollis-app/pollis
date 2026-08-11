@@ -93,6 +93,36 @@ impl TestRelay {
     }
 }
 
+/// A revocation store holding a freshly-signed list that revokes nobody.
+///
+/// Every relay in this file needs one: a node that cannot evaluate revocation
+/// refuses to extend circuits (#813 Phase C, wired in `serve_extend`), so the
+/// production shape of a middle hop is "keyed, with a current list" and that is
+/// what these tests run. `tests/revocation.rs` covers the unkeyed and revoked
+/// cases directly.
+fn healthy_revocations() -> pollis_relay::policy::RevocationStore {
+    use base64::Engine as _;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let sk = SigningKey::from_bytes(&[42u8; 32]);
+    let now = pollis_relay::proto::now_unix();
+    let payload = format!(
+        r#"{{"version":1,"type":"pollis-relay-revocations","seq":1,"issued_at":{now},"expires_at":{},"revoked":[]}}"#,
+        now + 300
+    );
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let envelope = serde_json::json!({
+        "payload_b64": b64.encode(payload.as_bytes()),
+        "signature_b64": b64.encode(sk.sign(payload.as_bytes()).to_bytes()),
+    });
+    let store =
+        pollis_relay::policy::RevocationStore::enforcing(b64.encode(sk.verifying_key().to_bytes()));
+    store
+        .install(&serde_json::to_vec(&envelope).unwrap(), now, 0)
+        .expect("a freshly-signed empty list installs");
+    store
+}
+
 /// Spawn a relay allowing `allow` hosts, with `overrides` mapping a DNS name to
 /// a loopback IP, optionally refusing to act as a middle hop.
 fn spawn_relay_with(allow: &[&str], overrides: &[(&str, IpAddr)], allow_extend: bool) -> TestRelay {
@@ -105,6 +135,7 @@ fn spawn_relay_with(allow: &[&str], overrides: &[(&str, IpAddr)], allow_extend: 
         config.resolve_overrides.insert((*host).to_string(), *ip);
     }
     config.allow_extend = allow_extend;
+    config.revocations = healthy_revocations();
 
     let peers: Arc<Mutex<Vec<SocketAddr>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = peers.clone();
