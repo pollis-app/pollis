@@ -11,11 +11,15 @@
 //   4. Discover each ASG's InService instances and their public IPs.
 //   5. Health-check each node at GET http://<ip>:<health-port>/version and
 //      keep only the ones that answer 200.
-//   6. Assemble the healthy set into the signed Directory (§3 of the ticket),
-//      sign the exact payload bytes with the Ed25519 private key from SSM, and
-//      publish the envelope to S3 (CloudFront serves it at the stable URL).
-//   7. Emit CloudWatch metrics (healthy nodes per region and pool-wide,
-//      reconcile failures).
+//   6. Read the operator-authored REVOCATION set, exclude every revoked node
+//      from the directory, and destroy those nodes (#813).
+//   7. Assemble the surviving healthy set into the signed Directory (§3 of the
+//      ticket), sign the exact payload bytes with the Ed25519 private key from
+//      SSM, and publish the envelope to S3 (CloudFront serves it at the stable
+//      URL) — preceded by the separately-signed, short-lived revocations.json
+//      that the directory anchors (see reconciler/revocation.mjs).
+//   8. Emit CloudWatch metrics (healthy nodes per region and pool-wide,
+//      reconcile failures, revocation counts).
 //
 // Nodes move between regions without a client rebuild because the whole pool
 // shares ONE pinned QUIC identity — the client pins the cert, not the address.
@@ -34,6 +38,7 @@ import { CloudWatchClient, PutMetricDataCommand } from "@aws-sdk/client-cloudwat
 import { createPrivateKey, sign } from "node:crypto";
 import { readDesiredTotal, drawPlacement, placementNeedsRedraw, placementTotal, mayDrain, clamp } from "./placement.mjs";
 import { parseVersion, protocolMismatch, directoryEligible, selectCycleTargets } from "./staleness.mjs";
+import { parseRevocationSet, revokesRelay, buildRevocationPayload, directoryAnchor, directoryTtlFor } from "./revocation.mjs";
 
 // --- Config from the Lambda environment (set by Terraform) -------------------
 
@@ -58,12 +63,26 @@ const EXPECTED_PROTOCOL = env("EXPECTED_PROTOCOL", "");
 const MAX_CYCLE_PER_RUN = Number(env("MAX_CYCLE_PER_RUN", "1"));
 const DIRECTORY_BUCKET = env("DIRECTORY_BUCKET");
 const DIRECTORY_KEY = env("DIRECTORY_KEY"); // S3 object key, e.g. "directory.json"
+// Live relay revocation (#813). The operator-authored set of revoked relays, as
+// {"revoked":[{addr|ip|cert_sha256_b64, reason?, revoked_at?}, ...]}. Its SSM
+// parameter VERSION is the published `seq` — Parameter Store increments it
+// server-side on every write, so the monotonic counter clients use for rollback
+// protection needs no extra state and cannot be mis-set by hand.
+// Empty env var ⇒ revocation is NOT configured for this pool: no revocations.json
+// is published and the directory keeps its exact pre-#813 shape.
+const REVOCATIONS_PARAM = env("REVOCATIONS_PARAM", "");
+const REVOCATIONS_KEY = env("REVOCATIONS_KEY", "revocations.json"); // S3 object key / URL path
 const RELAY_PORT = Number(env("RELAY_PORT", "9444"));
 const HEALTH_PORT = Number(env("HEALTH_PORT", "9445"));
 const NODE_FLOOR = Number(env("NODE_FLOOR", "2"));
 const NODE_MAX = Number(env("NODE_MAX", "3"));
 const ROTATION_INTERVAL_SECONDS = Number(env("ROTATION_INTERVAL_HOURS", "24")) * 3600;
 const DIRECTORY_TTL_SECONDS = Number(env("DIRECTORY_TTL_SECONDS", "3600"));
+// The revocation list's own, much shorter life — this is the real exposure window
+// for a seized relay, and the whole point of publishing it separately.
+const REVOCATION_TTL_SECONDS = Number(env("REVOCATION_TTL_SECONDS", "300"));
+// Directory TTL used WHILE any relay is revoked; see directoryTtlFor().
+const REVOKED_DIRECTORY_TTL_SECONDS = Number(env("REVOKED_DIRECTORY_TTL_SECONDS", "300"));
 const HEALTH_TIMEOUT_MS = Number(env("HEALTH_TIMEOUT_MS", "2500"));
 const METRIC_NAMESPACE = env("METRIC_NAMESPACE", "PollisRelayHydra");
 
@@ -78,8 +97,13 @@ export const handler = async () => {
   const placement = await resolvePlacement();
   const certB64 = await readParam(IDENTITY_CERT_PARAM, true);
   const intendedSha = await readIntendedSha();
+  const revocations = await readRevocations();
 
   const unhealthyByRegion = {};
+  // Healthy nodes the operator has REVOKED. They are excluded from the directory
+  // and destroyed below — a revoked node is not a capacity problem to be managed,
+  // it is a node we have decided not to trust.
+  const revokedNodes = [];
   const pendingScaleDown = {};
   // Healthy nodes that answered /version, carrying their parsed build/protocol
   // identity — the input to stale-node cycling below. A node excluded from the
@@ -120,8 +144,16 @@ export const handler = async () => {
       // address and never fails ALPN against it. It is still cycled below.
       for (const node of healthy) {
         healthyNodes.push({ instanceId: node.instanceId, region, version: node.version });
+        const candidate = { addr: `${node.ip}:${RELAY_PORT}`, region, cert_b64: certB64 };
+        // Revocation outranks every other membership rule: a revoked node never
+        // enters the directory, whatever its build, protocol or health says.
+        if (revocations.ok && revokesRelay(revocations.revoked, candidate)) {
+          revokedNodes.push({ instanceId: node.instanceId, region, addr: candidate.addr });
+          console.log(`${region}: ${node.instanceId} (${candidate.addr}) is REVOKED — excluded from the directory and being destroyed`);
+          continue;
+        }
         if (directoryEligible(node.version, EXPECTED_PROTOCOL)) {
-          relays.push({ addr: `${node.ip}:${RELAY_PORT}`, region, cert_b64: certB64 });
+          relays.push(candidate);
         } else {
           excludedFromDirectory += 1;
           console.log(
@@ -176,24 +208,50 @@ export const handler = async () => {
   const staleCycled = await cycleStaleNodes(healthyNodes, intendedSha, totalHealthy, placementTotal(placement));
   reconcileFailures += staleCycled.failures;
 
-  // §3: the client REJECTS an empty relays[]. Never publish an empty directory —
-  // a stale-but-valid directory that expires on its own is strictly better than
-  // signing "there are no relays" (which fails every client closed immediately).
-  if (relays.length === 0) {
+  // Destroy revoked nodes. DELIBERATELY unbounded and NOT floor-guarded, unlike
+  // build cycling: a build-stale node is merely out of date and worth keeping in
+  // service while it converges, whereas a revoked node is one we have decided not
+  // to trust — capacity is not a reason to keep it running. The ASG relaunches
+  // replacements on fresh instances (and fresh IPs) on its own.
+  reconcileFailures += await destroyRevokedNodes(revokedNodes);
+
+  // Publishing order is load-bearing: the revocation list FIRST, then the
+  // directory that anchors it. A directory advertising `revocation.seq = N` that
+  // reached clients before the list satisfying N would fail every up-to-date
+  // client closed — correct, but a self-inflicted outage.
+  let published = false;
+  if (revocations.configured && !revocations.ok) {
+    // We could not read or could not fully understand the revocation set. Signing
+    // a directory now would assert a revocation state we do not know. Publish
+    // nothing: the live artifacts stay up and the revocation list expires within
+    // REVOCATION_TTL_SECONDS, which fails clients closed on a ~5-minute clock
+    // rather than leaving them trusting a possibly-revoked relay for an hour.
+    reconcileFailures += 1;
+    console.error(`revocation set unusable (${revocations.error}) — publishing NOTHING this cycle; the live artifacts will expire on their own`);
+  } else if (relays.length === 0) {
+    // §3: the client REJECTS an empty relays[]. Never publish an empty directory —
+    // a stale-but-valid directory that expires on its own is strictly better than
+    // signing "there are no relays" (which fails every client closed immediately).
     reconcileFailures += 1;
     console.error("no healthy relays this cycle — leaving the previous directory in place to expire on its own");
   } else {
-    await publishDirectory(relays);
+    if (revocations.configured) {
+      await publishRevocations(revocations);
+    }
+    await publishDirectory(relays, revocations);
+    published = true;
   }
 
   await emitMetrics(perRegionHealthy, reconcileFailures, {
     staleBuild: staleCycled.staleCount,
     cycled: staleCycled.cycled,
     excludedFromDirectory,
+    revokedRelays: revocations.ok ? revocations.revoked.length : 0,
+    revokedNodesDestroyed: revokedNodes.length,
   });
 
   return {
-    published: relays.length > 0,
+    published,
     healthy: perRegionHealthy,
     placement,
     reconcileFailures,
@@ -201,8 +259,111 @@ export const handler = async () => {
     excludedFromDirectory,
     staleBuild: staleCycled.staleCount,
     cycled: staleCycled.cycled,
+    revocation: {
+      configured: revocations.configured,
+      ok: revocations.ok,
+      seq: revocations.seq,
+      count: revocations.revoked.length,
+      nodesDestroyed: revokedNodes.length,
+    },
   };
 };
+
+// --- Live relay revocation (#813) --------------------------------------------
+
+// Read + validate the operator-authored revocation set, and take its SSM
+// parameter VERSION as the published sequence number (see revocation.mjs for why
+// that is the counter rather than an operator-authored field).
+//
+// Three distinct outcomes, and the difference matters:
+//   - NOT CONFIGURED (no param name in the environment): revocation is not
+//     deployed for this pool. The directory keeps its exact pre-#813 shape and no
+//     revocation list is published. This is a deployment state, not a fault.
+//   - OK: we know the revocation state exactly.
+//   - NOT OK (read failed, or the value is anything we cannot fully parse): we do
+//     NOT know it. The caller publishes nothing, so the mechanism degrades to
+//     "everything expires" rather than to "everything is fine".
+async function readRevocations() {
+  if (!REVOCATIONS_PARAM) {
+    return { configured: false, ok: true, seq: null, revoked: [] };
+  }
+  let param;
+  try {
+    param = await readParamWithVersion(REVOCATIONS_PARAM);
+  } catch (err) {
+    return {
+      configured: true,
+      ok: false,
+      seq: null,
+      revoked: [],
+      error: `failed to read ${REVOCATIONS_PARAM}: ${err?.message ?? err}`,
+    };
+  }
+  try {
+    const { revoked } = parseRevocationSet(param.value, RELAY_PORT);
+    if (revoked.length > 0) {
+      console.log(`revocation set seq=${param.version}: ${revoked.length} revoked relay(s)`);
+    }
+    return { configured: true, ok: true, seq: param.version, revoked };
+  } catch (err) {
+    return {
+      configured: true,
+      ok: false,
+      seq: param.version,
+      revoked: [],
+      error: `malformed revocation set: ${err?.message ?? err}`,
+    };
+  }
+}
+
+// Mark every revoked node Unhealthy so its ASG terminates and replaces it.
+// Returns the number it FAILED to flag (counted onto ReconcileFailures, which is
+// alarmed — a revocation that silently fails to destroy the node is exactly the
+// kind of quiet non-event this pool must not have).
+async function destroyRevokedNodes(revokedNodes) {
+  if (revokedNodes.length === 0) {
+    return 0;
+  }
+  const byRegion = {};
+  for (const node of revokedNodes) {
+    (byRegion[node.region] ??= []).push({ instanceId: node.instanceId });
+  }
+  let failures = 0;
+  for (const [region, nodes] of Object.entries(byRegion)) {
+    // ShouldRespectGracePeriod is FALSE here (markUnhealthy's default is true):
+    // a revoked node must go now, not after its boot grace period.
+    failures += await markUnhealthy(region, nodes, "REVOKED", false);
+  }
+  return failures;
+}
+
+// Sign + publish revocations.json. Always published when revocation is
+// configured, including when nothing is revoked: "nothing is revoked right now"
+// is the steady state and clients need a FRESH artifact saying so, otherwise
+// there is nothing for them to fail closed against.
+async function publishRevocations(revocations) {
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const payload = buildRevocationPayload({
+    seq: revocations.seq,
+    revoked: revocations.revoked,
+    issuedAt,
+    ttlSeconds: REVOCATION_TTL_SECONDS,
+  });
+  const envelope = await signEnvelope(payload);
+
+  const s3 = new S3Client({});
+  await s3.send(new PutObjectCommand({
+    Bucket: DIRECTORY_BUCKET,
+    Key: REVOCATIONS_KEY,
+    Body: JSON.stringify(envelope),
+    ContentType: "application/json",
+    // Shorter than the directory's 30s: this is the artifact whose staleness is
+    // a security property, so edge caching gets less room.
+    CacheControl: "public, max-age=10, must-revalidate",
+  }));
+
+  console.log(`published revocations: seq=${payload.seq} ${payload.revoked.length} entr(ies), expires_at=${payload.expires_at}`);
+}
 
 // --- Intended build (recorded by CI on every image roll) ---------------------
 
@@ -349,29 +510,40 @@ async function readDesiredTotalFromSsm() {
 
 // --- Directory assembly + signing (§3 frozen contract) -----------------------
 
-async function publishDirectory(relays) {
+async function publishDirectory(relays, revocations) {
   // issued_at/expires_at are unix seconds. Kept short (default +1h) and re-signed
-  // every reconcile so a rolled-back/stale directory expires quickly.
+  // every reconcile so a rolled-back/stale directory expires quickly — and cut
+  // further while anything is revoked (see directoryTtlFor).
   const issuedAt = Math.floor(Date.now() / 1000);
+  const ttl = directoryTtlFor({
+    revokedCount: revocations.revoked.length,
+    baseTtl: DIRECTORY_TTL_SECONDS,
+    activeTtl: REVOKED_DIRECTORY_TTL_SECONDS,
+  });
   const directory = {
     version: 1,
     issued_at: issuedAt,
-    expires_at: issuedAt + DIRECTORY_TTL_SECONDS,
+    expires_at: issuedAt + ttl,
     relays,
   };
+
+  // ADDITIVE, OPTIONAL field — `version` stays 1 on purpose. Every shipped client
+  // parses the payload with a struct that ignores unknown fields, so a directory
+  // carrying this is inert to them; bumping the version instead would make every
+  // already-shipped client reject the directory outright, i.e. a fleet-wide
+  // self-inflicted outage. Omitted entirely when revocation is not configured, so
+  // that directory is byte-identical to the pre-#813 shape.
+  const anchor = revocations.configured
+    ? directoryAnchor({ seq: revocations.seq, path: REVOCATIONS_KEY, count: revocations.revoked.length })
+    : null;
+  if (anchor !== null) {
+    directory.revocation = anchor;
+  }
 
   // Sign-then-encode LITERAL bytes: we sign the exact UTF-8 bytes we base64 into
   // payload_b64. No canonicalization — the client verifies over the exact bytes
   // it base64-decodes, so both sides are byte-for-byte identical.
-  const payloadBytes = Buffer.from(JSON.stringify(directory), "utf8");
-  const privatePem = await readParam(SIGNING_KEY_PARAM, true);
-  const privateKey = createPrivateKey({ key: privatePem, format: "pem" });
-  const signature = sign(null, payloadBytes, privateKey); // Ed25519 => digest algo is null
-
-  const envelope = {
-    payload_b64: payloadBytes.toString("base64"),
-    signature_b64: signature.toString("base64"),
-  };
+  const envelope = await signEnvelope(directory);
 
   const s3 = new S3Client({}); // bucket region resolved by the SDK
   await s3.send(new PutObjectCommand({
@@ -383,7 +555,20 @@ async function publishDirectory(relays) {
     CacheControl: "public, max-age=30",
   }));
 
-  console.log(`published directory: ${relays.length} relay(s), expires_at=${directory.expires_at}`);
+  console.log(`published directory: ${relays.length} relay(s), expires_at=${directory.expires_at}${anchor ? ` revocation.seq=${anchor.seq}` : ""}`);
+}
+
+// Sign an object into the §3 envelope shape. Shared by both signed artifacts so
+// the directory and the revocation list can never drift in how they are signed.
+async function signEnvelope(payload) {
+  const payloadBytes = Buffer.from(JSON.stringify(payload), "utf8");
+  const privatePem = await readParam(SIGNING_KEY_PARAM, true);
+  const privateKey = createPrivateKey({ key: privatePem, format: "pem" });
+  const signature = sign(null, payloadBytes, privateKey); // Ed25519 => digest algo is null
+  return {
+    payload_b64: payloadBytes.toString("base64"),
+    signature_b64: signature.toString("base64"),
+  };
 }
 
 // --- ASG reconcile -----------------------------------------------------------
@@ -489,7 +674,7 @@ async function instancesOf(region, group) {
 // condition stops matching or the call is throttled, dead nodes linger, bill, and
 // serve nothing, with no metric moving. Counting the failures puts them on
 // ReconcileFailures, which is alarmed.
-async function markUnhealthy(region, unhealthyNodes, reason = "no /version") {
+async function markUnhealthy(region, unhealthyNodes, reason = "no /version", respectGracePeriod = true) {
   const asg = new AutoScalingClient({ region });
   let failures = 0;
   for (const { instanceId } of unhealthyNodes) {
@@ -497,7 +682,7 @@ async function markUnhealthy(region, unhealthyNodes, reason = "no /version") {
       await asg.send(new SetInstanceHealthCommand({
         InstanceId: instanceId,
         HealthStatus: "Unhealthy",
-        ShouldRespectGracePeriod: true,
+        ShouldRespectGracePeriod: respectGracePeriod,
       }));
       console.log(`${region}: marked ${instanceId} Unhealthy (${reason}) — ASG will replace it`);
     } catch (err) {
@@ -556,6 +741,13 @@ async function emitMetrics(perRegionHealthy, reconcileFailures, stale = {}) {
     { MetricName: "StaleBuildNodes", Value: stale.staleBuild ?? 0, Unit: "Count", Timestamp: timestamp },
     { MetricName: "NodesCycled", Value: stale.cycled ?? 0, Unit: "Count", Timestamp: timestamp },
     { MetricName: "ExcludedFromDirectory", Value: stale.excludedFromDirectory ?? 0, Unit: "Count", Timestamp: timestamp },
+    // Revocation visibility (#813). RevokedRelays is how many entries the signed
+    // list carries; RevokedNodesDestroyed is how many live pool nodes matched one
+    // this run and were flagged for termination. A sustained non-zero
+    // RevokedNodesDestroyed means a revoked instance keeps coming back — i.e. the
+    // revocation is pinned to an address the ASG keeps re-issuing.
+    { MetricName: "RevokedRelays", Value: stale.revokedRelays ?? 0, Unit: "Count", Timestamp: timestamp },
+    { MetricName: "RevokedNodesDestroyed", Value: stale.revokedNodesDestroyed ?? 0, Unit: "Count", Timestamp: timestamp },
     // Pool-wide healthy count. This is what the floor alarm watches: with random
     // placement an individual region legitimately holds zero nodes, so a
     // per-region floor alarm would page on every rotation that skipped it.
@@ -589,6 +781,19 @@ async function emitMetrics(perRegionHealthy, reconcileFailures, stale = {}) {
 async function readParam(name, decrypt) {
   const out = await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: decrypt }));
   return out.Parameter.Value;
+}
+
+// Read a parameter along with its SSM Version — the monotonic counter Parameter
+// Store bumps on every write. The revocation set uses it as the published `seq`,
+// so the rollback protection clients rely on costs no extra state and cannot be
+// mis-set by an operator (see reconciler/revocation.mjs).
+async function readParamWithVersion(name) {
+  const out = await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: false }));
+  const version = out.Parameter?.Version;
+  if (!Number.isInteger(version) || version < 0) {
+    throw new Error(`parameter ${name} returned no usable Version (${version})`);
+  }
+  return { value: out.Parameter.Value, version };
 }
 
 async function writeParam(name, value) {

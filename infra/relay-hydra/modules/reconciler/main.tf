@@ -80,13 +80,21 @@ data "aws_iam_policy_document" "reconciler" {
     resources = ["*"]
   }
 
-  # Read the desired-state, the current placement, the intended-image record, and
-  # the signing/identity secrets. The reconciler never WRITES the intended-image
-  # param — CI owns it (see the OIDC role); the reconciler only reads .sha from it.
+  # Read the desired-state, the current placement, the intended-image record, the
+  # revocation set, and the signing/identity secrets. The reconciler never WRITES
+  # the intended-image param — CI owns it (see the OIDC role); the reconciler only
+  # reads .sha from it. It never writes the REVOCATIONS param either: an operator
+  # revokes, the reconciler only enforces, so a compromised reconciler cannot
+  # un-revoke a relay by rewriting the source of truth.
   statement {
-    sid       = "ReadParams"
-    actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = concat(var.secret_param_arns, [var.desired_state_param_arn, var.placement_param_arn, var.intended_image_param_arn])
+    sid     = "ReadParams"
+    actions = ["ssm:GetParameter", "ssm:GetParameters"]
+    resources = concat(var.secret_param_arns, [
+      var.desired_state_param_arn,
+      var.placement_param_arn,
+      var.intended_image_param_arn,
+      var.revocations_param_arn,
+    ])
   }
 
   # Persist a fresh random draw. Scoped to the placement parameter ALONE — the
@@ -108,11 +116,14 @@ data "aws_iam_policy_document" "reconciler" {
     }
   }
 
-  # Publish the signed directory.
+  # Publish the two signed artifacts — and ONLY those two object keys.
   statement {
-    sid       = "PublishDirectory"
-    actions   = ["s3:PutObject"]
-    resources = ["${var.directory_bucket_arn}/${var.directory_object_key}"]
+    sid     = "PublishDirectory"
+    actions = ["s3:PutObject"]
+    resources = [
+      "${var.directory_bucket_arn}/${var.directory_object_key}",
+      "${var.directory_bucket_arn}/${var.revocation_object_key}",
+    ]
   }
 
   # Metrics (no resource-level support).
@@ -176,6 +187,14 @@ resource "aws_lambda_function" "reconciler" {
       ROTATION_INTERVAL_HOURS = tostring(var.rotation_interval_hours)
       DIRECTORY_TTL_SECONDS   = tostring(var.directory_ttl_seconds)
       METRIC_NAMESPACE        = local.metric_ns
+
+      # Live relay revocation (#813). Setting REVOCATIONS_PARAM is what ENABLES
+      # revocation for the pool; with it empty the reconciler publishes no
+      # revocation list and the directory keeps its exact pre-#813 shape.
+      REVOCATIONS_PARAM             = var.revocations_param
+      REVOCATIONS_KEY               = var.revocation_object_key
+      REVOCATION_TTL_SECONDS        = tostring(var.revocation_ttl_seconds)
+      REVOKED_DIRECTORY_TTL_SECONDS = tostring(var.revoked_directory_ttl_seconds)
     }
   }
 

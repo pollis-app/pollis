@@ -16,6 +16,11 @@ output "directory_url" {
   value       = local.use_custom_domain ? "https://${var.directory_domain}/${var.directory_object_key}" : "https://${aws_cloudfront_distribution.directory.domain_name}/${var.directory_object_key}"
 }
 
+output "revocation_url" {
+  description = "Stable HTTPS URL of the signed relay-revocation list (POLLIS_OVERLAY_REVOCATION_URL)."
+  value       = local.use_custom_domain ? "https://${var.directory_domain}/${var.revocation_object_key}" : "https://${aws_cloudfront_distribution.directory.domain_name}/${var.revocation_object_key}"
+}
+
 output "acm_validation_records" {
   description = "DNS CNAME(s) to add to validate the ACM certificate. Empty when no custom domain."
   value = local.use_custom_domain ? [

@@ -86,6 +86,32 @@ variable "directory_ttl_seconds" {
   type = number
 }
 
+# ── Live relay revocation (#813) ────────────────────────────────────────────
+
+variable "revocations_param" {
+  description = "SSM param holding the operator-authored revocation set. Its SSM Version is the published sequence number."
+  type        = string
+}
+
+variable "revocations_param_arn" {
+  type = string
+}
+
+variable "revocation_object_key" {
+  description = "S3 object key / URL path the signed revocation list is published at."
+  type        = string
+}
+
+variable "revocation_ttl_seconds" {
+  description = "expires_at - issued_at for each signed revocation list — the real exposure window for a seized relay."
+  type        = number
+}
+
+variable "revoked_directory_ttl_seconds" {
+  description = "Directory TTL used while at least one relay is revoked; the only lever that reaches already-shipped clients."
+  type        = number
+}
+
 variable "relay_port" {
   type = number
 }

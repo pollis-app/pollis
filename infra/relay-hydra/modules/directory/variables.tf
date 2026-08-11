@@ -12,3 +12,8 @@ variable "directory_object_key" {
   description = "S3 object key the signed directory is written to (and the URL path)."
   type        = string
 }
+
+variable "revocation_object_key" {
+  description = "S3 object key the signed relay-revocation list is written to (and the URL path). Gets a tighter CloudFront TTL than the directory."
+  type        = string
+}

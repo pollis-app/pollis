@@ -83,3 +83,55 @@ test("rejects empty relays", () => {
 test("rejects malformed envelope JSON", () => {
   assert.throws(() => verifyDirectory("{not json", pubRawB64, now), /malformed envelope/);
 });
+
+// ── Backward compatibility of the FROZEN §3 contract (#813 Phase C) ──────────
+//
+// The revocation work added ONE optional top-level field to the payload. The
+// §3 contract is shared with already-shipped client binaries we cannot update,
+// so the tests below are the guarantee that they keep working — not a nice-to-
+// have. If any of them ever fails, the change must not ship.
+
+test("OLD CLIENT: a revocation-carrying directory still verifies unchanged", () => {
+  // This is verbatim the pre-#813 verification path — the one baked into shipped
+  // builds. It reads version/expires_at/relays and nothing else.
+  const dir = verifyDirectory(
+    signEnvelope(freshDirectory({ revocation: { seq: 42, path: "revocations.json", count: 1 } })),
+    pubRawB64,
+    now,
+  );
+  assert.equal(dir.version, 1, "version stays 1 — bumping it would make every shipped client reject");
+  assert.equal(dir.relays.length, 1);
+  assert.equal(dir.relays[0].addr, "203.0.113.7:9444");
+  assert.equal(dir.relays[0].cert_b64, "ZHVtbXktY2VydA==");
+});
+
+test("OLD CLIENT: relay entries gained no new required fields", () => {
+  // A shipped client deserializes each entry into a fixed struct. Revocation is
+  // carried at the TOP level precisely so entries stay exactly as they were.
+  const dir = verifyDirectory(
+    signEnvelope(freshDirectory({ revocation: { seq: 42, path: "revocations.json", count: 0 } })),
+    pubRawB64,
+    now,
+  );
+  assert.deepEqual(Object.keys(dir.relays[0]).sort(), ["addr", "cert_b64", "region"]);
+});
+
+test("OLD CLIENT: unknown future payload fields are ignored, not rejected", () => {
+  // The same property, generalized: additive extension is the ONLY way this
+  // contract may grow.
+  const dir = verifyDirectory(
+    signEnvelope(freshDirectory({ some_field_from_2027: { nested: true } })),
+    pubRawB64,
+    now,
+  );
+  assert.equal(dir.relays.length, 1);
+});
+
+test("a directory with revocation NOT configured is byte-identical to the old shape", () => {
+  // When the pool has no revocation parameter the reconciler omits the field
+  // entirely, so the published bytes match what it published before #813.
+  const before = JSON.stringify(freshDirectory());
+  const envelope = JSON.parse(signEnvelope(freshDirectory()));
+  assert.equal(Buffer.from(envelope.payload_b64, "base64").toString("utf8"), before);
+  assert.equal(JSON.parse(before).revocation, undefined);
+});

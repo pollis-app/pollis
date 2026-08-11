@@ -236,6 +236,42 @@ variable "directory_ttl_seconds" {
   default     = 3600
 }
 
+# ── Live relay revocation (#813) ────────────────────────────────────────────
+
+variable "revocation_object_key" {
+  description = "S3 object key / URL path the signed revocation list is published at, beside the directory."
+  type        = string
+  default     = "revocations.json"
+}
+
+variable "revocation_ttl_seconds" {
+  description = <<-EOT
+    expires_at - issued_at for each signed revocation list. THIS IS THE REAL
+    EXPOSURE WINDOW for a seized relay: clients and relays must hold an unexpired
+    list to use any relay at all, so a compromised node stops being usable within
+    this many seconds of being revoked — not within directory_ttl_seconds. Keep it
+    comfortably above the reconcile interval (rate(2 minutes)) so a single missed
+    cycle does not black out the pool, and well under the directory TTL so the
+    split between "availability artifact" and "safety artifact" is real.
+  EOT
+  type        = number
+  default     = 300
+}
+
+variable "revoked_directory_ttl_seconds" {
+  description = <<-EOT
+    Directory TTL used WHILE at least one relay is revoked. This is the only lever
+    that reaches ALREADY-SHIPPED clients, which know nothing about the revocation
+    list: a revoked node leaves relays[] on the next reconcile, and a short TTL
+    means their cached directory stops being usable in minutes instead of an hour.
+    Deliberately fail-closed — if the reconciler wedges during an active
+    revocation the pool goes dark in minutes, which is the correct direction while
+    a node is known-compromised.
+  EOT
+  type        = number
+  default     = 300
+}
+
 # ── Reconciler ──────────────────────────────────────────────────────────────
 
 variable "reconcile_schedule" {
