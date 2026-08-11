@@ -112,13 +112,34 @@ jobs:
 
             # nginx.conf may have changed without the service def changing (bind
             # mount, content-only) — validate then reload to pick it up gracefully.
-            docker compose exec -T nginx nginx -t
-            docker compose exec -T nginx nginx -s reload
+            #
+            # `< /dev/null` ON EVERY `exec -T` IS LOAD-BEARING, NOT TIDINESS.
+            # This script is fed to ssh on stdin via the heredoc below, and
+            # `docker compose exec -T` forwards ITS stdin to the container — so
+            # without the redirect it consumes the rest of this script. Every line
+            # after the first `exec -T` was silently skipped, and because the
+            # swallowed lines never ran, the step still exited 0 and the deploy
+            # reported success. Symptom: nginx.conf and livekit.yml changes appeared
+            # to deploy but never took effect (verified 2026-08-11 — the containers'
+            # StartedAt was 8h older than a "successful" deploy).
+            docker compose exec -T nginx nginx -t < /dev/null
+
+            # `nginx -s reload` is the graceful path, but in the official image nginx
+            # runs as PID 1 with `daemon off`; SIGHUP via the container is the
+            # reliable equivalent and needs no pidfile lookup. Workers respawn with
+            # the new worker_processes / worker_connections; existing connections drain.
+            docker kill -s HUP livekit-nginx-1
 
             # livekit reads its config only at start — restart to apply livekit.yml.
-            docker compose restart livekit
+            docker compose restart livekit < /dev/null
 
-            docker compose ps
+            # Prove the reload actually happened: fresh workers, and the effective
+            # connection ceiling. A deploy that cannot show this has not applied.
+            echo "--- nginx workers after reload ---"
+            docker compose exec -T nginx ps -o pid,etime,args < /dev/null 2>/dev/null | grep -E "master|worker" || true
+            docker compose exec -T nginx nginx -T < /dev/null 2>/dev/null | grep -E "worker_processes|worker_connections" || true
+
+            docker compose ps < /dev/null
           REMOTE
 
       - name: Validate — LiveKit up
