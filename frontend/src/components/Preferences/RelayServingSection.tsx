@@ -166,8 +166,16 @@ function describeStatus(
     case "serving":
       return `relaying — carrying ${status.active_circuits} ${
         status.active_circuits === 1 ? "connection" : "connections"
-      }, ${formatFileSize(status.bytes_forwarded)} forwarded since Pollis started.`;
+      }, ${formatForwarded(status.bytes_forwarded)} forwarded since Pollis started.`;
   }
+}
+
+/** `formatFileSize` returns "" for zero, which reads as a missing value here. */
+function formatForwarded(bytes: number): string {
+  if (bytes === 0) {
+    return "0B";
+  }
+  return formatFileSize(bytes);
 }
 
 /** Render a tri-state platform signal without pretending unknown means no. */
