@@ -28,7 +28,7 @@ the delivery/watchtower containers by network alias.
 livekit/
   docker-compose.yml   # livekit + nginx only (delivery/watchtower owned by #407)
   livekit.yml          # non-secret; deploy appends the keys: block from secrets
-  nginx.conf           # full ingress: rtc, downpage (LiveKit) + api, api-dev, deploy (delivery)
+  nginx.conf           # LiveKit ingress only: rtc.pollis.com -> livekit:7880
   DEPLOY.md
 ```
 
@@ -37,7 +37,6 @@ livekit/
 | Hostname | Upstream | Cert |
 |----------|----------|------|
 | `rtc.pollis.com` | `livekit:7880` | Let's Encrypt |
-| `downpage.xyz` | `livekit:7880` (legacy) | Let's Encrypt |
 | `api.pollis.com` | `delivery:8788` | Cloudflare Origin (`/etc/ssl/cloudflare/verify.pollis.com.*`) |
 | `api-dev.pollis.com` | `delivery-dev:8788` | Cloudflare Origin |
 | `deploy.pollis.com` | `watchtower:8080` | Cloudflare Origin |
@@ -76,10 +75,10 @@ Note: if the host (e.g. Hostinger) has a control-panel firewall, open the same
 ports there too — it overrides UFW.
 
 ### 2. Certs
-- **Let's Encrypt** (`rtc.pollis.com`, `downpage.xyz`) via host certbot:
+- **Let's Encrypt** (`rtc.pollis.com`) via host certbot:
   ```bash
   apt install certbot -y
-  certbot certonly --standalone -d rtc.pollis.com -d downpage.xyz
+  certbot certonly --standalone -d rtc.pollis.com
   ```
   Auto-renews via a systemd timer; nginx must reload to pick up renewals:
   ```bash
