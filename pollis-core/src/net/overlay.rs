@@ -127,6 +127,26 @@ const OVERLAY_CERT_IDENTITY_VERSION: u32 = 1;
 /// reconnect-on-demand posture — recover lazily, never poll.
 const RELAY_DEAD_COOLDOWN: Duration = Duration::from_secs(30);
 
+/// Weight of the newest dial sample in each endpoint's latency EWMA. Low enough
+/// that one slow dial (a GC pause, a lossy moment) doesn't relegate an otherwise
+/// fast relay, high enough that a genuinely degraded one is demoted within a
+/// handful of dials.
+const RELAY_LATENCY_EWMA_ALPHA: f64 = 0.25;
+
+/// Endpoints whose measured latency is within this much of the best are treated
+/// as EQUIVALENT and keep rotating between themselves. Without a band, "prefer
+/// the fastest" collapses onto one node — every client in a region would pin to
+/// the same relay, which is both a load-spread and an anonymity-set problem.
+/// 20 ms is wide enough to cover same-region jitter and narrow enough to exclude
+/// a cross-country hop (the #812 measurement saw 15 ms vs 69 ms).
+const RELAY_LATENCY_BAND: Duration = Duration::from_millis(20);
+
+/// Every Nth dial ignores latency ordering and uses plain rotation, so endpoints
+/// that were slow once still get re-sampled. Without this, an endpoint demoted by
+/// a transient bad measurement would never be dialed again, so its EWMA could
+/// never recover — the pool would silently shrink to whoever won early.
+const RELAY_EXPLORE_EVERY: usize = 20;
+
 /// Upper bound on a single endpoint's dial (QUIC handshake + CONNECT). Without
 /// it, a relay that is *unreachable* (packets dropped, no ICMP) stalls on the
 /// QUIC handshake timeout — which would defeat the pool's purpose: a dead relay
@@ -185,6 +205,13 @@ struct RelayEndpoint {
 /// tried (a transient outage that marked the whole pool dead must never wedge it
 /// permanently). A rotating start index (`next_start`) spreads load across healthy
 /// endpoints instead of always hammering endpoint 0.
+///
+/// **Latency ordering (#812).** Among healthy endpoints the pool prefers the ones
+/// whose measured dial latency is lowest, so a client is not sent cross-country
+/// while a same-region relay is up — see [`RealRelayFactory::candidate_order`] for
+/// the band/explore rules that keep load spread and stop any endpoint being
+/// starved. Samples come from real dials ([`RealRelayFactory::record_latency`]);
+/// there is no probe traffic and still no background poll.
 struct RealRelayFactory {
     /// Weak so the factory (owned by the shim task, owned by `AppState.overlay`)
     /// does not form a reference cycle back into `AppState`.
@@ -197,8 +224,15 @@ struct RealRelayFactory {
     /// before any I/O.
     health: Mutex<Vec<Option<Instant>>>,
     /// Rotating start offset for load spread: each `connect` bumps this so the
-    /// pool doesn't always begin at endpoint 0.
+    /// pool doesn't always begin at endpoint 0. Doubles as the explore counter
+    /// (see [`RELAY_EXPLORE_EVERY`]).
     next_start: AtomicUsize,
+    /// Per-endpoint dial-latency EWMA, indexed parallel to `endpoints`. `None`
+    /// until that endpoint has been dialed successfully at least once — an
+    /// unmeasured endpoint sorts with the fast band so it gets sampled rather
+    /// than starved. Only successful dials are recorded: a failed dial's duration
+    /// is a timeout, not a latency, and health already covers that case.
+    latency: Mutex<Vec<Option<Duration>>>,
     /// How long a failed endpoint stays dead. `RELAY_DEAD_COOLDOWN` in production;
     /// tests inject a short value to exercise recovery.
     cooldown: Duration,
@@ -222,19 +256,38 @@ impl RealRelayFactory {
             identity: AsyncMutex::new(None),
             health: Mutex::new(vec![None; n]),
             next_start: AtomicUsize::new(0),
+            latency: Mutex::new(vec![None; n]),
             cooldown,
             dial_timeout,
         }
     }
 
     /// The order to try endpoints in for the next dial: healthy endpoints first
-    /// (rotated by `next_start` so load spreads), then any still in cooldown
-    /// (fail-open — always tried, so a fully-dead pool is never permanently
-    /// wedged). Returns endpoint indices. The health lock is taken and dropped
-    /// here; no I/O happens under it.
+    /// (fastest-measured first, rotating among equally-fast ones so load still
+    /// spreads), then any still in cooldown (fail-open — always tried, so a
+    /// fully-dead pool is never permanently wedged). Returns endpoint indices.
+    /// The locks are taken and dropped here; no I/O happens under them.
+    ///
+    /// **Why latency ordering (#812).** Health-only rotation sends a client to
+    /// every healthy relay equally, wherever it is. Measured against the live
+    /// pool from a US-East client, that meant a 15 ms hop half the time and a
+    /// 69 ms one the other half — about +21 ms vs +123 ms of added control-plane
+    /// latency, blowing the §6.4 budget on every other dial. Ordering by measured
+    /// latency keeps §6.4's rule ("the user should never wait on the overlay")
+    /// true by construction rather than by luck of which region the pool drew.
+    ///
+    /// Three properties this deliberately preserves:
+    /// - **Load still spreads.** Everything within [`RELAY_LATENCY_BAND`] of the
+    ///   best rotates as before, so a region's clients don't all pin to one node.
+    /// - **Nothing is starved.** Unmeasured endpoints sort with the fast band, and
+    ///   every [`RELAY_EXPLORE_EVERY`]th dial ignores latency entirely, so a
+    ///   demoted endpoint can always earn its way back.
+    /// - **Fail-open is untouched.** Latency only reorders *healthy* endpoints;
+    ///   cooldowned ones are still appended and still tried.
     fn candidate_order(&self) -> Vec<usize> {
         let n = self.endpoints.len();
-        let start = self.next_start.fetch_add(1, Ordering::Relaxed) % n;
+        let seq = self.next_start.fetch_add(1, Ordering::Relaxed);
+        let start = seq % n;
         let now = Instant::now();
         let health = self.health.lock().unwrap();
         let mut healthy = Vec::with_capacity(n);
@@ -248,8 +301,47 @@ impl RealRelayFactory {
                 healthy.push(idx);
             }
         }
+        drop(health);
+
+        // Every Nth dial keeps the plain rotation so demoted endpoints get
+        // re-sampled. `seq % N == N - 1` rather than `== 0` so the very first
+        // dial of a fresh pool is a normal one.
+        let exploring = seq % RELAY_EXPLORE_EVERY == RELAY_EXPLORE_EVERY - 1;
+        if !exploring {
+            let latency = self.latency.lock().unwrap();
+            // Best *measured* latency among the healthy set. If nothing has been
+            // measured yet (cold pool) there is nothing to sort by, and the
+            // rotation order already computed above stands unchanged.
+            if let Some(best) = healthy.iter().filter_map(|&i| latency[i]).min() {
+                let cutoff = best + RELAY_LATENCY_BAND;
+                // Unmeasured (`None`) counts as in-band so a fresh endpoint is
+                // tried and gets a sample instead of sitting behind measured ones
+                // forever. `partition` is order-preserving, so the rotation among
+                // the fast band survives.
+                let (fast, mut slow): (Vec<usize>, Vec<usize>) = healthy
+                    .iter()
+                    .copied()
+                    .partition(|&i| latency[i].is_none_or(|d| d <= cutoff));
+                slow.sort_by_key(|&i| latency[i]);
+                healthy = fast;
+                healthy.extend(slow);
+            }
+        }
+
         healthy.extend(dead);
         healthy
+    }
+
+    /// Fold a successful dial's duration into endpoint `idx`'s latency EWMA.
+    fn record_latency(&self, idx: usize, sample: Duration) {
+        let mut latency = self.latency.lock().unwrap();
+        latency[idx] = Some(match latency[idx] {
+            None => sample,
+            Some(prev) => Duration::from_secs_f64(
+                prev.as_secs_f64() * (1.0 - RELAY_LATENCY_EWMA_ALPHA)
+                    + sample.as_secs_f64() * RELAY_LATENCY_EWMA_ALPHA,
+            ),
+        });
     }
 
     /// Mark endpoint `idx` dead until `now + cooldown` (failed dial).
@@ -319,6 +411,7 @@ impl CircuitFactory for RealRelayFactory {
         // clears it.
         let mut last_err = None;
         for idx in self.candidate_order() {
+            let started = Instant::now();
             let dial = self.dial_endpoint(&self.endpoints[idx], &identity, host, port);
             let outcome = match tokio::time::timeout(self.dial_timeout, dial).await {
                 Ok(res) => res,
@@ -329,6 +422,9 @@ impl CircuitFactory for RealRelayFactory {
             };
             match outcome {
                 Ok(stream) => {
+                    // Time the whole dial (resolve + circuit build + CONNECT), not
+                    // just a ping: that IS the added latency §6.4 budgets for.
+                    self.record_latency(idx, started.elapsed());
                     self.mark_healthy(idx);
                     return Ok(stream);
                 }
@@ -1707,5 +1803,131 @@ mod tests {
         assert_eq!(relay0.stats.dials(), N / 2, "endpoint 0 took its share");
         assert_eq!(relay1.stats.dials(), N / 2, "endpoint 1 took its share");
         assert_eq!(relay0.stats.dials() + relay1.stats.dials(), N);
+    }
+
+    /// #812: a relay measurably slower than the band is NOT dialed while a fast
+    /// one is healthy. This is the invariant the live measurement showed missing —
+    /// health-order rotation sent a US-East client to the 69 ms us-west-2 node on
+    /// every other dial. Both test relays are loopback-fast, so the latencies are
+    /// seeded directly; what is under test is the ordering, not the clock.
+    #[tokio::test]
+    async fn pool_prefers_the_lower_latency_relay() {
+        let origin = spawn_plain_http("latency-target").await;
+        let fast = spawn_pool_relay();
+        let slow = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints = vec![
+            endpoint(fast.addr.to_string(), fast.cert.clone()),
+            endpoint(slow.addr.to_string(), slow.cert.clone()),
+        ];
+        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
+        // Mirrors the measured pool: 15 ms same-region vs 69 ms cross-country,
+        // which is far outside RELAY_LATENCY_BAND.
+        factory.record_latency(0, Duration::from_millis(15));
+        factory.record_latency(1, Duration::from_millis(69));
+
+        // Fewer than RELAY_EXPLORE_EVERY dials, so no explore dial intervenes.
+        const N: u64 = 6;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert_eq!(fast.stats.dials(), N, "every dial took the fast relay");
+        assert_eq!(slow.stats.dials(), 0, "the +54ms relay was never dialed");
+    }
+
+    /// #812: relays within `RELAY_LATENCY_BAND` of each other are equivalent and
+    /// keep rotating. Preferring the fastest must not collapse a region's clients
+    /// onto a single node — that is a load-spread and anonymity-set regression.
+    #[tokio::test]
+    async fn pool_rotates_within_the_latency_band() {
+        let origin = spawn_plain_http("band-target").await;
+        let relay0 = spawn_pool_relay();
+        let relay1 = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints = vec![
+            endpoint(relay0.addr.to_string(), relay0.cert.clone()),
+            endpoint(relay1.addr.to_string(), relay1.cert.clone()),
+        ];
+        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
+        // 5 ms apart — well inside the 20 ms band, so neither wins outright.
+        factory.record_latency(0, Duration::from_millis(10));
+        factory.record_latency(1, Duration::from_millis(15));
+
+        const N: u64 = 6;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert_eq!(
+            relay0.stats.dials(),
+            N / 2,
+            "in-band endpoint 0 keeps its share"
+        );
+        assert_eq!(
+            relay1.stats.dials(),
+            N / 2,
+            "in-band endpoint 1 keeps its share"
+        );
+    }
+
+    /// #812: a demoted endpoint must be able to earn its way back. Without the
+    /// periodic explore dial, one bad sample would exile an endpoint permanently
+    /// (it is never dialed, so its EWMA can never update) and the pool would
+    /// silently shrink to whichever node happened to win early.
+    #[tokio::test]
+    async fn pool_explores_the_slow_relay_periodically() {
+        let origin = spawn_plain_http("explore-target").await;
+        let fast = spawn_pool_relay();
+        let slow = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints = vec![
+            endpoint(fast.addr.to_string(), fast.cert.clone()),
+            endpoint(slow.addr.to_string(), slow.cert.clone()),
+        ];
+        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
+        factory.record_latency(0, Duration::from_millis(15));
+        factory.record_latency(1, Duration::from_millis(500));
+
+        // Exactly one full explore period: seq 0..=RELAY_EXPLORE_EVERY-1, whose
+        // last dial is the explore one and (n=2, seq odd) starts at endpoint 1.
+        for _ in 0..RELAY_EXPLORE_EVERY {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert_eq!(
+            slow.stats.dials(),
+            1,
+            "the slow relay is re-sampled exactly once per explore period"
+        );
+        assert_eq!(
+            fast.stats.dials(),
+            RELAY_EXPLORE_EVERY as u64 - 1,
+            "every other dial still took the fast relay"
+        );
+    }
+
+    /// #812 must not weaken the fail-open guarantee: latency only ever reorders
+    /// HEALTHY endpoints. A fast-but-dead relay is still tried after a slow live
+    /// one, and an all-dead pool is still fully attempted.
+    #[tokio::test]
+    async fn pool_latency_order_never_overrides_fail_open() {
+        let origin = spawn_plain_http("failopen-target").await;
+        let slow_live = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        // Endpoint 0 is unreachable but "fast"; endpoint 1 is live but slow.
+        let endpoints = vec![
+            endpoint("127.0.0.1:1".to_string(), slow_live.cert.clone()),
+            endpoint(slow_live.addr.to_string(), slow_live.cert.clone()),
+        ];
+        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
+        factory.record_latency(0, Duration::from_millis(1));
+        factory.record_latency(1, Duration::from_millis(400));
+
+        // The fast endpoint is tried first (and fails), then the slow live one
+        // serves the dial — delivery still works, which is the whole point.
+        factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        assert_eq!(slow_live.stats.dials(), 1, "the slow live relay carried it");
     }
 }
