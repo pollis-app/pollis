@@ -9,7 +9,9 @@
 //! - `--identity <path>` / `POLLIS_RELAY_IDENTITY`   — persisted QUIC identity key
 //!   (generated on first start; cert written to `<path>.crt`).
 //! - `--health-bind <addr>` / `POLLIS_RELAY_HEALTH_BIND` — TCP bind for the opt-in
-//!   HTTP `/health` + `/version` endpoint (unset ⇒ not started).
+//!   HTTP `/health` + `/version` + `/peers` endpoint (unset ⇒ not started).
+//!   `/peers` is what the hydra reconciler reads to put this node's parked
+//!   peer-hosted relays into the signed directory (#813 Phase P1).
 //! - `--directory-key <b64>` / `POLLIS_RELAY_DIRECTORY_KEY` — the pinned Ed25519
 //!   key that signs the relay directory and the revocation list. **Required to be
 //!   a middle hop:** without it this node cannot evaluate revocation, and
@@ -163,7 +165,13 @@ async fn main() -> anyhow::Result<()> {
     let mut health_handle = None;
     if let Some(addr_str) = health_bind {
         let health_addr: SocketAddr = addr_str.parse()?;
-        if let Some((handle, bound)) = health::spawn(health_addr, wait_for_shutdown(shutdown_rx.clone())).await? {
+        // The health endpoint publishes the parked peers (#813 Phase P1) from the
+        // SAME registry the relay splices into, so `/peers` cannot advertise a
+        // peer this node would not actually extend to.
+        let parked = config.parked.clone();
+        if let Some((handle, bound)) =
+            health::spawn(health_addr, wait_for_shutdown(shutdown_rx.clone()), parked).await?
+        {
             tracing::info!("pollis-relay health endpoint on {bound}");
             health_handle = Some(handle);
         }

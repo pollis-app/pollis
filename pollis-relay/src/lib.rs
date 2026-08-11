@@ -17,6 +17,8 @@
 //! - [`client`] — the QUIC relay client.
 //! - [`circuit`] — an n-hop `Circuit` + a [`circuit::CircuitFactory`].
 //! - [`onion`] — the per-hop layer: one nested TLS 1.3 session per hop (§6.2).
+//! - [`park`] — parked peer-hosted relays: the reverse hop a NATed peer opens,
+//!   and the tunnel an `Extend` is spliced into (#813).
 //! - [`shim`] — the local SOCKS5 CONNECT server on loopback.
 //! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4),
 //!   and the fail-closed **live relay revocation** store (#813).
@@ -40,6 +42,7 @@ pub mod config;
 pub mod health;
 pub mod http;
 pub mod onion;
+pub mod park;
 pub mod policy;
 pub mod proto;
 pub mod ratelimit;
@@ -60,7 +63,8 @@ pub use policy::{
     RevocationError, RevocationList, RevocationStore, RoutingPolicy, REVOCATION_TYPE,
     REVOCATION_VERSION,
 };
-pub use proto::{ClientFrame, DeviceCertMaterial, RejectReason, VerifiedClient};
+pub use park::{ParkedPeers, PeerFingerprint};
+pub use proto::{ClientFrame, DeviceCertMaterial, Park, RejectReason, VerifiedClient};
 // Re-exported so consumers (pollis-core's `net::overlay`) can name the pinned
 // relay leaf type without taking a direct `rustls`/`rustls-pki-types` dependency.
 pub use rustls::pki_types::CertificateDer;

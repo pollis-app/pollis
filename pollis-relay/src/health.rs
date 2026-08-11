@@ -4,7 +4,7 @@
 //! orchestrators can't probe with a plain TCP/HTTP liveness check. This module
 //! stands up a minimal HTTP/1.1 responder on a **separate, opt-in TCP port**
 //! (config `health_bind` / `--health-bind` / `POLLIS_RELAY_HEALTH_BIND`; unset ⇒
-//! not started) that answers exactly two routes:
+//! not started) that answers exactly three routes:
 //!
 //! - `GET /health`  → `200 OK`, body `ok` — liveness.
 //! - `GET /version` → `200 OK`, JSON
@@ -19,11 +19,22 @@
 //!   fail ALPN against it) and the build identity for cycling stale nodes
 //!   (#703). An unrelated docs commit changes `sha` without changing `protocol`,
 //!   which is exactly why the two are reported separately.
+//! - `GET /peers`   → `200 OK`, JSON `{"peers":[{"cert_b64":"<base64 DER>"}]}` —
+//!   the relay leaf certs of the peer-hosted relays parked here right now (#813
+//!   Phase P1, [`crate::park`]). The hydra reconciler polls this port already and
+//!   aggregates these into the signed directory's `peers` entries, which is where
+//!   a client gets the cert it pins — so the DER is public by construction and
+//!   publishing it here discloses nothing new.
+//!
+//!   **Parked peers and nothing else.** Not how many clients a peer is serving,
+//!   not who is connected, not a byte count, not an address — §5.2/§11.7 forbid
+//!   a relay reporting *who its users are*, and a parked peer is infrastructure,
+//!   not a user.
 //!
 //! Anything else is `404`; a non-`GET` method is `405`. It is hand-rolled on a
 //! `tokio::net::TcpListener` (read the request line, match the path, write a fixed
 //! response) rather than pulling in hyper/axum — the relay already has tokio and
-//! the surface is two static routes.
+//! the surface is three fixed routes.
 //!
 //! It runs as its own task so it never blocks the QUIC accept loop, and honors the
 //! same shutdown signal as the relay (stops on SIGTERM/SIGINT). A **bind failure
@@ -32,10 +43,13 @@
 
 use std::future::Future;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
+
+use crate::park::ParkedPeers;
 
 /// The git SHA this binary was built from, baked in at compile time by the Docker
 /// build (`ARG GIT_SHA` → `ENV GIT_SHA` → `option_env!`). `"unknown"` for local
@@ -53,14 +67,21 @@ pub const GIT_SHA: &str = match option_env!("GIT_SHA") {
 /// without a health endpoint rather than failing to boot, because forwarding is
 /// the load-bearing job and this probe is auxiliary. (An operator who wants
 /// fail-fast can treat a missing `/health` as a failed deploy from the outside.)
-pub async fn spawn<F>(bind: SocketAddr, shutdown: F) -> anyhow::Result<Option<(JoinHandle<()>, SocketAddr)>>
+///
+/// `parked` is the live registry the relay itself splices into, so `/peers`
+/// can never drift from what this node would actually accept an `Extend` for.
+pub async fn spawn<F>(
+    bind: SocketAddr,
+    shutdown: F,
+    parked: Arc<ParkedPeers>,
+) -> anyhow::Result<Option<(JoinHandle<()>, SocketAddr)>>
 where
     F: Future<Output = ()> + Send + 'static,
 {
     match TcpListener::bind(bind).await {
         Ok(listener) => {
             let addr = listener.local_addr().unwrap_or(bind);
-            let handle = tokio::spawn(serve(listener, shutdown));
+            let handle = tokio::spawn(serve(listener, shutdown, parked));
             Ok(Some((handle, addr)))
         }
         Err(e) => {
@@ -73,7 +94,7 @@ where
 /// Serve health/version on an already-bound listener until `shutdown` resolves.
 /// Each connection is handled on its own task; the accept loop exits promptly on
 /// shutdown (biased select) so a rolling redeploy isn't held open by the probe.
-pub async fn serve<F>(listener: TcpListener, shutdown: F)
+pub async fn serve<F>(listener: TcpListener, shutdown: F, parked: Arc<ParkedPeers>)
 where
     F: Future<Output = ()>,
 {
@@ -87,7 +108,7 @@ where
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, _peer)) => {
-                        tokio::spawn(handle_conn(stream));
+                        tokio::spawn(handle_conn(stream, parked.clone()));
                     }
                     Err(e) => {
                         tracing::debug!("health: accept failed: {e}");
@@ -101,7 +122,7 @@ where
 /// Read one request, route it, write the response, and close. We only need the
 /// request line for a liveness probe, so a single bounded read is sufficient — no
 /// need to buffer the whole request or keep the connection alive.
-async fn handle_conn(mut stream: TcpStream) {
+async fn handle_conn(mut stream: TcpStream, parked: Arc<ParkedPeers>) {
     let mut buf = [0u8; 1024];
     let n = match stream.read(&mut buf).await {
         Ok(0) => {
@@ -114,7 +135,7 @@ async fn handle_conn(mut stream: TcpStream) {
     };
 
     let (method, path) = parse_request_line(&buf[..n]);
-    let response = route(method, path);
+    let response = route(method, path, &parked);
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.flush().await;
 }
@@ -134,7 +155,7 @@ fn parse_request_line(req: &[u8]) -> (&str, &str) {
 }
 
 /// Map a method+path to a full HTTP/1.1 response string.
-fn route(method: &str, path: &str) -> String {
+fn route(method: &str, path: &str, parked: &ParkedPeers) -> String {
     if method != "GET" {
         return http_response(405, "Method Not Allowed", "text/plain", "method not allowed");
     }
@@ -143,8 +164,28 @@ fn route(method: &str, path: &str) -> String {
     match path {
         "/health" => http_response(200, "OK", "text/plain", "ok"),
         "/version" => http_response(200, "OK", "application/json", &version_body()),
+        "/peers" => http_response(200, "OK", "application/json", &peers_body(parked)),
         _ => http_response(404, "Not Found", "text/plain", "not found"),
     }
+}
+
+/// The `/peers` JSON body: `{"peers":[{"cert_b64":"<base64 DER>"}]}`, ordered by
+/// fingerprint.
+///
+/// Built straight from the parked leaves and from nothing else the registry
+/// holds — deliberately not from a serializable struct that could quietly grow a
+/// field. Base64 is a fixed `[A-Za-z0-9+/=]` shape, so hand-formatting cannot
+/// produce invalid JSON.
+fn peers_body(parked: &ParkedPeers) -> String {
+    use base64::Engine as _;
+
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let entries: Vec<String> = parked
+        .peer_leaves()
+        .iter()
+        .map(|leaf| format!("{{\"cert_b64\":\"{}\"}}", b64.encode(leaf)))
+        .collect();
+    format!("{{\"peers\":[{}]}}", entries.join(","))
 }
 
 /// The `/version` JSON body:
@@ -202,9 +243,14 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (tx, rx) = oneshot::channel::<()>();
-        let handle = tokio::spawn(serve(listener, async move {
-            let _ = rx.await;
-        }));
+        let parked = ParkedPeers::new();
+        let handle = tokio::spawn(serve(
+            listener,
+            async move {
+                let _ = rx.await;
+            },
+            parked,
+        ));
 
         // GET /health → 200, body "ok".
         let (status, body) = request(addr, "/health").await;
@@ -229,6 +275,12 @@ mod tests {
             body.contains(&format!("\"protocol_version\":{}", crate::proto::PROTOCOL_VERSION)),
             "version body missing protocol_version: {body}"
         );
+
+        // GET /peers → 200, an empty list on a node nobody has parked at. Absent
+        // is never "unknown" here: the relay always knows exactly who is parked.
+        let (status, body) = request(addr, "/peers").await;
+        assert!(status.contains("200"), "peers status: {status}");
+        assert_eq!(body, "{\"peers\":[]}");
 
         // An unknown path → 404.
         let (status, _body) = request(addr, "/nope").await;
