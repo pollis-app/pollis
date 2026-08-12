@@ -23,12 +23,24 @@ interface MembersPanelProps {
   conversationId: string | null;
 }
 
+interface Person {
+  userId: string;
+  label: string;
+  avatarKey: string | null;
+  isAdmin: boolean;
+}
+
 /**
  * Members + shared media for the active conversation — Discord's member list
  * over Messenger's shared-media grid, which is what #824 asks for.
  *
  * Members come from the group for a channel/group route. A DM has no member
  * table, so its two participants are derived from the conversation record.
+ *
+ * On a route with no conversation at all (Preferences, Search, the root page)
+ * the panel degrades to the plain online roster and drops the media grid —
+ * "who is online" still answers a question there, "media shared in this
+ * conversation" does not.
  */
 export const MembersPanel: React.FC<MembersPanelProps> = observer(
   ({ groupId, channelId, conversationId }) => {
@@ -37,11 +49,48 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const isTerminal = useSkin() === "terminal";
     const currentUser = appStore.currentUser;
     const dmConversations = appStore.dmConversations;
+    const hasContext = Boolean(groupId || channelId || conversationId);
 
     // Online first, then alphabetical. Reading `presenceStore.isOnline` here
     // (inside an observer) is what keeps the ordering live as people join and
     // leave — `isOnline` is deliberately not an action for exactly this.
-    const people = useMemo(() => {
+    const people = useMemo<Person[]>(() => {
+      if (!hasContext) {
+        // No conversation to scope to, so the roster is simply everyone we
+        // can currently see online. Names come from the DM list — the only
+        // peer directory the client holds without a group — and fall back to
+        // the raw id for someone we share no DM with.
+        const known = new Map<string, { label: string; avatarKey: string | null }>();
+        for (const dm of dmConversations) {
+          if (dm.user2_id) {
+            known.set(dm.user2_id, {
+              label: dm.user2_identifier,
+              avatarKey: dm.user2_avatar_url ?? null,
+            });
+          }
+        }
+        const self: Person[] = currentUser
+          ? [
+              {
+                userId: currentUser.id,
+                label: "You",
+                avatarKey: null,
+                isAdmin: false,
+              },
+            ]
+          : [];
+        const others = Object.keys(presenceStore.byUser)
+          .filter((userId) => userId !== currentUser?.id)
+          .map((userId) => ({
+            userId,
+            label: known.get(userId)?.label ?? userId,
+            avatarKey: known.get(userId)?.avatarKey ?? null,
+            isAdmin: false,
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label));
+        return [...self, ...others];
+      }
+
       if (conversationId) {
         const dm = dmConversations.find((c) => c.id === conversationId);
         if (!dm) {
@@ -86,6 +135,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           return a.label.localeCompare(b.label);
         });
     }, [
+      hasContext,
       conversationId,
       dmConversations,
       currentUser,
@@ -127,9 +177,16 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     return (
       <div className={rootClass}>
         <section className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}>
-          <SectionHeader label={`Members — ${people.length}`} isTerminal={isTerminal} />
+          <SectionHeader
+            label={
+              hasContext ? `Members — ${people.length}` : `Online — ${people.length}`
+            }
+            isTerminal={isTerminal}
+          />
           {people.length === 0 ? (
-            <p className={emptyClass}>No members to show.</p>
+            <p className={emptyClass}>
+              {hasContext ? "No members to show." : "No one online."}
+            </p>
           ) : (
             people.map((person) => (
               <MemberRow
@@ -143,10 +200,14 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           )}
         </section>
 
-        <section className={isTerminal ? "flex flex-col gap-1 pb-2" : "flex flex-col gap-2"}>
-          <SectionHeader label="Media" isTerminal={isTerminal} bordered />
-          <MediaGrid attachments={attachments} />
-        </section>
+        {hasContext && (
+          <section
+            className={isTerminal ? "flex flex-col gap-1 pb-2" : "flex flex-col gap-2"}
+          >
+            <SectionHeader label="Media" isTerminal={isTerminal} bordered />
+            <MediaGrid attachments={attachments} />
+          </section>
+        )}
       </div>
     );
   },

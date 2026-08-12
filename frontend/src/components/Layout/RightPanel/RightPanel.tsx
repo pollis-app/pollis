@@ -26,16 +26,22 @@ export const RightPanel: React.FC = observer(() => {
   const groupId = appStore.selectedGroupId;
   const channelId = appStore.selectedChannelId;
   const conversationId = appStore.selectedConversationId;
-  // The panel is context for a conversation. On routes that have none
-  // (preferences, search, the root page) there is nothing to show, so the
-  // slot collapses rather than rendering an empty column.
+  // Routes like Preferences, Search and the root page have no conversation.
+  // The panel used to collapse entirely there; now only its CONTENT is
+  // contextual — `MembersPanel` degrades to the plain online roster and drops
+  // the media grid, because "who is online" is useful on every route while
+  // "media shared in this conversation" is not.
   const hasContext = Boolean(channelId || conversationId || groupId);
+  // A thread is meaningless without the conversation it hangs off, so a
+  // stale `?panel=thread` on a context-free route falls back to the roster
+  // rather than rendering an empty thread.
+  const shownThreadId = kind === "thread" && hasContext ? threadId : null;
 
-  if (!isOpen || !hasContext) {
+  if (!isOpen) {
     return null;
   }
 
-  const label = kind === "thread" ? "Thread" : "Details";
+  const label = shownThreadId ? "Thread" : "Details";
 
   return (
     <aside
@@ -48,19 +54,15 @@ export const RightPanel: React.FC = observer(() => {
       aria-label="Conversation details"
     >
       <div className="min-h-0 flex-1">
-        {kind === "members" && (
-          <MembersPanel
-            groupId={groupId}
+        {shownThreadId ? (
+          <ThreadPanel
+            threadId={shownThreadId}
             channelId={channelId}
             conversationId={conversationId}
           />
-        )}
-        {/* `threadId` is non-null whenever kind is "thread" — the router drops
-            the panel param rather than admit one without the other — but the
-            guard keeps that guarantee local and typed. */}
-        {kind === "thread" && threadId && (
-          <ThreadPanel
-            threadId={threadId}
+        ) : (
+          <MembersPanel
+            groupId={groupId}
             channelId={channelId}
             conversationId={conversationId}
           />
