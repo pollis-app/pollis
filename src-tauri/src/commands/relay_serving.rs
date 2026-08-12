@@ -13,7 +13,10 @@ use tauri::{AppHandle, Emitter};
 
 use crate::error::Result;
 pub use pollis_core::commands::relay_serving::*;
-use pollis_core::commands::relay_serving::{set_status_sink, RELAY_SERVING_EVENT};
+// Only `set_status_sink` is imported by name. Naming RELAY_SERVING_EVENT here
+// too made this private import SHADOW the glob re-export above, so the constant
+// the renderer's event name must match was silently not re-exported.
+use pollis_core::commands::relay_serving::set_status_sink;
 use pollis_core::net::peer::{RelayServingConfig, RelayServingStatus};
 use pollis_core::sink::EventSink;
 
