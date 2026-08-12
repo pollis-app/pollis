@@ -73,6 +73,7 @@ export const PreferencesPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
+  const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
   const [skin, setSkin] = useState<Skin>("terminal");
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
@@ -84,6 +85,11 @@ export const PreferencesPage: React.FC = observer(() => {
   const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
   const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
+  // `undefined` until the user touches it — that state means "follow the
+  // skin" (open in refined, closed in terminal), which no boolean can encode.
+  const [rightPanelOpenByDefault, setRightPanelOpenByDefault] = useState<
+    boolean | undefined
+  >(undefined);
   const [closeToTray, setCloseToTray] = useState<boolean>(true);
   const [menubarIcon, setMenubarIcon] = useState<boolean>(false);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>("off");
@@ -127,6 +133,9 @@ export const PreferencesPage: React.FC = observer(() => {
       if (query.data.sidebar_open_by_default !== undefined) {
         setSidebarOpenByDefault(query.data.sidebar_open_by_default);
       }
+      // No `!== undefined` guard: absent is a meaningful value here, and
+      // skipping it would strand the local state after a reset elsewhere.
+      setRightPanelOpenByDefault(query.data.right_panel_open_by_default);
       if (query.data.close_to_tray !== undefined) {
         setCloseToTray(query.data.close_to_tray);
       }
@@ -171,6 +180,7 @@ export const PreferencesPage: React.FC = observer(() => {
     skin?: Skin;
     notifications?: boolean; soundEffects?: boolean;
     sidebarOpenByDefault?: boolean;
+    rightPanelOpenByDefault?: boolean;
     closeToTray?: boolean;
     menubarIcon?: boolean;
     overlayMode?: OverlayMode;
@@ -184,6 +194,7 @@ export const PreferencesPage: React.FC = observer(() => {
     const notif = opts.notifications ?? allowDesktopNotifications;
     const sfx = opts.soundEffects ?? allowSoundEffects;
     const sidebar = opts.sidebarOpenByDefault ?? sidebarOpenByDefault;
+    const rightPanel = opts.rightPanelOpenByDefault ?? rightPanelOpenByDefault;
     const tray = opts.closeToTray ?? closeToTray;
     const menubar = opts.menubarIcon ?? menubarIcon;
     const overlay = opts.overlayMode ?? overlayMode;
@@ -205,6 +216,7 @@ export const PreferencesPage: React.FC = observer(() => {
       allow_desktop_notifications: notif,
       allow_sound_effects: sfx,
       sidebar_open_by_default: sidebar,
+      right_panel_open_by_default: rightPanel,
       close_to_tray: tray,
       menubar_icon: menubar,
       overlay_mode: overlay,
@@ -370,6 +382,11 @@ export const PreferencesPage: React.FC = observer(() => {
   const handleSidebarOpenByDefault = (val: boolean) => {
     setSidebarOpenByDefault(val);
     save({ sidebarOpenByDefault: val });
+  };
+
+  const handleRightPanelOpenByDefault = (val: boolean) => {
+    setRightPanelOpenByDefault(val);
+    save({ rightPanelOpenByDefault: val });
   };
 
   const handleCloseToTray = (val: boolean) => {
@@ -700,6 +717,20 @@ export const PreferencesPage: React.FC = observer(() => {
                 />
                 <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
                   Controls whether the left sidebar is open when the app starts. Toggle ad-hoc with {toggleSidebarLabel}.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Switch
+                  id="pref-right-panel-default"
+                  label="Show details panel by default"
+                  checked={rightPanelOpenByDefault ?? skin === "refined"}
+                  onChange={handleRightPanelOpenByDefault}
+                />
+                <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                  Members and shared media for the channel or conversation
+                  you're viewing. Until you set this, it follows your theme —
+                  shown in Refined, hidden in Terminal. Toggle ad-hoc with{" "}
+                  {toggleRightPanelLabel}.
                 </p>
               </div>
               {!isMac && (

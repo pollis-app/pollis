@@ -10,6 +10,7 @@
 
 export type ShortcutCommandId =
   | "app.toggleSidebar"
+  | "app.toggleRightPanel"
   | "app.toggleTerminal"
   | "app.toggleSearch"
   | "app.lock"
@@ -47,6 +48,14 @@ export const SHORTCUT_COMMANDS: Record<
     title: "Toggle sidebar",
     category: "Application",
     defaultCombo: "mod+b",
+  },
+  "app.toggleRightPanel": {
+    id: "app.toggleRightPanel",
+    title: "Toggle details panel",
+    category: "Application",
+    // Mirrors mod+b for the left sidebar, shifted — the two panels are the
+    // same gesture on opposite edges.
+    defaultCombo: "mod+shift+b",
   },
   "app.toggleTerminal": {
     id: "app.toggleTerminal",

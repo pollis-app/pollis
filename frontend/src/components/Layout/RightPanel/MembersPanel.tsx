@@ -1,0 +1,147 @@
+import React, { useMemo } from "react";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../../stores/appStore";
+import { presenceStore } from "../../../stores/presenceStore";
+import { useGroupMembers } from "../../../hooks/queries/useGroups";
+import { useMessages } from "../../../hooks/queries/useMessages";
+import { MemberRow } from "./MemberRow";
+import { MediaGrid } from "./MediaGrid";
+import type { MessageAttachment } from "../../../types";
+
+/**
+ * How many attachments the grid renders. Each tile resolves its own bytes
+ * through the media server, so an unbounded grid on a media-heavy channel
+ * would fan out into hundreds of fetches the moment the panel opens. The cap
+ * keeps that bounded; the conversation itself remains the full archive.
+ */
+const MEDIA_LIMIT = 30;
+
+interface MembersPanelProps {
+  groupId: string | null;
+  channelId: string | null;
+  conversationId: string | null;
+}
+
+/**
+ * Members + shared media for the active conversation — Discord's member list
+ * over Messenger's shared-media grid, which is what #824 asks for.
+ *
+ * Members come from the group for a channel/group route. A DM has no member
+ * table, so its two participants are derived from the conversation record.
+ */
+export const MembersPanel: React.FC<MembersPanelProps> = observer(
+  ({ groupId, channelId, conversationId }) => {
+    const { data: groupMembers = [] } = useGroupMembers(groupId);
+    const { messages } = useMessages(channelId, conversationId);
+    const currentUser = appStore.currentUser;
+    const dmConversations = appStore.dmConversations;
+
+    // Online first, then alphabetical. Reading `presenceStore.isOnline` here
+    // (inside an observer) is what keeps the ordering live as people join and
+    // leave — `isOnline` is deliberately not an action for exactly this.
+    const people = useMemo(() => {
+      if (conversationId) {
+        const dm = dmConversations.find((c) => c.id === conversationId);
+        if (!dm) {
+          return [];
+        }
+        const peer = dm.user2_id
+          ? [
+              {
+                userId: dm.user2_id,
+                label: dm.user2_identifier,
+                avatarKey: dm.user2_avatar_url ?? null,
+                isAdmin: false,
+              },
+            ]
+          : [];
+        const self = currentUser
+          ? [
+              {
+                userId: currentUser.id,
+                label: "You",
+                avatarKey: null,
+                isAdmin: false,
+              },
+            ]
+          : [];
+        return [...peer, ...self];
+      }
+
+      return [...groupMembers]
+        .map((m) => ({
+          userId: m.user_id,
+          label: m.display_name || m.username || m.user_id,
+          avatarKey: m.avatar_url ?? null,
+          isAdmin: m.role === "admin",
+        }))
+        .sort((a, b) => {
+          const aOnline = presenceStore.isOnline(a.userId);
+          const bOnline = presenceStore.isOnline(b.userId);
+          if (aOnline !== bOnline) {
+            return aOnline ? -1 : 1;
+          }
+          return a.label.localeCompare(b.label);
+        });
+    }, [
+      conversationId,
+      dmConversations,
+      currentUser,
+      groupMembers,
+      // Re-sort when anyone's presence flips. `byUser` is replaced (not
+      // mutated) by the store, so identity is a sound dependency.
+      presenceStore.byUser,
+    ]);
+
+    const attachments = useMemo(() => {
+      const seen = new Set<string>();
+      const out: MessageAttachment[] = [];
+      // `messages` is oldest-first; walk backwards so the grid leads with the
+      // most recent media.
+      for (let i = messages.length - 1; i >= 0 && out.length < MEDIA_LIMIT; i--) {
+        const message = messages[i];
+        if (message.deleted_at) {
+          continue;
+        }
+        for (const attachment of message.attachments ?? []) {
+          if (out.length >= MEDIA_LIMIT || seen.has(attachment.id)) {
+            continue;
+          }
+          seen.add(attachment.id);
+          out.push(attachment);
+        }
+      }
+      return out;
+    }, [messages]);
+
+    return (
+      <div className="flex h-full flex-col gap-4 overflow-y-auto py-3">
+        <section className="flex flex-col gap-1">
+          <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
+            Members — {people.length}
+          </h2>
+          {people.length === 0 ? (
+            <p className="px-2 text-xs text-muted">No members to show.</p>
+          ) : (
+            people.map((person) => (
+              <MemberRow
+                key={person.userId}
+                userId={person.userId}
+                label={person.label}
+                avatarKey={person.avatarKey}
+                isAdmin={person.isAdmin}
+              />
+            ))
+          )}
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
+            Media
+          </h2>
+          <MediaGrid attachments={attachments} />
+        </section>
+      </div>
+    );
+  },
+);

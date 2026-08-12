@@ -77,6 +77,16 @@ export interface PreferencesData {
   /** Whether the left sidebar is open by default at app start. */
   sidebar_open_by_default?: boolean;
   /**
+   * Whether the right-hand context panel (#824) is open by default.
+   *
+   * Deliberately tri-state: `undefined` means "follow the skin" — open in
+   * `refined`, closed in `terminal` — while `true`/`false` is an explicit
+   * choice that holds across both skins. Defaulting it to a boolean here
+   * would silently freeze whichever skin the user happened to be on when
+   * the preference row was first written.
+   */
+  right_panel_open_by_default?: boolean;
+  /**
    * Linux/Windows only: when true, closing the window hides the app to the
    * system tray instead of fully exiting. macOS already hides via the Dock
    * regardless. Default true.
@@ -342,6 +352,13 @@ export function usePreferences() {
         ),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
         sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
+        // Default stays `undefined` on purpose — see the field docs. Absent
+        // means "follow the skin", which is not expressible as a boolean.
+        right_panel_open_by_default: getPreference<boolean | undefined>(
+          json,
+          "right_panel_open_by_default",
+          undefined,
+        ),
         close_to_tray: getPreference<boolean>(json, "close_to_tray", true),
         menubar_icon: getPreference<boolean>(json, "menubar_icon", false),
         revoke_media_on_exit: getPreference<boolean>(json, "revoke_media_on_exit", false),
