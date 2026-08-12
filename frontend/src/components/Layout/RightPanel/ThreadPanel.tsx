@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../../stores/appStore";
 import {
@@ -6,8 +6,8 @@ import {
   useSendMessage,
   useThreadMessages,
 } from "../../../hooks/queries/useMessages";
-import { Button } from "../../ui/Button";
-import { TextArea } from "../../ui/TextArea";
+import { ChatInput, type Attachment } from "../../ui/ChatInput";
+import { buildMessageContent } from "../../../utils/attachmentEnvelope";
 import { ThreadMessageRow } from "./ThreadMessageRow";
 
 interface ThreadPanelProps {
@@ -33,26 +33,27 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
     const { data: replies = [], isLoading } = useThreadMessages(threadId);
     const sendMessage = useSendMessage();
     const currentUser = appStore.currentUser;
-    const [draft, setDraft] = useState("");
 
     const root = useMemo(
       () => messages.find((m) => m.id === threadId) ?? null,
       [messages, threadId],
     );
 
-    const canSend = draft.trim().length > 0 && !!currentUser;
-
-    const submit = () => {
-      if (!canSend) {
+    const submit = async (text: string, attachments: Attachment[]) => {
+      const contentText = text.trim();
+      if ((!contentText && attachments.length === 0) || !currentUser) {
         return;
       }
+      // Same upload + `_att` envelope the channel composer uses, so a file
+      // dropped in a thread is indistinguishable on the wire from one dropped
+      // in the channel.
+      const content = await buildMessageContent(attachments, contentText);
       sendMessage.mutate({
         channelId: channelId ?? "",
         conversationId: conversationId ?? "",
-        content: draft.trim(),
+        content,
         threadId,
       });
-      setDraft("");
     };
 
     return (
@@ -79,36 +80,22 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
           )}
         </div>
 
-        {/* The thread composer is part of the panel, not a modal or an overlay
-            — it replaces nothing and covers nothing. */}
+        {/* The thread's OWN composer, not a second style of input.
+            `ChatInput` keeps its attachment list in component state, so a
+            thread instance and the channel instance cannot share a pending
+            file — which is the bug this replaced: the thread had only a bare
+            textarea, so the only attach button on screen belonged to the
+            channel and every file went there.
+
+            No label: the panel header already says Thread and the placeholder
+            says the rest, so a "Reply in thread" label above a "Reply in
+            thread…" placeholder was the same sentence twice. */}
         <div className="shrink-0 border-t border-line p-2">
-          <TextArea
-            id="thread-composer"
-            label="Reply in thread"
-            value={draft}
-            onChange={setDraft}
+          <ChatInput
+            onSend={submit}
             placeholder="Reply in thread…"
-            rows={2}
-            onKeyDown={(e) => {
-              // Enter sends, Shift+Enter newlines — the same contract as the
-              // main chat input.
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
+            draftKey={`thread:${threadId}`}
           />
-          <div className="mt-2 flex justify-end">
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={!canSend}
-              onClick={submit}
-              data-testid="thread-send"
-            >
-              Reply
-            </Button>
-          </div>
         </div>
       </div>
     );

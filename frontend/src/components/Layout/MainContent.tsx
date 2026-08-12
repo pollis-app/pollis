@@ -16,7 +16,7 @@ import { transformChannelMessage, type RawChannelMessage, useThreadSummaries } f
 import { useRightPanel } from "./RightPanel/useRightPanel";
 import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
-import { blurhashFromUrl } from "../../utils/imageProcessing";
+import { buildMessageContent } from "../../utils/attachmentEnvelope";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { TypingIndicator } from "../TypingIndicator";
 
@@ -28,18 +28,6 @@ export interface PendingDmRequest {
   onAccepted?: () => void;
   onBlocked?: () => void;
 }
-
-type MediaUploadResult = {
-  key: string;
-  url: string;
-  filename: string;
-  content_type: string;
-  size_bytes: number;
-  content_hash: string;
-  blurhash?: string;
-  width?: number;
-  height?: number;
-};
 
 type PageCursor = { sent_at: string; id: string };
 
@@ -412,54 +400,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     setReplyToMessageId(null);
 
     try {
-      let content = contentText;
-
-      if (attachments.length > 0) {
-        // For video attachments that have a poster preview, compute a blurhash
-        // so receivers see a placeholder without downloading the video first.
-        const videoBlurhashes = new Map<string, { bh: string; w: number; h: number }>();
-        await Promise.all(
-          attachments
-            .filter((att) => att.mimeType.startsWith("video/") && att.preview)
-            .map(async (att) => {
-              const meta = await blurhashFromUrl(att.preview!).catch(() => null);
-              if (meta) {
-                videoBlurhashes.set(att.id, { bh: meta.hash, w: meta.width, h: meta.height });
-              }
-            })
-        );
-
-        const results = await Promise.all(
-          attachments.map((att) =>
-            invoke<MediaUploadResult>('upload_media', {
-              path: att.path,
-              filename: att.name,
-              contentType: att.mimeType,
-            })
-          )
-        );
-
-        const envelope: Record<string, unknown> = {
-          _att: results.map((r, i) => {
-            const vMeta = videoBlurhashes.get(attachments[i]?.id ?? "");
-            return {
-              key: r.key,
-              url: r.url,
-              name: r.filename,
-              ct: r.content_type,
-              size: r.size_bytes,
-              hash: r.content_hash,
-              bh: r.blurhash ?? vMeta?.bh,
-              w: r.width ?? vMeta?.w,
-              h: r.height ?? vMeta?.h,
-            };
-          }),
-        };
-        if (contentText) {
-          envelope._txt = contentText;
-        }
-        content = JSON.stringify(envelope);
-      }
+      const content = await buildMessageContent(attachments, contentText);
 
       await sendMessageMutation.mutateAsync({
         channelId: selectedChannelId || "",
