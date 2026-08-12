@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../../stores/appStore";
 import { presenceStore } from "../../../stores/presenceStore";
+import { useSkin } from "../../../hooks/queries/usePreferences";
 import { useGroupMembers } from "../../../hooks/queries/useGroups";
 import { useMessages } from "../../../hooks/queries/useMessages";
 import { MemberRow } from "./MemberRow";
@@ -33,6 +34,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
   ({ groupId, channelId, conversationId }) => {
     const { data: groupMembers = [] } = useGroupMembers(groupId);
     const { messages } = useMessages(channelId, conversationId);
+    const isTerminal = useSkin() === "terminal";
     const currentUser = appStore.currentUser;
     const dmConversations = appStore.dmConversations;
 
@@ -114,14 +116,20 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
       return out;
     }, [messages]);
 
+    // Terminal packs the column the way the left sidebar does — sections butt
+    // up against their hairline headers with no outer padding. Refined keeps
+    // the airier card rhythm.
+    const rootClass = isTerminal
+      ? "flex h-full flex-col overflow-y-auto"
+      : "flex h-full flex-col gap-4 overflow-y-auto py-3";
+    const emptyClass = isTerminal ? "px-2.5 py-1 text-xs text-muted" : "px-2 text-xs text-muted";
+
     return (
-      <div className="flex h-full flex-col gap-4 overflow-y-auto py-3">
-        <section className="flex flex-col gap-1">
-          <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
-            Members — {people.length}
-          </h2>
+      <div className={rootClass}>
+        <section className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}>
+          <SectionHeader label={`Members — ${people.length}`} isTerminal={isTerminal} />
           {people.length === 0 ? (
-            <p className="px-2 text-xs text-muted">No members to show.</p>
+            <p className={emptyClass}>No members to show.</p>
           ) : (
             people.map((person) => (
               <MemberRow
@@ -135,13 +143,48 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           )}
         </section>
 
-        <section className="flex flex-col gap-2">
-          <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
-            Media
-          </h2>
+        <section className={isTerminal ? "flex flex-col gap-1 pb-2" : "flex flex-col gap-2"}>
+          <SectionHeader label="Media" isTerminal={isTerminal} bordered />
           <MediaGrid attachments={attachments} />
         </section>
       </div>
     );
   },
 );
+
+interface SectionHeaderProps {
+  label: string;
+  isTerminal: boolean;
+  /** Hairline rule above the header as well as below — the left sidebar's
+      `bordered` treatment, used on every section after the first. */
+  bordered?: boolean;
+}
+
+/**
+ * Section heading for the panel column. Terminal borrows the left sidebar's
+ * `SectionHeader` chrome verbatim — a `h-bar` sticky strip, hairline under it,
+ * and a second hairline above every section after the first — so both columns
+ * read as the same UI. Refined keeps the lighter free-standing label it
+ * already had.
+ */
+const SectionHeader: React.FC<SectionHeaderProps> = ({
+  label,
+  isTerminal,
+  bordered,
+}) => {
+  if (!isTerminal) {
+    return (
+      <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
+        {label}
+      </h2>
+    );
+  }
+  const cls = [
+    "sticky top-0 z-[1] flex h-bar w-full items-center border-b border-line",
+    "bg-surface px-2.5 text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none",
+    bordered ? "mt-1 border-t" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return <h2 className={cls}>{label}</h2>;
+};

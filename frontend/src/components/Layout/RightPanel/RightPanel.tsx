@@ -2,6 +2,7 @@ import React from "react";
 import { observer } from "mobx-react-lite";
 import { X } from "lucide-react";
 import { appStore } from "../../../stores/appStore";
+import { useSkin } from "../../../hooks/queries/usePreferences";
 import { useRightPanel } from "./useRightPanel";
 import { MembersPanel } from "./MembersPanel";
 import { ThreadPanel } from "./ThreadPanel";
@@ -19,6 +20,7 @@ import { ThreadPanel } from "./ThreadPanel";
  */
 export const RightPanel: React.FC = observer(() => {
   const { kind, isOpen, threadId, setPanel } = useRightPanel();
+  const isTerminal = useSkin() === "terminal";
 
   const groupId = appStore.selectedGroupId;
   const channelId = appStore.selectedChannelId;
@@ -34,12 +36,22 @@ export const RightPanel: React.FC = observer(() => {
 
   return (
     <aside
-      className="flex w-72 shrink-0 flex-col border-l border-line bg-surface"
+      // `font-mono` is the whole skin switch: terminal renders it as DM Mono,
+      // refined re-points `.font-mono:not(.font-machine)` at the sans face.
+      // Width tracks `--side-w` so the panel mirrors the left sidebar's
+      // per-skin measure instead of a fixed 18rem.
+      className="flex w-[var(--side-w)] shrink-0 flex-col border-l border-line bg-surface font-mono"
       data-testid="right-panel"
       aria-label="Conversation details"
     >
-      <div className="flex h-bar shrink-0 items-center justify-between border-b border-line px-3">
-        <span className="text-xs font-medium uppercase tracking-widest text-dim">
+      <div className="flex h-bar shrink-0 items-center justify-between border-b border-line px-2.5">
+        <span
+          className={
+            isTerminal
+              ? "text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none"
+              : "text-xs font-medium uppercase tracking-widest text-dim"
+          }
+        >
           {kind === "thread" ? "Thread" : "Details"}
         </span>
         <button

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { FileIcon } from "lucide-react";
+import { useSkin } from "../../../hooks/queries/usePreferences";
 import { getMediaUrl } from "../../../services/r2-upload";
 import type { MessageAttachment } from "../../../types";
 
@@ -20,6 +21,7 @@ interface MediaTileProps {
 export const MediaTile: React.FC<MediaTileProps> = ({ attachment }) => {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const isTerminal = useSkin() === "terminal";
   const isImage = attachment.content_type.startsWith("image/");
   // An attachment still uploading has no object_key yet; there is nothing to
   // fetch until the send confirms.
@@ -60,7 +62,12 @@ export const MediaTile: React.FC<MediaTileProps> = ({ attachment }) => {
 
   return (
     <div
-      className="relative aspect-square overflow-hidden rounded border border-line bg-surface-raised"
+      // Terminal keeps hard corners — the skin's chrome is square everywhere
+      // else, and a rounded thumbnail is the tell that this panel was styled
+      // for refined only.
+      className={`relative aspect-square overflow-hidden border border-line bg-surface-raised ${
+        isTerminal ? "" : "rounded"
+      }`}
       title={attachment.filename}
       data-testid="right-panel-media-tile"
     >
