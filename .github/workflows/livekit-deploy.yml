@@ -76,6 +76,26 @@ jobs:
             printf '  %s: %s\n' "${LIVEKIT_API_KEY}" "${LIVEKIT_API_SECRET}"
           } >> livekit/livekit.yml
 
+      - name: Preflight — TURN hostname resolves straight to this box
+        run: |
+          set -euo pipefail
+          # LiveKit hands clients `turns:turn.pollis.com:443` (the port is
+          # hardcoded — see livekit.yml). If that name does not resolve, or
+          # resolves to anything other than this VPS, TURN is dead on arrival and
+          # the failure is invisible: ICE just never finds a working candidate.
+          # In particular a Cloudflare-PROXIED record (orange cloud) resolves to
+          # Cloudflare, which does not speak TURN — it must be DNS-only.
+          got="$(getent ahostsv4 turn.pollis.com | awk '{print $1}' | sort -u | tr '\n' ' ' | sed 's/ $//')" || true
+          if [ -z "${got}" ]; then
+            echo "::error::turn.pollis.com does not resolve. Create a DNS-only (grey-cloud) A record -> ${VPS_HOST} before deploying."
+            exit 1
+          fi
+          if [ "${got}" != "${VPS_HOST}" ]; then
+            echo "::error::turn.pollis.com resolves to '${got}', expected '${VPS_HOST}'. A proxied/CDN record cannot carry TURN."
+            exit 1
+          fi
+          echo "turn.pollis.com -> ${got}"
+
       - name: Set up SSH
         run: |
           set -euo pipefail
@@ -83,6 +103,51 @@ jobs:
           printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Preflight — host is ready for the widened relay range
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy "${VPS_USER}@${VPS_HOST}" 'bash -seuo pipefail' <<'REMOTE'
+            fail=0
+
+            # 1. Userland proxy MUST be off. Docker forks two docker-proxy
+            #    processes per published port; at 1000 relay ports that is 2000
+            #    processes and ~22s of container start (measured), which this
+            #    7 GB box will not survive. Disabled, the contiguous range is a
+            #    single iptables DNAT rule and costs nothing. Checked BEFORE
+            #    `compose up` so a missing setting aborts instead of OOMing.
+            if ! grep -Eq '"userland-proxy"[[:space:]]*:[[:space:]]*false' /etc/docker/daemon.json 2>/dev/null; then
+              echo "::error::/etc/docker/daemon.json is missing '\"userland-proxy\": false'. See livekit/DEPLOY.md — set it and 'systemctl restart docker' before deploying."
+              fail=1
+            fi
+
+            # 2. The TURNS certificate must cover turn.pollis.com. nginx serves
+            #    the rtc.pollis.com lineage on both hostnames, so turn must be a
+            #    SAN on it or every client's TLS verification fails silently.
+            CERT=/etc/letsencrypt/live/rtc.pollis.com/fullchain.pem
+            if [ ! -f "${CERT}" ]; then
+              echo "::error::${CERT} is missing."
+              fail=1
+            elif ! openssl x509 -in "${CERT}" -noout -text | grep -q 'DNS:turn.pollis.com'; then
+              echo "::error::${CERT} has no turn.pollis.com SAN. Expand it (see livekit/DEPLOY.md) before deploying."
+              fail=1
+            fi
+
+            # 3. Firewall must pass the whole relay range. Ports LiveKit
+            #    allocates but the firewall drops are the silent-relay-failure
+            #    bug this deploy is fixing. Only enforced when ufw is the active
+            #    firewall — a control-panel firewall can't be checked from here.
+            if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
+              if ! ufw status | grep -q '30000:30999/udp'; then
+                echo "::error::ufw does not allow 30000:30999/udp. Run 'ufw allow 30000:30999/udp' (see livekit/DEPLOY.md)."
+                fail=1
+              fi
+            else
+              echo "::warning::ufw inactive or absent — verify the relay range 30000-30999/udp is open in the host control-panel firewall."
+            fi
+
+            exit "${fail}"
+          REMOTE
 
       - name: Sync config to the box (staging dir)
         run: |
@@ -153,3 +218,28 @@ jobs:
           curl -fsS --retry 10 --retry-delay 3 --retry-all-errors --retry-connrefused --max-time 20 https://rtc.pollis.com ; echo
           # (The Delivery Service moved to Cloudflare Containers in #515 and is no
           # longer proxied by this nginx, so there's nothing DS-related to assert here.)
+
+      - name: Validate — TURNS answers on 443 with a hostname-valid cert
+        run: |
+          set -euo pipefail
+          # The whole point of this stack: a client on a network that only allows
+          # 443 must be able to complete TLS to turn.pollis.com:443 and have the
+          # certificate verify against that name. `-verify_return_error` +
+          # `-verify_hostname` make a bad SAN a hard failure rather than a warning
+          # buried in output, because the client-side symptom is silence.
+          echo | openssl s_client -connect turn.pollis.com:443 \
+            -servername turn.pollis.com \
+            -verify_hostname turn.pollis.com \
+            -verify_return_error -brief 2>&1 | sed 's/^/  /'
+          # And prove the SNI actually routed to TURN, not back to the web vhost:
+          # the web vhost speaks HTTP, so an HTTP request over this TLS session
+          # would answer 200/301. TURN does not, so an empty/non-HTTP reply is the
+          # pass condition.
+          resp="$(printf 'GET / HTTP/1.1\r\nHost: turn.pollis.com\r\nConnection: close\r\n\r\n' \
+            | timeout 20 openssl s_client -connect turn.pollis.com:443 -servername turn.pollis.com -quiet 2>/dev/null \
+            | head -c 64 || true)"
+          if printf '%s' "${resp}" | grep -q '^HTTP/1'; then
+            printf '::error::turn.pollis.com:443 answered HTTP (%s) — SNI demux fell through to the web vhost, TURN is NOT reachable.\n' "${resp}"
+            exit 1
+          fi
+          echo "turn.pollis.com:443 did not answer HTTP — routed to the TURN listener."

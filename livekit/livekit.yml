@@ -5,17 +5,43 @@ rtc:
   use_external_ip: true
   use_ice_lite: true
 
-# TURNS (TURN over TLS on port 5349) — handles VPNs that block UDP and
-# non-443 ports. relay_range_* are the UDP ports LiveKit allocates to
-# actually relay media; they must be open in the firewall.
+# TURNS — TURN over TLS, the fallback path for clients that cannot get a direct
+# UDP route (corporate/hotel/carrier NAT, UDP-blocking VPNs).
+#
+# THE PORT IS NOT CONFIGURABLE. LiveKit hardcodes the URL it hands to clients as
+# `turns:<domain>:443?transport=tcp` (pkg/service/roommanager.go, v1.10.0) — it
+# does NOT interpolate tls_port. `tls_port` below only decides which port the
+# server LISTENS on. So while this said `tls_port: 5349`, every client was told
+# to reach TURNS at rtc.pollis.com:443, where nginx answered with HTTP and the
+# TURN handshake died. TURNS has never worked in production, and it fails
+# silently: ICE just falls back to candidates that don't work either.
+#
+# The fix: nginx owns :443 and demultiplexes by TLS SNI (see nginx.conf) —
+# rtc.pollis.com stays the web/WSS vhost, turn.pollis.com is terminated and
+# forwarded here as plaintext TURN. Hence `external_tls: true` and the
+# `domain` being turn.pollis.com rather than rtc.pollis.com: the domain field
+# IS the hostname clients dial, so it must be the one nginx routes to TURN.
+#
+# external_tls also means LiveKit no longer reads the TLS keypair (cert_file /
+# key_file are ignored on this path). That is deliberate: nginx already reloads
+# on the certbot renewal cron, whereas LiveKit only loads certs at process
+# start, so a LiveKit-terminated TURNS listener would quietly serve an expired
+# certificate ~60 days after every renewal.
 turn:
   enabled: true
-  domain: rtc.pollis.com
+  domain: turn.pollis.com
   tls_port: 5349
-  cert_file: /etc/letsencrypt/live/rtc.pollis.com/fullchain.pem
-  key_file: /etc/letsencrypt/live/rtc.pollis.com/privkey.pem
+  external_tls: true
+  # UDP ports LiveKit allocates to relay media. One port per TURN allocation,
+  # and a LiveKit client opens two peer connections (publisher + subscriber),
+  # so budget ~2 ports per concurrent participant. 1000 ports covers ~250
+  # concurrent relayed participants with slack for allocations still draining —
+  # comfortably past what 2 vCPU can serve. Widening these REQUIRES widening
+  # the docker publish range and the host firewall to match (see DEPLOY.md);
+  # ports LiveKit allocates but the firewall drops produce silent relay
+  # failures, which is the exact failure mode this block already had.
   relay_range_start: 30000
-  relay_range_end: 30100
+  relay_range_end: 30999
 
 # NOTE: the `keys:` block is intentionally NOT committed. The deploy workflow
 # (.github/workflows/livekit-deploy.yml) appends it on the box from the
