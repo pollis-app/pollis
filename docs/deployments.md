@@ -127,6 +127,15 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 - **From:** `livekit/` (compose + nginx ingress; runs **upstream** LiveKit images, not our build)
 - **Pipeline:** `.github/workflows/livekit-deploy.yml` — `workflow_dispatch` (env choice prod/dev). SSH + compose on the VPS.
 - **Runs at:** VPS. Frames are E2EE (the SFU forwards ciphertext).
+- **Ingress:** everything on **443**, split by TLS SNI in nginx's `stream` block —
+  `rtc.pollis.com` → HTTPS/WSS → `livekit:7880`; `turn.pollis.com` → TURNS,
+  terminated by nginx → `livekit:5349`. TURN *must* be on 443 (LiveKit hardcodes
+  `turns:<domain>:443` in the ICE servers it hands clients, and 443 is what
+  restrictive networks let through). Host prerequisites the pipeline cannot
+  create — a DNS-only A record for `turn.pollis.com`, a cert with that SAN, and
+  `"userland-proxy": false` in `/etc/docker/daemon.json` — are **preflight-gated**
+  in the workflow, which aborts rather than deploying a silently-broken relay.
+  Details + relay-port sizing: `livekit/DEPLOY.md`.
 
 ### Relay pool — closed-overlay first-party relay nodes
 - **From:** `pollis-relay/` (the `pollis-relay` binary; shares the offline device-cert primitive `pollis-device-cert`)

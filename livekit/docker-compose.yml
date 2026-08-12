@@ -1,7 +1,9 @@
 # LiveKit + nginx ingress stack for the Pollis VPS.
 #
 # Scope: this compose manages `livekit` and the `nginx` ingress in front of it.
-# nginx serves ONLY LiveKit, on the single domain rtc.pollis.com -> livekit:7880.
+# nginx serves ONLY LiveKit, and owns port 443 for BOTH of its hostnames: it
+# demultiplexes by TLS SNI, sending rtc.pollis.com -> livekit:7880 (HTTPS/WSS)
+# and turn.pollis.com -> livekit:5349 (TURN over TLS, terminated by nginx).
 # (downpage.xyz was a legacy alias for the same upstream and is retired.) The Delivery Service moved to Cloudflare Containers (#515), so the
 # old `delivery` / `delivery-dev` / `watchtower` containers no longer run on this
 # VPS and were removed from nginx.conf — a dangling upstream fails `nginx -t` and
@@ -19,13 +21,30 @@ services:
     ports:
       - "7881:7881"             # ICE TCP candidates
       - "7882:7882/udp"         # ICE UDP (single-port mux)
-      - "5349:5349"             # TURNS (TURN over TLS)
-      - "30000-30100:30000-30100/udp"  # TURN relay media ports
+      # 5349 is NOT published. TURNS now arrives on 443, is terminated by nginx
+      # and forwarded over the compose network to livekit:5349 as plaintext —
+      # so the TURN listener must not be reachable from the internet at all.
+      #
+      # TURN relay media ports. Widened 30000-30100 (101 ports) -> 30000-30999:
+      # one UDP port per TURN allocation and two allocations per participant
+      # (publisher + subscriber peer connection) capped relayed concurrency at
+      # roughly FIFTY participants, independent of CPU. This range must stay in
+      # lockstep with relay_range_* in livekit.yml and the host firewall.
+      #
+      # REQUIRES `"userland-proxy": false` in /etc/docker/daemon.json — see
+      # DEPLOY.md. With the userland proxy on, Docker forks TWO docker-proxy
+      # processes PER PUBLISHED PORT: measured 1000 ports -> 2000 processes and
+      # 22s of container start, which this 7 GB box will not survive. Disabled,
+      # the whole contiguous range collapses into iptables DNAT and costs
+      # nothing. The deploy workflow refuses to run if it is still enabled.
+      - "30000-30999:30000-30999/udp"
     volumes:
       # livekit.yml is rendered on the box with the `keys:` block appended from
       # secrets by the deploy workflow — see livekit.yml's trailing note.
       - ./livekit.yml:/etc/livekit.yml
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # NOTE: /etc/letsencrypt is deliberately no longer mounted here. With
+      # `turn.external_tls: true` nginx terminates TURNS, so LiveKit never reads
+      # a TLS keypair — one fewer process holding the private key.
     command: --config /etc/livekit.yml
     restart: unless-stopped
 
