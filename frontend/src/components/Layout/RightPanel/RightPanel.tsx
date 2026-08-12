@@ -1,8 +1,7 @@
 import React from "react";
 import { observer } from "mobx-react-lite";
-import { X } from "lucide-react";
 import { appStore } from "../../../stores/appStore";
-import { useSkin } from "../../../hooks/queries/usePreferences";
+import { useShortcutLabel } from "../../../keyboard";
 import { useRightPanel } from "./useRightPanel";
 import { MembersPanel } from "./MembersPanel";
 import { ThreadPanel } from "./ThreadPanel";
@@ -20,7 +19,9 @@ import { ThreadPanel } from "./ThreadPanel";
  */
 export const RightPanel: React.FC = observer(() => {
   const { kind, isOpen, threadId, setPanel } = useRightPanel();
-  const isTerminal = useSkin() === "terminal";
+  // Live label for the same command AppShell binds — rebinding the shortcut
+  // in Preferences relabels this footer with no extra wiring.
+  const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
 
   const groupId = appStore.selectedGroupId;
   const channelId = appStore.selectedChannelId;
@@ -34,6 +35,8 @@ export const RightPanel: React.FC = observer(() => {
     return null;
   }
 
+  const label = kind === "thread" ? "Thread" : "Details";
+
   return (
     <aside
       // `font-mono` is the whole skin switch: terminal renders it as DM Mono,
@@ -44,27 +47,6 @@ export const RightPanel: React.FC = observer(() => {
       data-testid="right-panel"
       aria-label="Conversation details"
     >
-      <div className="flex h-bar shrink-0 items-center justify-between border-b border-line px-2.5">
-        <span
-          className={
-            isTerminal
-              ? "text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none"
-              : "text-xs font-medium uppercase tracking-widest text-dim"
-          }
-        >
-          {kind === "thread" ? "Thread" : "Details"}
-        </span>
-        <button
-          type="button"
-          onClick={() => setPanel("none")}
-          className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
-          aria-label="Close details panel"
-          data-testid="right-panel-close"
-        >
-          <X size={14} aria-hidden />
-        </button>
-      </div>
-
       <div className="min-h-0 flex-1">
         {kind === "members" && (
           <MembersPanel
@@ -84,6 +66,26 @@ export const RightPanel: React.FC = observer(() => {
           />
         )}
       </div>
+
+      {/* Footer, not a header: the same affordance the left sidebar puts at
+          its bottom edge, mirrored to this one. Label on the left, live key
+          combo on the right, whole strip is the toggle. */}
+      <button
+        type="button"
+        data-testid="right-panel-close"
+        onClick={() => setPanel("none")}
+        aria-label={`Close ${label.toLowerCase()} panel (${toggleRightPanelLabel})`}
+        title={`Close ${label.toLowerCase()} panel (${toggleRightPanelLabel})`}
+        className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-line px-2.5 min-h-bar text-left text-xs text-muted transition-colors hover:text-fg"
+      >
+        <span className="flex-1">{label}</span>
+        <kbd
+          aria-hidden="true"
+          className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-2xs leading-[1.2]"
+        >
+          {toggleRightPanelLabel}
+        </kbd>
+      </button>
     </aside>
   );
 });
