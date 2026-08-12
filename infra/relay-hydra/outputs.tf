@@ -5,6 +5,11 @@ output "POLLIS_OVERLAY_DIRECTORY_URL" {
   value       = module.directory.directory_url
 }
 
+output "POLLIS_OVERLAY_REVOCATION_URL" {
+  description = "Stable HTTPS URL the client fetches the signed relay-revocation list from (#813). Bake into the client build. Signed by the SAME key as the directory, so there is no third build-time constant."
+  value       = module.directory.revocation_url
+}
+
 output "POLLIS_OVERLAY_DIRECTORY_KEY" {
   description = "base64 of the 32-byte Ed25519 directory-signing PUBLIC key. Printed by scripts/mint-signing-key.sh; re-surfaced here for convenience if you stored it in SSM."
   value       = "Run scripts/mint-signing-key.sh — it prints this. (Kept out of Terraform so the private half never touches TF state.)"
@@ -47,6 +52,11 @@ output "placement_param" {
 output "intended_image_param" {
   description = "SSM param recording the intended relay build ({image, sha}). CI writes it on every roll; the reconciler and the nodes' user-data read it. Seed a pinned digest by hand for a fresh pool: aws ssm put-parameter --name <this> --type String --overwrite --value '{\"image\":\"ghcr.io/actuallydan/pollis-relay@sha256:...\",\"sha\":\"<gitsha>\"}'."
   value       = aws_ssm_parameter.intended_image.name
+}
+
+output "revocations_param" {
+  description = "SSM param holding the live relay-revocation set (#813). Revoke a node NOW with: aws ssm put-parameter --name <this> --type String --overwrite --value '{\"revoked\":[{\"ip\":\"203.0.113.7\",\"reason\":\"seized\"}]}'. Its SSM Version is the published sequence number — NEVER delete this parameter (that resets Version to 1 and every client rejects it as a rollback); write an empty array to clear."
+  value       = aws_ssm_parameter.revocations.name
 }
 
 output "relay_image_oidc_role_arn" {

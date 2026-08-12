@@ -1,4 +1,4 @@
-# Relay operations & the operational-separation commitment (v0)
+# Relay operations & the operational-separation commitment (v0 + v1)
 
 *Companion to `docs/relay-overlay-design.md` (esp. §11.1, §12, §14). Required
 before the v0 overlay ships, per the §11.1 open question and issue #455. This
@@ -17,10 +17,21 @@ v0 is the **single-hop, first-party-operated fallback relay pool** (design §6.1
   (design §2.1). This is **breach / subpoena defense + IP-unlinking from the
   metadata plane.**
 - **Does NOT defend:** a *malicious* first-party operator who runs both the relay
-  tier and Turso and can join their logs. Removing that trust assumption is
-  **v1** (multi-hop onion, peer-hosted relays, first-party last hop — design
-  §6.2, §14.0). The roadmap north star is explicitly Option B; v0 is the
-  waypoint that ships the plumbing and the honest win in the meantime.
+  tier and Turso and can join their logs. **v1 (#813) is now built** — multi-hop
+  onion, peer-hosted middle hops, first-party guard *and* last hop (design §6.2,
+  §7.1, §13) — and it makes the per-relay position structural: no *single* relay
+  holds both the client's IP and the destination. Read the limit precisely
+  before repeating it as an operator claim:
+  - **Every hop verifies the client's device cert, so every hop learns which
+    account built the circuit.** v1 delivers network-address unlinkability, not
+    anonymity. Hiding the account needs anonymous credentials, which is a
+    separate effort and is not built (design §13).
+  - **A pool of only first-party nodes is still one operator at both ends.** With
+    a guard and an exit that we both run, we can still join IP↔destination by
+    correlating our own two nodes; what v1 removes is any *one* node holding
+    both. The arrangement that genuinely breaks the join is a **peer** middle
+    hop in a different trust domain — which is why volunteer relays exist, and
+    why a peer is never allowed the guard or exit position.
 - **Does NOT defend:** the application-layer social graph (that is sealed sender,
   a separate project — design §2.2), the global passive adversary (§2.3), or
   traffic-fingerprinting by cadence (§11.2). And the relay is **never** part of
@@ -90,20 +101,23 @@ abuse-at-scale defenses are a v1 concern that rides on multi-hop path selection.
 
 ### Honest limits of the offline chain (v0 → v1)
 
-- **No transparency-log anchoring of `account_id_pub` (v1).** Verifying the cert
-  proves *device ∈ account* offline. It does **not** prove that `account_id_pub`
-  is the account's *published* key in the account-key transparency log — doing so
-  requires either a fetch or a client-presented inclusion proof. v0 deliberately
-  does **not** build a transparency-log fetch into the relay, because that would
-  re-introduce the network coupling this whole design removes. Consequence: the
-  relay accepts any self-consistent `(account key, device key)` pair, including
-  one an attacker generated wholesale — which is fine for v0, whose gate is
-  "well-formed device + closed allowlist + rate limit," not "this specific
-  account." Log-anchoring the account id is a documented **v1** hardening.
-- **No live revocation (v1).** A revoked device's cert still verifies until the
-  account's `identity_version` rotates (which re-issues sibling certs). There is
-  no per-connection revocation check in v0 (that would be a metadata-plane
-  query). Documented tradeoff; live revocation is a v1 item.
+- **Transparency-log anchoring of `account_id_pub` — built in v1, off by
+  default.** Verifying the cert proves *device ∈ account* offline. It does **not**
+  prove that `account_id_pub` is the account's *published* key in the account-key
+  transparency log. Without that, the relay accepts any self-consistent
+  `(account key, device key)` pair, including one an attacker generated
+  wholesale — and since per-account rate limits key on `sha256(account_id_pub)`,
+  an attacker with an unlimited supply of self-consistent account keys has an
+  unlimited supply of distinct rate-limiting identities.
+  #813 closes this with the **client-presented inclusion proof**, not a fetch —
+  see "Account anchoring (#813 Phase E2)" below. It is enabled per node and off
+  until clients ship the frame.
+- **No live DEVICE revocation (v1).** A revoked device's cert still verifies until
+  the account's `identity_version` rotates (which re-issues sibling certs). There
+  is no per-connection revocation check in v0 (that would be a metadata-plane
+  query). Documented tradeoff; live device revocation is still a v1 item.
+  **Live RELAY revocation is a different thing and is built** — see "Live relay
+  revocation (#813)" below.
 
 ## 3. Rate limiting & abuse control
 
@@ -138,9 +152,25 @@ plane.
 - **First-party pool guarantees messages-must-work.** The pool exists so the
   network functions even with zero volunteer peers (design §7, §10.3); overlay
   use is opt-in (`off → prefer → strict`), and `strict` surfaces a degraded state
-  rather than silently dropping a send. **Peers are NOT relays in v0** — peer-run
-  relays are a v1 feature. Relaying grants no read access of any kind: a relay
-  only ever forwards sealed TLS bytes to a pinned first-party host (design §8).
+  rather than silently dropping a send. **Peers are NOT relays in v0**; peer-run
+  relays landed with v1 (#813) and are a **middle hop only** — never the guard,
+  never the exit — so the pool is still what carries every circuit's first and
+  last hop. Relaying grants no read access of any kind: a relay only ever
+  forwards sealed TLS bytes to a pinned first-party host (design §8).
+- **Parked peer relays (#813 v1).** A consenting device cannot accept inbound
+  connections, so it **dials out** to each node in the pool, runs the ordinary
+  device handshake, and leaves the connection parked (design §7.1). A node
+  therefore holds a small in-memory registry of parked peers and, on an `Extend`
+  naming a parked peer's leaf fingerprint, splices into that connection instead
+  of dialling. Operationally this needs **no configuration** — a v4 node that is
+  keyed (above) does it automatically — and it changes nothing about what a node
+  stores: the registry is `sha256(peer relay leaf) -> live socket` plus that
+  leaf, held in memory only, reaped when the connection ends, and never
+  persisted or logged. No client identity, no address, no traffic metadata, no
+  counts of who is connected. A peer's leaf is public in the signed directory by
+  construction (clients must pin it), which is why the health port may publish
+  it; nothing else about the registry may ever follow it out. Revocation applies
+  to a parked next hop exactly as it does to a dialled one.
 
 ### Relay pool & failover (client-side)
 
@@ -174,6 +204,119 @@ identity).
 - **Bounded dial.** Each dial has an upper timeout (8s) so an *unreachable* relay
   (packets dropped, no ICMP) fails over fast instead of hanging on the QUIC
   handshake timeout.
+
+### Live relay revocation (#813)
+
+Distinct from **device** revocation, which is still the v1 item noted above. This
+is how a *relay* stops being trusted without waiting for the signed directory's
+~1 hour TTL to lapse.
+
+**The shape.** A second signed artifact — `revocations.json` — sits beside the
+directory, signed by the same Ed25519 directory key, with a **5-minute** TTL and
+re-signed on every 2-minute reconcile. It names revoked relays by advertised
+`addr` and/or by `cert_sha256_b64` (base64 of SHA-256 over the DER leaf). The
+directory carries an additive `revocation: { seq, path, count }` anchor stating
+the minimum sequence a paired list must have.
+
+**Why two artifacts instead of just shortening the directory TTL.** The
+directory's long TTL is a deliberate *availability* property: a wedged reconciler
+must not take the pool down with it. Freshness is a *safety* property and wants
+the opposite. Splitting them lets both be right — the same reason a certificate
+and its CRL have different lifetimes. The exposure window for a seized relay is
+now the revocation TTL, not the directory TTL.
+
+**Fail-closed, in every direction.** A forged, unsigned, expired or replayed
+revocation list never *grants* access; it removes the evidence, and "cannot
+evaluate revocation" resolves the same way as "revoked". Concretely:
+
+- No list, an expired list, or a list below the directory's anchored sequence ⇒
+  **no usable relays** (in `prefer` that means a direct dial, in `strict` a
+  surfaced degrade — never a silent send over a possibly-seized relay).
+- A revocation entry keyed on a selector the build does not understand fails the
+  **whole list** closed, rather than being skipped — skipping would silently
+  downgrade a real revocation into an admission.
+- A relay with no directory key configured cannot evaluate revocation, so it
+  refuses to **extend** circuits to other relays (single-hop `CONNECT` is
+  unaffected — there is no next hop to vouch for). The unconfigured case is the
+  strictest state, not the loosest; making it permissive is how revocation
+  quietly becomes decoration.
+- Sequence numbers come from the revocation parameter's SSM `Version`, so
+  rollback protection is server-side and monotonic by construction. Clients keep a
+  high-water mark and reject anything below it.
+
+**Enforcement points.** `pollis_relay::policy::RevocationStore` is the shared,
+pure decision point (`admit` → `Admit | Revoked | Unevaluable`, and only `Admit`
+is an admission); the reconciler is the producer and additionally drops revoked
+relays from the directory and terminates the matching nodes. Runbook:
+`infra/relay-hydra/README.md` → "Revoke a relay NOW".
+
+On a **relay node** the store gates `Extend` in `server.rs::serve_extend`, twice:
+
+1. **before the dial**, on the next hop's advertised address — so a seized node is
+   never even contacted;
+2. **after the QUIC handshake**, on the full identity including the DER leaf the
+   peer actually presented — which is what binds the `cert_sha256_b64` selector,
+   the one that matters once nodes stop sharing a pooled identity (§7 / peer-hosted
+   relays).
+
+Both refuse with the existing typed `ExtendFailed`. **Operator consequence: a node
+with no `directory_key_b64` configured cannot be a middle hop at all** — it cannot
+evaluate revocation, and "cannot evaluate" resolves the same way as "revoked". It
+still serves circuits that terminate on it, so single-hop is unaffected. A node
+keeps its list current by fetching `revocation_url` every ~60s with backoff
+(`pollis_relay::revocation_sync`); a wedged fetch degrades the node to
+"no longer a middle hop", never to "still trusting a stale list", because expiry
+is checked when `admit` is called rather than when a list is installed.
+
+### Account anchoring (#813 Phase E2)
+
+The relay can require a client to **prove its account key is published in the
+account-key transparency log**, and does it with **zero I/O** — the client
+presents the leaf, an RFC-6962 inclusion proof, and the ML-DSA-44 signed tree
+head, all in one optional v4 `Anchor` frame; the relay checks them against one
+pinned log key. A relay-side *fetch* was the alternative and is ruled out: it
+would put the relay back inside the metadata plane, which is the coupling §2
+exists to remove.
+
+The relay verifies, cheapest check first:
+
+1. the leaf's `(user_id, identity_version, account_id_pub)` are **exactly** the
+   handshake's — anchors are public data, so an unbound proof proves nothing;
+2. the head is inside `anchor_max_age_secs`;
+3. the head verifies under the pinned key **in the account-keys domain context**
+   (one key signs three trees; only the context separates them);
+4. the audit path carries the leaf into that head's root.
+
+Three enforcement rungs, set by config:
+
+| `transparency_key_hex` | `require_account_anchor` | Behaviour |
+|---|---|---|
+| unset | false | No anchoring claim. An anchor is neither required nor judged. **Default.** |
+| set | false | Every presented anchor is verified; a bad one is `Unauthorized`. Absence is served. |
+| set | true | As above, plus a client presenting none is refused with `AnchorRequired`. |
+
+Setting `require_account_anchor` without the key **aborts startup** rather than
+coming up unenforcing.
+
+**Roll it out publish-then-enforce.** Requiring anchors before clients ship the
+frame locks the fleet out; so does requiring them for an account that has not yet
+reached the log's **daily** publish (a signup or key rotation is invisible for up
+to ~24h — the same window that produces `AuditStatus::Pending` in the app). Ship
+the mechanism, get clients presenting anchors, then flip the flag.
+
+**What it does not prove.** That the presented `identity_version` is the account's
+*current* one — that needs the whole tree, i.e. a fetch. A rotated-away key keeps
+verifying, exactly as its device certs do; this is the same "no live DEVICE
+revocation" limit below, not a new one. `anchor_max_age_secs` bounds how stale a
+*head* may be and cannot bound key rotation.
+
+**Backward compatibility.** The §3 directory payload stays at `version: 1` and
+every existing field keeps its exact meaning; the anchor is one additive optional
+top-level field that already-shipped clients ignore. Those clients do not enforce
+revocation — nothing can make a shipped binary do that — but they are not left
+where they were: a revoked node leaves `relays[]` within one reconcile, and the
+directory TTL is cut to 5 minutes while any revocation is active, so their
+exposure drops from up to an hour to minutes with no client change.
 
 ## 5. Turnkey deploy runbook
 
@@ -243,6 +386,30 @@ allowlist = [
 ]
 identity_path = "/var/lib/pollis-relay/identity.key"
 health_bind = "0.0.0.0:9445"
+
+# Act as a MIDDLE HOP of a multi-hop circuit — honour `Extend` by dialing the
+# next relay (wire v4, design §6.2). Default true. Set false to make this node
+# last-hop-only; it still serves circuits that terminate here, and the
+# destination allowlist above is enforced exactly the same either way (a middle
+# hop never sees a destination at all, so the allowlist simply never applies to
+# forwarded traffic).
+allow_extend = true
+
+# Base64 (STANDARD) of the 32-byte Ed25519 key that signs the relay directory AND
+# the revocation list — the same POLLIS_OVERLAY_DIRECTORY_KEY clients pin.
+# REQUIRED to actually be a middle hop: without it this node cannot evaluate
+# revocation, and "cannot evaluate" resolves the same way as "revoked", so every
+# `Extend` is refused regardless of `allow_extend` above. Omitting it is safe,
+# never permissive.
+directory_key_b64 = "<terraform output relay_directory_public_key>"
+revocation_url = "https://relays.pollis.com/revocations.json"
+
+# Transparency-log account anchoring (#813 Phase E2). Omitted ⇒ this node makes
+# no anchoring claim. Do NOT set require_account_anchor until clients ship the
+# `Anchor` frame — see "Account anchoring" above.
+# transparency_key_hex = "<the account-key tree's ML-DSA-44 public key, hex>"
+# require_account_anchor = false
+# anchor_max_age_secs = 604800
 
 [rate_limit]
 new_circuits_per_min_per_ip = 600
@@ -336,16 +503,37 @@ against its own advertised cert.
 ### Step 4 — verify
 
 - **Image is live:** `curl http://<host>:9445/version` →
-  `{"service":"pollis-relay","sha":"<GIT_SHA>","protocol":"pollis-relay/3","protocol_version":3}`.
+  `{"service":"pollis-relay","sha":"<GIT_SHA>","protocol":"pollis-relay/4","protocol_version":4}`.
+  (`protocol` reports the **newest** generation the node speaks; a v4 node also
+  still accepts `pollis-relay/3` clients, so an upgraded node keeps serving the
+  shipped single-hop fleet. The reconciler's expected-protocol setting must be
+  moved to `pollis-relay/4` in the same roll, or it will exclude every upgraded
+  node from the signed directory.)
   `sha` is the build `relay-image.yml` produced (mirrors the DS `/version`
   tripwire — don't trust "container started", confirm the running build);
   `protocol` is the relay's ALPN/wire identity, which the hydra reconciler uses to
   keep a wrong-generation node out of the signed directory and to cycle stale
   builds (#703). `curl http://<host>:9445/health` → `ok`.
+- **Middle-hop readiness — `/version` and `/health` do NOT tell you this, so check
+  it separately.** A v4 node rolled **without** `directory_key_b64` +
+  `revocation_url` comes up perfectly **healthy**, reports `pollis-relay/4`, is
+  admitted to the signed directory, and serves single-hop `CONNECT` normally —
+  while **silently refusing every `Extend`**. It cannot evaluate revocation, and
+  "cannot evaluate" resolves the same way as "revoked" (see "Live relay
+  revocation" above), so multi-hop just quietly does not work and nothing in the
+  probes says so. Confirm both keys are actually in the running node's config
+  before calling a roll done, and confirm the reconciler is publishing
+  `revocations.json`; a client that reaches the node sees only an `ExtendFailed`,
+  which is indistinguishable from an unreachable next hop.
 - **Traffic actually routes:** a client with the overlay in **Prefer** mode (and a
   reachable pool) sends its control-plane traffic (Turso reads, DS writes) through
   a relay — the node's logs show authorized handshakes + dials to the allowlisted
   hosts, and the client's source IP no longer appears at Turso/DS.
+- **Parked peers (only once volunteers exist):** `curl http://<host>:9445/peers` →
+  `{"peers":[{"cert_b64":"..."}]}`, or `{"peers":[]}` when nobody is parked. This
+  is what the directory reconciler aggregates into the directory's additive
+  `peers` field; an empty list is the normal state for a fresh pool and is not a
+  fault.
 
 ### The ops boundary, stated plainly
 

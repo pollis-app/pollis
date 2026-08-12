@@ -11,12 +11,19 @@
 //!
 //! Layout:
 //! - [`proto`] — the wire protocol + the offline device-CERTIFICATE handshake.
-//! - [`server`] — the QUIC relay: handshake → rate limit → allowlist → dial → pipe.
+//! - [`anchor`] — offline transparency-log account anchoring (#813 Phase E2).
+//! - [`server`] — the QUIC relay: handshake → rate limit → allowlist → dial → pipe,
+//!   or → extend to the next relay when it is a middle hop.
 //! - [`client`] — the QUIC relay client.
-//! - [`circuit`] — an n-hop `Circuit` (v0: n = 1) + a [`circuit::CircuitFactory`].
+//! - [`circuit`] — an n-hop `Circuit` + a [`circuit::CircuitFactory`].
+//! - [`onion`] — the per-hop layer: one nested TLS 1.3 session per hop (§6.2).
+//! - [`park`] — parked peer-hosted relays: the reverse hop a NATed peer opens,
+//!   and the tunnel an `Extend` is spliced into (#813).
 //! - [`shim`] — the local SOCKS5 CONNECT server on loopback.
-//! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4).
+//! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4),
+//!   and the fail-closed **live relay revocation** store (#813).
 //! - [`ratelimit`] — in-memory per-account / per-IP abuse control (§11.5).
+//! - [`revocation_sync`] — keeps a deployed node's revocation store loaded.
 //! - [`config`] — the deployable bin's TOML config.
 //! - [`health`] — the opt-in HTTP/1.1 health/version probe endpoint.
 //! - [`http`] — the shared reqwest client helper.
@@ -28,30 +35,40 @@
 //! keys (§8). Auth is the OFFLINE device-cert chain (`pollis-device-cert`), so
 //! the relay makes no metadata-plane query per connection (§11.1).
 
+pub mod anchor;
 pub mod circuit;
 pub mod client;
 pub mod config;
 pub mod health;
 pub mod http;
+pub mod onion;
+pub mod park;
 pub mod policy;
 pub mod proto;
 pub mod ratelimit;
+pub mod revocation_sync;
 pub mod server;
 pub mod shim;
 pub mod stream;
 pub mod tls;
 
 // Re-export the load-bearing types at the crate root for ergonomic consumers.
-pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory};
-pub use client::{ClientIdentity, RelayClient};
+pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory, StaticPathFactory, MAX_HOPS};
+pub use client::{ClientIdentity, RelayClient, RelayLink};
+pub use anchor::{AccountAnchor, AccountKeyLeaf, AnchorError, AnchorPolicy, AnchorVerifier};
 pub use config::{RateLimitFileConfig, RelayFileConfig};
 pub use http::{http_client, http_client_builder};
-pub use policy::{FinalAction, OverlayMode, PlannedRoute, RoutingPolicy};
-pub use proto::{DeviceCertMaterial, RejectReason, VerifiedClient};
+pub use policy::{
+    verify_revocations, Admission, FinalAction, OverlayMode, PlannedRoute, RelayIdentity,
+    RevocationError, RevocationList, RevocationStore, RoutingPolicy, REVOCATION_TYPE,
+    REVOCATION_VERSION,
+};
+pub use park::{ParkedPeers, PeerFingerprint};
+pub use proto::{ClientFrame, DeviceCertMaterial, Park, RejectReason, VerifiedClient};
 // Re-exported so consumers (pollis-core's `net::overlay`) can name the pinned
 // relay leaf type without taking a direct `rustls`/`rustls-pki-types` dependency.
 pub use rustls::pki_types::CertificateDer;
 pub use ratelimit::{RateLimitConfig, RateLimiter};
-pub use server::{Allowlist, HostPattern, RelayConfig, RelayServer, RelayStats};
+pub use server::{Allowlist, HostPattern, PeerObserver, RelayConfig, RelayServer, RelayStats};
 pub use shim::{OverlayHandle, OverlayShim};
 pub use stream::{BoxedStream, RelayStream};

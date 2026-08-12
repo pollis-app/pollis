@@ -74,6 +74,65 @@ pub struct Directory {
     pub issued_at: i64,
     pub expires_at: i64,
     pub relays: Vec<DirectoryRelay>,
+    /// #813 revocation anchor. `None` for a directory published before
+    /// revocation existed, or by a pool that has not enabled it.
+    ///
+    /// One additive **optional** field; `version` stays `1` deliberately (Phase C
+    /// decision) — bumping it would make every already-shipped client reject the
+    /// directory outright, a fleet-wide outage strictly worse than the exposure
+    /// window it was meant to close. See [`crate::net::revocation`] for what the
+    /// client does with it.
+    #[serde(default)]
+    pub revocation: Option<RevocationAnchor>,
+    /// #813 wave-3 peer-hosted relays. Empty for a directory published before
+    /// peers existed, by a pool with no consenting devices parked, or by one
+    /// that has excluded them all as revoked.
+    ///
+    /// The second additive **optional** field, on the same terms as
+    /// `revocation`: `version` stays `1`. **Absent means "no peers", never
+    /// "unknown"** — hence a `Vec` that defaults to empty rather than an
+    /// `Option`: there is no third state for a caller to mishandle, and the
+    /// fail-closed answer (use no peers) is the one an absent field already
+    /// produces.
+    #[serde(default)]
+    pub peers: Vec<DirectoryPeer>,
+}
+
+/// The directory's binding to the separately-published, short-lived
+/// `revocations.json`.
+///
+/// Both artifacts are signed by the same key and neither can be forged, but they
+/// can be **paired dishonestly**: serve a fresh directory beside a
+/// stale-but-unexpired revocation list and the newest revocation disappears.
+/// Carrying the sequence inside the signed directory makes that pairing
+/// detectable — which is the difference between "signed" and "fresh".
+#[derive(Debug, Clone, Deserialize)]
+pub struct RevocationAnchor {
+    /// Monotonic publisher sequence (the SSM parameter's `Version`). A list
+    /// below this is a replay.
+    pub seq: u64,
+    /// Where the list lives, relative to the directory URL unless absolute.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// How many relays the anchored list revokes. `Some(0)` is the only value
+    /// that lets a client tolerate an unreachable list (see
+    /// [`crate::net::revocation`]'s deploy-order carve-out).
+    #[serde(default)]
+    pub count: Option<u32>,
+}
+
+/// The default artifact name, matching the reconciler's `REVOCATIONS_KEY`.
+const DEFAULT_REVOCATION_PATH: &str = "revocations.json";
+
+impl RevocationAnchor {
+    /// The path to fetch, defaulted. An empty string is treated as absent —
+    /// mirroring `directory-verify.mjs`'s `length > 0` guard.
+    pub fn resolved_path(&self) -> &str {
+        match self.path.as_deref().map(str::trim) {
+            Some(p) if !p.is_empty() => p,
+            _ => DEFAULT_REVOCATION_PATH,
+        }
+    }
 }
 
 /// One relay advertised by the directory. `cert_b64` is base64 (STANDARD) of the
@@ -90,9 +149,47 @@ pub struct DirectoryRelay {
     pub cert_b64: String,
 }
 
+/// One **peer-hosted** relay the pool advertises (#813 wave 3), published from
+/// the parked-peer fingerprints the first-party relays report on their health
+/// port. A peer entry is deliberately NOT shaped like a [`DirectoryRelay`]:
+///
+/// - there is **no `addr`**, because a peer never listens for inbound
+///   connections. It is reached only through a first-party relay it has parked
+///   an outbound link with, so a directly-dialable peer is not a state this
+///   design can be in;
+/// - there is **no id, no region and nothing about the volunteer** — a relay
+///   identity must not be linkable to an account. The cert IS the identity (§7),
+///   and it is the selector phase C's revocation list already understands.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DirectoryPeer {
+    /// Base64 (STANDARD) of the DER bytes of the peer's relay leaf. The client
+    /// pins the layer it runs to this hop against exactly these bytes, so
+    /// whichever relay carries the parked link cannot substitute itself for it.
+    pub cert_b64: String,
+    /// The first-party relay addresses this peer is currently parked at, i.e.
+    /// the relays that can reach it. Defaulted so a directory that omits it
+    /// still parses; an entry with none is unreachable and the client drops it.
+    ///
+    /// In v1 a peer parks at **every** first-party relay in the directory, so
+    /// this is informational — the field exists so the scaling path (park at a
+    /// subset, have selection target a relay that holds the link) needs no
+    /// schema change later. [`crate::net::overlay`] already honours it, so that
+    /// change is a reconciler change only.
+    #[serde(default)]
+    pub parked_at: Vec<String>,
+}
+
 /// Fetch the raw envelope bytes from `url` over a DIRECT (non-overlay) client.
 /// See the module docs for why the fetch cannot route through the overlay.
 pub async fn fetch_directory(url: &str) -> Result<Vec<u8>, DirectoryError> {
+    fetch_signed(url).await
+}
+
+/// Fetch any of the pool's signed artifacts (the directory itself, or the
+/// `revocations.json` its anchor names) over the same DIRECT client. Both are
+/// Ed25519-signed, so their integrity does not depend on the transport, and both
+/// must bootstrap without the pool they describe.
+pub async fn fetch_signed(url: &str) -> Result<Vec<u8>, DirectoryError> {
     let client = reqwest::Client::builder()
         .timeout(FETCH_TIMEOUT)
         .build()
@@ -274,6 +371,87 @@ mod tests {
             verify_directory(&env, &pinned_b64(&sk), 1500),
             Err(DirectoryError::EmptyRelays)
         ));
+    }
+
+    /// The #813 anchor is additive: a directory WITHOUT it still verifies (this
+    /// is what keeps already-shipped clients working), and `version` stays 1.
+    #[test]
+    fn a_directory_without_a_revocation_anchor_still_verifies() {
+        let sk = signing_key();
+        let dir = verify_directory(&envelope_for(&sk, &valid_payload(2000)), &pinned_b64(&sk), 1500)
+            .expect("valid");
+        assert_eq!(dir.version, 1);
+        assert!(dir.revocation.is_none());
+    }
+
+    /// ...and a directory WITH it parses the anchor, defaulting `path`.
+    #[test]
+    fn parses_the_revocation_anchor() {
+        let sk = signing_key();
+        let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"x:1","cert_b64":"QUJD"}],"revocation":{"seq":12,"count":2}}"#;
+        let dir =
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
+        let anchor = dir.revocation.expect("anchor present");
+        assert_eq!(anchor.seq, 12);
+        assert_eq!(anchor.count, Some(2));
+        assert_eq!(anchor.resolved_path(), "revocations.json");
+
+        // An explicit path wins; an empty one falls back to the default.
+        let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"x:1","cert_b64":"QUJD"}],"revocation":{"seq":1,"path":"  ","count":0}}"#;
+        let dir =
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
+        assert_eq!(dir.revocation.unwrap().resolved_path(), "revocations.json");
+    }
+
+    /// The #813 wave-3 `peers` field is additive on the same terms: a directory
+    /// WITHOUT it still verifies and reads as "no peers", and `version` stays 1.
+    #[test]
+    fn a_directory_without_peers_still_verifies_and_means_no_peers() {
+        let sk = signing_key();
+        let dir = verify_directory(&envelope_for(&sk, &valid_payload(2000)), &pinned_b64(&sk), 1500)
+            .expect("valid");
+        assert_eq!(dir.version, 1);
+        assert!(
+            dir.peers.is_empty(),
+            "an absent `peers` must mean NO peers, never 'unknown'"
+        );
+    }
+
+    /// ...and a directory WITH it parses peer entries, defaulting `parked_at`.
+    #[test]
+    fn parses_peer_entries() {
+        let sk = signing_key();
+        let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"x:1","cert_b64":"QUJD"}],"peers":[{"cert_b64":"UEVFUg==","parked_at":["203.0.113.7:9444","203.0.113.8:9444"]},{"cert_b64":"UEVFUjI="}]}"#;
+        let dir =
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
+        assert_eq!(dir.version, 1);
+        assert_eq!(dir.peers.len(), 2);
+        assert_eq!(dir.peers[0].cert_b64, "UEVFUg==");
+        assert_eq!(dir.peers[0].parked_at.len(), 2);
+        // A peer that reports no parking is parsed, not rejected — the client
+        // drops it as unreachable rather than the whole directory.
+        assert!(dir.peers[1].parked_at.is_empty());
+    }
+
+    /// **Backward compatibility of the frozen §3 contract.** A directory
+    /// carrying BOTH additive fields must still satisfy everything an
+    /// already-shipped client checks: version 1, its relay entries unchanged,
+    /// and no new required field anywhere. The Rust struct ignores unknown
+    /// fields, which is the property this pins — the JS half of the same
+    /// guarantee is `infra/relay-hydra/test/directory-contract.test.mjs`.
+    #[test]
+    fn an_old_client_still_parses_a_peers_carrying_directory() {
+        let sk = signing_key();
+        let payload = r#"{"version":1,"issued_at":1000,"expires_at":2000,"relays":[{"addr":"203.0.113.7:9444","region":"us-west-2","cert_b64":"QUJD"}],"revocation":{"seq":9,"count":0},"peers":[{"cert_b64":"UEVFUg==","parked_at":["203.0.113.7:9444"]}],"some_field_from_2028":{"nested":true}}"#;
+        let dir =
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500).expect("valid");
+        assert_eq!(dir.version, 1, "version must stay 1 — see the module docs");
+        assert_eq!(dir.relays.len(), 1);
+        assert_eq!(dir.relays[0].addr, "203.0.113.7:9444");
+        assert_eq!(dir.relays[0].region, "us-west-2");
+        assert_eq!(dir.relays[0].cert_b64, "QUJD");
+        assert_eq!(dir.revocation.expect("anchor").seq, 9);
+        assert_eq!(dir.peers.len(), 1);
     }
 
     #[test]

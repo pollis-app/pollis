@@ -97,6 +97,14 @@ anyhow = "1"
 # Depended on UNCONDITIONALLY — the overlay is compiled into every consumer but
 # stays INERT unless `POLLIS_OVERLAY` selects a non-off mode at runtime (§14.0).
 pollis-relay = { path = "../pollis-relay" }
+# The outbound QUIC a consenting relay-serving device parks at each first-party
+# relay (#813 `net::peer::park`). `pollis_relay::client` only models the
+# client→relay direction and cannot ACCEPT the streams a relay opens back on a
+# parked connection, which is the whole reverse hop — so this side owns its own
+# endpoint. Same versions/features pollis-relay already pins (ring, no aws-lc-rs)
+# and both are already in the workspace lockfile: no new supply-chain surface.
+quinn = { version = "0.11", default-features = false, features = ["ring", "runtime-tokio", "rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # The offline device-certificate primitive (payload format + verification),
 # shared verbatim with pollis-relay so the relay's handshake and pollis-core's
 # MLS accept path can never drift. pollis-core mints certs; pollis-relay verifies
@@ -312,4 +320,3 @@ required-features = ["cli"]
 # 0.26 are already in the lockfile (reqwest + quinn); no new supply-chain crates.
 [dev-dependencies]
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

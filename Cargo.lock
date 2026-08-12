@@ -6696,6 +6696,7 @@ dependencies = [
  "pollis-capture-proto",
  "pollis-device-cert",
  "pollis-relay",
+ "quinn",
  "rand 0.8.6",
  "rand_core 0.6.4",
  "reqwest 0.12.28",
@@ -6764,7 +6765,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
+ "ed25519-dalek",
  "getrandom 0.2.17",
+ "hex",
  "ml-dsa",
  "pollis-device-cert",
  "quinn",
@@ -6773,6 +6776,7 @@ dependencies = [
  "rustls 0.23.39",
  "rustls-pki-types",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "thiserror 1.0.69",
  "tokio",
@@ -6780,6 +6784,7 @@ dependencies = [
  "tokio-socks",
  "toml 0.8.2",
  "tracing",
+ "verifiable-log",
 ]
 
 [[package]]

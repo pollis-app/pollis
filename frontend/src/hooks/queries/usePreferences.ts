@@ -120,6 +120,24 @@ export interface PreferencesData {
    * load. Absent → `off` (the direct path). See `OverlayMode`.
    */
   overlay_mode?: OverlayMode;
+  /**
+   * Consent to act as a relay FOR OTHER PEOPLE (#813 §10.2). Deliberately
+   * separate from `overlay_mode` — routing your own traffic through the
+   * overlay never implies carrying anyone else's, and vice versa. Absent →
+   * `false`; this is opt-in only and must never be defaulted on.
+   */
+  relay_serving?: boolean;
+  /**
+   * Condition: only relay while the device reports an unmetered (Wi-Fi)
+   * connection. Absent → `true` (§10.2 / §11.6 — being a relay on a metered
+   * link is user-hostile if mis-defaulted).
+   */
+  relay_serving_wifi_only?: boolean;
+  /**
+   * Condition: only relay while the device is running on external power.
+   * Absent → `true`, same reasoning as `relay_serving_wifi_only`.
+   */
+  relay_serving_power_only?: boolean;
 }
 
 // Voice-identity parsing (`userIdFromVoiceIdentity`) lives in
@@ -340,6 +358,9 @@ export function usePreferences() {
         overlay_mode: normalizeOverlayMode(
           getPreference<string | undefined>(json, "overlay_mode", undefined),
         ),
+        relay_serving: getPreference<boolean>(json, "relay_serving", false),
+        relay_serving_wifi_only: getPreference<boolean>(json, "relay_serving_wifi_only", true),
+        relay_serving_power_only: getPreference<boolean>(json, "relay_serving_power_only", true),
       };
     },
     enabled: !!currentUser,

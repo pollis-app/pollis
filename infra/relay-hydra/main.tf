@@ -161,9 +161,10 @@ module "directory" {
     aws.us_east_1 = aws.us_east_1
   }
 
-  name_prefix          = local.name_prefix
-  directory_domain     = var.directory_domain
-  directory_object_key = var.directory_object_key
+  name_prefix           = local.name_prefix
+  directory_domain      = var.directory_domain
+  directory_object_key  = var.directory_object_key
+  revocation_object_key = var.revocation_object_key
 }
 
 # ── Reconciler: Lambda + schedule + IAM + alarms ────────────────────────────
@@ -180,6 +181,8 @@ module "reconciler" {
   placement_param_arn      = local.placement_param_arn
   intended_image_param     = local.intended_image_param
   intended_image_param_arn = local.intended_image_param_arn
+  revocations_param        = local.revocations_param
+  revocations_param_arn    = local.revocations_param_arn
   signing_key_param        = local.signing_key_param
   identity_cert_param      = local.identity_cert_param
   secret_param_arns        = local.secret_param_arns
@@ -191,6 +194,10 @@ module "reconciler" {
   directory_bucket_arn  = module.directory.bucket_arn
   directory_object_key  = var.directory_object_key
   directory_ttl_seconds = var.directory_ttl_seconds
+
+  revocation_object_key         = var.revocation_object_key
+  revocation_ttl_seconds        = var.revocation_ttl_seconds
+  revoked_directory_ttl_seconds = var.revoked_directory_ttl_seconds
 
   relay_port              = var.relay_port
   health_port             = var.health_port

@@ -30,8 +30,10 @@ use tokio::task::JoinHandle;
 use tower_service::Service;
 
 use super::directory;
+use super::path::{self, GuardBook, RelayEndpoint, RelayPath};
+use super::revocation::RelayAdmission;
 
-use pollis_relay::circuit::{Circuit, CircuitFactory, Hop};
+use pollis_relay::circuit::{Circuit, CircuitFactory};
 use pollis_relay::client::ClientIdentity;
 use pollis_relay::proto::DeviceCertMaterial;
 use pollis_relay::stream::BoxedStream;
@@ -77,10 +79,26 @@ fn host_of(url: &str) -> Option<String> {
 
 /// Build the per-host routing policy from `Config` for a given runtime `mode`:
 /// the first-party control plane (Turso + optional commit-log DB, the DS, R2)
-/// routes through the overlay; LiveKit stays DIRECT in every mode (the media
-/// plane, §6.4). Any host not on either list is dialed direct (e.g. non-first-
-/// party Expo push, §14.4). The mode is passed explicitly (not read from
-/// `config.overlay_mode`) because it is now a RUNTIME value the shim can flip.
+/// routes through the overlay. Any host not on that list is dialed direct —
+/// including **LiveKit, signalling and media both** (see below) and
+/// non-first-party Expo push (§14.4). The mode is passed explicitly (not read
+/// from `config.overlay_mode`) because it is a RUNTIME value the shim can flip.
+///
+/// **LiveKit is deliberately absent, decided in #813 — see §14.4 item 3.**
+/// Overlaying LiveKit's signalling WebSocket was scoped and then cut, because it
+/// buys nothing: media (RTP) goes direct to the same first-party host by the
+/// §6.4 plane split, so that host learns the client's address from the call
+/// regardless — ICE hands it over by design. Hiding the setup connection while
+/// the media stream announces the same address to the same operator seconds
+/// later is not a privacy gain. Reopening it requires changing the plane split,
+/// not the transport.
+///
+/// Note this is a *policy* choice, not a capability gap. The shim is a SOCKS5
+/// CONNECT proxy — TCP only, reached over loopback by callers that opt in — so
+/// even if the LiveKit host were listed, RTP could not traverse it: voice frames
+/// are UDP from the Rust media stack's own sockets. That property is what makes
+/// the §6.4 split structural, and it is still proved by
+/// `a_socks_shim_cannot_carry_media_even_for_an_overlaid_host`.
 pub(crate) fn overlay_policy(config: &Config, mode: OverlayMode) -> RoutingPolicy {
     let mut overlay_hosts: Vec<String> = Vec::new();
     let control_urls = [
@@ -98,13 +116,10 @@ pub(crate) fn overlay_policy(config: &Config, mode: OverlayMode) -> RoutingPolic
         }
     }
 
-    // Media plane: LiveKit is always direct (§6.4), even in Strict mode.
-    let direct_hosts: Vec<String> = host_of(&config.livekit_url).into_iter().collect();
-
     RoutingPolicy::new(
         mode,
         Allowlist::from_patterns(overlay_hosts),
-        Allowlist::from_patterns(direct_hosts),
+        Allowlist::default(),
     )
 }
 
@@ -155,16 +170,6 @@ const RELAY_EXPLORE_EVERY: usize = 20;
 /// real first-party relay handshake over the internet.
 const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// A resolved relay endpoint: the `host:port` to dial and the pinned QUIC leaf
-/// the client verifies it against (the relay's identity *is* its cert, §7).
-#[derive(Clone)]
-struct RelayEndpoint {
-    /// As configured; resolved to a `SocketAddr` per dial (v0 relays are a small
-    /// known set, so a fresh lookup per circuit is fine).
-    addr: String,
-    cert: CertificateDer<'static>,
-}
-
 /// The production [`CircuitFactory`]: on each `connect`, present the logged-in
 /// device's [`ClientIdentity`] and dial the configured relay, returning the
 /// resulting byte pipe (over which the caller runs its own TLS to the real host).
@@ -212,6 +217,23 @@ struct RelayEndpoint {
 /// the band/explore rules that keep load spread and stop any endpoint being
 /// starved. Samples come from real dials ([`RealRelayFactory::record_latency`]);
 /// there is no probe traffic and still no background poll.
+///
+/// **Path selection (#813 phase B).** A `connect` no longer dials one relay: it
+/// picks an **exit** from the pool exactly as before (health, then latency band,
+/// then explore — all of §14.1/#812 unchanged), and then asks
+/// [`crate::net::path`] for the rest of the path around it — a pinned guard in
+/// front, region-diverse middles if the target length calls for them. The exit is
+/// still the endpoint whose health and latency are recorded, so the pool's
+/// fail-open behaviour is per-attempt exactly as it was. A pool too small to
+/// leave a spare node builds a single-hop path, which is byte-for-byte the v0
+/// dial. **The last hop is first-party by construction** — see
+/// [`crate::net::path::RelayPath`].
+///
+/// **Revocation (#813 phase C's client half).** Every candidate is run through
+/// [`RelayAdmission`] at *dial* time. "Cannot evaluate" resolves identically to
+/// "revoked", so a missing/expired/stale-vs-anchor list yields an EMPTY candidate
+/// set — never the unfiltered pool — and `connect` then errors, which is the
+/// existing, tested path to `Prefer`→direct and `Strict`→degrade.
 struct RealRelayFactory {
     /// Weak so the factory (owned by the shim task, owned by `AppState.overlay`)
     /// does not form a reference cycle back into `AppState`.
@@ -239,6 +261,15 @@ struct RealRelayFactory {
     /// Upper bound on a single dial. `RELAY_DIAL_TIMEOUT` in production; tests
     /// inject a short value so an unreachable endpoint fails over fast.
     dial_timeout: Duration,
+    /// Client-side revocation gate. Shared across pool rebuilds so the store's
+    /// high-water sequence (rollback protection) survives a directory refresh.
+    admission: Arc<RelayAdmission>,
+    /// Pinned entry relays (§4.4a), shared across pool rebuilds so a refresh
+    /// does not silently re-roll the client's guards.
+    guards: Arc<GuardBook>,
+    /// Path length to aim for. [`path::TARGET_HOPS`] in production; tests inject
+    /// a longer target to exercise middle-hop selection.
+    target_hops: usize,
 }
 
 impl RealRelayFactory {
@@ -248,8 +279,19 @@ impl RealRelayFactory {
         endpoints: Vec<RelayEndpoint>,
         cooldown: Duration,
         dial_timeout: Duration,
+        admission: Arc<RelayAdmission>,
+        guards: Arc<GuardBook>,
     ) -> Self {
         let n = endpoints.len();
+        // Peers only pay for themselves as an EXTRA hop (see `path::hops_for`), so
+        // the target length is raised exactly when the pool contains one. A pool
+        // with no peers therefore builds byte-for-byte the paths it built before
+        // wave 3 — no peers, no change.
+        let target_hops = if endpoints.iter().any(|e| e.tier == path::RelayTier::Peer) {
+            path::MAX_PATH_HOPS
+        } else {
+            path::TARGET_HOPS
+        };
         RealRelayFactory {
             state,
             endpoints,
@@ -259,6 +301,9 @@ impl RealRelayFactory {
             latency: Mutex::new(vec![None; n]),
             cooldown,
             dial_timeout,
+            admission,
+            guards,
+            target_hops,
         }
     }
 
@@ -355,23 +400,32 @@ impl RealRelayFactory {
         self.health.lock().unwrap()[idx] = None;
     }
 
-    /// Dial a single endpoint: resolve → single-hop circuit → connect to the
-    /// target. Kept single-hop (v0 is n=1 first-party); the pool decides *which*
-    /// relay, not *how many hops*.
-    async fn dial_endpoint(
+    /// Dial along `path`: resolve every hop → build the circuit → connect to the
+    /// target through it. A one-hop path is byte-for-byte the v0 exchange
+    /// (`Circuit::connect` special-cases `n == 1`), so a small pool is unchanged.
+    async fn dial_path(
         &self,
-        endpoint: &RelayEndpoint,
+        path: &RelayPath,
         identity: &Arc<ClientIdentity>,
         host: &str,
         port: u16,
     ) -> anyhow::Result<BoxedStream> {
-        let addr = tokio::net::lookup_host(&endpoint.addr)
-            .await
-            .map_err(|e| anyhow::anyhow!("overlay: resolve relay {}: {e}", endpoint.addr))?
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("overlay: relay {} did not resolve", endpoint.addr))?;
-        let circuit = Circuit::build_single_hop(Hop::new(addr, endpoint.cert.clone()), identity.clone());
+        let hops = path.resolve_hops().await?;
+        let circuit = Circuit::build(hops, identity.clone())?;
         circuit.connect(host, port).await
+    }
+
+    /// The relays this connect may use at all, in try order:
+    /// [`RealRelayFactory::candidate_order`] (health → latency band → explore,
+    /// all unchanged) filtered through the revocation gate. A relay we cannot
+    /// positively evaluate is treated as revoked, so an empty result is the
+    /// fail-closed state — `connect` then errors, which is the same path an
+    /// all-down pool already takes to `Prefer`→direct / `Strict`→degrade.
+    fn admissible_order(&self, now_secs: i64) -> Vec<usize> {
+        self.candidate_order()
+            .into_iter()
+            .filter(|&i| self.admission.admits(&self.endpoints[i], now_secs))
+            .collect()
     }
 
     /// Load (or reuse the cached) device `ClientIdentity`. Errors — fail-closed —
@@ -404,15 +458,50 @@ impl CircuitFactory for RealRelayFactory {
         }
         let identity = self.identity().await?;
 
+        // Revocation gate first: an inadmissible pool is an EMPTY pool, never the
+        // unfiltered one.
+        let now_secs = now_unix_secs() as i64;
+        let admitted = self.admissible_order(now_secs);
+        if admitted.is_empty() {
+            anyhow::bail!(
+                "overlay: no admissible relay (revocation fail-closed{})",
+                if self.admission.enforcement_required() {
+                    ", list required by the directory anchor"
+                } else {
+                    ""
+                }
+            );
+        }
+        // Pinned entry relays, restricted to what is admissible right now. Only
+        // needed once a path is longer than one hop.
+        let guards = if path::is_multi_hop(&self.endpoints, &admitted, self.target_hops) {
+            self.guards.guards_for(&self.endpoints, &admitted, now_secs)
+        } else {
+            Vec::new()
+        };
+
         // Try the pool in health order and return the FIRST success. Only when
         // EVERY candidate fails do we error — so a single dead relay never wedges
         // delivery, but an all-down pool still surfaces (Prefer→direct,
-        // Strict→degrade). Each failed dial marks that endpoint dead; each success
-        // clears it.
+        // Strict→degrade). Each failed dial marks the EXIT endpoint dead; each
+        // success clears it. The exit is what the health/latency model is about:
+        // it is the hop that actually reaches the destination.
         let mut last_err = None;
-        for idx in self.candidate_order() {
+        for (attempt, idx) in admitted.iter().copied().enumerate() {
+            let Some(selected) = path::plan_path(
+                &self.endpoints,
+                &admitted,
+                &guards,
+                idx,
+                attempt,
+                self.target_hops,
+            ) else {
+                // No valid path with this candidate as the exit — most commonly a
+                // peer relay, which may never terminate a circuit (§4.4).
+                continue;
+            };
             let started = Instant::now();
-            let dial = self.dial_endpoint(&self.endpoints[idx], &identity, host, port);
+            let dial = self.dial_path(&selected, &identity, host, port);
             let outcome = match tokio::time::timeout(self.dial_timeout, dial).await {
                 Ok(res) => res,
                 Err(_) => Err(anyhow::anyhow!(
@@ -542,7 +631,10 @@ fn load_relay_endpoints(config: &Config) -> Vec<RelayEndpoint> {
     };
     addrs
         .into_iter()
-        .map(|addr| RelayEndpoint { addr, cert: cert.clone() })
+        // The static config names OUR relays and carries no region, so every
+        // entry is first-party with an unknown region (which the selector treats
+        // as "not known to be diverse", never as diverse).
+        .map(|addr| RelayEndpoint::first_party(addr, String::new(), cert.clone()))
         .collect()
 }
 
@@ -591,18 +683,77 @@ const DIRECTORY_MIN_REFETCH: Duration = Duration::from_secs(15);
 /// shares one across the pool, but we consume whatever is listed). Entries whose
 /// `cert_b64` is not valid base64/DER are skipped — never dial a relay we cannot
 /// pin.
-fn directory_to_endpoints(dir: &directory::Directory) -> Vec<RelayEndpoint> {
+pub(crate) fn directory_to_endpoints(dir: &directory::Directory) -> Vec<RelayEndpoint> {
     use base64::Engine as _;
-    dir.relays
+    let mut endpoints: Vec<RelayEndpoint> = dir
+        .relays
         .iter()
         .filter_map(|r| {
             let der = base64::engine::general_purpose::STANDARD
                 .decode(r.cert_b64.trim())
                 .ok()?;
-            Some(RelayEndpoint {
-                addr: r.addr.clone(),
-                cert: CertificateDer::from(der),
-            })
+            // Everything in `relays[]` is ours: the reconciler only lists nodes it
+            // runs. Peer-hosted relays are a separate array and are tiered `Peer`
+            // below, which is what keeps them out of the guard and exit positions.
+            Some(RelayEndpoint::first_party(
+                r.addr.clone(),
+                r.region.clone(),
+                CertificateDer::from(der),
+            ))
+        })
+        .collect();
+    let peers = directory_to_peer_endpoints(dir, &endpoints);
+    endpoints.extend(peers);
+    endpoints
+}
+
+/// The peer-hosted middle hops a verified directory offers (#813 wave 3).
+///
+/// The signed directory is the **only** channel a peer can arrive through
+/// (`crate::net::peer::discovery`'s module docs spell out why an unsigned one
+/// would undo the design), and this is the only producer of [`RelayTier::Peer`]
+/// endpoints. Everything here fails toward *fewer peers*, which is the pool as it
+/// was before peers existed:
+///
+/// - an entry whose `cert_b64` is not valid base64/DER is skipped — a hop we
+///   cannot pin is a hop we will not build a layer to;
+/// - an entry parked at no relay in **this** directory is skipped as unreachable.
+///   A peer accepts no inbound connections, so a relay we are not advertising
+///   cannot be asked to splice into its link;
+/// - the rendezvous address recorded on the endpoint is the first parked relay
+///   that IS advertised, so a peer is never pinned to a node clients have stopped
+///   using.
+///
+/// Revocation is deliberately **not** applied here: it is evaluated per candidate
+/// at dial time by [`RelayAdmission`], on the same `cert_sha256_b64` selector
+/// relays use, so a peer revoked after this directory was fetched is refused too.
+fn directory_to_peer_endpoints(
+    dir: &directory::Directory,
+    first_party: &[RelayEndpoint],
+) -> Vec<RelayEndpoint> {
+    use base64::Engine as _;
+    dir.peers
+        .iter()
+        .filter_map(|p| {
+            let der = base64::engine::general_purpose::STANDARD
+                .decode(p.cert_b64.trim())
+                .ok()?;
+            let parked_at: Vec<String> = p
+                .parked_at
+                .iter()
+                .filter(|a| first_party.iter().any(|e| &&e.addr == a))
+                .cloned()
+                .collect();
+            let rendezvous = parked_at.first()?.clone();
+            Some(RelayEndpoint::peer_parked_at(
+                rendezvous,
+                // The directory carries no region for a peer, and inventing one
+                // would be worse than none: the selector treats an unknown region
+                // as "not known to be diverse", never as diverse.
+                String::new(),
+                CertificateDer::from(der),
+                parked_at,
+            ))
         })
         .collect()
 }
@@ -676,16 +827,32 @@ impl CircuitFactory for SwappableFactory {
 /// Fetch + verify the directory and build a fresh relay pool from it. Returns the
 /// new factory and the directory's `expires_at` (to schedule the next refresh).
 /// Fails (fail-closed) if the fetch, verification, or every listed cert fails.
+///
+/// **The revocation list rides this same tick** (#813 phase C's client half): no
+/// second timer, because CLAUDE.md bans polling loops and the list's freshness
+/// only has to keep up with the pool it filters. A failed revocation refresh is
+/// deliberately NOT an error here — the pool is still built, and
+/// [`RelayAdmission`] then refuses every member of it while the anchor requires a
+/// list. Making it an error instead would swap a fail-closed pool for a *stale*
+/// pool, which is the wrong way round.
 async fn fetch_and_build_pool(
     url: &str,
     key: &str,
     state: &Weak<AppState>,
     cooldown: Duration,
     dial_timeout: Duration,
+    admission: &Arc<RelayAdmission>,
+    guards: &Arc<GuardBook>,
 ) -> anyhow::Result<(Arc<dyn CircuitFactory>, i64)> {
     let bytes = directory::fetch_directory(url).await?;
     let now = now_unix_secs() as i64;
     let dir = directory::verify_directory(&bytes, key, now)?;
+    // Adopt the anchor BEFORE fetching the list, so the seq floor the install
+    // checks against is the one this directory commits to.
+    admission.observe_directory(&dir);
+    if let Err(e) = admission.refresh(url, &dir, now).await {
+        eprintln!("[overlay] revocation list unusable ({e}) — relays fail closed while the directory anchors one");
+    }
     let endpoints = directory_to_endpoints(&dir);
     if endpoints.is_empty() {
         anyhow::bail!("overlay: directory verified but no relay had a usable pinned cert");
@@ -695,6 +862,8 @@ async fn fetch_and_build_pool(
         endpoints,
         cooldown,
         dial_timeout,
+        admission.clone(),
+        guards.clone(),
     ));
     Ok((factory, dir.expires_at))
 }
@@ -706,6 +875,7 @@ async fn fetch_and_build_pool(
 /// and retries on a fixed backoff. Exits when the factory is dropped (overlay
 /// stopped) — the `Weak` upgrade fails. This is event-driven + lazy, not a
 /// keepalive poll: it sleeps on the directory's own TTL and on real dial failures.
+#[allow(clippy::too_many_arguments)]
 async fn directory_refresh_loop(
     factory: Weak<SwappableFactory>,
     state: Weak<AppState>,
@@ -713,6 +883,8 @@ async fn directory_refresh_loop(
     key: String,
     cooldown: Duration,
     dial_timeout: Duration,
+    admission: Arc<RelayAdmission>,
+    guards: Arc<GuardBook>,
     mut next_sleep: Duration,
 ) {
     let mut last_fetch = Instant::now();
@@ -734,7 +906,17 @@ async fn directory_refresh_loop(
         }
         last_fetch = Instant::now();
 
-        match fetch_and_build_pool(&url, &key, &state, cooldown, dial_timeout).await {
+        match fetch_and_build_pool(
+            &url,
+            &key,
+            &state,
+            cooldown,
+            dial_timeout,
+            &admission,
+            &guards,
+        )
+        .await
+        {
             Ok((next_factory, expires_at)) => match factory.upgrade() {
                 Some(sf) => {
                     sf.swap(next_factory);
@@ -759,6 +941,11 @@ async fn build_directory_factory(state: &Arc<AppState>) -> Arc<dyn CircuitFactor
     let url = state.config.overlay_directory_url.clone().unwrap_or_default();
     let key = state.config.overlay_directory_key.clone().unwrap_or_default();
     let weak_state = Arc::downgrade(state);
+    // Built ONCE and shared across every pool rebuild: the revocation store's
+    // high-water sequence (rollback protection) and the client's guard pins must
+    // both survive a directory refresh, or each refresh would silently reset them.
+    let admission = Arc::new(RelayAdmission::enforcing(&key));
+    let guards = Arc::new(GuardBook::at(GuardBook::default_path()));
 
     let (initial, next_sleep) = match fetch_and_build_pool(
         &url,
@@ -766,6 +953,8 @@ async fn build_directory_factory(state: &Arc<AppState>) -> Arc<dyn CircuitFactor
         &weak_state,
         RELAY_DEAD_COOLDOWN,
         RELAY_DIAL_TIMEOUT,
+        &admission,
+        &guards,
     )
     .await
     {
@@ -777,6 +966,8 @@ async fn build_directory_factory(state: &Arc<AppState>) -> Arc<dyn CircuitFactor
                 Vec::new(),
                 RELAY_DEAD_COOLDOWN,
                 RELAY_DIAL_TIMEOUT,
+                admission.clone(),
+                guards.clone(),
             ));
             (empty, DIRECTORY_RETRY_BACKOFF)
         }
@@ -790,6 +981,8 @@ async fn build_directory_factory(state: &Arc<AppState>) -> Arc<dyn CircuitFactor
         key,
         RELAY_DEAD_COOLDOWN,
         RELAY_DIAL_TIMEOUT,
+        admission,
+        guards,
         next_sleep,
     ));
     *swappable.refresh_task.lock().unwrap() = Some(AbortOnDrop(task));
@@ -816,6 +1009,10 @@ pub(crate) async fn start_overlay_shim(
             load_relay_endpoints(&state.config),
             RELAY_DEAD_COOLDOWN,
             RELAY_DIAL_TIMEOUT,
+            // No signed directory ⇒ no revocation anchor to enforce against, and
+            // a static pool small enough that guards are never consulted.
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
         ))
     };
     let handle = OverlayShim::start(policy, factory)
@@ -1116,6 +1313,9 @@ mod tests {
         for (host, ip) in overrides {
             config.resolve_overrides.insert((*host).to_string(), *ip);
         }
+        // Without a current list this relay refuses every Extend, so multi-hop
+        // tests fail with ExtendFailed. See net::testing.
+        config.revocations = crate::net::testing::healthy_revocations();
         let cert = config.server_cert();
         let stats = config.stats.clone();
         let (task, addr) = RelayServer::spawn(config).unwrap();
@@ -1233,8 +1433,13 @@ mod tests {
         assert_eq!(host_of(""), None);
     }
 
+    /// The plane split: the control plane routes overlay; everything else stays
+    /// direct — LiveKit included, signalling as well as media (#813 cut phase E1;
+    /// §14.4 item 3 records why). What keeps LiveKit *media* direct is the
+    /// transport rather than this list, which is what
+    /// `a_socks_shim_cannot_carry_media_even_for_an_overlaid_host` still pins.
     #[test]
-    fn policy_routes_control_plane_and_leaves_media_direct() {
+    fn policy_routes_control_plane_and_leaves_livekit_direct() {
         let policy = overlay_policy(&cfg(OverlayMode::Prefer, None), OverlayMode::Prefer);
         use pollis_relay::PlannedRoute;
         // Control-plane hosts route overlay (with direct fallback in Prefer).
@@ -1250,7 +1455,8 @@ mod tests {
             policy.plan("r2.example.com"),
             PlannedRoute::Overlay { fallback_to_direct: true }
         );
-        // LiveKit stays direct even in Prefer/Strict.
+        // LiveKit is direct in every mode. Overlaying its signalling would not
+        // hide the client from the SFU, which sees the address via ICE anyway.
         assert_eq!(policy.plan("livekit.example.com"), PlannedRoute::Direct);
         // A non-first-party host (e.g. Expo push) is direct.
         assert_eq!(policy.plan("exp.host"), PlannedRoute::Direct);
@@ -1267,6 +1473,9 @@ mod tests {
         let policy = overlay_policy(&cfg(OverlayMode::Off, None), OverlayMode::Off);
         assert_eq!(policy.plan("turso.example.com"), PlannedRoute::Direct);
         assert_eq!(policy.plan("api.example.com"), PlannedRoute::Direct);
+        // E1 did not weaken this: with the overlay off, the LiveKit signaling
+        // host is direct like everything else.
+        assert_eq!(policy.plan("livekit.example.com"), PlannedRoute::Direct);
     }
 
     #[tokio::test]
@@ -1634,11 +1843,13 @@ mod tests {
             endpoints,
             cooldown,
             Duration::from_secs(2),
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
         )
     }
 
     fn endpoint(addr: String, cert: CertificateDer<'static>) -> RelayEndpoint {
-        RelayEndpoint { addr, cert }
+        RelayEndpoint::first_party(addr, String::new(), cert)
     }
 
     /// FAILOVER: [relayA(unreachable), relayB(up)] → a control-plane dial still
@@ -1798,11 +2009,25 @@ mod tests {
         for _ in 0..N {
             factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
         }
-        // Rotation alternates the first-tried (and, both being up, dialed)
-        // endpoint, so each takes exactly half — deterministic, never flaky.
-        assert_eq!(relay0.stats.dials(), N / 2, "endpoint 0 took its share");
-        assert_eq!(relay1.stats.dials(), N / 2, "endpoint 1 took its share");
+        // Rotation deals connects out across healthy endpoints instead of
+        // hammering endpoint 0 — that is the property, and it is what a
+        // round-robin regression would break.
+        //
+        // The share is deliberately NOT asserted as exactly N/2. These endpoints
+        // are unmeasured on the first two dials and then carry REAL loopback
+        // latencies, which feed #812's band: on a loaded machine one scheduler
+        // hiccup can legitimately put an endpoint more than
+        // `RELAY_LATENCY_BAND` behind and demote it for the rest of the run.
+        // That is the latency preference working as designed, not a spread
+        // failure — asserting exact halves made this test flake (~1 run in 8,
+        // reproducible on the pre-#813 tree).
         assert_eq!(relay0.stats.dials() + relay1.stats.dials(), N);
+        assert!(
+            relay0.stats.dials() >= 1 && relay1.stats.dials() >= 1,
+            "load collapsed onto one endpoint ({} vs {})",
+            relay0.stats.dials(),
+            relay1.stats.dials()
+        );
     }
 
     /// #812: a relay measurably slower than the band is NOT dialed while a fast
@@ -1929,5 +2154,728 @@ mod tests {
         // serves the dial — delivery still works, which is the whole point.
         factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
         assert_eq!(slow_live.stats.dials(), 1, "the slow live relay carried it");
+    }
+
+    // ── (f) #813 phase B: multi-hop paths, guards, the first-party exit ────────
+
+    /// A pool factory with an explicit path length + revocation gate + guard
+    /// book, for the phase-B tests. Everything else matches `pool_factory`.
+    fn path_factory(
+        state: &Arc<AppState>,
+        endpoints: Vec<RelayEndpoint>,
+        admission: Arc<RelayAdmission>,
+        guards: Arc<GuardBook>,
+        target_hops: usize,
+    ) -> RealRelayFactory {
+        let mut factory = RealRelayFactory::new(
+            Arc::downgrade(state),
+            endpoints,
+            Duration::from_secs(30),
+            Duration::from_secs(4),
+            admission,
+            guards,
+        );
+        factory.target_hops = target_hops;
+        factory
+    }
+
+    fn peer_endpoint(addr: String, cert: CertificateDer<'static>) -> RelayEndpoint {
+        RelayEndpoint::peer(addr, String::new(), cert)
+    }
+
+    fn endpoint_in(addr: String, region: &str, cert: CertificateDer<'static>) -> RelayEndpoint {
+        RelayEndpoint::first_party(addr, region.to_string(), cert)
+    }
+
+    /// A pool big enough to leave a spare builds a real MULTI-HOP circuit: hop 1
+    /// only ever `Extend`s (it never sees the destination) and the last hop is the
+    /// one that dials the origin. Both are read off the relays' own counters, so
+    /// this is the wire behaviour, not the selector's opinion of it.
+    #[tokio::test]
+    async fn a_three_relay_pool_builds_a_two_hop_circuit() {
+        let origin = spawn_plain_http("two-hop-target").await;
+        let relays = [spawn_pool_relay(), spawn_pool_relay(), spawn_pool_relay()];
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints: Vec<RelayEndpoint> = relays
+            .iter()
+            .map(|r| endpoint(r.addr.to_string(), r.cert.clone()))
+            .collect();
+        let factory = path_factory(
+            &state,
+            endpoints,
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
+            path::TARGET_HOPS,
+        );
+
+        const N: u64 = 6;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+
+        let dials: u64 = relays.iter().map(|r| r.stats.dials()).sum();
+        let extends: u64 = relays.iter().map(|r| r.stats.extends()).sum();
+        assert_eq!(dials, N, "exactly one hop per circuit reaches the destination");
+        assert_eq!(extends, N, "a 2-hop circuit extends exactly once");
+        // Every circuit has a distinct entry and exit — enforced structurally by
+        // `plan_path` (unit-tested in `net::path`), so no relay ever sees the
+        // client's address and the destination on the SAME circuit. A guard may
+        // still serve as an exit on a *different* circuit; see the module notes.
+        assert!(
+            relays.iter().filter(|r| r.stats.extends() > 0).count() >= 1,
+            "no relay ever acted as an entry hop"
+        );
+        for r in &relays {
+            assert!(
+                r.stats.dials() + r.stats.extends() <= N,
+                "a relay served more positions than there were circuits"
+            );
+        }
+    }
+
+    /// A pool with no spare node stays SINGLE-hop: "messages must work" outranks
+    /// path length, and a 2-hop path across a 2-node pool has nothing to fail
+    /// over to.
+    #[tokio::test]
+    async fn a_two_relay_pool_stays_single_hop() {
+        let origin = spawn_plain_http("single-hop-target").await;
+        let relays = [spawn_pool_relay(), spawn_pool_relay()];
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints: Vec<RelayEndpoint> = relays
+            .iter()
+            .map(|r| endpoint(r.addr.to_string(), r.cert.clone()))
+            .collect();
+        let factory = path_factory(
+            &state,
+            endpoints,
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
+            path::TARGET_HOPS,
+        );
+
+        for _ in 0..4u32 {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        let extends: u64 = relays.iter().map(|r| r.stats.extends()).sum();
+        assert_eq!(extends, 0, "a 2-node pool must not build multi-hop paths");
+        assert_eq!(relays.iter().map(|r| r.stats.dials()).sum::<u64>(), 4);
+    }
+
+    /// THE INVARIANT, on the wire: a peer relay in the pool is **never** the hop
+    /// that reaches the destination. It may carry traffic as a middle, but the
+    /// terminal hop is always first-party (§4.4).
+    #[tokio::test]
+    async fn a_peer_relay_is_never_the_last_hop() {
+        let origin = spawn_plain_http("peer-exit-target").await;
+        let first_a = spawn_pool_relay();
+        let first_b = spawn_pool_relay();
+        let peer = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints = vec![
+            endpoint(first_a.addr.to_string(), first_a.cert.clone()),
+            peer_endpoint(peer.addr.to_string(), peer.cert.clone()),
+            endpoint(first_b.addr.to_string(), first_b.cert.clone()),
+        ];
+        let factory = path_factory(
+            &state,
+            endpoints,
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
+            path::TARGET_HOPS,
+        );
+
+        const N: u64 = 8;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert_eq!(
+            peer.stats.dials(),
+            0,
+            "a peer relay reached the destination — the first-party exit invariant is broken"
+        );
+        assert_eq!(
+            peer.stats.extends(),
+            0,
+            "a peer was used as an entry hop; peers are middle-only"
+        );
+        assert_eq!(
+            first_a.stats.dials() + first_b.stats.dials(),
+            N,
+            "every circuit exited through a first-party relay"
+        );
+    }
+
+    /// ...and the other half of the tier rule: a peer IS carried as a **middle**
+    /// hop. Forcing a 3-hop target over a pool containing one peer puts it in the
+    /// middle (it extends) and never at the end (it never dials).
+    #[tokio::test]
+    async fn a_peer_relay_is_usable_as_a_middle_hop_on_the_wire() {
+        let origin = spawn_plain_http("peer-middle-target").await;
+        let a = spawn_pool_relay();
+        let b = spawn_pool_relay();
+        let c = spawn_pool_relay();
+        let peer = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        // The peer sits in a distinct region, so middle selection prefers it —
+        // which is exactly the point of allowing peers there.
+        let endpoints = vec![
+            endpoint_in(a.addr.to_string(), "us-west-2", a.cert.clone()),
+            endpoint_in(b.addr.to_string(), "us-west-2", b.cert.clone()),
+            RelayEndpoint::peer(peer.addr.to_string(), "eu-west-1".into(), peer.cert.clone()),
+            endpoint_in(c.addr.to_string(), "us-west-2", c.cert.clone()),
+        ];
+        let factory = path_factory(
+            &state,
+            endpoints,
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
+            3,
+        );
+
+        const N: u64 = 4;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert!(
+            peer.stats.extends() > 0,
+            "the peer was never used as a middle hop"
+        );
+        assert_eq!(peer.stats.dials(), 0, "the peer must never be the exit");
+        let extends: u64 = [&a, &b, &c, &peer].iter().map(|r| r.stats.extends()).sum();
+        assert_eq!(extends, N * 2, "a 3-hop circuit extends twice");
+    }
+
+    /// GUARDS: the entry hop is drawn from a small pinned set, not re-rolled per
+    /// circuit. Over many connects at most [`path::GUARD_SET_SIZE`] distinct
+    /// relays ever occupy the entry position, and at least one pool member never
+    /// does — which is the property a random first hop would not have.
+    #[tokio::test]
+    async fn guard_pinning_bounds_the_entry_set() {
+        let origin = spawn_plain_http("guard-target").await;
+        let relays: Vec<TestRelay> = (0..4).map(|_| spawn_pool_relay()).collect();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints: Vec<RelayEndpoint> = relays
+            .iter()
+            .map(|r| endpoint(r.addr.to_string(), r.cert.clone()))
+            .collect();
+        let book = Arc::new(GuardBook::ephemeral());
+        let factory = path_factory(
+            &state,
+            endpoints,
+            Arc::new(RelayAdmission::unenforced()),
+            book,
+            path::TARGET_HOPS,
+        );
+
+        for _ in 0..12u32 {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        let entries = relays.iter().filter(|r| r.stats.extends() > 0).count();
+        assert!(entries >= 1, "somebody must have been the entry hop");
+        assert!(
+            entries <= path::GUARD_SET_SIZE,
+            "entry hops were not pinned: {entries} distinct relays saw the client's address"
+        );
+        assert!(
+            relays.iter().any(|r| r.stats.extends() == 0),
+            "every relay served as an entry — that is a random first hop, not a guard"
+        );
+    }
+
+    // ── (g) #813 phase C's client half: revocation, fail-closed ───────────────
+
+    /// Build an enforcing admission gate holding a freshly-signed list that
+    /// revokes `revoked_addrs`, anchored by a directory with a matching seq.
+    fn enforcing_gate(revoked_addrs: &[&str], now: i64, expires_at: i64) -> Arc<RelayAdmission> {
+        let revoked: Vec<serde_json::Value> = revoked_addrs
+            .iter()
+            .map(|a| serde_json::json!({ "addr": a }))
+            .collect();
+        enforcing_gate_for(revoked, now, expires_at)
+    }
+
+    /// The same, for revocation entries written out in full — the
+    /// `cert_sha256_b64` selector is the only one that can name a peer, which has
+    /// no address of its own.
+    fn enforcing_gate_for(
+        revoked: Vec<serde_json::Value>,
+        now: i64,
+        expires_at: i64,
+    ) -> Arc<RelayAdmission> {
+        use base64::Engine as _;
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let sk = SigningKey::from_bytes(&[21u8; 32]);
+        let key_b64 =
+            base64::engine::general_purpose::STANDARD.encode(sk.verifying_key().to_bytes());
+        let gate = Arc::new(RelayAdmission::enforcing(&key_b64));
+
+        let revoked_count = revoked.len();
+        let payload = serde_json::to_string(&serde_json::json!({
+            "version": pollis_relay::REVOCATION_VERSION,
+            "type": pollis_relay::REVOCATION_TYPE,
+            "seq": 5,
+            "issued_at": now - 10,
+            "expires_at": expires_at,
+            "revoked": revoked,
+        }))
+        .unwrap();
+        let sig = sk.sign(payload.as_bytes());
+        let envelope = serde_json::to_vec(&serde_json::json!({
+            "payload_b64": base64::engine::general_purpose::STANDARD.encode(payload.as_bytes()),
+            "signature_b64": base64::engine::general_purpose::STANDARD.encode(sig.to_bytes()),
+        }))
+        .unwrap();
+
+        let dir_json = format!(
+            r#"{{"version":1,"issued_at":1,"expires_at":9999999999,"relays":[{{"addr":"x:1","cert_b64":"QUJD"}}],"revocation":{{"seq":5,"count":{revoked_count}}}}}"#
+        );
+        let dir: directory::Directory = serde_json::from_str(&dir_json).unwrap();
+        gate.observe_directory(&dir);
+        gate.install(&envelope, now).expect("list installs");
+        gate
+    }
+
+    /// A revoked relay is NEVER dialed — not deprioritized, not tried last. The
+    /// pool routes around it entirely.
+    #[tokio::test]
+    async fn a_revoked_relay_is_never_dialed() {
+        let origin = spawn_plain_http("revocation-target").await;
+        let good = spawn_pool_relay();
+        let seized = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let now = now_unix_secs() as i64;
+        let gate = enforcing_gate(&[&seized.addr.to_string()], now, now + 3_600);
+        let endpoints = vec![
+            endpoint(seized.addr.to_string(), seized.cert.clone()),
+            endpoint(good.addr.to_string(), good.cert.clone()),
+        ];
+        let factory = path_factory(
+            &state,
+            endpoints,
+            gate,
+            Arc::new(GuardBook::ephemeral()),
+            path::TARGET_HOPS,
+        );
+
+        const N: u64 = 6;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert_eq!(seized.stats.dials(), 0, "a revoked relay carried traffic");
+        assert_eq!(seized.stats.extends(), 0, "a revoked relay was an entry hop");
+        assert_eq!(good.stats.dials(), N, "the unrevoked relay carried everything");
+    }
+
+    /// FAIL-CLOSED: the directory anchors a revocation list, we hold none, so the
+    /// pool is EMPTY — never the unfiltered pool. `connect` errors, which is the
+    /// already-tested route to `Prefer`→direct / `Strict`→degrade.
+    #[tokio::test]
+    async fn an_unevaluable_revocation_list_empties_the_pool() {
+        let origin = spawn_plain_http("failclosed-target").await;
+        let relay = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        // Enforcing gate, anchor says 2 relays are revoked, nothing installed.
+        let gate = Arc::new(RelayAdmission::enforcing("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+        let dir: directory::Directory = serde_json::from_str(
+            r#"{"version":1,"issued_at":1,"expires_at":9999999999,"relays":[{"addr":"x:1","cert_b64":"QUJD"}],"revocation":{"seq":9,"count":2}}"#,
+        )
+        .unwrap();
+        gate.observe_directory(&dir);
+
+        let endpoints = vec![endpoint(relay.addr.to_string(), relay.cert.clone())];
+        let factory = path_factory(
+            &state,
+            endpoints,
+            gate,
+            Arc::new(GuardBook::ephemeral()),
+            path::TARGET_HOPS,
+        );
+
+        assert!(
+            factory.connect(ORIGIN_NAME, origin.port()).await.is_err(),
+            "an unevaluable revocation list must empty the pool, not pass it through"
+        );
+        assert_eq!(
+            relay.stats.dials(),
+            0,
+            "a relay was dialed while revocation could not be evaluated"
+        );
+    }
+
+    /// The list expiring mid-session closes the pool at USE time — the client does
+    /// not keep dialing on stale evidence until the next refresh tick.
+    #[tokio::test]
+    async fn an_expired_revocation_list_closes_the_pool_at_use_time() {
+        let origin = spawn_plain_http("expiry-target").await;
+        let relay = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let now = now_unix_secs() as i64;
+        // A list that revokes something (so the anchor requires evidence) and is
+        // already expired as far as `now` is concerned.
+        let gate = enforcing_gate(&["198.51.100.9:9444"], now - 100, now - 1);
+        let endpoints = vec![endpoint(relay.addr.to_string(), relay.cert.clone())];
+        let factory = path_factory(
+            &state,
+            endpoints,
+            gate,
+            Arc::new(GuardBook::ephemeral()),
+            path::TARGET_HOPS,
+        );
+
+        assert!(
+            factory.connect(ORIGIN_NAME, origin.port()).await.is_err(),
+            "an expired list is not evidence; the pool must close"
+        );
+        assert_eq!(relay.stats.dials(), 0);
+    }
+
+    // ── (g2) #813 wave 3: peers published by the directory ────────────────────
+
+    fn cert_b64_of(cert: &CertificateDer<'static>) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(cert.as_ref())
+    }
+
+    fn cert_digest_b64_of(cert: &CertificateDer<'static>) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .encode(pollis_relay::proto::cert_fingerprint(cert.as_ref()))
+    }
+
+    /// A directory JSON carrying `relays` and (optionally) `peers`, parsed the way
+    /// `verify_directory` hands it to the pool builder.
+    fn directory_with(relays: &[(&str, &CertificateDer<'static>)], peers: serde_json::Value) -> directory::Directory {
+        let relays: Vec<serde_json::Value> = relays
+            .iter()
+            .map(|(addr, cert)| {
+                serde_json::json!({ "addr": addr, "region": "us-west-2", "cert_b64": cert_b64_of(cert) })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "issued_at": 1,
+            "expires_at": 9_999_999_999i64,
+            "relays": relays,
+            "peers": peers,
+        }))
+        .expect("directory parses")
+    }
+
+    /// THE PRODUCER: peer entries in the signed directory become `Peer`-tier
+    /// endpoints in the pool — the one channel a peer may arrive through.
+    #[test]
+    fn directory_peers_become_peer_tier_endpoints() {
+        let a = CertificateDer::from(vec![1u8; 24]);
+        let b = CertificateDer::from(vec![2u8; 24]);
+        let p = CertificateDer::from(vec![9u8; 24]);
+        let dir = directory_with(
+            &[("203.0.113.7:9444", &a), ("203.0.113.8:9444", &b)],
+            serde_json::json!([{ "cert_b64": cert_b64_of(&p), "parked_at": ["203.0.113.8:9444", "203.0.113.7:9444"] }]),
+        );
+
+        let endpoints = directory_to_endpoints(&dir);
+        assert_eq!(endpoints.len(), 3);
+        assert!(endpoints[..2]
+            .iter()
+            .all(|e| e.tier == path::RelayTier::FirstParty));
+        let peer = &endpoints[2];
+        assert_eq!(peer.tier, path::RelayTier::Peer);
+        assert_eq!(peer.cert.as_ref(), p.as_ref(), "the client pins the peer's own leaf");
+        // The rendezvous is the first ADVERTISED relay it is parked at, so a peer
+        // is never pinned to a node clients have stopped using.
+        assert_eq!(peer.addr, "203.0.113.8:9444");
+    }
+
+    /// A directory with no `peers` produces exactly the pool it produced before
+    /// wave 3 — and the factory built from it keeps the pre-wave-3 path length,
+    /// so "no peers, no change" is a property of the code, not of the config.
+    #[test]
+    fn a_directory_without_peers_is_unchanged() {
+        let a = CertificateDer::from(vec![1u8; 24]);
+        let b = CertificateDer::from(vec![2u8; 24]);
+        let dir: directory::Directory = serde_json::from_value(serde_json::json!({
+            "version": 1, "issued_at": 1, "expires_at": 9_999_999_999i64,
+            "relays": [
+                { "addr": "203.0.113.7:9444", "region": "us-west-2", "cert_b64": cert_b64_of(&a) },
+                { "addr": "203.0.113.8:9444", "region": "us-west-2", "cert_b64": cert_b64_of(&b) },
+            ],
+        }))
+        .unwrap();
+        let endpoints = directory_to_endpoints(&dir);
+        assert_eq!(endpoints.len(), 2);
+        assert!(endpoints.iter().all(|e| e.tier == path::RelayTier::FirstParty));
+    }
+
+    /// Unusable peer entries are dropped — never dialed, never fatal to the
+    /// directory. Each of these fails toward "fewer peers", i.e. shorter paths.
+    #[test]
+    fn unusable_peer_entries_are_dropped() {
+        let a = CertificateDer::from(vec![1u8; 24]);
+        let p = CertificateDer::from(vec![9u8; 24]);
+        let dir = directory_with(
+            &[("203.0.113.7:9444", &a)],
+            serde_json::json!([
+                // Not decodable as base64 → we could not pin this hop.
+                { "cert_b64": "!!!not base64!!!", "parked_at": ["203.0.113.7:9444"] },
+                // Parked only at a relay this directory does not advertise → no
+                // relay we can reach can splice into its link.
+                { "cert_b64": cert_b64_of(&p), "parked_at": ["198.51.100.9:9444"] },
+                // Parked nowhere at all → same, and the reason `parked_at` is not
+                // optional in practice.
+                { "cert_b64": cert_b64_of(&p) },
+            ]),
+        );
+        let endpoints = directory_to_endpoints(&dir);
+        assert_eq!(endpoints.len(), 1, "an unusable peer entered the pool");
+        assert_eq!(endpoints[0].tier, path::RelayTier::FirstParty);
+    }
+
+    /// THE PRODUCER MEETS THE SELECTOR: a peer published by the signed directory
+    /// is planned into the MIDDLE of a real 3-hop path — `first-party guard →
+    /// peer → first-party exit` — and the pool raises its own path length to make
+    /// room for it (the factory is built the production way, with no injected
+    /// `target_hops`).
+    ///
+    /// This stops at the plan rather than the wire **because a parked peer is not
+    /// dialable, which is the whole point of parking**: its endpoint address is a
+    /// rendezvous — the first-party relay holding its link — and reaching it needs
+    /// that relay to splice the `Extend` into the parked connection instead of
+    /// dialing (wave 3's relay half). The byte-level proof that this selector's
+    /// output carries traffic is `a_peer_relay_is_usable_as_a_middle_hop_on_the_wire`,
+    /// which runs the same `plan_path` over a directly-dialable peer.
+    #[test]
+    fn a_directory_published_peer_is_planned_as_the_middle_hop() {
+        let a = CertificateDer::from(vec![1u8; 24]);
+        let b = CertificateDer::from(vec![2u8; 24]);
+        let c = CertificateDer::from(vec![3u8; 24]);
+        let p = CertificateDer::from(vec![9u8; 24]);
+        let dir = directory_with(
+            &[
+                ("203.0.113.7:9444", &a),
+                ("203.0.113.8:9444", &b),
+                ("203.0.113.9:9444", &c),
+            ],
+            // v1 parks at every first-party relay, so any of them can reach it.
+            serde_json::json!([{
+                "cert_b64": cert_b64_of(&p),
+                "parked_at": ["203.0.113.7:9444", "203.0.113.8:9444", "203.0.113.9:9444"],
+            }]),
+        );
+        let endpoints = directory_to_endpoints(&dir);
+        assert_eq!(endpoints.len(), 4);
+
+        // A pool holding a peer raises its own target length; one without a peer
+        // keeps the pre-wave-3 length. `RealRelayFactory::new` decides this, so it
+        // is checked through the factory rather than restated here.
+        let with_peer = pool_factory_for(&endpoints);
+        assert_eq!(with_peer, path::MAX_PATH_HOPS);
+        assert_eq!(
+            pool_factory_for(&endpoints[..3]),
+            path::TARGET_HOPS,
+            "a peerless pool must not grow paths"
+        );
+
+        let order: Vec<usize> = (0..endpoints.len()).collect();
+        let path = path::plan_path(&endpoints, &order, &[0], 1, 0, with_peer).expect("path");
+        let hops = path.endpoints();
+        assert_eq!(hops.len(), 3, "the peer did not earn its middle hop");
+        assert_eq!(hops[0].tier, path::RelayTier::FirstParty, "the guard is ours");
+        assert_eq!(hops[1].tier, path::RelayTier::Peer);
+        assert_eq!(hops[1].cert.as_ref(), p.as_ref());
+        assert_eq!(hops[2].tier, path::RelayTier::FirstParty, "the exit is ours");
+    }
+
+    /// The `target_hops` a production factory settles on for this pool.
+    fn pool_factory_for(endpoints: &[RelayEndpoint]) -> usize {
+        let state: Weak<AppState> = Weak::new();
+        RealRelayFactory::new(
+            state,
+            endpoints.to_vec(),
+            Duration::from_secs(30),
+            Duration::from_secs(4),
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
+        )
+        .target_hops
+    }
+
+    /// BELT AND BRACES with the reconciler: a peer whose cert is revoked is
+    /// refused CLIENT-side even though the directory still advertises it — which
+    /// is the case that matters, because a client can be holding a directory
+    /// signed before the revocation. `cert_sha256_b64` is the only selector that
+    /// can name a peer; its address belongs to the relay parking it.
+    #[tokio::test]
+    async fn a_revoked_peer_is_never_used_as_a_middle() {
+        let origin = spawn_plain_http("revoked-peer-target").await;
+        let a = spawn_pool_relay();
+        let b = spawn_pool_relay();
+        let c = spawn_pool_relay();
+        let peer = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let dir = directory_with(
+            &[
+                (&a.addr.to_string(), &a.cert),
+                (&b.addr.to_string(), &b.cert),
+                (&c.addr.to_string(), &c.cert),
+            ],
+            serde_json::json!([{
+                "cert_b64": cert_b64_of(&peer.cert),
+                "parked_at": [a.addr.to_string(), b.addr.to_string(), c.addr.to_string()],
+            }]),
+        );
+        let now = now_unix_secs() as i64;
+        let gate = enforcing_gate_for(
+            vec![serde_json::json!({ "cert_sha256_b64": cert_digest_b64_of(&peer.cert) })],
+            now,
+            now + 3_600,
+        );
+
+        let factory = RealRelayFactory::new(
+            Arc::downgrade(&state),
+            directory_to_endpoints(&dir),
+            Duration::from_secs(30),
+            Duration::from_secs(4),
+            gate,
+            Arc::new(GuardBook::ephemeral()),
+        );
+
+        const N: u64 = 4;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert_eq!(peer.stats.extends(), 0, "a REVOKED peer carried traffic");
+        assert_eq!(peer.stats.dials(), 0);
+        // Delivery still works — the pool routes around the revoked peer and
+        // simply builds the shorter, first-party-only path.
+        assert_eq!(
+            a.stats.dials() + b.stats.dials() + c.stats.dials(),
+            N,
+            "revoking a peer must not cost delivery"
+        );
+    }
+
+    // ── (h) #813 phase E1: LiveKit signaling over the overlay, media direct ───
+
+    /// A factory that counts circuit requests, so a test can prove which flows
+    /// reached the overlay and which never touched it.
+    struct CountingFactory {
+        inner: Arc<dyn CircuitFactory>,
+        count: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl CircuitFactory for CountingFactory {
+        async fn connect(&self, host: &str, port: u16) -> anyhow::Result<BoxedStream> {
+            self.count.fetch_add(1, Ordering::Relaxed);
+            self.inner.connect(host, port).await
+        }
+    }
+
+    /// E1's load-bearing property: for ONE host, on ONE port, the signaling
+    /// stream (TCP) is carried by a relay circuit while the media datagram (UDP)
+    /// goes straight to the origin and never reaches the overlay at all.
+    ///
+    /// This is why §6.4's media rule survives putting LiveKit on the overlay host
+    /// list: the shim is a SOCKS5 CONNECT proxy, so the plane split is enforced by
+    /// the *transport*, which no host list could have expressed — signaling and
+    /// media share a hostname.
+    #[tokio::test]
+    async fn a_socks_shim_cannot_carry_media_even_for_an_overlaid_host() {
+        use tokio::net::UdpSocket;
+
+        // One address serving both planes: UDP (media) and TCP (signaling) on the
+        // same host and port, exactly as a real SFU presents itself.
+        let media = UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
+        let sfu_addr = media.local_addr().unwrap();
+        let signaling = TcpListener::bind(sfu_addr).await.expect("same port, TCP side");
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = signaling.accept().await {
+                tokio::spawn(async move {
+                    let _ = read_http_head(&mut sock).await;
+                    let _ = sock
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nsignaling",
+                        )
+                        .await;
+                });
+            }
+        });
+        // The media plane echoes whatever it is sent.
+        tokio::spawn(async move {
+            let mut buf = [0u8; 256];
+            while let Ok((n, from)) = media.recv_from(&mut buf).await {
+                let _ = media.send_to(&buf[..n], from).await;
+            }
+        });
+
+        let host = sfu_addr.ip().to_string();
+        let relay = spawn_relay(&[host.as_str()], &[]);
+        let circuits = Arc::new(AtomicUsize::new(0));
+        let factory: Arc<dyn CircuitFactory> = Arc::new(CountingFactory {
+            inner: relay.factory(),
+            count: circuits.clone(),
+        });
+        // Deliberately overlay-route the SFU host — stronger than the shipped
+        // policy, which leaves LiveKit direct (#813 cut E1). Forcing the host
+        // onto the overlay is what makes the media half of this test mean
+        // something: media stays direct even under a policy that tried to
+        // overlay it, so §6.4 holds by transport rather than by configuration.
+        let policy = RoutingPolicy::new(
+            OverlayMode::Strict,
+            Allowlist::from_patterns([host.as_str()]),
+            Allowlist::default(),
+        );
+        let shim = OverlayShim::start(policy, factory).await.unwrap();
+
+        // (1) SIGNALING: a TCP stream to the SFU is carried by a circuit.
+        let mut connector = SocksConnector::new(shim.socks_addr());
+        let uri: Uri = format!("http://{host}:{}", sfu_addr.port()).parse().unwrap();
+        let mut stream = Service::call(&mut connector, uri)
+            .await
+            .expect("signaling routes through the overlay");
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: sfu\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).await.unwrap();
+        assert!(String::from_utf8_lossy(&resp).contains("signaling"));
+        assert_eq!(circuits.load(Ordering::Relaxed), 1, "signaling used a circuit");
+        assert_eq!(relay.stats.dials(), 1, "the relay dialed the SFU for signaling");
+
+        // (2) MEDIA: a UDP datagram to the SAME host:port. The media stack owns
+        //     its own socket and never dials the shim — and a SOCKS5 CONNECT
+        //     proxy could not carry a datagram even if it did.
+        let rtp = UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
+        rtp.send_to(b"rtp-frame", sfu_addr).await.unwrap();
+        let mut buf = [0u8; 64];
+        let (n, from) = tokio::time::timeout(Duration::from_secs(2), rtp.recv_from(&mut buf))
+            .await
+            .expect("media must not be blocked by the overlay")
+            .unwrap();
+        assert_eq!(&buf[..n], b"rtp-frame");
+        assert_eq!(from, sfu_addr, "media came straight back from the SFU");
+
+        assert_eq!(
+            circuits.load(Ordering::Relaxed),
+            1,
+            "MEDIA WAS OVERLAID — §6.4's plane split is broken"
+        );
+        assert_eq!(
+            relay.stats.dials(),
+            1,
+            "the relay saw a second dial; media must never traverse it"
+        );
+        drop(shim);
     }
 }
