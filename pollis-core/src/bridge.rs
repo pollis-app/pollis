@@ -796,12 +796,16 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         // device's verified signature — matching desktop's `connect_rooms`
         // scheme (`{user_id}:{device_id}`), so multiple devices coexist. The
         // LiveKit API secret is no longer on the client (#393).
+        // Returns `{token, url}`, not a bare token. Mobile used to pair the
+        // token with a build-time `EXPO_PUBLIC_LIVEKIT_URL`, which pinned the SFU
+        // address into the app bundle exactly as the desktop config did. The URL
+        // the DS minted the token for is authoritative, so it ships with it.
         "get_livekit_token" => {
             let room: String = arg(&args, "room")?;
             let st = state()?;
-            let (token, _url) =
+            let (token, url) =
                 crate::commands::mls::ds_livekit_token(&st, &room, "realtime").await?;
-            ok(token)
+            ok(serde_json::json!({ "token": token, "url": url }))
         }
 
         // ----- media -----

@@ -40,7 +40,7 @@ mod realtime;
 
 pub(crate) use identity::{lookup_avatar_url, lookup_avatar_url_for_identity};
 
-pub use legacy::{get_livekit_token, get_livekit_url, get_livekit_view_token};
+pub use legacy::{get_livekit_token, get_livekit_url, get_livekit_view_token, LivekitCredential};
 pub use participants::{
     list_voice_participants, list_voice_room_counts, VoiceParticipantInfo, VoiceRoomCount,
 };

@@ -58,9 +58,12 @@ function ensureGlobals(registerGlobals: () => void): void {
  * DS to mint it. Returns `null` on any failure so the caller can treat
  * realtime as unavailable rather than throwing.
  */
-export async function fetchRealtimeToken(room: string): Promise<string | null> {
+export async function fetchRealtimeToken(
+  room: string,
+): Promise<{ token: string; url: string } | null> {
   try {
-    return await invoke<string>("get_livekit_token", { room });
+    const r = await invoke<{ token: string; url: string }>("get_livekit_token", { room });
+    return r && r.token ? r : null;
   } catch {
     return null;
   }
@@ -77,12 +80,18 @@ export async function connectRealtime(
   roomName: string,
   onEvent: (e: RealtimeEvent) => void,
 ): Promise<Room | null> {
-  const url = process.env.EXPO_PUBLIC_LIVEKIT_URL;
-  if (!url) {
+  // The server address comes back WITH the token, because a LiveKit JWT is only
+  // valid at the server that issued it. `EXPO_PUBLIC_LIVEKIT_URL` remains as a
+  // build-time fallback for local dev against a DS that has no LIVEKIT_URL set,
+  // but it is no longer how production finds the SFU — otherwise moving the SFU
+  // would require shipping a new app binary.
+  const minted = await fetchRealtimeToken(roomName);
+  if (!minted) {
     return null;
   }
-  const token = await fetchRealtimeToken(roomName);
-  if (!token) {
+  const { token } = minted;
+  const url = minted.url || process.env.EXPO_PUBLIC_LIVEKIT_URL;
+  if (!url) {
     return null;
   }
 

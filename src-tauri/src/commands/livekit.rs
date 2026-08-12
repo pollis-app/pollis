@@ -9,12 +9,12 @@ use crate::state::AppState;
 pub use pollis_core::commands::livekit::*;
 
 #[tauri::command]
-pub async fn get_livekit_token(room_name: String, identity: String, display_name: String, state: State<'_, Arc<AppState>>) -> Result<String> {
+pub async fn get_livekit_token(room_name: String, identity: String, display_name: String, state: State<'_, Arc<AppState>>) -> Result<pollis_core::commands::livekit::LivekitCredential> {
     pollis_core::commands::livekit::get_livekit_token(room_name, identity, display_name, &state).await
 }
 
 #[tauri::command]
-pub async fn get_livekit_view_token(room_name: String, identity: String, display_name: String, state: State<'_, Arc<AppState>>) -> Result<String> {
+pub async fn get_livekit_view_token(room_name: String, identity: String, display_name: String, state: State<'_, Arc<AppState>>) -> Result<pollis_core::commands::livekit::LivekitCredential> {
     pollis_core::commands::livekit::get_livekit_view_token(room_name, identity, display_name, &state).await
 }
 

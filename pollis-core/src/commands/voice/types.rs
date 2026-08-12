@@ -32,6 +32,12 @@ use crate::commands::{
 pub struct VoiceWarmup {
     pub channel_id: String,
     pub token: String,
+    /// The LiveKit ws URL the DS minted `token` FOR. Cached alongside the token
+    /// because the two are a pair — a JWT is only valid at the server that
+    /// issued it, so reusing a warm token against a different address would fail
+    /// authentication. Carrying it here is what lets the SFU move between the
+    /// warmup and the join without stranding the cached credential.
+    pub url: String,
     /// When the prepared token was created. Used to discard stale entries.
     pub created_at: Instant,
     /// When the underlying user identity was captured. Mismatches against

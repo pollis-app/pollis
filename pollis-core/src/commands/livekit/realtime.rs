@@ -31,7 +31,10 @@ pub async fn connect_rooms(
     _username: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let url = state.config.livekit_url.clone();
+    // NOTE: no compiled-in URL is read here any more. Each connect and each
+    // reconnect dials the address the DS returned alongside that room's token
+    // (`ds_livekit_token`), which falls back to `config.livekit_url` itself when
+    // a self-hosted DS leaves `LIVEKIT_URL` unset.
     let livekit_arc = Arc::clone(&state.livekit);
 
     // Per-device identity (`{user}:{device}`, so a user's devices coexist in a
@@ -80,17 +83,21 @@ pub async fn connect_rooms(
         // Participant token now minted by the DS (identity derived server-side
         // from the verified signer); the LiveKit API secret is no longer on the
         // client. See `commands::mls::ds_livekit_token` / `pollis-delivery::broker`.
-        let token = match crate::commands::mls::ds_livekit_token(state, &room_id, "realtime").await {
-            Ok((t, _url)) => t,
-            Err(e) => {
-                eprintln!("[realtime] token error for room {room_id}: {e}");
-                let mut lk = livekit_arc.lock().await;
-                lk.connecting.remove(&room_id);
-                continue;
-            }
-        };
+        // Take the URL the DS minted this token FOR, not the compiled-in one:
+        // the token is only valid at that server, and honouring it is what lets
+        // the SFU move or regionalise without shipping a client.
+        let (token, ds_url) =
+            match crate::commands::mls::ds_livekit_token(state, &room_id, "realtime").await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    eprintln!("[realtime] token error for room {room_id}: {e}");
+                    let mut lk = livekit_arc.lock().await;
+                    lk.connecting.remove(&room_id);
+                    continue;
+                }
+            };
 
-        let url_owned = url.clone();
+        let url_owned = ds_url;
         let lk_arc_connect = Arc::clone(&livekit_arc);
         let user_id_owned = user_id.clone();
         let app_state_connect = Arc::clone(state);
@@ -222,8 +229,13 @@ pub async fn connect_rooms(
                                 }
                             }
 
-                            let token = match crate::commands::mls::ds_livekit_token(&app_state_task, &room_id_owned, "realtime").await {
-                                Ok((t, _url)) => t,
+                            // Re-read the URL on every reconnect, not just the
+                            // first connect: a reconnect is exactly when the DS
+                            // may hand us a different server (failover, or a
+                            // regional move), and reusing the original address
+                            // would pin us to a server that may be draining.
+                            let (token, reconnect_url) = match crate::commands::mls::ds_livekit_token(&app_state_task, &room_id_owned, "realtime").await {
+                                Ok(pair) => pair,
                                 Err(e) => {
                                     eprintln!("[realtime] reconnect token error for room {room_id_owned}: {e}");
                                     backoff = (backoff * 2).min(300);
@@ -231,7 +243,7 @@ pub async fn connect_rooms(
                                 }
                             };
 
-                            match Room::connect(&url_owned, &token, RoomOptions::default()).await {
+                            match Room::connect(&reconnect_url, &token, RoomOptions::default()).await {
                                 Ok((new_room, mut new_events)) => {
                                     let new_room = Arc::new(new_room);
                                     eprintln!("[realtime] reconnected room {room_id_owned}");

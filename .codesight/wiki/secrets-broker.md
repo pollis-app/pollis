@@ -29,6 +29,15 @@ answers, like OTP with no Resend key).
 | `POST /v1/turso/token` | Mints a short-TTL **read-only** Turso token via the Platform API | `TURSO_PLATFORM_TOKEN`, `TURSO_ORG`, `TURSO_DB` |
 | `POST /v1/r2/presign` | SigV4 query-string presigned URL (GET/PUT/DELETE), path-style, `UNSIGNED-PAYLOAD`, `host`-only signed header | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_REGION` defaults `auto`) |
 
+**The `/v1/livekit/token` response is `{token, url}`, and the URL is authoritative.**
+A LiveKit JWT is only accepted by the server that issued it, so the two travel
+together. Clients used to destructure the response as `(token, _url)` at six call
+sites and dial the compiled-in `config.livekit_url` instead — which baked the SFU
+address into every shipped binary and made relocating or regionalising the SFU a
+client-release problem. `ds_livekit_token` now resolves the precedence centrally
+(`resolve_livekit_url`: DS wins, config is the self-host fallback for a DS with no
+`LIVEKIT_URL`), so no call site can reintroduce it by ignoring a field.
+
 **Client cutover: DONE for every embeddable secret (#393).** `pollis-core` holds
 no LiveKit or R2 secret:
 - **R2** — `commands/r2.rs`'s `presign_r2` presigns every get/put/delete via the DS.

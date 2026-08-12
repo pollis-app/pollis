@@ -238,7 +238,70 @@ pub async fn ds_livekit_token(
         .json()
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_livekit_token decode: {e}")))?;
-    Ok((parsed.token, parsed.url))
+
+    // Resolve the fallback HERE, not at the call sites. The DS's URL is
+    // authoritative — it is the server that will accept this JWT — but every one
+    // of the six callers used to destructure it as `_url` and dial the compiled-in
+    // `config.livekit_url` instead, which baked the SFU address into every shipped
+    // binary and made "move the SFU" a client-release problem. Returning an
+    // already-resolved URL means a caller cannot reintroduce that bug by ignoring
+    // a field, and there is exactly one place the precedence is written down.
+    //
+    // Empty is the documented self-host case: a DS with no `LIVEKIT_URL` set. That
+    // degrades to the previous behaviour rather than dialing "".
+    let url = resolve_livekit_url(&parsed.url, &state.config.livekit_url);
+    Ok((parsed.token, url))
+}
+
+/// Precedence for which LiveKit address to dial: the DS's answer wins, the
+/// compiled-in config is only a fallback.
+///
+/// Pulled out as a pure function so the rule is testable without a live DS — the
+/// bug this replaces was invisible precisely because it lived inline at six call
+/// sites with nothing asserting it.
+pub fn resolve_livekit_url(ds_url: &str, config_url: &str) -> String {
+    if ds_url.trim().is_empty() {
+        config_url.to_string()
+    } else {
+        ds_url.to_string()
+    }
+}
+
+#[cfg(test)]
+mod livekit_url_tests {
+    use super::resolve_livekit_url;
+
+    /// The whole point: a DS-supplied address must never be discarded in favour
+    /// of the compiled-in one. This is the invalid state that shipped — the SFU
+    /// address baked into every binary, unmovable without a client release.
+    #[test]
+    fn ds_url_always_wins_over_config() {
+        assert_eq!(
+            resolve_livekit_url("wss://eu.pollis.com", "wss://rtc.pollis.com"),
+            "wss://eu.pollis.com"
+        );
+    }
+
+    /// Self-host case: a DS with no LIVEKIT_URL set must degrade to the
+    /// compiled-in default, never to an empty dial.
+    #[test]
+    fn empty_ds_url_falls_back_to_config() {
+        assert_eq!(
+            resolve_livekit_url("", "wss://rtc.pollis.com"),
+            "wss://rtc.pollis.com"
+        );
+        assert_eq!(
+            resolve_livekit_url("   ", "wss://rtc.pollis.com"),
+            "wss://rtc.pollis.com"
+        );
+    }
+
+    /// Both unset stays empty so the caller's "LiveKit is not configured" check
+    /// still fires, rather than dialing a whitespace URL.
+    #[test]
+    fn both_empty_stays_empty() {
+        assert_eq!(resolve_livekit_url("", ""), "");
+    }
 }
 
 /// Fan out a **content-free** control `payload` to a LiveKit `room` via the DS's

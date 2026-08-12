@@ -120,8 +120,8 @@ pub async fn prepare_voice_connection(
     // already paid by the time the user clicks Join. Identity (`voice-{user}:
     // {device}`) is derived server-side from the verified signer — the LiveKit
     // API secret is no longer on the client. Non-fatal: warmup is best-effort.
-    let token = match crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await {
-        Ok((t, _url)) => t,
+    let (token, ds_url) = match crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await {
+        Ok(pair) => pair,
         Err(e) => {
             eprintln!("[voice] warmup token error (non-fatal): {e}");
             return Ok(());
@@ -132,7 +132,7 @@ pub async fn prepare_voice_connection(
     // clicks Join, they'll race this — that's fine, the worst case is a
     // single redundant TLS handshake. Errors are non-fatal: this whole
     // command is best-effort.
-    let warm_url = url.clone();
+    let warm_url = ds_url.clone();
     let task = tokio::spawn(async move {
         // Reuse the same twirp transform `livekit::room_service_list_participants`
         // uses; we don't import it to keep the dependency direction clean.
@@ -174,6 +174,7 @@ pub async fn prepare_voice_connection(
     voice.warmup = Some(VoiceWarmup {
         channel_id,
         token,
+        url: ds_url,
         created_at: Instant::now(),
         user_id,
         display_name,
@@ -239,10 +240,12 @@ pub async fn join_voice_channel(
         JoinGuard(Arc::clone(&voice.joining))
     };
 
-    let url = state.config.livekit_url.clone();
-    if url.is_empty() {
-        return Err(anyhow::anyhow!("LiveKit is not configured on this server").into());
-    }
+    // The URL is no longer read from config here — it now arrives with the token
+    // (cached warmup pair, or the DS response below), so the emptiness check moved
+    // to after the token is resolved. `ds_livekit_token` already falls back to
+    // `config.livekit_url` when a self-hosted DS leaves `LIVEKIT_URL` unset, so an
+    // empty value here still means "LiveKit is not configured" — just checked one
+    // step later.
 
     // Per-device LiveKit identity (#140): `voice-{user_id}:{device_id}`. Lets a
     // second device of the same user join the room as a distinct participant
@@ -257,7 +260,7 @@ pub async fn join_voice_channel(
     // the warmup is stale or for a different room/user we mint a new token.
     // VoiceWarmup implements Drop (to abort its background task) so we can't
     // simply destructure it; clone the token out before dropping the entry.
-    let cached_token: Option<String> = {
+    let cached_token: Option<(String, String)> = {
         let mut voice = state.voice.lock().await;
         let usable = voice
             .warmup
@@ -270,7 +273,8 @@ pub async fn join_voice_channel(
             })
             .unwrap_or(false);
         if usable {
-            let cloned = voice.warmup.as_ref().map(|w| w.token.clone());
+            // Token and URL travel together — see `VoiceWarmup::url`.
+            let cloned = voice.warmup.as_ref().map(|w| (w.token.clone(), w.url.clone()));
             // Drop the entry now — its background task is no longer needed.
             voice.warmup = None;
             cloned
@@ -283,10 +287,10 @@ pub async fn join_voice_channel(
     // ── Phase: jwt_mint ────────────────────────────────────────────────────
     // 0 if a warmup-cached token was usable.
     let jwt_mint_ms;
-    let token: String = match cached_token {
-        Some(t) => {
+    let (token, url): (String, String) = match cached_token {
+        Some(pair) => {
             jwt_mint_ms = 0;
-            t
+            pair
         }
         None => {
             // DS-minted (identity derived server-side; matches `local_identity`
@@ -294,11 +298,14 @@ pub async fn join_voice_channel(
             // verified signature). Now a network round-trip, not a local sign —
             // still on the join hot path, so it stays phase-timed.
             let jwt_start = Instant::now();
-            let (t, _url) = crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await?;
+            let pair = crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await?;
             jwt_mint_ms = jwt_start.elapsed().as_millis() as u64;
-            t
+            pair
         }
     };
+    if url.is_empty() {
+        return Err(anyhow::anyhow!("LiveKit is not configured on this server").into());
+    }
 
     // ── Run room connect and mic init concurrently ─────────────────────────
     // Both are independent and individually expensive on cold starts. Running
