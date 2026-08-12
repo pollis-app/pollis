@@ -212,6 +212,19 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     return deduped.sort((a, b) => a.created_at - b.created_at);
   }, [olderMessages, messages]);
 
+  // What the CHANNEL shows: everything except thread replies (#825). A reply
+  // lives in its thread, and the root already advertises it with "N replies" —
+  // showing it in both places double-posts every reply into the channel, which
+  // is exactly what threads exist to avoid.
+  //
+  // Filtered here rather than in `allMessages` on purpose: that list still
+  // backs id lookups (delete/edit confirmation, the reply-quote resolver), and
+  // those must keep resolving a reply that is only rendered in the panel.
+  const channelMessages = useMemo(
+    () => allMessages.filter((m) => !m.thread_id || m.thread_id === m.id),
+    [allMessages],
+  );
+
   const loadMore = async () => {
     if (!pageCursor || loadingMore || !currentUser) {
       return;
@@ -503,7 +516,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           </div>
         ) : (
           <MessageList
-            messages={allMessages}
+            messages={channelMessages}
             // MLS group id for the open conversation. Groups: selectedGroupId.
             // DMs: selectedConversationId (the dm_channel_id IS the MLS group
             // id for that DM). Either way, this is what RosterChanged events
