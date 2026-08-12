@@ -82,3 +82,15 @@ variable "az_count" {
   type        = number
   default     = 3
 }
+
+variable "directory_key_b64" {
+  description = "Pinned Ed25519 directory-signing PUBLIC key (base64, raw 32 bytes). Required for this node to act as a middle hop: without it the relay cannot evaluate revocation and so refuses to extend circuits (#813). Empty = single-hop only, which is honest rather than fail-open."
+  type        = string
+  default     = ""
+}
+
+variable "revocation_url" {
+  description = "URL of the signed relay-revocation list (#813). Paired with directory_key_b64; both must be set for this node to extend circuits."
+  type        = string
+  default     = ""
+}
