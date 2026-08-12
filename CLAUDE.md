@@ -9,7 +9,7 @@ Pollis — privacy-first E2EE desktop messenger (MLS, Slack-style channels). Tau
 ```bash
 pnpm dev                # Tauri app  (dev:frontend = browser-only; cli = pollis-tui terminal client)
 pnpm build:tauri        # bundle current platform  (:linux | :macos | :windows)
-cargo test --features test-harness --test flows   # integration suite — real dispatch path, shared Turso from .env.test
+cargo test --features test-harness --test flows   # integration suite — real dispatch path, process-local libsql (NOT a shared Turso)
                                                   # headless: -p pollis --no-default-features --features test-harness
 cargo test -p pollis-delivery                     # DS endpoint tests
 ```

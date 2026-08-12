@@ -1124,13 +1124,45 @@ async fn process_one_generation<'h>(
             //     leak, fuzzer finding #2).
             let welcome_pending = has_pending_welcome(state, mls_group_id, user_id).await;
             let may_rejoin = may_rejoin_via_external_join(state, mls_group_id, user_id).await;
-            match super::invariants::join_recovery(welcome_pending, may_rejoin) {
+            // #832: external-join builds a commit ON the published GroupInfo, so
+            // with no `mls_group_info` row there is nothing to join onto. Feeding
+            // that to the gate is what stops it selecting an impossible join and
+            // retrying it once per pass through the pre-establishment window.
+            let group_info_available =
+                published_group_info_head(state, mls_group_id).await.is_some();
+            match super::invariants::join_recovery(
+                welcome_pending,
+                may_rejoin,
+                group_info_available,
+            ) {
                 super::invariants::JoinRecovery::AwaitWelcome => {
-                    eprintln!(
-                        "[mls] process_pending_commits: no local group for {mls_group_id} but an \
-                         undelivered Welcome targets this device — deferring to the Welcome path \
-                         (not external-joining) to avoid racing our own Welcome"
-                    );
+                    if welcome_pending {
+                        eprintln!(
+                            "[mls] process_pending_commits: no local group for {mls_group_id} but an \
+                             undelivered Welcome targets this device — deferring to the Welcome path \
+                             (not external-joining) to avoid racing our own Welcome"
+                        );
+                    } else {
+                        // No GroupInfo yet: the group is not established from our
+                        // view, so a Welcome is the only way in. Poll for it NOW
+                        // rather than waiting for the next sweep — idempotent, and
+                        // it is the step that actually converges this state (#832).
+                        eprintln!(
+                            "[mls] process_pending_commits: no local group for {mls_group_id} and no \
+                             published GroupInfo — awaiting a Welcome (external-join would have \
+                             nothing to join onto); polling welcomes now"
+                        );
+                        // `Box::pin`: poll_mls_welcomes can re-enter this path
+                        // (welcome → apply → process commits), so the future is
+                        // recursive and needs indirection to have a finite size.
+                        if let Err(e) =
+                            Box::pin(super::poll_mls_welcomes(state, user_id.to_string())).await
+                        {
+                            eprintln!(
+                                "[mls] process_pending_commits: welcome poll for {mls_group_id} failed: {e}"
+                            );
+                        }
+                    }
                 }
                 super::invariants::JoinRecovery::ExternalJoin => {
                     // Lock already held by the wrapper, so call the unlocked inner variant.

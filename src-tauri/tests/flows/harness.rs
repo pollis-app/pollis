@@ -11,8 +11,13 @@
 //! cargo test --features test-harness --test flows
 //! ```
 //!
-//! Tests serialize on a process-wide mutex (`serial_test`) so the shared
-//! Turso wipe between tests can't race.
+//! Tests serialize on a process-wide mutex (`serial_test`) so the per-test DB
+//! wipe can't race. Note there is NO shared Turso involved: since #420 each run
+//! uses process-local libsql files (see `RemoteDb::connect_local` above), and CI
+//! provisions `.env.test` with `TURSO_URL=libsql://placeholder.invalid`. An
+//! intermittent failure here is a real race in the code, never contention on a
+//! shared database — a stale comment claiming otherwise sent one investigation
+//! down exactly that wrong path (#832).
 
 use std::sync::Arc;
 

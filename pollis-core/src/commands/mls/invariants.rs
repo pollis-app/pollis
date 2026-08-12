@@ -64,9 +64,10 @@ pub enum JoinRecovery {
     StayOut,
 }
 
-/// Decide the no-local-group recovery action from the two guards the runtime
+/// Decide the no-local-group recovery action from the three guards the runtime
 /// evaluates: `welcome_pending` (an undelivered Welcome targets this device for
-/// this conversation) and `may_rejoin` (the I5 gate: registered ∧ member).
+/// this conversation), `may_rejoin` (the I5 gate: registered ∧ member), and
+/// `group_info_available` (the group has a published GroupInfo to join onto).
 ///
 /// **Welcome-first.** Whenever a Welcome is pending we defer to it, REGARDLESS of
 /// the rejoin gate — the Welcome is the canonical, cheaper join, and
@@ -75,13 +76,38 @@ pub enum JoinRecovery {
 /// is false). Only when no Welcome is available does the I5 gate decide
 /// external-join vs stay-out.
 ///
-/// The Kani harness proves the load-bearing property: **`ExternalJoin` ⟹
-/// `!welcome_pending`** — a device with a pending Welcome NEVER external-joins, so
-/// the two concurrent join mechanisms can never both run for one fresh membership
-/// (the DM-accept convergence race). This is the pure core of the gate in
+/// The Kani harness proves two load-bearing properties:
+///
+/// * **`ExternalJoin` ⟹ `!welcome_pending`** — a device with a pending Welcome
+///   NEVER external-joins, so the two concurrent join mechanisms can never both
+///   run for one fresh membership (the DM-accept convergence race).
+/// * **`ExternalJoin` ⟹ `group_info_available`** (#832) — the gate never selects
+///   an external join that cannot succeed. Without this the runtime retried
+///   `no GroupInfo stored — cannot external-join` once per pass through the entire
+///   pre-establishment window.
+///
+/// This is the pure core of the gate in
 /// `group_state::process_pending_commits_locked_impl`.
-pub fn join_recovery(welcome_pending: bool, may_rejoin: bool) -> JoinRecovery {
+pub fn join_recovery(
+    welcome_pending: bool,
+    may_rejoin: bool,
+    group_info_available: bool,
+) -> JoinRecovery {
     if welcome_pending {
+        JoinRecovery::AwaitWelcome
+    } else if !group_info_available {
+        // An external join is a commit built ON the group's published GroupInfo.
+        // With no `mls_group_info` row there is nothing to build on, so choosing
+        // ExternalJoin here does not fail gracefully — it retries an operation
+        // that CANNOT succeed until someone else publishes, once per pass,
+        // burning the window in which the Welcome would have landed. That is the
+        // pre-establishment window: a device can see it is a member (membership
+        // is a plain remote row) before the creator has published anything.
+        //
+        // The only way into a group with no GroupInfo is a Welcome, so wait for
+        // one. If it never comes, a later pass finds GroupInfo published (by the
+        // creator's `heal_group_info` backstop) and external-join proceeds then —
+        // strictly later than today, but reachable, and never futile.
         JoinRecovery::AwaitWelcome
     } else if may_rejoin {
         JoinRecovery::ExternalJoin
@@ -283,18 +309,23 @@ mod proofs {
     fn i6_welcome_first_never_double_joins() {
         let welcome_pending: bool = kani::any();
         let may_rejoin: bool = kani::any();
+        let group_info_available: bool = kani::any();
 
-        match join_recovery(welcome_pending, may_rejoin) {
-            // The headline: never external-join while a Welcome is queued.
+        match join_recovery(welcome_pending, may_rejoin, group_info_available) {
+            // The two headline implications: never external-join while a Welcome
+            // is queued, and never external-join with nothing to join onto (#832).
             JoinRecovery::ExternalJoin => {
                 assert!(!welcome_pending);
                 assert!(may_rejoin);
+                assert!(group_info_available);
             }
-            // Deferring to the Welcome happens exactly when one is pending.
-            JoinRecovery::AwaitWelcome => assert!(welcome_pending),
-            // Stay-out is exactly "no Welcome and not allowed to rejoin".
+            // Deferring to the Welcome happens when one is pending OR when there
+            // is no GroupInfo, in which case a Welcome is the only way in.
+            JoinRecovery::AwaitWelcome => assert!(welcome_pending || !group_info_available),
+            // Stay-out is exactly "no Welcome, GroupInfo exists, not allowed in".
             JoinRecovery::StayOut => {
                 assert!(!welcome_pending);
+                assert!(group_info_available);
                 assert!(!may_rejoin);
             }
         }
@@ -304,9 +335,15 @@ mod proofs {
     /// gate passes, IGNORING a pending Welcome — the exact dual-path that strands
     /// a DM recipient. `should_panic`: Kani must find the double-join the real
     /// Welcome-first guard prevents.
-    fn join_recovery_mutant(welcome_pending: bool, may_rejoin: bool) -> JoinRecovery {
+    fn join_recovery_mutant(
+        welcome_pending: bool,
+        may_rejoin: bool,
+        _group_info_available: bool,
+    ) -> JoinRecovery {
         // BUG: checks the rejoin gate BEFORE the Welcome, so a device with a
-        // pending Welcome still external-joins and races its own Welcome.
+        // pending Welcome still external-joins and races its own Welcome. It also
+        // ignores `group_info_available` entirely — the #832 shape, where the gate
+        // selects an external join that cannot succeed.
         if may_rejoin {
             JoinRecovery::ExternalJoin
         } else if welcome_pending {
@@ -322,8 +359,14 @@ mod proofs {
         let welcome_pending: bool = kani::any();
         let may_rejoin: bool = kani::any();
 
-        if let JoinRecovery::ExternalJoin = join_recovery_mutant(welcome_pending, may_rejoin) {
+        let group_info_available: bool = kani::any();
+        if let JoinRecovery::ExternalJoin =
+            join_recovery_mutant(welcome_pending, may_rejoin, group_info_available)
+        {
+            // Refuted on BOTH implications: the mutant external-joins with a
+            // Welcome pending, and with no GroupInfo to join onto.
             assert!(!welcome_pending);
+            assert!(group_info_available);
         }
     }
 
@@ -487,25 +530,67 @@ mod tests {
         // A pending Welcome always wins — even when the device is a full member
         // that COULD external-join. This is the exact state a fresh DM recipient
         // is in, and the one that used to strand it.
-        assert_eq!(join_recovery(true, true), JoinRecovery::AwaitWelcome);
-        assert_eq!(join_recovery(true, false), JoinRecovery::AwaitWelcome);
+        assert_eq!(join_recovery(true, true, true), JoinRecovery::AwaitWelcome);
+        assert_eq!(join_recovery(true, false, true), JoinRecovery::AwaitWelcome);
 
         // No Welcome available: the I5 gate decides. A current member recovers via
         // external-join (Secret-Key recovery / genuinely dropped Welcome)...
-        assert_eq!(join_recovery(false, true), JoinRecovery::ExternalJoin);
+        assert_eq!(join_recovery(false, true, true), JoinRecovery::ExternalJoin);
         // ...and a revoked/removed device stays out (never climbs back in).
-        assert_eq!(join_recovery(false, false), JoinRecovery::StayOut);
+        assert_eq!(join_recovery(false, false, true), JoinRecovery::StayOut);
 
-        // The headline property over the whole 2-bit space: ExternalJoin ⟹ no
+        // The headline property over the whole 3-bit space: ExternalJoin ⟹ no
         // Welcome pending. If this ever holds with a Welcome pending, the dual-path
         // race is back.
         for welcome_pending in [false, true] {
             for may_rejoin in [false, true] {
-                if join_recovery(welcome_pending, may_rejoin) == JoinRecovery::ExternalJoin {
-                    assert!(
-                        !welcome_pending,
-                        "external-join must never run while a Welcome is pending"
-                    );
+                for group_info in [false, true] {
+                    if join_recovery(welcome_pending, may_rejoin, group_info)
+                        == JoinRecovery::ExternalJoin
+                    {
+                        assert!(
+                            !welcome_pending,
+                            "external-join must never run while a Welcome is pending"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// #832: the state that actually shipped. A registered, current member with no
+    /// Welcome pending and NO published GroupInfo used to be told to external-join
+    /// — an operation that cannot succeed, retried once per pass for the whole
+    /// pre-establishment window. It must wait for the Welcome instead.
+    #[test]
+    fn no_group_info_never_selects_an_impossible_external_join() {
+        assert_eq!(
+            join_recovery(false, true, false),
+            JoinRecovery::AwaitWelcome,
+            "a member with no published GroupInfo must await the Welcome, not \
+             external-join onto a group that has nothing to join onto"
+        );
+
+        // Even a device that may NOT rejoin waits rather than reporting StayOut:
+        // with no GroupInfo we cannot yet distinguish "removed" from "not yet
+        // published", and StayOut is the one verdict that gives up permanently.
+        assert_eq!(
+            join_recovery(false, false, false),
+            JoinRecovery::AwaitWelcome
+        );
+
+        // The new implication, exhaustively: ExternalJoin ⟹ group_info_available.
+        for welcome_pending in [false, true] {
+            for may_rejoin in [false, true] {
+                for group_info in [false, true] {
+                    if join_recovery(welcome_pending, may_rejoin, group_info)
+                        == JoinRecovery::ExternalJoin
+                    {
+                        assert!(
+                            group_info,
+                            "external-join must never be selected without a GroupInfo to join onto"
+                        );
+                    }
                 }
             }
         }
