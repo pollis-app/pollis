@@ -54,10 +54,23 @@ fi
 # --network host so the QUIC UDP port and the health TCP port bind directly to
 # the node's public interface. --restart=always survives dockerd/instance reboots;
 # the ASG replaces the whole node if it dies.
+#
+# POLLIS_RELAY_DIRECTORY_KEY + POLLIS_RELAY_REVOCATION_URL are what let this node
+# act as a MIDDLE hop (#813). A relay that cannot evaluate revocation refuses to
+# extend circuits, by design and fail-closed — so a v4 node started without these
+# comes up healthy, reports pollis-relay/4, is admitted to the signed directory,
+# serves single-hop fine, and then silently refuses every Extend. Neither
+# /version nor /health surfaces that; the client only ever sees ExtendFailed,
+# which is indistinguishable from an unreachable next hop. Both values are
+# PUBLIC (a verifying key and a URL), so they belong in user-data rather than SSM.
+# An empty key is honest rather than broken: the relay treats it as unconfigured
+# and declines to be a middle hop instead of forwarding blind.
 docker run -d --name pollis-relay --restart=always --network host \
   -v /var/lib/pollis-relay:/var/lib/pollis-relay \
   -e POLLIS_RELAY_BIND=0.0.0.0:${relay_port} \
   -e POLLIS_RELAY_HEALTH_BIND=0.0.0.0:${health_port} \
   -e POLLIS_RELAY_ALLOWLIST='${relay_allowlist}' \
   -e POLLIS_RELAY_IDENTITY=/var/lib/pollis-relay/identity.key \
+  -e POLLIS_RELAY_DIRECTORY_KEY='${directory_key_b64}' \
+  -e POLLIS_RELAY_REVOCATION_URL='${revocation_url}' \
   "$RELAY_IMAGE"

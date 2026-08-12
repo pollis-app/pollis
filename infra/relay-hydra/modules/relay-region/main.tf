@@ -216,6 +216,8 @@ resource "aws_launch_template" "relay" {
     relay_allowlist     = var.relay_allowlist
     identity_key_param  = var.identity_key_param
     identity_cert_param = var.identity_cert_param
+    directory_key_b64   = var.directory_key_b64
+    revocation_url      = var.revocation_url
   }))
 
   tag_specifications {

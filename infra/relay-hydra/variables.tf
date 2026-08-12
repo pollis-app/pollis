@@ -342,3 +342,9 @@ variable "manage_github_oidc_provider" {
   type        = bool
   default     = false
 }
+
+variable "relay_directory_key_b64" {
+  description = "Pinned Ed25519 directory-signing PUBLIC key (base64, raw 32 bytes) handed to each relay node so it can verify the revocation list and therefore act as a middle hop (#813). Only the PUBLIC half — the private key is minted by scripts/mint-signing-key.sh and never touches Terraform state. Empty means the pool serves single-hop only, which is the fail-closed default rather than a fail-open one."
+  type        = string
+  default     = ""
+}

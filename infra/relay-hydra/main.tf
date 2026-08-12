@@ -59,6 +59,8 @@ module "relay_region_us_east_1" {
   relay_port          = var.relay_port
   health_port         = var.health_port
   relay_allowlist     = var.relay_allowlist
+  directory_key_b64   = var.relay_directory_key_b64
+  revocation_url      = module.directory.revocation_url
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
   image_param         = local.intended_image_param
@@ -81,6 +83,8 @@ module "relay_region_us_east_2" {
   relay_port          = var.relay_port
   health_port         = var.health_port
   relay_allowlist     = var.relay_allowlist
+  directory_key_b64   = var.relay_directory_key_b64
+  revocation_url      = module.directory.revocation_url
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
   image_param         = local.intended_image_param
@@ -106,6 +110,8 @@ module "relay_region_us_west_1" {
   relay_port          = var.relay_port
   health_port         = var.health_port
   relay_allowlist     = var.relay_allowlist
+  directory_key_b64   = var.relay_directory_key_b64
+  revocation_url      = module.directory.revocation_url
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
   image_param         = local.intended_image_param
@@ -128,6 +134,8 @@ module "relay_region_us_west_2" {
   relay_port          = var.relay_port
   health_port         = var.health_port
   relay_allowlist     = var.relay_allowlist
+  directory_key_b64   = var.relay_directory_key_b64
+  revocation_url      = module.directory.revocation_url
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
   image_param         = local.intended_image_param
