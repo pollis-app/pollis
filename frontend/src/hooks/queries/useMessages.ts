@@ -26,6 +26,9 @@ export const messageQueryKeys = {
   channel: (channelId: string | null) => ["messages", "channel", channelId] as const,
   conversation: (conversationId: string | null) => ["messages", "conversation", conversationId] as const,
   dmConversations: (userId: string | null) => ["dm-conversations", userId] as const,
+  thread: (threadId: string | null) => ["messages", "thread", threadId] as const,
+  threadSummaries: (conversationId: string | null) =>
+    ["messages", "thread-summaries", conversationId] as const,
 };
 
 export const lastMessageQueryKeys = {
@@ -53,6 +56,8 @@ type RawMessage = {
   sender_id: string;
   content?: string;
   reply_to_id?: string;
+  /** ULID of the thread root this was sent into (#825). */
+  thread_id?: string;
   sent_at: string;
 };
 
@@ -65,6 +70,8 @@ export type RawChannelMessage = {
   ciphertext: string;
   content?: string;
   reply_to_id?: string;
+  /** ULID of the thread root, recovered from inside the ciphertext (#825). */
+  thread_id?: string;
   sent_at: string;
   edited_at?: string;
   deleted_at?: string;
@@ -128,6 +135,7 @@ function transformMessage(m: RawMessage): Message {
     nonce: new Uint8Array(),
     content_decrypted: parsed?.text,
     reply_to_message_id: m.reply_to_id,
+    thread_id: m.thread_id,
     is_pinned: false,
     created_at: new Date(m.sent_at).getTime(),
     delivered: true,
@@ -151,6 +159,7 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
     nonce: new Uint8Array(),
     content_decrypted: parsed?.text,
     reply_to_message_id: m.reply_to_id,
+    thread_id: m.thread_id,
     is_pinned: false,
     created_at: new Date(m.sent_at).getTime(),
     delivered: true,
@@ -271,11 +280,15 @@ export function useSendMessage() {
       conversationId,
       content,
       replyToMessageId,
+      threadId,
     }: {
       channelId: string;
       conversationId: string;
       content: string;
       replyToMessageId?: string;
+      // ULID of the thread root when sending into a thread (#825). Carried
+      // inside the MLS ciphertext, never in the DS request body.
+      threadId?: string;
       optimisticId?: string; // used by onSuccess to replace the optimistic stub
     }) => {
       if (!currentUser) {
@@ -288,6 +301,7 @@ export function useSendMessage() {
         senderId: currentUser.id,
         content,
         replyToId: replyToMessageId ?? null,
+        threadId: threadId ?? null,
         senderUsername: currentUser.username ?? null,
       });
     },
@@ -318,6 +332,20 @@ export function useSendMessage() {
 
       // Then invalidate in the background so we stay in sync with the server.
       queryClient.invalidateQueries({ queryKey });
+
+      // A threaded send (#825) also changes the open thread and that
+      // conversation's reply counts; without this the thread panel would show
+      // the reply only after a refetch on focus.
+      if (variables.threadId) {
+        queryClient.invalidateQueries({
+          queryKey: messageQueryKeys.thread(variables.threadId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: messageQueryKeys.threadSummaries(
+            variables.channelId || variables.conversationId,
+          ),
+        });
+      }
     },
   });
 }
@@ -521,5 +549,63 @@ export function useEditMessage() {
         queryClient.invalidateQueries({ queryKey: context.queryKey });
       }
     },
+  });
+}
+
+/** Mirrors the Rust `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
+export type ThreadSummary = {
+  thread_id: string;
+  reply_count: number;
+  last_reply_at?: string;
+};
+
+/**
+ * Replies in one thread, oldest-first (#825).
+ *
+ * Local-only by construction: `thread_id` lives inside the MLS ciphertext, so
+ * the DS cannot be asked for a thread. This returns what this device has
+ * decrypted — the same bounded-history behaviour channels already have.
+ */
+export function useThreadMessages(threadId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  return useQuery({
+    queryKey: messageQueryKeys.thread(threadId),
+    queryFn: async (): Promise<Message[]> => {
+      if (!threadId) {
+        return [];
+      }
+      const rows = await invoke<RawChannelMessage[]>("read_thread_messages", {
+        threadId,
+      });
+      return (rows || []).map(transformChannelMessage);
+    },
+    enabled: !!threadId && !!currentUser,
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Reply counts per thread root for a conversation, so a channel row can show
+ * "N replies" without loading every thread.
+ */
+export function useThreadSummaries(conversationId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  return useQuery({
+    queryKey: messageQueryKeys.threadSummaries(conversationId),
+    queryFn: async (): Promise<Map<string, ThreadSummary>> => {
+      if (!conversationId) {
+        return new Map();
+      }
+      const rows = await invoke<ThreadSummary[]>("list_thread_summaries", {
+        conversationId,
+      });
+      return new Map((rows || []).map((r) => [r.thread_id, r]));
+    },
+    enabled: !!conversationId && !!currentUser,
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: true,
   });
 }

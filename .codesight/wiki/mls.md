@@ -445,6 +445,8 @@ Both peers compute the same 32-byte key because both hold the same exporter secr
 **Send** (`send_message`):
 1. Poll welcomes → interleaved ingesting catch-up (`catch_up_mls_group_interleaved`) to reach the current epoch while decrypting any current-epoch inbound message first, so this device's own send can't strand it (#440)
 2. For a TEXT message, pad the plaintext to a size bucket (`messages::framing::pad`) so the ciphertext length no longer leaks the message length (metadata minimization, issue #331 v2, `docs/metadata-minimization-design.md` §4.1). Attachment envelopes are left unpadded. Then `try_mls_encrypt(local_db, group_id, plaintext)` → MLS ciphertext
+   - **Threads (#825):** a reply into a thread uses `messages::framing::pad_threaded`, which appends a `0xF7` trailer carrying the thread root's ULID **after** the plaintext, inside the same `0xF5` frame. `thread_id` therefore never reaches the DS or Turso — the server has no notion of a thread and cannot paginate one. A threaded send always takes the padded frame, attachment envelope or not, because the trailer has nowhere else to live; an unthreaded send is byte-for-byte what it was before threads.
+   - The trailer sits after the plaintext, and the header + length prefix are untouched, **so a client that predates threads reads the same length prefix and recovers exactly the same plaintext**. A thread reply degrades to an ordinary channel message on an old client rather than to mojibake — which a new marker byte would have caused, since `strip` returns unrecognised frames verbatim.
 3. Store ciphertext in `message_envelope` (remote) and `message` (local)
 
 **Receive** (`get_channel_messages` / `get_dm_messages`):

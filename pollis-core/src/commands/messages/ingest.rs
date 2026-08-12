@@ -562,13 +562,17 @@ fn decrypt_and_persist_one(
                 // Ordinary text / attachment message. Strip size padding (issue
                 // #331 v2, §4.1) — a no-op for legacy unpadded sends and for
                 // attachment envelopes, so old and new clients interoperate.
-                super::framing::Frame::Text(plaintext) => {
-                    if let Ok(text) = String::from_utf8(plaintext) {
+                // `thread_id` (#825) rides inside the ciphertext as a trailer on
+                // this same frame, so it is recovered here and nowhere else —
+                // the DS and Turso never see it. `None` for every unthreaded
+                // send and for every message from a threads-unaware client.
+                super::framing::Frame::Text { text, thread_id } => {
+                    if let Ok(text) = String::from_utf8(text) {
                         let _ = conn.execute(
                             "INSERT OR IGNORE INTO message
-                             (id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                            rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, sent_at],
+                             (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, thread_id, sent_at],
                         );
                     }
                 }

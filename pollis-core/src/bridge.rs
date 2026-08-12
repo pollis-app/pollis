@@ -604,12 +604,14 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let sender_id: String = arg(&args, "senderId")?;
             let content: String = arg(&args, "content")?;
             let reply_to_id: Option<String> = arg_opt(&args, "replyToId")?;
+            let thread_id: Option<String> = arg_opt(&args, "threadId")?;
             let sender_username: Option<String> = arg_opt(&args, "senderUsername")?;
             ok(messages::send_message(
                 conversation_id,
                 sender_id,
                 content,
                 reply_to_id,
+                thread_id,
                 sender_username,
                 &state()?,
             )

@@ -107,6 +107,10 @@ interface MessageListProps {
    * deleting other members' messages for moderation. */
   viewerIsAdmin?: boolean;
   onReply?: (messageId: string) => void;
+  /** Open a message's thread in the right panel (#825). */
+  onOpenThread?: (messageId: string) => void;
+  /** messageId -> replies this device holds, for the "N replies" affordance. */
+  threadReplyCounts?: Map<string, number>;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
@@ -124,6 +128,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   adminUserIds,
   viewerIsAdmin = false,
   onReply,
+  onOpenThread,
+  threadReplyCounts,
   onEdit,
   onDelete,
   onScrollToMessage,
@@ -362,6 +368,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
             canModerate={viewerIsAdmin}
             isGroupStart={isGroupStart}
             onReply={onReply}
+            onOpenThread={onOpenThread}
+            threadReplyCount={threadReplyCounts?.get(message.id) ?? 0}
             onEdit={onEdit}
             onDelete={onDelete}
             onScrollToReply={scrollToMessage}
