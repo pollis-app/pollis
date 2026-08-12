@@ -11,6 +11,12 @@ class PresenceStore {
   // user_id → Set<room_id>
   byUser: Record<string, Set<string>> = {};
 
+  // The signed-in user. `byUser` is fed exclusively by realtime room events
+  // about OTHER participants — we never receive one about ourselves — so
+  // without this the local user reads as offline in every presence surface
+  // while the app is plainly running. Set from `appStore.setCurrentUser`.
+  selfUserId: string | null = null;
+
   constructor() {
     // `isOnline` is excluded from auto-annotation (left a plain method, not an
     // `action`). Actions run in an untracked context, so if `isOnline` were an
@@ -18,6 +24,13 @@ class PresenceStore {
     // component and presence wouldn't update live. As a plain method its reads
     // are tracked by the enclosing observer's render.
     makeAutoObservable(this, { isOnline: false }, { autoBind: true });
+  }
+
+  // Called wherever the current user is established or cleared (sign-in,
+  // logout). A setter rather than a read of `appStore` so this store keeps
+  // its zero imports and the dependency stays one-way.
+  setSelfUserId(userId: string | null) {
+    this.selfUserId = userId;
   }
 
   setPresent(userId: string, roomId: string, present: boolean) {
@@ -60,7 +73,16 @@ class PresenceStore {
   }
 
   isOnline(userId: string | null | undefined): boolean {
-    return userId ? (this.byUser[userId]?.size ?? 0) > 0 : false;
+    if (!userId) {
+      return false;
+    }
+    // If the app is running, we are online — no room event will ever say so
+    // on our behalf. Reading `selfUserId` here (still a plain method, not an
+    // action) keeps the read tracked by the enclosing observer.
+    if (userId === this.selfUserId) {
+      return true;
+    }
+    return (this.byUser[userId]?.size ?? 0) > 0;
   }
 }
 
