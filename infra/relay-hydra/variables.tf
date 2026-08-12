@@ -166,7 +166,7 @@ variable "expected_relay_protocol" {
     and never touches this. Empty disables the protocol membership gate.
   EOT
   type        = string
-  default     = "pollis-relay/3"
+  default     = "pollis-relay/4"
 }
 
 variable "max_cycle_per_run" {
