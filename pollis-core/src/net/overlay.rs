@@ -79,28 +79,26 @@ fn host_of(url: &str) -> Option<String> {
 
 /// Build the per-host routing policy from `Config` for a given runtime `mode`:
 /// the first-party control plane (Turso + optional commit-log DB, the DS, R2)
-/// routes through the overlay, and so does **LiveKit signaling** (#813 phase E1);
-/// LiveKit **media** stays direct in every mode (§6.4). Any host not on either
-/// list is dialed direct (e.g. non-first-party Expo push, §14.4). The mode is
-/// passed explicitly (not read from `config.overlay_mode`) because it is now a
-/// RUNTIME value the shim can flip.
+/// routes through the overlay. Any host not on that list is dialed direct —
+/// including **LiveKit, signalling and media both** (see below) and
+/// non-first-party Expo push (§14.4). The mode is passed explicitly (not read
+/// from `config.overlay_mode`) because it is a RUNTIME value the shim can flip.
 ///
-/// **The plane split is by TRANSPORT, not by host (E1).** LiveKit's signaling
-/// WebSocket and its RTP media share one hostname, so no host list can separate
-/// them — and the design's §6.4 rule is about the *media*, not the name it is
-/// reached under. The separation that actually holds is the shim itself: it is a
-/// SOCKS5 **CONNECT** proxy, i.e. TCP only, reached over loopback by callers that
-/// explicitly opt in. Voice frames are UDP (RTP/ICE) emitted by the Rust media
-/// stack's own sockets, which never dial the shim and could not traverse it if
-/// they tried. So adding the LiveKit host here routes its *signaling* stream and
-/// cannot route a media packet — proved by
-/// `media_plane_stays_direct_while_signaling_is_overlaid`, which sends both over
-/// the same host:port and watches which one reaches a circuit.
+/// **LiveKit is deliberately absent, decided in #813 — see §14.4 item 3.**
+/// Overlaying LiveKit's signalling WebSocket was scoped and then cut, because it
+/// buys nothing: media (RTP) goes direct to the same first-party host by the
+/// §6.4 plane split, so that host learns the client's address from the call
+/// regardless — ICE hands it over by design. Hiding the setup connection while
+/// the media stream announces the same address to the same operator seconds
+/// later is not a privacy gain. Reopening it requires changing the plane split,
+/// not the transport.
 ///
-/// **What E1 does and does not buy.** It hides the signaling connection's source
-/// address from the SFU's signaling endpoint. It does **not** make a voice call
-/// IP-private: ICE hands the SFU the client's address by design, and media stays
-/// direct on purpose. Do not describe overlaid signaling as anonymous voice.
+/// Note this is a *policy* choice, not a capability gap. The shim is a SOCKS5
+/// CONNECT proxy — TCP only, reached over loopback by callers that opt in — so
+/// even if the LiveKit host were listed, RTP could not traverse it: voice frames
+/// are UDP from the Rust media stack's own sockets. That property is what makes
+/// the §6.4 split structural, and it is still proved by
+/// `a_socks_shim_cannot_carry_media_even_for_an_overlaid_host`.
 pub(crate) fn overlay_policy(config: &Config, mode: OverlayMode) -> RoutingPolicy {
     let mut overlay_hosts: Vec<String> = Vec::new();
     let control_urls = [
@@ -109,9 +107,6 @@ pub(crate) fn overlay_policy(config: &Config, mode: OverlayMode) -> RoutingPolic
         config.pollis_delivery_url.as_deref(),
         Some(config.r2_endpoint.as_str()),
         Some(config.r2_public_url.as_str()),
-        // E1: LiveKit signaling. Media to this same host stays direct because it
-        // is UDP and never touches the shim — see the doc comment above.
-        Some(config.livekit_url.as_str()),
     ];
     for url in control_urls.into_iter().flatten() {
         if let Some(host) = host_of(url) {
@@ -1438,12 +1433,13 @@ mod tests {
         assert_eq!(host_of(""), None);
     }
 
-    /// The plane split, including E1: the control plane AND LiveKit *signaling*
-    /// route overlay; anything not first-party stays direct. What keeps LiveKit
-    /// **media** direct is the transport, not this list — see
-    /// `media_plane_stays_direct_while_signaling_is_overlaid`.
+    /// The plane split: the control plane routes overlay; everything else stays
+    /// direct — LiveKit included, signalling as well as media (#813 cut phase E1;
+    /// §14.4 item 3 records why). What keeps LiveKit *media* direct is the
+    /// transport rather than this list, which is what
+    /// `a_socks_shim_cannot_carry_media_even_for_an_overlaid_host` still pins.
     #[test]
-    fn policy_routes_control_plane_and_livekit_signaling() {
+    fn policy_routes_control_plane_and_leaves_livekit_direct() {
         let policy = overlay_policy(&cfg(OverlayMode::Prefer, None), OverlayMode::Prefer);
         use pollis_relay::PlannedRoute;
         // Control-plane hosts route overlay (with direct fallback in Prefer).
@@ -1459,13 +1455,9 @@ mod tests {
             policy.plan("r2.example.com"),
             PlannedRoute::Overlay { fallback_to_direct: true }
         );
-        // E1: the LiveKit signaling host routes overlay too. (Before #813 it was
-        // pinned direct, which also pinned its signaling metadata to the client's
-        // real address.)
-        assert_eq!(
-            policy.plan("livekit.example.com"),
-            PlannedRoute::Overlay { fallback_to_direct: true }
-        );
+        // LiveKit is direct in every mode. Overlaying its signalling would not
+        // hide the client from the SFU, which sees the address via ICE anyway.
+        assert_eq!(policy.plan("livekit.example.com"), PlannedRoute::Direct);
         // A non-first-party host (e.g. Expo push) is direct.
         assert_eq!(policy.plan("exp.host"), PlannedRoute::Direct);
     }
@@ -2798,7 +2790,7 @@ mod tests {
     /// the *transport*, which no host list could have expressed — signaling and
     /// media share a hostname.
     #[tokio::test]
-    async fn media_plane_stays_direct_while_signaling_is_overlaid() {
+    async fn a_socks_shim_cannot_carry_media_even_for_an_overlaid_host() {
         use tokio::net::UdpSocket;
 
         // One address serving both planes: UDP (media) and TCP (signaling) on the
@@ -2833,7 +2825,11 @@ mod tests {
             inner: relay.factory(),
             count: circuits.clone(),
         });
-        // The SFU host is on the overlay list — this is the E1 policy change.
+        // Deliberately overlay-route the SFU host — stronger than the shipped
+        // policy, which leaves LiveKit direct (#813 cut E1). Forcing the host
+        // onto the overlay is what makes the media half of this test mean
+        // something: media stays direct even under a policy that tried to
+        // overlay it, so §6.4 holds by transport rather than by configuration.
         let policy = RoutingPolicy::new(
             OverlayMode::Strict,
             Allowlist::from_patterns([host.as_str()]),
