@@ -94,6 +94,10 @@ impl LocalDb {
         if !is_fresh {
             ensure_incremental_auto_vacuum(&conn)?;
         }
+        // Additive columns run BEFORE the schema batch, because that batch now
+        // contains an index over one of them and `CREATE INDEX` on a column an
+        // existing DB has not gained yet would fail the whole batch.
+        add_missing_columns(&conn)?;
         conn.execute_batch(SCHEMA)?;
         conn.execute(
             "INSERT OR REPLACE INTO kv (key, value) VALUES ('schema_version', ?1)",
@@ -137,6 +141,51 @@ pub const ALLOWED_RETENTION_DAYS: [i64; 4] = [0, 30, 90, 365];
 /// A no-op if already FULL/INCREMENTAL, so it is safe to call on every open.
 /// `VACUUM` is required because `auto_vacuum` cannot otherwise change on a DB
 /// that already holds tables; it rewrites the file and preserves all data.
+/// Columns added to EXISTING tables since a database was first created.
+///
+/// `local_schema.sql` is re-applied on every open, but `CREATE TABLE IF NOT
+/// EXISTS` cannot widen a table that already exists — and the alternative,
+/// bumping [`LOCAL_SCHEMA_VERSION`], DELETES the database file along with the
+/// device's MLS state and the user's entire message history. Adding a nullable
+/// column is not remotely worth that, so additive columns land here instead.
+///
+/// Each entry must be nullable or carry a DEFAULT, so existing rows stay valid
+/// without a backfill.
+const ADDITIVE_COLUMNS: &[(&str, &str, &str)] = &[
+    // (table, column, full ALTER fragment)
+    ("message", "thread_id", "ALTER TABLE message ADD COLUMN thread_id TEXT"),
+];
+
+/// Apply [`ADDITIVE_COLUMNS`] to a database that predates them.
+///
+/// Runs on every open and is idempotent. Two failures are expected and
+/// tolerated rather than propagated:
+///
+/// * **"duplicate column name"** — the column is already there, i.e. every
+///   open after the first.
+/// * **"no such table"** — a fresh database, where the schema batch that
+///   follows creates the table already carrying the column.
+///
+/// Anything else is a real error and is surfaced, on the same principle as the
+/// wipe guard in `open_at`: we do not quietly paper over failures we do not
+/// understand on a database holding the user's history.
+fn add_missing_columns(conn: &Connection) -> Result<()> {
+    for (table, column, stmt) in ADDITIVE_COLUMNS {
+        match conn.execute(stmt, []) {
+            Ok(_) => {}
+            Err(rusqlite::Error::SqliteFailure(_, Some(ref msg)))
+                if msg.contains("duplicate column name")
+                    || msg.starts_with("no such table") => {}
+            Err(e) => {
+                return Err(Error::Other(anyhow::anyhow!(
+                    "add column {table}.{column}: {e}"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
 fn ensure_incremental_auto_vacuum(conn: &Connection) -> Result<()> {
     // 0 = NONE, 1 = FULL, 2 = INCREMENTAL.
     let mode: i64 = conn.query_row("PRAGMA auto_vacuum;", [], |row| row.get(0))?;
@@ -212,6 +261,97 @@ mod tests {
 
     fn db() -> LocalDb {
         LocalDb::open_in_memory().expect("in-memory db")
+    }
+
+    /// #825: gaining `message.thread_id` must NOT cost the user their history.
+    ///
+    /// Builds a database with the pre-thread `message` shape, puts a message in
+    /// it, then runs the same open-path steps `open_at` runs — additive columns
+    /// first, then the schema batch. The row, and the MLS state alongside it,
+    /// must still be there afterwards. Bumping `LOCAL_SCHEMA_VERSION` instead
+    /// would delete the file and fail this test, which is the point.
+    #[test]
+    fn additive_column_preserves_existing_history() {
+        let conn = Connection::open_in_memory().expect("open");
+
+        // The `message` table exactly as it was before threads: no thread_id.
+        conn.execute_batch(
+            "CREATE TABLE message (
+                 id TEXT PRIMARY KEY,
+                 conversation_id TEXT NOT NULL,
+                 sender_id TEXT NOT NULL,
+                 ciphertext BLOB NOT NULL,
+                 content TEXT,
+                 reply_to_id TEXT,
+                 sent_at TEXT NOT NULL,
+                 received_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 delivered INTEGER NOT NULL DEFAULT 0,
+                 edited_at TEXT,
+                 deleted_at TEXT
+             );
+             CREATE TABLE mls_kv (k TEXT PRIMARY KEY, v BLOB NOT NULL);",
+        )
+        .expect("legacy schema");
+
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+             VALUES ('old1', 'conv1', 'user1', X'deadbeef', 'from before threads', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("seed history");
+        conn.execute(
+            "INSERT INTO mls_kv (k, v) VALUES ('group_state', X'c0ffee')",
+            [],
+        )
+        .expect("seed mls state");
+
+        // The upgrade, in the order `open_at` performs it.
+        add_missing_columns(&conn).expect("additive columns");
+        conn.execute_batch(SCHEMA).expect("schema batch");
+
+        // History survived.
+        let (content, thread_id): (String, Option<String>) = conn
+            .query_row(
+                "SELECT content, thread_id FROM message WHERE id = 'old1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("pre-existing message still present");
+        assert_eq!(content, "from before threads");
+        assert_eq!(thread_id, None, "pre-thread messages are not in a thread");
+
+        // MLS state survived — the expensive half of a wipe.
+        let mls: Vec<u8> = conn
+            .query_row("SELECT v FROM mls_kv WHERE k = 'group_state'", [], |row| {
+                row.get(0)
+            })
+            .expect("mls state still present");
+        assert_eq!(mls, vec![0xc0, 0xff, 0xee]);
+
+        // The new column is usable, and re-running the upgrade is a no-op.
+        add_missing_columns(&conn).expect("second run must be idempotent");
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, thread_id, sent_at)
+             VALUES ('new1', 'conv1', 'user1', X'01', 'reply', 'old1', '2024-01-02T00:00:00Z')",
+            [],
+        )
+        .expect("thread_id is writable");
+    }
+
+    /// A fresh database has no `message` table when additive columns run, and
+    /// that must not be an error — the schema batch right after creates the
+    /// table already carrying the column.
+    #[test]
+    fn additive_columns_tolerate_a_fresh_database() {
+        let conn = Connection::open_in_memory().expect("open");
+        add_missing_columns(&conn).expect("no such table must be tolerated");
+        conn.execute_batch(SCHEMA).expect("schema batch");
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, thread_id, sent_at)
+             VALUES ('m1', 'c1', 'u1', X'00', 't1', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("fresh db has thread_id");
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::db::queries::CHANNEL_PREVIEWS as QUERY_CHANNEL_PREVIEWS;
 use super::ingest::{ingest_channel_envelopes_inner, ingest_dm_envelopes_inner};
 use super::types::{
     ChannelMessage, ChannelPreview, Message, MessageCursor, MessagePage, MessageWithContext,
-    SearchResult,
+    SearchResult, ThreadSummary,
 };
 
 pub async fn list_messages(
@@ -30,7 +30,7 @@ pub async fn list_messages(
         ).unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
 
         let mut stmt = db.conn().prepare(
-            "SELECT id, conversation_id, sender_id, content, reply_to_id, sent_at
+            "SELECT id, conversation_id, sender_id, content, reply_to_id, thread_id, sent_at
              FROM message
              WHERE conversation_id = ?1 AND sent_at < ?2
              ORDER BY sent_at DESC LIMIT ?3"
@@ -44,14 +44,15 @@ pub async fn list_messages(
                 sender_id: row.get(2)?,
                 content: row.get(3)?,
                 reply_to_id: row.get(4)?,
-                sent_at: row.get(5)?,
+                thread_id: row.get(5)?,
+                sent_at: row.get(6)?,
             }),
         )?;
 
         rows.filter_map(|r| r.ok()).collect()
     } else {
         let mut stmt = db.conn().prepare(
-            "SELECT id, conversation_id, sender_id, content, reply_to_id, sent_at
+            "SELECT id, conversation_id, sender_id, content, reply_to_id, thread_id, sent_at
              FROM message
              WHERE conversation_id = ?1
              ORDER BY sent_at DESC LIMIT ?2"
@@ -65,7 +66,8 @@ pub async fn list_messages(
                 sender_id: row.get(2)?,
                 content: row.get(3)?,
                 reply_to_id: row.get(4)?,
-                sent_at: row.get(5)?,
+                thread_id: row.get(5)?,
+                sent_at: row.get(6)?,
             }),
         )?;
 
@@ -106,6 +108,32 @@ pub async fn get_channel_messages(
     Ok(MessagePage { messages, next_cursor })
 }
 
+/// Map a `message` row to a [`ChannelMessage`].
+///
+/// Shared by the channel/DM page reads and the thread read (#825), so every
+/// caller must SELECT the same column order:
+/// `id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at,
+///  edited_at, deleted_at, thread_id`.
+fn row_to_channel_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMessage> {
+    let ct: Vec<u8> = row.get(3)?;
+    let content: Option<String> = row.get(4)?;
+    let deleted_at: Option<String> = row.get(8)?;
+    Ok(ChannelMessage {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        sender_id: row.get(2)?,
+        sender_username: None,
+        ciphertext: format!("mls:{}", hex::encode(&ct)),
+        // Soft-deleted messages mask content to None regardless of cache.
+        content: if deleted_at.is_some() { None } else { content },
+        reply_to_id: row.get(5)?,
+        thread_id: row.get(9)?,
+        sent_at: row.get(6)?,
+        edited_at: row.get(7)?,
+        deleted_at,
+    })
+}
+
 /// Read a page of messages for a conversation from the local `message` table,
 /// newest-first. Used by both channel and DM read paths after ingest has
 /// persisted any new envelopes.
@@ -118,36 +146,17 @@ async fn read_local_channel_page(
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-    fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMessage> {
-        let ct: Vec<u8> = row.get(3)?;
-        let content: Option<String> = row.get(4)?;
-        let deleted_at: Option<String> = row.get(8)?;
-        Ok(ChannelMessage {
-            id: row.get(0)?,
-            conversation_id: row.get(1)?,
-            sender_id: row.get(2)?,
-            sender_username: None,
-            ciphertext: format!("mls:{}", hex::encode(&ct)),
-            // Soft-deleted messages mask content to None regardless of cache.
-            content: if deleted_at.is_some() { None } else { content },
-            reply_to_id: row.get(5)?,
-            sent_at: row.get(6)?,
-            edited_at: row.get(7)?,
-            deleted_at,
-        })
-    }
-
     let mut rows: Vec<ChannelMessage> = Vec::new();
     match cursor {
         None => {
             let mut stmt = db.conn().prepare(
-                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at
+                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
                  FROM message
                  WHERE conversation_id = ?1
                  ORDER BY sent_at DESC, id DESC
                  LIMIT ?2"
             )?;
-            let mapped = stmt.query_map(rusqlite::params![conversation_id, limit], row_to_message)?;
+            let mapped = stmt.query_map(rusqlite::params![conversation_id, limit], row_to_channel_message)?;
             for r in mapped {
                 if let Ok(m) = r {
                     rows.push(m);
@@ -156,14 +165,14 @@ async fn read_local_channel_page(
         }
         Some(c) => {
             let mut stmt = db.conn().prepare(
-                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at
+                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
                  FROM message
                  WHERE conversation_id = ?1
                    AND (sent_at < ?2 OR (sent_at = ?2 AND id < ?3))
                  ORDER BY sent_at DESC, id DESC
                  LIMIT ?4"
             )?;
-            let mapped = stmt.query_map(rusqlite::params![conversation_id, c.sent_at, c.id, limit], row_to_message)?;
+            let mapped = stmt.query_map(rusqlite::params![conversation_id, c.sent_at, c.id, limit], row_to_channel_message)?;
             for r in mapped {
                 if let Ok(m) = r {
                     rows.push(m);
@@ -429,5 +438,75 @@ pub async fn search_messages(
         },
     )?;
 
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// One thread's replies, oldest-first (#825).
+///
+/// Purely local: `thread_id` lives inside the MLS ciphertext and is recovered
+/// at ingest, so the DS cannot be asked for a thread and there is nothing to
+/// paginate server-side. What this device has decrypted is the thread. A device
+/// that joined later, or a fresh install, sees only what it holds — the same
+/// bounded-history behaviour that already applies to channels.
+///
+/// The root message itself is NOT included; it is already rendered in the
+/// channel, and the caller has it.
+pub async fn read_thread_messages(
+    thread_id: String,
+    state: &Arc<AppState>,
+) -> Result<Vec<ChannelMessage>> {
+    // The rusqlite connection and its statements are not `Send`, so every one
+    // of them has to be dropped before the `.await` below — an explicit
+    // `drop()` is not enough, since the generated future still captures them.
+    // Scoping the whole DB read in a block is what keeps this command `Send`.
+    let mut messages: Vec<ChannelMessage> = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+        let mut stmt = db.conn().prepare(
+            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+             FROM message
+             WHERE thread_id = ?1
+             ORDER BY sent_at ASC, id ASC",
+        )?;
+        let mapped = stmt.query_map(rusqlite::params![thread_id], row_to_channel_message)?;
+        mapped.filter_map(|r| r.ok()).collect()
+    };
+
+    attach_sender_usernames_local(state, &mut messages).await?;
+    Ok(messages)
+}
+
+/// Reply count and last-reply time for every thread in a conversation (#825).
+///
+/// Drives the "N replies" affordance under a root message without loading each
+/// thread. Soft-deleted replies are excluded from the count so a thread whose
+/// replies were all deleted stops advertising itself.
+pub async fn list_thread_summaries(
+    conversation_id: String,
+    state: &Arc<AppState>,
+) -> Result<Vec<ThreadSummary>> {
+    let guard = state.local_db.lock().await;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+    let mut stmt = db.conn().prepare(
+        "SELECT thread_id, COUNT(*) AS reply_count, MAX(sent_at) AS last_reply_at
+         FROM message
+         WHERE conversation_id = ?1
+           AND thread_id IS NOT NULL
+           AND deleted_at IS NULL
+         GROUP BY thread_id",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![conversation_id], |row| {
+        Ok(ThreadSummary {
+            thread_id: row.get(0)?,
+            reply_count: row.get(1)?,
+            last_reply_at: row.get(2)?,
+        })
+    })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
