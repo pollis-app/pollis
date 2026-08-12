@@ -36,6 +36,7 @@ pub mod otp;
 pub mod profile;
 pub mod ratelimit;
 pub mod redact;
+pub mod room_id;
 pub mod session;
 pub mod writes;
 

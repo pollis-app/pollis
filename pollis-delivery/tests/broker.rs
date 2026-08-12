@@ -245,3 +245,44 @@ fn presign_canonical_query_is_sorted() {
     // And the signature is genuinely last (never part of what was signed).
     assert!(query.split('&').last().unwrap().starts_with("X-Amz-Signature="));
 }
+
+// ─── #828: pseudonymous room names ───────────────────────────────────────────
+
+/// The acceptance criterion: a token minted for a conversation must not carry
+/// that conversation's id in its grant. This is asserted on the *decoded JWT*,
+/// not on the helper, because the grant is the thing LiveKit actually reads —
+/// a mapping applied anywhere short of it would still leak.
+#[test]
+fn minted_grant_never_carries_the_raw_conversation_id() {
+    let conv = "01KZVDFR5Z9DKJ27YN91S3KS6N";
+    let wire = pollis_delivery::room_id::room_pseudonym(LK_SECRET, conv);
+
+    let token =
+        sign_livekit_token(LK_KEY, LK_SECRET, &wire, "alice", "Alice", true, 1_700_000_000).unwrap();
+    let (_h, payload, _s) = split_jwt(&token);
+    let granted = payload["video"]["room"].as_str().expect("room grant");
+
+    assert_ne!(granted, conv, "the grant must not be the conversation id");
+    assert!(!granted.contains(conv), "the grant must not embed the conversation id");
+    assert!(granted.starts_with("r-"), "grant should be an opaque pseudonym, got {granted}");
+}
+
+/// Two members of one conversation must resolve to the SAME room, or they join
+/// different rooms and never see each other's traffic — the failure mode that
+/// would make this change silently break messaging rather than loudly break it.
+#[test]
+fn all_members_of_a_conversation_resolve_to_one_room() {
+    let conv = "01KZVDFR5Z9DKJ27YN91S3KS6N";
+    let a = pollis_delivery::room_id::room_pseudonym(LK_SECRET, conv);
+    let b = pollis_delivery::room_id::room_pseudonym(LK_SECRET, conv);
+    assert_eq!(a, b);
+}
+
+/// An inbox room must not expose the owner's user id either — otherwise the SFU
+/// still learns exactly who is online, which is half of what #828 removes.
+#[test]
+fn inbox_rooms_do_not_expose_the_user_id() {
+    let uid = "01KZT7RW4RXQGT943Q05C7NW8A";
+    let wire = pollis_delivery::room_id::room_pseudonym(LK_SECRET, &format!("inbox-{uid}"));
+    assert!(!wire.contains(uid), "inbox pseudonym must not embed the user id");
+}

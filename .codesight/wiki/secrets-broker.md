@@ -23,11 +23,41 @@ answers, like OTP with no Resend key).
 
 | Endpoint | Does | Env (all required, else `503`) |
 |----------|------|--------------------------------|
-| `POST /v1/livekit/token` | HS256 participant JWT; identity = `{user}:{device}` (or `voice-`/`:view` per `kind`) from the **verified signer**; room authz (own `inbox-*` and `call-*` always ok, else membership) | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` |
+| `POST /v1/livekit/token` | HS256 participant JWT; identity = `{user}:{device}` (or `voice-`/`:view` per `kind`) from the **verified signer**; room authz (own `inbox-*` and `call-*` always ok, else membership) on the **logical** room, then the grant carries the **pseudonym** (#828) | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` |
 | `POST /v1/livekit/send-data` | Server-side `RoomService/SendData` — signs an admin JWT + Twirp POSTs a content-free control payload to a room | same LiveKit env |
 | `POST /v1/livekit/participants` | Server-side `RoomService/ListParticipants` (voice roster), internal identities filtered; membership-gated | same LiveKit env |
 | `POST /v1/turso/token` | Mints a short-TTL **read-only** Turso token via the Platform API | `TURSO_PLATFORM_TOKEN`, `TURSO_ORG`, `TURSO_DB` |
 | `POST /v1/r2/presign` | SigV4 query-string presigned URL (GET/PUT/DELETE), path-style, `UNSIGNED-PAYLOAD`, `host`-only signed header | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_REGION` defaults `auto`) |
+
+### Room names are pseudonymous (#828)
+
+Rooms used to be named with the raw `group.id` / `dm_channel.id`, and inboxes with
+`inbox-<user_id>`. Room membership is visible to the SFU operator by construction, so
+that handed LiveKit a second, independent copy of the social graph — which users belong
+to which conversations — living outside Turso.
+
+Every room name is now `r-<32 hex>` = HMAC-SHA256 over the logical name, keyed by a
+label-separated derivation of `LIVEKIT_API_SECRET` (`pollis-delivery/src/room_id.rs`).
+
+The split that matters: **authorization happens on the logical name, the pseudonym is
+what crosses to LiveKit.** Membership checks are unchanged.
+
+This is deliberately **server-only**. A LiveKit JWT carries the room inside its `video`
+grant and `Room::connect` takes no room argument, so the client dials whatever its token
+grants and never holds the mapping or the key — a mapping shipped in a release binary
+could be extracted and used to re-link every room to its conversation. The three places a
+room reaches LiveKit all map at the chokepoint (`sign_livekit_token`, the participants
+handler, and inside `room_send_data`, so server-side emitters like
+`bootstrap::enrollment_request` cannot forget).
+
+Rotating `LIVEKIT_API_SECRET` re-keys every room name. That is self-healing rather than a
+break: rotation already invalidates outstanding LiveKit tokens, so clients re-request one
+and get the new name in the same round trip.
+
+**Residual, stated plainly:** participant identity is still `{user_id}:{device_id}`, so
+the operator continues to see *which users* share a room even when it cannot tell which
+conversation that room is. Co-membership clustering survives. These are also stable
+pseudonyms, not unlinkable ones — one name per conversation for the life of the secret.
 
 **The `/v1/livekit/token` response is `{token, url}`, and the URL is authoritative.**
 A LiveKit JWT is only accepted by the server that issued it, so the two travel

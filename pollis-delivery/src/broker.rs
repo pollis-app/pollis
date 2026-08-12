@@ -330,10 +330,17 @@ pub async fn livekit_token(
         _ => (base, true),
     };
 
+    // #828: membership was authorized on the LOGICAL room above; what reaches
+    // LiveKit is the pseudonym. The room travels inside the JWT grant and
+    // `Room::connect` takes no room argument, so the client needs no change and
+    // never holds the mapping — which is the point: a mapping shipped in a client
+    // binary could be extracted and used to re-link every room to its conversation.
+    let wire_room = crate::room_id::room_pseudonym(api_secret, &parsed.room);
+
     let token = sign_livekit_token(
         api_key,
         api_secret,
-        &parsed.room,
+        &wire_room,
         &identity,
         &display_name,
         can_publish_data,
@@ -552,14 +559,19 @@ pub async fn room_send_data(
         use base64::Engine as _;
         base64::engine::general_purpose::STANDARD.encode(&raw)
     };
-    let token = sign_livekit_admin_token(api_key, api_secret, room, now_unix())
+    // #828: map here, at the chokepoint, so EVERY caller — including server-side
+    // emitters like `bootstrap::enrollment_request` — keeps passing the logical
+    // room and none of them can forget. The pseudonym is the only form that ever
+    // reaches LiveKit.
+    let wire_room = crate::room_id::room_pseudonym(api_secret, room);
+    let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, now_unix())
         .map_err(|e| format!("sign admin token: {e}"))?;
     let endpoint = format!("{}/twirp/livekit.RoomService/SendData", twirp_base(url));
 
     let sent = reqwest::Client::new()
         .post(&endpoint)
         .bearer_auth(&token)
-        .json(&serde_json::json!({ "room": room, "data": data_b64, "kind": "RELIABLE" }))
+        .json(&serde_json::json!({ "room": wire_room, "data": data_b64, "kind": "RELIABLE" }))
         .send()
         .await;
 
@@ -631,13 +643,15 @@ pub async fn livekit_participants(
         }
     }
 
-    let token = sign_livekit_admin_token(api_key, api_secret, &parsed.room, now_unix())?;
+    // #828: authorize the logical room, address LiveKit by its pseudonym.
+    let wire_room = crate::room_id::room_pseudonym(api_secret, &parsed.room);
+    let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, now_unix())?;
     let endpoint = format!("{}/twirp/livekit.RoomService/ListParticipants", twirp_base(url));
 
     let listed = reqwest::Client::new()
         .post(&endpoint)
         .bearer_auth(&token)
-        .json(&serde_json::json!({ "room": parsed.room }))
+        .json(&serde_json::json!({ "room": wire_room }))
         .send()
         .await;
 
