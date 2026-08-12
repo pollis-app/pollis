@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { AppShell } from "./components/Layout/AppShell";
 import type { RouterContext } from "./types/router";
+import { validatePanelSearch } from "./types/panel";
 import { RootPage } from "./pages/Root";
 import { GroupsPage } from "./pages/Groups";
 import { GroupPage } from "./pages/Group";
@@ -49,8 +50,13 @@ export type { RouterContext };
 // AppShell renders the chrome (TitleBar, VoiceBar, breadcrumb) + <Outlet />
 // for the matched child route's content area.
 
+// Search params are declared on the ROOT route because the right-hand panel
+// (#824) is chrome owned by AppShell, not by any one page — every route needs
+// to carry `panel` for the slot to survive navigation. Validating here once
+// also means a new panel kind is a change to `validatePanelSearch` alone.
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: AppShell,
+  validateSearch: validatePanelSearch,
 });
 
 // ─── Route definitions ─────────────────────────────────────────────────────────

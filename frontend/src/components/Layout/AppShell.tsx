@@ -6,6 +6,8 @@ import { TitleBar } from "./TitleBar";
 import { WindowResizeEdges } from "./WindowResizeEdges";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { Sidebar } from "./Sidebar";
+import { RightPanel } from "./RightPanel/RightPanel";
+import { useRightPanel } from "./RightPanel/useRightPanel";
 import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { useSkin } from "../../hooks/queries/usePreferences";
@@ -117,6 +119,9 @@ export const AppShell: React.FC = observer(() => {
 
   const currentUser = appStore.currentUser;
   const skin = useSkin();
+  // Panel open/closed lives in the URL, not in AppShell state — see
+  // `useRightPanel`. AppShell only needs the toggle for the shortcut.
+  const { toggle: toggleRightPanel } = useRightPanel();
 
   // Drive the looping ringtone off the incomingCall slot. Rust owns the
   // playback thread (`start_ring` / `stop_ring`) so the loop survives any
@@ -325,6 +330,10 @@ export const AppShell: React.FC = observer(() => {
 
   useGlobalShortcut("app.toggleSidebar", () => {
     setIsSidebarOpen((v) => !v);
+  });
+
+  useGlobalShortcut("app.toggleRightPanel", () => {
+    toggleRightPanel();
   });
 
   // Leaving uses history.back() so the prior chat view (and its selected
@@ -562,6 +571,10 @@ export const AppShell: React.FC = observer(() => {
           <Outlet />
           <ScreenShareViewer />
         </div>
+        {/* Right-hand context panel (#824) — a flex sibling of the outlet, so
+            opening it reflows the message list instead of covering it. Hidden
+            while the terminal view owns the region. */}
+        {!isTerminal && <RightPanel />}
         {terminalActivated && (
           <div
             style={{

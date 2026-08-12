@@ -49,7 +49,7 @@
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`
 
-### `components/Layout` (9)
+### `components/Layout` (14)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`
@@ -60,6 +60,26 @@
 - **StatusBarSummary** — props: icon, count, to, label, color, testId — `frontend/src/components/Layout/StatusBarSummary.tsx`
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
 - **WindowResizeEdges** — `frontend/src/components/Layout/WindowResizeEdges.tsx`
+
+#### `components/Layout/RightPanel` — right-hand context panel (#824)
+
+- **RightPanel** — the generic slot — `frontend/src/components/Layout/RightPanel/RightPanel.tsx`
+- **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
+- **MemberRow** — props: userId, label, avatarKey, isAdmin — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
+- **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
+- **MediaTile** — props: attachment — `frontend/src/components/Layout/RightPanel/MediaTile.tsx`
+
+The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay — opening it reflows the message list. Which panel is open lives in the URL, not in a store:
+
+| `?panel=` | Meaning |
+| --- | --- |
+| absent | Follow the default: the `right_panel_open_by_default` preference, else the skin (open in `refined`, closed in `terminal`). |
+| `members` | Explicitly open. |
+| `none` | Explicitly closed — distinct from absent, so a `refined` user can share a link with the panel shut. |
+
+`validatePanelSearch` (`frontend/src/types/panel.ts`) is declared on the **root** route, because the panel is AppShell's chrome rather than any one page's. It drops unrecognised values instead of throwing, so a stale or hand-edited link falls back to the default rather than blanking the app. `useRightPanel` resolves the precedence and owns the only write path.
+
+`panel` is a discriminated union, not a boolean, so threads (#825) add a variant rather than a second sidebar. **`useRightPanel` navigates with an explicit `to: pathname`** — a relative `to: "."` would resolve against `/` (AppShell renders at the root route) and throw the user out of their conversation, and omitting `to` leaves the search type unresolved.
 
 ### `components/Message` (9)
 
