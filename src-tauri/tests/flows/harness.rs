@@ -3153,6 +3153,59 @@ impl TestClient {
         .await
     }
 
+    /// Send a reply INTO a thread (#825). `thread_id` is the root message's
+    /// ULID. Returns the new message so a caller can assert on its id.
+    ///
+    /// Takes `conversation_id` like every other send here: the local `message`
+    /// table keys channels and DMs on the same column, which is precisely why
+    /// threads are expected to behave identically in both.
+    pub(crate) async fn send_thread_reply(
+        &self,
+        conversation_id: &str,
+        thread_id: &str,
+        content: &str,
+    ) -> serde_json::Value {
+        self.activate();
+        invoke(
+            &self.webview,
+            "send_message",
+            json!({
+                "conversationId": conversation_id,
+                "senderId": self.user_id(),
+                "content": content,
+                "replyToId": null,
+                "threadId": thread_id,
+                "senderUsername": self.profile.as_ref().map(|p| p.username.clone()),
+            }),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("send_thread_reply({conversation_id}, {thread_id}): {e}"))
+    }
+
+    /// Replies this device holds for one thread, oldest first.
+    pub(crate) async fn read_thread(&self, thread_id: &str) -> Vec<serde_json::Value> {
+        self.activate();
+        invoke::<Vec<serde_json::Value>>(
+            &self.webview,
+            "read_thread_messages",
+            json!({ "threadId": thread_id }),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("read_thread_messages({thread_id}): {e}"))
+    }
+
+    /// Reply counts per thread for one conversation (channel id or DM id).
+    pub(crate) async fn thread_summaries(&self, conversation_id: &str) -> Vec<serde_json::Value> {
+        self.activate();
+        invoke::<Vec<serde_json::Value>>(
+            &self.webview,
+            "list_thread_summaries",
+            json!({ "conversationId": conversation_id }),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("list_thread_summaries({conversation_id}): {e}"))
+    }
+
     pub(crate) async fn send_channel_message(&self, conversation_id: &str, content: &str) {
         self.try_send_message(conversation_id, content)
             .await
