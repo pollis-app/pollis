@@ -37,6 +37,12 @@ pub async fn send_message(
     sender_id: &str,
     content: &str,
     reply_to_id: Option<String>,
+    // ULID of the thread root this message replies into (#825). Threaded through
+    // rather than hardcoded `None` at the core call: the TUI has no thread UI yet,
+    // but the wrapper stays a faithful passthrough so adding one is a caller
+    // change, not a signature change — and so a thread reply can never be
+    // silently flattened into the channel by this path.
+    thread_id: Option<String>,
     sender_username: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<Message> {
@@ -45,6 +51,7 @@ pub async fn send_message(
         sender_id.to_string(),
         content.to_string(),
         reply_to_id,
+        thread_id,
         sender_username,
         state,
     )
@@ -153,7 +160,8 @@ pub async fn send_text(
     conv_id: &str,
     text: &str,
 ) -> Result<Message> {
-    send_message(conv_id, user_id, text, None, username, state).await
+    // No thread UI in the TUI yet — an ordinary channel message.
+    send_message(conv_id, user_id, text, None, None, username, state).await
 }
 
 /// Create a group named `name` owned by `user_id`, with the default text
