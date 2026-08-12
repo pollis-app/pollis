@@ -12,6 +12,12 @@ interface TextAreaProps {
   rows?: number;
   className?: string;
   id?: string;
+  /**
+   * Key handler on the underlying `<textarea>`. Added for the thread composer
+   * (#825), which needs Enter-to-send with Shift+Enter for a newline — the
+   * same contract as the main chat input.
+   */
+  onKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>;
 }
 
 export const TextArea: React.FC<TextAreaProps> = ({
@@ -25,6 +31,7 @@ export const TextArea: React.FC<TextAreaProps> = ({
   rows = 3,
   className = "",
   id,
+  onKeyDown,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const inputId = id || `textarea-${Math.random().toString(36).substr(2, 9)}`;
@@ -50,6 +57,7 @@ export const TextArea: React.FC<TextAreaProps> = ({
           value={value}
           rows={rows}
           onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           placeholder={placeholder}

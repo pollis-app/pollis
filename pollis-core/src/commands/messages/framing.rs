@@ -51,6 +51,41 @@ const PAD_FRAMING_V1: u8 = 0xF5;
 /// [`PAD_FRAMING_V1`], so it can never collide with legacy unpadded text.
 const REDACT_FRAMING_V1: u8 = 0xF6;
 
+/// Marker for the optional **thread trailer** (#825), written immediately
+/// after the real plaintext inside an otherwise ordinary [`PAD_FRAMING_V1`]
+/// text frame:
+///
+/// ```text
+///  byte 0        : PAD_FRAMING_V1 (0xF5)
+///  bytes 1..5    : u32 LE real-plaintext length      <- unchanged
+///  bytes 5..N    : real plaintext                    <- unchanged
+///  byte N        : THREAD_TRAILER_V1 (0xF7)
+///  bytes N+1..N+5: u32 LE thread-id length
+///  bytes N+5..M  : thread id (ULID, UTF-8)
+///  bytes M..     : zero padding up to the bucket size
+/// ```
+///
+/// ## Why a trailer instead of a new frame version
+///
+/// A brand-new marker byte (`0xF8…`) would have been the obvious move, but an
+/// OLD client hits the `strip` fallback on an unrecognised marker and returns
+/// the whole buffer verbatim — so every thread reply would render as binary
+/// mojibake on any client that predates this change. "Messages must work"
+/// (CLAUDE.md) rules that out.
+///
+/// Hanging the thread id off the END of the existing v1 frame keeps the header
+/// and the length prefix byte-for-byte what they always were, so an old
+/// client's `strip` reads the same length prefix, returns exactly the same
+/// plaintext, and never looks past it. A thread reply degrades to a perfectly
+/// ordinary channel message on an old client — it loses the threading, not the
+/// message.
+///
+/// The marker cannot be confused with padding (which is `0x00`) and cannot be
+/// confused with the plaintext (which ended at `N`), so its presence at `N` is
+/// unambiguous. It is drawn from the same reserved `0xF5..=0xFF` range as the
+/// frame markers so the two namespaces never collide.
+const THREAD_TRAILER_V1: u8 = 0xF7;
+
 /// Framing header: 1 version byte + 4-byte little-endian length prefix. Shared
 /// by the padded-text ([`PAD_FRAMING_V1`]) and redaction ([`REDACT_FRAMING_V1`])
 /// frames.
@@ -132,7 +167,13 @@ pub(crate) fn strip(buf: &[u8]) -> Vec<u8> {
 /// plaintext; a "delete for everyone" control message is
 /// [`Frame::Redaction`] carrying the target message id.
 pub(crate) enum Frame {
-    Text(Vec<u8>),
+    Text {
+        text: Vec<u8>,
+        /// Set when the sender wrote a thread trailer (#825) — the ULID of the
+        /// thread's root message. `None` for an ordinary channel message, and
+        /// for every message sent by a client that predates threads.
+        thread_id: Option<String>,
+    },
     Redaction(String),
 }
 
@@ -169,7 +210,68 @@ pub(crate) fn classify(buf: &[u8]) -> Frame {
             }
         }
     }
-    Frame::Text(strip(buf))
+    Frame::Text {
+        text: strip(buf),
+        thread_id: thread_of(buf),
+    }
+}
+
+/// Wrap `plaintext` in the v1 framing with a thread trailer naming
+/// `thread_id`, then zero-pad to the size bucket (#825).
+///
+/// Identical to [`pad`] up to the end of the plaintext — which is exactly what
+/// makes a thread reply readable on a client that has never heard of threads.
+pub(crate) fn pad_threaded(plaintext: &[u8], thread_id: &str) -> Vec<u8> {
+    let id = thread_id.as_bytes();
+    let mut buf = Vec::with_capacity(HEADER + plaintext.len() + HEADER + id.len());
+    buf.push(PAD_FRAMING_V1);
+    buf.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
+    buf.extend_from_slice(plaintext);
+    buf.push(THREAD_TRAILER_V1);
+    buf.extend_from_slice(&(id.len() as u32).to_le_bytes());
+    buf.extend_from_slice(id);
+    let target = padded_len(buf.len());
+    buf.resize(target, 0u8);
+    buf
+}
+
+/// Recover the thread id from a decrypted buffer, if the sender wrote one.
+///
+/// Returns `None` for every buffer [`pad`] produces, for legacy unpadded
+/// messages, for attachment envelopes, and for any malformed trailer — a
+/// message that merely loses its threading is far better than one that fails
+/// to decode, so every ambiguous case degrades to "not in a thread".
+pub(crate) fn thread_of(buf: &[u8]) -> Option<String> {
+    if buf.first() != Some(&PAD_FRAMING_V1) || buf.len() < HEADER {
+        return None;
+    }
+    let len = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+    // `checked_add` because `len` is attacker-controlled in the sense that it
+    // arrives from a decrypted buffer we did not build; an overflow here would
+    // wrap and index somewhere arbitrary.
+    let end = HEADER.checked_add(len)?;
+    // `>=`, not `>`: the trailer marker itself must be within the buffer.
+    if end >= buf.len() || buf[end] != THREAD_TRAILER_V1 {
+        return None;
+    }
+    let id_len_at = end.checked_add(1)?;
+    let id_at = id_len_at.checked_add(4)?;
+    if id_at > buf.len() {
+        return None;
+    }
+    let id_len = u32::from_le_bytes([
+        buf[id_len_at],
+        buf[id_len_at + 1],
+        buf[id_len_at + 2],
+        buf[id_len_at + 3],
+    ]) as usize;
+    let id_end = id_at.checked_add(id_len)?;
+    if id_end > buf.len() {
+        return None;
+    }
+    std::str::from_utf8(&buf[id_at..id_end])
+        .ok()
+        .map(str::to_string)
 }
 
 #[cfg(test)]
@@ -279,7 +381,7 @@ mod tests {
             let framed = pad_redaction(id);
             match classify(&framed) {
                 Frame::Redaction(got) => assert_eq!(got, id, "redaction id must round-trip"),
-                Frame::Text(_) => panic!("a redaction frame must classify as Redaction (id={id:?})"),
+                Frame::Text { .. } => panic!("a redaction frame must classify as Redaction (id={id:?})"),
             }
         }
     }
@@ -307,7 +409,7 @@ mod tests {
         ];
         for &buf in cases {
             match classify(buf) {
-                Frame::Text(plaintext) => assert_eq!(plaintext, strip(buf)),
+                Frame::Text { text, .. } => assert_eq!(text, strip(buf)),
                 Frame::Redaction(_) => panic!("non-redaction payload misclassified: {buf:?}"),
             }
         }
@@ -321,6 +423,111 @@ mod tests {
         let mut bad = vec![REDACT_FRAMING_V1];
         bad.extend_from_slice(&999u32.to_le_bytes());
         bad.extend_from_slice(b"short");
-        assert!(matches!(classify(&bad), Frame::Text(_)));
+        assert!(matches!(classify(&bad), Frame::Text { .. }));
+    }
+
+    // ── Thread trailer (#825) ───────────────────────────────────────────────
+
+    const THREAD: &str = "01J8XQ2M5H7NR3T0V9WZ4KDCEB";
+
+    /// THE load-bearing back-compat test. A client that predates threads only
+    /// ever calls `strip`; if the trailer disturbed the header or the length
+    /// prefix, every thread reply would render as mojibake on an old client.
+    /// `strip` must return the plaintext byte-for-byte, exactly as it does for
+    /// an unthreaded `pad`.
+    #[test]
+    fn old_client_strip_recovers_thread_reply_verbatim() {
+        for text in [
+            "".as_bytes(),
+            "ok".as_bytes(),
+            "a longer reply that crosses a bucket boundary ".repeat(20).as_bytes(),
+            // Multi-byte UTF-8 must survive untouched.
+            "héllo → 🧵".as_bytes(),
+        ] {
+            let framed = pad_threaded(text, THREAD);
+            assert_eq!(
+                strip(&framed),
+                text,
+                "a threads-unaware client must recover the plaintext exactly",
+            );
+        }
+    }
+
+    #[test]
+    fn pad_threaded_roundtrips_thread_id() {
+        let framed = pad_threaded(b"in a thread", THREAD);
+        assert_eq!(thread_of(&framed).as_deref(), Some(THREAD));
+        match classify(&framed) {
+            Frame::Text { text, thread_id } => {
+                assert_eq!(text, b"in a thread");
+                assert_eq!(thread_id.as_deref(), Some(THREAD));
+            }
+            Frame::Redaction(_) => panic!("threaded text misclassified as redaction"),
+        }
+    }
+
+    /// An ordinary send carries no trailer, so it must never be mistaken for a
+    /// thread reply — including when the plaintext itself ends in the trailer
+    /// marker byte or in zeros.
+    #[test]
+    fn unthreaded_payloads_have_no_thread_id() {
+        assert_eq!(thread_of(&pad(b"plain message")), None);
+        assert_eq!(thread_of(&pad(b"")), None);
+        assert_eq!(thread_of(&pad(&[0x00, 0x00, 0x00])), None);
+        assert_eq!(thread_of(&pad(&[THREAD_TRAILER_V1])), None);
+        // Legacy unpadded text and attachment envelopes.
+        assert_eq!(thread_of(b"legacy unpadded"), None);
+        assert_eq!(thread_of(br#"{"_att":[]}"#), None);
+        assert_eq!(thread_of(&[]), None);
+        // A redaction frame is not a text frame and has no thread.
+        assert_eq!(thread_of(&pad_redaction("01JABC")), None);
+    }
+
+    /// A truncated or hostile trailer degrades to "no thread" instead of
+    /// panicking. These cannot arise from `pad_threaded`; the ingest path must
+    /// survive them anyway, since the buffer is only as trustworthy as the
+    /// sender.
+    #[test]
+    fn malformed_thread_trailer_degrades_to_none() {
+        let good = pad_threaded(b"hi", THREAD);
+        let text_end = HEADER + 2;
+
+        // Trailer marker present but the id length prefix is truncated away.
+        let truncated = good[..text_end + 1].to_vec();
+        assert_eq!(thread_of(&truncated), None);
+
+        // Id length prefix overruns the buffer.
+        let mut overrun = good[..text_end + 1].to_vec();
+        overrun.extend_from_slice(&9_999u32.to_le_bytes());
+        overrun.extend_from_slice(b"short");
+        assert_eq!(thread_of(&overrun), None);
+
+        // Length prefix large enough that `HEADER + len` would overflow.
+        let mut overflow = vec![PAD_FRAMING_V1];
+        overflow.extend_from_slice(&u32::MAX.to_le_bytes());
+        overflow.extend_from_slice(b"body");
+        assert_eq!(thread_of(&overflow), None);
+
+        // Non-UTF-8 thread id.
+        let mut bad_utf8 = good[..text_end + 1].to_vec();
+        bad_utf8.extend_from_slice(&2u32.to_le_bytes());
+        bad_utf8.extend_from_slice(&[0xFF, 0xFE]);
+        assert_eq!(thread_of(&bad_utf8), None);
+    }
+
+    /// The trailer must not defeat the padding it sits inside — a thread reply
+    /// is still bucketed, so its ciphertext length leaks no more than an
+    /// ordinary short message's does.
+    #[test]
+    fn threaded_payloads_are_still_bucketed() {
+        for text in ["a", "a much longer thread reply", ""] {
+            let framed = pad_threaded(text.as_bytes(), THREAD);
+            assert_eq!(
+                framed.len(),
+                padded_len(framed.len()),
+                "threaded payload escaped its size bucket",
+            );
+            assert_eq!(framed.len(), MIN_BUCKET, "short replies must collapse");
+        }
     }
 }

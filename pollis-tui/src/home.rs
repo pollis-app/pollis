@@ -493,6 +493,7 @@ mod tests {
             ciphertext: String::new(),
             content: Some(content.to_string()),
             reply_to_id: None,
+            thread_id: None,
             sent_at: sent_at.to_string(),
             edited_at: None,
             deleted_at: None,

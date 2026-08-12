@@ -14,8 +14,8 @@ pub async fn list_messages(conversation_id: String, limit: Option<i64>, before_i
 }
 
 #[tauri::command]
-pub async fn send_message(conversation_id: String, sender_id: String, content: String, reply_to_id: Option<String>, sender_username: Option<String>, state: State<'_, Arc<AppState>>) -> Result<Message> {
-    pollis_core::commands::messages::send_message(conversation_id, sender_id, content, reply_to_id, sender_username, &state).await
+pub async fn send_message(conversation_id: String, sender_id: String, content: String, reply_to_id: Option<String>, thread_id: Option<String>, sender_username: Option<String>, state: State<'_, Arc<AppState>>) -> Result<Message> {
+    pollis_core::commands::messages::send_message(conversation_id, sender_id, content, reply_to_id, thread_id, sender_username, &state).await
 }
 
 #[tauri::command]
@@ -36,6 +36,16 @@ pub async fn read_channel_messages(channel_id: String, limit: Option<i64>, curso
 #[tauri::command]
 pub async fn read_dm_messages(dm_channel_id: String, limit: Option<i64>, cursor: Option<MessageCursor>, state: State<'_, Arc<AppState>>) -> Result<MessagePage> {
     pollis_core::commands::messages::read_dm_messages(dm_channel_id, limit, cursor, &state).await
+}
+
+#[tauri::command]
+pub async fn read_thread_messages(thread_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<ChannelMessage>> {
+    pollis_core::commands::messages::read_thread_messages(thread_id, &state).await
+}
+
+#[tauri::command]
+pub async fn list_thread_summaries(conversation_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<ThreadSummary>> {
+    pollis_core::commands::messages::list_thread_summaries(conversation_id, &state).await
 }
 
 #[tauri::command]

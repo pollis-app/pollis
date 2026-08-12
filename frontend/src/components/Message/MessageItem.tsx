@@ -1,5 +1,6 @@
 import React from "react";
-import { Reply, CornerUpLeft, Edit2, Trash2 } from "lucide-react";
+import { Reply, CornerUpLeft, Edit2, Trash2, MessagesSquare } from "lucide-react";
+import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
@@ -26,6 +27,10 @@ interface MessageItemProps {
    * callers keep the full header. */
   isGroupStart?: boolean;
   onReply?: (messageId: string) => void;
+  /** Open this message's thread in the right panel (#825). */
+  onOpenThread?: (messageId: string) => void;
+  /** Replies this device holds for this message's thread, 0 if none. */
+  threadReplyCount?: number;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
@@ -45,6 +50,8 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   canModerate = false,
   isGroupStart = true,
   onReply,
+  onOpenThread,
+  threadReplyCount = 0,
   onEdit,
   onDelete,
   onScrollToReply,
@@ -233,6 +240,14 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
           {/* Reactions row — disabled, needs more thought */}
           {/* <MessageReactions messageId={message.id} /> */}
+      <ThreadReplyCount
+        count={threadReplyCount}
+        onOpen={onOpenThread ? () => onOpenThread(message.id) : undefined}
+      />
+          <ThreadReplyCount
+            count={threadReplyCount}
+            onOpen={onOpenThread ? () => onOpenThread(message.id) : undefined}
+          />
         </div>
 
         {/* Floating hover action toolbar */}
@@ -246,6 +261,16 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             >
               <Reply size={16} />
             </button>
+            {onOpenThread && (
+              <button
+                data-testid="thread-button"
+                onClick={() => onOpenThread(message.id)}
+                aria-label="Reply in thread"
+                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <MessagesSquare size={16} />
+              </button>
+            )}
             {isOwn && onEdit && (
               <button
                 data-testid="edit-button"
@@ -389,6 +414,16 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             >
               <Reply size={18} />
             </button>
+            {onOpenThread && (
+              <button
+                data-testid="thread-button"
+                onClick={() => onOpenThread(message.id)}
+                aria-label="Reply in thread"
+                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <MessagesSquare size={18} />
+              </button>
+            )}
             {isOwn && onEdit && (
               <button
                 data-testid="edit-button"
