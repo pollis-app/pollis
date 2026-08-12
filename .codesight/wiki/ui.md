@@ -22,6 +22,25 @@
 - Components read MobX stores inside `observer()` wrappers; remote data comes from
   React Query hooks in `frontend/src/hooks/queries/`.
 
+### Presence
+
+`presenceStore` infers online-ness from LiveKit room participation, keeping a
+`user_id → Set<room_id>` map so leaving one shared room doesn't flip someone
+offline while they're still in another. Two properties are load-bearing:
+
+- **`isOnline` is deliberately NOT a MobX action.** Actions run untracked, so an
+  `action` here would leave its `byUser` reads invisible to the calling
+  `observer()` and presence would stop updating live. It stays a plain method,
+  excluded via `makeAutoObservable(this, { isOnline: false })`.
+- **The local user is tracked separately.** Room events only ever describe
+  *other* participants — nothing tells us we are online — so `byUser` never
+  contains us and every surface would report the signed-in user as offline.
+  `appStore.setCurrentUser` (and `logout`) pushes the id into
+  `presenceStore.setSelfUserId`, and `isOnline` short-circuits true for it. The
+  dependency is one-way (`appStore → presenceStore`; presence imports nothing of
+  ours) so it cannot cycle. Don't paper over this at a call site with a
+  hardcoded `presence="online"`.
+
 ## Components
 
 ### `(root)` (3)
@@ -84,6 +103,10 @@ The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay 
 
 `panel` is a discriminated union, not a boolean, so threads (#825) add a variant rather than a second sidebar. **`useRightPanel` navigates with an explicit `to: pathname`** — a relative `to: "."` would resolve against `/` (AppShell renders at the root route) and throw the user out of their conversation, and omitting `to` leaves the search type unresolved.
 
+**Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-bar border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, refined re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; refined keeps the airier avatar rows.
+
+**Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?panel=thread` on such a route falls back to the roster rather than rendering an empty thread.
+
 ### `components/Message` (9)
 
 - **AttachmentDisplay** — `frontend/src/components/Message/AttachmentDisplay.tsx`
@@ -135,6 +158,7 @@ The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay 
 - **PillButton** — props: accent, onClick, title, square, children — `frontend/src/components/ui/PillButton.tsx`
 - **PollisLogo** — props: size, color — `frontend/src/components/ui/PollisLogo.tsx`
 - **PresenceAvatar** — props: userId, avatarKey, size, alt, testId, variant — `frontend/src/components/ui/PresenceAvatar.tsx`
+- **PresenceDot** — props: userId, testId — bare online/offline dot for rows with no avatar to anchor it (terminal sidebar DMs, right-panel members) — `frontend/src/components/ui/PresenceDot.tsx`
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
 - **Switch** — props: label, checked, onChange, disabled, className, id, description — `frontend/src/components/ui/Switch.tsx`

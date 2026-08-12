@@ -21,7 +21,7 @@ import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
 import { usePeerVerifications } from "../../hooks/queries/useUserProfile";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
-import { usePresenceStatus } from "../../stores/presenceStore";
+import { PresenceDot } from "../ui/PresenceDot";
 import { useShortcutLabel } from "../../keyboard";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { PresenceAvatar } from "../ui/PresenceAvatar";
@@ -278,7 +278,12 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                       testId={`sidebar-dm-avatar-${c.id}`}
                     />
                   ) : (
-                    <PresenceDot userId={c.user2_id ?? null} />
+                    <PresenceDot
+                      userId={c.user2_id ?? null}
+                      testId={
+                        c.user2_id ? `sidebar-presence-${c.user2_id}` : undefined
+                      }
+                    />
                   )
                 }
                 label={c.user2_identifier}
@@ -440,19 +445,3 @@ const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, mute
     {count > 99 ? "99+" : count}
   </span>
 );
-
-// Standalone presence dot mirroring Avatar's overlay dot: online uses the
-// accent color, offline uses the bg color ringed in accent-muted. Used in
-// the sidebar DM list where there's no avatar behind it to anchor the dot.
-const PresenceDot: React.FC<{ userId: string | null }> = observer(({ userId }) => {
-  const status = usePresenceStatus(userId);
-  return (
-    <span
-      data-testid={userId ? `sidebar-presence-${userId}` : undefined}
-      aria-label={`Presence: ${status}`}
-      className={`inline-block size-2 rounded-full box-content shrink-0 border ${
-        status === "offline" ? "bg-bg border-accent-muted" : "bg-accent border-surface"
-      }`}
-    />
-  );
-});
