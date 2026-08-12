@@ -22,7 +22,7 @@ pub mod watermark;
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{
     ChannelMessage, ChannelPreview, Message, MessageCursor, MessagePage, MessageWithContext,
-    SearchResult,
+    SearchResult, ThreadSummary,
 };
 
 // ── Send ─────────────────────────────────────────────────────────────────────
@@ -31,7 +31,8 @@ pub use send::send_message;
 // ── Read / list / search ─────────────────────────────────────────────────────
 pub use read::{
     get_channel_messages, get_dm_messages, list_channel_previews, list_messages,
-    list_messages_by_sender, read_channel_messages, read_dm_messages, search_messages,
+    list_messages_by_sender, list_thread_summaries, read_channel_messages, read_dm_messages,
+    read_thread_messages, search_messages,
 };
 
 // ── Ingest (envelope pull + watermark + cleanup) ─────────────────────────────

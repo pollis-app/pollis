@@ -12,7 +12,8 @@ import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInpu
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
-import { transformChannelMessage, type RawChannelMessage } from "../../hooks/queries/useMessages";
+import { transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
+import { useRightPanel } from "./RightPanel/useRightPanel";
 import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
 import { blurhashFromUrl } from "../../utils/imageProcessing";
@@ -105,6 +106,19 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     selectedConversationId
   );
   const sendMessageMutation = useSendMessage();
+  // Threads (#825). `openThread` writes the panel search params; the summaries
+  // give each root message its "N replies" count without loading the thread.
+  const { openThread } = useRightPanel();
+  const { data: threadSummaries } = useThreadSummaries(
+    selectedChannelId ?? selectedConversationId ?? null,
+  );
+  const threadReplyCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const [threadId, summary] of threadSummaries ?? []) {
+      counts.set(threadId, summary.reply_count);
+    }
+    return counts;
+  }, [threadSummaries]);
   const deleteMessageMutation = useDeleteMessage();
   const editMessageMutation = useEditMessage();
 
@@ -501,6 +515,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             groupIdForNames={selectedGroupId ?? null}
             adminUserIds={selectedGroupId ? adminUserIds : undefined}
             viewerIsAdmin={viewerIsAdmin}
+            onOpenThread={openThread}
+            threadReplyCounts={threadReplyCounts}
             onReply={(id) => {
               setEditingMessage(null);
               setPendingDeleteId(null);

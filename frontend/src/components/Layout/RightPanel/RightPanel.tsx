@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { appStore } from "../../../stores/appStore";
 import { useRightPanel } from "./useRightPanel";
 import { MembersPanel } from "./MembersPanel";
+import { ThreadPanel } from "./ThreadPanel";
 
 /**
  * The right-hand context panel slot (#824).
@@ -17,7 +18,7 @@ import { MembersPanel } from "./MembersPanel";
  * list reflows instead of being covered.
  */
 export const RightPanel: React.FC = observer(() => {
-  const { kind, isOpen, setPanel } = useRightPanel();
+  const { kind, isOpen, threadId, setPanel } = useRightPanel();
 
   const groupId = appStore.selectedGroupId;
   const channelId = appStore.selectedChannelId;
@@ -39,7 +40,7 @@ export const RightPanel: React.FC = observer(() => {
     >
       <div className="flex h-bar shrink-0 items-center justify-between border-b border-line px-3">
         <span className="text-xs font-medium uppercase tracking-widest text-dim">
-          Details
+          {kind === "thread" ? "Thread" : "Details"}
         </span>
         <button
           type="button"
@@ -56,6 +57,16 @@ export const RightPanel: React.FC = observer(() => {
         {kind === "members" && (
           <MembersPanel
             groupId={groupId}
+            channelId={channelId}
+            conversationId={conversationId}
+          />
+        )}
+        {/* `threadId` is non-null whenever kind is "thread" — the router drops
+            the panel param rather than admit one without the other — but the
+            guard keeps that guarantee local and typed. */}
+        {kind === "thread" && threadId && (
+          <ThreadPanel
+            threadId={threadId}
             channelId={channelId}
             conversationId={conversationId}
           />

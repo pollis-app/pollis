@@ -1377,6 +1377,8 @@ impl TestClient {
             self.user_id().to_string(),
             content.to_string(),
             None,
+            // reply_to_id / thread_id: an ordinary channel message.
+            None,
             username,
             &self.state,
         )

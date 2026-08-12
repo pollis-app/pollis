@@ -25,10 +25,23 @@ CREATE TABLE IF NOT EXISTS message (
     received_at TEXT NOT NULL DEFAULT (datetime('now')),
     delivered INTEGER NOT NULL DEFAULT 0,
     edited_at TEXT,
-    deleted_at TEXT
+    deleted_at TEXT,
+    -- ULID of the thread root this message replies into, NULL for an ordinary
+    -- channel message (#825). Only ever populated from the decrypted MLS
+    -- payload — it is never sent to, or read from, the DS.
+    --
+    -- This column is ALSO added to pre-existing databases by
+    -- `add_missing_columns` in `local.rs`; CREATE TABLE IF NOT EXISTS is a
+    -- no-op once the table exists, so this line only serves fresh DBs.
+    thread_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);
+
+-- Thread lookup: fetching one thread's replies, and counting replies per root.
+-- Created on every open like the eviction index above, so existing DBs gain it
+-- without a schema-version bump (which would wipe history).
+CREATE INDEX IF NOT EXISTS idx_message_thread ON message(thread_id, sent_at);
 
 -- Eviction scan index: lookback/retention sweeps delete by received_at. Run on
 -- every open (this schema is re-applied each open) so existing DBs gain it
