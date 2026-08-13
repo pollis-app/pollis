@@ -4,6 +4,8 @@ import type { VoiceState } from '../types/voice-state';
 import type { SourceList } from '../screenshare/screenShareSession';
 import type { CameraSource } from '../camera/types';
 import { isSpeaking } from '../voice/participantAudio';
+// One-way edge: presenceStore imports nothing of ours, so this cannot cycle.
+import { presenceStore } from './presenceStore';
 
 type CameraRemote = { trackKey: string; width: number; height: number };
 type EnrollmentApproval = { requestId: string; newDeviceId: string; verificationCode: string };
@@ -109,6 +111,10 @@ class AppStore implements AppState {
   // ── Actions ────────────────────────────────────────────────────────────
   setCurrentUser(user: User | null) {
     this.currentUser = user;
+    // Presence is fed by realtime events about other participants only, so
+    // the store has to be told who "we" are or every surface reports the
+    // local user offline.
+    presenceStore.setSelfUserId(user?.id ?? null);
   }
 
   setUsername(username: string | null) {
@@ -516,6 +522,7 @@ class AppStore implements AppState {
 
   logout() {
     this.currentUser = null;
+    presenceStore.setSelfUserId(null);
     this.username = null;
     this.userAvatarUrl = null;
     this.selectedGroupId = null;

@@ -2149,3 +2149,104 @@ async fn admin_delete_redacts_the_authors_own_copy() {
 
     drop((alice, bob));
 }
+
+/// Threads (#825) must behave identically in a DM and in a group channel.
+///
+/// They share one code path by construction — the local `message` table keys
+/// both on `conversation_id`, and `read_thread_messages` filters on `thread_id`
+/// alone — but nothing pinned that, and the two surfaces reach it through
+/// different UI. This runs the same thread through both and asserts the same
+/// answers, so a future change that special-cases channels fails here.
+///
+/// What it pins, for each surface:
+///   - a reply sent with `threadId` is readable back as a reply of that thread
+///   - the reply does NOT come back in the conversation's main message list
+///     (the channel feed shows the root's "N replies" instead — a reply in
+///     both places is the double-post bug threads exist to avoid)
+///   - `list_thread_summaries` counts it against the root
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn threads_behave_the_same_in_dms_and_channels() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // ---- surface 1: a group channel ----
+    let group_id = alice.create_group("Threads").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    let channel_root = alice
+        .send_channel_message_id(&channel_id, "channel root")
+        .await;
+    alice
+        .send_thread_reply(&channel_id, &channel_root, "channel reply")
+        .await;
+
+    // ---- surface 2: a DM ----
+    let dm_id = alice.create_dm(&[bob_profile.id.as_str()]).await;
+    bob.poll().await;
+    let dm_root = alice.send_channel_message_id(&dm_id, "dm root").await;
+    alice
+        .send_thread_reply(&dm_id, &dm_root, "dm reply")
+        .await;
+
+    // ---- the same three assertions against each ----
+    for (label, conversation_id, root_id, reply_text) in [
+        ("channel", &channel_id, &channel_root, "channel reply"),
+        ("dm", &dm_id, &dm_root, "dm reply"),
+    ] {
+        let replies = alice.read_thread(root_id).await;
+        let texts: Vec<&str> = replies
+            .iter()
+            .filter_map(|m| m["content"].as_str())
+            .collect();
+        assert!(
+            texts.contains(&reply_text),
+            "{label}: the thread should hold its reply, got: {replies:#?}"
+        );
+
+        // The reply belongs to the thread, not the conversation's own feed.
+        let feed = alice.fetch_channel_messages(conversation_id).await;
+        let feed_has_reply = feed
+            .iter()
+            .filter_map(|m| m["thread_id"].as_str())
+            .any(|t| t == root_id.as_str());
+        assert!(
+            feed_has_reply,
+            "{label}: the reply must still be FETCHABLE with a thread_id set — \
+             the channel feed filters it out client-side, so the field is what \
+             that filter keys on and it must survive the round trip"
+        );
+
+        let summaries = alice.thread_summaries(conversation_id).await;
+        let counted = summaries
+            .iter()
+            .find(|s| s["thread_id"].as_str() == Some(root_id.as_str()))
+            .unwrap_or_else(|| {
+                panic!("{label}: no thread summary for {root_id}, got: {summaries:#?}")
+            });
+        assert_eq!(
+            counted["reply_count"].as_i64(),
+            Some(1),
+            "{label}: the root should advertise exactly one reply"
+        );
+    }
+
+    let _ = alice_profile;
+    drop(alice);
+    drop(bob);
+}

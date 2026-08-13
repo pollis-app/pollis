@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../../stores/appStore";
 import { presenceStore } from "../../../stores/presenceStore";
+import { useSkin } from "../../../hooks/queries/usePreferences";
 import { useGroupMembers } from "../../../hooks/queries/useGroups";
 import { useMessages } from "../../../hooks/queries/useMessages";
 import { MemberRow } from "./MemberRow";
@@ -22,24 +23,74 @@ interface MembersPanelProps {
   conversationId: string | null;
 }
 
+interface Person {
+  userId: string;
+  label: string;
+  avatarKey: string | null;
+  isAdmin: boolean;
+}
+
 /**
  * Members + shared media for the active conversation — Discord's member list
  * over Messenger's shared-media grid, which is what #824 asks for.
  *
  * Members come from the group for a channel/group route. A DM has no member
  * table, so its two participants are derived from the conversation record.
+ *
+ * On a route with no conversation at all (Preferences, Search, the root page)
+ * the panel degrades to the plain online roster and drops the media grid —
+ * "who is online" still answers a question there, "media shared in this
+ * conversation" does not.
  */
 export const MembersPanel: React.FC<MembersPanelProps> = observer(
   ({ groupId, channelId, conversationId }) => {
     const { data: groupMembers = [] } = useGroupMembers(groupId);
     const { messages } = useMessages(channelId, conversationId);
+    const isTerminal = useSkin() === "terminal";
     const currentUser = appStore.currentUser;
     const dmConversations = appStore.dmConversations;
+    const hasContext = Boolean(groupId || channelId || conversationId);
 
     // Online first, then alphabetical. Reading `presenceStore.isOnline` here
     // (inside an observer) is what keeps the ordering live as people join and
     // leave — `isOnline` is deliberately not an action for exactly this.
-    const people = useMemo(() => {
+    const people = useMemo<Person[]>(() => {
+      if (!hasContext) {
+        // No conversation to scope to, so the roster is simply everyone we
+        // can currently see online. Names come from the DM list — the only
+        // peer directory the client holds without a group — and fall back to
+        // the raw id for someone we share no DM with.
+        const known = new Map<string, { label: string; avatarKey: string | null }>();
+        for (const dm of dmConversations) {
+          if (dm.user2_id) {
+            known.set(dm.user2_id, {
+              label: dm.user2_identifier,
+              avatarKey: dm.user2_avatar_url ?? null,
+            });
+          }
+        }
+        const self: Person[] = currentUser
+          ? [
+              {
+                userId: currentUser.id,
+                label: "You",
+                avatarKey: null,
+                isAdmin: false,
+              },
+            ]
+          : [];
+        const others = Object.keys(presenceStore.byUser)
+          .filter((userId) => userId !== currentUser?.id)
+          .map((userId) => ({
+            userId,
+            label: known.get(userId)?.label ?? userId,
+            avatarKey: known.get(userId)?.avatarKey ?? null,
+            isAdmin: false,
+          }))
+          .sort((a, b) => a.label.localeCompare(b.label));
+        return [...self, ...others];
+      }
+
       if (conversationId) {
         const dm = dmConversations.find((c) => c.id === conversationId);
         if (!dm) {
@@ -84,6 +135,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           return a.label.localeCompare(b.label);
         });
     }, [
+      hasContext,
       conversationId,
       dmConversations,
       currentUser,
@@ -114,14 +166,27 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
       return out;
     }, [messages]);
 
+    // Terminal packs the column the way the left sidebar does — sections butt
+    // up against their hairline headers with no outer padding. Refined keeps
+    // the airier card rhythm.
+    const rootClass = isTerminal
+      ? "flex h-full flex-col overflow-y-auto"
+      : "flex h-full flex-col gap-4 overflow-y-auto py-3";
+    const emptyClass = isTerminal ? "px-2.5 py-1 text-xs text-muted" : "px-2 text-xs text-muted";
+
     return (
-      <div className="flex h-full flex-col gap-4 overflow-y-auto py-3">
-        <section className="flex flex-col gap-1">
-          <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
-            Members — {people.length}
-          </h2>
+      <div className={rootClass}>
+        <section className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}>
+          <SectionHeader
+            label={
+              hasContext ? `Members — ${people.length}` : `Online — ${people.length}`
+            }
+            isTerminal={isTerminal}
+          />
           {people.length === 0 ? (
-            <p className="px-2 text-xs text-muted">No members to show.</p>
+            <p className={emptyClass}>
+              {hasContext ? "No members to show." : "No one online."}
+            </p>
           ) : (
             people.map((person) => (
               <MemberRow
@@ -135,13 +200,52 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           )}
         </section>
 
-        <section className="flex flex-col gap-2">
-          <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
-            Media
-          </h2>
-          <MediaGrid attachments={attachments} />
-        </section>
+        {hasContext && (
+          <section
+            className={isTerminal ? "flex flex-col gap-1 pb-2" : "flex flex-col gap-2"}
+          >
+            <SectionHeader label="Media" isTerminal={isTerminal} bordered />
+            <MediaGrid attachments={attachments} />
+          </section>
+        )}
       </div>
     );
   },
 );
+
+interface SectionHeaderProps {
+  label: string;
+  isTerminal: boolean;
+  /** Hairline rule above the header as well as below — the left sidebar's
+      `bordered` treatment, used on every section after the first. */
+  bordered?: boolean;
+}
+
+/**
+ * Section heading for the panel column. Terminal borrows the left sidebar's
+ * `SectionHeader` chrome verbatim — a `h-bar` sticky strip, hairline under it,
+ * and a second hairline above every section after the first — so both columns
+ * read as the same UI. Refined keeps the lighter free-standing label it
+ * already had.
+ */
+const SectionHeader: React.FC<SectionHeaderProps> = ({
+  label,
+  isTerminal,
+  bordered,
+}) => {
+  if (!isTerminal) {
+    return (
+      <h2 className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
+        {label}
+      </h2>
+    );
+  }
+  const cls = [
+    "sticky top-0 z-[1] flex h-bar w-full items-center border-b border-line",
+    "bg-surface px-2.5 text-[0.8rem] uppercase tracking-[0.08em] text-muted select-none",
+    bordered ? "mt-1 border-t" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return <h2 className={cls}>{label}</h2>;
+};

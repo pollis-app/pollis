@@ -240,10 +240,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
           {/* Reactions row — disabled, needs more thought */}
           {/* <MessageReactions messageId={message.id} /> */}
-      <ThreadReplyCount
-        count={threadReplyCount}
-        onOpen={onOpenThread ? () => onOpenThread(message.id) : undefined}
-      />
           <ThreadReplyCount
             count={threadReplyCount}
             onOpen={onOpenThread ? () => onOpenThread(message.id) : undefined}
