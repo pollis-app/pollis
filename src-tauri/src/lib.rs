@@ -294,9 +294,23 @@ pub fn run() {
 
     // WebKitGTK 2.42+ attempts DMA-BUF rendering and aborts if GBM/EGL is
     // unavailable (e.g. certain GPU drivers, VMs, Wayland compositors without
-    // DRM). Disable it unconditionally so the app doesn't crash on launch.
+    // DRM). Disable it so the app doesn't crash on launch.
+    //
+    // NOT unconditional, despite what this comment used to say. `main.rs`
+    // deliberately skips both WebKit disables when POLLIS_ENABLE_COMPOSITING is
+    // set, and this line then set one of them straight back — so the documented
+    // escape hatch could not actually be exercised, and nobody could measure
+    // the accelerated path even by asking for it. Honouring the same opt-in
+    // here is what makes that flag mean something.
+    //
+    // The perf stake is real: with WebKitGTK's accelerated compositing off
+    // there is no WebGL, so the in-app terminal falls back to a slower renderer
+    // (see TerminalView.tsx). Launching at all still wins over launching fast,
+    // which is why the conservative path remains the default.
     #[cfg(target_os = "linux")]
-    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    if std::env::var("POLLIS_ENABLE_COMPOSITING").is_err() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
 
     // WebKit uses GStreamer for media playback. The `autoaudiosink` element
     // (gst-plugins-good) is not always installed. When it is missing, GStreamer
