@@ -126,12 +126,18 @@
    color: var(--vs-ink-faint);
 }
 
+/* Flex (not grid) centering: RemoteVideoTile's canvas fits via
+   max-width/max-height 100%, which only resolves against a definite
+   box. A grid's auto track would size to the canvas's intrinsic
+   (source-resolution) height and clip it at small window sizes. */
 .vs-tile-stage {
    flex: 1 1 auto;
    position: relative;
-   display: grid;
-   place-items: center;
+   display: flex;
+   align-items: center;
+   justify-content: center;
    min-height: 0;
+   min-width: 0;
 }
 
 .vs-tile-center {
