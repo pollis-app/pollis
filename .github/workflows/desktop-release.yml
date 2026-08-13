@@ -1173,7 +1173,13 @@ jobs:
       # Pinned installer action — never an unpinned curl. Puts the `cosign` CLI
       # on the runner for the sign-blob pass below.
       #
-      # v4, not v3: the v3 line stopped at v3.10.1 (2025-10) and its hardcoded
+      # Pinned to an EXACT version, not `@v4`: sigstore/cosign-installer
+      # publishes no moving `v4` tag (v3 has one, v4 does not), so `@v4` is
+      # unresolvable and the job dies in "Set up job" before a single step runs
+      # — which is exactly how v1.9.1 lost its provenance. Bumping a major by
+      # convention is not safe here; check the tag exists.
+      #
+      # v4.x, not v3: the v3 line stopped at v3.10.1 (2025-10) and its hardcoded
       # digest for cosign's release signing key went stale, so every run now dies
       # with "Fetched public key does not match expected digest" (curl exit 22).
       # That is what silently cost v1.9.0 its provenance — the SLSA attestations
@@ -1186,7 +1192,7 @@ jobs:
       # installer and the CLI generation in one step would make a failure
       # ambiguous, so the CLI contract stays fixed here and moves on its own.
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.2
         with:
           cosign-release: 'v2.6.5'
 

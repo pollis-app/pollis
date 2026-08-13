@@ -303,6 +303,21 @@ A green workflow is **not** proof the new bits are serving traffic. For anything
 - **Desktop / CLI** — the new version appears under `cdn.pollis.com/releases/<version>/…` and in the `latest.json` / `cli/latest.json` manifest.
 - **Website** — the change is live on **pollis.com** (Cloudflare Pages deploy is a manual button; `main` being green ≠ deployed).
 - **Transparency log** — `verify.pollis.com` STH advanced; `pollis-verify` still passes.
+- **Provenance (`provenance` job) — check it explicitly, every release.** It is the *second*,
+  independent sigstore anchor, it runs `continue-on-error`-adjacent to everything else, and it has
+  now failed twice for two unrelated reasons (v1.9.0: a stale key digest in `cosign-installer@v3`;
+  v1.9.1: `@v4` is not a real tag, so the job died in "Set up job"). **Both times every other part
+  of the release was perfectly healthy**, which is exactly why it needs its own line here. Verify
+  the artifact it is supposed to publish actually exists rather than reading the job status:
+  ```bash
+  curl -sIo /dev/null -w '%{http_code}\n' \
+    "https://cdn.pollis.com/releases/<tag>/pollis-<tag>-linux.deb.intoto.jsonl"   # want 200
+  ```
+  A 404 means every BinaryRecord leaf for that tag carries a `provenance_uri` that resolves to
+  nothing. **It is not repairable in place** — re-runs use the workflow from the tagged commit, and
+  `attest-release.yml` backfills the transparency log only, with no cosign/provenance path. So the
+  choice is a fresh tag or a release that ships with the primary anchor alone; decide deliberately
+  rather than discovering it later.
 - **Migration** — confirm it's recorded in prod `schema_migrations` after the deploy that was supposed to apply it.
 
 If a target is deferred, it is now **known-stale** — say so, and make sure the eventual deploy that ships it is on someone's radar.
