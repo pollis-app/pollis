@@ -3,6 +3,7 @@ import { invoke, Channel } from "../bridge";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { CanvasAddon } from "@xterm/addon-canvas";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalViewProps {
@@ -51,12 +52,35 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef.current);
+    // Renderer, best first. xterm has three and the gap between them is the
+    // difference between typing feeling instant and feeling staggered:
+    // WebGL > canvas > DOM, and DOM repaints spans on the CPU.
+    //
+    // This matters far more on Linux than macOS. WKWebView is accelerated, so
+    // macOS gets WebGL. On Linux the app launches with
+    // WEBKIT_DISABLE_COMPOSITING_MODE=1 (src-tauri/src/main.rs — it is there to
+    // stop WebKitGTK aborting at startup on drivers without working GBM/EGL),
+    // and with accelerated compositing off WebKitGTK has no WebGL at all. The
+    // previous code caught that failure and said nothing, so every Linux user
+    // silently fell all the way to DOM. Canvas is the rung in between and needs
+    // no GPU compositing, which is why it is worth carrying.
+    let renderer: "webgl" | "canvas" | "dom" = "dom";
     try {
       term.loadAddon(new WebglAddon());
+      renderer = "webgl";
     } catch {
-      // WebGL unavailable (some Linux WebKitGTK builds) — xterm falls
-      // back to its DOM renderer automatically.
+      try {
+        term.loadAddon(new CanvasAddon());
+        renderer = "canvas";
+      } catch {
+        // Both unavailable — xterm uses its DOM renderer.
+      }
     }
+    // Logged because it is otherwise invisible: the addons fail by throwing at
+    // load time, so "is this accelerated?" was previously unanswerable without
+    // a debugger. If this ever reads `dom` on a machine that should manage
+    // better, that is the bug, not the terminal code.
+    console.info(`[terminal] renderer: ${renderer}`);
 
     termRef.current = term;
     fitRef.current = fit;
@@ -82,18 +106,51 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     // NOT TextDecode per-chunk. The write callback fires once the chunk is
     // actually parsed/rendered: that's the true end-to-end backpressure
     // signal we credit back to the aggregator via terminal_ack.
+    // Acks are COALESCED, not one per rendered chunk.
+    //
+    // The write path is binary, but this ack is JSON — and it used to fire from
+    // every single xterm write callback. While you type, the shell echoes each
+    // keystroke as its own chunk, so every character cost a JSON
+    // serialize/parse round trip on top of the keystroke's own invoke: two IPC
+    // hops per key, on WebKitGTK, which is the webview least able to afford
+    // them. That is a large part of why typing felt staggered on Linux and fine
+    // on macOS.
+    //
+    // Safe to batch because the aggregator needs EVENTUAL credit, not
+    // per-chunk precision: it only parks above HIGH_WATERMARK (1 MiB) and
+    // resumes below LOW_WATERMARK (256 KiB) — see commands/terminal_unix.rs.
+    // So we flush on a frame, and immediately once enough is outstanding that
+    // sitting on it could park a bulk producer mid-stream.
+    let pendingAck = 0;
+    let ackScheduled = false;
+    let ackFrame = 0;
+    const ACK_FLUSH_BYTES = 64 * 1024;
+    const flushAck = () => {
+      ackScheduled = false;
+      const bytes = pendingAck;
+      pendingAck = 0;
+      const id = terminalIdRef.current;
+      if (id === null || bytes === 0) {
+        return;
+      }
+      invoke("terminal_ack", { terminalId: id, bytes }).catch((e) =>
+        console.warn("terminal_ack failed", e),
+      );
+    };
+
     const channel = new Channel<ArrayBuffer>();
     channel.onmessage = (buf) => {
       const bytes = new Uint8Array(buf);
       term.write(bytes, () => {
-        const id = terminalIdRef.current;
-        if (id === null) {
+        pendingAck += bytes.byteLength;
+        if (pendingAck >= ACK_FLUSH_BYTES) {
+          flushAck();
           return;
         }
-        invoke("terminal_ack", {
-          terminalId: id,
-          bytes: bytes.byteLength,
-        }).catch((e) => console.warn("terminal_ack failed", e));
+        if (!ackScheduled) {
+          ackScheduled = true;
+          ackFrame = requestAnimationFrame(flushAck);
+        }
       });
     };
 
@@ -175,6 +232,12 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
       cancelAnimationFrame(readyRaf);
       window.removeEventListener("beforeunload", onBeforeUnload);
       resizeObserver.disconnect();
+      // Drop any scheduled ack: the session is being closed, so the credit has
+      // nowhere to go and the callback would fire against a dead id.
+      if (ackScheduled) {
+        cancelAnimationFrame(ackFrame);
+        ackScheduled = false;
+      }
       onDataDisposable.dispose();
       const id = terminalIdRef.current;
       if (id !== null) {
