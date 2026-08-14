@@ -428,7 +428,29 @@ pub async fn download_media(
     let get_url = presign_r2(state, "get", &r2_key).await?;
     let overlay = state.overlay_handle();
     let ciphertext = r2_get_url(overlay.as_deref(), &get_url).await?;
-    decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)
+    let plaintext = decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)?;
+
+    // The object is CONTENT-ADDRESSED, so verify it actually is its address.
+    //
+    // AEAD alone proves nothing here: the key is DERIVED from `content_hash`
+    // (`derive_attachment_key` above), and that hash is known to everyone the
+    // attachment was shared with. Anyone holding it can therefore produce
+    // ciphertext that decrypts cleanly — the tag only proves the writer knew the
+    // hash, not that the bytes are the ones the sender meant. Re-hashing is what
+    // closes that: a substituted payload has a different digest and is refused,
+    // whoever managed to write it into R2.
+    //
+    // Cheap, and it also catches ordinary corruption in the shared convergent
+    // object rather than rendering it as genuine.
+    let actual = sha256_bytes(&plaintext);
+    if actual != hash_array {
+        return Err(Error::Other(anyhow::anyhow!(
+            "attachment {r2_key} failed its content-hash check — expected {content_hash}, \
+             got {}; refusing to return substituted or corrupted bytes",
+            hex::encode(actual)
+        )));
+    }
+    Ok(plaintext)
 }
 
 /// Resolve a media attachment to a loopback HTTP URL the webview can use
