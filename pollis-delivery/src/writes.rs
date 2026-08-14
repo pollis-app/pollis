@@ -214,6 +214,36 @@ pub(crate) fn resolve_actor(
 ///
 /// Takes a bare [`Connection`] (the main DB) so the same gate is reusable from
 /// the integration harness, which drives a single shared connection rather than
+/// True when `id` is already in use as ANY kind of conversation — a DM channel,
+/// a group, or a channel.
+///
+/// The three live in separate tables with separate primary keys, so SQLite
+/// happily accepts the same id in all three. That is not a ULID collision
+/// (they do not collide by chance); every creation endpoint takes the id
+/// straight from the request body, so an attacker simply *names* an existing
+/// conversation. [`is_member`] then ORs across all three tables on one id, so
+/// creating a DM whose id is a victim group's id and adding yourself to it
+/// makes `is_member(victim_group, you)` true — membership of a group you were
+/// never in, and with it commit injection, GroupInfo/Welcome overwrite, and a
+/// LiveKit token for their room.
+///
+/// Every `create_*` path must call this before inserting. The durable fix is a
+/// single `conversation` table owning the id namespace so the database refuses
+/// this outright; this is the chokepoint that closes it today.
+pub async fn conversation_id_taken(conn: &Connection, id: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 WHERE \
+                EXISTS (SELECT 1 FROM dm_channel WHERE id = ?1) \
+             OR EXISTS (SELECT 1 FROM groups     WHERE id = ?1) \
+             OR EXISTS (SELECT 1 FROM channels   WHERE id = ?1) \
+             LIMIT 1",
+            libsql::params![id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
 /// the DS's `AppState`.
 pub async fn is_member(
     conn: &Connection,
@@ -653,4 +683,109 @@ pub async fn upsert_welcome(
 fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine as _;
     Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
+}
+
+#[cfg(test)]
+mod conversation_namespace_tests {
+    //! One id must never name two kinds of conversation.
+    //!
+    //! Not a ULID-collision concern — ULIDs do not collide by chance. Every
+    //! `create_*` endpoint takes the id straight from the request body, so an
+    //! attacker *names* an existing conversation rather than colliding with it.
+    //! Because `dm_channel`, `groups` and `channels` are separate tables with
+    //! separate primary keys, SQLite accepts the same id in all three, and
+    //! `is_member` ORs across all three on one id — so a DM whose id is a
+    //! victim group's id grants membership of that group.
+
+    use super::*;
+    use libsql::Connection;
+
+    const SCHEMA: &str = "\
+        CREATE TABLE dm_channel (id TEXT PRIMARY KEY);\
+        CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);\
+        CREATE TABLE groups (id TEXT PRIMARY KEY);\
+        CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT);\
+        CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);";
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let c = db.connect().unwrap();
+        c.execute_batch(SCHEMA).await.unwrap();
+        c
+    }
+
+    /// The exact attack: a group exists; its id must be refused everywhere else.
+    #[tokio::test]
+    async fn an_existing_group_id_is_taken_for_every_conversation_kind() {
+        let c = conn().await;
+        c.execute("INSERT INTO groups (id) VALUES ('victim-group')", ())
+            .await
+            .unwrap();
+
+        assert!(
+            conversation_id_taken(&c, "victim-group").await.unwrap(),
+            "a group's id must be refused to dm/create and channel/create — \
+             otherwise is_member() grants membership of the group"
+        );
+    }
+
+    #[tokio::test]
+    async fn dm_and_channel_ids_are_taken_too() {
+        let c = conn().await;
+        c.execute("INSERT INTO dm_channel (id) VALUES ('a-dm')", ())
+            .await
+            .unwrap();
+        c.execute(
+            "INSERT INTO channels (id, group_id) VALUES ('a-channel', 'g')",
+            (),
+        )
+        .await
+        .unwrap();
+
+        assert!(conversation_id_taken(&c, "a-dm").await.unwrap());
+        assert!(conversation_id_taken(&c, "a-channel").await.unwrap());
+    }
+
+    /// A fresh id is still free — without this the guard could be "refuse
+    /// everything" and the tests above would still pass.
+    #[tokio::test]
+    async fn an_unused_id_is_free() {
+        let c = conn().await;
+        c.execute("INSERT INTO groups (id) VALUES ('some-group')", ())
+            .await
+            .unwrap();
+
+        assert!(
+            !conversation_id_taken(&c, "a-brand-new-ulid").await.unwrap(),
+            "an unused id must remain creatable"
+        );
+    }
+
+    /// The property the guard protects: sharing an id across two tables is what
+    /// makes `is_member` answer for the wrong conversation.
+    #[tokio::test]
+    async fn a_shared_id_would_grant_membership_of_the_other_conversation() {
+        let c = conn().await;
+        // The victim's group — mallory is NOT a member.
+        c.execute("INSERT INTO groups (id) VALUES ('victim-group')", ())
+            .await
+            .unwrap();
+        // What the attack inserts if the guard is absent.
+        c.execute("INSERT INTO dm_channel (id) VALUES ('victim-group')", ())
+            .await
+            .unwrap();
+        c.execute(
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id) \
+             VALUES ('victim-group', 'mallory')",
+            (),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            is_member(&c, "victim-group", "mallory").await.unwrap(),
+            "documents WHY the guard exists: with the id shared, is_member \
+             answers true for a group mallory was never in"
+        );
+    }
 }

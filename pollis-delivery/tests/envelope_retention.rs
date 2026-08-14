@@ -64,6 +64,7 @@ CREATE TABLE message_envelope (\
   reply_to_id TEXT, type TEXT NOT NULL DEFAULT 'message', target_message_id TEXT);\
 CREATE TABLE user_device (user_id TEXT NOT NULL, device_id TEXT NOT NULL, revoked_at TEXT);\
 CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member');\
+CREATE TABLE groups (id TEXT PRIMARY KEY);\
 CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
 CREATE TABLE dm_channel (id TEXT PRIMARY KEY, created_by TEXT NOT NULL, created_at TEXT NOT NULL);\
 CREATE TABLE dm_channel_member (\
