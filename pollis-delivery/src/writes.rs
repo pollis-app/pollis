@@ -161,6 +161,7 @@ pub(crate) fn ok_json(value: serde_json::Value) -> Response {
 ///
 /// `pub` (not `pub(crate)`) so the integration-test harness — an external crate —
 /// can match on it when driving the `apply_*` fns directly.
+#[derive(Debug)]
 pub enum WriteOutcome {
     Ok,
     Forbidden,

@@ -757,15 +757,22 @@ pub async fn apply_delete_message(
         if authed.is_some() && !is_member(conn, &body.conversation_id, &actor).await? {
             return Ok(WriteOutcome::Forbidden);
         }
+        // Both deletes are SCOPED to the conversation that was just authorised.
+        // Without `AND conversation_id`, authz reads one attacker-supplied field
+        // (`conversation_id`) while the delete acts on a second, independent one
+        // (`message_id`) — so membership of any conversation, including a DM with
+        // yourself, authorised deleting any envelope in the deployment. Clients
+        // hold a whole-DB read-only Turso token, so the ids are enumerable.
         let tx = conn.transaction().await?;
         tx.execute(
-            "DELETE FROM message_envelope WHERE id = ?1",
-            libsql::params![body.message_id.clone()],
+            "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
+            libsql::params![body.message_id.clone(), body.conversation_id.clone()],
         )
         .await?;
         tx.execute(
-            "DELETE FROM message_envelope WHERE target_message_id = ?1 AND type = 'edit'",
-            libsql::params![body.message_id.clone()],
+            "DELETE FROM message_envelope \
+             WHERE target_message_id = ?1 AND type = 'edit' AND conversation_id = ?2",
+            libsql::params![body.message_id.clone(), body.conversation_id.clone()],
         )
         .await?;
         tx.commit().await?;
@@ -787,15 +794,19 @@ pub async fn apply_delete_message(
     // is only ever fetched if it sorts above it.
     let floor = tombstone_floor(conn, &body.conversation_id).await?;
     let now = sent_at_after(now_rfc3339(), floor);
+    // Scoped for the same reason as the self-branch above: the admin check is
+    // against `conversation_id`, so the delete must be too, or an admin of any
+    // one group could remove envelopes from every other conversation.
     let tx = conn.transaction().await?;
     tx.execute(
-        "DELETE FROM message_envelope WHERE id = ?1",
-        libsql::params![body.message_id.clone()],
+        "DELETE FROM message_envelope WHERE id = ?1 AND conversation_id = ?2",
+        libsql::params![body.message_id.clone(), body.conversation_id.clone()],
     )
     .await?;
     tx.execute(
-        "DELETE FROM message_envelope WHERE target_message_id = ?1 AND type = 'edit'",
-        libsql::params![body.message_id.clone()],
+        "DELETE FROM message_envelope \
+         WHERE target_message_id = ?1 AND type = 'edit' AND conversation_id = ?2",
+        libsql::params![body.message_id.clone(), body.conversation_id.clone()],
     )
     .await?;
     tx.execute(
@@ -3346,6 +3357,172 @@ CREATE TABLE conversation_watermark (\
             "a sibling connection of the SAME libsql Database must see the just-\
              written row immediately — this is the read-your-writes property the \
              flows harness relies on to make #661 candidate 1 impossible"
+        );
+    }
+}
+
+#[cfg(test)]
+mod delete_scope_tests {
+    //! `/v1/messages/delete` must only ever touch the conversation it authorised
+    //! against.
+    //!
+    //! The bug these pin: authz read `body.conversation_id` while the DELETE
+    //! acted on `body.message_id` — two independent, attacker-supplied fields
+    //! with nothing tying them together. Membership of ANY conversation (a DM
+    //! with yourself qualifies) therefore authorised deleting ANY envelope in
+    //! the deployment, on both the self and admin branches. Every client holds a
+    //! whole-DB read-only Turso token, so the ids are enumerable. That is
+    //! undelivered mail destroyed for everyone — invariant I3 and "messages must
+    //! work", from an ordinary account.
+    //!
+    //! Both tests assert the VICTIM row survives. Asserting only that the call
+    //! returns Ok would pass against the vulnerable code.
+
+    use super::*;
+    use libsql::Connection;
+
+    const SCHEMA: &str = "\
+        CREATE TABLE message_envelope (\
+            id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sender_id TEXT NOT NULL,\
+            ciphertext TEXT NOT NULL, sent_at TEXT NOT NULL, type TEXT,\
+            target_message_id TEXT, delivered INTEGER NOT NULL DEFAULT 0);\
+        CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);\
+        CREATE TABLE dm_channel (id TEXT PRIMARY KEY);\
+        CREATE TABLE groups (id TEXT PRIMARY KEY);\
+        CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
+        CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT);\
+        CREATE TABLE conversation_watermark (\
+            conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL,\
+            last_fetched_at TEXT NOT NULL,\
+            PRIMARY KEY (conversation_id, user_id, device_id));";
+
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let c = db.connect().unwrap();
+        c.execute_batch(SCHEMA).await.unwrap();
+        c
+    }
+
+    async fn seed_envelope(c: &Connection, id: &str, conv: &str, sender: &str) {
+        c.execute(
+            "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
+             VALUES (?1, ?2, ?3, 'x', '2026-01-01T00:00:00.000000000+00:00')",
+            libsql::params![id.to_string(), conv.to_string(), sender.to_string()],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn exists(c: &Connection, id: &str) -> bool {
+        let mut rows = c
+            .query(
+                "SELECT 1 FROM message_envelope WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().is_some()
+    }
+
+    /// Self-branch: a member of their own DM cannot delete an envelope that
+    /// lives in someone else's conversation.
+    #[tokio::test]
+    async fn self_delete_cannot_reach_another_conversation() {
+        let c = conn().await;
+        // The attacker is a legitimate member of exactly one conversation.
+        c.execute(
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('mine', 'mallory')",
+            (),
+        )
+        .await
+        .unwrap();
+        c.execute("INSERT INTO dm_channel (id) VALUES ('mine')", ())
+            .await
+            .unwrap();
+        seed_envelope(&c, "victim-envelope", "someone-elses-conversation", "alice").await;
+
+        let body = DeleteMessageBody {
+            message_id: "victim-envelope".to_string(),
+            // Authorised against a conversation they really are in …
+            conversation_id: "mine".to_string(),
+            // … and the self-branch is entered by naming themselves as author.
+            msg_sender_id: Some("mallory".to_string()),
+            actor_id: None,
+        };
+        let outcome = apply_delete_message(&c, Some("mallory"), &body).await.unwrap();
+
+        assert!(
+            exists(&c, "victim-envelope").await,
+            "a member of 'mine' deleted an envelope in another conversation \
+             (outcome was {outcome:?}) — authz and the DELETE are keyed on \
+             different attacker-supplied fields"
+        );
+    }
+
+    /// Admin-branch: being an admin somewhere does not grant deletion everywhere.
+    #[tokio::test]
+    async fn admin_delete_cannot_reach_another_conversation() {
+        let c = conn().await;
+        c.execute("INSERT INTO groups (id) VALUES ('g1')", ())
+            .await
+            .unwrap();
+        c.execute(
+            "INSERT INTO channels (id, group_id) VALUES ('my-channel', 'g1')",
+            (),
+        )
+        .await
+        .unwrap();
+        c.execute(
+            "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'mallory', 'admin')",
+            (),
+        )
+        .await
+        .unwrap();
+        seed_envelope(&c, "victim-envelope", "someone-elses-conversation", "alice").await;
+
+        let body = DeleteMessageBody {
+            message_id: "victim-envelope".to_string(),
+            conversation_id: "my-channel".to_string(),
+            // A different author than the actor takes the admin branch.
+            msg_sender_id: Some("alice".to_string()),
+            actor_id: None,
+        };
+        let outcome = apply_delete_message(&c, Some("mallory"), &body).await.unwrap();
+
+        assert!(
+            exists(&c, "victim-envelope").await,
+            "an admin of 'g1' deleted an envelope in another conversation \
+             (outcome was {outcome:?})"
+        );
+    }
+
+    /// The legitimate path still works — otherwise the fix above could be
+    /// "delete nothing, ever" and both tests would still pass.
+    #[tokio::test]
+    async fn self_delete_still_removes_your_own_envelope() {
+        let c = conn().await;
+        c.execute(
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('mine', 'mallory')",
+            (),
+        )
+        .await
+        .unwrap();
+        c.execute("INSERT INTO dm_channel (id) VALUES ('mine')", ())
+            .await
+            .unwrap();
+        seed_envelope(&c, "my-envelope", "mine", "mallory").await;
+
+        let body = DeleteMessageBody {
+            message_id: "my-envelope".to_string(),
+            conversation_id: "mine".to_string(),
+            msg_sender_id: Some("mallory".to_string()),
+            actor_id: None,
+        };
+        apply_delete_message(&c, Some("mallory"), &body).await.unwrap();
+
+        assert!(
+            !exists(&c, "my-envelope").await,
+            "the legitimate self-delete must still remove the envelope"
         );
     }
 }
