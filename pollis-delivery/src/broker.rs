@@ -869,6 +869,30 @@ pub async fn r2_presign(
         }
     }
 
+    // Per-object INTEGRITY gate on put: refuse to mint a `put` for a media
+    // object that is already referenced by a message.
+    //
+    // These objects are a global convergent dedup keyed on the content hash, so
+    // one `media/<hash>/…` key is shared by every conversation holding that
+    // attachment. An ungated `put` therefore let any authenticated user
+    // OVERWRITE anyone else's attachment — and because the AEAD key is derived
+    // from the hash (which every recipient knows), the replacement decrypts
+    // cleanly, so recipients rendered chosen plaintext as genuine.
+    //
+    // Refusing is safe precisely because the store is convergent: if the hash is
+    // already referenced the bytes are already there, so a legitimate uploader
+    // has nothing to write. Clients already skip re-upload on dedup hit.
+    // Belt-and-braces with the client-side check in `download_media`, which
+    // re-hashes after decrypting so a substitution is caught however it got in.
+    if http_method == "PUT" {
+        if let Some(content_hash) = content_hash_from_key(&parsed.key) {
+            let conn = state.db.conn()?;
+            if crate::messages::object_is_referenced(&conn, content_hash).await? {
+                return Ok(AuthRejection::Forbidden.into_response());
+            }
+        }
+    }
+
     let url = presign_r2_url(
         endpoint,
         bucket,

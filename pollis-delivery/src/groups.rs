@@ -46,7 +46,9 @@ use libsql::Connection;
 use serde::Deserialize;
 
 use crate::error::AppError;
-use crate::writes::{bad_request, gate, outcome_response, resolve_actor, WriteOutcome};
+use crate::writes::{
+    bad_request, conversation_id_taken, gate, outcome_response, resolve_actor, WriteOutcome,
+};
 use crate::AppState;
 
 // ── Shared authz helpers ─────────────────────────────────────────────────────
@@ -172,6 +174,12 @@ pub async fn apply_create_group(
         Ok(o) => o,
         Err(o) => return Ok(o),
     };
+    // Refuse an id already in use as any other kind of conversation. See
+    // `conversation_id_taken` — `is_member` ORs across dm/group/channel on one
+    // id, so reusing another conversation's id grants membership of it.
+    if conversation_id_taken(conn, &body.id).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
     let tx = conn.transaction().await?;
     tx.execute(
         "INSERT INTO groups (id, name, description, owner_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -446,6 +454,12 @@ pub async fn apply_create_channel(
         Err(o) => return Ok(o),
     };
     if authed.is_some() && group_role(conn, &body.group_id, &creator).await?.is_none() {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    // Refuse an id already in use as any other kind of conversation. See
+    // `conversation_id_taken` — `is_member` ORs across dm/group/channel on one
+    // id, so reusing another conversation's id grants membership of it.
+    if conversation_id_taken(conn, &body.id).await? {
         return Ok(WriteOutcome::Forbidden);
     }
     conn.execute(

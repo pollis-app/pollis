@@ -418,33 +418,62 @@ async fn r2_presign_delete_passes_non_media_keys() {
     );
 }
 
-/// `get`/`put` are never reference-gated — only the shared-object integrity of
-/// `delete` is. A referenced object must still be freely fetchable/uploadable.
+/// `get` is never reference-gated: a referenced object must stay freely
+/// fetchable by everyone holding it.
+///
+/// `put` USED to be ungated too, and that was the bug. These objects are a
+/// global convergent dedup, so one `media/<hash>/…` key is shared by every
+/// conversation holding that attachment — an ungated `put` let any
+/// authenticated user overwrite anyone else's. The AEAD key is derived from the
+/// content hash, which every recipient knows, so the replacement decrypted
+/// cleanly and recipients rendered chosen plaintext as genuine.
 #[tokio::test]
-async fn r2_presign_get_and_put_are_not_gated() {
+async fn r2_presign_get_is_not_gated_but_put_of_a_referenced_object_is() {
     let db = fresh().await;
     let key = "media/hhhh/pic.enc";
     register_ref(&db, "hhhh", key, "m_p").await;
     let state = AppState::new(Arc::clone(&db), false).with_broker_config(r2_broker());
     let router = build_router_with_state(state);
 
-    for op in ["get", "put"] {
-        let body = serde_json::json!({ "operation": op, "key": key, "user_id": "u1" });
-        let req = Request::builder()
-            .method("POST")
-            .uri("/v1/r2/presign")
-            .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_vec(&body).unwrap()))
-            .unwrap();
-        let resp = router.clone().oneshot(req).await.unwrap();
-        assert_eq!(
-            resp.status(),
-            StatusCode::OK,
-            "{op} must not be reference-gated even while the object is referenced"
-        );
-        // Sanity: the body carries a presigned URL.
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert!(json.get("url").and_then(|u| u.as_str()).is_some(), "presign returns a url");
-    }
+    let presign = |op: &'static str, key: String| {
+        let router = router.clone();
+        async move {
+            let body = serde_json::json!({ "operation": op, "key": key, "user_id": "u1" });
+            let req = Request::builder()
+                .method("POST")
+                .uri("/v1/r2/presign")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap();
+            router.oneshot(req).await.unwrap()
+        }
+    };
+
+    let get = presign("get", key.to_string()).await;
+    assert_eq!(
+        get.status(),
+        StatusCode::OK,
+        "get must stay ungated — everyone holding the attachment fetches this object"
+    );
+    let bytes = get.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(json.get("url").and_then(|u| u.as_str()).is_some(), "presign returns a url");
+
+    let put_existing = presign("put", key.to_string()).await;
+    assert_eq!(
+        put_existing.status(),
+        StatusCode::FORBIDDEN,
+        "put over an ALREADY-REFERENCED object must be refused — that overwrite is \
+         the attachment-substitution attack"
+    );
+
+    // The legitimate upload still works: a hash nobody references yet. Without
+    // this the gate could be "refuse every put" and the assertion above would
+    // still pass, while breaking all uploads.
+    let put_new = presign("put", "media/brandnewhash/pic.enc".to_string()).await;
+    assert_eq!(
+        put_new.status(),
+        StatusCode::OK,
+        "a first upload of an unreferenced hash must still be allowed"
+    );
 }

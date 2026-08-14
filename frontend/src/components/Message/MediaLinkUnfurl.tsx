@@ -69,9 +69,37 @@ interface MediaLinkUnfurlProps {
   text: string;
 }
 
+/// Hosts whose media loads without asking.
+///
+/// Only our own CDN: those bytes are already fetched from us, so previewing
+/// them tells a third party nothing it does not already know.
+const AUTO_LOAD_HOSTS = ["cdn.pollis.com"];
+
+function isFirstParty(url: string): boolean {
+  try {
+    return AUTO_LOAD_HOSTS.includes(new URL(ensureProtocol(url)).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
   const links = useMemo(() => extractMediaLinks(text), [text]);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  // Third-party media loads only when the reader asks for it.
+  //
+  // Rendering `<img src>` straight from message text meant that merely OPENING
+  // a message made the app fetch from a host the sender chose — handing them
+  // the reader's IP address, user-agent and the moment they read it, from any
+  // message including an unaccepted DM request from a stranger. That is a
+  // read-receipt and a deanonymiser in one, and it defeats the relay overlay
+  // entirely: the overlay hides the client's address from OUR servers while
+  // this handed it to an arbitrary one.
+  //
+  // A click is the consent. It is deliberately per-URL and not remembered —
+  // the sender picks the URL, so a blanket "always load" would be a setting the
+  // attacker, not the user, gets to exploit.
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
   const handleClick = useCallback((url: string) => {
     shellOpen(ensureProtocol(url));
@@ -96,6 +124,24 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
     <div data-testid="media-link-unfurl" className="mt-2 flex flex-wrap gap-1">
       {visible.map((link) => {
         const href = ensureProtocol(link.url);
+        const show = revealed.has(link.url) || isFirstParty(link.url);
+        if (!show) {
+          return (
+            <button
+              key={link.url}
+              type="button"
+              data-testid="media-link-reveal"
+              onClick={() =>
+                setRevealed((prev) => new Set(prev).add(link.url))
+              }
+              title={`Load media from ${href} — this contacts that site directly`}
+              aria-label={`Load media from ${href}. This contacts that site directly and reveals your IP address to it.`}
+              className="flex h-24 w-24 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-line bg-surface-raised px-2 text-center text-2xs text-muted hover:bg-hover hover:text-fg"
+            >
+              Load {link.kind}
+            </button>
+          );
+        }
         const onError = () =>
           setHidden((prev) => {
             const next = new Set(prev);
