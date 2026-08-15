@@ -15,7 +15,17 @@ import { formatFileSize } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { dropTargetStore } from "../../stores/dropTargetStore";
 import { getDraft, setDraft } from "../../utils/drafts";
-import { mentionsAll } from "../../utils/mentions";
+import {
+  mentionsAll,
+  mentionQueryAt,
+  applyMention,
+  rankMentionCandidates,
+  type MentionCandidate,
+} from "../../utils/mentions";
+import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
+import { useSkin } from "../../hooks/queries/usePreferences";
+import { MentionGhost } from "./MentionGhost";
+import { MentionSuggestList } from "./MentionSuggestList";
 
 // Attachment carries a filesystem path so Rust can read the file directly —
 // no bytes-over-IPC bottleneck, no size limit.
@@ -415,6 +425,71 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   // when the send will fan out an `all_mention`.
   const willNotifyEveryone = canNotifyAll && mentionsAll(message);
 
+  // ── @mention autocomplete (#843) ─────────────────────────────────────────
+  // Candidates come from the roster of the conversation the user is already
+  // in — never a directory lookup. See useMentionCandidates for why.
+  const skin = useSkin();
+  const mentionCandidates = useMentionCandidates();
+  const [caret, setCaret] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
+  // Esc hides the suggestions for the current token; typing brings them back.
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  // Mirrors the textarea's scroll so the terminal ghost stays aligned once
+  // the message wraps past the visible box.
+  const [scrollTop, setScrollTop] = useState(0);
+  // Where to put the caret after a completion is inserted. Applied in the
+  // effect below, once React has committed the new value to the textarea.
+  const pendingCaretRef = useRef<number | null>(null);
+
+  const mentionQuery = mentionDismissed ? null : mentionQueryAt(message, caret);
+  const suggestions = mentionQuery
+    ? rankMentionCandidates(mentionCandidates, mentionQuery.query)
+    : [];
+
+  // Terminal skin: the ghost can only ever APPEND to what's typed, so it needs
+  // a prefix match, and — like fish / zsh-autosuggestions — it is only offered
+  // when the caret sits at the end of the line.
+  const ghostTarget =
+    skin === "terminal" && mentionQuery && caret === message.length
+      ? suggestions.find((c) =>
+          c.username.toLowerCase().startsWith(mentionQuery.query),
+        )
+      : undefined;
+  const ghostText = ghostTarget
+    ? ghostTarget.username.slice(mentionQuery!.query.length)
+    : "";
+
+  // Refined skin: the Slack-style list. Terminal never opens one.
+  const showSuggestList = skin === "refined" && suggestions.length > 0;
+
+  // Keep the highlight in range as the candidate list narrows on each keystroke.
+  useEffect(() => {
+    setActiveIndex((prev) => (prev < suggestions.length ? prev : 0));
+  }, [suggestions.length]);
+
+  useEffect(() => {
+    const pending = pendingCaretRef.current;
+    if (pending === null || !textareaRef.current) {
+      return;
+    }
+    pendingCaretRef.current = null;
+    textareaRef.current.setSelectionRange(pending, pending);
+    textareaRef.current.focus();
+    setCaret(pending);
+  }, [message]);
+
+  const acceptMention = useCallback((candidate: MentionCandidate) => {
+    const next = applyMention(message, caret, candidate.username);
+    if (next.text === message) {
+      return;
+    }
+    pendingCaretRef.current = next.caret;
+    setMessage(next.text);
+    setDraft(draftKey, next.text);
+    onValueChange?.(next.text);
+    setActiveIndex(0);
+  }, [message, caret, draftKey, onValueChange]);
+
   const handleSend = () => {
     if (!message.trim() && attachments.length === 0) { return; }
     if (hasLoadingAttachments) { return; }
@@ -432,6 +507,49 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Mention keys are handled BEFORE the Enter-sends branch: while a
+    // suggestion is on offer, Enter accepts it rather than sending a
+    // half-typed name, exactly as Slack and Discord behave.
+    if (showSuggestList) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIndex((i) => (i + 1) % suggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        acceptMention(suggestions[activeIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setMentionDismissed(true);
+        return;
+      }
+    }
+
+    // Terminal skin: Tab accepts the ghosted completion. There is nothing to
+    // arrow through and nothing to dismiss beyond hiding the ghost.
+    if (ghostTarget) {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        acceptMention(ghostTarget);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setMentionDismissed(true);
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -485,9 +603,20 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   return (
     <div
-      className={`border-t ${className}`}
+      className={`relative border-t ${className}`}
       style={{ borderColor: "var(--c-border)", background: "var(--c-bg)" }}
     >
+      {/* Refined skin's mention list. Anchored to this container with
+          `absolute`, never a portal or a fixed overlay. */}
+      {showSuggestList && mentionQuery && (
+        <MentionSuggestList
+          candidates={suggestions}
+          activeIndex={activeIndex}
+          query={mentionQuery.query}
+          onSelect={acceptMention}
+          onHover={setActiveIndex}
+        />
+      )}
 
       {/* Attachment previews */}
       {attachments.length > 0 && (
@@ -534,41 +663,56 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           <Plus className="w-4 h-4" />
         </button>
 
-        <textarea
-          ref={textareaRef}
-          data-testid="message-input"
-          value={message}
-          onChange={(e) => {
-            const next = e.target.value;
-            setMessage(next);
-            setDraft(draftKey, next);
-            onValueChange?.(next);
-          }}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder={placeholder}
-          disabled={disabled}
-          autoFocus={autoFocus}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          rows={1}
-          className={`chat-input-textarea flex-1 min-w-0 px-2 py-1 resize-none font-mono text-sm transition-colors${isFocused ? " is-focused" : ""}`}
-          style={{
-            lineHeight: "1.5rem",
-            minHeight: "1.5rem",
-            borderRadius: "4px",
-            background: isFocused ? "var(--c-accent)" : "var(--c-hover)",
-            color: isFocused ? "var(--c-bg)" : "var(--c-text)",
-            outline: "none",
-            border: "none",
-            opacity: disabled ? 0.5 : 1,
-          }}
-          aria-label="Message input"
-        />
+        {/* Positioning context for the terminal skin's inline ghost, which
+            mirrors this exact box. */}
+        <div className="relative flex-1 min-w-0">
+          <textarea
+            ref={textareaRef}
+            data-testid="message-input"
+            value={message}
+            onChange={(e) => {
+              const next = e.target.value;
+              setMessage(next);
+              setDraft(draftKey, next);
+              onValueChange?.(next);
+              setCaret(e.target.selectionStart ?? next.length);
+              // Any edit re-opens suggestions that Esc had hidden.
+              setMentionDismissed(false);
+            }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={placeholder}
+            disabled={disabled}
+            autoFocus={autoFocus}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            rows={1}
+            className={`chat-input-textarea w-full px-2 py-1 resize-none font-mono text-sm transition-colors${isFocused ? " is-focused" : ""}`}
+            style={{
+              lineHeight: "1.5rem",
+              minHeight: "1.5rem",
+              borderRadius: "4px",
+              background: isFocused ? "var(--c-accent)" : "var(--c-hover)",
+              color: isFocused ? "var(--c-bg)" : "var(--c-text)",
+              outline: "none",
+              border: "none",
+              opacity: disabled ? 0.5 : 1,
+            }}
+            aria-label="Message input"
+          />
+          <MentionGhost
+            value={message}
+            ghost={ghostText}
+            focused={isFocused}
+            scrollTop={scrollTop}
+          />
+        </div>
 
         <button
           onClick={handleSend}
