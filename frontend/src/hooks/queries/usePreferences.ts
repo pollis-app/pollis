@@ -42,6 +42,12 @@ export function normalizeOverlayMode(v: string | undefined | null): OverlayMode 
   return v === "prefer" || v === "strict" ? v : "off";
 }
 
+/** Coerce an arbitrary string to a known `VoiceInputMode`; unknown/absent →
+ *  `voice_activity`. */
+export function normalizeVoiceInputMode(v: string | undefined | null): VoiceInputMode {
+  return v === "push_to_talk" ? v : VOICE_INPUT_MODE_DEFAULT;
+}
+
 export interface PreferencesData {
   accent_color?: string;
   background_color?: string;
@@ -367,6 +373,14 @@ export function usePreferences() {
           getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
         ),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
+        // Read back explicitly: `save` stringifies the whole object, so a
+        // field missing HERE is written but never loaded — the preference
+        // silently reverts to voice-activity on every refetch, and
+        // `applyPreferences` then pushes that default down onto the Rust
+        // gate, dropping a live call out of push-to-talk.
+        voice_input_mode: normalizeVoiceInputMode(
+          getPreference<string | undefined>(json, "voice_input_mode", undefined),
+        ),
         sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
         // Default stays `undefined` on purpose — see the field docs. Absent
         // means "follow the skin", which is not expressible as a boolean.
