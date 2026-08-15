@@ -5,6 +5,7 @@
 
 mod channels;
 mod groups;
+mod invite_token;
 mod invites;
 mod join_requests;
 mod membership;
