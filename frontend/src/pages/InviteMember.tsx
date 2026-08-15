@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { useSendGroupInvite } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
+import { InviteLinkManager } from "../components/Invites/InviteLinkManager";
 
 interface InviteMemberProps {
   groupId: string;
@@ -36,9 +37,10 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
       style={{ background: 'var(--c-bg)' }}
     >
       <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
+        <div className="w-full max-w-md flex flex-col gap-8">
         <form
           onSubmit={handleInvite}
-          className="w-full max-w-md flex flex-col gap-6"
+          className="flex flex-col gap-6"
         >
           <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
             Invite someone to <span style={{ color: 'var(--c-accent)' }}>{groupName}</span>
@@ -77,6 +79,11 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
             </p>
           )}
         </form>
+
+        <div className="border-t border-line pt-6">
+          <InviteLinkManager groupId={groupId} />
+        </div>
+        </div>
       </div>
     </div>
   );

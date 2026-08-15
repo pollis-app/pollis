@@ -59,7 +59,6 @@ pub struct PendingInvite {
 /// "a database read must not yield working invites": nobody, including the
 /// creator, can re-read a link after the fact. To share again, mint a new one.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CreatedInviteLink {
     pub id: String,
     /// The full `<selector>.<secret>` token. Show once.
@@ -75,7 +74,6 @@ pub struct CreatedInviteLink {
 /// Deliberately carries NO token field — the type makes "re-read an existing
 /// link's secret" unrepresentable rather than merely unimplemented.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct InviteLinkSummary {
     pub id: String,
     pub created_at: String,
@@ -91,7 +89,6 @@ pub struct InviteLinkSummary {
 
 /// The outcome of redeeming an invite link.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct RedeemedInvite {
     pub group_id: String,
     pub group_name: Option<String>,

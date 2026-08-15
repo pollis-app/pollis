@@ -18,6 +18,7 @@ export const groupQueryKeys = {
   joinRequests: (groupId: string) => ["group-join-requests", groupId] as const,
   myJoinRequest: (groupId: string | undefined, userId: string | null) =>
     ["group-join-requests", "my", groupId, userId] as const,
+  inviteLinks: (groupId: string) => ["group-invite-links", groupId] as const,
 };
 
 export function useUserGroupsWithChannels() {
@@ -648,5 +649,137 @@ export function useAllPendingJoinRequests() {
     enabled: !!currentUser && adminGroupIds.length > 0,
     staleTime: 1000 * 30,
     refetchOnWindowFocus: true,
+  });
+}
+
+// ── #847 shareable invite links ──────────────────────────────────────────────
+
+/**
+ * A freshly minted invite link. Mirrors `CreatedInviteLink` in
+ * `pollis-core/src/commands/groups/types.rs`.
+ *
+ * `token`/`url` arrive exactly once, from the create call. Nothing persists
+ * them — the server stores only `sha256(secret)` — so once this value is
+ * discarded the link can never be displayed again.
+ */
+export type CreatedInviteLink = {
+  id: string;
+  token: string;
+  url: string;
+  expires_at?: string | null;
+  max_uses?: number | null;
+};
+
+/**
+ * An existing link as shown in the management list. Mirrors
+ * `InviteLinkSummary`. Deliberately has no token field — see above.
+ */
+export type InviteLinkSummary = {
+  id: string;
+  created_at: string;
+  creator_username?: string | null;
+  expires_at?: string | null;
+  max_uses?: number | null;
+  uses: number;
+  revoked_at?: string | null;
+  is_live: boolean;
+};
+
+/** Mirrors `RedeemedInvite`. */
+export type RedeemedInvite = {
+  group_id: string;
+  group_name?: string | null;
+};
+
+export function useGroupInviteLinks(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  return useQuery({
+    queryKey: groupQueryKeys.inviteLinks(groupId ?? ''),
+    queryFn: async (): Promise<InviteLinkSummary[]> => {
+      if (!currentUser || !groupId) {
+        return [];
+      }
+      return invoke<InviteLinkSummary[]>('list_group_invite_links', {
+        groupId,
+        userId: currentUser.id,
+      });
+    },
+    enabled: !!currentUser && !!groupId,
+  });
+}
+
+export function useCreateGroupInviteLink() {
+  const currentUser = useObserver(() => appStore.currentUser);
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      groupId,
+      expiresInHours,
+      maxUses,
+    }: {
+      groupId: string;
+      expiresInHours: number | null;
+      maxUses: number | null;
+    }): Promise<CreatedInviteLink> => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      return invoke<CreatedInviteLink>('create_group_invite_link', {
+        groupId,
+        creatorId: currentUser.id,
+        expiresInHours,
+        maxUses,
+      });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.inviteLinks(variables.groupId),
+      });
+    },
+  });
+}
+
+export function useRevokeGroupInviteLink() {
+  const currentUser = useObserver(() => appStore.currentUser);
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ linkId }: { linkId: string; groupId: string }) => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('revoke_group_invite_link', { linkId, userId: currentUser.id });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.inviteLinks(variables.groupId),
+      });
+    },
+  });
+}
+
+export function useRedeemGroupInviteLink() {
+  const currentUser = useObserver(() => appStore.currentUser);
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ token }: { token: string }): Promise<RedeemedInvite> => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      return invoke<RedeemedInvite>('redeem_group_invite_link', {
+        token,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      // A successful redemption changes this user's group list and the
+      // group's member list. Invalidate broadly rather than surgically: the
+      // redeemer has just crossed into a group they could not see before, so
+      // most group-scoped caches are now stale.
+      queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
+    },
   });
 }
