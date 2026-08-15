@@ -54,6 +54,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `keyring` (pollis-core's `os-keystore` feature) links libdbus via
+      # libdbus-sys, whose build script needs the dev package and pkg-config.
+      # The TUI carries that feature deliberately: without it the RELEASE binary
+      # falls back to a plaintext key file (see pollis-tui/Cargo.toml), which is
+      # what #876/#879 fixed. The runner does not ship dbus headers, so the
+      # build fails without this step.
+      - name: Install dbus development headers
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
