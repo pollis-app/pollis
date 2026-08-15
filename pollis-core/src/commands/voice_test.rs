@@ -213,7 +213,7 @@ pub async fn start_mic_test(
     let (is_muted, monitor_flag) = {
         let s = state_arc.lock().await;
         let voice = state.voice.lock().await;
-        (Arc::clone(&voice.is_muted), Arc::clone(&s.monitor_enabled))
+        (Arc::clone(&voice.self_muted), Arc::clone(&s.monitor_enabled))
     };
     monitor_flag.store(monitor, Ordering::Relaxed);
 
@@ -363,7 +363,7 @@ pub async fn record_and_play_back(
     let is_muted = {
         let _s = state_arc.lock().await;
         let v = voice_arc.lock().await;
-        Arc::clone(&v.is_muted)
+        Arc::clone(&v.self_muted)
     };
     let (frame_tx, mut frame_rx) =
         tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();

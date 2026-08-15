@@ -18,6 +18,7 @@ entry point (see below):
 | `two-client-dm-reply.js` | bidirectional 1:1 DM — B replies and A sees it (reverse leg of two-client) | yes | yes (writable) |
 | `two-client-delete.js` | delete-for-everyone — after A's DM converges into B, A deletes it and B's already-delivered copy flips to `[deleted]` (E2EE redaction) | yes | yes (writable) |
 | `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
+| `voice-ptt-deafen.js` | push-to-talk + self-deafen (#849): deafen implies mute and undeafen restores the *prior* mute state; PTT-idle renders distinctly from muted | yes | yes (writable) + LiveKit + audio |
 | `two-client-voice-channel.js` | A + B join a group voice channel, both see 2 participants, A leaves, B sees the drop | yes | yes (writable) + LiveKit + audio |
 | `two-client-call.js` | two instances place + accept a real 1:1 call; each sees the other in the call | yes | yes (writable) + LiveKit + audio |
 | `two-client-camera.js` | two instances in a call; A turns its webcam on, B sees A's remote camera tile | yes | yes (writable) + LiveKit + audio + virtual camera |
@@ -38,6 +39,7 @@ pnpm --filter @pollis/e2e e2e two-client-dm-reply       # bidirectional DM (need
 pnpm --filter @pollis/e2e e2e two-client-delete         # delete-for-everyone redaction (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-channel        # group text-channel convergence (needs backend)
 pnpm --filter @pollis/e2e e2e two-client-voice-channel  # group voice join/leave (needs backend + LiveKit + audio)
+pnpm --filter @pollis/e2e e2e voice-ptt-deafen          # push-to-talk + deafen states (needs backend + LiveKit + audio)
 pnpm --filter @pollis/e2e e2e two-client-call  # or: node e2e/two-client-call.js  (needs backend + LiveKit + audio up first)
 pnpm --filter @pollis/e2e e2e two-client-camera  # or: node e2e/two-client-camera.js  (needs backend + LiveKit + audio + virtual camera up first)
 pnpm --filter @pollis/e2e e2e two-client-screenshare  # or: node e2e/two-client-screenshare.js  (needs backend + LiveKit + audio up first)

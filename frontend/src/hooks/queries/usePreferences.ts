@@ -17,6 +17,11 @@ import {
   setShortcutOverrides,
   type ShortcutCommandId,
 } from "../../keyboard";
+import {
+  VOICE_INPUT_MODE_DEFAULT,
+  type VoiceInputMode,
+} from "../../types/voice-state";
+import { voiceSession } from "../../voice";
 
 /**
  * Mirrors `voice_apm::NsLevel` in src-tauri.
@@ -123,6 +128,17 @@ export interface PreferencesData {
    * `defaultCombo` in `keyboard/commands.ts`.
    */
   shortcut_overrides?: { [commandId: string]: string };
+  /**
+   * How the microphone is gated in a voice call (#849): `voice_activity`
+   * (open whenever unmuted — the default and prior behaviour) or
+   * `push_to_talk` (open only while the push-to-talk key is held).
+   *
+   * Synced like every other preference so the choice follows the user
+   * across devices. Applied by pushing it to the Rust voice gate on load
+   * and on change — Rust owns the state machine, this is just where the
+   * preference is stored. Absent → `voice_activity`.
+   */
+  voice_input_mode?: VoiceInputMode;
   /**
    * Network-privacy relay overlay mode (#455). Persisted through the synced
    * preferences blob like every other field so the choice survives restart and
@@ -432,6 +448,11 @@ export function applyPreferences(prefs: PreferencesData): void {
   setShortcutOverrides(
     (prefs.shortcut_overrides ?? {}) as Partial<Record<ShortcutCommandId, string>>,
   );
+  // Push the input mode down to the Rust voice gate, which owns it. Safe
+  // outside a call and idempotent; doing it on load (not just on change)
+  // is what makes a synced push-to-talk preference apply on a fresh
+  // device before the user ever opens voice settings.
+  void voiceSession.setInputMode(prefs.voice_input_mode ?? VOICE_INPUT_MODE_DEFAULT);
 }
 
 /**

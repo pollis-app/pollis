@@ -27,12 +27,62 @@ use crate::{
 };
 
 use super::devices::get_device;
+use super::gate::{TransmitGate, VoiceGateState, VoiceInputMode};
 use super::levels::BandAnalyzer;
 use super::playback::{ensure_playback, register_remote_track};
 use super::streams::start_mic_stream;
 use super::types::{
-    user_id_from_voice_identity, JoinTimings, VoiceEvent, VoiceWarmup, VOICE_WARMUP_TTL,
+    user_id_from_voice_identity, JoinTimings, VoiceEvent, VoiceState, VoiceWarmup,
+    VOICE_WARMUP_TTL,
 };
+
+// ── Gate plumbing (#849) ─────────────────────────────────────────────────
+//
+// `TransmitGate` is the authority; these two helpers are the only way its
+// decisions reach the rest of the process. Every command that mutates the
+// gate calls both, in this order, while still holding the voice lock.
+
+/// Republish the gate's derived booleans onto the atomics the audio hot
+/// paths read — the cpal capture callback (`transmit_muted`) and the
+/// playback mixer (`deafened`). Neither can afford a lock per frame.
+fn publish_gate(voice: &VoiceState, gate: &TransmitGate) {
+    voice
+        .transmit_muted
+        .store(!gate.transmitting(), Ordering::Relaxed);
+    voice.deafened.store(gate.deafened(), Ordering::Relaxed);
+    voice.self_muted.store(gate.self_muted(), Ordering::Relaxed);
+}
+
+/// Signal the local mic state to the room so remote participants' tiles
+/// show the truth.
+///
+/// A released push-to-talk key is a *real* mute as far as the SFU and
+/// everyone else's UI are concerned — "PTT idle" and "deafened" are local
+/// distinctions for our own UI, and leaking them would tell the room more
+/// about the user than it needs to know. What must never happen is the
+/// inverse: appearing unmuted to others while the gate is closed.
+fn apply_gate_to_room(voice: &VoiceState, gate: &TransmitGate) {
+    let muted = !gate.transmitting();
+
+    // Hint APM that the output is muted so its AGC/AEC stop adapting to
+    // silence frames during the mute window.
+    if let Some(apm) = &voice.apm {
+        apm.handle().set_output_will_be_muted(muted);
+    }
+
+    if let Some(room) = &voice.room {
+        let pubs = room.local_participant().track_publications();
+        for (_, pub_) in pubs {
+            if pub_.kind() == TrackKind::Audio {
+                if muted {
+                    pub_.mute();
+                } else {
+                    pub_.unmute();
+                }
+            }
+        }
+    }
+}
 
 /// Build the per-device LiveKit identity for a voice participant:
 /// `voice-{user_id}:{device_id}` when a device id is known (the normal case
@@ -311,10 +361,18 @@ pub async fn join_voice_channel(
     // Both are independent and individually expensive on cold starts. Running
     // them with `tokio::join!` cuts the user-visible delay to ~max(net, mic).
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
+    // Reset the per-session gate bits (mute / deafen / any stale
+    // push-to-talk latch) and republish the derived atomics. The input
+    // *mode* deliberately survives — it's a user preference pushed down
+    // from voice settings, not something a join should silently undo.
     let is_muted = {
         let voice = state.voice.lock().await;
-        voice.is_muted.store(false, Ordering::Relaxed);
-        Arc::clone(&voice.is_muted)
+        {
+            let mut gate = voice.gate.lock().unwrap();
+            gate.reset_for_join();
+            publish_gate(&voice, &gate);
+        }
+        Arc::clone(&voice.transmit_muted)
     };
 
     let input_device_clone = input_device.clone();
@@ -879,6 +937,17 @@ pub async fn join_voice_channel(
     voice.e2ee_epoch = voice_epoch;
     *voice.last_join_timings.lock().unwrap() = Some(timings);
 
+    // Sync the freshly-created publication to the gate, now that the room
+    // and APM are actually on `voice`. A LiveKit publication is born
+    // unmuted, so joining in push-to-talk mode would otherwise advertise a
+    // hot mic to every remote tile while capture is in fact gated shut —
+    // exactly the "tiles misreport your state" failure. Capture already
+    // obeys `transmit_muted`; this makes the signalling agree with it.
+    {
+        let gate = voice.gate.lock().unwrap();
+        apply_gate_to_room(&voice, &gate);
+    }
+
     // Tell the renderer whether this session can transmit, so the local tile
     // and tray show a "listening only" state instead of a live mute toggle
     // when there's no capture device.
@@ -958,7 +1027,15 @@ async fn release_voice_resources(
         if let Ok(mut slot) = voice.denoiser.lock() {
             *slot = None;
         }
-        voice.is_muted.store(false, Ordering::Relaxed);
+        // Clear the session gate bits (mute / deafen / any held
+        // push-to-talk latch) and republish, so nothing carries into the
+        // next join — most importantly, a `deafened` atomic left set here
+        // would silence the *next* call's mixer.
+        {
+            let mut gate = voice.gate.lock().unwrap();
+            gate.reset_for_join();
+            publish_gate(&voice, &gate);
+        }
         voice.current_input_device = None;
         voice.e2ee_key_provider = None;
         voice.e2ee_mls_group_id = None;
@@ -1013,32 +1090,79 @@ pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
 
 /// Toggle the local microphone mute. Returns the new muted state (true = muted).
 /// Also signals the muted state to remote participants via the LiveKit publication.
-pub async fn toggle_voice_mute(state: &Arc<AppState>) -> Result<bool> {
+pub async fn toggle_voice_mute(state: &Arc<AppState>) -> Result<VoiceGateState> {
+    mutate_gate(state, |g| g.toggle_mute()).await
+}
+
+/// Toggle self-deafen (#849).
+///
+/// Deafening silences all *incoming* audio and, as on Discord, implies
+/// self-mute. Undeafening restores the mute state that deafening
+/// displaced rather than blindly unmuting — see `gate::TransmitGate`.
+pub async fn toggle_voice_deafen(state: &Arc<AppState>) -> Result<VoiceGateState> {
+    mutate_gate(state, |g| g.toggle_deafen()).await
+}
+
+/// Choose how the microphone is gated: voice-activity (open whenever
+/// unmuted — the default and prior behaviour) or push-to-talk.
+///
+/// Safe to call outside a call: the mode is a persisted preference, so the
+/// renderer pushes it on load as well as on change. Switching modes always
+/// drops any held push-to-talk latch.
+pub async fn set_voice_input_mode(
+    mode: VoiceInputMode,
+    state: &Arc<AppState>,
+) -> Result<VoiceGateState> {
+    mutate_gate(state, |g| g.set_mode(mode)).await
+}
+
+/// Push-to-talk key down (`held: true`) / up (`held: false`).
+///
+/// The renderer also calls this with `false` on window blur — see
+/// `release_voice_ptt`, which is the same transition under a name that
+/// says why.
+pub async fn set_voice_ptt_held(held: bool, state: &Arc<AppState>) -> Result<VoiceGateState> {
+    mutate_gate(state, |g| g.set_ptt_held(held)).await
+}
+
+/// Release the push-to-talk latch because the window lost keyboard focus.
+///
+/// Separate from `set_voice_ptt_held(false)` purely so the call site reads
+/// as the safety measure it is: the OS delivers the keydown and then, once
+/// focus moves elsewhere, never the matching keyup. Without this the mic
+/// stays hot in the background — the push-to-talk failure everyone
+/// remembers. Idempotent, and never clears an explicit mute.
+pub async fn release_voice_ptt(state: &Arc<AppState>) -> Result<VoiceGateState> {
+    mutate_gate(state, |g| g.on_focus_lost()).await
+}
+
+/// Read the current gate without changing it. Used by the renderer to
+/// resync after a reload or a late subscribe.
+pub async fn get_voice_gate_state(state: &Arc<AppState>) -> Result<VoiceGateState> {
     let voice = state.voice.lock().await;
-    let new_muted = !voice.is_muted.load(Ordering::Relaxed);
-    voice.is_muted.store(new_muted, Ordering::Relaxed);
+    let gate = voice.gate.lock().unwrap();
+    Ok(gate.snapshot())
+}
 
-    // Hint APM that the output is muted so its AGC/AEC stop adapting to
-    // silence frames during the mute window.
-    if let Some(apm) = &voice.apm {
-        apm.handle().set_output_will_be_muted(new_muted);
-    }
-
-    // Signal to remote participants via the LiveKit publication
-    if let Some(room) = &voice.room {
-        let pubs = room.local_participant().track_publications();
-        for (_, pub_) in pubs {
-            if pub_.kind() == TrackKind::Audio {
-                if new_muted {
-                    pub_.mute();
-                } else {
-                    pub_.unmute();
-                }
-            }
-        }
-    }
-
-    Ok(new_muted)
+/// Apply one transition to the gate, then republish it everywhere that
+/// depends on it: the audio hot-path atomics and the LiveKit publication.
+///
+/// Every gate-mutating command funnels through here so no caller can
+/// mutate the state machine and forget half the propagation — the
+/// "protocol chokepoint" rung of the invariant ladder.
+async fn mutate_gate<F>(state: &Arc<AppState>, f: F) -> Result<VoiceGateState>
+where
+    F: FnOnce(&mut TransmitGate),
+{
+    let voice = state.voice.lock().await;
+    let snapshot = {
+        let mut gate = voice.gate.lock().unwrap();
+        f(&mut gate);
+        publish_gate(&voice, &gate);
+        apply_gate_to_room(&voice, &gate);
+        gate.snapshot()
+    };
+    Ok(snapshot)
 }
 
 /// Set the per-user output gain multiplier for a remote participant.
@@ -1091,7 +1215,7 @@ pub async fn set_voice_input_device(
     // Extract shared atomics + current APM rate / config before dropping the
     // lock — cpal init makes blocking ALSA syscalls and must not hold the
     // async mutex.
-    let is_muted_clone = Arc::clone(&voice.is_muted);
+    let is_muted_clone = Arc::clone(&voice.transmit_muted);
     let prev_apm_rate = voice.apm.as_ref().map(|a| a.sample_rate_hz());
     let prev_apm_config = voice.apm.as_ref().map(|a| a.config().clone());
     drop(voice);

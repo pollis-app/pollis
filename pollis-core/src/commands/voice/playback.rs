@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
@@ -126,6 +129,7 @@ async fn run_mixer_task(
     output_capacity_samples: usize,
     apm_processor: Option<Arc<ApmProcessor>>,
     apm_frame_samples: usize,
+    deafened: Arc<AtomicBool>,
 ) {
     let mut interval = tokio::time::interval(Duration::from_millis(10));
     // Skip catch-up bursts: under sustained load we'd rather lose 10 ms than
@@ -187,6 +191,20 @@ async fn run_mixer_task(
         // sample. Hard clipping past ±1.0 sounds harsh; we just hold here.
         for s in mix.iter_mut() {
             *s = s.clamp(-1.0, 1.0);
+        }
+
+        // Self-deafen (#849): silence the mixed frame. Deliberately *after*
+        // the drain above — remote buffers keep advancing, so undeafening
+        // resumes at the live edge instead of dumping a backlog, and the
+        // speaking/level meters keep working while deafened. Also
+        // deliberately *before* the APM render tap: nothing is reaching the
+        // speaker, so the echo canceller's reference must be silence too,
+        // or it would spend the deafened window subtracting an echo that
+        // physically cannot exist.
+        if deafened.load(Ordering::Relaxed) {
+            for s in mix.iter_mut() {
+                *s = 0.0;
+            }
         }
 
         // AEC render reference: APM analyses the about-to-play signal so its
@@ -289,14 +307,20 @@ pub(crate) async fn ensure_playback(
         None
     };
 
-    let (track_buffers, user_volumes, output_capacity_samples) = {
+    // `deafened` is cloned off VoiceState (not PlaybackState) so the flag
+    // survives a mid-call output-device switch: this function tears the
+    // mixer down and builds a new one, and a deafened user must stay
+    // deafened across that rebuild.
+    let (track_buffers, user_volumes, output_capacity_samples, deafened) = {
         let voice = voice_arc.lock().await;
+        let deafened = Arc::clone(&voice.deafened);
         let pb = voice.playback.lock().unwrap();
         let cap = (sample_rate as usize) * (channels as usize) / 5; // 200 ms
         (
             Arc::clone(&pb.track_buffers),
             Arc::clone(&pb.user_volumes),
             cap,
+            deafened,
         )
     };
 
@@ -308,6 +332,7 @@ pub(crate) async fn ensure_playback(
         output_capacity_samples,
         apm_for_mixer,
         apm_frame_samples,
+        deafened,
     ));
 
     let voice = voice_arc.lock().await;

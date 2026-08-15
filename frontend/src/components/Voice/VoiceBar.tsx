@@ -3,14 +3,21 @@ import { useNavigate } from "@tanstack/react-router";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff, Video, VideoOff } from "lucide-react";
+import { Volume2, VolumeX, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff, Video, VideoOff } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 import { voiceSession } from "../../voice";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { toggleCamera } from "../../camera/cameraActions";
-import { shareOf, cameraOf } from "../../types/voice-state";
+import { shareOf, cameraOf, gateOf, micIndicatorOf } from "../../types/voice-state";
+import { useShortcutLabel } from "../../keyboard";
+import {
+  micControlTitle,
+  micControlAriaLabel,
+  deafenControlTitle,
+  deafenControlAriaLabel,
+} from "./voiceControlLabels";
 
 interface VoiceBarProps {
   channelId: string;
@@ -23,7 +30,12 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
     voiceState,
     voiceActiveSpeakerIds,
   } = appStore;
-  const voiceIsMuted = voiceState.kind === 'joined' ? voiceState.micMuted : false;
+  const gate = gateOf(voiceState);
+  // Four states, not a bool: deafened and push-to-talk-idle both stop the
+  // mic without the user having muted themselves, and showing either as a
+  // plain mute is what makes push-to-talk feel broken.
+  const micIndicator = micIndicatorOf(gate);
+  const pttCombo = useShortcutLabel("voice.pushToTalk");
   // Listen-only: joined without a working capture device. The mute toggle
   // becomes a non-interactive "listening only" indicator.
   const micAvailable = voiceState.kind === 'joined' ? voiceState.micAvailable : true;
@@ -44,6 +56,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   )?.id ?? null;
 
   const toggleMute = () => voiceSession.toggleMute();
+  const toggleDeafen = () => voiceSession.toggleDeafen();
   const leave = () => voiceSession.leave();
 
   // The voice bar is feedback about *other* speakers, so always exclude self.
@@ -96,17 +109,31 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         {channelName}
       </PillButton>
 
-      {/* Mute toggle — or, listen-only, a static "listening only" indicator */}
+      {/* Mute toggle — or, listen-only, a static "listening only" indicator.
+          `data-mic-state` carries the full four-state indicator so tests and
+          the tray agree on what is being shown. Push-to-talk-idle keeps the
+          live Mic glyph (the mic is armed, not switched off) but dims it. */}
       {micAvailable ? (
         <PillButton
           data-testid="voice-bar-mute-button"
-          accent={voiceIsMuted ? "var(--c-danger)" : "var(--c-accent)"}
+          data-mic-state={micIndicator}
+          accent={
+            micIndicator === "live"
+              ? "var(--c-accent)"
+              : micIndicator === "ptt-idle"
+                ? "var(--c-text-dim)"
+                : "var(--c-danger)"
+          }
           onClick={toggleMute}
-          title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
-          aria-label={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
+          title={micControlTitle(micIndicator, pttCombo)}
+          aria-label={micControlAriaLabel(micIndicator, pttCombo)}
           square
         >
-          {voiceIsMuted ? <MicOff size={12} /> : <Mic size={12} />}
+          {micIndicator === "live" || micIndicator === "ptt-idle" ? (
+            <Mic size={12} />
+          ) : (
+            <MicOff size={12} />
+          )}
         </PillButton>
       ) : (
         <PillButton
@@ -119,6 +146,22 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
           <MicOff size={12} />
         </PillButton>
       )}
+
+      {/* Deafen toggle. Sits next to mute, as on Discord — deafen implies
+          mute, and undeafening restores whatever mute state it displaced.
+          Shown even listen-only: with no capture device you can still have
+          incoming audio worth silencing. */}
+      <PillButton
+        data-testid="voice-bar-deafen-button"
+        data-deafened={gate.deafened}
+        accent={gate.deafened ? "var(--c-danger)" : "var(--c-accent)"}
+        onClick={toggleDeafen}
+        title={deafenControlTitle(gate.deafened)}
+        aria-label={deafenControlAriaLabel(gate.deafened)}
+        square
+      >
+        {gate.deafened ? <VolumeX size={12} /> : <Volume2 size={12} />}
+      </PillButton>
 
       {/* Screen share toggle. On macOS we enumerate via SCShareableContent
           and route to our in-app picker — the system picker

@@ -454,6 +454,20 @@
    border-color: var(--vs-red);
 }
 
+/* Push-to-talk, armed but idle. Distinct from both live (default) and
+   muted (red `on`): the mic is ready and nothing is wrong, it is just
+   waiting for the key. Dimmed rather than coloured, with a dashed border
+   to read as "standing by" at a glance. */
+.vs-tray-btn.armed {
+   color: var(--c-text-dim);
+   border-style: dashed;
+   border-color: var(--c-border-active);
+}
+
+.vs-tray-btn.armed:hover {
+   color: var(--c-accent);
+}
+
 .vs-tray-leave {
    display: inline-flex;
    align-items: center;

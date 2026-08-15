@@ -4,6 +4,11 @@ import { invoke } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
+import { VoiceInputModeSelect } from "../components/Voice/VoiceInputModeSelect";
+import {
+  VOICE_INPUT_MODE_DEFAULT,
+  type VoiceInputMode,
+} from "../types/voice-state";
 import { Button } from "../components/ui/Button";
 import {
   preferencesToApmConfig,
@@ -332,6 +337,15 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     preferences.save({ ...preferences.query.data, auto_join_voice: enabled });
   };
 
+  const inputMode: VoiceInputMode =
+    preferences.query.data?.voice_input_mode ?? VOICE_INPUT_MODE_DEFAULT;
+  // Persist, then push to the Rust gate so a mid-call change takes effect
+  // immediately rather than at the next join.
+  const handleInputMode = (mode: VoiceInputMode) => {
+    preferences.save({ ...preferences.query.data, voice_input_mode: mode });
+    void voiceSession.setInputMode(mode);
+  };
+
   const screenShareFps = preferences.query.data?.screen_share_max_fps ?? SCREEN_SHARE_FPS_DEFAULT;
   const handleScreenShareFps = (fps: number) => {
     preferences.save({ ...preferences.query.data, screen_share_max_fps: fps });
@@ -594,6 +608,8 @@ export const VoiceSettingsPage: React.FC = observer(() => {
           >
             Audio Processing
           </h2>
+
+          <VoiceInputModeSelect value={inputMode} onChange={handleInputMode} />
 
           <RangeSlider
             label="Microphone Boost"

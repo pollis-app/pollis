@@ -14,6 +14,15 @@ export interface UseGlobalShortcutOptions {
   priority?: number;
   /** preventDefault on match. Default true; pass false for nav.back. */
   preventDefault?: boolean;
+  /**
+   * Makes this a hold-style command: `handler` fires on key down and
+   * `onRelease` on key up. The registry also fires `onRelease` when the
+   * window loses focus or the command unmounts mid-hold, so a held key can
+   * never be stranded in the down state.
+   *
+   * Held in a ref like `handler`, so an inline closure is fine.
+   */
+  onRelease?: () => void;
 }
 
 /**
@@ -32,9 +41,17 @@ export function useGlobalShortcut(
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
+  const onRelease = options?.onRelease;
+  const onReleaseRef = useRef(onRelease);
+  onReleaseRef.current = onRelease;
+
   const enabled = options?.enabled ?? true;
   const priority = options?.priority ?? 0;
   const preventDefault = options?.preventDefault ?? true;
+  // Whether this is a hold command is structural, not per-render: it must
+  // not churn the registration just because the caller passed a new inline
+  // closure. Only the presence of a release handler matters.
+  const isHold = !!onRelease;
 
   useEffect(() => {
     return registerShortcut(id, {
@@ -42,6 +59,7 @@ export function useGlobalShortcut(
       enabled,
       priority,
       preventDefault,
+      onRelease: isHold ? () => onReleaseRef.current?.() : undefined,
     });
-  }, [id, enabled, priority, preventDefault]);
+  }, [id, enabled, priority, preventDefault, isHold]);
 }

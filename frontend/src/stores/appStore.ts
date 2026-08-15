@@ -1,6 +1,7 @@
 import { makeAutoObservable } from 'mobx';
 import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant } from '../types';
-import type { VoiceState } from '../types/voice-state';
+import type { VoiceState, VoiceGateState } from '../types/voice-state';
+import { VOICE_GATE_INITIAL } from '../types/voice-state';
 import type { SourceList } from '../screenshare/screenShareSession';
 import type { CameraSource } from '../camera/types';
 import { isSpeaking } from '../voice/participantAudio';
@@ -265,6 +266,7 @@ class AppStore implements AppState {
       channelId,
       counterpartyUserId,
       micMuted: false,
+      gate: VOICE_GATE_INITIAL,
       // Assume a mic until the backend says otherwise via `mic_availability`.
       micAvailable: true,
       share: { kind: 'idle' },
@@ -302,6 +304,16 @@ class AppStore implements AppState {
       return;
     }
     this.voiceState = { ...this.voiceState, micMuted: muted };
+  }
+
+  /** Mirror the Rust-owned push-to-talk / mute / deafen snapshot (#849).
+   *  `micMuted` is kept in step with the gate's explicit-mute field so the
+   *  two can never disagree. */
+  voiceSetGate(gate: VoiceGateState) {
+    if (this.voiceState.kind !== 'joined') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, gate, micMuted: gate.self_muted };
   }
 
   voiceSetMicAvailable(available: boolean) {

@@ -371,6 +371,38 @@ export const AppShell: React.FC = observer(() => {
     { enabled: !!activeVoiceChannelId },
   );
   useGlobalShortcut(
+    "voice.toggleDeafen",
+    () => {
+      voiceSession
+        .toggleDeafen()
+        .catch((err) => console.error("[voice] toggleDeafen shortcut:", err));
+    },
+    { enabled: !!activeVoiceChannelId },
+  );
+
+  // Push-to-talk is a HOLD command: transmit while down, silent on release.
+  // `onRelease` is what makes it one, and the registry also fires it when
+  // the window loses focus or this unmounts mid-hold — the mic must never
+  // be left open because a keyup went to another window. `releasePushToTalk`
+  // asks Rust for the same guarantee from its side.
+  useGlobalShortcut(
+    "voice.pushToTalk",
+    () => {
+      voiceSession
+        .setPushToTalkHeld(true)
+        .catch((err) => console.error("[voice] pushToTalk down:", err));
+    },
+    {
+      enabled: !!activeVoiceChannelId,
+      onRelease: () => {
+        voiceSession
+          .releasePushToTalk()
+          .catch((err) => console.error("[voice] pushToTalk up:", err));
+      },
+    },
+  );
+
+  useGlobalShortcut(
     "voice.leave",
     () => {
       voiceSession.leave();
