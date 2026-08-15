@@ -239,6 +239,7 @@ async fn request_otp_is_ip_rate_limited() {
             verify_otp_window_secs: 600,
             write_max: 1200,
             write_window_secs: 60,
+            ..RateLimitConfig::default()
         });
 
     // First two requests from one IP pass; the third is throttled.
@@ -282,6 +283,7 @@ async fn security_headers_on_every_response_including_429() {
             verify_otp_window_secs: 600,
             write_max: 1200,
             write_window_secs: 60,
+            ..RateLimitConfig::default()
         });
 
     async fn hit(state: &AppState, ip: &str) -> (StatusCode, axum::http::HeaderMap) {

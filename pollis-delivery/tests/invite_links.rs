@@ -74,8 +74,8 @@ CREATE TABLE group_invite_link_redemption (\
   id TEXT PRIMARY KEY, link_id TEXT, user_id TEXT NOT NULL,\
   attempted_at TEXT NOT NULL DEFAULT (datetime('now')),\
   succeeded INTEGER NOT NULL DEFAULT 0 CHECK (succeeded IN (0, 1)));\
-CREATE UNIQUE INDEX idx_invite_redemption_once\
-  ON group_invite_link_redemption(link_id, user_id) WHERE succeeded = 1;";
+CREATE UNIQUE INDEX idx_invite_redemption_once ON \
+group_invite_link_redemption(link_id, user_id) WHERE succeeded = 1;";
 
 const GROUP: &str = "grp-1";
 const ADMIN: &str = "admin-1";
