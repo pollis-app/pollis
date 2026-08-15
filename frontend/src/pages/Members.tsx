@@ -129,7 +129,22 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
         if (isAdmin && !isSelf) {
           return null;
         }
-        return <span>{m.role}</span>;
+        // `m.role` is the wire value ("admin" / "member") — a protocol token,
+        // not copy. It happens to read as English, which is exactly why it
+        // shipped straight to screen untranslated.
+        //
+        // Written as two literal keys rather than t(`members.role.${m.role}`)
+        // so `scripts/i18n-check.mjs` can see them: its call-site scan only
+        // resolves literals, and a computed key is invisible to it. A role the
+        // client does not know falls back to the raw value, which is still
+        // better than a blank slot.
+        const roleLabel =
+          m.role === "admin"
+            ? t("members.role.admin")
+            : m.role === "member"
+              ? t("members.role.member")
+              : m.role;
+        return <span>{roleLabel}</span>;
       }}
     />
   );

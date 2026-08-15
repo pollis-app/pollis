@@ -1,16 +1,23 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
+import { horizontalArrowStep, isHorizontalArrow } from "../../utils/direction";
+
 // Reusable keyboard-navigable list.
 //
 // Navigation model:
 //   colIndex 0         → the row itself (Enter fires onEnterRow)
-//   colIndex 1..N      → one of the right-aligned `controls`
+//   colIndex 1..N      → one of the inline-end `controls`
 //
 // Keys: ArrowUp/Down move between rows (and reset colIndex to 0),
 // ArrowLeft/Right move between the row and its controls, Enter either
 // fires onEnterRow (when on the row) or is handled natively by the
 // focused control (e.g. Button/Switch translate Enter to click).
+//
+// The controls sit at the INLINE END of the row (`borderInlineStart` marks
+// the start edge), so under `dir="rtl"` they are drawn on the left and the
+// key that reaches them is ArrowLeft. `horizontalArrowStep` resolves that
+// against the row's real computed direction — see `utils/direction.ts`.
 export interface NavigableListProps<T> {
   items: T[];
 
@@ -156,10 +163,25 @@ export function NavigableList<T>({
       if (
         e.key === "ArrowUp" ||
         e.key === "ArrowDown" ||
-        e.key === "ArrowLeft" ||
-        e.key === "ArrowRight"
+        isHorizontalArrow(e.key)
       ) {
         hasNavigatedRef.current = true;
+      }
+
+      // Which way the row actually reads. Resolved per event off the live
+      // container rather than cached, so a language switch takes effect
+      // without remounting the list.
+      const step = horizontalArrowStep(e.key, containerRef.current);
+      if (step !== 0) {
+        if (maxCol === 0) {
+          return;
+        }
+        e.preventDefault();
+        setNav((prev) => ({
+          ...prev,
+          colIndex: Math.max(0, Math.min(maxCol, prev.colIndex + step)),
+        }));
+        return;
       }
 
       switch (e.key) {
@@ -176,28 +198,6 @@ export function NavigableList<T>({
           setNav((prev) => ({
             rowIndex: prev.rowIndex < items.length - 1 ? prev.rowIndex + 1 : 0,
             colIndex: 0,
-          }));
-          break;
-        }
-        case "ArrowRight": {
-          if (maxCol === 0) {
-            break;
-          }
-          e.preventDefault();
-          setNav((prev) => ({
-            ...prev,
-            colIndex: prev.colIndex < maxCol ? prev.colIndex + 1 : maxCol,
-          }));
-          break;
-        }
-        case "ArrowLeft": {
-          if (maxCol === 0) {
-            break;
-          }
-          e.preventDefault();
-          setNav((prev) => ({
-            ...prev,
-            colIndex: prev.colIndex > 0 ? prev.colIndex - 1 : 0,
           }));
           break;
         }

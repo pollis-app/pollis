@@ -295,6 +295,16 @@ export const PreferencesPage: React.FC = observer(() => {
     };
   }, [query.data?.overlay_mode, applyOverlayMode]);
 
+  // One label per overlay mode, resolved once. `off` / `prefer` / `strict` are
+  // wire values, and the error line below used to interpolate the raw token
+  // into a translated sentence ("currently strict") while the buttons two
+  // sections down translated the very same three words.
+  const overlayModeLabels: Record<OverlayMode, string> = {
+    off: t("overlay.modeOff"),
+    prefer: t("overlay.modePrefer"),
+    strict: t("overlay.modeStrict"),
+  };
+
   const handleOverlayMode = (val: OverlayMode) => {
     if (val === overlayMode) {
       return;
@@ -891,20 +901,16 @@ export const PreferencesPage: React.FC = observer(() => {
                 aria-label={t("overlay.ariaLabel")}
                 className="flex gap-2 flex-wrap"
               >
-                {([
-                  { value: "off", label: t("overlay.modeOff") },
-                  { value: "prefer", label: t("overlay.modePrefer") },
-                  { value: "strict", label: t("overlay.modeStrict") },
-                ] as const).map((opt) => (
+                {(["off", "prefer", "strict"] as const).map((value) => (
                   <Button
-                    key={opt.value}
-                    variant={overlayMode === opt.value ? "primary" : "secondary"}
+                    key={value}
+                    variant={overlayMode === value ? "primary" : "secondary"}
                     size="sm"
-                    aria-label={opt.label}
-                    data-testid={`pref-overlay-mode-${opt.value}`}
-                    onClick={() => handleOverlayMode(opt.value)}
+                    aria-label={overlayModeLabels[value]}
+                    data-testid={`pref-overlay-mode-${value}`}
+                    onClick={() => handleOverlayMode(value)}
                   >
-                    {opt.label}
+                    {overlayModeLabels[value]}
                   </Button>
                 ))}
               </div>
@@ -940,7 +946,10 @@ export const PreferencesPage: React.FC = observer(() => {
                   className="text-xs font-mono"
                   style={{ color: "var(--c-danger)" }}
                 >
-                  {t("overlay.applyError", { error: overlayStatus, mode: overlayMode })}
+                  {t("overlay.applyError", {
+                    error: overlayStatus,
+                    mode: overlayModeLabels[overlayMode],
+                  })}
                 </p>
               )}
             </section>

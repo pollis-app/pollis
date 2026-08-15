@@ -4,6 +4,7 @@
 // future user-override map, and this matcher. Keeping parse/match/format
 // here means the persisted format never leaks into call sites.
 
+import i18n from "../i18n";
 import { isMac } from "../utils/platform";
 
 export interface ParsedCombo {
@@ -149,13 +150,48 @@ export function comboReleasedByEvent(p: ParsedCombo, e: KeyboardEvent): boolean 
   return false;
 }
 
-const KEY_LABELS: Record<string, string> = {
-  escape: "Esc",
+/**
+ * Key names that are WORDS, and so are copy: a German keyboard is labelled
+ * *Strg* and *Umschalt*, not Ctrl and Shift, and "Esc" is "Esc" only because
+ * English abbreviated it that way.
+ *
+ * Resolved through the i18next singleton at call time, the same way
+ * `utils/timeAgo.ts` and `utils/format.ts` do — `formatCombo` is a pure
+ * module function shared by the shortcuts page and the ~8 badge call sites
+ * behind `useShortcutLabel`, and turning it into a hook to translate three
+ * words would be the tail wagging the dog.
+ */
+const KEY_NAME_KEYS: Record<string, string> = {
+  escape: "common:keys.escape",
+  space: "common:keys.space",
+  enter: "common:keys.enter",
+  tab: "common:keys.tab",
+  backspace: "common:keys.backspace",
+  delete: "common:keys.delete",
+  home: "common:keys.home",
+  end: "common:keys.end",
+  pageup: "common:keys.pageUp",
+  pagedown: "common:keys.pageDown",
+};
+
+/**
+ * Key labels that are GLYPHS, and so are NOT copy.
+ *
+ * `↑ ↓ ← →` and the backtick are Unicode symbols engraved on the physical
+ * keyboard; they read identically in Arabic, German and Chinese, and there is
+ * nothing for a translator to do to them. The macOS modifier glyphs
+ * `⌘ ⌥ ⇧` below are in this same group and are likewise left alone — Apple
+ * ships them untranslated in every localization of macOS. Translating a glyph
+ * would only give six locales an opportunity to get it wrong.
+ *
+ * The arrows are deliberately NOT mirrored under RTL either: they name a key
+ * you press, not a direction you read.
+ */
+const KEY_GLYPHS: Record<string, string> = {
   arrowup: "↑",
   arrowdown: "↓",
   arrowleft: "←",
   arrowright: "→",
-  space: "Space",
   "`": "`",
 };
 
@@ -169,21 +205,25 @@ export function formatCombo(combo: string): string {
   const parts: string[] = [];
 
   if (p.mod || p.meta) {
-    parts.push(isMac ? "⌘" : "Ctrl");
+    parts.push(isMac ? "⌘" : i18n.t("common:keys.ctrl"));
   }
   if (p.ctrl && !p.mod) {
-    parts.push("Ctrl");
+    parts.push(i18n.t("common:keys.ctrl"));
   }
   if (p.alt) {
-    parts.push(isMac ? "⌥" : "Alt");
+    parts.push(isMac ? "⌥" : i18n.t("common:keys.alt"));
   }
   if (p.shift) {
-    parts.push(isMac ? "⇧" : "Shift");
+    parts.push(isMac ? "⇧" : i18n.t("common:keys.shift"));
   }
 
-  const keyLabel =
-    KEY_LABELS[p.key] ??
-    (p.key.length === 1 ? p.key.toUpperCase() : p.key.replace(/^\w/, (c) => c.toUpperCase()));
+  const nameKey = KEY_NAME_KEYS[p.key];
+  const keyLabel = nameKey
+    ? i18n.t(nameKey)
+    : (KEY_GLYPHS[p.key] ??
+      (p.key.length === 1
+        ? p.key.toUpperCase()
+        : p.key.replace(/^\w/, (c) => c.toUpperCase())));
   parts.push(keyLabel);
 
   // macOS condenses modifier glyphs against the key; a thin space (U+2009)

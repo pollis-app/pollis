@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
 import { appStore } from "../../stores/appStore";
+import { horizontalArrowStep } from "../../utils/direction";
 import { useUsableEmoji } from "../../hooks/queries/useEmoji";
 import { TextInput } from "../ui/TextInput";
 import { EMOJI_CATEGORIES, STANDARD_EMOJI } from "./emojiData";
@@ -216,13 +217,17 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
           onClose?.();
           return;
         }
-        const deltas: Record<string, number> = {
-          ArrowRight: 1,
-          ArrowLeft: -1,
+        // The emoji grid lays out along the inline axis, so under `dir="rtl"`
+        // the NEXT emoji is drawn to the left and ArrowLeft is the key that
+        // must reach it. Vertical steps are whole rows and do not mirror.
+        // See `utils/direction.ts`.
+        const horizontal = horizontalArrowStep(event.key, event.currentTarget);
+        const verticalDeltas: Record<string, number> = {
           ArrowDown: EMOJI_COLUMNS,
           ArrowUp: -EMOJI_COLUMNS,
         };
-        const delta = deltas[event.key];
+        const delta =
+          horizontal !== 0 ? horizontal : verticalDeltas[event.key];
         if (delta === undefined) {
           return;
         }
