@@ -58,10 +58,12 @@ export function useInboxRealtime() {
             queryKey: groupInviteQueryKeys.pending(userId),
           });
           break;
-        case "all_mention": {
-          // An @all in a group. Arrives on the per-user inbox room so it
-          // reaches members even when they're not in the group's LiveKit
-          // room. Ingest the referenced channel so the message lands, then
+        case "all_mention":
+        case "user_mention": {
+          // An @all or an @username (#843) in a group. Arrives on the per-user
+          // inbox room so it reaches members even when they're not in the
+          // group's LiveKit room. Ingest the referenced channel so the message
+          // lands, then
           // refresh that channel's message cache. (No foreground OS ping —
           // mobile/lib/push exposes no ready local-notification helper, and
           // this task doesn't build new notification infra.)

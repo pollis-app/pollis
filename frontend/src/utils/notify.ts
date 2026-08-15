@@ -14,7 +14,8 @@ export type Category =
   | 'group_invite'
   | 'enrollment'
   | 'incoming_call'
-  | 'all_mention';
+  | 'all_mention'
+  | 'user_mention';
 
 type CategoryConfig = {
   sound?: 'ping' | 'join' | 'leave';
@@ -56,6 +57,13 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   // channel_message). Badge is left to the accompanying new_message event so a
   // connected client doesn't double-count unread.
   all_mention:       { sound: 'ping',  osNotif: true,                            cooldownMs: 2500 },
+  // @username in a group (#843) — someone spoke to YOU by name, which is a
+  // personal event, so it is treated like a DM rather than like channel
+  // chatter: ping, OS notification, AND the status-bar alert that names the
+  // sender. It is deliberately louder than `all_mention` (which is addressed
+  // to a room, not to you) — that alert is the difference. Badge is left to
+  // the accompanying new_message event so unread isn't double-counted.
+  user_mention:      { sound: 'ping',  osNotif: true,               alert: true, cooldownMs: 2500 },
 };
 
 export type NotifyPayload = {

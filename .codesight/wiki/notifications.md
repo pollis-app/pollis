@@ -53,6 +53,12 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   // channel_message). Badge is left to the accompanying new_message event so a
   // connected client doesn't double-count unread.
   all_mention:       { sound: 'ping',  osNotif: true,                            cooldownMs: 2500 },
+  // @username in a group (#843) — someone spoke to YOU by name, which is a
+  // personal event, so it is treated like a DM rather than like channel
+  // chatter: ping, OS notification, AND the status-bar alert that names the
+  // sender. Deliberately louder than `all_mention` (addressed to a room, not
+  // to you) — that alert is the difference.
+  user_mention:      { sound: 'ping',  osNotif: true,               alert: true, cooldownMs: 2500 },
 };
 ```
 
@@ -71,7 +77,7 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
 ### Conventions
 
 1. **Anything with `osNotif: true` should also have `sound: 'ping'`.** Users always hear every system notification. Don't ship a silent OS banner. The one exception is `incoming_call`, which has no `sound` because it plays a *ringtone* on its own device-local gate (`honorsRingtonePref`) rather than a one-shot sfx — muting ringing on one device must not silence every other alert on it.
-2. **Pings are reserved for personal events.** Channel chatter only updates the badge — noisy rooms must not become a constant ping.
+2. **Pings are reserved for personal events.** Channel chatter only updates the badge — noisy rooms must not become a constant ping. Mentions are the sanctioned exception, and they earn it by being addressed: `@all` to the room, `@username` to you specifically.
 3. **`badge` and `alert` are never cooldown-gated.** The unread count must stay accurate; only sound and OS notifications dedupe.
 
 ## Categorization (the call site)
@@ -189,11 +195,51 @@ Cooldown is keyed by `${category}:${roomId ?? '_global'}`. It applies only to so
 - A burst across two DM rooms pings twice (different cooldown buckets).
 - If sound is disabled but OS notif is enabled, the OS notification still fires and starts the cooldown.
 
+## Mentions (#843)
+
+`@all` and `@username` are the only channel events that wake anyone. Both are
+decided **in Rust**, in `pollis-core/src/commands/messages/send.rs`:
+
+- `mention_audience(is_channel, content, members)` returns `Everyone` (a DM, or
+  a channel `@all`), `Only(user_ids)` (a channel naming specific members), or
+  `Nobody` (ordinary channel chatter). Its unit tests are the invariant: a
+  per-user mention wakes exactly the people named, and a plain channel message
+  wakes nobody.
+- That one value drives BOTH fanouts, so they cannot drift: the inbox ping
+  (`all_mention` to every member, or `user_mention` to just the named ones) and
+  the background push (`notify_new_message(..., only, ...)`, which intersects
+  the subset with real membership so it can only ever remove recipients).
+
+**Mentions cannot leak.** `members` is the roster of the conversation the
+sender already belongs to, so an `@name` matching nobody in the room resolves
+to nothing on both the server and the client. The composer's suggestion list
+is derived from the same roster (`useMentionCandidates`) — there is
+deliberately no username lookup behind it, because a directory search would let
+anyone enumerate users outside their own groups and DMs just by typing.
+
+Client side, `MessageBody` tokenizes only mentions that resolve, so a
+highlighted token always means a real person was actually notified. Your own
+mention (and `@all`, which addresses you too) renders as a filled accent block;
+someone else's renders as a quiet tinted chip.
+
+Composer UX branches per skin (`useSkin()`): terminal gets a ghosted inline
+autosuggest accepted with Tab — the fish / zsh-autosuggestions idiom, offered
+only when the caret is at the end of the line — and refined gets the
+Slack-style list above the composer (arrows / Enter / Tab / Esc). Neither is a
+modal, a portal, or a fixed overlay.
+
 ## Files
 
 | File | Role |
 |---|---|
 | `frontend/src/utils/notify.ts` | Dispatcher + category table |
+| `frontend/src/utils/mentions.ts` | Mention parsing + ranking; mirrors the Rust matcher |
+| `frontend/src/hooks/queries/useMentionCandidates.ts` | Roster-derived mention pool (the no-leak boundary) |
+| `frontend/src/components/ui/MentionGhost.tsx` | Terminal skin's inline ghost completion |
+| `frontend/src/components/ui/MentionSuggestList.tsx` | Refined skin's Slack-style suggestion list |
+| `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
+| `pollis-core/src/commands/messages/send.rs` | `mention_audience()` — who gets woken, + the inbox fanout |
+| `pollis-core/src/commands/push.rs` | `notify_new_message(..., only, ...)` recipient filter |
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
 | `frontend/src/voice/voiceBridge.ts` | Calls `notify('voice_self_join'/'voice_self_leave')` for local actions (was `hooks/useVoiceChannel.ts`, deleted) |
@@ -205,4 +251,5 @@ Cooldown is keyed by `${category}:${roomId ?? '_global'}`. It applies only to so
 
 ## Related issues
 
+- #843 — per-user `@username` mentions that notify the mentioned user.
 - #186 — original audit + dispatcher refactor (PR #202).

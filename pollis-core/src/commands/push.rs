@@ -53,11 +53,19 @@ pub async fn register_push_token(
 /// effort: resolves recipients → their tokens → one batched Expo POST. Returns
 /// `Ok(())` (after logging) on any relay failure; callers spawn this so it
 /// never blocks or fails the send.
+///
+/// `only` narrows the recipients to a subset of the conversation's members —
+/// used by per-user `@username` mentions (#843), where a channel message must
+/// wake exactly the people named and nobody else. `None` means every member,
+/// the DM / `@all` behaviour. The subset is INTERSECTED with real membership
+/// rather than trusted directly, so it can only ever remove recipients: a
+/// caller cannot use it to push to someone outside the conversation.
 pub async fn notify_new_message(
     conversation_id: &str,
     mls_group_id: &str,
     is_channel: bool,
     sender_id: &str,
+    only: Option<&[String]>,
     state: &Arc<AppState>,
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
@@ -85,6 +93,14 @@ pub async fn notify_new_message(
     while let Some(row) = rows.next().await? {
         user_ids.push(row.get::<String>(0)?);
     }
+
+    // Narrow to the named recipients when the caller asked for it. Applied as
+    // an intersection with the membership read above, so `only` can never
+    // widen the audience past the conversation.
+    if let Some(allowed) = only {
+        user_ids.retain(|u| allowed.contains(u));
+    }
+
     if user_ids.is_empty() {
         return Ok(());
     }

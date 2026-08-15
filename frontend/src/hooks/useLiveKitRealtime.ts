@@ -43,6 +43,16 @@ type RealtimeEvent =
     sender_id: string;
     sender_username: string | null;
   }
+  // Per-user @username mention (#843). Same shape as all_mention — the
+  // difference is the audience: the backend publishes this ONLY to the
+  // members the message names.
+  | {
+    type: 'user_mention';
+    group_id: string;
+    channel_id: string;
+    sender_id: string;
+    sender_username: string | null;
+  }
   | {
     // Sent to every device on the user's inbox when one of their devices is
     // revoked. Each device re-checks its own registration and only the
@@ -701,6 +711,25 @@ export function useLiveKitRealtime() {
           roomId: event.channel_id,
           title,
           body: `${senderUsername} mentioned @all`,
+          senderUsername,
+        });
+        return;
+      }
+
+      // @username mention in a group (#843). Same inbox-room delivery as
+      // all_mention, but the backend only sends it to the members actually
+      // named — so receiving one means this message is addressed to us, and
+      // it routes to the louder `user_mention` category. Skip our own.
+      if (event.type === 'user_mention') {
+        if (event.sender_id === currentUserIdRef.current) {
+          return;
+        }
+        const senderUsername = event.sender_username ?? 'Someone';
+        const title = roomNameMapRef.current.get(event.channel_id) ?? 'New mention';
+        notify('user_mention', {
+          roomId: event.channel_id,
+          title,
+          body: `${senderUsername} mentioned you`,
           senderUsername,
         });
         return;

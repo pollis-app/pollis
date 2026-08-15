@@ -1,10 +1,10 @@
 import React from "react";
-import { Reply, CornerUpLeft, Edit2, Trash2, MessagesSquare } from "lucide-react";
+import { Reply, CornerUpLeft, Edit2, Trash2, MessagesSquare, Bookmark, Link } from "lucide-react";
 import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
-import { LinkifiedText } from "../ui/LinkifiedText";
+import { MessageBody } from "./MessageBody";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
 import { getUsernameColor, useBackgroundIsLight } from "../../utils/usernameColor";
 import { useSkin } from "../../hooks/queries/usePreferences";
@@ -33,6 +33,11 @@ interface MessageItemProps {
   threadReplyCount?: number;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
+  /** Bookmarks + permalinks (#854). All optional — when the parent doesn't
+   * pass them the affordances simply don't render. Wired from `MessageList`. */
+  onToggleSave?: (messageId: string) => void;
+  onCopyLink?: (messageId: string) => void;
+  isSaved?: boolean;
   onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
 }
@@ -54,6 +59,9 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   threadReplyCount = 0,
   onEdit,
   onDelete,
+  onToggleSave,
+  onCopyLink,
+  isSaved = false,
   onScrollToReply,
 }) => {
   const { currentUser } = appStore;
@@ -220,7 +228,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               lineHeight: "var(--lh)",
             }}
           >
-            <LinkifiedText text={content} />
+            <MessageBody text={content} />
             {message.edited_at && !isDeleted && (
               <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
                 (edited)
@@ -265,6 +273,26 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
               >
                 <MessagesSquare size={16} />
+              </button>
+            )}
+            {onToggleSave && (
+              <button
+                data-testid="save-button"
+                onClick={() => onToggleSave(message.id)}
+                aria-label={isSaved ? "Remove bookmark" : "Save message"}
+                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <Bookmark size={16} fill={isSaved ? "currentColor" : "none"} />
+              </button>
+            )}
+            {onCopyLink && (
+              <button
+                data-testid="copy-link-button"
+                onClick={() => onCopyLink(message.id)}
+                aria-label="Copy link to message"
+                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <Link size={16} />
               </button>
             )}
             {isOwn && onEdit && (
@@ -386,7 +414,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             whiteSpace: "pre-wrap",
           }}
         >
-          <LinkifiedText text={content} />
+          <MessageBody text={content} />
           {message.edited_at && !isDeleted && (
             <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
               (edited)
@@ -418,6 +446,26 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
               >
                 <MessagesSquare size={18} />
+              </button>
+            )}
+            {onToggleSave && (
+              <button
+                data-testid="save-button"
+                onClick={() => onToggleSave(message.id)}
+                aria-label={isSaved ? "Remove bookmark" : "Save message"}
+                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <Bookmark size={18} fill={isSaved ? "currentColor" : "none"} />
+              </button>
+            )}
+            {onCopyLink && (
+              <button
+                data-testid="copy-link-button"
+                onClick={() => onCopyLink(message.id)}
+                aria-label="Copy link to message"
+                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <Link size={18} />
               </button>
             )}
             {isOwn && onEdit && (

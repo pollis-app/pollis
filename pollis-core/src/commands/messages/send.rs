@@ -249,41 +249,76 @@ pub async fn send_message(
         }
     }
 
-    // @all mention: group messages don't raise OS notifications for every
-    // new message, but an explicit `@all` pings every group member's inbox so
-    // they get one. Per-user "notifications off" is enforced client-side in
+    // Mentions (#843). Group messages don't raise OS notifications for every
+    // new message, but a mention does — an explicit `@all` pings every group
+    // member's inbox, and an `@username` pings exactly the members named. Both
+    // resolve against THIS channel's roster, which the sender is already a
+    // member of, so a mention can never address (or probe for) someone outside
+    // the room. Per-user "notifications off" is enforced client-side in
     // notify.ts. Inbox publish (one per member) is fire-and-forget; failures
-    // are logged, never fatal to the send. Only meaningful for group channels.
-    if is_channel && mentions_all(&content) {
-        let member_ids: Vec<String> = {
+    // are logged, never fatal to the send. Only meaningful for group channels;
+    // a DM already notifies its recipient unconditionally.
+    let audience = if is_channel {
+        // `(user_id, username)` for every other member. LEFT JOIN so a member
+        // whose user row is missing still counts for `@all` — it just can't be
+        // named individually.
+        let members: Vec<(String, String)> = {
             let conn = state.remote_db.conn().await?;
             let mut rows = conn.query(
-                "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id <> ?2",
+                "SELECT gm.user_id, COALESCE(u.username, '')
+                 FROM group_member gm
+                 LEFT JOIN users u ON u.id = gm.user_id
+                 WHERE gm.group_id = ?1 AND gm.user_id <> ?2",
                 libsql::params![mls_group_id.clone(), sender_id.clone()],
             ).await?;
-            let mut ids = Vec::new();
+            let mut out = Vec::new();
             while let Some(row) = rows.next().await? {
-                ids.push(row.get::<String>(0)?);
+                out.push((row.get::<String>(0)?, row.get::<String>(1)?));
             }
-            ids
+            out
         };
-        let payload = serde_json::json!({
-            "type": "all_mention",
-            "group_id": mls_group_id,
-            "channel_id": conversation_id,
-            "sender_id": sender_id,
-            "sender_username": sender_username,
-        });
-        for uid in member_ids {
-            if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
-                state,
-                &uid,
-                payload.clone(),
-            ).await {
-                eprintln!("[realtime] send_message: @all inbox publish to {uid}: {e}");
+        let audience = mention_audience(is_channel, &content, &members);
+
+        // `@all` keeps its exact existing payload and fanout — every member.
+        if mentions_all(&content) {
+            let payload = serde_json::json!({
+                "type": "all_mention",
+                "group_id": mls_group_id,
+                "channel_id": conversation_id,
+                "sender_id": sender_id,
+                "sender_username": sender_username,
+            });
+            for (uid, _) in &members {
+                if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
+                    state,
+                    uid,
+                    payload.clone(),
+                ).await {
+                    eprintln!("[realtime] send_message: @all inbox publish to {uid}: {e}");
+                }
+            }
+        } else if let MentionAudience::Only(ref ids) = audience {
+            let payload = serde_json::json!({
+                "type": "user_mention",
+                "group_id": mls_group_id,
+                "channel_id": conversation_id,
+                "sender_id": sender_id,
+                "sender_username": sender_username,
+            });
+            for uid in ids {
+                if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
+                    state,
+                    uid,
+                    payload.clone(),
+                ).await {
+                    eprintln!("[realtime] send_message: @mention inbox publish to {uid}: {e}");
+                }
             }
         }
-    }
+        audience
+    } else {
+        MentionAudience::Everyone
+    };
 
     // Content-free push to recipients' backgrounded/closed apps (#344).
     // Fire-and-forget: a push relay hiccup must never block or fail the send,
@@ -291,22 +326,32 @@ pub async fn send_message(
     // Desktop runs this too (its users just have no registered tokens), which
     // is what lets a desktop-sent message wake a recipient's phone.
     //
-    // Notification policy mirrors desktop: a DM always notifies its recipient,
-    // but a group channel message only notifies on an explicit `@all` (regular
-    // channel chatter would be far too noisy — desktop raises no per-message
-    // notification for it either; see the @all inbox-ping branch above).
-    let should_push = !is_channel || mentions_all(&content);
-    if should_push {
+    // Notification policy mirrors desktop and is driven by the SAME `audience`
+    // the inbox fanout above used, so the two can't drift: a DM always notifies
+    // its recipient, a channel `@all` notifies every member, a channel
+    // `@username` notifies exactly the members named, and ordinary channel
+    // chatter notifies nobody (it would be far too noisy — desktop raises no
+    // per-message notification for it either).
+    let push_only: Option<Vec<String>> = match audience {
+        MentionAudience::Everyone => Some(Vec::new()),
+        MentionAudience::Only(ids) => Some(ids),
+        MentionAudience::Nobody => None,
+    };
+    if let Some(only) = push_only {
         let state = Arc::clone(state);
         let conversation_id = conversation_id.clone();
         let mls_group_id = mls_group_id.clone();
         let sender_id = sender_id.clone();
         tokio::spawn(async move {
+            // An empty restriction means "every member", which is what
+            // `notify_new_message` does with `None`.
+            let restrict = if only.is_empty() { None } else { Some(only.as_slice()) };
             if let Err(e) = crate::commands::push::notify_new_message(
                 &conversation_id,
                 &mls_group_id,
                 is_channel,
                 &sender_id,
+                restrict,
                 &state,
             )
             .await
@@ -335,4 +380,214 @@ fn mentions_all(content: &str) -> bool {
         w.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '@')
             .eq_ignore_ascii_case("@all")
     })
+}
+
+/// Characters that may appear INSIDE a username after the leading `@`. Kept
+/// deliberately wide (the `users.username` column has no charset constraint)
+/// but closed over the punctuation that normally ends a sentence, so
+/// "@dana." and "@dana," yield the token `dana`.
+fn is_mention_body_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '-' || c == '.'
+}
+
+/// Extract the `@`-prefixed mention tokens from `content`, lowercased and
+/// stripped of the leading `@`.
+///
+/// A token only counts when the `@` starts the string or follows whitespace —
+/// that is what stops "email@allcorp" and "a@b.com" from reading as mentions,
+/// matching the spirit of `mentions_all()` above. Trailing `.`/`-`/`_` are
+/// trimmed so "@dana." mentions `dana`, and `@all` is deliberately excluded:
+/// it is the everyone-mention, handled by `mentions_all()`, never a username.
+///
+/// MIRROR: `mentionTokens()` in `frontend/src/utils/mentions.ts`. The two must
+/// agree or the composer will promise a ping the backend does not send.
+fn mention_tokens(content: &str) -> Vec<String> {
+    let chars: Vec<char> = content.chars().collect();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '@' {
+            i += 1;
+            continue;
+        }
+        // Only a string-initial or whitespace-preceded `@` opens a mention.
+        if i > 0 && !chars[i - 1].is_whitespace() {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < chars.len() && is_mention_body_char(chars[j]) {
+            j += 1;
+        }
+        let token: String = chars[i + 1..j]
+            .iter()
+            .collect::<String>()
+            .trim_end_matches(['.', '-', '_'])
+            .to_lowercase();
+        if !token.is_empty() && token != "all" {
+            tokens.push(token);
+        }
+        i = j.max(i + 1);
+    }
+    tokens
+}
+
+/// Who should be woken for a message — i.e. who gets an inbox ping and a
+/// background push, over and above the unread badge every recipient gets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MentionAudience {
+    /// Everyone in the conversation except the sender. A DM (always personal)
+    /// or a channel `@all`.
+    Everyone,
+    /// Only these user ids — a channel message that names specific members by
+    /// `@username`. This is the case that lets a mention reach you in a
+    /// channel whose ordinary chatter is badge-only.
+    Only(Vec<String>),
+    /// Nobody — ordinary channel chatter. The accompanying `new_message`
+    /// event still bumps the unread badge.
+    Nobody,
+}
+
+/// Decide the wake-up audience for a message.
+///
+/// `members` is `(user_id, username)` for every OTHER member of the
+/// conversation — the caller reads it from the conversation the sender is
+/// already a member of, which is what keeps mentions from becoming a user
+/// directory: an `@name` that matches nobody in this room resolves to nothing
+/// and reveals nothing. Matching is case-insensitive, and the returned ids
+/// preserve `members` order with duplicates removed.
+pub(crate) fn mention_audience(
+    is_channel: bool,
+    content: &str,
+    members: &[(String, String)],
+) -> MentionAudience {
+    // A DM is personal by construction — every message notifies.
+    if !is_channel {
+        return MentionAudience::Everyone;
+    }
+    if mentions_all(content) {
+        return MentionAudience::Everyone;
+    }
+    let tokens = mention_tokens(content);
+    if tokens.is_empty() {
+        return MentionAudience::Nobody;
+    }
+    let mut ids: Vec<String> = Vec::new();
+    for (user_id, username) in members {
+        let uname = username.to_lowercase();
+        if !uname.is_empty() && tokens.iter().any(|t| *t == uname) && !ids.contains(user_id) {
+            ids.push(user_id.clone());
+        }
+    }
+    if ids.is_empty() {
+        MentionAudience::Nobody
+    } else {
+        MentionAudience::Only(ids)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn members() -> Vec<(String, String)> {
+        vec![
+            ("u_dana".to_string(), "dana".to_string()),
+            ("u_bob".to_string(), "Bob".to_string()),
+            ("u_ann".to_string(), "ann_marie".to_string()),
+        ]
+    }
+
+    // The invariant #843 exists to establish: naming someone in a CHANNEL
+    // wakes them, even though the same channel's ordinary chatter does not.
+    #[test]
+    fn per_user_mention_in_channel_targets_only_the_named_member() {
+        assert_eq!(
+            mention_audience(true, "can you look at this @dana", &members()),
+            MentionAudience::Only(vec!["u_dana".to_string()])
+        );
+    }
+
+    // The other half of the same invariant: a plain channel message wakes
+    // nobody. Regressing this turns every channel into a notification storm.
+    #[test]
+    fn plain_channel_message_wakes_nobody() {
+        assert_eq!(
+            mention_audience(true, "shipping the build now", &members()),
+            MentionAudience::Nobody
+        );
+    }
+
+    #[test]
+    fn mention_matching_is_case_insensitive_and_dedupes() {
+        assert_eq!(
+            mention_audience(true, "@BOB @bob ping", &members()),
+            MentionAudience::Only(vec!["u_bob".to_string()])
+        );
+    }
+
+    #[test]
+    fn multiple_mentions_preserve_member_order() {
+        assert_eq!(
+            mention_audience(true, "@bob and @dana", &members()),
+            MentionAudience::Only(vec!["u_dana".to_string(), "u_bob".to_string()])
+        );
+    }
+
+    // Trailing sentence punctuation must not swallow the mention.
+    #[test]
+    fn trailing_punctuation_is_trimmed() {
+        assert_eq!(
+            mention_audience(true, "thanks @dana.", &members()),
+            MentionAudience::Only(vec!["u_dana".to_string()])
+        );
+        assert_eq!(
+            mention_audience(true, "hey @ann_marie, look", &members()),
+            MentionAudience::Only(vec!["u_ann".to_string()])
+        );
+    }
+
+    // An `@name` nobody in this conversation answers to resolves to nothing.
+    // This is the no-leak property: mentions never reach outside the room.
+    #[test]
+    fn unknown_and_embedded_mentions_resolve_to_nobody() {
+        assert_eq!(
+            mention_audience(true, "@carol are you there", &members()),
+            MentionAudience::Nobody
+        );
+        assert_eq!(
+            mention_audience(true, "mail me at bob@dana.com", &members()),
+            MentionAudience::Nobody
+        );
+    }
+
+    // `@all` keeps its existing everyone-fanout, and never reads as a username.
+    #[test]
+    fn all_mention_still_means_everyone() {
+        assert_eq!(
+            mention_audience(true, "@all standup in 5", &members()),
+            MentionAudience::Everyone
+        );
+        assert_eq!(mention_tokens("@all standup"), Vec::<String>::new());
+    }
+
+    // A DM notifies its recipient whether or not anyone is named.
+    #[test]
+    fn dm_always_notifies_everyone() {
+        assert_eq!(
+            mention_audience(false, "hey", &members()),
+            MentionAudience::Everyone
+        );
+        assert_eq!(
+            mention_audience(false, "hey @dana", &members()),
+            MentionAudience::Everyone
+        );
+    }
+
+    #[test]
+    fn mention_tokens_ignores_bare_at_and_embedded_at() {
+        assert_eq!(mention_tokens("@ hello"), Vec::<String>::new());
+        assert_eq!(mention_tokens("user@example.com"), Vec::<String>::new());
+        assert_eq!(mention_tokens("hi @dana"), vec!["dana".to_string()]);
+    }
 }
