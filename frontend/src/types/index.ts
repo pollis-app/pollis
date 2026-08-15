@@ -138,6 +138,29 @@ export interface Reaction {
   count: number;
 }
 
+// One custom per-group emoji (#848). Mirrors `pollis_core::commands::emoji::CustomEmoji`
+// field for field — keep the two in sync.
+//
+// `content_hash` is the identity: the same image registered by fifteen groups is
+// fifteen of these pointing at ONE stored object. It is also what travels inside
+// message text as `<:shortcode:content_hash>`, which is why a recipient can render
+// an emoji from a group they are not in — the hash resolves without any membership
+// check, deliberately.
+export interface CustomEmoji {
+  group_id: string;
+  // The registering group's display name — the picker's section header.
+  group_name: string;
+  // `[a-z0-9_]{2,32}`, enforced at the DS.
+  shortcode: string;
+  content_hash: string;
+  // `image/webp` or `image/gif` — the only two the Rust re-encoder emits.
+  content_type: string;
+  animated: boolean;
+  size_bytes: number;
+  // Who added it to this group. Only they or a group admin may remove it.
+  created_by: string;
+}
+
 export interface MessageAttachment {
   id: string;
   object_key: string;       // R2 object key — empty string while upload is in progress

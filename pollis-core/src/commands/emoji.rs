@@ -796,17 +796,21 @@ pub async fn collect_orphaned_emoji(state: &Arc<AppState>) -> Result<()> {
 /// Resolve an emoji to a loopback URL the webview can use as `<img src>`.
 ///
 /// Same shape as `get_media_url`, and it writes into the SAME on-disk cache, so
-/// the existing media server serves it with no changes. What differs is the
-/// fetch: an emoji object is stored in the clear, so there is no convergent
-/// decryption step — and that makes the integrity check load-bearing rather than
-/// belt-and-braces. Nothing but the hash proves these bytes are the emoji that
-/// was registered, so the hash is verified before the bytes are cached, and an
-/// oversized response is refused outright.
-pub async fn get_emoji_url(
-    content_hash: String,
-    content_type: String,
-    state: &Arc<AppState>,
-) -> Result<String> {
+/// the existing media server serves it with no changes. Two things differ.
+///
+/// First, the fetch: an emoji object is stored in the clear, so there is no
+/// convergent decryption step — and that makes the integrity check load-bearing
+/// rather than belt-and-braces. Nothing but the hash proves these bytes are the
+/// emoji that was registered, so the hash is verified before the bytes are
+/// cached, and an oversized response is refused outright.
+///
+/// Second, the content type is LOOKED UP, not passed in. It could have been a
+/// parameter, but the wire token (`<:name:hash>`) carries only the hash, so
+/// every caller would have had to guess — and a guess of `image/webp` for an
+/// animated emoji derives the wrong R2 key and 404s. Deriving it from the row
+/// that owns the object makes that mismatch unrepresentable. The lookup is
+/// skipped entirely on a cache hit, which is the common case.
+pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Result<String> {
     if !content_hash_is_valid(&content_hash) {
         return Err(Error::Other(anyhow::anyhow!("malformed emoji content hash")));
     }
@@ -823,13 +827,41 @@ pub async fn get_emoji_url(
         .ok_or_else(|| Error::Other(anyhow::anyhow!("media server token not set; not unlocked")))?;
     let url = format!("http://127.0.0.1:{port}/{token}/{content_hash}");
 
-    let target = r2::cache_file_path(&content_hash, &content_type)?;
-    if target.exists() {
+    // Cache hit needs no content type at all — the cached file's own extension
+    // is what the media server serves it with.
+    if r2::find_cached_file(&content_hash).is_some() {
         return Ok(url);
     }
 
-    let r2_key = emoji_r2_key(&content_hash, &content_type)?;
-    let get_url = r2::presign_r2_with_length(state, "get", &r2_key, None).await?;
+    let (r2_key, content_type) = {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn
+            .query(
+                "SELECT r2_key, content_type FROM custom_emoji_object WHERE content_hash = ?1",
+                libsql::params![content_hash.clone()],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => (row.get::<String>(0)?, row.get::<String>(1)?),
+            None => {
+                return Err(Error::Other(anyhow::anyhow!(
+                    "no such emoji object: {content_hash}"
+                )))
+            }
+        }
+    };
+    // Re-derive the key rather than trusting the stored string: the DS derives
+    // it the same way, so a disagreement is a bug worth failing on, not
+    // something to follow into an arbitrary bucket path.
+    let expected_key = emoji_r2_key(&content_hash, &content_type)?;
+    if r2_key != expected_key {
+        return Err(Error::Other(anyhow::anyhow!(
+            "emoji {content_hash} has an unexpected object key; refusing to fetch it"
+        )));
+    }
+    let target = r2::cache_file_path(&content_hash, &content_type)?;
+
+    let get_url = r2::presign_r2_with_length(state, "get", &expected_key, None).await?;
     let overlay = state.overlay_handle();
     let bytes = r2::r2_get_url(overlay.as_deref(), &get_url).await?;
 

@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil } from "lucide-react";
+import { ArrowLeft, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -105,6 +105,16 @@ export const GroupPage: React.FC = observer(() => {
       action: () => navigate({ to: "/groups/$groupId/members", params: { groupId } }),
       type: "system" as const,
       testId: "menu-item-members",
+    },
+    // Any MEMBER can add a custom emoji (#848) — the cost is bounded per
+    // person rather than gatekept — so this sits outside the admin block.
+    {
+      id: "group-emoji",
+      label: "Custom Emoji",
+      icon: <Smile size={14} />,
+      action: () => navigate({ to: "/groups/$groupId/emoji", params: { groupId } }),
+      type: "system" as const,
+      testId: "menu-item-group-emoji",
     },
     ...(isAdmin ? [
       {

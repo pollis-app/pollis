@@ -41,6 +41,7 @@ import { BlockedPage } from "./pages/BlockedPage";
 import { CallPage } from "./pages/Call";
 import { RenameChannelPage } from "./pages/RenameChannelPage";
 import { RenameGroupPage } from "./pages/RenameGroupPage";
+import { GroupEmojiPage } from "./pages/GroupEmojiPage";
 import { KeyboardShortcutsPage } from "./pages/KeyboardShortcutsPage";
 import { UpdatePage } from "./pages/UpdatePage";
 import { ArcadePage } from "./pages/ArcadePage";
@@ -117,6 +118,14 @@ const renameGroupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/$groupId/rename",
   component: RenameGroupPage,
+});
+
+// Custom per-group emoji (#848). A parameterized route, so it is exempt from
+// the PAGE_RESULTS registration the static pages need.
+const groupEmojiRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/emoji",
+  component: GroupEmojiPage,
 });
 
 const membersRoute = createRoute({
@@ -316,6 +325,7 @@ const routeTree = rootRoute.addChildren([
   createChannelRoute,
   renameChannelRoute,
   renameGroupRoute,
+  groupEmojiRoute,
   membersRoute,
   kickMemberRoute,
   joinRequestsRoute,

@@ -1,0 +1,51 @@
+import React from "react";
+import { SKIN_TONES } from "./emojiData";
+
+interface SkinTonePickerProps {
+  toneIndex: number;
+  onChange: (toneIndex: number) => void;
+}
+
+// The hand each swatch shows. Index 0 is the default (no modifier).
+const SWATCH_BASE = "\u{270B}";
+
+/**
+ * The six skin-tone swatches, as Discord has them.
+ *
+ * Inline rather than behind a disclosure: six small buttons cost less room than
+ * the popover that would hide them, and a popover inside a popover is exactly
+ * the layered-overlay pattern this codebase does not do.
+ */
+export const SkinTonePicker: React.FC<SkinTonePickerProps> = ({ toneIndex, onChange }) => {
+  return (
+    <div
+      data-testid="emoji-skin-tones"
+      role="radiogroup"
+      aria-label="Skin tone"
+      className="flex items-center gap-0.5"
+    >
+      {SKIN_TONES.map((tone, index) => {
+        const selected = index === toneIndex;
+        return (
+          <button
+            key={index}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={index === 0 ? "Default skin tone" : `Skin tone ${index}`}
+            data-testid={`emoji-skin-tone-${index}`}
+            onClick={() => onChange(index)}
+            className="flex items-center justify-center w-5 h-5 text-sm leading-none transition-colors duration-75 hover:bg-hover"
+            style={{
+              borderRadius: "var(--radius-chip)",
+              background: selected ? "var(--c-active)" : undefined,
+            }}
+          >
+            {SWATCH_BASE}
+            {tone}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
