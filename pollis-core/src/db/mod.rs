@@ -113,6 +113,10 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "group_invite_link",
         include_str!("migrations/000014_group_invite_link.sql"),
     ),
+    (
+        "custom_emoji",
+        include_str!("migrations/000014_custom_emoji.sql"),
+    ),
 ];
 
 pub mod queries {

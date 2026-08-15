@@ -330,6 +330,13 @@ pub async fn apply_delete_group(
     if authed.is_some() && !is_admin(conn, &body.group_id, &requester).await? {
         return Ok(WriteOutcome::Forbidden);
     }
+    // Release the group's custom-emoji references BEFORE the group row goes
+    // (#848). A deleted group's shortcodes are meaningless, and a `group_emoji`
+    // row that outlives its group would pin its shared object forever — the
+    // object is collectable only when NO row names its hash. Release here,
+    // collect in `POST /v1/emoji/gc`; keeping the two apart is what lets every
+    // teardown path release correctly by deleting nothing but its own rows.
+    crate::emoji::release_group_emoji(conn, &body.group_id).await?;
     conn.execute(
         "DELETE FROM groups WHERE id = ?1",
         libsql::params![body.group_id.clone()],

@@ -28,6 +28,7 @@ pub mod commit;
 pub mod db;
 pub mod devices;
 pub mod email_change;
+pub mod emoji;
 pub mod error;
 pub mod groups;
 pub mod headers;
@@ -287,6 +288,14 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/join-requests/create", post(groups::create_join_request))
         .route("/v1/join-requests/approve", post(groups::approve_join_request))
         .route("/v1/join-requests/reject", post(groups::reject_join_request))
+        // Domain F (#848) — custom per-group emoji. Lands on the MAIN DB.
+        // `create` binds a content-addressed object to a (group, shortcode);
+        // `remove` releases it and collects the object if that was the last
+        // reference; `gc` sweeps objects whose references vanished with their
+        // group. See the `emoji` module docs for the storage + permission model.
+        .route("/v1/emoji/create", post(emoji::create_emoji))
+        .route("/v1/emoji/remove", post(emoji::remove_emoji))
+        .route("/v1/emoji/gc", post(emoji::emoji_gc))
         // Domain C (#419) — profile / preferences / blocks / DMs. All land on
         // the MAIN DB.
         .route("/v1/profile/update", post(profile::update_profile))
