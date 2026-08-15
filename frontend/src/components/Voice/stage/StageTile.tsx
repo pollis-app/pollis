@@ -124,6 +124,16 @@ export const StageTile: React.FC<Props> = ({
   onView,
 }) => {
   const { t } = useTranslation("voice");
+  // LiveKit's quality enum is a wire value, not copy — interpolating it raw
+  // produced "Connexion : excellent" for a French user. Written as four
+  // literal keys so `scripts/i18n-check.mjs` can resolve them.
+  const qualityLabels: Record<VoiceConnectionQuality, string> = {
+    excellent: t("tile.qualityExcellent"),
+    good: t("tile.qualityGood"),
+    poor: t("tile.qualityPoor"),
+    lost: t("tile.qualityLost"),
+  };
+  const qualityLabel = qualityLabels[p.connectionQuality ?? "excellent"];
   const big = mode === "big";
   const preview = mode === "preview";
   const media = p.media;
@@ -220,7 +230,7 @@ export const StageTile: React.FC<Props> = ({
           <span
             className="vs-tag vs-pad6"
             data-testid={`voice-tile-quality-${p.tileKey}`}
-            title={t("tile.quality", { quality: p.connectionQuality ?? "excellent" })}
+            title={t("tile.quality", { quality: qualityLabel })}
           >
             <span className={"vs-sig " + signalClass(p.connectionQuality)}>
               <i /><i /><i /><i />

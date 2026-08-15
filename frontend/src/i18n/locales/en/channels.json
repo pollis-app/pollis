@@ -101,6 +101,10 @@
     "pageTitle": "Members",
     "empty": "No members.",
     "self": "(you)",
+    "role": {
+      "admin": "admin",
+      "member": "member"
+    },
     "adminToggle": "admin",
     "kick": "kick",
     "verified": "Verified contact",
