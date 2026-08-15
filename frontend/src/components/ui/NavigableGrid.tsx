@@ -7,6 +7,8 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
+import { horizontalArrowStep } from "../../utils/direction";
+
 // Reusable arrow-key-navigable 2D grid.
 //
 // Sizing: cells target a fixed aspect ratio and grow to best-fill the
@@ -18,6 +20,12 @@ import { useTranslation } from "react-i18next";
 // the focused cell. Mouse hover is handled by the cell itself — the grid
 // only owns keyboard focus, so hover and keyboard selection are
 // independent triggers.
+//
+// CSS Grid lays cells out along the INLINE axis, so under `dir="rtl"` the
+// next cell is drawn to the left. `horizontalArrowStep` resolves the
+// left/right keys against the grid's real computed direction so the cursor
+// follows the key you pressed; Up/Down are unaffected (the block axis does
+// not mirror).
 
 export interface NavigableGridProps<T> {
   items: T[];
@@ -157,15 +165,13 @@ export function NavigableGrid<T>({
       if (n === 0) {
         return;
       }
+      const step = horizontalArrowStep(e.key, containerEl);
+      if (step !== 0) {
+        e.preventDefault();
+        setFocused((f) => Math.max(0, Math.min(n - 1, f + step)));
+        return;
+      }
       switch (e.key) {
-        case "ArrowRight":
-          e.preventDefault();
-          setFocused((f) => Math.min(n - 1, f + 1));
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          setFocused((f) => Math.max(0, f - 1));
-          break;
         case "ArrowDown":
           e.preventDefault();
           setFocused((f) => Math.min(n - 1, f + cols));
@@ -192,7 +198,7 @@ export function NavigableGrid<T>({
         }
       }
     },
-    [items, focused, cols, onActivate],
+    [items, focused, cols, onActivate, containerEl],
   );
 
   if (items.length === 0) {
