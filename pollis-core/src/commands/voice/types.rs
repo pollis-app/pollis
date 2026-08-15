@@ -266,7 +266,30 @@ pub struct VoiceState {
     pub frame_task: Option<tokio::task::JoinHandle<()>>,
     pub room_task: Option<tokio::task::JoinHandle<()>>,
     pub playback: Arc<Mutex<PlaybackState>>,
-    pub is_muted: Arc<AtomicBool>,
+    /// Push-to-talk / mute / deafen state machine (#849). The authority for
+    /// every local gating decision; `transmit_muted` and `deafened` below
+    /// are just its derived booleans, republished as atomics so the audio
+    /// hot paths never take a lock.
+    pub gate: Arc<Mutex<super::gate::TransmitGate>>,
+    /// Derived from `gate`: `true` means the cpal capture callback drops
+    /// the frames it just read. Covers an explicit mute, a deafen, and an
+    /// un-held push-to-talk key alike — the callback asks one question.
+    pub transmit_muted: Arc<AtomicBool>,
+    /// Derived from `gate`: `true` means the playback mixer zeroes its
+    /// mixed frame, so nothing reaches the speaker. Remote tracks keep
+    /// draining, so undeafening resumes at the live position instead of
+    /// flushing a backlog.
+    pub deafened: Arc<AtomicBool>,
+    /// Derived from `gate`: the user's *explicit* mute, with no
+    /// push-to-talk or deafen folded in.
+    ///
+    /// Exists solely for the mic-test harness (`voice_test.rs`), which
+    /// borrows a gate for its own capture stream. It must not read
+    /// `transmit_muted`: in push-to-talk mode that atomic sits `true`
+    /// whenever the key isn't held — including outside a call — which
+    /// would make "test my microphone" silently record nothing. Explicit
+    /// mute is the only part of the gate a mic test should honour.
+    pub self_muted: Arc<AtomicBool>,
     /// Set while a `join_voice_channel` call is in flight. Blocks a second
     /// concurrent invocation from racing the first and tripping LiveKit's
     /// DuplicateIdentity eviction (which would disconnect both attempts).
@@ -309,7 +332,10 @@ impl VoiceState {
             frame_task: None,
             room_task: None,
             playback: Arc::new(Mutex::new(PlaybackState::new())),
-            is_muted: Arc::new(AtomicBool::new(false)),
+            gate: Arc::new(Mutex::new(super::gate::TransmitGate::new())),
+            transmit_muted: Arc::new(AtomicBool::new(false)),
+            deafened: Arc::new(AtomicBool::new(false)),
+            self_muted: Arc::new(AtomicBool::new(false)),
             joining: Arc::new(AtomicBool::new(false)),
             current_input_device: None,
             apm: None,
