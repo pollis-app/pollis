@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/Button";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { activeLocale } from "../../utils/format";
 import type { InviteLinkSummary } from "../../hooks/queries/useGroups";
 
 interface InviteLinkRowProps {
@@ -45,7 +46,7 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
     usesLabel,
     link.expires_at
       ? t("inviteLinks.expiresOn", {
-          date: new Date(link.expires_at).toLocaleDateString(),
+          date: new Date(link.expires_at).toLocaleDateString(activeLocale()),
         })
       : t("inviteLinks.noExpiry"),
     link.creator_username

@@ -4,6 +4,7 @@ import { observer } from "mobx-react-lite";
 import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { useSkin } from "../../../hooks/queries/usePreferences";
+import { activeLocale } from "../../../utils/format";
 import type { Message } from "../../../types";
 
 interface ThreadMessageRowProps {
@@ -37,7 +38,8 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     const skin = useSkin();
     const isTerminal = skin !== "refined";
     const author = message.sender_username ?? message.sender_id;
-    const time = new Date(message.created_at).toLocaleTimeString([], {
+    // App language, not the OS's — see `activeLocale` in `utils/format.ts`.
+    const time = new Date(message.created_at).toLocaleTimeString(activeLocale(), {
       hour: "2-digit",
       minute: "2-digit",
     });

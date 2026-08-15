@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Copy } from "lucide-react";
 import { Button } from "../ui/Button";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { activeLocale } from "../../utils/format";
 import type { CreatedInviteLink } from "../../hooks/queries/useGroups";
 
 interface CreatedInviteLinkCardProps {
@@ -40,7 +41,9 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
   }
   if (link.expires_at) {
     bounds.push(
-      t("inviteLinks.expiresOn", { date: new Date(link.expires_at).toLocaleString() }),
+      t("inviteLinks.expiresOn", {
+        date: new Date(link.expires_at).toLocaleString(activeLocale()),
+      }),
     );
   }
   const boundsLabel =
