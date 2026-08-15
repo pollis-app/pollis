@@ -46,6 +46,16 @@ export type RealtimeEvent =
       sender_username: string | null;
     }
   | {
+      // Per-user @username mention (#843). Same shape as all_mention — the
+      // difference is the audience: the backend publishes this ONLY to the
+      // members the message names.
+      type: "user_mention";
+      group_id: string;
+      channel_id: string;
+      sender_id: string;
+      sender_username: string | null;
+    }
+  | {
       type: "member_role_changed";
       group_id: string;
     }
@@ -74,6 +84,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "dm_created",
   "membership_changed",
   "all_mention",
+  "user_mention",
   "member_role_changed",
   "roster_changed",
   "device_revoked",
