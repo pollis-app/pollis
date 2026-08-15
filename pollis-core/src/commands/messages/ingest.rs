@@ -298,7 +298,6 @@ pub async fn catch_up_mls_group_interleaved(
             if let Err(e) = super::receipts::emit_delivered(
                 state,
                 &res.conversation_id,
-                user_id,
                 &res.newly_delivered,
             )
             .await

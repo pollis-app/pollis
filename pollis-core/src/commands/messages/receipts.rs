@@ -198,7 +198,6 @@ async fn is_dm(state: &Arc<AppState>, conversation_id: &str) -> Result<bool> {
 pub(crate) async fn emit_receipt(
     state: &Arc<AppState>,
     conversation_id: &str,
-    user_id: &str,
     kind: ReceiptKind,
     message_ids: &[String],
 ) -> Result<()> {
@@ -262,7 +261,6 @@ pub(crate) async fn emit_receipt(
         eprintln!("[receipts] publish hint for {conversation_id}: {e}");
     }
 
-    let _ = user_id;
     Ok(())
 }
 
@@ -271,17 +269,9 @@ pub(crate) async fn emit_receipt(
 pub(crate) async fn emit_delivered(
     state: &Arc<AppState>,
     conversation_id: &str,
-    user_id: &str,
     message_ids: &[String],
 ) -> Result<()> {
-    emit_receipt(
-        state,
-        conversation_id,
-        user_id,
-        ReceiptKind::Delivered,
-        message_ids,
-    )
-    .await
+    emit_receipt(state, conversation_id, ReceiptKind::Delivered, message_ids).await
 }
 
 /// Mark messages as **actually read by the human** and emit a read receipt.
@@ -329,14 +319,7 @@ pub async fn mark_messages_read(
         out
     };
 
-    emit_receipt(
-        state,
-        &conversation_id,
-        &user_id,
-        ReceiptKind::Read,
-        &to_ack,
-    )
-    .await
+    emit_receipt(state, &conversation_id, ReceiptKind::Read, &to_ack).await
 }
 
 /// Every receipt this device holds for the messages of one conversation.
