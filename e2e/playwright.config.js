@@ -15,7 +15,10 @@ const PORT = 5174;
 
 module.exports = defineConfig({
   testDir: __dirname,
-  testMatch: /.*\.spec\.js$/,
+  // Both dialects: mentions (#843) wrote .spec.js, bookmarks (#854) wrote
+  // .spec.ts. Playwright handles TS natively, so one config runs both rather
+  // than the repo carrying two configs and two script names.
+  testMatch: /.*\.spec\.(js|ts)$/,
   outputDir: `${__dirname}/artifacts/playwright`,
   // Composer interaction is keystroke-by-keystroke; give it room on a cold
   // dev-server transform without being generous enough to hide a hang.

@@ -17,3 +17,13 @@ export async function readClipboardImageToTemp(): Promise<string | null> {
   const path = await invoke<string>("read_clipboard_image_to_temp");
   return path && path.length > 0 ? path : null;
 }
+
+/**
+ * Write plain text to the OS clipboard. Returns false if the write failed.
+ *
+ * Backed by a Rust command rather than `navigator.clipboard` because the
+ * latter is unreliable on WebKitGTK (the Linux webview this app ships on).
+ */
+export async function writeClipboardText(text: string): Promise<boolean> {
+  return invoke<boolean>("write_clipboard_text", { text });
+}

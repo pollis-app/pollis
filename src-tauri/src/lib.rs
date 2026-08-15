@@ -250,6 +250,19 @@ async fn read_clipboard_image_to_temp(app: tauri::AppHandle) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// Write plain text to the OS clipboard.
+///
+/// Used by "copy link" (#854). Goes through the clipboard-manager plugin rather
+/// than `navigator.clipboard` because the latter is unreliable on WebKitGTK,
+/// which is the Linux webview this app ships on.
+#[cfg(feature = "native-shell")]
+#[tauri::command]
+fn write_clipboard_text(app: tauri::AppHandle, text: String) -> bool {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    app.clipboard().write_text(text).is_ok()
+}
+
 /// Cmd+W handler: hide the window on macOS (matching hide_on_close behaviour)
 /// or close it on Windows/Linux.
 #[cfg(feature = "native-shell")]
@@ -448,6 +461,7 @@ pub fn run() {
             hide_window,
             read_clipboard_files,
             read_clipboard_image_to_temp,
+            write_clipboard_text,
             tray::tray_set_unread,
             tray::tray_set_close_to_tray,
             tray::tray_set_enabled,
@@ -537,6 +551,14 @@ pub fn run() {
             commands::blocks::block_user,
             commands::blocks::unblock_user,
             commands::blocks::list_blocked_users,
+            // Saved messages + permalinks (#854). Device-local; no DS endpoint
+            // backs any of these, and resolve_message_permalink deliberately
+            // only ever consults the local database.
+            commands::bookmarks::save_message,
+            commands::bookmarks::unsave_message,
+            commands::bookmarks::toggle_saved_message,
+            commands::bookmarks::list_saved_messages,
+            commands::bookmarks::resolve_message_permalink,
             commands::messages::list_messages,
             commands::messages::send_message,
             commands::messages::get_channel_messages,

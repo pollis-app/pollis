@@ -44,6 +44,7 @@ import { RenameGroupPage } from "./pages/RenameGroupPage";
 import { KeyboardShortcutsPage } from "./pages/KeyboardShortcutsPage";
 import { UpdatePage } from "./pages/UpdatePage";
 import { ArcadePage } from "./pages/ArcadePage";
+import { SavedPage } from "./pages/SavedPage";
 
 // Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
@@ -282,6 +283,12 @@ const callRoute = createRoute({
   component: CallPage,
 });
 
+const savedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/saved",
+  component: SavedPage,
+});
+
 const arcadeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/arcade",
@@ -336,6 +343,7 @@ const routeTree = rootRoute.addChildren([
   keyboardShortcutsRoute,
   updateRoute,
   callRoute,
+  savedRoute,
   arcadeRoute,
   terminalRoute,
 ]);

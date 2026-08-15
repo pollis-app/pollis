@@ -21,6 +21,8 @@ The path in each section header below points at the implementation in `pollis-co
 > sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 > ```
 >
+> Commands added *after* that verification date are appended to the inventories below as they land, so the inventories run slightly ahead of the **167** figure above; the figure is left pinned to the commit it was actually counted at.
+>
 > Appendix A at the bottom of this page is a mechanically extracted snapshot of that list as of the date above — names only, no invented descriptions. If a command appears there but not in the prose, read its `pollis-core` implementation; do not assume this page's silence means it does not exist.
 >
 > When you add or change a command, update the relevant section here **and** Appendix A in the same PR (per `CLAUDE.md`: update the wiki alongside the code).
@@ -100,6 +102,46 @@ PIN is cryptographically load-bearing — see `pin-design.md`.
 - `unblock_user(blocker_id, blocked_id)` — deletes the `user_block` row. DM history becomes visible again and un-accepted channels surface in `list_dm_requests`.
 - `list_blocked_users(user_id)` → `BlockedUser[]`
 - Enforced in: `create_dm_channel`, `send_message` (DM only — group-channel sends are not gated), `send_group_invite`. All three return the identical string `"message request pending"` so the sender cannot infer which gate rejected them.
+
+## bookmarks (`commands/bookmarks.rs`)
+
+Saved messages and message permalinks (#854). **Every command here is device-local**
+— pure rusqlite against the encrypted local DB (`bookmark` table in
+`db/local_schema.sql`). None of them touch the DS or Turso, and no DS endpoint backs
+any of them.
+
+- `save_message(message_id)` — save a message. The conversation is read from the local
+  `message` row, never taken from the caller, so a bookmark cannot point at the wrong
+  conversation. Errors if this device does not hold the message. Idempotent
+  (`message_id` is the primary key, so a duplicate save is unrepresentable).
+- `unsave_message(message_id)` → `bool` — true if a bookmark was removed. Works even
+  when the message body is gone, so an unavailable saved item stays removable.
+- `toggle_saved_message(message_id)` → `bool` — returns the saved state *after* the
+  flip, so the caller never re-reads to know what to render.
+- `list_saved_messages()` → `SavedMessage[]` — newest save first, LEFT JOINed to the
+  local message body. A bookmark deliberately outlives retention eviction and soft
+  delete: those rows come back with `available: false` and `content`/`sender_id`/
+  `sent_at` all `null`, rather than vanishing from the list or rendering a blank body.
+- `resolve_message_permalink(conversation_id, message_id)` → `PermalinkTarget` —
+  resolves `pollis://m/<conversation_id>/<message_id>` **strictly against the local
+  database**.
+
+  There is deliberately **no server-side permalink lookup, and none may be added** — a
+  "fetch this message by id" endpoint is exactly what would turn a permalink from a
+  harmless pointer into a leak. A permalink grants nothing, so forwarding one to a
+  stranger is safe.
+
+  Resolution requires the message to exist locally **and** to be in the conversation
+  the link claims, so a caller cannot pair a real message id with a guessed
+  conversation id to confirm where it lives. Every failure mode — unknown message,
+  evicted message, mismatched conversation — returns the byte-identical
+  `{ found: false, conversation_id: null, message_id: null }`, so the command cannot be
+  used as an existence oracle.
+
+  A device that was not in the MLS group when the message was sent never received the
+  key material, so it never decrypted the envelope and never wrote it locally. The miss
+  is therefore *cryptographic*, not a permission check — accepted loss (1) in
+  `CLAUDE.md`.
 
 ## mls (`commands/mls/`)
 Only three MLS commands are registered (`src-tauri/src/commands/mls.rs`):
@@ -194,6 +236,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image_to_temp`
 - **`auth`** — `delete_account`, `dev_login`, `get_identity`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`
+- **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 - **`device_enrollment`** — `approve_device_enrollment`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 - **`dm`** — `accept_dm_request`, `add_user_to_dm_channel`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`, `remove_user_from_dm_channel`
@@ -259,6 +302,8 @@ than hand-edit.
 **`dm`** (8) — `accept_dm_request`, `add_user_to_dm_channel`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`, `remove_user_from_dm_channel`
 
 **`blocks`** (3) — `block_user`, `list_blocked_users`, `unblock_user`
+
+**`bookmarks`** (5) — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 
 **`messages`** (21) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
 

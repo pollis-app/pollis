@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   Keyboard,
   Download,
+  Bookmark,
 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -143,6 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 
   const isOnSettingsHub = pathname === "/settings";
   const settingsItems = [
+    { id: "saved", label: "Saved", icon: <Bookmark {...iconProps} />, to: "/saved" as const, isActive: pathname === "/saved" },
     { id: "preferences", label: "Preferences", icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
     { id: "user", label: "User Settings", icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
     { id: "voice-settings", label: "Voice & Video", icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },

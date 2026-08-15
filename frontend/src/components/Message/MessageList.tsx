@@ -1,12 +1,22 @@
-import React, { useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { MessageItem } from "./MessageItem";
+import "./messageHighlight.css";
 import { useBlockedUsers } from "../../hooks/queries";
 import { useGroupMembers } from "../../hooks/queries/useGroups";
 import { observer } from "mobx-react-lite";
 import { rosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
 import { formatDayDivider } from "../../utils/format";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import {
+  useSavedMessageIds,
+  useToggleSavedMessage,
+} from "../../hooks/queries/useBookmarks";
+import { useMessagePermalink } from "../../hooks/useMessagePermalink";
+import { messageJumpStore } from "../../stores/messageJumpStore";
 import type { Message } from "../../types";
+
+// How long the permalink jump highlight stays on the target row.
+const HIGHLIGHT_MS = 1800;
 
 const toMs = (timestamp: number): number =>
   timestamp < 1e12 ? timestamp * 1000 : timestamp;
@@ -272,6 +282,77 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     onScrollToMessage?.(messageId);
   };
 
+  // ── Saved messages + permalinks (#854) ──────────────────────────────────
+  const savedMessageIds = useSavedMessageIds();
+  const toggleSavedMutation = useToggleSavedMessage();
+  const { copyPermalink } = useMessagePermalink();
+
+  const handleToggleSave = useCallback(
+    (messageId: string) => {
+      toggleSavedMutation.mutate(messageId);
+    },
+    [toggleSavedMutation],
+  );
+
+  const handleCopyLink = useCallback(
+    (messageId: string) => {
+      const message = sortedMessages.find((m) => m.id === messageId);
+      // The message's OWN conversation, never the list's `conversationId` prop
+      // — that prop is the MLS group id for channels, which would produce a
+      // permalink that resolves nowhere.
+      const targetConversationId = message?.conversation_id;
+      if (!targetConversationId) {
+        return;
+      }
+      void copyPermalink(targetConversationId, messageId);
+    },
+    [sortedMessages, copyPermalink],
+  );
+
+  // Read the pending jump during RENDER, not only inside the effect below.
+  // `MessageList` is an `observer`, and observers only subscribe to what they
+  // touch while rendering — claiming solely inside an effect would mean a jump
+  // requested while this conversation is already open never re-renders the
+  // component, so the effect would never re-run and the jump would be dropped.
+  //
+  // The match is on the message this list RENDERS rather than on the
+  // `conversationId` prop, which for channels is the MLS *group* id (it feeds
+  // roster banners) and so would never equal a channel permalink's target.
+  const requestedJumpMessageId = messageJumpStore.messageId;
+  const jumpTargetMessageId =
+    requestedJumpMessageId &&
+    sortedMessages.some((m) => m.id === requestedJumpMessageId)
+      ? requestedJumpMessageId
+      : null;
+
+  // Consume a pending permalink jump: scroll the target into view and flash it.
+  // The class is applied imperatively to the row that is already in the DOM, so
+  // this needs no change to `MessageItem` and adds no wrapper to the timeline.
+  //
+  // A jump requested before its target has loaded simply is not claimed yet —
+  // it stays pending and this effect re-runs when the message arrives.
+  useEffect(() => {
+    if (!jumpTargetMessageId) {
+      return;
+    }
+    const el = containerRef.current?.querySelector(
+      `[data-testid="message-${jumpTargetMessageId}"]`,
+    );
+    if (!el) {
+      return;
+    }
+    if (!messageJumpStore.claimMessage(jumpTargetMessageId)) {
+      return;
+    }
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("pollis-message-flash");
+    const timer = setTimeout(() => {
+      el.classList.remove("pollis-message-flash");
+      messageJumpStore.clearHighlight();
+    }, HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [jumpTargetMessageId, timeline.length]);
+
   if (timeline.length === 0) {
     return (
       <div
@@ -373,6 +454,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
             onEdit={onEdit}
             onDelete={onDelete}
             onScrollToReply={scrollToMessage}
+            isSaved={savedMessageIds.has(message.id)}
+            onToggleSave={handleToggleSave}
+            onCopyLink={handleCopyLink}
           />
         );
 

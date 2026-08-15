@@ -2,6 +2,9 @@ pub mod account_identity;
 pub mod auth;
 pub mod pin;
 pub mod blocks;
+// Saved messages + local permalink resolution (#854). Pure rusqlite against the
+// device-local DB — no DS, no Turso, compiles on every target.
+pub mod bookmarks;
 pub mod device_enrollment;
 pub mod user;
 pub mod groups;

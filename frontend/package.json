@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "echo 'Linting frontend...'",
+    "test": "node --test \"tests/**/*.test.ts\"",
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {
