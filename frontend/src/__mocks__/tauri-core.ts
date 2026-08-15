@@ -773,14 +773,23 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_voice_gate_state':
       return gateSnapshot();
 
-    // Voice room observation + connection warm-up. Nothing serves a room in
-    // the browser build, so these are inert.
+    // Voice room observation, device enumeration and the mic-test rig. There
+    // is no audio hardware behind the browser build, so these are inert.
     case 'list_voice_participants':
     case 'list_voice_room_counts':
+    case 'list_audio_devices':
       return [];
 
     case 'prepare_voice_connection':
     case 'publish_voice_presence':
+    case 'set_voice_audio_processing':
+    case 'subscribe_voice_test_events':
+    case 'start_mic_test':
+    case 'stop_mic_test':
+    case 'set_mic_test_monitor':
+    case 'record_and_play_back':
+    case 'play_test_tone':
+    case 'stop_test_playback':
       return null;
 
     case 'write_clipboard_text': {
