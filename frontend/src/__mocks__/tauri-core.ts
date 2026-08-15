@@ -153,6 +153,12 @@ interface MockStore {
   // preloads may write either shape (see `readPreferences`).
   preferences: Record<string, unknown>;
   clipboard: string;
+  // Idle auto-lock (#851): the last window the renderer pushed (null = Off)
+  // and how many activity reports it has sent. Nothing here times anything —
+  // Rust owns the deadline — these exist so a spec can prove the renderer's
+  // half of the contract.
+  autoLockMinutes: number | null;
+  activityReports: number;
 }
 
 // Only `@tauri-apps/api/core` and `/event` are vite-aliased to these mocks.
@@ -218,6 +224,8 @@ const store: MockStore = {
   // Lets a test drive the skin: `{ skin: 'refined' }` or its JSON string.
   preferences: readPreferences(preload.preferences),
   clipboard: '',
+  autoLockMinutes: null,
+  activityReports: 0,
 };
 
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
@@ -328,6 +336,20 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'set_pin':
     case 'unlock':
     case 'lock':
+      return null;
+
+    // Idle auto-lock (#851). The real deadline and timer live in Rust
+    // (`pollis-core/src/commands/autolock.rs`); in the browser tier there is
+    // nothing to time, so these just record the last window the renderer
+    // pushed. A spec asserts on `__tauriMock.autoLockMinutes` to prove the
+    // setting reached the backend, and fires the lock itself with
+    // `window.__tauriEmit('auto-lock')`.
+    case 'set_auto_lock_timeout':
+      store.autoLockMinutes = (args.minutes as number | null) ?? null;
+      return null;
+
+    case 'report_user_activity':
+      store.activityReports += 1;
       return null;
 
     case 'initialize_identity':
