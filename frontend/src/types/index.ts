@@ -104,6 +104,10 @@ export interface DMConversation {
   user2_identifier: string; // username/email/phone of other user
   user2_id?: string;
   user2_avatar_url?: string;
+  /** Total members including the viewer. Group DMs have 3+; a 1:1 has 2.
+   * Drives the per-reader receipt summary (#857) — optional because callers
+   * that only need the "other side" never populate it. */
+  member_count?: number;
   created_at: number;
   updated_at: number;
 }
