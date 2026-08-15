@@ -140,7 +140,14 @@ catalogue as ASCII to match.
 - `Error` messages destined only for logs or crash reports.
 - `data-testid` values — tests must not move when copy does.
 - Developer-facing strings, debug panels, dev-only branches.
-- Protocol / wire values, command names, preference keys, CSS class names.
+- Protocol / wire values, command names, preference keys, CSS class names —
+  **as values**. The moment one is RENDERED to a user it is copy: `admin`,
+  `member`, `excellent`, `strict` all reach the screen and all need keys. Map
+  the token to literal `t("…")` calls, one per value; a key built from the
+  value with a template literal is invisible to `i18n-check`.
+- Keyboard GLYPHS — `⌘ ⌥ ⇧`, the arrows `↑ ↓ ← →`, the backtick. Key NAMES
+  that are words (Ctrl, Shift, Esc, Space…) live in `common:keys.*` and are
+  translated; see `keyboard/keyCombo.ts`.
 
 ## Fallback behaviour
 
@@ -148,6 +155,13 @@ catalogue as ASCII to match.
 active language — or present but left as `""` in a half-finished catalogue —
 renders the **English** string, not the raw key. A partial translation is
 therefore always shippable.
+
+`node scripts/i18n-check.mjs` treats that as a **warning**, not a failure: it
+prints a per-locale count of keys still awaiting translation and exits 0. New
+copy lands English-only on purpose, and a translation pass clears the backlog
+later. What still FAILS the check is a catalogue that is wrong rather than
+behind — a key `en` does not have, a plural family you started but did not
+finish, placeholder drift, or an empty string.
 
 ## Where the preference lives
 
