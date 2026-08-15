@@ -591,3 +591,137 @@ for (const skin of SKINS) {
     });
   });
 }
+
+/*
+ * ────────────────────────────────────────────────────────────────────────────
+ * Horizontal arrow-key navigation (#902).
+ *
+ * `.codesight/wiki/i18n.md` §4 listed this as knowingly unfixed after #855:
+ * `NavigableList`, `NavigableGrid` and `EmojiPicker` all treated ArrowRight as
+ * "next", which under `dir=rtl` walks the cursor backwards through the UI.
+ *
+ * These follow the same rule as everything else in this file — MEASURE, do not
+ * assert on `dir`. The property under test is "the cursor moved the way the
+ * key points ON SCREEN", which is a statement about pixels and is identical in
+ * both directions. An index-shaped assertion would have to encode the answer
+ * it is checking, and would pass on the unfixed code in LTR while saying
+ * nothing about RTL.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+/** Where DOM focus currently is, as a box plus a stable identity. */
+async function focusedCell(
+  page: Page,
+): Promise<{ left: number; index: number }> {
+  return page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el) {
+      throw new Error("nothing is focused");
+    }
+    const raw = el.dataset.emojiIndex;
+    if (raw === undefined) {
+      throw new Error(`focus is not on an emoji cell (${el.tagName})`);
+    }
+    return { left: el.getBoundingClientRect().left, index: Number.parseInt(raw, 10) };
+  });
+}
+
+for (const skin of SKINS) {
+  test.describe(`rtl keyboard navigation — ${skin} skin`, () => {
+    async function gotoShortcuts(page: Page) {
+      await page.keyboard.press(
+        process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK",
+      );
+      await expect(page.getByTestId("search-panel")).toBeVisible();
+      await page.getByTestId("search-panel-input").fill("key bindings");
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("keyboard-shortcuts-page")).toBeVisible();
+    }
+
+    test("a list's row controls are reached by the arrow that points at them", async ({
+      page,
+    }) => {
+      // `NavigableList` puts its controls at the INLINE END of the row, so
+      // `dir=rtl` draws them on the left and ArrowLeft is what must reach
+      // them. The test derives which key to press from where the control was
+      // actually painted, so it states the RULE rather than the answer.
+      const sides: Record<string, boolean> = {};
+
+      for (const language of [RTL_LANG, LTR_LANG]) {
+        await boot(page, skin, language);
+        await gotoShortcuts(page);
+
+        const list = page.getByTestId("keyboard-shortcuts-list");
+        const firstControl = page.getByTestId("shortcut-app.toggleSidebar-edit");
+        await expect(firstControl).toBeVisible();
+        await expect(firstControl).toBeEnabled();
+
+        const listBox = await box(list);
+        const controlBox = await box(firstControl);
+        const controlOnRight = controlBox.left > listBox.left + listBox.width / 2;
+        sides[language] = controlOnRight;
+
+        await list.focus();
+        await page.keyboard.press(controlOnRight ? "ArrowRight" : "ArrowLeft");
+        await expect(firstControl).toBeFocused();
+
+        // And the opposite key walks back to the row, leaving the control.
+        await page.keyboard.press(controlOnRight ? "ArrowLeft" : "ArrowRight");
+        await expect(firstControl).not.toBeFocused();
+      }
+
+      // The fixture itself mirrored. Without this the loop above would be
+      // satisfied by a layout that never moved the controls at all.
+      expect(sides[LTR_LANG]).toBe(true);
+      expect(sides[RTL_LANG]).toBe(false);
+    });
+
+    test("the emoji grid cursor follows the key you pressed, not the LTR order", async ({
+      page,
+    }) => {
+      // Start from a cell in the middle of the first row so neither direction
+      // is clamped at an edge, then assert the cursor moved RIGHTWARDS ON
+      // SCREEN for ArrowRight. Under `dir=rtl` that is the PREVIOUS emoji, and
+      // the unfixed code moved to the next one — which is drawn to the left,
+      // so this fails on it.
+      const START = 4;
+      const indexAfterRight: Record<string, number> = {};
+
+      for (const language of [RTL_LANG, LTR_LANG]) {
+        await boot(page, skin, language);
+        await gotoChannel(page);
+
+        await page.getByTestId("emoji-picker-button").click();
+        await expect(page.getByTestId("emoji-picker")).toBeVisible();
+        await expect(page.getByTestId("emoji-cell").first()).toBeVisible();
+
+        const start = page.locator(`[data-emoji-index="${START}"]`);
+        await expect(start).toBeVisible();
+        await start.focus();
+
+        const before = await focusedCell(page);
+        expect(before.index).toBe(START);
+
+        await page.keyboard.press("ArrowRight");
+        const after = await focusedCell(page);
+
+        // The whole assertion: focus is now further right than it was.
+        expect(after.left).toBeGreaterThan(before.left);
+        expect(after.index).not.toBe(before.index);
+        indexAfterRight[language] = after.index;
+
+        // ArrowLeft is its inverse and returns to where we started.
+        await page.keyboard.press("ArrowLeft");
+        const back = await focusedCell(page);
+        expect(back.index).toBe(START);
+        expect(back.left).toBeLessThan(after.left);
+      }
+
+      // "Rightwards on screen" is a DIFFERENT emoji in each direction. If both
+      // locales landed on the same index, one of them moved the wrong way and
+      // the geometry assertions above were reading an unmirrored grid.
+      expect(indexAfterRight[RTL_LANG]).toBe(START - 1);
+      expect(indexAfterRight[LTR_LANG]).toBe(START + 1);
+    });
+  });
+}

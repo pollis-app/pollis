@@ -99,13 +99,32 @@ const TEST_LOCALE = {
  * can be exercised; it must be installed before any app module evaluates,
  * hence `addInitScript`.
  */
+interface TestLocaleShape {
+  code: string;
+  label: string;
+  dir: "ltr" | "rtl";
+  catalogues: Record<string, Record<string, unknown>>;
+}
+
 async function boot(
   page: Page,
   skin: Skin,
-  opts: { osLanguages?: string[]; withTestLocale?: boolean } = {},
+  opts: {
+    osLanguages?: string[];
+    withTestLocale?: boolean;
+    /** Extra preload state merged over the default fixture. */
+    preload?: Record<string, unknown>;
+    /**
+     * A synthetic catalogue other than the module-level `TEST_LOCALE`. The
+     * default one translates exactly ONE key on purpose — the tests below
+     * that need a different key bring their own rather than widening it and
+     * quietly weakening the fallback assertions that depend on its gaps.
+     */
+    locale?: TestLocaleShape;
+  } = {},
 ) {
   const withTestLocale = opts.withTestLocale ?? true;
-  const state = preloadState(skin);
+  const state = { ...preloadState(skin), ...(opts.preload ?? {}) };
   await page.addInitScript(
     ({ preload, locale, osLanguages }) => {
       const w = window as unknown as Record<string, unknown>;
@@ -142,7 +161,7 @@ async function boot(
     },
     {
       preload: state,
-      locale: withTestLocale ? TEST_LOCALE : null,
+      locale: withTestLocale ? (opts.locale ?? TEST_LOCALE) : null,
       osLanguages: opts.osLanguages ?? null,
     },
   );
@@ -469,4 +488,269 @@ test.describe("shipped locales", () => {
       expect(await rawKeyLeaks(page)).toEqual([]);
     });
   }
+});
+
+/*
+ * ────────────────────────────────────────────────────────────────────────────
+ * #902 — four surfaces #855 left speaking the wrong language.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+/** Any Arabic-script character. */
+const ARABIC_SCRIPT = /[؀-ۿ]/;
+const LATIN_LETTER = /[A-Za-z]/;
+
+/**
+ * Dates must follow the APP language, not the OS one.
+ *
+ * `test.use({ locale })` pins the BROWSER's locale — i.e. the machine's — and
+ * pinning it to English is the entire point of the fixture. `toLocaleDateString([])`
+ * resolves against exactly that, so on an English machine the old code rendered
+ * "Mon, Jun 7" underneath a translated "اليوم". A test that let the browser
+ * locale follow the app language would pass on the unfixed code.
+ *
+ * The assertion is on SCRIPT, not on a specific string: the exact rendering of
+ * a weekday is CLDR's business and changes between ICU versions, but "did any
+ * Arabic come out at all" is the property under test and is stable.
+ */
+test.describe("dates follow the app language, not the OS locale", () => {
+  test.use({ locale: "en-US" });
+
+  const DAYS_AGO = 3;
+  const DATED_MESSAGE_ID = "01HQ7Z3K9M2P5R8T1V4W6Y0DTE";
+
+  /** A message old enough for the day divider to take its weekday branch. */
+  function datedMessages() {
+    const sentAt = new Date(Date.now() - DAYS_AGO * 86_400_000).toISOString();
+    return {
+      messages: {
+        [CHANNEL_ID]: [
+          {
+            id: DATED_MESSAGE_ID,
+            conversation_id: CHANNEL_ID,
+            sender_id: USER.id,
+            content: "a message from earlier this week",
+            sent_at: sentAt,
+          },
+        ],
+      },
+    };
+  }
+
+  async function gotoChannel(page: Page) {
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK",
+    );
+    await expect(page.getByTestId("search-panel")).toBeVisible();
+    await page.getByTestId("search-panel-input").fill("general");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId(`message-${DATED_MESSAGE_ID}`)).toBeVisible();
+  }
+
+  test("an Arabic UI renders Arabic weekdays and months on an English machine", async ({
+    page,
+  }) => {
+    await boot(page, "terminal", {
+      withTestLocale: false,
+      osLanguages: ["ar"],
+      preload: datedMessages(),
+    });
+    // Precondition, not the test: if the locale failed to take, everything
+    // below would be measuring an English app.
+    await expect(page.locator("html")).toHaveAttribute("lang", "ar");
+    await gotoChannel(page);
+
+    const divider = page.getByTestId("day-divider").first();
+    await expect(divider).toBeVisible();
+    const label = (await divider.innerText()).trim();
+
+    expect(label).toMatch(ARABIC_SCRIPT);
+    // No Latin at all — this is the half that fails on the unfixed code, where
+    // the weekday and month came back from the en-US host locale.
+    expect(label).not.toMatch(LATIN_LETTER);
+
+    // The hover tooltip is `formatFullTimestamp`, a separate `toLocaleString`
+    // call site that had the same bug.
+    const title = await page
+      .getByTestId(`message-${DATED_MESSAGE_ID}`)
+      .getByTestId("message-timestamp")
+      .first()
+      .getAttribute("title");
+    expect(title ?? "").toMatch(ARABIC_SCRIPT);
+  });
+
+  test("an English UI still renders English dates", async ({ page }) => {
+    // The other half of the pin. A one-sided assertion above is also satisfied
+    // by a build that renders Arabic dates to everybody.
+    await boot(page, "terminal", {
+      withTestLocale: false,
+      osLanguages: ["en-US"],
+      preload: datedMessages(),
+    });
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await gotoChannel(page);
+
+    const label = (await page.getByTestId("day-divider").first().innerText()).trim();
+    expect(label).toMatch(LATIN_LETTER);
+    expect(label).not.toMatch(ARABIC_SCRIPT);
+  });
+});
+
+/**
+ * Keyboard glyphs that are WORDS are copy.
+ *
+ * Driven through a synthetic locale rather than a real one because the six
+ * shipped locales have not been translated for these keys yet (#902 ships
+ * English only, by design) — so against `ar` this would assert the English
+ * fallback and prove nothing. The synthetic catalogue is the same mechanism
+ * the tests above use.
+ */
+test.describe("keyboard glyphs are translated", () => {
+  const KEYS_LANG = "qtk";
+  const ESC_TRANSLATED = "ESC-TEST";
+  const CTRL_TRANSLATED = "CTRL-TEST";
+  const SHIFT_TRANSLATED = "SHIFT-TEST";
+  const SPACE_TRANSLATED = "SPACE-TEST";
+
+  const KEYS_LOCALE: TestLocaleShape = {
+    code: KEYS_LANG,
+    label: "Kèyish",
+    dir: "ltr",
+    catalogues: {
+      common: {
+        keys: {
+          escape: ESC_TRANSLATED,
+          ctrl: CTRL_TRANSLATED,
+          shift: SHIFT_TRANSLATED,
+          space: SPACE_TRANSLATED,
+        },
+      },
+    },
+  };
+
+  async function gotoShortcuts(page: Page) {
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK",
+    );
+    await expect(page.getByTestId("search-panel")).toBeVisible();
+    await page.getByTestId("search-panel-input").fill("key bindings");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("keyboard-shortcuts-page")).toBeVisible();
+  }
+
+  test("named keys render the active language, not English literals", async ({
+    page,
+  }) => {
+    await boot(page, "terminal", {
+      osLanguages: [KEYS_LANG],
+      locale: KEYS_LOCALE,
+    });
+    await expect(page.locator("html")).toHaveAttribute("lang", KEYS_LANG);
+    await gotoShortcuts(page);
+
+    // `nav.back` is bound to a bare `escape`, so its badge is the key name on
+    // its own — no platform-dependent modifier in the way.
+    const escBadge = page.getByTestId("shortcut-nav.back-edit");
+    await expect(escBadge).toHaveText(ESC_TRANSLATED);
+
+    // Modifier NAMES are only rendered off macOS; there the glyphs ⌘/⇧ are
+    // used, and those are deliberately never translated (see `keyCombo.ts`).
+    if (process.platform !== "darwin") {
+      const pttBadge = page.getByTestId("shortcut-voice.pushToTalk-edit");
+      await expect(pttBadge).toHaveText(
+        `${CTRL_TRANSLATED}+${SHIFT_TRANSLATED}+${SPACE_TRANSLATED}`,
+      );
+    }
+  });
+
+  test("English still renders the English key names", async ({ page }) => {
+    await boot(page, "terminal", { osLanguages: ["en-US"], locale: KEYS_LOCALE });
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await gotoShortcuts(page);
+    await expect(page.getByTestId("shortcut-nav.back-edit")).toHaveText("Esc");
+  });
+
+});
+
+/**
+ * A member's role is a wire value, and the list rendered it straight to screen.
+ *
+ * Again synthetic, and for a sharper reason than usual: the English copy for
+ * this key is deliberately the SAME WORD as the wire value it replaces
+ * ("member"), so under any real locale — which falls back to English — a
+ * reverted build renders an identical string and the test would pass on
+ * unfixed code.
+ */
+test.describe("member roles are translated, not echoed from the wire", () => {
+  const ROLE_LANG = "qtr";
+  const MEMBER_TRANSLATED = "ROLE-MEMBER-TEST";
+  const BOB = "u-bob";
+
+  const ROLE_LOCALE: TestLocaleShape = {
+    code: ROLE_LANG,
+    label: "Rôlish",
+    dir: "ltr",
+    catalogues: {
+      channels: { members: { role: { member: MEMBER_TRANSLATED } } },
+    },
+  };
+
+  /** The signed-in user is NOT an admin, so every row shows its role. */
+  const rosterPreload = {
+    groups: [
+      {
+        id: GROUP_ID,
+        name: "Acme",
+        owner_id: BOB,
+        created_at: new Date().toISOString(),
+        current_user_role: "member",
+      },
+    ],
+    groupMembers: {
+      [GROUP_ID]: [
+        { user_id: USER.id, username: "alice", role: "member", joined_at: "2026-08-01T09:00:00.000Z" },
+        { user_id: BOB, username: "bob", role: "admin", joined_at: "2026-08-01T09:00:00.000Z" },
+      ],
+    },
+  };
+
+  /**
+   * Members is a parameterized route, so it is not in `PAGE_RESULTS` and
+   * cannot be reached from Cmd+K at all (the palette indexes channels, not
+   * groups). Go the way a user does: the sidebar's group row opens the group
+   * menu, and Members is on it.
+   */
+  async function gotoMembers(page: Page) {
+    await page
+      .getByTestId("sidebar")
+      .getByRole("button", { name: "Acme", exact: true })
+      .click();
+    await page.getByTestId("menu-item-members").click();
+    await expect(page.getByTestId("members-list")).toBeVisible();
+  }
+
+  test("the role column renders the active language", async ({ page }) => {
+    await boot(page, "terminal", {
+      osLanguages: [ROLE_LANG],
+      locale: ROLE_LOCALE,
+      preload: rosterPreload,
+    });
+    await expect(page.locator("html")).toHaveAttribute("lang", ROLE_LANG);
+    await gotoMembers(page);
+
+    const selfRow = page.getByTestId(`member-row-${USER.id}`);
+    await expect(selfRow).toContainText(MEMBER_TRANSLATED);
+    // The raw wire token is gone from that row.
+    await expect(selfRow).not.toContainText(/\bmember\b/);
+  });
+
+  test("English still renders the English role label", async ({ page }) => {
+    await boot(page, "terminal", {
+      osLanguages: ["en-US"],
+      locale: ROLE_LOCALE,
+      preload: rosterPreload,
+    });
+    await gotoMembers(page);
+    await expect(page.getByTestId(`member-row-${USER.id}`)).toContainText("member");
+  });
 });
