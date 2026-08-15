@@ -5,7 +5,8 @@ import { Channel, invoke } from '../bridge';
 import { reaction } from 'mobx';
 import { appStore } from '../stores/appStore';
 import type { VoiceParticipant, VoiceConnectionQuality } from '../types';
-import type { ParticipantVideo } from '../types/voice-state';
+import type { ParticipantVideo, VoiceGateState, VoiceInputMode } from '../types/voice-state';
+import { VOICE_GATE_INITIAL } from '../types/voice-state';
 import { userIdFromVoiceIdentity } from './identity';
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
@@ -82,6 +83,11 @@ export interface VoiceSessionState {
    *  a participant's audio DU — this is the local user's toggle, not a
    *  speaking-derived value. */
   isMuted: boolean;
+  /** Push-to-talk / mute / deafen snapshot owned by Rust (#849), mirrored
+   *  onto `voiceState.gate`. `isMuted` above is kept equal to its
+   *  `self_muted` field — this carries the states a bool cannot express
+   *  (deafened, push-to-talk armed but idle). */
+  gate: VoiceGateState;
   /** False when the session joined listen-only (no working capture device).
    *  Mirrored onto the store's `joined.micAvailable`; drives the "listening
    *  only" indicator in place of the mute toggle. */
@@ -118,6 +124,24 @@ type ManagerEventMap = {
 type Listener = () => void;
 type EventListener<E extends keyof ManagerEventMap> = (payload: ManagerEventMap[E]) => void;
 
+/**
+ * The gate a fresh session starts from. Mirrors Rust's
+ * `TransmitGate::reset_for_join`: mute, deafen and any held push-to-talk
+ * latch are session state and get cleared, but `mode` is a persisted user
+ * preference and must survive — resetting it here would silently drop the
+ * user out of push-to-talk on every rejoin, and would also put this mirror
+ * out of step with the Rust gate, which keeps it.
+ */
+function gateForNewSession(prev: VoiceGateState): VoiceGateState {
+  return {
+    mode: prev.mode,
+    self_muted: false,
+    deafened: false,
+    ptt_held: false,
+    transmitting: prev.mode === 'voice_activity',
+  };
+}
+
 const INITIAL_STATE: VoiceSessionState = {
   phase: 'idle',
   channelId: null,
@@ -125,6 +149,7 @@ const INITIAL_STATE: VoiceSessionState = {
   counterpartyUserId: null,
   participants: [],
   isMuted: false,
+  gate: VOICE_GATE_INITIAL,
   micAvailable: true,
   error: null,
 };
@@ -281,20 +306,87 @@ class VoiceSessionManager {
 
   /** Toggle the local mic mute. No-op if not currently joined. */
   async toggleMute(): Promise<void> {
-    if (this.state.phase !== 'joined') {
+    await this.applyGate('toggle_voice_mute');
+  }
+
+  /**
+   * Toggle self-deafen: silence all incoming audio. Implies self-mute, and
+   * undeafening restores whatever mute state deafening displaced — the
+   * decision is made in Rust, we just render the result.
+   */
+  async toggleDeafen(): Promise<void> {
+    await this.applyGate('toggle_voice_deafen');
+  }
+
+  /**
+   * Choose voice-activity vs push-to-talk. Safe to call outside a call —
+   * the mode is a persisted preference, so this runs on preferences load
+   * as well as on change.
+   */
+  async setInputMode(mode: VoiceInputMode): Promise<void> {
+    await this.applyGate('set_voice_input_mode', { mode }, { requireJoined: false });
+  }
+
+  /** Push-to-talk key down / up. */
+  async setPushToTalkHeld(held: boolean): Promise<void> {
+    await this.applyGate('set_voice_ptt_held', { held });
+  }
+
+  /**
+   * Release push-to-talk because the window lost keyboard focus.
+   *
+   * Distinct from `setPushToTalkHeld(false)` only in intent, but the
+   * intent is the whole point: the keyup for a key held while alt-tabbing
+   * is delivered to whatever the user switched to, never to us, so without
+   * this the mic stays open in the background.
+   *
+   * Deliberately fires even when the gate is not currently held — it costs
+   * one idempotent IPC call and removes any chance of the renderer and the
+   * Rust gate disagreeing about a stranded key.
+   */
+  async releasePushToTalk(): Promise<void> {
+    await this.applyGate('release_voice_ptt');
+  }
+
+  /** Re-read the Rust gate without changing it (post-join / post-reload). */
+  async syncGate(): Promise<void> {
+    await this.applyGate('get_voice_gate_state');
+  }
+
+  /**
+   * Run one gate command and mirror the returned snapshot.
+   *
+   * Rust owns this state machine; every one of these commands returns the
+   * full `VoiceGateState` precisely because a transition can have
+   * consequences the caller did not ask for (unmuting while deafened also
+   * undeafens). Mirroring the whole snapshot is what keeps the UI honest —
+   * the renderer never predicts the outcome of a transition.
+   */
+  private async applyGate(
+    command: string,
+    args?: Record<string, unknown>,
+    opts?: { requireJoined?: boolean },
+  ): Promise<void> {
+    if ((opts?.requireJoined ?? true) && this.state.phase !== 'joined') {
       return;
     }
     try {
-      const muted = await invoke<boolean>('toggle_voice_mute');
+      const gate = await invoke<VoiceGateState>(command, args);
       const localIdentity = this.localIdentity;
+      // The local tile follows what the room sees: not transmitting reads
+      // as muted to everyone else, so it should look muted to us too. The
+      // finer distinction (deafened vs PTT-idle vs muted) lives on `gate`
+      // and is drawn by the voice controls, not the participant tile.
       const participants = localIdentity
         ? this.state.participants.map((p) =>
-            p.identity === localIdentity ? { ...p, audio: audioSetMuted(p.audio, muted) } : p,
+            p.identity === localIdentity
+              ? { ...p, audio: audioSetMuted(p.audio, !gate.transmitting) }
+              : p,
           )
         : this.state.participants;
-      this.setState({ isMuted: muted, participants });
+      this.setState({ gate, isMuted: gate.self_muted, participants });
     } catch (e) {
-      console.warn('[voice] toggle_voice_mute failed:', e);
+      console.warn(`[voice] ${command} failed:`, e);
     }
   }
 
@@ -458,6 +550,7 @@ class VoiceSessionManager {
       groupId: target.groupId,
       counterpartyUserId: target.counterpartyUserId ?? null,
       isMuted: false,
+      gate: gateForNewSession(this.state.gate),
       // Reset any stale listen-only state from a previous session; the
       // backend re-asserts it via `mic_availability` on this join.
       micAvailable: true,
@@ -502,6 +595,7 @@ class VoiceSessionManager {
         groupId: null,
         participants: [],
         isMuted: false,
+      gate: gateForNewSession(this.state.gate),
         error: msg,
       });
       return false;
@@ -524,6 +618,7 @@ class VoiceSessionManager {
         groupId: null,
         participants: [],
         isMuted: false,
+      gate: gateForNewSession(this.state.gate),
       });
       return true;
     }
@@ -543,6 +638,13 @@ class VoiceSessionManager {
 
     this.current = { intent: target, userId, displayName };
     this.setState({ phase: 'joined' });
+
+    // Adopt the gate Rust actually joined with. The two sides agree by
+    // construction (both keep the input mode across a join and clear the
+    // rest), but a renderer reload during a live call leaves this mirror
+    // stale, and joining in push-to-talk must show as armed-idle rather
+    // than live from the first frame.
+    void this.syncGate();
 
     const intentToInvokeMs = Math.round(performance.now() - intentTs);
     this.emit('joined', {
@@ -587,6 +689,7 @@ class VoiceSessionManager {
       groupId: null,
       participants: [],
       isMuted: false,
+      gate: gateForNewSession(this.state.gate),
     });
 
     if (left) {
@@ -672,10 +775,14 @@ class VoiceSessionManager {
         const participants = this.state.participants.map((p) =>
           p.identity === event.identity ? { ...p, audio: audioSetMuted(p.audio, muted) } : p,
         );
+        // For the LOCAL identity we deliberately do NOT write `isMuted`
+        // here. Push-to-talk mutes/unmutes the LiveKit publication on
+        // every key press, so LiveKit echoes a muted/unmuted event back at
+        // us each time; deriving our own mute from that would make the
+        // mute button flicker in time with the PTT key and would fight the
+        // gate, which is the authority. The participant tile still follows
+        // the event — that IS what the room sees.
         const patch: Partial<VoiceSessionState> = { participants };
-        if (event.identity === localIdentity) {
-          patch.isMuted = muted;
-        }
         // No muted ⇒ not-speaking band-aid needed (was ec00fc6): muting sets
         // audio to `{kind:'muted'}` (already not-speaking), and audioSetSpeaking
         // no-ops while muted, so a stuck active speaker is now unrepresentable.
@@ -907,6 +1014,12 @@ voiceSession.subscribe(() => {
       }
       // Mic-mute + availability mirror.
       const after = appStore.voiceState;
+      // The gate carries mute along with it (`voiceSetGate` keeps
+      // `micMuted` equal to `gate.self_muted`), so mirror it first and let
+      // the plain-mute mirror below cover the case where only that moved.
+      if (after.kind === 'joined' && after.gate !== s.gate) {
+        store.voiceSetGate(s.gate);
+      }
       if (after.kind === 'joined' && after.micMuted !== s.isMuted) {
         store.voiceSetMicMuted(s.isMuted);
       }

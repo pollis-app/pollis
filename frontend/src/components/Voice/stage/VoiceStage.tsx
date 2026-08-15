@@ -19,11 +19,18 @@
 
 import React, { useState } from "react";
 import { observer } from "mobx-react-lite";
-import { ArrowLeft, Volume2, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, Volume2, VolumeX, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal } from "lucide-react";
 
 import { appStore } from "../../../stores/appStore";
 import type { VoiceParticipant } from "../../../types";
-import { shareOf, cameraOf, screenshareOf } from "../../../types/voice-state";
+import { shareOf, cameraOf, screenshareOf, gateOf, micIndicatorOf } from "../../../types/voice-state";
+import { useShortcutLabel } from "../../../keyboard";
+import {
+  micControlTitle,
+  micControlAriaLabel,
+  deafenControlTitle,
+  deafenControlAriaLabel,
+} from "../voiceControlLabels";
 import { isMuted } from "../../../voice/participantAudio";
 import { LOCAL_PREVIEW_KEY } from "../../../screenshare/screenShareSession";
 import { toggleScreenShare } from "../../../screenshare/screenShareActions";
@@ -96,6 +103,11 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
     const isJoining = voiceState.kind === "joining";
     const micMuted = voiceState.kind === "joined" ? voiceState.micMuted : false;
+    const gate = gateOf(voiceState);
+    // Four states, not a bool — see `micIndicatorOf`. Push-to-talk-idle and
+    // deafened both close the mic without the user having muted themselves.
+    const micIndicator = micIndicatorOf(gate);
+    const pttCombo = useShortcutLabel("voice.pushToTalk");
     // Listen-only: joined without a working capture device. The mute button
     // becomes a non-interactive "listening only" indicator.
     const micAvailable = voiceState.kind === "joined" ? voiceState.micAvailable : true;
@@ -380,13 +392,25 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 <div className="vs-tray">
                   {micAvailable ? (
                     <button
-                      className={"vs-tray-btn danger" + (micMuted ? " on" : "")}
+                      // `armed` (push-to-talk idle) is deliberately NOT the
+                      // red `on` state: nothing is wrong, the mic is simply
+                      // waiting for the key.
+                      className={
+                        "vs-tray-btn danger" +
+                        (micIndicator === "muted" || micIndicator === "deafened" ? " on" : "") +
+                        (micIndicator === "ptt-idle" ? " armed" : "")
+                      }
                       data-testid="voice-tray-mute"
-                      title={micMuted ? "Unmute" : "Mute"}
-                      aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+                      data-mic-state={micIndicator}
+                      title={micControlTitle(micIndicator, pttCombo)}
+                      aria-label={micControlAriaLabel(micIndicator, pttCombo)}
                       onClick={() => voiceSession.toggleMute()}
                     >
-                      {micMuted ? <MicOff size={15} /> : <Mic size={15} />}
+                      {micIndicator === "live" || micIndicator === "ptt-idle" ? (
+                        <Mic size={15} />
+                      ) : (
+                        <MicOff size={15} />
+                      )}
                     </button>
                   ) : (
                     <button
@@ -399,6 +423,19 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                       <MicOff size={15} />
                     </button>
                   )}
+                  {/* Deafen — next to mute, as on Discord. Rendered whether
+                      or not a mic exists: a listen-only session still has
+                      incoming audio worth silencing. */}
+                  <button
+                    className={"vs-tray-btn danger" + (gate.deafened ? " on" : "")}
+                    data-testid="voice-tray-deafen"
+                    data-deafened={gate.deafened}
+                    title={deafenControlTitle(gate.deafened)}
+                    aria-label={deafenControlAriaLabel(gate.deafened)}
+                    onClick={() => voiceSession.toggleDeafen()}
+                  >
+                    {gate.deafened ? <VolumeX size={15} /> : <Volume2 size={15} />}
+                  </button>
                   <button
                     className={"vs-tray-btn" + (shareActive ? " on" : "")}
                     data-testid="voice-tray-screenshare"

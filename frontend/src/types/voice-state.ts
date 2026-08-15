@@ -18,6 +18,65 @@
 import type { SourceList } from '../screenshare/screenShareSession';
 import type { CameraSource } from '../camera/types';
 
+/** Mirrors `VoiceInputMode` in `pollis-core/src/commands/voice/gate.rs`. */
+export type VoiceInputMode = 'voice_activity' | 'push_to_talk';
+
+export const VOICE_INPUT_MODE_DEFAULT: VoiceInputMode = 'voice_activity';
+
+/**
+ * Mirrors `VoiceGateState` in `pollis-core/src/commands/voice/gate.rs` —
+ * the snapshot every gate-mutating command returns.
+ *
+ * Rust owns this state machine; the renderer only ever *displays* it and
+ * asks for transitions. In particular `transmitting` is derived in Rust,
+ * so the UI must never recompute it from the other fields.
+ *
+ * Invariant carried over from Rust: `deafened` implies `self_muted`.
+ */
+export interface VoiceGateState {
+  mode: VoiceInputMode;
+  /** The user's explicit mute. Deafen forces this on. */
+  self_muted: boolean;
+  /** Incoming audio silenced; implies `self_muted`. */
+  deafened: boolean;
+  /** Push-to-talk key is down. Only meaningful in `push_to_talk` mode. */
+  ptt_held: boolean;
+  /** Derived in Rust: the mic is actually open right now. */
+  transmitting: boolean;
+}
+
+export const VOICE_GATE_INITIAL: VoiceGateState = {
+  mode: VOICE_INPUT_MODE_DEFAULT,
+  self_muted: false,
+  deafened: false,
+  ptt_held: false,
+  transmitting: true,
+};
+
+/**
+ * How the local mic should be *presented*. Collapses the gate into the
+ * four states the UI draws, so components don't each re-derive it (and
+ * disagree).
+ *
+ * `ptt-idle` is deliberately distinct from `muted`: the user has not
+ * muted themselves, they simply are not holding the key, and showing that
+ * as a mute would make push-to-talk look broken.
+ */
+export type MicIndicator = 'live' | 'muted' | 'deafened' | 'ptt-idle';
+
+export function micIndicatorOf(gate: VoiceGateState): MicIndicator {
+  if (gate.deafened) {
+    return 'deafened';
+  }
+  if (gate.self_muted) {
+    return 'muted';
+  }
+  if (gate.mode === 'push_to_talk' && !gate.ptt_held) {
+    return 'ptt-idle';
+  }
+  return 'live';
+}
+
 /** Top-level voice room lifecycle. Local-only — does not track remote
  *  participants (that's `voiceParticipants` in the store, kept separate
  *  because it's collection data driven by LiveKit events). */
@@ -36,6 +95,11 @@ export type VoiceState =
       channelId: string;
       counterpartyUserId: string | null;
       micMuted: boolean;
+      /** Push-to-talk / mute / deafen state, authored by Rust (#849).
+       *  `micMuted` above stays as the explicit-mute mirror that most of
+       *  the UI reads; anything that needs to tell deafened or PTT-idle
+       *  apart from a plain mute reads this instead. */
+      gate: VoiceGateState;
       /** False when this session joined *listen-only* — no working capture
        *  device, so we're connected and receiving but not publishing audio.
        *  The UI shows a "listening only" indicator instead of a mute toggle.
@@ -149,6 +213,10 @@ export function isShareActive(s: VoiceState): boolean {
 
 export function cameraOf(s: VoiceState): CameraState {
   return s.kind === 'joined' ? s.camera : { kind: 'idle' };
+}
+
+export function gateOf(s: VoiceState): VoiceGateState {
+  return s.kind === 'joined' ? s.gate : VOICE_GATE_INITIAL;
 }
 
 export function isCameraActive(s: VoiceState): boolean {
