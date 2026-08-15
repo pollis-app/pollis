@@ -8,6 +8,7 @@ export * from "./useMessages";
 export * from "./useSearchMessages";
 export * from "./useReactions";
 export * from "./useEmoji";
+export * from "./useReceipts";
 export * from "./useBlocks";
 export * from "./useTransparency";
 export * from "./useMessageRetention";

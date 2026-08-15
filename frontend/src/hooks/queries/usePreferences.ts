@@ -61,6 +61,25 @@ export interface PreferencesData {
   font_size?: string;
   allow_desktop_notifications?: boolean;
   allow_sound_effects?: boolean;
+  /**
+   * Delivery + read receipts in DMs (#857). Default **true**.
+   *
+   * **Reciprocal**, and deliberately so: while this is off the device emits no
+   * receipts of either kind AND records none, so you cannot see other people's
+   * either. It covers delivery as well as read because a delivery receipt is
+   * still a client-emitted "my device was online and fetched at time T" signal,
+   * which is exactly what a user declining receipts is declining.
+   *
+   * Enforced in Rust at `pollis-core/src/commands/messages/receipts.rs`
+   * (`emit_receipt` / `record_receipt`), never only in the UI. Synced through
+   * the preferences blob rather than kept device-local, because a privacy
+   * switch that silently fails to apply on your other laptop is a broken
+   * privacy switch.
+   *
+   * Group channels have no receipts at all, so this preference does not apply
+   * there.
+   */
+  send_read_receipts?: boolean;
   /** Pre-AGC mic boost in dB. 0..=20; 0 = off. */
   mic_boost_db?: number;
   auto_gain_control?: boolean;
@@ -353,6 +372,7 @@ export function usePreferences() {
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
         allow_sound_effects: getPreference<boolean>(json, "allow_sound_effects", true),
+        send_read_receipts: getPreference<boolean>(json, "send_read_receipts", true),
         mic_boost_db: getPreference<number>(json, "mic_boost_db", APM_DEFAULTS.mic_boost_db),
         auto_gain_control: getPreference<boolean>(json, "auto_gain_control", APM_DEFAULTS.auto_gain_control),
         agc_target_dbfs: getPreference<number>(json, "agc_target_dbfs", APM_DEFAULTS.agc_target_dbfs),
@@ -424,6 +444,20 @@ export function usePreferences() {
 export function useSkin(): Skin {
   const { query } = usePreferences();
   return normalizeSkin(query.data?.skin);
+}
+
+/**
+ * Reactive "send read receipts" preference (#857). Defaults to true before the
+ * preferences query resolves, matching the stored default.
+ *
+ * This is a convenience for the renderer only — it decides whether to bother
+ * observing rows and whether to show other people's receipts. The binding
+ * enforcement lives in Rust (`receipts::emit_receipt` / `record_receipt`), so
+ * nothing here can cause a receipt to be emitted against the user's wishes.
+ */
+export function useSendReadReceipts(): boolean {
+  const { query } = usePreferences();
+  return query.data?.send_read_receipts ?? true;
 }
 
 /**

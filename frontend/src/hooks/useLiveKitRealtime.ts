@@ -10,6 +10,7 @@ import { useObserver } from 'mobx-react-lite';
 import { appStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { lastMessageQueryKeys, messageQueryKeys, useDMConversations, markIngested } from './queries/useMessages';
+import { receiptQueryKeys } from './queries/useReceipts';
 import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipants';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
@@ -351,6 +352,12 @@ export function useLiveKitRealtime() {
           } else if (conversationId) {
             queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
             queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.conversation(conversationId) });
+            // Receipts (#857) arrive as MLS control envelopes on this very
+            // path — the ingest above is what decrypts and records them, so
+            // this is the point at which new ticks become visible. DM-only, and
+            // no polling anywhere: the peer's receipt publishes the same
+            // routing-only hint an ordinary message does.
+            queryClientRef.current.invalidateQueries({ queryKey: receiptQueryKeys.conversation(conversationId) });
           }
         });
     };
