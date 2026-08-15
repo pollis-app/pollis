@@ -108,6 +108,15 @@ async function boot(page: Page, skin: Skin) {
   }, preloadFor(skin));
   await page.goto("/");
   await expect(page.getByTestId("app-ready")).toBeAttached();
+  // The controls use `transition-colors`, so the moment `data-mic-state`
+  // flips the computed colour is still the PREVIOUS state's and only
+  // animates to the new one. Sampling appearance right after the attribute
+  // settles therefore read a stale colour perhaps a third of the time, and
+  // two genuinely different states compared equal. These tests are about
+  // which colour a state lands on, never how it gets there.
+  await page.addStyleTag({
+    content: "*, *::before, *::after { transition: none !important; animation: none !important; }",
+  });
 }
 
 /** Walk into the voice channel and put the session in the joined state. */
@@ -334,14 +343,21 @@ test.describe("push-to-talk + deafen — terminal VoiceBar", () => {
     await expect(mute).toBeVisible();
     await expect(deafen).toBeVisible();
 
-    await setGate(page, LIVE);
-    const live = await appearanceOf(mute);
-    await setGate(page, MUTED);
-    const muted = await appearanceOf(mute);
-    await setGate(page, PTT_IDLE);
-    const pttIdle = await appearanceOf(mute);
+    // Wait for the button to actually reflect each gate BEFORE sampling how it
+    // looks. `setGate` resolves when the command returns, not when React has
+    // re-rendered, so reading the appearance straight after it sampled the
+    // previous frame perhaps a third of the time — and a stale sample makes
+    // two genuinely different states compare equal.
+    const appearanceInState = async (gate: Parameters<typeof setGate>[1], state: string) => {
+      await setGate(page, gate);
+      await expect(mute).toHaveAttribute("data-mic-state", state);
+      return appearanceOf(mute);
+    };
 
-    await expect(mute).toHaveAttribute("data-mic-state", "ptt-idle");
+    const live = await appearanceInState(LIVE, "live");
+    const muted = await appearanceInState(MUTED, "muted");
+    const pttIdle = await appearanceInState(PTT_IDLE, "ptt-idle");
+
     expect(pttIdle).not.toBe(muted);
     expect(pttIdle).not.toBe(live);
 
@@ -354,17 +370,9 @@ test.describe("push-to-talk + deafen — terminal VoiceBar", () => {
 });
 
 /*
- * GAP, deliberately not papered over with a passing test:
- *
- * `SidebarProfilePanel` — the refined skin's persistent voice strip, and the
- * counterpart to the terminal `VoiceBar` above — has no deafen control at all,
- * and its mic button reads the plain `voiceState.micMuted` boolean rather than
- * the four-state indicator. So in refined, push-to-talk idle renders as an
- * ordinary live mic and deafened renders as an ordinary mute, with nothing
- * anywhere in the sidebar to undeafen with. The controls are only complete on
- * the voice-channel stage, which both skins share and which the tests above
- * cover.
- *
- * A test asserting today's sidebar behaviour would be a test that locks the
- * defect in, so there isn't one. It is reported instead.
+ * The gap this file used to record — refined's sidebar strip having no deafen
+ * control and a two-state mic — was #891, and is closed. The strip now carries
+ * the same four-state mic and a deafen toggle in both skins; the tests live in
+ * `voice-sidebar-parity.spec.ts`, which asserts the four states are distinct in
+ * rendered appearance rather than by state name.
  */
