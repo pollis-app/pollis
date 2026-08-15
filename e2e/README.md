@@ -1,4 +1,36 @@
-# E2E tests (real Tauri app, driven via WebDriver)
+# E2E tests
+
+Two suites live here, for two different jobs.
+
+**1. WebDriver scenarios (`*.js`)** — the bulk of this directory. They drive the
+**actual native desktop app**: the real WebKitGTK WebView inside the Tauri
+shell, talking to the real Rust core over Tauri IPC. Use these for anything
+that has to prove real delivery, MLS, or cross-client convergence.
+
+**2. Playwright UI specs (`*.spec.js`)** — pure front-end interaction against
+the browser build with `VITE_PLAYWRIGHT=true`, which vite-aliases
+`@tauri-apps/api/*` to the mocks in `frontend/src/__mocks__/`. Real React tree,
+real CSS tokens, real skin branching — but no delivery service, no Turso, no
+MLS, so they need no backend and run in seconds. Use these for composer and
+rendering behaviour, where the native stack would add minutes and prove
+nothing extra.
+
+```bash
+pnpm --filter @pollis/e2e e2e:ui                 # all Playwright UI specs
+pnpm --filter @pollis/e2e e2e:ui mentions        # just the mentions spec
+```
+
+| spec | what it proves |
+|---|---|
+| `mentions.spec.js` | `@username` autocomplete + rendering in BOTH skins: terminal ghost-completes on Tab with no pop-over; refined drives the Slack-style list with arrows/Enter/Tab/Esc; your own mention renders stronger than a peer's; an unresolvable `@name` offers nothing |
+
+First run needs the browser once: `pnpm --filter @pollis/e2e exec playwright install chromium`.
+
+The rest of this document covers the WebDriver scenarios.
+
+---
+
+## WebDriver scenarios (real Tauri app)
 
 Drives the **actual native desktop app** — the real WebKitGTK WebView inside the
 Tauri shell, talking to the real Rust core over Tauri IPC — not the browser
