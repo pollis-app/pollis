@@ -1,12 +1,13 @@
 import React from "react";
 import { observer } from "mobx-react-lite";
 import { useRouter } from "@tanstack/react-router";
-import { Settings as SettingsIcon, Volume2, Mic, MicOff, Monitor, MonitorOff, PhoneOff } from "lucide-react";
+import { Settings as SettingsIcon, Volume2, Monitor, MonitorOff, PhoneOff } from "lucide-react";
 import { appStore } from "../../stores/appStore";
 import { useUserProfile } from "../../hooks/queries/useUserProfile";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { Avatar } from "../ui/Avatar";
 import { voiceSession } from "../../voice";
+import { SidebarVoiceControls } from "../Voice/SidebarVoiceControls";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { shareOf } from "../../types/voice-state";
 
@@ -14,10 +15,12 @@ import { shareOf } from "../../types/voice-state";
  * Discord-style identity panel anchored to the sidebar bottom (refined skin).
  * Row 1 is always shown: avatar (with online dot) + display name + @username +
  * a settings gear. Row 2 appears only while connected to voice — the persistent
- * voice-status strip (channel + mic + screenshare + disconnect) that the
- * standalone terminal `VoiceBar` provides. In refined, AppShell hides that bar
- * and this strip owns the persistent voice controls instead. No participant
- * count (per the design brief).
+ * voice-status strip (channel + mic + deafen + screenshare + disconnect) that
+ * the standalone terminal `VoiceBar` provides. In refined, AppShell hides that
+ * bar and this strip owns the persistent voice controls instead, so it has to
+ * carry the full set: the mic and deafen halves live in `SidebarVoiceControls`,
+ * which shares its state mapping and labels with `VoiceBar` and the
+ * `VoiceStage` tray. No participant count (per the design brief).
  */
 export const SidebarProfilePanel: React.FC = observer(() => {
   const router = useRouter();
@@ -31,7 +34,6 @@ export const SidebarProfilePanel: React.FC = observer(() => {
 
   const inVoice = voiceState.kind === "joined";
   const voiceChannelId = inVoice ? voiceState.channelId : null;
-  const voiceIsMuted = inVoice ? voiceState.micMuted : false;
   const share = shareOf(voiceState);
   const shareActive = share.kind === "active";
 
@@ -104,17 +106,9 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             </span>
             <span className="truncate text-2xs text-muted">{voiceChannelName}</span>
           </div>
-          <button
-            type="button"
-            data-testid="sidebar-voice-mute"
-            onClick={() => voiceSession.toggleMute()}
-            aria-label={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
-            title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
-            className="icon-btn-sm"
-            style={voiceIsMuted ? { color: "var(--c-danger)" } : undefined}
-          >
-            {voiceIsMuted ? <MicOff size={15} /> : <Mic size={15} />}
-          </button>
+          {/* Mic (four-state) + deafen. Same information and affordances as
+              terminal's VoiceBar, drawn in refined's idiom. */}
+          <SidebarVoiceControls />
           <button
             type="button"
             data-testid="sidebar-voice-screenshare"

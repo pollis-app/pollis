@@ -75,7 +75,7 @@ offline while they're still in another. Two properties are load-bearing:
 - **MainContent** — props: pendingDmRequest — `frontend/src/components/Layout/MainContent.tsx`
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
 - **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`
-- **SidebarProfilePanel** — `frontend/src/components/Layout/SidebarProfilePanel.tsx`
+- **SidebarProfilePanel** — refined only; identity row + the persistent voice strip (channel, mic, deafen, screenshare, disconnect) that replaces terminal's `VoiceBar` — `frontend/src/components/Layout/SidebarProfilePanel.tsx`
 - **StatusBarSummary** — props: icon, count, to, label, color, testId — `frontend/src/components/Layout/StatusBarSummary.tsx`
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
 - **WindowResizeEdges** — `frontend/src/components/Layout/WindowResizeEdges.tsx`
@@ -129,9 +129,10 @@ The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay 
 - **BuildVerifyLine** — props: status, detail, testId — `frontend/src/components/Security/BuildVerifyLine.tsx`
 - **KeyChangeBanner** — props: peerUserId, peerLabel — `frontend/src/components/Security/KeyChangeBanner.tsx`
 
-### `components/Voice` (8)
+### `components/Voice` (9)
 
 - **CameraPicker** — `frontend/src/components/Voice/CameraPicker.tsx`
+- **SidebarVoiceControls** — mic (four-state) + deafen for refined's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage` — `frontend/src/components/Voice/SidebarVoiceControls.tsx`
 - **RemoteUserVolumeSlider** — props: identity, participantName — `frontend/src/components/Voice/RemoteUserVolumeSlider.tsx`
 - **RemoteVideoTile** — props: trackKey, className, initialWidth, initialHeight, preview, mirror — `frontend/src/components/Voice/RemoteVideoTile.tsx`
 - **ScreenSharePicker** — props: disabled, onPick, title, subtitle, thumbnail, icon — `frontend/src/components/Voice/ScreenSharePicker.tsx`
