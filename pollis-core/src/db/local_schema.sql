@@ -131,3 +131,31 @@ CREATE TABLE IF NOT EXISTS contact_verification (
     updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+
+-- Saved / bookmarked messages (#854).
+--
+-- DEVICE-LOCAL BY DESIGN. Bookmarks are never sent to the DS or Turso and there
+-- is no sync endpoint for them. Which messages a user chose to save is exactly
+-- the kind of per-message interest metadata the threat model says the untrusted
+-- server must never learn — syncing it would hand the server a ranked list of
+-- the conversations and moments a user cares most about, which is strictly more
+-- than it learns from envelope delivery alone. The cost is that bookmarks do not
+-- follow you to a new device, which is consistent with accepted loss (2) in
+-- CLAUDE.md: a new device starts empty and has no history to bookmark anyway.
+--
+-- No foreign key to `message`: a bookmark is allowed to outlive local retention
+-- eviction. The saved-items list resolves each row against `message` at read
+-- time and renders an honest "you do not have this message" placeholder when the
+-- join misses, rather than making the row silently disappear.
+--
+-- Additive CREATE TABLE IF NOT EXISTS — this file is re-applied on every open,
+-- so existing databases gain the table with no LOCAL_SCHEMA_VERSION bump (a bump
+-- would DELETE the user's message history; see the comment in local.rs).
+CREATE TABLE IF NOT EXISTS bookmark (
+    message_id      TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The saved-items surface lists newest-first across all conversations.
+CREATE INDEX IF NOT EXISTS idx_bookmark_created_at ON bookmark(created_at DESC);

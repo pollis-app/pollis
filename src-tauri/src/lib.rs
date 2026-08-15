@@ -537,6 +537,14 @@ pub fn run() {
             commands::blocks::block_user,
             commands::blocks::unblock_user,
             commands::blocks::list_blocked_users,
+            // Saved messages + permalinks (#854). Device-local; no DS endpoint
+            // backs any of these, and resolve_message_permalink deliberately
+            // only ever consults the local database.
+            commands::bookmarks::save_message,
+            commands::bookmarks::unsave_message,
+            commands::bookmarks::toggle_saved_message,
+            commands::bookmarks::list_saved_messages,
+            commands::bookmarks::resolve_message_permalink,
             commands::messages::list_messages,
             commands::messages::send_message,
             commands::messages::get_channel_messages,
