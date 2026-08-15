@@ -592,6 +592,8 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849) |
 
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
+| `bookmarks.spec.ts` | Saved messages + permalink jump/highlight in BOTH skins (#854) |
+| `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
 
 Three things to know before writing one:
 
