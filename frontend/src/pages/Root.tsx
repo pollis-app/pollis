@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { exit } from "../bridge";
-import { Users, MessageCircle, Mail, UserPlus, LogOut, Power } from "lucide-react";
+import { Users, MessageCircle, Mail, UserPlus, LogOut, Power, Link as LinkIcon } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -48,6 +48,15 @@ export const RootPage: React.FC = observer(() => {
       action: () => navigate({ to: "/invites" }),
       type: "system" as const,
       testId: "menu-item-invites",
+    },
+    {
+      id: "join",
+      label: "Join a Group",
+      icon: <LinkIcon size={14} />,
+      description: "Redeem an invite link or join code",
+      action: () => navigate({ to: "/join" }),
+      type: "system" as const,
+      testId: "menu-item-join",
     },
     ...(pendingJoinRequests.length > 0 ? [{
       id: "join-requests",

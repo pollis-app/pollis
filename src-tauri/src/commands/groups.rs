@@ -122,3 +122,23 @@ pub async fn set_member_role(group_id: String, user_id: String, role: String, re
 pub async fn search_group_by_slug(slug: String, state: State<'_, Arc<AppState>>) -> Result<Group> {
     pollis_core::commands::groups::search_group_by_slug(slug, &state).await
 }
+
+#[tauri::command]
+pub async fn create_group_invite_link(group_id: String, creator_id: String, expires_in_hours: Option<i64>, max_uses: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<CreatedInviteLink> {
+    pollis_core::commands::groups::create_group_invite_link(group_id, creator_id, expires_in_hours, max_uses, &state).await
+}
+
+#[tauri::command]
+pub async fn list_group_invite_links(group_id: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<InviteLinkSummary>> {
+    pollis_core::commands::groups::list_group_invite_links(group_id, user_id, &state).await
+}
+
+#[tauri::command]
+pub async fn revoke_group_invite_link(link_id: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::groups::revoke_group_invite_link(link_id, user_id, &state).await
+}
+
+#[tauri::command]
+pub async fn redeem_group_invite_link(token: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<RedeemedInvite> {
+    pollis_core::commands::groups::redeem_group_invite_link(token, user_id, &state).await
+}

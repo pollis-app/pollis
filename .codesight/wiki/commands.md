@@ -61,6 +61,10 @@ PIN is cryptographically load-bearing — see `pin-design.md`.
 - `get_pending_invites(user_id)` → `PendingInvite[]`
 - `accept_group_invite(invite_id, user_id)`
 - `decline_group_invite(invite_id, user_id)`
+- `create_group_invite_link(group_id, creator_id, expires_in_hours?, max_uses?)` → `CreatedInviteLink` — #847. Admin-only. The token is minted **client-side**; only the selector and `sha256(secret)` reach the DS. `token`/`url` are returned **once** and are unrecoverable afterwards — the server stores no secret, so there is no "re-copy" for an existing link. Both bounds `null` = unlimited.
+- `list_group_invite_links(group_id, user_id)` → `InviteLinkSummary[]` — admin-only (non-admins get `[]`, mirroring `get_group_join_requests`). Carries **no token field** by construction. `isLive` is computed server-side with the same `datetime()` normalisation redemption uses.
+- `revoke_group_invite_link(link_id, user_id)` — one-way; keeps the first revocation timestamp. Admin of the link's own group, re-derived from the link row.
+- `redeem_group_invite_link(token, user_id)` → `RedeemedInvite` — accepts a bare code, an `https://pollis.com/invite/…` URL, or `pollis://invite/…`. Adds the caller via the **same** `add_member_rows` path as invite-accept and join-request-approve, then self-heals into the MLS tree by external commit (a redeemer has no inviter to graft them). Every failure — wrong, malformed, revoked, expired, exhausted — returns the identical `INVITE_LINK_ERR`; only rate-limiting (429) is distinguishable, and only because it describes the caller, not the token.
 - `request_group_access(group_id, requester_id)` — creates a pending join request. (Documented here as `request_to_join_group` until #714; that name has never existed in the tree.)
 - `approve_join_request(request_id, approver_id)`
 - `reject_join_request(request_id, approver_id)`
@@ -193,7 +197,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 - **`device_enrollment`** — `approve_device_enrollment`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 - **`dm`** — `accept_dm_request`, `add_user_to_dm_channel`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`, `remove_user_from_dm_channel`
-- **`groups`** — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_user_groups`, `list_user_groups_with_channels`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
+- **`groups`** — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `create_group_invite_link`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_group_invite_links`, `list_user_groups`, `list_user_groups_with_channels`, `redeem_group_invite_link`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `revoke_group_invite_link`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
 - **`install_kind`** — `detect_managed_install`
 - **`livekit`** — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
 - **`media_permissions`** — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
@@ -250,7 +254,7 @@ than hand-edit.
 
 **`user`** (5) — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
 
-**`groups`** (23) — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_user_groups`, `list_user_groups_with_channels`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
+**`groups`** (27) — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `create_group_invite_link`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_group_invite_links`, `list_user_groups`, `list_user_groups_with_channels`, `redeem_group_invite_link`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `revoke_group_invite_link`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
 
 **`dm`** (8) — `accept_dm_request`, `add_user_to_dm_channel`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`, `remove_user_from_dm_channel`
 

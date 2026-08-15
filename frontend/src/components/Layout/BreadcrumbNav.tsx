@@ -126,6 +126,8 @@ function useBreadcrumbTrail(): Segment[] {
       out.push({ label: "Voice", to: "/voice-settings" });
     } else if (pathname === "/invites") {
       out.push({ label: "Invites", to: "/invites" });
+    } else if (pathname === "/join" || pathname.startsWith("/invite/")) {
+      out.push({ label: "Join a Group", to: "/join" });
     } else if (pathname === "/join-requests") {
       out.push({ label: "Join Requests", to: "/join-requests" });
     } else if (pathname === "/search") {

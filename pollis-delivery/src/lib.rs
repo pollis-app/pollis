@@ -31,6 +31,7 @@ pub mod email_change;
 pub mod error;
 pub mod groups;
 pub mod headers;
+pub mod invite_token;
 pub mod messages;
 pub mod otp;
 pub mod profile;
@@ -280,6 +281,9 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/invites/create", post(groups::create_invite))
         .route("/v1/invites/accept", post(groups::accept_invite))
         .route("/v1/invites/decline", post(groups::decline_invite))
+        .route("/v1/invite-links/create", post(groups::create_invite_link))
+        .route("/v1/invite-links/revoke", post(groups::revoke_invite_link))
+        .route("/v1/invite-links/redeem", post(groups::redeem_invite_link))
         .route("/v1/join-requests/create", post(groups::create_join_request))
         .route("/v1/join-requests/approve", post(groups::approve_join_request))
         .route("/v1/join-requests/reject", post(groups::reject_join_request))
@@ -450,6 +454,12 @@ async fn effective_config(State(state): State<AppState>, headers: HeaderMap) -> 
             // class of lie it exists to prevent.
             "gc_sweep_secs": messages::gc_sweep_secs(),
             "require_auth": state.require_auth,
+            // #847 — the invite-link redemption tier. Surfaced for the same
+            // reason as the two above: a brute-force bound that silently fell
+            // back to the generic 1200/60s `write` tier would look configured
+            // and defend nothing.
+            "invite_redeem_max": state.ratelimit_config.invite_redeem_max,
+            "invite_redeem_window_secs": state.ratelimit_config.invite_redeem_window_secs,
             // Presence only — never the token itself.
             "metrics_token_set": true,
         })),

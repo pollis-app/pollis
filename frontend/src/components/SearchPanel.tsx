@@ -191,6 +191,7 @@ const PAGE_RESULTS: SearchResultItem[] = [
   { type: "page", id: "page-shortcuts", name: "Key Bindings", breadcrumb: "/shortcuts", path: "/shortcuts", keywords: "key bindings keyboard shortcuts hotkeys keybindings cmd ctrl" },
   { type: "page", id: "page-update", name: "Software Update", breadcrumb: "/update", path: "/update", keywords: "update version upgrade install release" },
   { type: "page", id: "page-invites", name: "Invites", breadcrumb: "/invites", path: "/invites", keywords: "pending invitations groups" },
+  { type: "page", id: "page-join", name: "Join a Group", breadcrumb: "/join", path: "/join", keywords: "invite link code redeem join group" },
   { type: "page", id: "page-join-requests", name: "Join Requests", breadcrumb: "/join-requests", path: "/join-requests", keywords: "pending group membership" },
   { type: "page", id: "page-dm-requests", name: "DM Requests", breadcrumb: "/dms/requests", path: "/dms/requests", keywords: "direct message pending" },
   { type: "page", id: "page-dm-blocked", name: "Blocked Users", breadcrumb: "/dms/blocked", path: "/dms/blocked", keywords: "block list direct message" },

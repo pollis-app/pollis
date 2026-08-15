@@ -18,6 +18,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 | M-VC | Voice channel: A joins, B joins same channel, both see 2 participants, A leaves, B sees drop | 5 | 2 | 🟡 | Explicitly requested. Needs LiveKit + audio + group membership (MLS voice key). |
 | M-OFF | Offline convergence: A sends while B's app closed, B relaunches → receives (bounded history) | 5 | 2 | ⬜ | "Messages must work" invariant. |
 | M-DM2 | DM bidirectional: B replies to A, A sees B's message | 4 | 3 | 🟡 | Reverse direction never asserted (existing test is A→B only). |
+| M-INV | Invite link (#847): A mints a link, copies it, B redeems and joins; A revokes, B's retry is refused. Run in BOTH skins | 5 | 2 | 🟡 | invite-links.js. Asserts the clipboard really holds the token (it can never be shown again) and that the failure message does not disclose WHY. |
 | M-JR | Join-request path: B searches group by slug, requests, A approves, B becomes member | 4 | 2 | ⬜ | Alt to invite; relies on async realtime membership_changed → welcome poll. |
 | M-EDIT | Edit convergence: A edits a message, B sees new text + (edited) | 3 | 2 | ⬜ | |
 | M-DEL | Delete convergence: A deletes, B sees `[deleted]` | 3 | 2 | ⬜ | Content tombstoned, row stays. |

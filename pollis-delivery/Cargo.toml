@@ -32,6 +32,12 @@ pollis-device-cert = { path = "../pollis-device-cert" }
 # `user_device.mls_signature_pub_pq`. Also the device-cert signature scheme.
 ml-dsa = { version = "0.1", default-features = false, features = ["alloc"] }
 sha2 = "0.10"
+# Constant-time equality for the #847 invite-link secret hash. Hand-rolling a
+# byte fold is not equivalent — LLVM is free to turn `diff == 0` back into an
+# early-exit compare. `subtle`'s optimisation barriers are the reason to depend
+# on it rather than write the four-line loop.
+subtle = "2.6"
+hex = "0.4"
 # Authorized-secrets broker (#393): mint LiveKit JWTs server-side (pure HS256,
 # no native dep) and HMAC for the R2 SigV4 query-string presign. Same crates as
 # pollis-core's livekit_jwt / r2 so the contract stays byte-identical.

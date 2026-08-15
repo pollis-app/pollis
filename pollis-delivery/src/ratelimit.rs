@@ -54,6 +54,12 @@ pub struct RateLimitConfig {
     pub write_max: u32,
     /// Authenticated-write window length, seconds.
     pub write_window_secs: u64,
+    /// Max invite-link redemption attempts per IP per window (#847). The
+    /// generic `write` tier is 1200/60s — fine as a flood backstop, useless as a
+    /// brute-force bound on a join code, so redemption gets its own tier.
+    pub invite_redeem_max: u32,
+    /// Invite-link redemption window length, seconds.
+    pub invite_redeem_window_secs: u64,
 }
 
 impl Default for RateLimitConfig {
@@ -67,6 +73,11 @@ impl Default for RateLimitConfig {
             verify_otp_window_secs: 600,
             write_max: 1200,
             write_window_secs: 60,
+            // A real user redeems a link once. 20 attempts per 10 minutes from
+            // one IP is generous for retries and typos, and far below anything
+            // that resembles a search.
+            invite_redeem_max: 20,
+            invite_redeem_window_secs: 600,
         }
     }
 }
@@ -94,6 +105,12 @@ impl RateLimitConfig {
         }
         if let Some(v) = env_u64("RL_WRITE_WINDOW_SECS") {
             cfg.write_window_secs = v;
+        }
+        if let Some(v) = env_u32("RL_INVITE_REDEEM_MAX") {
+            cfg.invite_redeem_max = v;
+        }
+        if let Some(v) = env_u64("RL_INVITE_REDEEM_WINDOW_SECS") {
+            cfg.invite_redeem_window_secs = v;
         }
         cfg
     }
@@ -229,6 +246,14 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
         | "/v1/auth/verify-email-change" => {
             Some(("otp_verify", cfg.verify_otp_max, cfg.verify_otp_window_secs))
         }
+        // #847 — its own tier, keyed per IP. The durable per-USER bound lives in
+        // `groups::apply_redeem_invite_link`; this one sheds volume, that one
+        // survives a restart and an IP rotation.
+        "/v1/invite-links/redeem" => Some((
+            "invite_redeem",
+            cfg.invite_redeem_max,
+            cfg.invite_redeem_window_secs,
+        )),
         _ => Some(("write", cfg.write_max, cfg.write_window_secs)),
     }
 }

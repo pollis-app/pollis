@@ -5,6 +5,7 @@
 
 mod channels;
 mod groups;
+mod invite_token;
 mod invites;
 mod join_requests;
 mod membership;
@@ -35,7 +36,10 @@ pub(super) fn derive_slug(name: &str) -> String {
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
-pub use types::{Channel, Group, GroupMember, GroupWithChannels, JoinRequest, PendingInvite};
+pub use types::{
+    Channel, CreatedInviteLink, Group, GroupMember, GroupWithChannels, InviteLinkSummary,
+    JoinRequest, PendingInvite, RedeemedInvite,
+};
 
 // ── Group CRUD / search ──────────────────────────────────────────────────────
 pub use groups::{
@@ -53,7 +57,9 @@ pub use membership::{
 
 // ── Invites ──────────────────────────────────────────────────────────────────
 pub use invites::{
-    accept_group_invite, decline_group_invite, get_pending_invites, send_group_invite,
+    accept_group_invite, create_group_invite_link, decline_group_invite, get_pending_invites,
+    list_group_invite_links, redeem_group_invite_link, revoke_group_invite_link,
+    send_group_invite, INVITE_LINK_ERR,
 };
 
 // ── Join requests ────────────────────────────────────────────────────────────

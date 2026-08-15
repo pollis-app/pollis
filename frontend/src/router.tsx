@@ -28,6 +28,8 @@ import { UserProfilePage } from "./pages/UserProfile";
 import { SecurityPage } from "./pages/SecurityPage";
 import { ChangePinPage } from "./pages/ChangePinPage";
 import { InvitesPage } from "./pages/InvitesPage";
+import { JoinByInvitePage } from "./pages/JoinByInvitePage";
+import { InviteLinkLandingPage } from "./pages/InviteLinkLandingPage";
 import { JoinRequestsPage } from "./pages/JoinRequestsPage";
 import { AllJoinRequestsPage } from "./pages/AllJoinRequestsPage";
 import { InviteMemberPage } from "./pages/InviteMemberPage";
@@ -237,6 +239,19 @@ const invitesRoute = createRoute({
   component: InvitesPage,
 });
 
+const joinByInviteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/join",
+  component: JoinByInvitePage,
+});
+
+// Parameterized, so exempt from the three-place static-page registration.
+const inviteLinkLandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/invite/$token",
+  component: InviteLinkLandingPage,
+});
+
 const allJoinRequestsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/join-requests",
@@ -314,6 +329,8 @@ const routeTree = rootRoute.addChildren([
   securityRoute,
   changePinRoute,
   invitesRoute,
+  joinByInviteRoute,
+  inviteLinkLandingRoute,
   allJoinRequestsRoute,
   searchRoute,
   keyboardShortcutsRoute,

@@ -40,14 +40,15 @@ use axum::{
     body::Bytes,
     extract::State,
     http::{HeaderMap, Method, Uri},
-    response::Response,
+    response::{IntoResponse as _, Response},
 };
 use libsql::Connection;
 use serde::Deserialize;
 
 use crate::error::AppError;
 use crate::writes::{
-    bad_request, conversation_id_taken, gate, outcome_response, resolve_actor, WriteOutcome,
+    bad_request, conversation_id_taken, gate, ok_json, outcome_response, resolve_actor,
+    WriteOutcome,
 };
 use crate::AppState;
 
@@ -1085,4 +1086,500 @@ pub async fn apply_reject_join_request(
     )
     .await?;
     Ok(WriteOutcome::Ok)
+}
+
+// ── #847 shareable invite links ──────────────────────────────────────────────
+//
+// ## Why redemption is not a second membership path
+//
+// The security crux of #847 is that a link must NOT become another way into a
+// group. `apply_redeem_invite_link` therefore performs the member-add by calling
+// `add_member_rows` — the exact function `apply_accept_invite` and
+// `apply_approve_join_request` call, and the only function in this module that
+// writes `group_member`. A redeemer lands as an ordinary `role = 'member'` row
+// with seeded watermarks, indistinguishable from someone an admin invited by
+// name.
+//
+// That matters more here than it first appears. `group_member` is the SOLE
+// capability in this system: `desired_roster_user_ids`
+// (`pollis-core/src/commands/mls/reconcile.rs`) derives the MLS roster from it,
+// and `writes::is_member` derives commit-submission rights from it. Nothing
+// downstream re-validates how the row got there. So this handler is the entire
+// trust boundary, and the token check and the member-add must be — and are — one
+// transaction. Redemption itself never touches MLS state, never stages a commit,
+// and cannot put a device in the tree; it can only make the roster say "this
+// user is a member", which is precisely the authority the admin delegated when
+// they created the link.
+//
+// ## Why every failure looks identical
+//
+// Wrong token, malformed token, revoked link, expired link, exhausted link — all
+// five return `RedeemOutcome::Rejected`, which maps to one 403 with one body.
+// Telling an attacker "that token was right but expired" confirms a valid token
+// and turns a search over 2^256 into a hunt for a fresher link. The predicates
+// are therefore evaluated into booleans and combined ONCE, with no early return
+// between the secret compare and the verdict.
+//
+// Rate limiting is the one distinguishable response (429), deliberately: it is a
+// statement about the CALLER, not about the token, so it confirms nothing about
+// whether any particular token is valid.
+
+/// How far back the durable redemption rate limit counts failed attempts.
+const REDEEM_FAILURE_WINDOW_SECS: i64 = 600;
+
+/// Failed redemptions allowed per user within [`REDEEM_FAILURE_WINDOW_SECS`].
+///
+/// Sized for humans, not for search. A legitimate user redeems once; ten
+/// failures in ten minutes already means they are pasting the wrong thing
+/// repeatedly.
+///
+/// This is the durable half of the bound and the half that actually binds. The
+/// per-IP middleware tier (`ratelimit::classify`) sheds floods but an attacker
+/// rotates IPs; this one is keyed on the authenticated user and read from the
+/// database, so it survives a DS restart and is shared across instances. Against
+/// the 256-bit secret both are belt-and-braces — but they are what stops
+/// redemption being a free oracle for a selector whose secret is being ground.
+const REDEEM_FAILURE_MAX: i64 = 10;
+
+// ── POST /v1/invite-links/create ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct CreateInviteLinkBody {
+    pub id: String,
+    pub group_id: String,
+    /// The creator; bound to the authenticated user when signed.
+    #[serde(default)]
+    pub created_by: Option<String>,
+    /// Public lookup handle. Generated client-side.
+    pub selector: String,
+    /// `sha256(secret)`, hex. The DS never receives the secret at create time —
+    /// the client mints the token and hashes it locally.
+    pub secret_hash: String,
+    /// RFC3339. `None` = never expires.
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    /// `None` = unlimited.
+    #[serde(default)]
+    pub max_uses: Option<i64>,
+}
+
+pub async fn create_invite_link(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+    let parsed: CreateInviteLinkBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn()?;
+    outcome_response(apply_create_invite_link(&conn, authed.as_deref(), &parsed).await?)
+}
+
+/// INSERT an invite link. Authz: the creator is a re-derived admin — the same bar
+/// as `apply_create_invite`, because a link IS an invite with the addressee left
+/// open.
+pub async fn apply_create_invite_link(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &CreateInviteLinkBody,
+) -> anyhow::Result<WriteOutcome> {
+    let creator = match resolve_actor(authed, body.created_by.as_deref()) {
+        Ok(c) => c,
+        Err(o) => return Ok(o),
+    };
+    if authed.is_some() && !is_admin(conn, &body.group_id, &creator).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    // Refuse anything that is not a sha256 hex digest. The column would accept
+    // any TEXT, and a short or low-entropy value is how a buggy — or hostile —
+    // client could plant a hash it can cheaply preimage. Checked on BOTH the
+    // auth-on and auth-off paths: this is a well-formedness invariant on the
+    // stored secret, not an identity check.
+    if body.secret_hash.len() != 64 || !body.secret_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    // `max_uses = 0` is rejected by the table CHECK; refuse it here too so the
+    // caller gets a 403 rather than a 500 from a constraint violation.
+    if body.max_uses.is_some_and(|m| m <= 0) {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    conn.execute(
+        "INSERT INTO group_invite_link \
+           (id, group_id, created_by, selector, secret_hash, expires_at, max_uses) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        libsql::params![
+            body.id.clone(),
+            body.group_id.clone(),
+            creator,
+            body.selector.clone(),
+            body.secret_hash.clone(),
+            body.expires_at.clone(),
+            body.max_uses,
+        ],
+    )
+    .await?;
+    Ok(WriteOutcome::Ok)
+}
+
+// ── POST /v1/invite-links/revoke ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct RevokeInviteLinkBody {
+    pub link_id: String,
+    /// The revoker; bound to the authenticated user when signed.
+    #[serde(default)]
+    pub actor_id: Option<String>,
+    pub revoked_at: String,
+}
+
+pub async fn revoke_invite_link(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+    let parsed: RevokeInviteLinkBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn()?;
+    outcome_response(apply_revoke_invite_link(&conn, authed.as_deref(), &parsed).await?)
+}
+
+/// Revoke a link. Authz: the actor is a re-derived admin OF THE LINK'S OWN GROUP
+/// — resolved from the link row, never from the request, so an admin of group A
+/// cannot revoke group B's link. Same ordering as
+/// `apply_approve_join_request`: resolve the row first, then check the role.
+///
+/// Revocation is a one-way stamp, not a delete: the row stays so the redemption
+/// audit trail keeps pointing at something, and `revoked_at IS NULL` remains the
+/// single expression of "live".
+pub async fn apply_revoke_invite_link(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &RevokeInviteLinkBody,
+) -> anyhow::Result<WriteOutcome> {
+    let actor = match resolve_actor(authed, body.actor_id.as_deref()) {
+        Ok(a) => a,
+        Err(o) => return Ok(o),
+    };
+    let mut rows = conn
+        .query(
+            "SELECT group_id FROM group_invite_link WHERE id = ?1",
+            libsql::params![body.link_id.clone()],
+        )
+        .await?;
+    let group_id: String = match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => return Ok(WriteOutcome::Forbidden),
+    };
+    drop(rows);
+
+    if authed.is_some() && !is_admin(conn, &group_id, &actor).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    // `revoked_at IS NULL` keeps the first revocation's timestamp — re-revoking
+    // must not rewrite when the link actually died.
+    conn.execute(
+        "UPDATE group_invite_link SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL",
+        libsql::params![body.revoked_at.clone(), body.link_id.clone()],
+    )
+    .await?;
+    Ok(WriteOutcome::Ok)
+}
+
+// ── POST /v1/invite-links/redeem ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct RedeemInviteLinkBody {
+    /// The full `<selector>.<secret>` token as presented by the user.
+    pub token: String,
+    /// The redeemer; bound to the authenticated user when signed.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// Client-generated id for the audit row.
+    pub attempt_id: String,
+    /// RFC3339 "now", used for the expiry comparison and the audit stamp.
+    pub now: String,
+}
+
+/// The result of a redemption attempt.
+///
+/// Three variants on purpose. Collapsing every way a token can fail into one
+/// `Rejected` is a security property, not an oversight — an `Expired` or
+/// `Revoked` variant would leak exactly what #847 says must not leak.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RedeemOutcome {
+    /// The actor is now a member of this group.
+    Joined { group_id: String },
+    /// The token did not yield a live link. Indistinguishable by construction.
+    Rejected,
+    /// The actor has failed too many times recently.
+    RateLimited,
+}
+
+pub async fn redeem_invite_link(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+    let parsed: RedeemInviteLinkBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn()?;
+    Ok(
+        match apply_redeem_invite_link(&conn, authed.as_deref(), &parsed).await? {
+            RedeemOutcome::Joined { group_id } => {
+                ok_json(serde_json::json!({ "status": "ok", "group_id": group_id }))
+            }
+            RedeemOutcome::Rejected => redeem_rejected(),
+            RedeemOutcome::RateLimited => redeem_rate_limited(),
+        },
+    )
+}
+
+/// The single rejection response: one status, one body, for every way a token
+/// can fail to be live.
+fn redeem_rejected() -> Response {
+    (
+        axum::http::StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({ "error": "invite_invalid" })),
+    )
+        .into_response()
+}
+
+fn redeem_rate_limited() -> Response {
+    (
+        axum::http::StatusCode::TOO_MANY_REQUESTS,
+        axum::Json(serde_json::json!({ "error": "too_many_attempts" })),
+    )
+        .into_response()
+}
+
+/// Redeem an invite link.
+///
+/// Authz: the actor is whoever `gate` authenticated. That is the admission floor
+/// — a link is not a bypass around holding a Pollis identity, it only removes the
+/// need for an admin to know your username in advance. An anonymous caller
+/// cannot reach this at all. "Authenticated but not yet a member" is already a
+/// first-class case on this service (`/v1/join-requests/create`,
+/// `/v1/invites/accept`), so no new auth machinery is involved.
+pub async fn apply_redeem_invite_link(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &RedeemInviteLinkBody,
+) -> anyhow::Result<RedeemOutcome> {
+    let user = match resolve_actor(authed, body.user_id.as_deref()) {
+        Ok(u) => u,
+        Err(_) => return Ok(RedeemOutcome::Rejected),
+    };
+
+    // Durable rate limit: recent FAILED attempts by this actor, counted from the
+    // audit table rather than memory, so a rolling restart does not hand an
+    // attacker a fresh budget and every DS instance sees the same count.
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM group_invite_link_redemption \
+             WHERE user_id = ?1 AND succeeded = 0 \
+               AND datetime(attempted_at) > datetime(?2, ?3)",
+            libsql::params![
+                user.clone(),
+                body.now.clone(),
+                format!("-{REDEEM_FAILURE_WINDOW_SECS} seconds"),
+            ],
+        )
+        .await?;
+    let recent_failures: i64 = match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => 0,
+    };
+    drop(rows);
+    if recent_failures >= REDEEM_FAILURE_MAX {
+        return Ok(RedeemOutcome::RateLimited);
+    }
+
+    // A malformed token is recorded and rejected exactly like a wrong one.
+    let Some((selector, secret)) = crate::invite_token::parse(&body.token) else {
+        record_redemption(conn, &body.attempt_id, None, &user, &body.now, false).await?;
+        return Ok(RedeemOutcome::Rejected);
+    };
+
+    let mut rows = conn
+        .query(
+            "SELECT id, group_id, secret_hash, expires_at, max_uses, uses, revoked_at \
+             FROM group_invite_link WHERE selector = ?1",
+            libsql::params![selector],
+        )
+        .await?;
+    let found = rows.next().await?;
+    #[allow(clippy::type_complexity)]
+    let (link_id, group_id, secret_hash, expires_at, max_uses, uses, revoked_at): (
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<i64>,
+        i64,
+        Option<String>,
+    ) = match found {
+        Some(row) => (
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
+            row.get(6)?,
+        ),
+        None => {
+            drop(rows);
+            record_redemption(conn, &body.attempt_id, None, &user, &body.now, false).await?;
+            return Ok(RedeemOutcome::Rejected);
+        }
+    };
+    drop(rows);
+
+    // Every predicate is evaluated, THEN combined. No early return sits between
+    // the secret compare and the verdict, so the four failure modes are not
+    // separable by response and not separable by control flow either.
+    let secret_ok = crate::invite_token::hash_eq(
+        &crate::invite_token::hash_secret(&secret),
+        &secret_hash,
+    );
+    let not_revoked = revoked_at.is_none();
+    let not_expired = match expires_at.as_deref() {
+        Some(exp) => !expiry_passed(conn, exp, &body.now).await?,
+        None => true,
+    };
+    let uses_left = match max_uses {
+        Some(max) => uses < max,
+        None => true,
+    };
+
+    if !(secret_ok && not_revoked && not_expired && uses_left) {
+        // Record the link id only when the SECRET matched, so an admin can see a
+        // specific live link being probed. The attacker never reads this table,
+        // so it leaks nothing back to them.
+        let probed = if secret_ok { Some(link_id.as_str()) } else { None };
+        record_redemption(conn, &body.attempt_id, probed, &user, &body.now, false).await?;
+        return Ok(RedeemOutcome::Rejected);
+    }
+
+    // Already a member → idempotent success. Re-opening the same link must not
+    // burn a use or fail; it just says "you're in".
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+            libsql::params![group_id.clone(), user.clone()],
+        )
+        .await?;
+    let already_member = rows.next().await?.is_some();
+    drop(rows);
+    if already_member {
+        return Ok(RedeemOutcome::Joined { group_id });
+    }
+
+    let tx = conn.transaction().await?;
+    // THE shared membership primitive — the same call `apply_accept_invite` and
+    // `apply_approve_join_request` make. This is what keeps a link from being a
+    // second admission path.
+    add_member_rows(&tx, &group_id, &user).await?;
+    // Re-check every bound INSIDE the transaction and let the row count decide.
+    // Two people redeeming the last use concurrently both pass the checks above;
+    // only one can pass this guarded UPDATE. The table's `uses <= max_uses`
+    // CHECK is the backstop beneath even this.
+    let updated = tx
+        .execute(
+            "UPDATE group_invite_link SET uses = uses + 1 \
+             WHERE id = ?1 \
+               AND revoked_at IS NULL \
+               AND (expires_at IS NULL OR datetime(expires_at) > datetime(?2)) \
+               AND (max_uses IS NULL OR uses < max_uses)",
+            libsql::params![link_id.clone(), body.now.clone()],
+        )
+        .await?;
+    if updated == 0 {
+        tx.rollback().await?;
+        record_redemption(conn, &body.attempt_id, Some(&link_id), &user, &body.now, false).await?;
+        return Ok(RedeemOutcome::Rejected);
+    }
+    tx.execute(
+        "INSERT INTO group_invite_link_redemption \
+           (id, link_id, user_id, attempted_at, succeeded) VALUES (?1, ?2, ?3, ?4, 1)",
+        libsql::params![
+            body.attempt_id.clone(),
+            link_id,
+            user.clone(),
+            body.now.clone(),
+        ],
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(RedeemOutcome::Joined { group_id })
+}
+
+/// Whether `expires_at` is at or before `now`, compared BY SQLITE via
+/// `datetime()` so the two RFC3339 strings normalise the same way the guarded
+/// UPDATE normalises them. Comparing in Rust with string ordering would disagree
+/// with SQL for offsets like `+00:00` versus `Z`.
+async fn expiry_passed(conn: &Connection, expires_at: &str, now: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT datetime(?1) <= datetime(?2)",
+            libsql::params![expires_at.to_string(), now.to_string()],
+        )
+        .await?;
+    // An unparseable timestamp yields NULL, not 0/1. Treat anything that is not
+    // a definite "not yet expired" as EXPIRED — fail closed.
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<Option<i64>>(0)?.unwrap_or(1) == 1,
+        None => true,
+    })
+}
+
+/// Append one row to the redemption audit trail.
+///
+/// `OR IGNORE` so a replayed `attempt_id` cannot error the request — the point
+/// is the count, not the individual row.
+async fn record_redemption(
+    conn: &Connection,
+    attempt_id: &str,
+    link_id: Option<&str>,
+    user_id: &str,
+    now: &str,
+    succeeded: bool,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO group_invite_link_redemption \
+           (id, link_id, user_id, attempted_at, succeeded) VALUES (?1, ?2, ?3, ?4, ?5)",
+        libsql::params![
+            attempt_id.to_string(),
+            link_id.map(|s| s.to_string()),
+            user_id.to_string(),
+            now.to_string(),
+            i64::from(succeeded),
+        ],
+    )
+    .await?;
+    Ok(())
 }
