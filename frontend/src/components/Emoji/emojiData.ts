@@ -12,6 +12,10 @@
 // the search keywords — there is deliberately no separate keyword field.
 // Categories approximate the CLDR groups; see the generator's docstring for
 // the exact ranges and the known approximation limits.
+//
+// `char` is the bare base codepoint with no U+FE0F variation selector. Entries
+// drawn from the older BMP symbol blocks default to text presentation, so a
+// renderer wanting a colour glyph should append U+FE0F at display time.
 
 export type EmojiCategoryId =
   | "people"

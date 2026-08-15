@@ -257,7 +257,7 @@ One row = "message `message_id` carries the file with `content_hash`". Because t
 
 **Metadata-exposure trade-off (chosen deliberately; see `docs/metadata-retention-policy.md` §2/§5).** Storing `message_id` in the clear moves the attachment↔message linkage that previously lived only inside the MLS-encrypted payload out to the operator: joining `attachment_ref` to `message_envelope.conversation_id` reveals which messages — and thus which conversations — share a given convergent file. It does **not** reveal the file (plaintext is never seen) or the sender (sealed, #607). The opaque-`ref_token` alternative would hide that graph but leaks references forever when a device loses local state and cannot release a token an admin never held — i.e. it fails deletion, the very thing #690 exists to make correct. We chose the counted, robust option; the incremental exposure is the co-reference graph over hashes the operator already stores.
 
-### custom_emoji_object _(migration 000014, #848)_
+### custom_emoji_object _(migration 000015, #848)_
 - `content_hash` TEXT PK _(SHA-256 of the **re-encoded** bytes)_
 - `r2_key` TEXT NOT NULL _(`emoji/<content_hash>.<ext>`, DERIVED server-side — never accepted from a client)_
 - `content_type` TEXT NOT NULL _(`image/webp` or `image/gif` — the only two the re-encoder emits, allowlisted at the DS)_
@@ -271,7 +271,7 @@ Global dedup for custom emoji: one row (and one R2 blob) per unique image, share
 
 **Collection is reference-counted, derived exactly as attachments are.** The row goes only when no `group_emoji` row names its hash: `DELETE FROM custom_emoji_object WHERE content_hash = ?1 AND NOT EXISTS (SELECT 1 FROM group_emoji WHERE content_hash = ?1)`. Removing a group emoji runs that collect inline; `POST /v1/emoji/gc` sweeps in bulk for references dropped without going through it (notably group deletion, which releases via `release_group_emoji`). The R2 blob is gated by the same predicate — `/v1/r2/presign` refuses both `delete` **and** `put` for a referenced emoji hash (`broker.rs`), the `put` gate mattering more here than for media because the object is public and unencrypted, so an overwrite would replace an image every referencing group renders.
 
-### group_emoji _(migration 000014, #848)_
+### group_emoji _(migration 000015, #848)_
 - PK: (`group_id`, `shortcode`)
 - `group_id` TEXT NOT NULL
 - `shortcode` TEXT NOT NULL _(`[a-z0-9_]{2,32}`, validated at the DS)_

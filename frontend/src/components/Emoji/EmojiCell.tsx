@@ -1,7 +1,6 @@
 import React from "react";
 import type { PickerEmoji } from "./emojiSearch";
-import { pickerEmojiId } from "./emojiSearch";
-import { applySkinTone } from "./emojiData";
+import { emojiDisplayChar, pickerEmojiId } from "./emojiSearch";
 import { CustomEmojiImage } from "./CustomEmojiImage";
 
 interface EmojiCellProps {
@@ -52,7 +51,7 @@ export const EmojiCell: React.FC<EmojiCellProps> = ({
       style={{ borderRadius: "var(--radius-chip)" }}
     >
       {item.kind === "standard" ? (
-        <span>{applySkinTone(item.emoji, toneIndex)}</span>
+        <span>{emojiDisplayChar(item.emoji, toneIndex)}</span>
       ) : (
         <CustomEmojiImage
           contentHash={item.emoji.content_hash}

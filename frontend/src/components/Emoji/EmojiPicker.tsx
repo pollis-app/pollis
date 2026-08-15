@@ -3,9 +3,10 @@ import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { useUsableEmoji } from "../../hooks/queries/useEmoji";
 import { TextInput } from "../ui/TextInput";
-import { EMOJI_CATEGORIES, STANDARD_EMOJI, applySkinTone } from "./emojiData";
+import { EMOJI_CATEGORIES, STANDARD_EMOJI } from "./emojiData";
 import type { PickerEmoji } from "./emojiSearch";
 import {
+  emojiDisplayChar,
   pickerEmojiId,
   pickerEmojiInsertText,
   readRecentEmojiIds,
@@ -304,7 +305,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
               <>
                 {preview.kind === "standard" ? (
                   <span className="text-xl leading-none">
-                    {applySkinTone(preview.emoji, toneIndex)}
+                    {emojiDisplayChar(preview.emoji, toneIndex)}
                   </span>
                 ) : (
                   <CustomEmojiImage

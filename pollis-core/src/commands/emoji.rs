@@ -5,7 +5,7 @@
 //!
 //! An emoji is a **content-addressed, unencrypted R2 object** plus a metadata
 //! row per group that uses it (see the DS module `pollis_delivery::emoji` and
-//! migration `000014_custom_emoji.sql`). Everything else Pollis puts in R2 is
+//! migration `000015_custom_emoji.sql`). Everything else Pollis puts in R2 is
 //! convergently encrypted; this deliberately is not, and the reason is
 //! structural. #848 asks for Discord's rule: a member of group A may use A's
 //! emoji while talking in group B, and everyone in B must RENDER it even though
@@ -930,15 +930,26 @@ pub async fn prepare_emoji_text(
         return Ok(text);
     }
     let usable = list_usable_emoji(user_id, state).await?;
+    let allowed: std::collections::HashSet<&str> =
+        usable.iter().map(|e| e.content_hash.as_str()).collect();
+    Ok(strip_disallowed_emoji(&text, &allowed))
+}
 
+/// The pure half of [`prepare_emoji_text`]: rewrite `text`, keeping every token
+/// whose hash is in `allowed` and degrading the rest to plain `:shortcode:`.
+///
+/// Split out from the I/O so the rule itself is directly testable — the DB
+/// lookup is uninteresting, the rewriting is where an off-by-one would silently
+/// eat a character of somebody's message.
+pub fn strip_disallowed_emoji(
+    text: &str,
+    allowed: &std::collections::HashSet<&str>,
+) -> String {
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0usize;
-    for token in tokens {
-        let permitted = usable
-            .iter()
-            .any(|e| e.content_hash == token.content_hash);
+    for token in parse_emoji_tokens(text) {
         out.push_str(&text[cursor..token.start]);
-        if permitted {
+        if allowed.contains(token.content_hash.as_str()) {
             out.push_str(&text[token.start..token.end]);
         } else {
             out.push(':');
@@ -948,7 +959,7 @@ pub async fn prepare_emoji_text(
         cursor = token.end;
     }
     out.push_str(&text[cursor..]);
-    Ok(out)
+    out
 }
 
 #[cfg(test)]
@@ -1008,6 +1019,68 @@ mod tests {
         assert!(!shortcode_is_valid("<img src=x>"));
         assert!(!shortcode_is_valid("a:b"));
         assert!(!shortcode_is_valid("../../etc/passwd"));
+    }
+
+    // ── The "use" rule, applied to outgoing text ─────────────────────────────
+
+    /// The sender-side half of the #848 permission rule, on the exact worked
+    /// example from the ticket.
+    ///
+    /// B is in group A, so B keeps group A's emoji **while typing in group B**;
+    /// C is in neither, so C's copy of the same token degrades to plain
+    /// `:parrot:` rather than failing the send. The membership set — never the
+    /// conversation — is what decides, which is why B's line is the interesting
+    /// assertion here.
+    #[test]
+    fn a_disallowed_emoji_degrades_to_its_shortcode_and_nothing_else_moves() {
+        let parrot = h('a');
+        let stranger = h('b');
+        let allowed: std::collections::HashSet<&str> =
+            [parrot.as_str()].into_iter().collect();
+
+        // B, permitted: the token survives verbatim.
+        let b_text = format!("morning all <:parrot:{parrot}> — standup in 5");
+        assert_eq!(strip_disallowed_emoji(&b_text, &allowed), b_text);
+
+        // C, not permitted: only the token is rewritten; every other byte of the
+        // message is untouched.
+        let c_text = format!("morning all <:parrot:{stranger}> — standup in 5");
+        assert_eq!(
+            strip_disallowed_emoji(&c_text, &allowed),
+            "morning all :parrot: — standup in 5"
+        );
+
+        // Mixed, adjacent, and at the very edges of the string — the cases where
+        // a slicing bug eats a character.
+        let mixed = format!("<:parrot:{parrot}><:parrot:{stranger}>");
+        assert_eq!(
+            strip_disallowed_emoji(&mixed, &allowed),
+            format!("<:parrot:{parrot}>:parrot:")
+        );
+
+        // Text with no tokens is returned byte-for-byte, including near-misses
+        // that must not be touched.
+        for untouched in ["", "no emoji here", "<:oops:>", "a :parrot: b"] {
+            assert_eq!(strip_disallowed_emoji(untouched, &allowed), untouched);
+        }
+
+        // Multi-byte text around a stripped token survives — the rewrite slices
+        // on byte offsets the parser produced, so a token adjacent to non-ASCII
+        // must not split a character.
+        let unicode = format!("héllo 🎉 <:parrot:{stranger}> wörld");
+        assert_eq!(
+            strip_disallowed_emoji(&unicode, &allowed),
+            "héllo 🎉 :parrot: wörld"
+        );
+    }
+
+    /// Nothing permitted at all — the empty-allow-set edge, which is what a user
+    /// in no groups sees.
+    #[test]
+    fn with_nothing_permitted_every_token_degrades() {
+        let allowed: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let text = format!("<:a_b:{}> <:c_d:{}>", h('a'), h('b'));
+        assert_eq!(strip_disallowed_emoji(&text, &allowed), ":a_b: :c_d:");
     }
 
     // ── The re-encoder ───────────────────────────────────────────────────────

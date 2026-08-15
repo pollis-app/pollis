@@ -23,16 +23,53 @@ export function pickerEmojiId(item: PickerEmoji): string {
 }
 
 /**
+ * The character to actually display (and insert) for a standard emoji.
+ *
+ * `emojiData.ts` stores bare codepoints with no variation selector, on purpose:
+ * baking U+FE0F in would make the tonable bases multi-codepoint and break
+ * `applySkinTone`'s "insert after the first codepoint" contract. But ~190
+ * entries — the legacy BMP pictographs like ☝ ⌨ ☎ ❤ — default to *text*
+ * presentation, so without a selector they render as monochrome glyphs rather
+ * than emoji.
+ *
+ * So the selector is added here, at render time, under two conditions:
+ *
+ *   - Never when a skin tone was applied. A Fitzpatrick modifier already implies
+ *     emoji presentation, and `<base> FE0F <modifier>` is not the canonical
+ *     sequence.
+ *   - Only for SINGLE-codepoint bases below U+1F000. Astral pictographs
+ *     (U+1F300+) already default to emoji presentation, and multi-codepoint
+ *     entries are the flags — regional-indicator pairs, which must not be
+ *     touched.
+ */
+export function emojiDisplayChar(emoji: StandardEmoji, toneIndex: number): string {
+  const toned = applySkinTone(emoji, toneIndex);
+  if (toned !== emoji.char) {
+    return toned;
+  }
+  const codepoints = Array.from(emoji.char);
+  if (codepoints.length !== 1) {
+    return emoji.char;
+  }
+  const cp = emoji.char.codePointAt(0) ?? 0;
+  if (cp >= 0x1f000) {
+    return emoji.char;
+  }
+  return `${emoji.char}️`;
+}
+
+/**
  * What gets inserted into the composer when a cell is chosen.
  *
- * A standard emoji inserts the character (with the user's skin tone applied
- * where the base supports one); a custom emoji inserts its wire token, which is
- * what travels inside the E2EE message body and what every recipient — member
- * of the owning group or not — resolves to an image.
+ * A standard emoji inserts the displayed character (skin tone and variation
+ * selector included, so the recipient sees what the sender picked); a custom
+ * emoji inserts its wire token, which is what travels inside the E2EE message
+ * body and what every recipient — member of the owning group or not — resolves
+ * to an image.
  */
 export function pickerEmojiInsertText(item: PickerEmoji, toneIndex: number): string {
   if (item.kind === "standard") {
-    return applySkinTone(item.emoji, toneIndex);
+    return emojiDisplayChar(item.emoji, toneIndex);
   }
   return emojiTokenText(item.emoji.shortcode, item.emoji.content_hash);
 }
