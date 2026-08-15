@@ -34,6 +34,18 @@ enum DeleteResolution {
     Pending,
 }
 
+/// What one conversation's pass through [`ingest_group_envelopes_interleaved`]
+/// produced: how far its watermark may advance, and which inbound messages this
+/// device newly decrypted (the batch a DM acknowledges with one delivery
+/// receipt, #857).
+struct ConvIngest {
+    conversation_id: String,
+    watermark: Option<String>,
+    /// Ids of messages persisted for the FIRST time on this pass, authored by
+    /// someone else. Empty for group channels, which never emit receipts.
+    newly_delivered: Vec<String>,
+}
+
 /// Decide a delete tombstone's fate from its redaction outcome. Pure so the
 /// edge-case matrix is unit-testable offline (`delete_resolution_tests`) without
 /// a DB:
@@ -240,9 +252,10 @@ pub async fn catch_up_mls_group_interleaved(
 
     // Drive the shared group's replay once, decrypting each conversation's
     // envelopes as the group reaches their epoch. Returns the per-conversation
-    // watermark each device may advance to.
-    let watermarks: Vec<(String, Option<String>)> =
-        ingest_group_envelopes_interleaved(state, user_id, mls_group_id, &per_conv).await?;
+    // watermark each device may advance to, plus the messages newly decrypted on
+    // this pass (the delivery-receipt batch).
+    let results: Vec<ConvIngest> =
+        ingest_group_envelopes_interleaved(state, user_id, mls_group_id, &per_conv, is_dm).await?;
 
     // Advance each conversation's watermark through the Delivery Service (best
     // effort — DS failures are logged and ignored). Envelope GC is NOT fired from
@@ -250,8 +263,9 @@ pub async fn catch_up_mls_group_interleaved(
     // (`pollis-delivery` `sweep_envelope_gc`), so a conversation whose members all
     // go quiet is still collected and a chatty one no longer runs GC on every
     // ingest. This path only reports the watermark that GC reads.
-    for (cid, ts_opt) in &watermarks {
-        if let (Some(ts), Some(did)) = (ts_opt.as_ref(), device_id.as_ref()) {
+    for res in &results {
+        let cid = &res.conversation_id;
+        if let (Some(ts), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) {
             let body = serde_json::json!({
                 "conversation_id": cid,
                 "user_id": user_id,
@@ -262,6 +276,37 @@ pub async fn catch_up_mls_group_interleaved(
                 crate::commands::mls::ds_post_ok(state, "/v1/watermarks/advance", &body).await
             {
                 eprintln!("[watermark] catch_up_group: DS advance failed for {cid}: {e}");
+            }
+        }
+    }
+
+    // Delivery receipts (#857): this device fetched and DECRYPTED these
+    // messages, which is precisely what "delivered" means — a statement about a
+    // device, never about a human having seen anything. One batched control
+    // frame per conversation covers a whole catch-up burst.
+    //
+    // `emit_receipt` re-checks both gates (DMs only, and the sending-side
+    // opt-out), so this call site cannot widen the feature's scope by mistake;
+    // the `is_dm` short-circuit here just avoids a pointless round-trip for the
+    // group-channel case. Best-effort — a receipt that fails to send must never
+    // fail an ingest pass, because the message itself already landed.
+    if is_dm {
+        for res in &results {
+            if res.newly_delivered.is_empty() {
+                continue;
+            }
+            if let Err(e) = super::receipts::emit_delivered(
+                state,
+                &res.conversation_id,
+                user_id,
+                &res.newly_delivered,
+            )
+            .await
+            {
+                eprintln!(
+                    "[receipts] delivered emit failed for {}: {e}",
+                    res.conversation_id
+                );
             }
         }
     }
@@ -295,7 +340,11 @@ async fn ingest_group_envelopes_interleaved(
     user_id: &str,
     mls_group_id: &str,
     per_conv: &[(String, Vec<EnvelopeRow>)],
-) -> Result<Vec<(String, Option<String>)>> {
+    // Whether this MLS group backs a DM. Receipts (#857) are DMs-only, so this
+    // gates both recording an inbound receipt frame and collecting the
+    // delivered batch.
+    is_dm: bool,
+) -> Result<Vec<ConvIngest>> {
     // Pre-parse each message/edit envelope's MLS position across ALL bound
     // conversations (delete/unknown carry none) and index `(conv_idx, env_idx)`
     // by position so the per-epoch hook decrypts exactly the ones sealed at the
@@ -336,6 +385,9 @@ async fn ingest_group_envelopes_interleaved(
     // watermark loop. Runs even with zero envelopes so the group still advances
     // to head (the cold-launch sweep guarantee).
     let mut max_fired_epoch: Option<(i64, u64)> = None;
+    // Per-conversation batch of messages newly persisted on this pass — the
+    // delivery receipts (#857) this device owes once the replay is done.
+    let mut newly_delivered: Vec<Vec<String>> = vec![Vec::new(); per_conv.len()];
     {
         let mut on_epoch = |conn: &rusqlite::Connection, generation: i64, epoch: u64| {
             // Lexicographic on `(generation, epoch)`: a successor lineage restarts
@@ -345,12 +397,16 @@ async fn ingest_group_envelopes_interleaved(
             max_fired_epoch = Some(max_fired_epoch.map_or(key, |m| m.max(key)));
             if let Some(indices) = by_epoch.get(&key) {
                 for &(ci, ei) in indices {
-                    decrypt_and_persist_one(
+                    if let Some(delivered_id) = decrypt_and_persist_one(
                         conn,
                         &per_conv[ci].0,
                         mls_group_id,
                         &per_conv[ci].1[ei],
-                    );
+                        user_id,
+                        is_dm,
+                    ) {
+                        newly_delivered[ci].push(delivered_id);
+                    }
                 }
             }
         };
@@ -456,7 +512,7 @@ async fn ingest_group_envelopes_interleaved(
     // path goes through the verified function, not a copy. Build the
     // `(sent_at, EnvKind, Option<epoch>)` view from the existing envelope rows +
     // pre-parsed `epoch_of`; `&str` keys avoid cloning every `sent_at`.
-    let mut out: Vec<(String, Option<String>)> = Vec::with_capacity(per_conv.len());
+    let mut out: Vec<ConvIngest> = Vec::with_capacity(per_conv.len());
     for (ci, (cid, envs)) in per_conv.iter().enumerate() {
         let items: Vec<(&str, super::watermark::EnvKind, Option<(i64, u64)>)> = envs
             .iter()
@@ -475,7 +531,11 @@ async fn ingest_group_envelopes_interleaved(
             .collect();
         let watermark =
             super::watermark::next_watermark(&items, max_fired_epoch).map(str::to_string);
-        out.push((cid.clone(), watermark));
+        out.push(ConvIngest {
+            conversation_id: cid.clone(),
+            watermark,
+            newly_delivered: std::mem::take(&mut newly_delivered[ci]),
+        });
     }
     Ok(out)
 }
@@ -487,12 +547,20 @@ async fn ingest_group_envelopes_interleaved(
 /// Infallible: a failed decrypt or a transient DB error simply leaves nothing
 /// persisted (the envelope stays in `message_envelope` for a later retry), the
 /// same outcome the watermark logic accounts for.
+///
+/// Returns the message id when this call persisted a NEW inbound message in a
+/// DM — i.e. exactly what a delivery receipt (#857) acknowledges. `None` for
+/// everything else: our own messages, re-ingested duplicates, edits, tombstones,
+/// group channels, and control frames (which are never themselves acknowledged,
+/// so a receipt can never trigger a receipt).
 fn decrypt_and_persist_one(
     conn: &rusqlite::Connection,
     conversation_id: &str,
     mls_group_id: &str,
     env: &EnvelopeRow,
-) {
+    user_id: &str,
+    is_dm: bool,
+) -> Option<String> {
     // `sender_id` (the server-writable envelope column) is intentionally NOT
     // read for attribution — the sender is taken from the MLS credential inside
     // the ciphertext (sealed sender, `docs/metadata-minimization-design.md` §2).
@@ -510,13 +578,13 @@ fn decrypt_and_persist_one(
                 .flatten()
                 .unwrap_or(false);
             if exists {
-                return;
+                return None;
             }
             let Some(bytes) = ciphertext
                 .strip_prefix("mls:")
                 .and_then(|h| hex::decode(h).ok())
             else {
-                return;
+                return None;
             };
             // Attribute from the MLS-authenticated credential inside the
             // ciphertext, NOT the server-writable `message_envelope.sender_id`
@@ -527,7 +595,7 @@ fn decrypt_and_persist_one(
             else {
                 // Decrypt failed — leave the envelope in message_envelope for a
                 // future retry; the watermark is computed to not skip past it.
-                return;
+                return None;
             };
             match super::framing::classify(&plain) {
                 // "Delete for everyone" (E2EE redaction). Honor it ONLY when the
@@ -568,11 +636,51 @@ fn decrypt_and_persist_one(
                 // send and for every message from a threads-unaware client.
                 super::framing::Frame::Text { text, thread_id } => {
                     if let Ok(text) = String::from_utf8(text) {
-                        let _ = conn.execute(
+                        let inserted = conn.execute(
                             "INSERT OR IGNORE INTO message
                              (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                             rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, thread_id, sent_at],
+                        ).unwrap_or(0);
+                        // Delivered (#857) means exactly this: the envelope was
+                        // fetched AND decrypted AND stored, here, now. Only a
+                        // DM, only someone else's message, and only the first
+                        // time — a re-ingest returns early above, so a message
+                        // is never acknowledged twice.
+                        if inserted > 0 && is_dm && cred_sender != user_id {
+                            return Some(id.clone());
+                        }
+                    }
+                }
+                // A delivery/read receipt from another member (#857). It is a
+                // CONTROL message: no `message` row is ever written for it, on
+                // either side, so it can never be rendered and — crucially —
+                // never itself acknowledged. That is what keeps two clients from
+                // ping-ponging receipts forever.
+                super::framing::Frame::Receipt { kind, at, message_ids } => {
+                    // DMs only. A receipt frame arriving in a group channel is
+                    // dropped outright: #857 excludes group channels on the
+                    // recording side as well as the emitting side, so a client
+                    // that emitted one anyway cannot create the behaviour here.
+                    if !is_dm {
+                        return None;
+                    }
+                    // Our own receipt, echoed back to us from the conversation
+                    // we posted it to. Nothing to learn from it.
+                    if cred_sender == user_id {
+                        return None;
+                    }
+                    // `cred_sender` is the MLS-authenticated author of the
+                    // frame, so a member can only ever record a receipt in their
+                    // OWN name — neither the server nor another member can
+                    // forge "carol read this".
+                    for target in &message_ids {
+                        super::receipts::record_receipt(
+                            conn,
+                            target,
+                            &cred_sender,
+                            kind,
+                            &at,
                         );
                     }
                 }
@@ -593,7 +701,7 @@ fn decrypt_and_persist_one(
                     .and_then(|h| hex::decode(h).ok())
                     .and_then(|b| crate::commands::mls::try_mls_decrypt(conn, mls_group_id, &b))
                 else {
-                    return;
+                    return None;
                 };
                 let author: Option<String> = conn
                     .query_row(
@@ -605,7 +713,7 @@ fn decrypt_and_persist_one(
                     .ok()
                     .flatten();
                 if author.as_deref() != Some(cred_sender.as_str()) {
-                    return;
+                    return None;
                 }
                 // Strip size padding (§4.1); no-op for legacy/unpadded edits.
                 if let Ok(text) = String::from_utf8(super::framing::strip(&plain)) {
@@ -620,6 +728,9 @@ fn decrypt_and_persist_one(
         }
         _ => {}
     }
+    // Only the "persisted a new inbound DM message" path above returns an id;
+    // every other outcome is nothing to acknowledge.
+    None
 }
 
 /// Frontend-triggerable ingest for a channel. Used by LiveKit real-time hints
