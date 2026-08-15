@@ -4,7 +4,7 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::types::PendingInvite;
+use super::types::{CreatedInviteLink, InviteLinkSummary, PendingInvite, RedeemedInvite};
 
 /// Invite a user (by username) to a group. Inviter must be a current member.
 pub async fn send_group_invite(
@@ -258,4 +258,299 @@ pub async fn decline_group_invite(
     crate::commands::mls::ds_post_ok(state, "/v1/invites/decline", &body).await?;
 
     Ok(())
+}
+
+// ── #847 shareable invite links ──────────────────────────────────────────────
+
+/// Create a shareable invite link for a group.
+///
+/// The token is minted HERE, on the client, and only `sha256(secret)` is posted
+/// to the Delivery Service — so the server never sees a working token at
+/// creation time. The returned [`CreatedInviteLink`] is the one and only chance
+/// to read it; nothing persists it.
+///
+/// `expires_in_hours` and `max_uses` are both `None` for an unbounded link.
+/// Those two plus revocation are the entire control surface, deliberately: they
+/// are the three Slack and Discord actually ship, and every additional knob is a
+/// new way to misconfigure a security boundary.
+pub async fn create_group_invite_link(
+    group_id: String,
+    creator_id: String,
+    expires_in_hours: Option<i64>,
+    max_uses: Option<i64>,
+    state: &Arc<AppState>,
+) -> Result<CreatedInviteLink> {
+    let conn = state.remote_db.conn().await?;
+
+    // Client-side admin check for a clean error message. The DS re-derives this
+    // server-side and is the authority — this is UX, not enforcement.
+    let mut rows = conn
+        .query(
+            "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+            libsql::params![group_id.clone(), creator_id.clone()],
+        )
+        .await?;
+    let role: String = if let Some(row) = rows.next().await? {
+        row.get(0)?
+    } else {
+        return Err(Error::Other(anyhow::anyhow!(
+            "you are not a member of this group"
+        )));
+    };
+    if role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!(
+            "only admins can create invite links"
+        )));
+    }
+
+    if max_uses.is_some_and(|m| m <= 0) {
+        return Err(Error::Other(anyhow::anyhow!(
+            "an invite link must allow at least one use"
+        )));
+    }
+    if expires_in_hours.is_some_and(|h| h <= 0) {
+        return Err(Error::Other(anyhow::anyhow!(
+            "an expiry must be in the future"
+        )));
+    }
+
+    let minted = super::invite_token::mint();
+    let id = Ulid::new().to_string();
+    let expires_at = expires_in_hours
+        .map(|h| (chrono::Utc::now() + chrono::Duration::hours(h)).to_rfc3339());
+
+    // DS seam: only the SELECTOR and the HASH cross the wire. The secret half
+    // never leaves this function.
+    let body = serde_json::json!({
+        "id": id,
+        "group_id": group_id,
+        "created_by": creator_id,
+        "selector": minted.selector,
+        "secret_hash": minted.secret_hash,
+        "expires_at": expires_at,
+        "max_uses": max_uses,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/invite-links/create", &body).await?;
+
+    Ok(CreatedInviteLink {
+        id,
+        url: super::invite_token::invite_url(&minted.token),
+        token: minted.token,
+        expires_at,
+        max_uses,
+    })
+}
+
+/// List a group's invite links. Admins only; everyone else gets an empty list,
+/// mirroring `get_group_join_requests`.
+///
+/// Returns no tokens — see [`InviteLinkSummary`].
+pub async fn list_group_invite_links(
+    group_id: String,
+    user_id: String,
+    state: &Arc<AppState>,
+) -> Result<Vec<InviteLinkSummary>> {
+    let conn = state.remote_db.conn().await?;
+
+    let mut rows = conn
+        .query(
+            "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+            libsql::params![group_id.clone(), user_id],
+        )
+        .await?;
+    let role: String = if let Some(row) = rows.next().await? {
+        row.get(0)?
+    } else {
+        return Ok(Vec::new());
+    };
+    if role != "admin" {
+        return Ok(Vec::new());
+    }
+
+    // `is_live` is computed by SQLite with the same `datetime()` normalisation
+    // the redeem path uses, so the badge cannot disagree with what redemption
+    // will actually do.
+    let mut link_rows = conn
+        .query(
+            "SELECT l.id, l.created_at, u.username, l.expires_at, l.max_uses, l.uses, \
+                    l.revoked_at, \
+                    CASE WHEN l.revoked_at IS NULL \
+                          AND (l.expires_at IS NULL OR datetime(l.expires_at) > datetime('now')) \
+                          AND (l.max_uses IS NULL OR l.uses < l.max_uses) \
+                         THEN 1 ELSE 0 END AS is_live \
+             FROM group_invite_link l \
+             LEFT JOIN users u ON u.id = l.created_by \
+             WHERE l.group_id = ?1 \
+             ORDER BY l.created_at DESC",
+            libsql::params![group_id],
+        )
+        .await?;
+
+    let mut links = Vec::new();
+    while let Some(row) = link_rows.next().await? {
+        links.push(InviteLinkSummary {
+            id: row.get(0)?,
+            created_at: row.get(1)?,
+            creator_username: row.get(2)?,
+            expires_at: row.get(3)?,
+            max_uses: row.get(4)?,
+            uses: row.get(5)?,
+            revoked_at: row.get(6)?,
+            is_live: row.get::<i64>(7)? == 1,
+        });
+    }
+
+    Ok(links)
+}
+
+/// Revoke an invite link. Admins of that link's group only (re-derived by the DS).
+pub async fn revoke_group_invite_link(
+    link_id: String,
+    user_id: String,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let body = serde_json::json!({
+        "link_id": link_id,
+        "actor_id": user_id,
+        "revoked_at": chrono::Utc::now().to_rfc3339(),
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/invite-links/revoke", &body).await?;
+    Ok(())
+}
+
+/// The single user-facing error for a failed redemption.
+///
+/// One string for every failure mode. The DS already collapses "wrong",
+/// "expired", "revoked" and "exhausted" into one opaque response; rendering them
+/// differently on the client would hand back the distinction the server just
+/// spent effort hiding. Mirrors how `BLOCK_ERR` is shared across the three gates
+/// in `send_group_invite`.
+pub const INVITE_LINK_ERR: &str = "this invite link is not valid";
+
+/// Redeem an invite link and join the group.
+///
+/// Two things happen after the DS admits us, and both matter:
+///
+/// 1. **Self-heal into the MLS tree.** Unlike `send_group_invite` — where the
+///    inviter pre-grafts the invitee's devices before they ever accept — a link
+///    redeemer has nobody to graft them: reconcile is always run by the actor
+///    making the change, and no existing member is involved in a redemption. So
+///    the redeemer joins the tree itself via an MLS **external commit** against
+///    the server-stored `GroupInfo`, exactly as a newly enrolled device does in
+///    `finalize_enrollment`. Without this the redeemer would be a `group_member`
+///    who cannot decrypt a single message — a broken feature, not a partial one.
+///
+///    This is not a bypass. The external commit is posted to `mls_commit_log`
+///    like any other, existing members merge it on their next pass, and the
+///    inbound cross-signing cert check still applies — a device whose cert does
+///    not chain to the user's `account_id_pub` is rejected by the other members.
+///
+/// 2. **Tell the existing members**, so their member list refreshes.
+pub async fn redeem_group_invite_link(
+    token: String,
+    user_id: String,
+    state: &Arc<AppState>,
+) -> Result<RedeemedInvite> {
+    // Accept a bare code, a https URL, or the in-app scheme — people paste
+    // whatever they were sent. A token that doesn't even parse still goes to the
+    // DS: bailing early here would make "malformed" locally distinguishable from
+    // "wrong", which is precisely the leak the server-side design avoids, and it
+    // would skip the rate-limit accounting for a spraying client.
+    let presented = super::invite_token::extract(&token)
+        .map(|(selector, secret)| format!("{selector}.{secret}"))
+        .unwrap_or_else(|| token.trim().to_string());
+
+    let body = serde_json::json!({
+        "token": presented,
+        "user_id": user_id,
+        "attempt_id": Ulid::new().to_string(),
+        "now": chrono::Utc::now().to_rfc3339(),
+    });
+
+    let resp = crate::commands::mls::ds_post(state, "/v1/invite-links/redeem", &body).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        // 429 is the one distinguishable failure, and only because it describes
+        // the caller rather than the token.
+        if status.as_u16() == 429 {
+            return Err(Error::Other(anyhow::anyhow!(
+                "too many attempts — wait a few minutes and try again"
+            )));
+        }
+        return Err(Error::Other(anyhow::anyhow!(INVITE_LINK_ERR)));
+    }
+
+    let payload: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("invalid redeem response: {e}")))?;
+    let group_id = payload
+        .get("group_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("redeem response missing group_id")))?
+        .to_string();
+
+    // Self-heal into the MLS tree — see the note above. Skipped when this device
+    // already holds the group (an idempotent re-redemption, or a second device
+    // that was grafted normally).
+    let already_joined = {
+        let guard = state.local_db.lock().await;
+        guard.as_ref().is_some_and(|db| {
+            crate::commands::mls::has_local_group(db.conn(), &group_id)
+        })
+    };
+    if !already_joined {
+        if let Err(e) = crate::commands::mls::external_join_group(state, &group_id, &user_id).await {
+            // Non-fatal: membership is already real and durable server-side. A
+            // failed external join self-heals on the next pass (device
+            // enrollment, message catch-up) rather than rolling back a join the
+            // DS has committed.
+            eprintln!("[mls] redeem_group_invite_link: external_join {group_id}: {e}");
+        }
+    }
+
+    // Name the group for the caller's confirmation UI. Public directory
+    // metadata; best-effort, and never fails a completed join.
+    let group_name = match state.remote_db.conn().await {
+        Ok(conn) => fetch_group_name(&conn, &group_id).await.unwrap_or(None),
+        Err(e) => {
+            eprintln!("[invites] redeem_group_invite_link: group-name lookup failed: {e}");
+            None
+        }
+    };
+
+    // Notify existing members so their roster refreshes. The redeemer may not be
+    // connected to the group's room yet, so this rides the server-side publish,
+    // matching `accept_group_invite`.
+    if let Err(e) = crate::commands::livekit::publish_to_room_server(
+        state,
+        &group_id,
+        serde_json::json!({"type": "membership_changed", "group_id": group_id}),
+    )
+    .await
+    {
+        eprintln!("[realtime] redeem_group_invite_link: notify group {group_id}: {e}");
+    }
+
+    Ok(RedeemedInvite {
+        group_id,
+        group_name,
+    })
+}
+
+/// A group's display name, or `None` if the row is gone.
+async fn fetch_group_name(
+    conn: &libsql::Connection,
+    group_id: &str,
+) -> Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT name FROM groups WHERE id = ?1",
+            libsql::params![group_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => None,
+    })
 }
