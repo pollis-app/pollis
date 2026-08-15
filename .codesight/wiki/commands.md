@@ -133,7 +133,18 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `prepare_voice_connection(channel_id, user_id, display_name)` — best-effort warmup fired on user "intent" (hover, route entry). Pre-fetches + caches the DS-minted voice token (identity derived server-side, so it matches the join) and runs a one-shot HTTPS probe to warm DNS / TLS / connection pool. Idempotent; safe to call eagerly. Consumed by the next `join_voice_channel` for the same channel + identity.
 - `join_voice_channel(channel_id, user_id, display_name, input_device, output_device, audio_processing)` — connect to LiveKit and publish the local mic. `audio_processing` is the `ApmConfig` struct (AGC + NS + AEC settings) — see [Audio Processing](./audio-processing.md). Consumes a fresh warmup if present and runs `Room::connect` + cpal mic init concurrently to minimise cold-start latency.
 - `leave_voice_channel()`
-- `toggle_voice_mute()`
+
+**Transmit gate — push-to-talk, mute, deafen (#849).** All local gating decisions live in one pure state machine, `voice::TransmitGate` (`commands/voice/gate.rs`). The commands below are thin wrappers: each applies one transition, then republishes the result to the three places that consume it — the `transmit_muted` atomic read by the cpal capture callback, the `deafened` atomic read by the playback mixer, and the LiveKit publication's mute state (so remote tiles show the truth). They all return the same `VoiceGateState` snapshot `{ mode, self_muted, deafened, ptt_held, transmitting }`, mirrored in TS as `VoiceGateState` in `frontend/src/types/voice-state.ts`.
+
+Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and unmuting while deafened also undeafens, so the contradiction is unconstructible. Undeafen restores the mute state deafen displaced; it never blindly unmutes.
+
+- `toggle_voice_mute()` → `VoiceGateState` — **returns the full gate snapshot, not a bool** (changed in #849): a toggle can clear deafen as a side effect, so the renderer must be told the whole outcome.
+- `toggle_voice_deafen()` → `VoiceGateState` — silences all *incoming* audio (the mixer zeroes its mixed frame after draining, so undeafening resumes at the live edge) and implies self-mute.
+- `set_voice_input_mode(mode)` → `VoiceGateState` — `"voice_activity"` (default; mic open whenever unmuted) or `"push_to_talk"`. Persisted by the renderer in the preferences blob and pushed on load as well as on change, so it is valid to call outside a call. Always drops any held PTT latch.
+- `set_voice_ptt_held(held)` → `VoiceGateState` — push-to-talk key down/up.
+- `release_voice_ptt()` → `VoiceGateState` — same transition as `set_voice_ptt_held(false)`, named for its reason: the window lost keyboard focus, so the matching keyup will never arrive and the mic must not be left hot. The renderer calls it from `window.blur` / `visibilitychange` / `pagehide`.
+- `get_voice_gate_state()` → `VoiceGateState` — read without mutating; used to resync after a renderer reload.
+
 - `set_voice_input_device(device_name)` / `set_voice_output_device(device_name)` — switch device mid-call. Input switch rebuilds APM if the new device's sample rate differs.
 - `set_voice_audio_processing(config)` — push live APM config (AGC target, NS level, AEC on/off) without rejoining. Internal echo / noise / AGC state is preserved; only the changed submodule re-initialises.
 - `subscribe_voice_events(on_event: Channel)`
@@ -200,7 +211,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`tray`** — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
 - **`update`** — `is_update_required`, `mark_update_required`
 - **`user`** — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
-- **`voice`** — `get_last_join_timings`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_output_device`, `subscribe_voice_events`, `toggle_voice_mute`
+- **`voice`** — `get_last_join_timings`, `get_voice_gate_state`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `release_voice_ptt`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_input_mode`, `set_voice_output_device`, `set_voice_ptt_held`, `subscribe_voice_events`, `toggle_voice_deafen`, `toggle_voice_mute`
 - **`voice_test`** — `play_test_tone`, `record_and_play_back`, `set_mic_test_monitor`, `start_mic_test`, `stop_mic_test`, `stop_test_playback`, `subscribe_voice_test_events`
 
 If this appendix and `src-tauri/src/lib.rs` disagree, `lib.rs` is right and this file is stale.
@@ -212,7 +223,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **169 commands** in 26 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **175 commands** in 26 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -257,7 +268,7 @@ than hand-edit.
 
 **`install_kind`** (1) — `detect_managed_install`
 
-**`voice`** (11) — `get_last_join_timings`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_output_device`, `subscribe_voice_events`, `toggle_voice_mute`
+**`voice`** (17) — `get_last_join_timings`, `get_voice_gate_state`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `release_voice_ptt`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_input_mode`, `set_voice_output_device`, `set_voice_ptt_held`, `subscribe_voice_events`, `toggle_voice_deafen`, `toggle_voice_mute`
 
 **`voice_test`** (7) — `play_test_tone`, `record_and_play_back`, `set_mic_test_monitor`, `start_mic_test`, `stop_mic_test`, `stop_test_playback`, `subscribe_voice_test_events`
 

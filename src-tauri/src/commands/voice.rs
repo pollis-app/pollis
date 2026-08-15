@@ -34,8 +34,33 @@ pub async fn leave_voice_channel(state: State<'_, Arc<AppState>>) -> Result<()> 
 }
 
 #[tauri::command]
-pub async fn toggle_voice_mute(state: State<'_, Arc<AppState>>) -> Result<bool> {
+pub async fn toggle_voice_mute(state: State<'_, Arc<AppState>>) -> Result<VoiceGateState> {
     pollis_core::commands::voice::toggle_voice_mute(&state).await
+}
+
+#[tauri::command]
+pub async fn toggle_voice_deafen(state: State<'_, Arc<AppState>>) -> Result<VoiceGateState> {
+    pollis_core::commands::voice::toggle_voice_deafen(&state).await
+}
+
+#[tauri::command]
+pub async fn set_voice_input_mode(mode: VoiceInputMode, state: State<'_, Arc<AppState>>) -> Result<VoiceGateState> {
+    pollis_core::commands::voice::set_voice_input_mode(mode, &state).await
+}
+
+#[tauri::command]
+pub async fn set_voice_ptt_held(held: bool, state: State<'_, Arc<AppState>>) -> Result<VoiceGateState> {
+    pollis_core::commands::voice::set_voice_ptt_held(held, &state).await
+}
+
+#[tauri::command]
+pub async fn release_voice_ptt(state: State<'_, Arc<AppState>>) -> Result<VoiceGateState> {
+    pollis_core::commands::voice::release_voice_ptt(&state).await
+}
+
+#[tauri::command]
+pub async fn get_voice_gate_state(state: State<'_, Arc<AppState>>) -> Result<VoiceGateState> {
+    pollis_core::commands::voice::get_voice_gate_state(&state).await
 }
 
 #[tauri::command]
