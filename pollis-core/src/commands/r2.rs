@@ -101,7 +101,12 @@ fn ext_for_content_type(ct: &str) -> &'static str {
     }
 }
 
-fn cache_file_path(content_hash: &str, content_type: &str) -> Result<PathBuf> {
+/// `pub(crate)` so `commands::emoji` writes custom-emoji bytes into the SAME
+/// on-disk cache under the same naming scheme. That is what lets the loopback
+/// media server serve an emoji with no changes at all — it resolves
+/// `/{token}/{hash}` by scanning for `<hash>.<ext>.enc`, and does not care which
+/// subsystem put the file there.
+pub(crate) fn cache_file_path(content_hash: &str, content_type: &str) -> Result<PathBuf> {
     let dir = media_cache_dir()?;
     let ext = ext_for_content_type(content_type);
     Ok(dir.join(format!("{content_hash}.{ext}.enc")))
@@ -762,7 +767,27 @@ fn compute_image_meta(data: &[u8]) -> anyhow::Result<(String, u32, u32)> {
 /// Ask the DS to presign an R2 `operation` (`"get"` / `"put"` / `"delete"`) on
 /// `key` and return the ready-to-use URL. Device-signed via [`ds_post`].
 async fn presign_r2(state: &Arc<AppState>, operation: &str, key: &str) -> Result<String> {
-    let body = serde_json::json!({ "operation": operation, "key": key });
+    presign_r2_with_length(state, operation, key, None).await
+}
+
+/// [`presign_r2`], optionally declaring the EXACT byte count a `put` will
+/// carry. When present the DS signs `content-length` into the URL, so R2 itself
+/// refuses a body of any other size.
+///
+/// Required for `emoji/…` puts (#848) — those objects are unencrypted, publicly
+/// fetchable and hard-capped, and a cap the client merely honours is not a cap.
+/// `None` reproduces the previous request byte for byte, which is why every
+/// media/avatar call site is untouched.
+pub(crate) async fn presign_r2_with_length(
+    state: &Arc<AppState>,
+    operation: &str,
+    key: &str,
+    content_length: Option<u64>,
+) -> Result<String> {
+    let mut body = serde_json::json!({ "operation": operation, "key": key });
+    if let Some(n) = content_length {
+        body["content_length"] = serde_json::json!(n);
+    }
     let resp = crate::commands::mls::ds_post(state, "/v1/r2/presign", &body).await?;
     let status = resp.status();
     if !status.is_success() {
@@ -785,7 +810,7 @@ async fn presign_r2(state: &Arc<AppState>, operation: &str, key: &str) -> Result
 /// PUT `data` to a presigned URL. Content-Type is set at request time (the broker
 /// signs only `host`, so it is deliberately left unsigned). Routes through the
 /// overlay when on — R2 is a first-party, allowlisted host (§14.2).
-async fn r2_put_url(
+pub(crate) async fn r2_put_url(
     overlay: Option<&pollis_relay::OverlayHandle>,
     url: &str,
     data: Vec<u8>,
@@ -806,7 +831,7 @@ async fn r2_put_url(
 }
 
 /// GET the bytes at a presigned URL. Routes through the overlay when on.
-async fn r2_get_url(overlay: Option<&pollis_relay::OverlayHandle>, url: &str) -> Result<Vec<u8>> {
+pub(crate) async fn r2_get_url(overlay: Option<&pollis_relay::OverlayHandle>, url: &str) -> Result<Vec<u8>> {
     let resp = crate::net::overlay::http_client(overlay).get(url).send().await?;
     if !resp.status().is_success() {
         let status = resp.status();

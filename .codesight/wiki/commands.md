@@ -205,6 +205,15 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 - `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso.
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) used by `delete_message` to purge orphaned attachments. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 
+## emoji (`commands/emoji.rs`)
+Custom per-group emoji (#848). Remote metadata lives in `custom_emoji_object` (content-addressed, one row per stored image) + `group_emoji` (one row per group that uses it); writes go through the DS (`POST /v1/emoji/{create,remove,gc}`). The objects are **unencrypted** in R2, deliberately — see the module docs and migration `000014_custom_emoji.sql`.
+- `list_usable_emoji(user_id)` → `CustomEmoji[]` — every custom emoji the user may SEND, i.e. every emoji registered to any group they are a current member of. Discord's rule: usable in ANY conversation, not just the registering group. This is both the picker's source and the permission predicate — deliberately one query, so the set offered and the set permitted cannot drift.
+- `list_group_emoji(group_id)` → `CustomEmoji[]` — one group's emoji (the management page).
+- `upload_group_emoji(group_id, shortcode, path)` → `CustomEmoji` — reads the file from disk (no bytes over IPC), **re-encodes** it to WebP/GIF under 48 KiB (`encode_emoji`), content-hashes the *re-encoded* bytes, skips the R2 PUT on a dedup hit, uploads under a length-bound presign, then registers via the DS. `shortcode` must be `[a-z0-9_]{2,32}`.
+- `remove_group_emoji(group_id, shortcode)` — DS remove (creator or group admin), then an event-driven GC sweep that deletes any now-unreferenced R2 blob.
+- `get_emoji_url(content_hash, content_type)` → URL — loopback media-server URL for rendering. Fetches the plain object, **verifies `sha256(bytes) == content_hash` and the size ceiling before caching**, then writes into the shared media cache so `media_server.rs` serves it unchanged. Rendering is unauthorized by design — a user in none of the registering groups must still see the emoji.
+- `prepare_emoji_text(user_id, text)` → `string` — strips `<:shortcode:hash>` tokens the user is not permitted to use, leaving plain `:shortcode:`. The "use" rule cannot be enforced server-side (message content is E2EE, so the DS never learns which emoji a message carries), so it is enforced on the sender's device against the same predicate that fills the picker. Degrades rather than refuses: a message is not worth failing over an emoji.
+
 ## overlay (`commands/overlay.rs`)
 Runtime application of the closed-overlay relay mode (design `docs/relay-overlay-design.md` §14). Off-by-default; when off no shim runs and every network path is byte-for-byte the direct path.
 - `get_overlay_mode()` → `"off" | "prefer" | "strict"` — the CURRENT live mode (the running shim's mode, or `off` when no shim).
@@ -225,7 +234,7 @@ The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *
 
 ## Appendix A — full registered-command inventory (names only)
 
-Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813. **169 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
+Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813. **175 commands.** (169 as of the #714 snapshot, plus the six `emoji` commands added by #848.) Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
 
 Regenerate with:
 
@@ -240,6 +249,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
 - **`device_enrollment`** — `approve_device_enrollment`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 - **`dm`** — `accept_dm_request`, `add_user_to_dm_channel`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`, `remove_user_from_dm_channel`
+- **`emoji`** — `get_emoji_url`, `list_group_emoji`, `list_usable_emoji`, `prepare_emoji_text`, `remove_group_emoji`, `upload_group_emoji`
 - **`groups`** — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `create_group_invite_link`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_group_invite_links`, `list_user_groups`, `list_user_groups_with_channels`, `redeem_group_invite_link`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `revoke_group_invite_link`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
 - **`install_kind`** — `detect_managed_install`
 - **`livekit`** — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
