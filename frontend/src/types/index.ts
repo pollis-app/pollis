@@ -104,6 +104,10 @@ export interface DMConversation {
   user2_identifier: string; // username/email/phone of other user
   user2_id?: string;
   user2_avatar_url?: string;
+  /** Total members including the viewer. Group DMs have 3+; a 1:1 has 2.
+   * Drives the per-reader receipt summary (#857) — optional because callers
+   * that only need the "other side" never populate it. */
+  member_count?: number;
   created_at: number;
   updated_at: number;
 }
@@ -159,6 +163,27 @@ export interface CustomEmoji {
   size_bytes: number;
   // Who added it to this group. Only they or a group admin may remove it.
   created_by: string;
+}
+
+/**
+ * Delivery / read receipts held for ONE message in a DM (#857).
+ *
+ * Mirrors `MessageReceipts` in `pollis-core/src/commands/messages/receipts.rs`.
+ *
+ * Both fields are lists of user ids, never booleans — a DM can have several
+ * members, so "delivered" and "read" are sets, and the 1:1 case is just the
+ * one-element case. `read_by` is always a subset of `delivered_by`: the local
+ * schema has a trigger making "read but never delivered" unrepresentable.
+ *
+ * Receipts are device-local and exist only for DMs; group channels never
+ * produce them.
+ */
+export interface MessageReceipts {
+  message_id: string;
+  /** Readers whose device fetched and decrypted the message. */
+  delivered_by: string[];
+  /** Readers who actually saw it on screen in a focused window. */
+  read_by: string[];
 }
 
 export interface MessageAttachment {

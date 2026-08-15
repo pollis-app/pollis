@@ -122,6 +122,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::messages::add_reaction,
             crate::commands::messages::remove_reaction,
             crate::commands::messages::get_reactions,
+            crate::commands::messages::mark_messages_read,
+            crate::commands::messages::get_conversation_receipts,
             crate::commands::messages::delete_message,
             crate::commands::messages::edit_message,
             crate::commands::mls::poll_mls_welcomes,

@@ -13,6 +13,9 @@ import {
 } from "../../hooks/queries/useBookmarks";
 import { useMessagePermalink } from "../../hooks/useMessagePermalink";
 import { messageJumpStore } from "../../stores/messageJumpStore";
+import { useConversationReceipts } from "../../hooks/queries/useReceipts";
+import { useDMConversations } from "../../hooks/queries/useMessages";
+import { appStore } from "../../stores/appStore";
 import type { Message } from "../../types";
 
 // How long the permalink jump highlight stays on the target row.
@@ -187,6 +190,26 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   const rosterBanners =
     (conversationId ? rosterChangeStore.byConversation[conversationId] : undefined) ?? [];
   const { data: groupMembers = [] } = useGroupMembers(groupIdForNames ?? null);
+
+  // Delivery / read receipts (#857). Queried ONCE here for the whole list and
+  // passed down by message id — a per-row query would be one IPC call per
+  // rendered message. Receipts are a DM-only product decision, so a group
+  // channel (which always has a selected channel id) never runs this query and
+  // never renders an indicator.
+  const selectedChannelId = appStore.selectedChannelId;
+  const selectedConversationId = appStore.selectedConversationId;
+  const isDm = !selectedChannelId && !!selectedConversationId;
+  const { receipts } = useConversationReceipts(isDm ? selectedConversationId : null);
+  const { data: dmConversations = [] } = useDMConversations();
+  // Other members only — the viewer never acknowledges their own message, so a
+  // 3-person DM reads "2/2" when both peers have read it, never "2/3".
+  const peerCount = useMemo(() => {
+    if (!isDm) {
+      return 0;
+    }
+    const conv = dmConversations.find((c) => c.id === selectedConversationId);
+    return Math.max((conv?.member_count ?? 2) - 1, 1);
+  }, [isDm, dmConversations, selectedConversationId]);
   const usernameByUserId = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of groupMembers) {
@@ -457,6 +480,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
             isSaved={savedMessageIds.has(message.id)}
             onToggleSave={handleToggleSave}
             onCopyLink={handleCopyLink}
+            receipts={receipts}
+            peerCount={peerCount}
+            isDm={isDm}
           />
         );
 

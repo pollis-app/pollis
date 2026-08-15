@@ -575,6 +575,8 @@ pub fn run() {
             commands::messages::add_reaction,
             commands::messages::remove_reaction,
             commands::messages::get_reactions,
+            commands::messages::mark_messages_read,
+            commands::messages::get_conversation_receipts,
             commands::messages::delete_message,
             commands::messages::edit_message,
             commands::messages::get_message_retention,

@@ -86,6 +86,40 @@ const REDACT_FRAMING_V1: u8 = 0xF6;
 /// frame markers so the two namespaces never collide.
 const THREAD_TRAILER_V1: u8 = 0xF7;
 
+/// First byte of the v1 **receipt control frame** (#857, DMs only).
+///
+/// A delivery/read receipt is an ordinary MLS application message whose
+/// plaintext is
+///
+/// ```text
+///  byte 0          : RECEIPT_FRAMING_V1 (0xF8)
+///  byte 1          : kind — 0 = delivered, 1 = read
+///  bytes 2..6      : u32 LE  length of the RFC3339 timestamp
+///  bytes 6..6+T    : timestamp (UTF-8)
+///  next 4 bytes    : u32 LE  message-id count
+///  then, per id    : u32 LE length + id bytes (ULID, UTF-8)
+///  remainder       : zero padding up to the size bucket
+/// ```
+///
+/// zero-padded to a size bucket exactly like every other frame, so on the wire
+/// (and in a Turso breach) a receipt is indistinguishable **by length** from a
+/// short text message and the server never learns who read what, or when. It
+/// rides `/v1/messages/send` as an ordinary `type='message'` envelope for the
+/// same reason: a dedicated `/v1/receipts/*` endpoint would put "this is a
+/// receipt" in the request line, handing the untrusted DS precisely the metadata
+/// this frame exists to withhold.
+///
+/// Receipts are **batched** — one frame carries every message id a reader is
+/// acknowledging in that conversation — so a burst of catch-up ingest emits one
+/// envelope, not one per message.
+///
+/// Drawn from the same non-UTF-8 `0xF5..=0xFF` range as the other markers, which
+/// is what makes the back-compat degradation safe: a client that predates
+/// receipts hits the `strip` fallback, gets the buffer verbatim, fails the
+/// `String::from_utf8` check in the ingest path, and silently ignores the frame
+/// instead of rendering mojibake. See `old_client_ignores_receipt_frame`.
+const RECEIPT_FRAMING_V1: u8 = 0xF8;
+
 /// Framing header: 1 version byte + 4-byte little-endian length prefix. Shared
 /// by the padded-text ([`PAD_FRAMING_V1`]) and redaction ([`REDACT_FRAMING_V1`])
 /// frames.
@@ -162,10 +196,56 @@ pub(crate) fn strip(buf: &[u8]) -> Vec<u8> {
     buf[HEADER..end].to_vec()
 }
 
+/// Which of the two receipt signals a [`Frame::Receipt`] carries (#857).
+///
+/// The two are deliberately **distinct** and never conflated:
+/// - [`ReceiptKind::Delivered`] — the reader's device fetched the envelope and
+///   successfully MLS-decrypted it. Emitted by the ingest path; says nothing
+///   about a human.
+/// - [`ReceiptKind::Read`] — a human actually saw the message: it was on screen,
+///   in a focused window, in the conversation the user is looking at. Emitted
+///   only by an explicit foreground call from the renderer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ReceiptKind {
+    Delivered,
+    Read,
+}
+
+impl ReceiptKind {
+    /// Wire byte. Stable — it is inside the MLS ciphertext, but old and new
+    /// clients must still agree.
+    fn to_byte(self) -> u8 {
+        match self {
+            ReceiptKind::Delivered => 0,
+            ReceiptKind::Read => 1,
+        }
+    }
+
+    fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(ReceiptKind::Delivered),
+            1 => Some(ReceiptKind::Read),
+            // An unknown kind from a future client is dropped rather than
+            // guessed — recording it under the wrong kind would be worse than
+            // not recording it.
+            _ => None,
+        }
+    }
+
+    /// The `message_receipt.kind` column value.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            ReceiptKind::Delivered => "delivered",
+            ReceiptKind::Read => "read",
+        }
+    }
+}
+
 /// A decrypted, de-framed message payload. Ordinary text (a text message, an
 /// edit, or an attachment envelope) is [`Frame::Text`] carrying the exact
 /// plaintext; a "delete for everyone" control message is
-/// [`Frame::Redaction`] carrying the target message id.
+/// [`Frame::Redaction`] carrying the target message id; a delivery/read
+/// acknowledgement is [`Frame::Receipt`] (#857).
 pub(crate) enum Frame {
     Text {
         text: Vec<u8>,
@@ -175,6 +255,15 @@ pub(crate) enum Frame {
         thread_id: Option<String>,
     },
     Redaction(String),
+    Receipt {
+        kind: ReceiptKind,
+        /// The reader's own RFC3339 timestamp for the acknowledgement. Inside
+        /// authenticated ciphertext, so only the reader could have written it.
+        at: String,
+        /// Every message id this frame acknowledges. Batched, so one envelope
+        /// covers a whole catch-up burst.
+        message_ids: Vec<String>,
+    },
 }
 
 /// Wrap `target_message_id` in the v1 redaction framing and zero-pad it to its
@@ -191,16 +280,90 @@ pub(crate) fn pad_redaction(target_message_id: &str) -> Vec<u8> {
     buf
 }
 
+/// Wrap a batch of receipt acknowledgements in the v1 receipt framing and
+/// zero-pad to the size bucket (#857). See [`RECEIPT_FRAMING_V1`] for the layout.
+///
+/// The buffer is handed to `try_mls_encrypt` exactly like a text send, so a
+/// receipt is length-indistinguishable from a short message.
+pub(crate) fn pad_receipt(kind: ReceiptKind, at: &str, message_ids: &[String]) -> Vec<u8> {
+    let at_bytes = at.as_bytes();
+    let mut buf = Vec::with_capacity(2 + 4 + at_bytes.len() + 4 + message_ids.len() * 30);
+    buf.push(RECEIPT_FRAMING_V1);
+    buf.push(kind.to_byte());
+    buf.extend_from_slice(&(at_bytes.len() as u32).to_le_bytes());
+    buf.extend_from_slice(at_bytes);
+    buf.extend_from_slice(&(message_ids.len() as u32).to_le_bytes());
+    for id in message_ids {
+        let id_bytes = id.as_bytes();
+        buf.extend_from_slice(&(id_bytes.len() as u32).to_le_bytes());
+        buf.extend_from_slice(id_bytes);
+    }
+    let target = padded_len(buf.len());
+    buf.resize(target, 0u8);
+    buf
+}
+
+/// Read a u32 LE at `at`, returning the value and the offset just past it.
+/// `None` when the four bytes are not fully inside `buf` — every caller is
+/// parsing a buffer it did not build, so no read may be assumed in-bounds.
+fn read_u32(buf: &[u8], at: usize) -> Option<(usize, usize)> {
+    let end = at.checked_add(4)?;
+    if end > buf.len() {
+        return None;
+    }
+    let v = u32::from_le_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]) as usize;
+    Some((v, end))
+}
+
+/// Read a u32-LE-length-prefixed UTF-8 string at `at`, returning it and the
+/// offset just past it. `None` on any overrun or invalid UTF-8.
+fn read_str(buf: &[u8], at: usize) -> Option<(String, usize)> {
+    let (len, after_len) = read_u32(buf, at)?;
+    let end = after_len.checked_add(len)?;
+    if end > buf.len() {
+        return None;
+    }
+    let s = std::str::from_utf8(&buf[after_len..end]).ok()?.to_string();
+    Some((s, end))
+}
+
+/// Parse a [`RECEIPT_FRAMING_V1`] buffer. `None` for any non-receipt or
+/// malformed buffer, so the caller falls through to the ordinary text path.
+fn parse_receipt(buf: &[u8]) -> Option<Frame> {
+    if buf.first() != Some(&RECEIPT_FRAMING_V1) {
+        return None;
+    }
+    let kind = ReceiptKind::from_byte(*buf.get(1)?)?;
+    let (at, after_at) = read_str(buf, 2)?;
+    let (count, mut pos) = read_u32(buf, after_at)?;
+    // A hostile count must not pre-allocate gigabytes; the ids are read one at a
+    // time and the loop is bounded by the buffer, so cap the reservation only.
+    let mut message_ids = Vec::with_capacity(count.min(1024));
+    for _ in 0..count {
+        let (id, next) = read_str(buf, pos)?;
+        message_ids.push(id);
+        pos = next;
+    }
+    Some(Frame::Receipt { kind, at, message_ids })
+}
+
 /// Classify a decrypted buffer. Keys on the first byte:
 ///
 /// - `0xF6` ([`REDACT_FRAMING_V1`]) → [`Frame::Redaction`] with the target id.
+/// - `0xF8` ([`RECEIPT_FRAMING_V1`]) → [`Frame::Receipt`] (#857).
 /// - anything else — v1 padded text (`0xF5`), legacy unpadded UTF-8, or an
 ///   attachment envelope (`{`) → [`Frame::Text`] via [`strip`].
 ///
-/// A malformed redaction frame (too short, bad length prefix, non-UTF-8 id)
-/// degrades to `Text` — it cannot arise from [`pad_redaction`] and exists only
-/// as belt-and-braces so a hostile buffer can never panic the ingest path.
+/// A malformed redaction or receipt frame (too short, bad length prefix,
+/// non-UTF-8 payload) degrades to `Text` — it cannot arise from
+/// [`pad_redaction`] / [`pad_receipt`] and exists only as belt-and-braces so a
+/// hostile buffer can never panic the ingest path. Such a buffer then fails the
+/// ingest path's `String::from_utf8` check (its lead byte is not valid UTF-8)
+/// and is dropped rather than stored as a visible message.
 pub(crate) fn classify(buf: &[u8]) -> Frame {
+    if let Some(receipt) = parse_receipt(buf) {
+        return receipt;
+    }
     if buf.first() == Some(&REDACT_FRAMING_V1) && buf.len() >= HEADER {
         let len = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
         let end = HEADER + len;
@@ -381,7 +544,7 @@ mod tests {
             let framed = pad_redaction(id);
             match classify(&framed) {
                 Frame::Redaction(got) => assert_eq!(got, id, "redaction id must round-trip"),
-                Frame::Text { .. } => panic!("a redaction frame must classify as Redaction (id={id:?})"),
+                _ => panic!("a redaction frame must classify as Redaction (id={id:?})"),
             }
         }
     }
@@ -410,7 +573,7 @@ mod tests {
         for &buf in cases {
             match classify(buf) {
                 Frame::Text { text, .. } => assert_eq!(text, strip(buf)),
-                Frame::Redaction(_) => panic!("non-redaction payload misclassified: {buf:?}"),
+                _ => panic!("non-redaction payload misclassified: {buf:?}"),
             }
         }
     }
@@ -462,7 +625,7 @@ mod tests {
                 assert_eq!(text, b"in a thread");
                 assert_eq!(thread_id.as_deref(), Some(THREAD));
             }
-            Frame::Redaction(_) => panic!("threaded text misclassified as redaction"),
+            _ => panic!("threaded text misclassified as redaction"),
         }
     }
 
@@ -513,6 +676,171 @@ mod tests {
         bad_utf8.extend_from_slice(&2u32.to_le_bytes());
         bad_utf8.extend_from_slice(&[0xFF, 0xFE]);
         assert_eq!(thread_of(&bad_utf8), None);
+    }
+
+    // ── Receipt frame (#857) ────────────────────────────────────────────────
+
+    const MSG_A: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const MSG_B: &str = "01J8XQ2M5H7NR3T0V9WZ4KDCEB";
+
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// `pad_receipt` -> `classify` recovers the kind, timestamp and the full id
+    /// batch, for both kinds and for batch sizes from empty to large.
+    #[test]
+    fn receipt_roundtrips_kind_time_and_batch() {
+        let at = "2026-08-15T12:34:56.789Z";
+        let batches = vec![
+            ids(&[]),
+            ids(&[MSG_A]),
+            ids(&[MSG_A, MSG_B]),
+            (0..200).map(|i| format!("01ARZ3NDEKTSV4RRFFQ69G5F{i:03}")).collect(),
+        ];
+        for kind in [ReceiptKind::Delivered, ReceiptKind::Read] {
+            for batch in &batches {
+                let framed = pad_receipt(kind, at, batch);
+                match classify(&framed) {
+                    Frame::Receipt { kind: got_kind, at: got_at, message_ids } => {
+                        assert_eq!(got_kind, kind, "kind must round-trip");
+                        assert_eq!(got_at, at, "timestamp must round-trip");
+                        assert_eq!(&message_ids, batch, "the whole batch must round-trip");
+                    }
+                    _ => panic!("a receipt frame must classify as Receipt (kind={kind:?})"),
+                }
+            }
+        }
+    }
+
+    /// Delivered and Read are DISTINCT signals on the wire — the whole point of
+    /// not conflating "your device got it" with "a human saw it". A frame built
+    /// as one must never decode as the other.
+    #[test]
+    fn delivered_and_read_are_distinct_on_the_wire() {
+        let d = pad_receipt(ReceiptKind::Delivered, "2026-08-15T00:00:00Z", &ids(&[MSG_A]));
+        let r = pad_receipt(ReceiptKind::Read, "2026-08-15T00:00:00Z", &ids(&[MSG_A]));
+        assert_ne!(d, r, "the two kinds must not produce identical bytes");
+        match (classify(&d), classify(&r)) {
+            (Frame::Receipt { kind: a, .. }, Frame::Receipt { kind: b, .. }) => {
+                assert_eq!(a, ReceiptKind::Delivered);
+                assert_eq!(b, ReceiptKind::Read);
+            }
+            _ => panic!("both must classify as receipts"),
+        }
+    }
+
+    /// A receipt is padded to the SAME size bucket as a short text message, so
+    /// the DS/Turso cannot pick receipts out of the envelope stream by length.
+    /// This is the property that keeps "who read what, when" off the server.
+    #[test]
+    fn receipt_is_length_indistinguishable_from_text() {
+        let receipt = pad_receipt(ReceiptKind::Read, "2026-08-15T12:34:56Z", &ids(&[MSG_A]));
+        assert_eq!(receipt.len(), MIN_BUCKET);
+        assert_eq!(receipt.len(), pad(b"hey").len());
+        assert_eq!(receipt.len(), pad_redaction(MSG_A).len());
+        // A realistic multi-message catch-up batch still collapses to the floor.
+        let batch = pad_receipt(ReceiptKind::Delivered, "2026-08-15T12:34:56Z", &ids(&[MSG_A, MSG_B]));
+        assert_eq!(batch.len(), MIN_BUCKET);
+        // And a big batch is still bucketed, never a bespoke length.
+        let big: Vec<String> = (0..50).map(|i| format!("01ARZ3NDEKTSV4RRFFQ69G5F{i:03}")).collect();
+        let big_framed = pad_receipt(ReceiptKind::Read, "2026-08-15T12:34:56Z", &big);
+        assert_eq!(big_framed.len(), padded_len(big_framed.len()));
+    }
+
+    /// THE back-compat test. A client that predates receipts only ever calls
+    /// `strip`, which returns a `0xF8` buffer verbatim; the ingest path then
+    /// tries `String::from_utf8` on it. `0xF8` can never begin valid UTF-8, so
+    /// the frame is silently ignored — never rendered as a garbage message.
+    #[test]
+    fn old_client_ignores_receipt_frame() {
+        for kind in [ReceiptKind::Delivered, ReceiptKind::Read] {
+            let framed = pad_receipt(kind, "2026-08-15T00:00:00Z", &ids(&[MSG_A, MSG_B]));
+            assert_eq!(strip(&framed), framed, "an old client's strip returns it verbatim");
+            assert!(
+                String::from_utf8(strip(&framed)).is_err(),
+                "the verbatim buffer must fail UTF-8, so ingest drops it instead of rendering it",
+            );
+            assert_eq!(thread_of(&framed), None, "a receipt is not a threaded text frame");
+        }
+    }
+
+    /// Text, redaction and legacy payloads must never be mistaken for receipts,
+    /// and a receipt must never be mistaken for text or a redaction.
+    #[test]
+    fn receipts_do_not_collide_with_other_frames() {
+        let non_receipts: Vec<Vec<u8>> = vec![
+            pad(b"hello"),
+            pad_threaded(b"hello", THREAD),
+            pad_redaction(MSG_A),
+            b"legacy unpadded".to_vec(),
+            br#"{"_att":[{"hash":"a","key":"k"}]}"#.to_vec(),
+            Vec::new(),
+        ];
+        for buf in &non_receipts {
+            assert!(
+                !matches!(classify(buf), Frame::Receipt { .. }),
+                "non-receipt payload misclassified as a receipt: {buf:?}",
+            );
+        }
+        let receipt = pad_receipt(ReceiptKind::Read, "2026-08-15T00:00:00Z", &ids(&[MSG_A]));
+        assert!(matches!(classify(&receipt), Frame::Receipt { .. }));
+    }
+
+    /// A truncated or hostile receipt frame degrades to `Text` (and is then
+    /// dropped by ingest's UTF-8 check) rather than panicking. These cannot
+    /// arise from `pad_receipt`; the ingest path must survive them anyway,
+    /// because the buffer is only as trustworthy as the sender.
+    #[test]
+    fn malformed_receipt_frame_degrades_to_text() {
+        let cases: Vec<Vec<u8>> = vec![
+            // Lead byte only — no kind byte.
+            vec![RECEIPT_FRAMING_V1],
+            // Unknown kind byte from a future client.
+            {
+                let mut b = vec![RECEIPT_FRAMING_V1, 99];
+                b.extend_from_slice(&1u32.to_le_bytes());
+                b.push(b'x');
+                b.extend_from_slice(&0u32.to_le_bytes());
+                b
+            },
+            // Timestamp length prefix overruns the buffer.
+            {
+                let mut b = vec![RECEIPT_FRAMING_V1, 0];
+                b.extend_from_slice(&9_999u32.to_le_bytes());
+                b.extend_from_slice(b"short");
+                b
+            },
+            // Well-formed timestamp, but the id count promises more than exists.
+            {
+                let mut b = vec![RECEIPT_FRAMING_V1, 1];
+                b.extend_from_slice(&1u32.to_le_bytes());
+                b.push(b't');
+                b.extend_from_slice(&5u32.to_le_bytes());
+                b
+            },
+            // Count would overflow the reservation arithmetic.
+            {
+                let mut b = vec![RECEIPT_FRAMING_V1, 0];
+                b.extend_from_slice(&0u32.to_le_bytes());
+                b.extend_from_slice(&u32::MAX.to_le_bytes());
+                b
+            },
+            // Non-UTF-8 timestamp.
+            {
+                let mut b = vec![RECEIPT_FRAMING_V1, 0];
+                b.extend_from_slice(&2u32.to_le_bytes());
+                b.extend_from_slice(&[0xFF, 0xFE]);
+                b.extend_from_slice(&0u32.to_le_bytes());
+                b
+            },
+        ];
+        for buf in &cases {
+            assert!(
+                matches!(classify(buf), Frame::Text { .. }),
+                "malformed receipt must degrade to Text, not panic or parse: {buf:?}",
+            );
+        }
     }
 
     /// The trailer must not defeat the padding it sits inside — a thread reply

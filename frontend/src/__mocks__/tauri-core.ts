@@ -115,6 +115,16 @@ interface MockVoiceGate {
   muted_before_deafen: boolean;
 }
 
+/** Mirrors `MessageReceipts` in `pollis-core/src/commands/messages/receipts.rs`.
+ *  Both sides are lists of user ids, never booleans — that is the whole point
+ *  of the per-reader store, and a mock that collapsed them to a flag could not
+ *  reproduce the multi-participant DM case. */
+interface MockReceipt {
+  message_id: string;
+  delivered_by: string[];
+  read_by: string[];
+}
+
 interface MockStore {
   session: MockUser | null;
   profile: MockProfile | null;
@@ -135,6 +145,10 @@ interface MockStore {
   inviteLinks: MockInviteLink[];
   // Local voice gate (#849). Rust owns this in production.
   voiceGate: MockVoiceGate;
+  // Delivery / read receipts (#857), keyed by conversation id. DM-only in
+  // production — a preload that puts receipts under a channel id is modelling
+  // something the Rust side cannot produce, so the UI must still show nothing.
+  receipts: Record<string, MockReceipt[]>;
   // Held decoded. `get_preferences` is the only thing that serializes it, and
   // preloads may write either shape (see `readPreferences`).
   preferences: Record<string, unknown>;
@@ -200,6 +214,7 @@ const store: MockStore = {
     ptt_held: false,
     muted_before_deafen: false,
   },
+  receipts: preload.receipts ?? {},
   // Lets a test drive the skin: `{ skin: 'refined' }` or its JSON string.
   preferences: readPreferences(preload.preferences),
   clipboard: '',
@@ -791,6 +806,52 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'play_test_tone':
     case 'stop_test_playback':
       return null;
+
+    case 'get_conversation_receipts': {
+      const { conversationId } = args as { conversationId?: string };
+      if (!conversationId) {
+        return [];
+      }
+      return store.receipts[conversationId] ?? [];
+    }
+
+    case 'mark_messages_read': {
+      // Mirrors `receipts::mark_messages_read`: the local reader is added to
+      // `read_by`, and to `delivered_by` too if it was somehow missing — the
+      // real schema has a trigger making "read without delivered" impossible,
+      // so the mock must not be able to represent it either.
+      const { conversationId, userId, messageIds } = args as {
+        conversationId?: string;
+        userId?: string;
+        messageIds?: string[];
+      };
+      if (!conversationId || !userId) {
+        return null;
+      }
+      const list = (store.receipts[conversationId] ??= []);
+      for (const messageId of messageIds ?? []) {
+        // You never acknowledge your own message — `mark_messages_read` in
+        // receipts.rs drops any id whose sender is the acking user. Without
+        // this the viewer's own id lands in `read_by` and a 1:1 DM would
+        // render "read" purely from the sender having looked at the screen.
+        const target = findMessage(messageId);
+        if (!target || target.sender_id === userId) {
+          continue;
+        }
+        let entry = list.find((r) => r.message_id === messageId);
+        if (!entry) {
+          entry = { message_id: messageId, delivered_by: [], read_by: [] };
+          list.push(entry);
+        }
+        if (!entry.delivered_by.includes(userId)) {
+          entry.delivered_by.push(userId);
+        }
+        if (!entry.read_by.includes(userId)) {
+          entry.read_by.push(userId);
+        }
+      }
+      return null;
+    }
 
     case 'write_clipboard_text': {
       const { text } = args as { text: string };

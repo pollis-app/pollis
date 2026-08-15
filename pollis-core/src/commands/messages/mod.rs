@@ -9,6 +9,7 @@ pub(crate) mod framing;
 mod ingest;
 mod reactions;
 mod read;
+mod receipts;
 mod retention;
 mod send;
 mod types;
@@ -45,6 +46,9 @@ pub use ingest::{
 pub use edit_delete::{delete_message, edit_message};
 #[cfg(feature = "test-harness")]
 pub use edit_delete::{edit_message_as, send_redaction_as};
+
+// ── Receipts (delivery / read, DMs only — #857) ──────────────────────────────
+pub use receipts::{get_conversation_receipts, mark_messages_read, MessageReceipts};
 
 // ── Reactions ────────────────────────────────────────────────────────────────
 pub use reactions::{add_reaction, get_reactions, remove_reaction, Reaction};

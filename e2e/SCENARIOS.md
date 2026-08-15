@@ -32,6 +32,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 | M-KICK | A kicks B from group, B loses access | 3 | 2 | ⬜ | |
 | M-LEAVE | B leaves group, A sees membership drop | 2 | 2 | ⬜ | |
 | M-CONV | DM request → accept → message (base) | 5 | 4 | ✅ | two-client.js |
+| M-RCPT | Receipts (#857): A sends, B decrypts while elsewhere → A sees **delivered**; B then opens the DM → A sees **read** | 4 | 2 | 🟡 | two-client-receipts.js. Asserts the intermediate `delivered` state *before* B ever looks, and fails fast if `read` appears early — that ordering is what proves the two signals are not conflated. Needs `ReceiptIndicator` wired into the message row (cross-cutting, owned by the #843 agent). |
 
 ## Single-user scenarios
 

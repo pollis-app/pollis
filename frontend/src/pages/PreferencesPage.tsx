@@ -83,6 +83,7 @@ export const PreferencesPage: React.FC = observer(() => {
   const [fontSize, setFontSize] = useState<number>(15);
   const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
   const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
+  const [sendReadReceipts, setSendReadReceipts] = useState<boolean>(true);
   const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
   // `undefined` until the user touches it — that state means "follow the
@@ -129,6 +130,9 @@ export const PreferencesPage: React.FC = observer(() => {
       }
       if (query.data.allow_sound_effects !== undefined) {
         setAllowSoundEffects(query.data.allow_sound_effects);
+      }
+      if (query.data.send_read_receipts !== undefined) {
+        setSendReadReceipts(query.data.send_read_receipts);
       }
       if (query.data.sidebar_open_by_default !== undefined) {
         setSidebarOpenByDefault(query.data.sidebar_open_by_default);
@@ -179,6 +183,7 @@ export const PreferencesPage: React.FC = observer(() => {
     bgH?: number; bgS?: number; bgL?: number;
     skin?: Skin;
     notifications?: boolean; soundEffects?: boolean;
+    sendReadReceipts?: boolean;
     sidebarOpenByDefault?: boolean;
     rightPanelOpenByDefault?: boolean;
     closeToTray?: boolean;
@@ -193,6 +198,7 @@ export const PreferencesPage: React.FC = observer(() => {
     const bl = opts.bgL ?? bgLightness;
     const notif = opts.notifications ?? allowDesktopNotifications;
     const sfx = opts.soundEffects ?? allowSoundEffects;
+    const receipts = opts.sendReadReceipts ?? sendReadReceipts;
     const sidebar = opts.sidebarOpenByDefault ?? sidebarOpenByDefault;
     const rightPanel = opts.rightPanelOpenByDefault ?? rightPanelOpenByDefault;
     const tray = opts.closeToTray ?? closeToTray;
@@ -215,6 +221,7 @@ export const PreferencesPage: React.FC = observer(() => {
       skin: skinVal,
       allow_desktop_notifications: notif,
       allow_sound_effects: sfx,
+      send_read_receipts: receipts,
       sidebar_open_by_default: sidebar,
       right_panel_open_by_default: rightPanel,
       close_to_tray: tray,
@@ -224,7 +231,7 @@ export const PreferencesPage: React.FC = observer(() => {
       relay_serving_wifi_only: relay.wifi_only,
       relay_serving_power_only: relay.power_only,
     });
-  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode, relayServing]);
+  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sendReadReceipts, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode, relayServing]);
 
   // Drive the merged overlay engine (`set_overlay_mode`) to `val`, live. Never
   // throws: a rejected apply (e.g. Strict with no relay reachable — the engine
@@ -377,6 +384,11 @@ export const PreferencesPage: React.FC = observer(() => {
   const handleAllowSoundEffects = (val: boolean) => {
     setAllowSoundEffects(val);
     save({ soundEffects: val });
+  };
+
+  const handleSendReadReceipts = (val: boolean) => {
+    setSendReadReceipts(val);
+    save({ sendReadReceipts: val });
   };
 
   const handleSidebarOpenByDefault = (val: boolean) => {
@@ -781,6 +793,30 @@ export const PreferencesPage: React.FC = observer(() => {
                 checked={allowSoundEffects}
                 onChange={handleAllowSoundEffects}
               />
+            </section>
+
+            {/* Read receipts (#857) — DMs only. */}
+            <section className="flex flex-col gap-4 mb-12">
+              <h2
+                className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+                style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+              >
+                Read receipts
+              </h2>
+              <Switch
+                id="pref-read-receipts"
+                label="Send read receipts"
+                checked={sendReadReceipts}
+                onChange={handleSendReadReceipts}
+              />
+              <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                In direct messages, lets the people you are talking to see when their
+                messages reached your device and when you read them. Turning this off
+                also hides <em>their</em> receipts from you — you will no longer see
+                whether your own messages were delivered or read. Receipts are
+                end-to-end encrypted like any message; our servers never see who read
+                what. Group channels never send receipts.
+              </p>
             </section>
 
             {/* Local message history (this device) — device-local retention

@@ -89,6 +89,16 @@ pub async fn get_reactions(message_id: String, state: State<'_, Arc<AppState>>) 
 }
 
 #[tauri::command]
+pub async fn mark_messages_read(conversation_id: String, user_id: String, message_ids: Vec<String>, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::messages::mark_messages_read(conversation_id, user_id, message_ids, &state).await
+}
+
+#[tauri::command]
+pub async fn get_conversation_receipts(conversation_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<MessageReceipts>> {
+    pollis_core::commands::messages::get_conversation_receipts(conversation_id, &state).await
+}
+
+#[tauri::command]
 pub async fn delete_message(message_id: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::messages::delete_message(message_id, user_id, &state).await
 }

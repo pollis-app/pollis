@@ -11,6 +11,8 @@ import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "../bridge";
 import { voiceSession } from "../voice";
 import { KeyChangeBanner } from "../components/Security/KeyChangeBanner";
+import { useReadReceipts } from "../hooks/useReadReceipts";
+import { useSendReadReceipts } from "../hooks/queries/usePreferences";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
@@ -25,6 +27,8 @@ export const DMPage: React.FC = observer(() => {
   const setOutgoingCall = appStore.setOutgoingCall;
   const outgoingCall = appStore.outgoingCall;
 
+  const sendReadReceipts = useSendReadReceipts();
+
   const [otherUserId, setOtherUserId] = React.useState<string | null>(null);
   const [memberCount, setMemberCount] = React.useState<number>(0);
   const [otherAcceptedAt, setOtherAcceptedAt] = React.useState<string | null>(null);
@@ -36,6 +40,15 @@ export const DMPage: React.FC = observer(() => {
     markRead(conversationId);
     return () => { setSelectedConversationId(null); };
   }, [conversationId, setSelectedConversationId, markRead]);
+
+  // Read receipts (#857) — DMs only, which is why this is mounted here and not
+  // in the shared MainContent. Deliberately NOT tied to the `markRead` call
+  // above: clearing an unread badge means "you navigated here", while a read
+  // receipt claims a human actually saw a specific message, so the hook does
+  // its own viewport + window-focus tracking. The `send_read_receipts`
+  // preference is enforced in Rust at the emit chokepoint; passing it here just
+  // avoids the pointless work of observing rows we would never report.
+  useReadReceipts(conversationId, currentUser?.id ?? null, sendReadReceipts);
 
   // Fetch member list for the conversation so we can target the right
   // user_id when blocking or calling, and discover whether the other party

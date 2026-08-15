@@ -10,7 +10,8 @@ import { getUsernameColor, useBackgroundIsLight } from "../../utils/usernameColo
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
-import type { Message } from "../../types";
+import { ReceiptIndicator } from "./ReceiptIndicator";
+import type { Message, MessageReceipts } from "../../types";
 
 interface MessageItemProps {
   message: Message;
@@ -40,6 +41,13 @@ interface MessageItemProps {
   isSaved?: boolean;
   onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
+  /** Delivery / read receipts (#857). All optional — when the parent doesn't
+   * pass them no indicator renders. Wired from `MessageList`; receipts exist
+   * for DMs only, so `isDm` gates the whole affordance. */
+  receipts?: Map<string, MessageReceipts>;
+  /** DM members excluding the viewer — drives the "2/4" multi-reader summary. */
+  peerCount?: number;
+  isDm?: boolean;
 }
 
 // `created_at` arrives as unix seconds or milliseconds depending on source;
@@ -63,6 +71,9 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   onCopyLink,
   isSaved = false,
   onScrollToReply,
+  receipts,
+  peerCount = 0,
+  isDm = false,
 }) => {
   const { currentUser } = appStore;
   const isOwn = message.sender_id === currentUser?.id;
@@ -239,6 +250,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 [{message.status}]
               </span>
             )}
+            <ReceiptIndicator
+              receipts={receipts?.get(message.id)}
+              peerCount={peerCount}
+              visible={isOwn && isDm}
+            />
           </div>
 
           {/* Inline previews for media URLs typed in the message body */}
@@ -425,6 +441,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               [{message.status}]
             </span>
           )}
+          <ReceiptIndicator
+            receipts={receipts?.get(message.id)}
+            peerCount={peerCount}
+            visible={isOwn && isDm}
+          />
         </span>
 
         {/* Action buttons — only visible on hover */}

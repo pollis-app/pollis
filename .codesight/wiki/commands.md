@@ -234,7 +234,7 @@ The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *
 
 ## Appendix A — full registered-command inventory (names only)
 
-Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813. **175 commands.** (169 as of the #714 snapshot, plus the six `emoji` commands added by #848. NOTE for whoever merges the parallel feature branches: #849 also adds commands and bumped this same number independently — the merged total is 169 + 6 + #849's, not 175.) Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
+Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, and the two `messages` receipt commands added by #857. **194 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
 
 Regenerate with:
 
@@ -280,12 +280,12 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **175 commands** in 26 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **194 commands** in 27 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
 
-**`(root)`** (3) — `hide_window`, `read_clipboard_files`, `read_clipboard_image_to_temp`
+**`(root)`** (4) — `hide_window`, `read_clipboard_files`, `read_clipboard_image_to_temp`, `write_clipboard_text`
 
 **`tray`** (4) — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
 
@@ -327,7 +327,7 @@ than hand-edit.
 
 **`install_kind`** (1) — `detect_managed_install`
 
-**`voice`** (17) — `get_last_join_timings`, `get_voice_gate_state`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `release_voice_ptt`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_input_mode`, `set_voice_output_device`, `set_voice_ptt_held`, `subscribe_voice_events`, `toggle_voice_deafen`, `toggle_voice_mute`
+**`voice`** (16) — `get_last_join_timings`, `get_voice_gate_state`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `release_voice_ptt`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_input_mode`, `set_voice_output_device`, `set_voice_ptt_held`, `subscribe_voice_events`, `toggle_voice_deafen`, `toggle_voice_mute`
 
 **`voice_test`** (7) — `play_test_tone`, `record_and_play_back`, `set_mic_test_monitor`, `start_mic_test`, `stop_mic_test`, `stop_test_playback`, `subscribe_voice_test_events`
 

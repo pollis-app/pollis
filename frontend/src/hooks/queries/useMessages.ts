@@ -368,6 +368,7 @@ export function useDMConversations() {
           user2_identifier: other?.username || other?.user_id || 'Unknown',
           user2_id: other?.user_id,
           user2_avatar_url: other?.avatar_url,
+          member_count: c.members.length,
           created_at: new Date(c.created_at).getTime(),
           updated_at: new Date(c.created_at).getTime(),
         };

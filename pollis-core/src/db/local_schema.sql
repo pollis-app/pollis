@@ -117,6 +117,40 @@ CREATE TABLE IF NOT EXISTS user_cache (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Delivery / read receipts for DM messages (#857).
+--
+-- PER MESSAGE, PER READER, PER KIND — never a boolean on the message. A DM can
+-- have several members, so "who has received this" and "who has read this" are
+-- sets, and the 1:1 case is just the N=1 row count. `reader_id` is always the
+-- MLS credential recovered from inside the receipt's ciphertext, so a member can
+-- only ever speak for themselves.
+--
+-- Device-local by design: a receipt is a fact this device has learned, and
+-- keeping it off the server is the whole point — the DS never sees who read
+-- what, or when. `at` is the reader's own timestamp, carried inside the
+-- authenticated ciphertext.
+CREATE TABLE IF NOT EXISTS message_receipt (
+    message_id TEXT NOT NULL,
+    reader_id  TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('delivered', 'read')),
+    at         TEXT NOT NULL,
+    PRIMARY KEY (message_id, reader_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_message_receipt_message ON message_receipt(message_id);
+
+-- "Read implies delivered" enforced at the LOWEST layer (see
+-- docs/backend-core-invariants.md): you cannot have read a message your device
+-- never received. Recording a read materialises the matching delivered row, so
+-- the state "read but not delivered" is physically unrepresentable rather than
+-- something every caller has to remember to maintain.
+CREATE TRIGGER IF NOT EXISTS message_receipt_read_implies_delivered
+AFTER INSERT ON message_receipt
+WHEN NEW.kind = 'read'
+BEGIN
+    INSERT OR IGNORE INTO message_receipt (message_id, reader_id, kind, at)
+    VALUES (NEW.message_id, NEW.reader_id, 'delivered', NEW.at);
+END;
+
 -- Safety-number / contact verification pins (Signal-style).
 -- TOFU: the first account_id_pub seen for a peer is stored here. A later
 -- mismatch is surfaced as a "changed" status and clears `verified`. Lives
