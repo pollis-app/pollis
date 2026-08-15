@@ -1,6 +1,9 @@
 pub mod account_identity;
 pub mod auth;
 pub mod pin;
+// Idle auto-lock (#851): the deadline + the single resettable timer that
+// drives `pin::lock`. Pure tokio, so it compiles on every target.
+pub mod autolock;
 pub mod blocks;
 // Saved messages + local permalink resolution (#854). Pure rusqlite against the
 // device-local DB — no DS, no Turso, compiles on every target.

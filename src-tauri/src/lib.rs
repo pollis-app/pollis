@@ -438,6 +438,12 @@ pub fn run() {
             // refresh when Preferences remounts.
             commands::relay_serving::install_status_sink(tray_handle.clone());
 
+            // Push the idle auto-lock to the renderer as a global event (#851).
+            // The deadline is owned by Rust because a WebView throttles its own
+            // timers exactly when the window is hidden — the case auto-lock
+            // exists for.
+            commands::autolock::install_auto_lock_sink(tray_handle.clone());
+
             // Holds the "revoke media permissions on quit" preference so the
             // ExitRequested hook can read it synchronously at shutdown.
             tray_handle.manage(commands::media_permissions::MediaPermissionsState::default());
@@ -486,6 +492,8 @@ pub fn run() {
             commands::pin::unlock,
             commands::pin::lock,
             commands::pin::get_unlock_state,
+            commands::autolock::set_auto_lock_timeout,
+            commands::autolock::report_user_activity,
             commands::auth::list_user_devices,
             commands::auth::revoke_device,
             commands::auth::is_current_device_registered,
