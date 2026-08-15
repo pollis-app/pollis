@@ -116,6 +116,22 @@ pub(crate) fn receipts_enabled(conn: &rusqlite::Connection) -> bool {
         .unwrap_or(true)
 }
 
+/// THE gate on all receipt activity, in one pure predicate — emitting and
+/// recording, both kinds, every call site.
+///
+/// Both conditions are load-bearing and neither is a nicety:
+/// * `is_dm` — #857 is DMs-only. A group channel emits nothing and records
+///   nothing. Not behind a flag, not "while we're here".
+/// * `enabled` — the user's `send_read_receipts` preference. Reciprocal, so it
+///   gates the recording direction too.
+///
+/// Pure so the whole truth table is testable without a database or a network,
+/// which is what makes "a receipt is never produced in a group channel" an
+/// asserted invariant rather than a claim about two call sites.
+pub(crate) fn receipts_permitted(is_dm: bool, enabled: bool) -> bool {
+    is_dm && enabled
+}
+
 /// Record one inbound receipt locally.
 ///
 /// `reader_id` MUST be the MLS-authenticated credential of the receipt's author,
@@ -124,14 +140,16 @@ pub(crate) fn receipts_enabled(conn: &rusqlite::Connection) -> bool {
 /// Refuses while the reciprocal opt-out is off: a user who does not send
 /// receipts does not collect them either, so "you can't see theirs" is enforced
 /// by the absence of rows rather than by the renderer choosing not to look.
+/// Refuses outside a DM for the same reason the emit side does.
 pub(crate) fn record_receipt(
     conn: &rusqlite::Connection,
     message_id: &str,
     reader_id: &str,
     kind: ReceiptKind,
     at: &str,
+    is_dm: bool,
 ) {
-    if !receipts_enabled(conn) {
+    if !receipts_permitted(is_dm, receipts_enabled(conn)) {
         return;
     }
     // `INSERT OR IGNORE`: the (message_id, reader_id, kind) primary key makes a
@@ -187,11 +205,9 @@ pub(crate) async fn emit_receipt(
     if message_ids.is_empty() {
         return Ok(());
     }
-    // Scope gate. A group channel must never produce a receipt — not behind a
-    // flag, not "while we're here".
-    if !is_dm(state, conversation_id).await? {
-        return Ok(());
-    }
+    // Scope gate, resolved against the database rather than trusted from the
+    // caller: a group channel must never produce a receipt.
+    let dm = is_dm(state, conversation_id).await?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let ciphertext_remote = {
@@ -199,9 +215,9 @@ pub(crate) async fn emit_receipt(
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-        // Opt-out gate, read under the same lock as the encrypt so the decision
-        // and the act cannot straddle a preference change.
-        if !receipts_enabled(db.conn()) {
+        // Both gates together, under the same lock as the encrypt so the
+        // decision and the act cannot straddle a preference change.
+        if !receipts_permitted(dm, receipts_enabled(db.conn())) {
             return Ok(());
         }
         let plaintext = super::framing::pad_receipt(kind, &now, message_ids);
@@ -417,6 +433,43 @@ mod tests {
         rows.map(|r| r.unwrap()).collect()
     }
 
+    /// **DMs only.** The single most important scope property of #857: a group
+    /// channel must never produce or record a receipt, whatever the preference
+    /// says. Exhaustive over the whole two-bit truth table, so the "not behind a
+    /// flag, not while we're here" requirement is asserted, not asserted-about.
+    #[test]
+    fn receipts_are_permitted_only_in_dms() {
+        assert!(receipts_permitted(true, true), "a DM with receipts on");
+        assert!(
+            !receipts_permitted(false, true),
+            "a GROUP CHANNEL must never produce a receipt, even with the preference on",
+        );
+        assert!(
+            !receipts_permitted(true, false),
+            "a DM must produce nothing while the user has opted out",
+        );
+        assert!(!receipts_permitted(false, false), "neither");
+    }
+
+    /// The DM-only rule holds on the RECORDING side too, not just the emitting
+    /// side — a receipt frame that somehow arrives in a group channel is
+    /// dropped rather than honoured.
+    #[test]
+    fn a_group_channel_records_no_receipts() {
+        let db = db();
+        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t0", false);
+        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Read, "t1", false);
+        assert!(
+            receipt_rows(db.conn(), "m1").is_empty(),
+            "a group channel must not accumulate receipts",
+        );
+
+        // Same inputs, in a DM: recorded. Proves the test above is not passing
+        // for some unrelated reason.
+        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t0", true);
+        assert_eq!(receipt_rows(db.conn(), "m1").len(), 1);
+    }
+
     /// Default is ON, and every shape of missing/broken cache must also read as
     /// ON — a cold or corrupt preferences row must never silently disable a
     /// feature the user did not turn off.
@@ -440,8 +493,8 @@ mod tests {
         set_pref(db.conn(), r#"{"send_read_receipts":false}"#);
         assert!(!receipts_enabled(db.conn()));
 
-        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t0");
-        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Read, "t1");
+        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t0", true);
+        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Read, "t1", true);
         assert!(
             receipt_rows(db.conn(), "m1").is_empty(),
             "an opted-out device must not collect other people's receipts either",
@@ -449,7 +502,7 @@ mod tests {
 
         // Flipping it back on resumes collection from that moment.
         set_pref(db.conn(), r#"{"send_read_receipts":true}"#);
-        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t2");
+        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t2", true);
         assert_eq!(
             receipt_rows(db.conn(), "m1"),
             vec![("bob".to_string(), "delivered".to_string())],
@@ -464,10 +517,10 @@ mod tests {
         let db = db();
         // Three peers received it; only two of them actually read it.
         for reader in ["bob", "carol", "dave"] {
-            record_receipt(db.conn(), "m1", reader, ReceiptKind::Delivered, "t0");
+            record_receipt(db.conn(), "m1", reader, ReceiptKind::Delivered, "t0", true);
         }
         for reader in ["bob", "dave"] {
-            record_receipt(db.conn(), "m1", reader, ReceiptKind::Read, "t1");
+            record_receipt(db.conn(), "m1", reader, ReceiptKind::Read, "t1", true);
         }
 
         let rows = receipt_rows(db.conn(), "m1");
@@ -533,8 +586,8 @@ mod tests {
     #[test]
     fn recording_is_idempotent_and_keeps_the_first_timestamp() {
         let db = db();
-        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t-first");
-        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t-second");
+        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t-first", true);
+        record_receipt(db.conn(), "m1", "bob", ReceiptKind::Delivered, "t-second", true);
         assert_eq!(receipt_rows(db.conn(), "m1").len(), 1);
         let at: String = db
             .conn()

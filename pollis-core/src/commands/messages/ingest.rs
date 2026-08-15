@@ -658,18 +658,19 @@ fn decrypt_and_persist_one(
                 // never itself acknowledged. That is what keeps two clients from
                 // ping-ponging receipts forever.
                 super::framing::Frame::Receipt { kind, at, message_ids } => {
-                    // DMs only. A receipt frame arriving in a group channel is
-                    // dropped outright: #857 excludes group channels on the
-                    // recording side as well as the emitting side, so a client
-                    // that emitted one anyway cannot create the behaviour here.
-                    if !is_dm {
-                        return None;
-                    }
                     // Our own receipt, echoed back to us from the conversation
                     // we posted it to. Nothing to learn from it.
                     if cred_sender == user_id {
                         return None;
                     }
+                    // `is_dm` is passed through to the recorder rather than
+                    // checked here: #857 excludes group channels on the
+                    // recording side as well as the emitting side, and putting
+                    // that decision in `receipts_permitted` keeps it one
+                    // testable predicate instead of two call sites that have to
+                    // agree. A receipt frame that somehow reaches a group
+                    // channel is therefore dropped, not honoured.
+                    //
                     // `cred_sender` is the MLS-authenticated author of the
                     // frame, so a member can only ever record a receipt in their
                     // OWN name — neither the server nor another member can
@@ -681,6 +682,7 @@ fn decrypt_and_persist_one(
                             &cred_sender,
                             kind,
                             &at,
+                            is_dm,
                         );
                     }
                 }
