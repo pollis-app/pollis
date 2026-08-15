@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Hash, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon } from "lucide-react";
+import { Hash, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon, Link as LinkIcon } from "lucide-react";
 import { PresenceAvatar } from "./ui/PresenceAvatar";
 import { useUserGroupsWithChannels, useAllGroupMembers, type GroupMemberWithGroup } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
@@ -8,6 +8,8 @@ import { observer } from "mobx-react-lite";
 import { appStore } from "../stores/appStore";
 import type { GroupWithChannels } from "../services/api";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
+import { parseMessagePermalink } from "../utils/urlRouting";
+import { useMessagePermalink } from "../hooks/useMessagePermalink";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -199,6 +201,7 @@ const PAGE_RESULTS: SearchResultItem[] = [
   { type: "page", id: "page-groups", name: "Groups", breadcrumb: "/groups", path: "/groups", keywords: "list all" },
   { type: "page", id: "page-groups-new", name: "Create Group", breadcrumb: "/groups/new", path: "/groups/new", keywords: "new create" },
   { type: "page", id: "page-groups-search", name: "Find Groups", breadcrumb: "/groups/search", path: "/groups/search", keywords: "discover search public" },
+  { type: "page", id: "page-saved", name: "Saved", breadcrumb: "/saved", path: "/saved", keywords: "saved bookmark bookmarks starred pinned later permalink link" },
   { type: "page", id: "page-arcade", name: "Arcade", breadcrumb: "/arcade", path: "/arcade", keywords: "arcade game asteroids ship shoot easter egg play" },
 ];
 
@@ -223,6 +226,13 @@ function filterResults(
 export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClose }) => {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  // Pasting a message permalink (#854) takes over the panel: there is nothing
+  // to fuzzy-match, the answer is either "jump there" or "you don't have it".
+  const [permalinkStatus, setPermalinkStatus] = useState<
+    "checking" | "found" | "missing"
+  >("checking");
+  const { openPermalink } = useMessagePermalink();
+  const permalink = useMemo(() => parseMessagePermalink(query), [query]);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -252,6 +262,35 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     }
     return combined;
   }, [groupsWithChannels, dmConversations, allGroupMembers, activeVoiceChannelId, currentUserId]);
+
+  // Resolve a pasted permalink against the LOCAL database only. There is no
+  // server lookup here and there must never be one — that endpoint is what
+  // would turn a permalink from an inert pointer into a leak.
+  useEffect(() => {
+    if (!permalink) {
+      return;
+    }
+    let cancelled = false;
+    setPermalinkStatus("checking");
+    void (async () => {
+      const jumped = await openPermalink(
+        permalink.conversationId,
+        permalink.messageId,
+      );
+      if (cancelled) {
+        return;
+      }
+      if (jumped) {
+        setPermalinkStatus("found");
+        onClose();
+      } else {
+        setPermalinkStatus("missing");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [permalink, openPermalink, onClose]);
 
   // Filter based on query
   const filteredItems = useMemo(
@@ -344,6 +383,11 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         }
         case "Enter": {
           e.preventDefault();
+          // A pasted permalink resolves on its own; Enter must not fall through
+          // and navigate to whatever unrelated result happens to be selected.
+          if (permalink) {
+            break;
+          }
           const item = filteredItems[selectedIndex];
           if (item) {
             handleSelect(item);
@@ -492,7 +536,25 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
           className="overflow-y-auto"
           style={{ flex: 1 }}
         >
-          {filteredItems.length === 0 ? (
+          {permalink ? (
+            // A permalink is a pointer, not a capability, so the two outcomes
+            // are simply "we have it" or "we don't". The missing case must not
+            // hint at whether the message exists, who sent it, or what it says.
+            <div
+              data-testid="search-panel-permalink"
+              className="flex items-center gap-3 px-4 py-3 font-mono text-xs"
+              style={{ color: "var(--c-text-muted)" }}
+            >
+              <LinkIcon size={14} className="flex-shrink-0" />
+              {permalinkStatus === "missing" ? (
+                <span data-testid="permalink-unresolved">
+                  You do not have this message on this device.
+                </span>
+              ) : (
+                <span data-testid="permalink-resolving">Opening message…</span>
+              )}
+            </div>
+          ) : filteredItems.length === 0 ? (
             <div
               data-testid="search-panel-empty"
               className="text-center py-8 font-mono text-xs"

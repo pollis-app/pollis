@@ -1,0 +1,29 @@
+/*
+ * Permalink jump highlight (#854).
+ *
+ * Applied imperatively to the target message row so the flash needs no change
+ * to `MessageItem` and no extra wrapper element in the message timeline.
+ *
+ * Token-backed, so it reads correctly in both the terminal and refined skins
+ * rather than hard-coding a colour that only suits one of them. The accent is
+ * used at low alpha via colour-mix, which keeps it a flat tint — no glow.
+ */
+@keyframes pollis-message-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--c-accent) 28%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.pollis-message-flash {
+  animation: pollis-message-flash 1.8s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pollis-message-flash {
+    animation: none;
+    background-color: color-mix(in srgb, var(--c-accent) 18%, transparent);
+  }
+}

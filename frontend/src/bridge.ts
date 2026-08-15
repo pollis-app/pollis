@@ -15,7 +15,8 @@
  *                                 convertFileSrc
  *  - `bridge/notifications.ts`  — isPermissionGranted / requestPermission /
  *                                 sendNotification
- *  - `bridge/clipboard.ts`      — readClipboardFiles / readClipboardImageToTemp
+ *  - `bridge/clipboard.ts`      — readClipboardFiles / readClipboardImageToTemp /
+ *                                 writeClipboardText
  *  - `bridge/updater.ts`        — check
  *  - `bridge/tray.ts`           — tray / menu-bar
  *
@@ -82,6 +83,7 @@ export {
 export {
   readClipboardFiles,
   readClipboardImageToTemp,
+  writeClipboardText,
 } from "./bridge/clipboard";
 
 // Updater.
