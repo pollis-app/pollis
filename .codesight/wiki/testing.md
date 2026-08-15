@@ -1,10 +1,11 @@
 # Testing
 
-Pollis has three tiers of automated tests:
+Pollis has four tiers of automated tests:
 
 1. **Unit tests** (in-crate `#[cfg(test)]` modules) — pure logic, in-memory rusqlite schemas, no I/O.
 2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end against a disposable test Turso database. Most of this document covers the harness.
-3. **WebDriver E2E tests** (`e2e/`) — drives the real shipped Tauri app (native WebKitGTK WebView, real Rust core) via `tauri-driver`. See [WebDriver E2E tests](#webdriver-e2e-tests-e2e) below.
+3. **WebDriver E2E tests** (`e2e/*.js`) — drives the real shipped Tauri app (native WebKitGTK WebView, real Rust core) via `tauri-driver`. See [WebDriver E2E tests](#webdriver-e2e-tests-e2e) below.
+4. **Playwright UI specs** (`e2e/*.spec.js`) — front-end interaction only, against the browser build with `VITE_PLAYWRIGHT=true` (Tauri IPC mocked in `frontend/src/__mocks__/`). No backend, seconds to run. See [Playwright UI specs](#playwright-ui-specs-e2especjs) below.
 
 > The harness is built on top of Tauri's test machinery (`tauri::test::get_ipc_response` + `MockRuntime`). Tauri is the shipping shell, so the harness drives the real command logic through the same dispatch path the app uses, headlessly — `pollis-core` is the unit under test, reached through the `#[tauri::command]` shims exactly as at runtime.
 
@@ -567,3 +568,36 @@ Full details — how the stack is stood up, `.env.test` schema bootstrap,
 `data-testid` conventions, and the WebKitWebDriver quirks (native `.click()`
 doesn't fire React handlers, IPv6-only Vite loopback, orphan-process
 reaping) — live in `e2e/README.md`, not duplicated here.
+
+## Playwright UI specs (`e2e/*.spec.js`)
+
+For behaviour that lives entirely in the renderer — composer interaction,
+per-skin branching, how a message body renders — the native stack costs minutes
+and proves nothing extra. These specs drive the **browser** build with
+`VITE_PLAYWRIGHT=true`, which vite-aliases `@tauri-apps/api/*` to
+`frontend/src/__mocks__/`. Real React tree, real CSS tokens, real `useSkin()`
+branching; no MLS, no delivery service, no Turso.
+
+```bash
+pnpm --filter @pollis/e2e exec playwright install chromium   # once
+pnpm --filter @pollis/e2e e2e:ui                             # all specs
+```
+
+| spec | what it proves |
+|---|---|
+| `mentions.spec.js` | `@username` autocomplete + rendering in BOTH skins (#843) |
+
+Three things to know before writing one:
+
+- **Fixtures go in `window.__POLLIS_PRELOAD__`** via `page.addInitScript`, read
+  once by the mock on load. Extend `MockStore` in `frontend/src/__mocks__/tauri-core.ts`
+  to add a new fixture slice.
+- **Navigate through the UI, not the URL.** The router uses
+  `createMemoryHistory` (`frontend/src/router.tsx`), so `page.goto('/groups/…')`
+  changes the address bar and renders Root anyway. Click
+  `menu-item-groups` → `group-option-<id>` → `channel-option-<id>`.
+- **The mock is a real surface — keep it current.** An unhandled command returns
+  `null`, and `null` is not `undefined`, so `const { data = [] }` defaults do NOT
+  catch it and the page dies in an error boundary. When a Rust command is renamed
+  (`get_channel_messages` → `read_channel_messages`) the mock silently rots until
+  someone runs these specs.
