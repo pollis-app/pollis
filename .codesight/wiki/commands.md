@@ -45,6 +45,19 @@ PIN is cryptographically load-bearing — see `pin-design.md`.
 - `lock()` — drop `AppState.unlock` and close the local DB. Until the next `unlock`, every DB-touching command fails with "Not signed in".
 - `get_unlock_state()` → `{ last_active_user, is_unlocked, pin_set }` — frontend uses this to route between pin-entry, pin-create, and the main app.
 
+## autolock (`commands/autolock.rs`)
+Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns the deadline **and** the timer; the renderer only reports activity and reacts to the resulting event.
+- `set_auto_lock_timeout(minutes?)` — install this device's idle window, or `null` for Off (the default). Rejects anything outside `AUTO_LOCK_OPTIONS_MINUTES` (`1, 5, 15, 60`), so a window the UI could never produce is unrepresentable. Resets the deadline and re-arms; changing the setting counts as activity.
+- `report_user_activity()` — "a human touched this machine". One lock + one field write; the renderer throttles to at most one call per 15s.
+
+**Why the deadline is not in the renderer.** A WebView throttles (and on some platforms suspends) its own timers once the window is hidden or minimized — exactly when an auto-lock most needs to fire, so a JS `setTimeout` would be reliable only in the case that doesn't matter.
+
+**Not polling.** One task sleeps until the current deadline and re-evaluates on wake; reported activity moves the deadline rather than starting a new timer. A generation counter retires the previous task on every reconfigure, so two timers can never race. `Off` spawns nothing at all.
+
+**An active voice session suppresses it** (`VoiceState.room.is_some() || joining`): `pin::lock` closes the local DB, so locking mid-call would leave the call UI unable to read anything while audio kept flowing. The call is treated as continuous activity and the idle clock resumes when it ends.
+
+**Frontend surface:** Security → "Auto-lock" (`SecurityPage.tsx`), next to PIN because it is the same gate reached without pressing anything. The choice is **device-local** (`localStorage`, keyed by user id — see `frontend/src/utils/autoLock.ts`), like font size and the call ringtone: it describes where a machine physically sits, so syncing it would force one answer onto every device. `useAutoLock` (mounted in `AppShell`) pushes the stored value on mount, feeds throttled activity, and disarms on unmount, so the timer is live exactly while there is decrypted content to protect. On expiry Rust locks, then emits the global `auto-lock` event; `App.tsx` routes it through the **same** `handleLock` Cmd/Ctrl+L uses. That handler's transition into `pin-entry` also calls `queryClient.clear()` — without it every message body the user had read would stay decrypted in the module-level React Query cache, which outlives the unmounted shell.
+
 ## user (`commands/user.rs`)
 - `get_user_profile(user_id)` → `User`
 - `update_user_profile(user_id, username?, email?, phone?)` → `User`
@@ -234,7 +247,7 @@ The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *
 
 ## Appendix A — full registered-command inventory (names only)
 
-Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, and the two `messages` receipt commands added by #857. **194 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
+Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, the two `messages` receipt commands added by #857, and the two `autolock` commands added by #851. **196 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
 
 Regenerate with:
 
@@ -243,6 +256,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 ```
 
 - **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image_to_temp`
+- **`autolock`** — `report_user_activity`, `set_auto_lock_timeout`
 - **`auth`** — `delete_account`, `dev_login`, `get_identity`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`
 - **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
@@ -280,7 +294,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **194 commands** in 27 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **196 commands** in 28 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -294,6 +308,8 @@ than hand-edit.
 **`auth`** (15) — `delete_account`, `dev_login`, `get_identity`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 
 **`pin`** (4) — `get_unlock_state`, `lock`, `set_pin`, `unlock`
+
+**`autolock`** (2) — `report_user_activity`, `set_auto_lock_timeout`
 
 **`device_enrollment`** (9) — `approve_device_enrollment`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 

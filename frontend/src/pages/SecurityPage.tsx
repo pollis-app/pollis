@@ -23,6 +23,12 @@ import {
 import { invoke } from "../bridge";
 import { isMac, isLinux, isWindows } from "../utils/platform";
 import { formatDateTime } from "../utils/format";
+import { useShortcutLabel } from "../keyboard";
+import {
+  AUTO_LOCK_OPTIONS,
+  loadDeviceAutoLockMinutes,
+  saveDeviceAutoLockMinutes,
+} from "../utils/autoLock";
 
 // The plain-language explainer for everything on this page — what a root is,
 // what an inclusion tick means, and the difference between "couldn't check" and
@@ -138,6 +144,27 @@ export const SecurityPage: React.FC = observer(() => {
   const revokeMedia = useRevokeMediaPermissions();
   const [revokeMediaOnExit, setRevokeMediaOnExit] = useState<boolean>(false);
   const [confirmingRevoke, setConfirmingRevoke] = useState<boolean>(false);
+
+  // Idle auto-lock (#851). Device-local, like font size and the call ringtone:
+  // it describes where this machine physically sits, so it deliberately does
+  // not sync. Seeded from localStorage once the active user is known.
+  const [autoLockMinutes, setAutoLockMinutes] = useState<number | null>(null);
+  const lockLabel = useShortcutLabel("app.lock");
+
+  useEffect(() => {
+    setAutoLockMinutes(loadDeviceAutoLockMinutes(currentUser?.id));
+  }, [currentUser?.id]);
+
+  const handleAutoLock = (minutes: number | null) => {
+    setAutoLockMinutes(minutes);
+    saveDeviceAutoLockMinutes(currentUser?.id, minutes);
+    // Push straight away rather than waiting for the shell to remount — the
+    // backend owns the deadline, so until it hears about the change nothing
+    // has actually changed.
+    void api.setAutoLockTimeout(minutes).catch((err) => {
+      console.warn("[autolock] failed to apply timeout:", err);
+    });
+  };
 
   useEffect(() => {
     if (prefsQuery.data?.revoke_media_on_exit !== undefined) {
@@ -387,6 +414,61 @@ export const SecurityPage: React.FC = observer(() => {
                 Change PIN
               </Button>
             </div>
+          </section>
+
+          {/* Auto-lock (#851) — sits with PIN because it is the same gate,
+              just reached without pressing anything. Device-local: the answer
+              depends on where this machine physically sits, so it deliberately
+              does not sync to your other devices. */}
+          <section className="flex flex-col gap-4 mb-12" data-testid="auto-lock-section">
+            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+              Auto-lock
+            </h2>
+            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+              Lock Pollis back to the PIN screen after a period with no mouse or
+              keyboard activity, so walking away from this machine doesn't leave
+              your decrypted conversations on screen. You can always lock
+              immediately with {lockLabel}.
+            </p>
+            {/* A group of toggle buttons rather than the `role="radiogroup"`
+                the neighbouring selectors use: without `role="radio"` +
+                `aria-checked` on the children (which would also commit us to
+                arrow-key traversal) a radiogroup announces every option as
+                unselected. `aria-pressed` states the selection honestly, and
+                renders identically. */}
+            <div
+              role="group"
+              aria-label="Auto-lock after inactivity"
+              className="flex gap-2 flex-wrap"
+            >
+              {AUTO_LOCK_OPTIONS.map((option) => {
+                const selected = autoLockMinutes === option.minutes;
+                return (
+                  <Button
+                    key={option.label}
+                    variant={selected ? "primary" : "secondary"}
+                    size="sm"
+                    aria-label={option.label}
+                    aria-pressed={selected}
+                    data-testid={`auto-lock-${option.minutes ?? "off"}`}
+                    onClick={() => {
+                      if (selected) {
+                        return;
+                      }
+                      handleAutoLock(option.minutes);
+                    }}
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
+            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+              Applies to this device only. A call in progress keeps Pollis
+              unlocked — locking would close the local database out from under
+              the call. Nothing is lost when it locks: your messages are on
+              disk, and entering your PIN brings you straight back.
+            </p>
           </section>
 
           {/* Devices */}

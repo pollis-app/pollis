@@ -26,6 +26,7 @@ import { isDropTargetActive } from "../../stores/dropTargetStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
+import { useAutoLock } from "../../hooks/useAutoLock";
 import { AlertTriangle, Download, Mail, Phone, X } from "lucide-react";
 import { startUpdatePolling, stopUpdatePolling } from "../../services/updatePoller";
 import { loadDeviceCallRingtone } from "../../utils/notify";
@@ -295,6 +296,11 @@ export const AppShell: React.FC = observer(() => {
 
   // Sync unread count to OS dock/taskbar badge
   useBadge();
+
+  // Idle auto-lock (#851). Armed for exactly as long as this shell — the only
+  // thing that renders decrypted content — is mounted. The deadline lives in
+  // Rust; this only pushes the device-local window and throttled activity.
+  useAutoLock(currentUser?.id ?? null);
 
   // Sync groups+channels into the store once loaded
   useEffect(() => {

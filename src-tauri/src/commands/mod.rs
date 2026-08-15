@@ -1,6 +1,8 @@
 // Shim modules. Each forwards #[tauri::command]s to pollis_core::commands::*.
 // install_kind stays in src-tauri because it inspects Tauri's bundle metadata.
 pub mod auth;
+// Idle auto-lock (#851).
+pub mod autolock;
 pub mod blocks;
 pub mod bookmarks;
 pub mod device_enrollment;

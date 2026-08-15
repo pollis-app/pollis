@@ -43,6 +43,14 @@ const queryClient = new QueryClient({
   },
 });
 
+// Same rationale as `__pollisStore` above: the query cache is where decrypted
+// message plaintext actually lives, so a test asserting that locking empties it
+// (#851) needs to see the cache, not just the rendered tree — a DOM assertion
+// would pass on an unmount alone and prove nothing about the heap.
+if (import.meta.env.VITE_PLAYWRIGHT === 'true') {
+  (window as any).__pollisQueryClient = queryClient;
+}
+
 const root = createRoot(container!);
 
 root.render(

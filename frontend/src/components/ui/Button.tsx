@@ -20,6 +20,13 @@ interface ButtonProps {
   onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
   autoFocus?: boolean;
   "aria-label"?: string;
+  /**
+   * Selected state for a button acting as a toggle — e.g. one option in a
+   * group of mutually exclusive choices. Without it a "selected" option is
+   * announced identically to an unselected one, since the distinction is
+   * carried only by the `primary` variant's colour.
+   */
+  "aria-pressed"?: boolean;
   "data-testid"?: string;
 }
 
@@ -36,6 +43,7 @@ export const Button: React.FC<ButtonProps> = ({
   onKeyDown,
   autoFocus,
   "aria-label": ariaLabel,
+  "aria-pressed": ariaPressed,
   "data-testid": testId,
 }) => {
   const isPrimary = variant === "primary";
@@ -58,6 +66,7 @@ export const Button: React.FC<ButtonProps> = ({
       onKeyDown={onKeyDown}
       autoFocus={autoFocus}
       aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
       data-testid={testId}
       className={`inline-flex items-center justify-center gap-2 font-mono font-medium rounded-[var(--radius-control)] tracking-[0.5px] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${variantClass} ${size === "xs" ? "px-1.5 py-0.5 text-[10px]" : size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}
     >

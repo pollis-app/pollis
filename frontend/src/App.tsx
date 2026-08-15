@@ -4,7 +4,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { invoke } from "./bridge";
+import { invoke, listen } from "./bridge";
 import { observer } from "mobx-react-lite";
 import { appStore } from "./stores/appStore";
 import { LoginScreen } from "./components/Auth/LoginScreen";
@@ -28,6 +28,7 @@ import { Button } from "./components/ui/Button";
 import { useQueryClient } from "@tanstack/react-query";
 import { installTrayVoiceBridge, installVoiceBridge } from "./voice";
 import { clearAllDrafts } from "./utils/drafts";
+import { AUTO_LOCK_EVENT } from "./utils/autoLock";
 
 type AppState =
   | "initializing"
@@ -271,6 +272,23 @@ function MainApp() {
     clearAllDrafts();
   }, [currentUser?.id]);
 
+  // Locking has to empty the React Query cache, not just stop rendering it.
+  // `pin::lock` drops the keys and closes the local DB, but every message body
+  // the user had already read stays decrypted in the query cache — which is
+  // module-level and outlives AppShell — so without this the plaintext this
+  // feature exists to protect is still sitting in the heap, one devtools
+  // snapshot or one bug that re-renders a stale list away from being readable.
+  //
+  // Keyed on the transition into "pin-entry" so it covers Cmd/Ctrl+L, the
+  // idle auto-lock (#851), and the boot-time PIN gate alike. It runs after
+  // React has committed the pin-entry tree, so AppShell is already unmounted
+  // and no observer is left to refetch against a locked backend.
+  useEffect(() => {
+    if (appState === "pin-entry") {
+      queryClient.clear();
+    }
+  }, [appState, queryClient]);
+
   const handleAuthSuccess = useCallback(async (result: api.AuthResult) => {
     // Branch 1: first-device signup. Show the Secret Key screen and gate
     // navigation until the user types it back to confirm they saved it.
@@ -431,6 +449,28 @@ function MainApp() {
     setPendingPinUser(currentUser);
     setAppState("pin-entry");
   }, [currentUser]);
+
+  // Idle auto-lock (#851): Rust owns the deadline and has already locked by the
+  // time this fires — all that is left is to leave the unlocked UI. Routed
+  // through the very same `handleLock` Cmd/Ctrl+L uses so there is one lock
+  // path, not two that can drift apart.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    void listen(AUTO_LOCK_EVENT, () => {
+      void handleLock();
+    }).then((fn) => {
+      if (disposed) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [handleLock]);
 
   // After delete_account succeeds in Settings, transition to auth screen.
   // Zustand logout() is called in Settings.tsx before this fires.
