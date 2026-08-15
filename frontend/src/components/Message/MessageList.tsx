@@ -15,27 +15,6 @@ import { useMessagePermalink } from "../../hooks/useMessagePermalink";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import type { Message } from "../../types";
 
-// Per-message saved/permalink actions (#854).
-//
-// `MessageItem.tsx` is owned by the #843 mentions work, so it does not declare
-// these props yet — they are filed as a cross-cutting request in
-// FEAT-COORDINATION.md and the lead adds them at integration. Forwarding them
-// now means integration is a no-op rather than another change here: React
-// passes unknown props straight through to the component's props object, where
-// today they are simply ignored, and the save / copy-link buttons light up the
-// moment `MessageItem` renders them.
-//
-// Delete this alias and use `MessageItem` directly once those props exist.
-type BookmarkActionProps = {
-  isSaved?: boolean;
-  onToggleSave?: (messageId: string) => void;
-  onCopyLink?: (messageId: string) => void;
-};
-
-const MessageItemWithBookmarks = MessageItem as React.ComponentType<
-  React.ComponentProps<typeof MessageItem> & BookmarkActionProps
->;
-
 // How long the permalink jump highlight stays on the target row.
 const HIGHLIGHT_MS = 1800;
 
@@ -457,7 +436,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
             </div>
           </div>
         ) : (
-          <MessageItemWithBookmarks
+          <MessageItem
             key={message.id}
             message={message}
             allMessages={sortedMessages}
