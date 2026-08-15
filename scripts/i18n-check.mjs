@@ -8,13 +8,39 @@
  * wrong counts in Russian, Ukrainian and Arabic while passing every other
  * gate we have. So this checks the things that are otherwise invisible:
  *
- *   1. key parity with `en` — nothing missing, nothing orphaned
+ *   1. key parity with `en` — nothing orphaned (hard), nothing missing (WARN)
  *   2. plural families carry EXACTLY the CLDR categories the locale requires,
  *      taken from `Intl.PluralRules` rather than a hand-maintained table
  *   3. interpolation placeholders survive translation in both directions
  *   4. no empty values (an empty string renders as a blank UI slot, which
  *      reads as a bug rather than as missing copy)
  *   5. every `t('ns:key')` call site in the renderer resolves in `en`
+ *
+ * ## Why "missing" is a warning and "orphaned" is not
+ *
+ * `en` is the only catalogue a key may be AUTHORED in, and `fallbackLng: "en"`
+ * means a key the six machine-translated locales have not caught up on renders
+ * the English string — visibly untranslated, never broken. That is the normal
+ * steady state of a live product: a feature lands in English on Tuesday and the
+ * translation pass follows. Failing the build for it would mean every feature
+ * PR either blocks on translation or invents six machine translations nobody
+ * reviewed, which is how a catalogue fills up with confident nonsense.
+ *
+ * So a key present in `en` and absent elsewhere is reported as a WARNING with a
+ * count, and the run still passes. Everything that indicates the catalogue is
+ * WRONG rather than merely BEHIND stays a hard failure:
+ *
+ *   - a key the locale has that `en` does not (orphaned) — a rename or a typo,
+ *     and it is dead weight no code path can ever select;
+ *   - a plural family the locale has STARTED but left incomplete — the exact
+ *     copied-from-English bug this script was written for;
+ *   - placeholder drift, including the rule that a plural form covering more
+ *     than one number must show `{{count}}`;
+ *   - an empty string, which renders as a blank slot instead of falling back;
+ *   - a call site with no `en` entry at all, which renders a raw key id.
+ *
+ * A plural family the locale has not started AT ALL is untranslated, not
+ * broken, so it counts toward the warning like any other missing key.
  *
  * Run: `node scripts/i18n-check.mjs`
  */
@@ -34,6 +60,14 @@ let failures = 0;
 function fail(message) {
   failures += 1;
   console.error(`  ✗ ${message}`);
+}
+
+// Untranslated-but-present-in-English. Reported, never fatal — see the header.
+// `count` is how many KEYS the line stands for, so the summary can total them.
+const untranslatedByLocale = new Map();
+function warn(code, count, message) {
+  console.warn(`  ⚠ ${message}`);
+  untranslatedByLocale.set(code, (untranslatedByLocale.get(code) ?? 0) + count);
 }
 
 /** Flatten `{a:{b:"x"}}` to `{"a.b":"x"}`. */
@@ -138,10 +172,20 @@ for (const code of localeCodes.filter((c) => c !== BASE)) {
   );
 
   // 1. Non-plural key parity.
+  //
+  //    Missing is a WARNING: the key renders its English string via
+  //    `fallbackLng`, which is untranslated, not broken. Orphaned is a
+  //    FAILURE: nothing can ever select it, so it is a rename or a typo.
   const flatBase = baseKeys.filter((k) => !splitPlural(k));
   const missing = flatBase.filter((k) => !(k in locale));
   if (missing.length) {
-    fail(`${missing.length} missing keys, e.g. ${missing.slice(0, 3).join(", ")}`);
+    warn(
+      code,
+      missing.length,
+      `${missing.length} keys not yet translated (renders English), e.g. ${missing
+        .slice(0, 3)
+        .join(", ")}`,
+    );
   }
   const orphaned = Object.keys(locale).filter(
     (k) => !splitPlural(k) && !(k in base),
@@ -153,21 +197,42 @@ for (const code of localeCodes.filter((c) => c !== BASE)) {
   }
 
   // 2. Plural families carry exactly the locale's CLDR categories.
+  //
+  //    A family the locale has not started at all is simply untranslated and
+  //    warns with the missing keys above. A family it has STARTED but left
+  //    incomplete is the copied-from-English bug this whole script exists for,
+  //    and stays a hard failure — i18next would silently fall back per form,
+  //    so half the counts on one screen would read in the wrong language.
   let familiesChecked = 0;
+  let familiesUntranslated = 0;
   for (const family of baseFamilies) {
     const present = expected.filter((s) => `${family}_${s}` in locale);
+    const anyForm = PLURAL_SUFFIXES.some((s) => `${family}_${s}` in locale);
     const extra = PLURAL_SUFFIXES.filter(
       (s) => !declared.includes(s) && `${family}_${s}` in locale,
     );
     if (present.length !== expected.length) {
       const absent = expected.filter((s) => !(`${family}_${s}` in locale));
-      fail(`plural family ${family} missing form(s): ${absent.join(", ")}`);
+      if (!anyForm) {
+        familiesUntranslated += 1;
+      } else {
+        fail(
+          `plural family ${family} is partly translated — missing form(s): ${absent.join(", ")}`,
+        );
+      }
     } else {
       familiesChecked += 1;
     }
     if (extra.length) {
       fail(`plural family ${family} has form(s) ${code} never uses: ${extra.join(", ")}`);
     }
+  }
+  if (familiesUntranslated) {
+    warn(
+      code,
+      familiesUntranslated,
+      `${familiesUntranslated} plural famil${familiesUntranslated === 1 ? "y" : "ies"} not yet translated (renders English)`,
+    );
   }
 
   // 3. Placeholder parity.
@@ -311,6 +376,19 @@ for (const file of sourceFiles(SRC_DIR)) {
 console.log(`  ${callSites} literal call sites checked`);
 for (const key of unresolved) {
   fail(`call site has no ${BASE} entry: ${key}`);
+}
+
+// Untranslated coverage, as a standing report rather than a gate.
+if (untranslatedByLocale.size) {
+  console.log("\nnot yet translated (renders English via fallbackLng):");
+  let total = 0;
+  for (const [code, count] of untranslatedByLocale) {
+    total += count;
+    console.log(`  ${code}: ${count}`);
+  }
+  console.log(
+    `  ${total} across ${untranslatedByLocale.size} locale(s) — a warning, not a failure.`,
+  );
 }
 
 console.log(
