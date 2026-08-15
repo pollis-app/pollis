@@ -257,6 +257,35 @@ One row = "message `message_id` carries the file with `content_hash`". Because t
 
 **Metadata-exposure trade-off (chosen deliberately; see `docs/metadata-retention-policy.md` §2/§5).** Storing `message_id` in the clear moves the attachment↔message linkage that previously lived only inside the MLS-encrypted payload out to the operator: joining `attachment_ref` to `message_envelope.conversation_id` reveals which messages — and thus which conversations — share a given convergent file. It does **not** reveal the file (plaintext is never seen) or the sender (sealed, #607). The opaque-`ref_token` alternative would hide that graph but leaks references forever when a device loses local state and cannot release a token an admin never held — i.e. it fails deletion, the very thing #690 exists to make correct. We chose the counted, robust option; the incremental exposure is the co-reference graph over hashes the operator already stores.
 
+### custom_emoji_object _(migration 000015, #848)_
+- `content_hash` TEXT PK _(SHA-256 of the **re-encoded** bytes)_
+- `r2_key` TEXT NOT NULL _(`emoji/<content_hash>.<ext>`, DERIVED server-side — never accepted from a client)_
+- `content_type` TEXT NOT NULL _(`image/webp` or `image/gif` — the only two the re-encoder emits, allowlisted at the DS)_
+- `size_bytes` INTEGER NOT NULL _(≤ 48 KiB, re-checked at registration and bound into the presigned PUT's signature)_
+- `animated` INTEGER NOT NULL DEFAULT 0
+- `created_at` TEXT NOT NULL DEFAULT now
+
+Global dedup for custom emoji: one row (and one R2 blob) per unique image, shared by every group that registered it — fifteen groups adding party-parrot produce fifteen [group_emoji](#group_emoji) rows and exactly one object. The hash is of the bytes `pollis-core`'s `encode_emoji` produced, not of the user's file, so two people uploading the same picture in different formats still converge; the re-encoder is deterministic, which is what makes that true.
+
+**These blobs are NOT encrypted**, unlike [attachment_object](#attachment_object). Deliberate (#848): the product rule is that a member of group A may use A's emoji while talking in group B, and everyone in B must *render* it — there is no key a B-only member could hold, so an encrypted emoji is one that cannot cross a group boundary. Message content stays E2EE; what leaves the envelope is `<:shortcode:hash>`. Cost, stated plainly: the operator can see every custom-emoji image and which group registered it — not who sent one, where, or in what message.
+
+**Collection is reference-counted, derived exactly as attachments are.** The row goes only when no `group_emoji` row names its hash: `DELETE FROM custom_emoji_object WHERE content_hash = ?1 AND NOT EXISTS (SELECT 1 FROM group_emoji WHERE content_hash = ?1)`. Removing a group emoji runs that collect inline; `POST /v1/emoji/gc` sweeps in bulk for references dropped without going through it (notably group deletion, which releases via `release_group_emoji`). The R2 blob is gated by the same predicate — `/v1/r2/presign` refuses both `delete` **and** `put` for a referenced emoji hash (`broker.rs`), the `put` gate mattering more here than for media because the object is public and unencrypted, so an overwrite would replace an image every referencing group renders.
+
+### group_emoji _(migration 000015, #848)_
+- PK: (`group_id`, `shortcode`)
+- `group_id` TEXT NOT NULL
+- `shortcode` TEXT NOT NULL _(`[a-z0-9_]{2,32}`, validated at the DS)_
+- `content_hash` TEXT NOT NULL _(the referenced [custom_emoji_object](#custom_emoji_object))_
+- `created_by` TEXT NOT NULL
+- `created_at` TEXT NOT NULL DEFAULT now
+- INDEX: (`content_hash`), (`created_by`)
+
+One row = "group `group_id` calls this object `:shortcode:`". The PK makes a shortcode unique within its group (two members racing to add `:parrot:` cannot both win) while the same image in another group is a second row pointing at the one object.
+
+**Permissions.** *Adding* requires current membership of the target group; *removing* requires being the row's creator or a group admin. *Using* is broader and is the #848 rule verbatim: `user_can_use_emoji` is true when the emoji is registered to **any** group the user is currently a member of, with no conversation term at all — so a member of group A may send A's emoji in group B, and a user in neither cannot send it but still renders it. That predicate is also what fills the picker (`list_usable_emoji`), so the set offered and the set permitted cannot drift. It cannot be enforced server-side at send time — the DS never sees message content — so `prepare_emoji_text` applies it on the sender's device, degrading a disallowed token to plain `:shortcode:` rather than failing the send.
+
+**Bounds.** There is deliberately **no per-group cap** (#848 is explicit). The bound is per-person: `EMOJI_MAX_PER_USER` (1000) rows per creator across all groups, which with the 48 KiB object ceiling caps one account's worst-case storage at 48 MiB — and usually far less, since their second copy of a popular emoji costs a row and no bytes.
+
 ### conversation_watermark _(migration 5, re-keyed in migration 16)_
 - PK: (`conversation_id`, `user_id`, `device_id`)
 - `conversation_id` TEXT NOT NULL

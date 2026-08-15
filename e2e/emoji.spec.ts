@@ -1,0 +1,315 @@
+/*
+ * Custom emoji (#848) — the picker, caret-aware insertion, and token
+ * rendering. BOTH skins.
+ *
+ * Runs against the browser build with `VITE_PLAYWRIGHT=true`, so
+ * `@tauri-apps/api/core` resolves to `frontend/src/__mocks__/tauri-core.ts`.
+ * The mock reimplements `list_usable_emoji` / `get_emoji_url` with the same
+ * contract as `pollis-core/src/commands/emoji.rs`: one flat usable set (the
+ * permission predicate is "any group you are in", never "this conversation"),
+ * and a hash that resolves to an image with no membership check at all.
+ *
+ * What each test is guarding:
+ *   - the picker mounts the REAL standard set, not the eight hardcoded faces
+ *     the old reaction picker shipped with;
+ *   - search actually narrows;
+ *   - a pick lands AT THE CARET. This is the integration-time wiring in
+ *     `ChatInput.insertAtCursor` and it had no test — appending to the end
+ *     would still look fine in a screenshot and be wrong for every user who
+ *     ever goes back to fix a sentence;
+ *   - a `<:name:hash>` token in a message body is an image, not literal text.
+ */
+
+import { test, expect, type Page } from "@playwright/test";
+
+const ME = { id: "u_me", email: "me@pollis.test", username: "mia" };
+const GROUP_ID = "g_emoji";
+const CHANNEL_ID = "c_general";
+
+// 64 lowercase hex, as the wire grammar requires. Anything else is not a
+// token and must survive as literal text.
+const PARROT_HASH = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+const SHIPIT_HASH = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
+const PARROT_TOKEN = `<:partyparrot:${PARROT_HASH}>`;
+
+// A hash nothing has stored — the deleted / not-yet-fetched case.
+const MISSING_HASH = "1111111111111111111111111111111111111111111111111111111111111111";
+
+const CUSTOM_EMOJI = [
+  {
+    group_id: GROUP_ID,
+    group_name: "emoji",
+    shortcode: "partyparrot",
+    content_hash: PARROT_HASH,
+    content_type: "image/gif",
+    animated: true,
+    size_bytes: 4096,
+    created_by: ME.id,
+  },
+  {
+    group_id: GROUP_ID,
+    group_name: "emoji",
+    shortcode: "shipit",
+    content_hash: SHIPIT_HASH,
+    content_type: "image/webp",
+    animated: false,
+    size_bytes: 2048,
+    created_by: ME.id,
+  },
+];
+
+const MESSAGES = [
+  {
+    id: "m1",
+    conversation_id: CHANNEL_ID,
+    sender_id: "u_dana",
+    sender_username: "dana",
+    ciphertext: "",
+    content: `deploy is green ${PARROT_TOKEN} nice work`,
+    sent_at: "2026-08-01T09:00:00Z",
+  },
+  // A near-miss and an unresolvable one. Both have to stay readable.
+  {
+    id: "m2",
+    conversation_id: CHANNEL_ID,
+    sender_id: "u_dana",
+    sender_username: "dana",
+    ciphertext: "",
+    content: `<:oops:> is not a token, and <:ghost:${MISSING_HASH}> cannot be found`,
+    sent_at: "2026-08-01T09:01:00Z",
+  },
+];
+
+const SKINS = ["terminal", "refined"] as const;
+type Skin = (typeof SKINS)[number];
+
+function preloadFor(skin: Skin) {
+  return {
+    session: ME,
+    profile: { id: ME.id, username: ME.username },
+    groups: [
+      {
+        id: GROUP_ID,
+        name: "emoji",
+        owner_id: ME.id,
+        created_at: "2026-01-01T00:00:00Z",
+        current_user_role: "admin",
+      },
+    ],
+    channels: { [GROUP_ID]: [{ id: CHANNEL_ID, group_id: GROUP_ID, name: "general" }] },
+    groupMembers: {
+      [GROUP_ID]: [
+        { user_id: ME.id, username: "mia", role: "admin", joined_at: "2026-01-01T00:00:00Z" },
+        { user_id: "u_dana", username: "dana", role: "member", joined_at: "2026-01-01T00:00:00Z" },
+      ],
+    },
+    messages: { [CHANNEL_ID]: MESSAGES },
+    dmChannels: [],
+    customEmoji: CUSTOM_EMOJI,
+    preferences: { skin },
+  };
+}
+
+/**
+ * Boot with the given skin and walk into the channel.
+ *
+ * The router runs on a memory history (`createMemoryHistory` in
+ * `frontend/src/router.tsx`), so a deep-link `goto` would set the browser URL
+ * and still render Root. Navigation goes through the UI, as in
+ * `mentions.spec.js`.
+ */
+async function openChannel(page: Page, skin: Skin) {
+  await page.addInitScript((data) => {
+    (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = data;
+  }, preloadFor(skin));
+  await page.goto("/");
+  await expect(page.getByTestId("app-ready")).toBeAttached();
+
+  await page.getByTestId("menu-item-groups").click();
+  await page.getByTestId(`group-option-${GROUP_ID}`).click();
+  await page.getByTestId(`channel-option-${CHANNEL_ID}`).click();
+
+  await expect(page.getByTestId("message-input")).toBeVisible();
+  await expect(page.getByTestId("message-content").first()).toBeVisible();
+}
+
+const composer = (page: Page) => page.getByTestId("message-input");
+
+/** Open the composer's picker and wait for the grid to have mounted. */
+async function openPicker(page: Page) {
+  await page.getByTestId("emoji-picker-button").click();
+  await expect(page.getByTestId("emoji-picker")).toBeVisible();
+  await expect(page.getByTestId("emoji-cell").first()).toBeVisible();
+}
+
+for (const skin of SKINS) {
+  test.describe(`custom emoji — ${skin} skin`, () => {
+    test("the picker opens from the composer with the whole standard set", async ({
+      page,
+    }) => {
+      await openChannel(page, skin);
+      await openPicker(page);
+
+      // The regression this guards is the old picker's eight hardcoded faces.
+      // Sections mount lazily, so this is what is on screen at open — the full
+      // set is ~1600 and the rest arrives on scroll.
+      const cells = page.getByTestId("emoji-cell");
+      await expect.poll(() => cells.count()).toBeGreaterThanOrEqual(100);
+
+      // Both custom emoji are offered, under their group's own heading, and
+      // they render as images rather than as `:shortcode:` text.
+      const parrot = page.locator(`[data-emoji-id="c:${PARROT_HASH}"]`);
+      await expect(parrot).toBeVisible();
+      await expect(parrot.getByTestId("custom-emoji")).toBeVisible();
+      await expect(page.locator(`[data-emoji-id="c:${SHIPIT_HASH}"]`)).toBeVisible();
+
+      // The category rail is the picker's other half of "this is the full set".
+      await expect(page.getByTestId("emoji-category-flags")).toBeAttached();
+
+      // The whole panel is on screen and nothing is painted over it. The
+      // trigger sits hard against the left edge of the content region, which
+      // AppShell clips with `overflow: hidden` — a panel that grows leftwards
+      // from there is cut off and most of its cells become unclickable, which
+      // is exactly what shipped until this assertion existed.
+      const box = await page.getByTestId("emoji-picker").boundingBox();
+      expect(box).not.toBeNull();
+      const viewport = page.viewportSize();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+      // Probe the panel's own corners: whatever the browser hit-tests there
+      // has to be inside the picker, not the sidebar sitting behind it.
+      for (const [dx, dy] of [
+        [4, 4],
+        [-4, 4],
+        [4, -4],
+        [-4, -4],
+      ]) {
+        const insidePicker = await page.evaluate(
+          ([x, y]) => {
+            const picker = document.querySelector('[data-testid="emoji-picker"]');
+            const hit = document.elementFromPoint(x, y);
+            return picker != null && hit != null && picker.contains(hit);
+          },
+          [
+            dx > 0 ? box!.x + dx : box!.x + box!.width + dx,
+            dy > 0 ? box!.y + dy : box!.y + box!.height + dy,
+          ],
+        );
+        expect(insidePicker).toBe(true);
+      }
+
+      await page.screenshot({ path: `artifacts/emoji-picker-${skin}.png` });
+    });
+
+    test("search narrows the grid to matches only", async ({ page }) => {
+      await openChannel(page, skin);
+      await openPicker(page);
+
+      const cells = page.getByTestId("emoji-cell");
+      const before = await cells.count();
+
+      // A shortcode-only query leaves exactly the one custom emoji. ("parrot"
+      // on its own would also match the standard 🦜, which is correct and
+      // makes for a worse assertion.)
+      await page.getByTestId("emoji-picker-search").fill("partypar");
+      await expect(cells).toHaveCount(1);
+      await expect(page.locator(`[data-emoji-id="c:${PARROT_HASH}"]`)).toBeVisible();
+
+      // A standard-emoji query narrows too, and every survivor matches.
+      await page.getByTestId("emoji-picker-search").fill("cactus");
+      const after = await cells.count();
+      expect(after).toBeGreaterThan(0);
+      expect(after).toBeLessThan(before);
+      for (const label of await cells.evaluateAll((nodes) =>
+        nodes.map((n) => n.getAttribute("aria-label") ?? ""),
+      )) {
+        expect(label).toContain("cactus");
+      }
+
+      await page.screenshot({ path: `artifacts/emoji-search-${skin}.png` });
+
+      // A query nothing matches says so rather than showing a blank grid.
+      await page.getByTestId("emoji-picker-search").fill("zzzzzzz");
+      await expect(page.getByTestId("emoji-picker-empty")).toBeVisible();
+      await expect(cells).toHaveCount(0);
+    });
+
+    test("a custom pick lands at the caret, not at the end", async ({ page }) => {
+      await openChannel(page, skin);
+
+      await composer(page).click();
+      await composer(page).pressSequentially("hello world");
+      // Walk the caret back to just after "hello" the way a person would.
+      for (let i = 0; i < 6; i += 1) {
+        await composer(page).press("ArrowLeft");
+      }
+
+      await openPicker(page);
+      await page.getByTestId("emoji-picker-search").fill("partyparrot");
+      await page.locator(`[data-emoji-id="c:${PARROT_HASH}"]`).click();
+
+      // The wire token, spliced in mid-string. Appending would have produced
+      // "hello world<:partyparrot:…>", which is the bug.
+      await expect(composer(page)).toHaveValue(`hello${PARROT_TOKEN} world`);
+
+      // The picker stays open for a second pick (composer behaviour; the
+      // reaction picker closes instead), and the caret is left after the
+      // inserted text — so the next pick lands after it, not back at 5.
+      await expect(page.getByTestId("emoji-picker")).toBeVisible();
+      await page.getByTestId("emoji-picker-search").fill("shipit");
+      await page.locator(`[data-emoji-id="c:${SHIPIT_HASH}"]`).click();
+      await expect(composer(page)).toHaveValue(
+        `hello${PARROT_TOKEN}<:shipit:${SHIPIT_HASH}> world`,
+      );
+    });
+
+    test("a standard pick also lands at the caret", async ({ page }) => {
+      await openChannel(page, skin);
+
+      await composer(page).click();
+      await composer(page).pressSequentially("hello world");
+      for (let i = 0; i < 6; i += 1) {
+        await composer(page).press("ArrowLeft");
+      }
+
+      await openPicker(page);
+      // An exact name match ranks first, so the leading cell is that emoji.
+      await page.getByTestId("emoji-picker-search").fill("grinning face");
+      const first = page.getByTestId("emoji-cell").first();
+      await expect(first).toHaveAttribute("aria-label", "grinning face");
+      await first.click();
+
+      await expect(composer(page)).toHaveValue("hello\u{1F600} world");
+    });
+
+    test("a token in a message body renders as an image, not literal text", async ({
+      page,
+    }) => {
+      await openChannel(page, skin);
+
+      const body = page.getByTestId("message-content").first();
+      const image = body.getByTestId("custom-emoji");
+      await expect(image).toBeVisible();
+      await expect(image).toHaveAttribute("data-shortcode", "partyparrot");
+      // The image actually decoded — a broken `<img>` is still "visible".
+      await expect
+        .poll(() => image.evaluate((el) => (el as HTMLImageElement).naturalWidth))
+        .toBeGreaterThan(0);
+
+      // None of the token's machinery leaks into the readable text.
+      const text = await body.innerText();
+      expect(text).toContain("deploy is green");
+      expect(text).not.toContain(PARROT_HASH);
+      expect(text).not.toContain("<:partyparrot:");
+
+      // A malformed token stays literal, and an unresolvable one degrades to
+      // its shortcode rather than vanishing.
+      const second = page.getByTestId("message-content").nth(1);
+      await expect(second).toContainText("<:oops:>");
+      await expect(second.getByTestId("custom-emoji-fallback")).toHaveText(":ghost:");
+
+      await page.screenshot({ path: `artifacts/emoji-message-${skin}.png` });
+    });
+  });
+}

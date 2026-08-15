@@ -784,6 +784,17 @@ pub struct R2PresignBody {
     /// signs only `host`, so the client sets Content-Type at upload time.
     #[serde(default)]
     pub content_type: Option<String>,
+    /// The EXACT byte count the client will PUT. When present, `content-length`
+    /// is added to the signed headers, so R2 rejects a body of any other size —
+    /// the presign stops being "here is permission to write, of any size".
+    ///
+    /// REQUIRED for `put` on an `emoji/…` key (#848): those objects are
+    /// unencrypted, publicly fetchable, and bounded by
+    /// [`crate::emoji::EMOJI_MAX_BYTES`], and a size the server merely *believes*
+    /// is not a bound at all. Optional everywhere else, so every existing
+    /// media/avatar presign is byte-identical to before.
+    #[serde(default)]
+    pub content_length: Option<u64>,
     /// No-auth path only — see [`resolve_user`]. Unused beyond the auth gate
     /// (presign has no per-object authz), kept for shape-symmetry with the other
     /// broker endpoint.
@@ -893,7 +904,49 @@ pub async fn r2_presign(
         }
     }
 
-    let url = presign_r2_url(
+    // Custom-emoji objects (#848) get the SAME two integrity gates as media, on
+    // the same reasoning — one `emoji/<hash>.<ext>` blob is shared by every group
+    // that registered the hash, so overwriting or deleting it while a group still
+    // references it corrupts or 404s that group's emoji. The reference count is
+    // `emoji::object_is_referenced` (does ANY `group_emoji` row name this hash),
+    // exactly parallel to the attachment one.
+    //
+    // The emoji `put` gate carries extra weight the media one does not: these
+    // objects are UNENCRYPTED and served to anyone, so a successful overwrite
+    // would replace an image every member of every referencing group renders.
+    if let Some(content_hash) = crate::emoji::content_hash_from_emoji_key(&parsed.key) {
+        if http_method == "PUT" || http_method == "DELETE" {
+            let conn = state.db.conn()?;
+            if crate::emoji::object_is_referenced(&conn, content_hash).await? {
+                return Ok(AuthRejection::Forbidden.into_response());
+            }
+        }
+        // A `put` for an emoji object MUST declare its exact size, and that size
+        // must be within the ceiling. Without this the bound is a client-side
+        // promise: the DS validates `size_bytes` at registration, but nothing
+        // stopped the actual PUT from carrying a gigabyte. Signing the length
+        // moves the check to R2, which is the only party that sees the bytes.
+        if http_method == "PUT" {
+            match parsed.content_length {
+                Some(n) if n > 0 && n <= crate::emoji::EMOJI_MAX_BYTES => {}
+                Some(_) => {
+                    return Ok(bad_request("emoji content_length out of range"));
+                }
+                None => {
+                    return Ok(bad_request("content_length required for emoji put"));
+                }
+            }
+        }
+    }
+
+    // Only a PUT can meaningfully bind a body length; a signed `content-length`
+    // on GET/DELETE would just make the URL unusable.
+    let signed_content_length = match http_method {
+        "PUT" => parsed.content_length,
+        _ => None,
+    };
+
+    let url = presign_r2_url_bounded(
         endpoint,
         bucket,
         &state.broker.r2_region,
@@ -903,6 +956,7 @@ pub async fn r2_presign(
         &parsed.key,
         PRESIGN_EXPIRES_SECS,
         &amz_datetime(),
+        signed_content_length,
     );
 
     Ok(ok_json(serde_json::json!({
@@ -928,6 +982,9 @@ fn amz_datetime() -> String {
 
 /// Build a SigV4 presigned URL for `method` on `bucket/key`. Pure — `datetime`
 /// is injected — so tests can pin the clock and reproduce the signature.
+///
+/// Signs `host` only. See [`presign_r2_url_bounded`] for the variant that also
+/// binds an exact body length.
 #[allow(clippy::too_many_arguments)]
 pub fn presign_r2_url(
     endpoint: &str,
@@ -940,6 +997,35 @@ pub fn presign_r2_url(
     expires: u64,
     datetime: &str,
 ) -> String {
+    presign_r2_url_bounded(
+        endpoint, bucket, region, access_key, secret_key, method, key, expires, datetime, None,
+    )
+}
+
+/// [`presign_r2_url`], optionally binding an EXACT `Content-Length`.
+///
+/// With `content_length: Some(n)` the canonical request signs
+/// `content-length;host` instead of `host` alone, so the URL only authorizes a
+/// body of exactly `n` bytes — R2 rejects anything else with a signature
+/// mismatch. That is the difference between a size the server believes and a
+/// size the storage layer enforces, and it is what bounds `emoji/…` objects
+/// (#848).
+///
+/// `None` reproduces the original single-signed-header form byte for byte, which
+/// is why every existing media/avatar presign is unchanged.
+#[allow(clippy::too_many_arguments)]
+pub fn presign_r2_url_bounded(
+    endpoint: &str,
+    bucket: &str,
+    region: &str,
+    access_key: &str,
+    secret_key: &str,
+    method: &str,
+    key: &str,
+    expires: u64,
+    datetime: &str,
+    content_length: Option<u64>,
+) -> String {
     let date = &datetime[..8];
     let host = host_of(endpoint);
 
@@ -951,16 +1037,28 @@ pub fn presign_r2_url(
         uri_encode(key, false)
     );
 
+    // Canonical headers are lowercase and sorted by name — `content-length`
+    // sorts before `host`, and `SignedHeaders` (both the canonical-request line
+    // and the `X-Amz-SignedHeaders` query param) must list them in that order.
+    let (canonical_headers, signed_headers) = match content_length {
+        Some(n) => (
+            format!("content-length:{n}\nhost:{host}\n"),
+            "content-length;host",
+        ),
+        None => (format!("host:{host}\n"), "host"),
+    };
+
     let credential = format!("{access_key}/{date}/{region}/s3/aws4_request");
     // Canonical query: params sorted by name, values URI-encoded (the credential
-    // `/`s become %2F). X-Amz-Signature is NOT part of the canonical query.
+    // `/`s become %2F, and the signed-headers `;` becomes %3B). X-Amz-Signature
+    // is NOT part of the canonical query.
     let canonical_query = {
         let mut params = [
             ("X-Amz-Algorithm", "AWS4-HMAC-SHA256".to_string()),
             ("X-Amz-Credential", uri_encode(&credential, true)),
             ("X-Amz-Date", datetime.to_string()),
             ("X-Amz-Expires", expires.to_string()),
-            ("X-Amz-SignedHeaders", "host".to_string()),
+            ("X-Amz-SignedHeaders", uri_encode(signed_headers, true)),
         ];
         params.sort_by(|a, b| a.0.cmp(b.0));
         params
@@ -970,8 +1068,6 @@ pub fn presign_r2_url(
             .join("&")
     };
 
-    let canonical_headers = format!("host:{host}\n");
-    let signed_headers = "host";
     let payload_hash = "UNSIGNED-PAYLOAD";
     let canonical_request = format!(
         "{method}\n{canonical_uri}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"

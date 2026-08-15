@@ -586,6 +586,12 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | spec | what it proves |
 |---|---|
 | `mentions.spec.js` | `@username` autocomplete + rendering in BOTH skins (#843) |
+| `bookmarks.spec.ts` | Saved messages + permalinks, and what an unresolvable permalink refuses to say, in BOTH skins (#854) |
+| `emoji.spec.ts` | The custom-emoji picker (full standard set, search, caret-accurate insertion) and `<:name:hash>` rendering, in BOTH skins (#848) |
+| `invite-links.spec.ts` | Invite-link create / one-time copy / revoke, in BOTH skins (#847) |
+| `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849) |
+
+`.spec.ts` is as welcome as `.spec.js`; one config matches both.
 
 Three things to know before writing one:
 

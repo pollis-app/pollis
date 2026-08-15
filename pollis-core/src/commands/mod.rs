@@ -6,6 +6,10 @@ pub mod blocks;
 // device-local DB — no DS, no Turso, compiles on every target.
 pub mod bookmarks;
 pub mod device_enrollment;
+// Custom per-group emoji (#848): the untrusted-image re-encoder, the
+// content-addressed upload/GC path, and the cross-group "may this user send
+// it" rule. Pure `image` + libsql + reqwest, so it compiles on every target.
+pub mod emoji;
 pub mod user;
 pub mod groups;
 pub mod messages;

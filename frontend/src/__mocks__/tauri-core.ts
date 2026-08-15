@@ -66,6 +66,55 @@ interface MockBookmark {
   saved_at: string;
 }
 
+/** One custom emoji (#848). Mirrors `CustomEmoji` in `frontend/src/types`. */
+interface MockCustomEmoji {
+  group_id: string;
+  group_name: string;
+  shortcode: string;
+  content_hash: string;
+  content_type: string;
+  animated: boolean;
+  size_bytes: number;
+  created_by: string;
+}
+
+/**
+ * One invite link as the management list sees it (#847). Mirrors
+ * `InviteLinkSummary` — no token field, because the server has no token to
+ * give: only `sha256(secret)` was ever stored.
+ */
+interface MockInviteLink {
+  id: string;
+  group_id: string;
+  created_at: string;
+  creator_username: string | null;
+  expires_at: string | null;
+  max_uses: number | null;
+  uses: number;
+  revoked_at: string | null;
+}
+
+/** Mirrors `VoiceInputMode` in `pollis-core/src/commands/voice/gate.rs`. */
+type MockVoiceInputMode = 'voice_activity' | 'push_to_talk';
+
+/**
+ * The push-to-talk / mute / deafen state machine (#849).
+ *
+ * A field-for-field port of `TransmitGate` in
+ * `pollis-core/src/commands/voice/gate.rs`, including the private restore slot
+ * that makes undeafen non-destructive and the `deafened ⇒ self_muted`
+ * invariant. Ported rather than stubbed because the interesting UI states —
+ * push-to-talk idle, and deafened-vs-muted — only exist as *derived* answers,
+ * and a stub that just flipped booleans could not produce them honestly.
+ */
+interface MockVoiceGate {
+  mode: MockVoiceInputMode;
+  self_muted: boolean;
+  deafened: boolean;
+  ptt_held: boolean;
+  muted_before_deafen: boolean;
+}
+
 interface MockStore {
   session: MockUser | null;
   profile: MockProfile | null;
@@ -78,6 +127,14 @@ interface MockStore {
   groupMembers: Record<string, MockGroupMember[]>;
   // Saved messages (#854). Device-local in production; a plain array here.
   bookmarks: MockBookmark[];
+  // Custom emoji (#848) the signed-in user may SEND — every emoji from every
+  // group they belong to, which is exactly what `list_usable_emoji` returns.
+  customEmoji: MockCustomEmoji[];
+  // Shareable invite links (#847), keyed by nothing — the group id is on the
+  // row, as it is server-side.
+  inviteLinks: MockInviteLink[];
+  // Local voice gate (#849). Rust owns this in production.
+  voiceGate: MockVoiceGate;
   // Held decoded. `get_preferences` is the only thing that serializes it, and
   // preloads may write either shape (see `readPreferences`).
   preferences: Record<string, unknown>;
@@ -134,6 +191,15 @@ const store: MockStore = {
   dmChannels: preload.dmChannels ?? [],
   groupMembers: preload.groupMembers ?? {},
   bookmarks: preload.bookmarks ?? [],
+  customEmoji: preload.customEmoji ?? [],
+  inviteLinks: preload.inviteLinks ?? [],
+  voiceGate: {
+    mode: 'voice_activity',
+    self_muted: false,
+    deafened: false,
+    ptt_held: false,
+    muted_before_deafen: false,
+  },
   // Lets a test drive the skin: `{ skin: 'refined' }` or its JSON string.
   preferences: readPreferences(preload.preferences),
   clipboard: '',
@@ -160,6 +226,62 @@ function findMessage(messageId: string): MockMessage | undefined {
     }
   }
   return undefined;
+}
+
+/** This user's role in `groupId`, or null when they are not a member. */
+function roleInGroup(groupId: string): string | null {
+  const members = store.groupMembers[groupId];
+  const me = store.session?.id;
+  if (members && me) {
+    return members.find((m) => m.user_id === me)?.role ?? null;
+  }
+  // No roster preloaded — fall back to the group row, which is what
+  // `list_user_groups_with_channels` already reports to the UI.
+  const group = store.groups.find((g) => g.id === groupId);
+  if (!group) {
+    return null;
+  }
+  return group.current_user_role ?? 'admin';
+}
+
+/**
+ * A stand-in image for one custom emoji.
+ *
+ * Production hands back `http://127.0.0.1:<port>/<token>/<hash>` from the
+ * loopback media server, because the real bytes are a WebP/GIF that must not
+ * cross the JSON IPC. There is no loopback server in the browser build, so the
+ * mock returns a `data:` URL instead: same contract as far as every caller is
+ * concerned — an `<img src>` that resolves — and it keeps the assertion honest,
+ * since the image either decodes or it does not.
+ *
+ * The glyph is derived from the shortcode so two different emoji are visibly
+ * two different images in the screenshots.
+ */
+function emojiDataUrl(shortcode: string, contentHash: string): string {
+  const hue = Number.parseInt(contentHash.slice(0, 2), 16) * 1.4;
+  const letter = (shortcode[0] ?? '?').toUpperCase();
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
+    `<rect width="32" height="32" rx="6" fill="hsl(${hue} 70% 45%)"/>` +
+    `<text x="16" y="23" font-family="monospace" font-size="20" font-weight="bold" ` +
+    `text-anchor="middle" fill="#fff">${letter}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/** Snapshot the gate exactly as `TransmitGate::snapshot` does. */
+function gateSnapshot(): Record<string, unknown> {
+  const gate = store.voiceGate;
+  // Derived in Rust, never recomputed by the UI — so it is derived here too.
+  const transmitting = gate.self_muted
+    ? false
+    : gate.mode === 'voice_activity' || gate.ptt_held;
+  return {
+    mode: gate.mode,
+    self_muted: gate.self_muted,
+    deafened: gate.deafened,
+    ptt_held: gate.ptt_held,
+    transmitting,
+  };
 }
 
 function handleCommand(command: string, args: Record<string, unknown>): unknown {
@@ -489,6 +611,186 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         message_id: messageId,
       };
     }
+
+    // ── Custom emoji (#848) ──────────────────────────────────────────────
+    // `list_usable_emoji` is the permission predicate as well as the picker's
+    // source: every emoji from every group you are in, usable in any
+    // conversation. The mock keeps them as one flat list for the same reason
+    // Rust does — narrowing by the conversation being typed in is the bug.
+
+    case 'list_usable_emoji':
+      return store.customEmoji;
+
+    case 'list_group_emoji': {
+      const { groupId } = args as { groupId: string };
+      return store.customEmoji.filter((e) => e.group_id === groupId);
+    }
+
+    case 'get_emoji_url': {
+      const { contentHash } = args as { contentHash: string };
+      const emoji = store.customEmoji.find((e) => e.content_hash === contentHash);
+      if (!emoji) {
+        // An emoji this device cannot resolve — deleted, or never stored.
+        // Rejecting is what drives the `:shortcode:` text fallback, so the
+        // mock must reject rather than hand back a broken URL.
+        throw new Error('no stored object for that hash');
+      }
+      return emojiDataUrl(emoji.shortcode, emoji.content_hash);
+    }
+
+    // ── Shareable invite links (#847) ────────────────────────────────────
+
+    case 'create_group_invite_link': {
+      const { groupId, expiresInHours, maxUses } = args as {
+        groupId: string;
+        creatorId: string;
+        expiresInHours: number | null;
+        maxUses: number | null;
+      };
+      if (roleInGroup(groupId) !== 'admin') {
+        throw new Error('only admins can create invite links');
+      }
+      const id = generateId();
+      // `selector.secret`, the shape `invite_token::mint` produces. Only the
+      // hash of the secret half would reach a server; nothing here stores it,
+      // which is precisely why the card can only be shown once.
+      const token = `${generateId()}${generateId()}.${generateId()}${generateId()}`;
+      const expiresAt =
+        expiresInHours == null
+          ? null
+          : new Date(Date.now() + expiresInHours * 3600_000).toISOString();
+      store.inviteLinks.push({
+        id,
+        group_id: groupId,
+        created_at: nowIso(),
+        creator_username: store.session?.username ?? null,
+        expires_at: expiresAt,
+        max_uses: maxUses,
+        uses: 0,
+        revoked_at: null,
+      });
+      return {
+        id,
+        token,
+        url: `https://pollis.com/invite/${token}`,
+        expires_at: expiresAt,
+        max_uses: maxUses,
+      };
+    }
+
+    case 'list_group_invite_links': {
+      const { groupId } = args as { groupId: string };
+      // Admins only; everyone else gets an empty list, as in Rust.
+      if (roleInGroup(groupId) !== 'admin') {
+        return [];
+      }
+      return store.inviteLinks
+        .filter((l) => l.group_id === groupId)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .map((l) => ({
+          id: l.id,
+          created_at: l.created_at,
+          creator_username: l.creator_username,
+          expires_at: l.expires_at,
+          max_uses: l.max_uses,
+          uses: l.uses,
+          revoked_at: l.revoked_at,
+          // Computed here for the same reason SQLite computes it there: the
+          // badge must not be able to disagree with what redemption would do.
+          is_live:
+            l.revoked_at == null &&
+            (l.expires_at == null || Date.parse(l.expires_at) > Date.now()) &&
+            (l.max_uses == null || l.uses < l.max_uses),
+        }));
+    }
+
+    case 'revoke_group_invite_link': {
+      const { linkId } = args as { linkId: string };
+      const link = store.inviteLinks.find((l) => l.id === linkId);
+      if (!link) {
+        throw new Error('no such invite link');
+      }
+      // Revocation stamps the row; it does not delete it. The link stays
+      // listed as Revoked, which is what the DS-backed list returns.
+      link.revoked_at = nowIso();
+      return null;
+    }
+
+    // ── Voice gate: push-to-talk, mute, deafen (#849) ────────────────────
+    // Every one of these returns the full snapshot, because the renderer is
+    // forbidden from re-deriving the outcome of a transition.
+
+    case 'toggle_voice_mute': {
+      const gate = store.voiceGate;
+      const muted = !gate.self_muted;
+      if (!muted && gate.deafened) {
+        // Unmuting while deafened also undeafens — the invariant forbids
+        // `deafened && !self_muted`.
+        gate.deafened = false;
+        gate.muted_before_deafen = false;
+      }
+      gate.self_muted = muted;
+      if (gate.deafened) {
+        gate.muted_before_deafen = muted;
+      }
+      return gateSnapshot();
+    }
+
+    case 'toggle_voice_deafen': {
+      const gate = store.voiceGate;
+      if (gate.deafened) {
+        gate.deafened = false;
+        gate.self_muted = gate.muted_before_deafen;
+        gate.muted_before_deafen = false;
+      } else {
+        gate.muted_before_deafen = gate.self_muted;
+        gate.deafened = true;
+        gate.self_muted = true;
+        gate.ptt_held = false;
+      }
+      return gateSnapshot();
+    }
+
+    case 'set_voice_input_mode': {
+      const { mode } = args as { mode: MockVoiceInputMode };
+      store.voiceGate.mode = mode;
+      // Switching mode always drops a held latch, in either direction.
+      store.voiceGate.ptt_held = false;
+      return gateSnapshot();
+    }
+
+    case 'set_voice_ptt_held': {
+      const { held } = args as { held: boolean };
+      store.voiceGate.ptt_held = held;
+      return gateSnapshot();
+    }
+
+    case 'release_voice_ptt': {
+      store.voiceGate.ptt_held = false;
+      return gateSnapshot();
+    }
+
+    case 'get_voice_gate_state':
+      return gateSnapshot();
+
+    // Voice room observation, device enumeration and the mic-test rig. There
+    // is no audio hardware behind the browser build, so these are inert.
+    case 'list_voice_participants':
+    case 'list_voice_room_counts':
+    case 'list_audio_devices':
+      return [];
+
+    case 'prepare_voice_connection':
+    case 'publish_voice_presence':
+    case 'set_voice_audio_processing':
+    case 'subscribe_voice_test_events':
+    case 'start_mic_test':
+    case 'stop_mic_test':
+    case 'set_mic_test_monitor':
+    case 'record_and_play_back':
+    case 'play_test_tone':
+    case 'stop_test_playback':
+      return null;
 
     case 'write_clipboard_text': {
       const { text } = args as { text: string };

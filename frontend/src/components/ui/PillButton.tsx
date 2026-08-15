@@ -9,6 +9,15 @@ interface PillButtonProps {
   children: React.ReactNode;
   "data-testid"?: string;
   "aria-label"?: string;
+  /**
+   * Any other `data-*` attribute, forwarded verbatim to the button.
+   *
+   * State that callers publish for the tray and for tests to read — the voice
+   * bar's `data-mic-state` / `data-deafened` (#849) — arrives this way. Before
+   * this existed the props were a closed list, so those attributes were
+   * accepted by TypeScript and then silently dropped on the floor.
+   */
+  [dataAttribute: `data-${string}`]: unknown;
 }
 
 /**
@@ -26,10 +35,18 @@ export const PillButton: React.FC<PillButtonProps> = ({
   children,
   "data-testid": testId,
   "aria-label": ariaLabel,
+  ...rest
 }) => {
+  // Only `data-*` goes through: className and style stay owned by this
+  // component, so a caller cannot quietly unpick the pill's appearance.
+  const dataAttributes = Object.fromEntries(
+    Object.entries(rest).filter(([key]) => key.startsWith("data-")),
+  );
+
   return (
     <button
       data-testid={testId}
+      {...dataAttributes}
       aria-label={ariaLabel}
       title={title}
       onClick={onClick}

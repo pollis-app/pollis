@@ -2,12 +2,41 @@ import React, { useState, useRef, useEffect } from "react";
 import { useReactions, useAddReaction, useRemoveReaction } from "../../hooks/queries/useReactions";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
-
-const COMMON_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👀"];
+import { EmojiPicker } from "../Emoji/EmojiPicker";
+import { CustomEmojiImage } from "../Emoji/CustomEmojiImage";
+import { splitEmojiSegments } from "../Emoji/emojiTokens";
 
 interface MessageReactionsProps {
   messageId: string;
 }
+
+/**
+ * Render a reaction's emoji — either a Unicode character or a custom
+ * `<:name:hash>` token.
+ *
+ * Reactions are stored as opaque strings, so a custom reaction is simply its
+ * wire token; splitting it here is what makes the same string render as an
+ * image for someone who has never heard of the group that owns it (#848).
+ */
+const ReactionEmoji: React.FC<{ emoji: string }> = ({ emoji }) => {
+  const segments = splitEmojiSegments(emoji);
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.kind === "emoji" ? (
+          <CustomEmojiImage
+            key={index}
+            contentHash={segment.contentHash}
+            shortcode={segment.shortcode}
+            sizeRem={1}
+          />
+        ) : (
+          <span key={index}>{segment.text}</span>
+        ),
+      )}
+    </>
+  );
+};
 
 export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ messageId }) => {
   const { currentUser } = appStore;
@@ -36,7 +65,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
     };
   }, [pickerOpen]);
 
-  const handlePickerEmoji = (emoji: string) => {
+  const toggleReaction = (emoji: string) => {
     if (!currentUser) {
       return;
     }
@@ -49,23 +78,11 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
     } else {
       addReaction.mutate({ messageId, userId: currentUser.id, emoji });
     }
-
-    setPickerOpen(false);
   };
 
-  const handlePillClick = (emoji: string) => {
-    if (!currentUser) {
-      return;
-    }
-
-    const existing = reactions.find((r) => r.emoji === emoji);
-    const alreadyReacted = existing?.user_ids.includes(currentUser.id) ?? false;
-
-    if (alreadyReacted) {
-      removeReaction.mutate({ messageId, userId: currentUser.id, emoji });
-    } else {
-      addReaction.mutate({ messageId, userId: currentUser.id, emoji });
-    }
+  const handlePickerEmoji = (emoji: string) => {
+    toggleReaction(emoji);
+    setPickerOpen(false);
   };
 
   const hasReactions = reactions.length > 0;
@@ -82,7 +99,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
           <button
             key={reaction.emoji}
             data-testid="reaction-pill"
-            onClick={() => handlePillClick(reaction.emoji)}
+            onClick={() => toggleReaction(reaction.emoji)}
             className="panel-raised flex items-center gap-1 px-1.5 py-0.5 text-xs font-mono transition-colors duration-75 hover:opacity-90"
             style={{
               color: reacted ? "var(--c-accent)" : "var(--c-text-muted)",
@@ -91,7 +108,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
             aria-label={`${reaction.emoji} ${reaction.count} reaction${reaction.count !== 1 ? "s" : ""}`}
             aria-pressed={reacted}
           >
-            <span>{reaction.emoji}</span>
+            <ReactionEmoji emoji={reaction.emoji} />
             <span>{reaction.count}</span>
           </button>
         );
@@ -110,34 +127,14 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
           +
         </button>
 
-        {/* Emoji picker panel */}
+        {/*
+          The real picker (#848), replacing the eight hard-coded emoji this
+          affordance used to be. Anchored `absolute` inside this `relative`
+          wrapper — no portal, no fixed overlay, no backdrop.
+        */}
         {pickerOpen && (
-          <div
-            data-testid="reaction-picker"
-            className="absolute bottom-full mb-1 left-0 z-50 panel-raised flex gap-1 p-1.5"
-            style={{ background: "var(--c-surface-raised)" }}
-          >
-            {COMMON_EMOJIS.map((emoji) => {
-              const existing = reactions.find((r) => r.emoji === emoji);
-              const reacted = currentUser
-                ? (existing?.user_ids.includes(currentUser.id) ?? false)
-                : false;
-
-              return (
-                <button
-                  key={emoji}
-                  onClick={() => handlePickerEmoji(emoji)}
-                  className="text-base leading-none hover:scale-125 transition-transform duration-75 px-0.5"
-                  style={{
-                    filter: reacted ? "drop-shadow(0 0 4px var(--c-accent))" : undefined,
-                  }}
-                  aria-label={emoji}
-                  aria-pressed={reacted}
-                >
-                  {emoji}
-                </button>
-              );
-            })}
+          <div data-testid="reaction-picker" className="absolute bottom-full mb-1 left-0 z-40">
+            <EmojiPicker onSelect={handlePickerEmoji} onClose={() => setPickerOpen(false)} closeOnSelect />
           </div>
         )}
       </div>

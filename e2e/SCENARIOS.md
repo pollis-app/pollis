@@ -50,6 +50,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 | S-SIGNUP | Full signup: email→OTP→secret key→PIN→app-ready | 5 | 4 | ✅ | e2e.js |
 | S-BADOTP | Wrong OTP rejected inline | 4 | 4 | ✅ | invalid-otp.js |
 | S-SMOKE | App launches, login screen renders | 5 | 5 | ✅ | smoke.js |
+| S-EMOJI | Emoji picker: reaction affordance opens the REAL picker (search + category rail + skin tones + hundreds of cells), search narrows it, picking adds a reaction pill, the rail jumps sections, and the per-group Custom Emoji page renders | 4 | 2 | 🟡 | emoji-picker.js (#848). Visual: screenshots to `artifacts/emoji-*.png`. Asserts >=100 mounted cells, which is exactly the regression the eight hard-coded emoji used to be. |
 
 ## Fixture bugs found while getting the suite green locally
 Two blockers stopped **every** two-client script from passing on a local dev box

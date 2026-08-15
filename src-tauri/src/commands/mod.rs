@@ -5,6 +5,8 @@ pub mod blocks;
 pub mod bookmarks;
 pub mod device_enrollment;
 pub mod dm;
+// Custom per-group emoji (#848).
+pub mod emoji;
 pub mod groups;
 pub mod install_kind;
 // OS-level media permissions (camera/mic/screen). Like tray.rs it is built
