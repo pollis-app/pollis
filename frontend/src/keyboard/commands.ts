@@ -18,6 +18,8 @@ export type ShortcutCommandId =
   | "app.sync"
   | "nav.back"
   | "voice.toggleMute"
+  | "voice.toggleDeafen"
+  | "voice.pushToTalk"
   | "voice.leave";
 
 export type ShortcutCategory = "Application" | "Navigation" | "Voice";
@@ -37,6 +39,16 @@ export interface ShortcutCommandMeta {
    * can be persisted in preferences verbatim.
    */
   defaultCombo: string;
+  /**
+   * Hold-style command: fires on key *down* and again on key *up*, and is
+   * force-released whenever the window loses focus. Push-to-talk is the
+   * only one today. Default false — an ordinary command only ever fires on
+   * keydown.
+   *
+   * The rebinding UI shows these identically to any other shortcut; the
+   * difference is purely in how the registry dispatches them.
+   */
+  hold?: boolean;
 }
 
 export const SHORTCUT_COMMANDS: Record<
@@ -98,6 +110,26 @@ export const SHORTCUT_COMMANDS: Record<
     title: "Toggle mute",
     category: "Voice",
     defaultCombo: "mod+shift+m",
+  },
+  "voice.toggleDeafen": {
+    id: "voice.toggleDeafen",
+    title: "Toggle deafen",
+    category: "Voice",
+    // Sits next to Toggle mute on the same modifier pair, the way Discord
+    // pairs the two controls.
+    defaultCombo: "mod+shift+d",
+  },
+  "voice.pushToTalk": {
+    id: "voice.pushToTalk",
+    title: "Push to talk (hold)",
+    category: "Voice",
+    // Deliberately a modifier combo rather than a bare key. The dispatcher
+    // has no "is the user typing" guard, so a bare-key default would
+    // transmit every time you wrote a message mid-call. Real PTT users
+    // rebind this to whatever is under their thumb — that is what the
+    // rebinding UI is for — but the shipped default must be safe.
+    defaultCombo: "mod+shift+space",
+    hold: true,
   },
   "voice.leave": {
     id: "voice.leave",

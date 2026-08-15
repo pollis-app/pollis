@@ -21,9 +21,22 @@ export interface ParsedCombo {
 
 /** Normalize a KeyboardEvent.key to the canonical token used in combos. */
 export function normalizeKey(key: string): string {
+  // Space arrives as " ", which cannot survive a "+"-joined combo string:
+  // parseCombo trims every token, so a literal space would be dropped and
+  // the binding would silently degrade to modifiers-only. Spell it out.
+  if (key === " ") {
+    return "space";
+  }
   // Single printable chars ("b", "`", "/") -> lowercased. Named keys
   // ("Escape", "ArrowUp") -> lowercased name. Both collapse via toLowerCase.
   return key.toLowerCase();
+}
+
+/** Modifier `KeyboardEvent.key` values, normalized. */
+const MODIFIER_KEYS = new Set(["control", "meta", "alt", "shift"]);
+
+export function isModifierKey(key: string): boolean {
+  return MODIFIER_KEYS.has(normalizeKey(key));
 }
 
 export function parseCombo(combo: string): ParsedCombo {
@@ -106,13 +119,43 @@ export function comboMatchesEvent(p: ParsedCombo, e: KeyboardEvent): boolean {
   return true;
 }
 
+/**
+ * Does this keyup end a currently-held combo?
+ *
+ * Looser than `comboMatchesEvent` on purpose. Releasing `mod+shift+space`
+ * rarely lifts all three keys at once — let go of Shift first and the
+ * *next* keyup carries `shiftKey: false`, so an exact-modifier match would
+ * never fire and the key would appear stuck down forever. Any constituent
+ * of the combo going up ends the hold, which for push-to-talk is the safe
+ * direction to be wrong in.
+ */
+export function comboReleasedByEvent(p: ParsedCombo, e: KeyboardEvent): boolean {
+  const k = normalizeKey(e.key);
+  if (k === p.key) {
+    return true;
+  }
+  if (k === "control" && (p.ctrl || p.mod)) {
+    return true;
+  }
+  if (k === "meta" && (p.meta || p.mod)) {
+    return true;
+  }
+  if (k === "alt" && p.alt) {
+    return true;
+  }
+  if (k === "shift" && p.shift) {
+    return true;
+  }
+  return false;
+}
+
 const KEY_LABELS: Record<string, string> = {
   escape: "Esc",
   arrowup: "↑",
   arrowdown: "↓",
   arrowleft: "←",
   arrowright: "→",
-  " ": "Space",
+  space: "Space",
   "`": "`",
 };
 
