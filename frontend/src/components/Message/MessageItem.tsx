@@ -4,7 +4,7 @@ import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
-import { LinkifiedText } from "../ui/LinkifiedText";
+import { MessageBody } from "./MessageBody";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
 import { getUsernameColor, useBackgroundIsLight } from "../../utils/usernameColor";
 import { useSkin } from "../../hooks/queries/usePreferences";
@@ -220,7 +220,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               lineHeight: "var(--lh)",
             }}
           >
-            <LinkifiedText text={content} />
+            <MessageBody text={content} />
             {message.edited_at && !isDeleted && (
               <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
                 (edited)
@@ -386,7 +386,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             whiteSpace: "pre-wrap",
           }}
         >
-          <LinkifiedText text={content} />
+          <MessageBody text={content} />
           {message.edited_at && !isDeleted && (
             <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
               (edited)
