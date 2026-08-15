@@ -34,20 +34,25 @@ class MessageJumpStore {
   }
 
   /**
-   * Consume a pending jump for `conversationId`, if there is one.
+   * Consume the pending jump, which the caller has confirmed it can satisfy.
    *
-   * Returns the message id and moves it to `highlightedMessageId`, so the jump
-   * fires exactly once per request and cannot re-trigger on every re-render.
+   * Claiming is keyed on the message the list actually RENDERS, not on a
+   * conversation id: `MessageList`'s `conversationId` prop is the MLS *group*
+   * id for channels (it drives roster banners), so comparing against it would
+   * never match a channel permalink. "Do I show this message?" is both the
+   * correct question and the one that cannot drift.
+   *
+   * Moves the id to `highlightedMessageId` so the jump fires exactly once per
+   * request and cannot re-trigger on every re-render.
    */
-  claim(conversationId: string): string | null {
-    if (!this.messageId || this.conversationId !== conversationId) {
-      return null;
+  claimMessage(messageId: string): boolean {
+    if (this.messageId !== messageId) {
+      return false;
     }
-    const messageId = this.messageId;
     this.conversationId = null;
     this.messageId = null;
     this.highlightedMessageId = messageId;
-    return messageId;
+    return true;
   }
 
   /** End the flash. */

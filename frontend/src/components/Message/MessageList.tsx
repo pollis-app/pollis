@@ -318,16 +318,16 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   const handleCopyLink = useCallback(
     (messageId: string) => {
       const message = sortedMessages.find((m) => m.id === messageId);
-      // Prefer the message's own conversation over the list's prop so a copy
-      // from a thread or search-result list still points at the right place.
-      const targetConversationId =
-        message?.conversation_id ?? message?.channel_id ?? conversationId;
+      // The message's OWN conversation, never the list's `conversationId` prop
+      // — that prop is the MLS group id for channels, which would produce a
+      // permalink that resolves nowhere.
+      const targetConversationId = message?.conversation_id;
       if (!targetConversationId) {
         return;
       }
       void copyPermalink(targetConversationId, messageId);
     },
-    [sortedMessages, conversationId, copyPermalink],
+    [sortedMessages, copyPermalink],
   );
 
   // Read the pending jump during RENDER, not only inside the effect below.
@@ -335,33 +335,34 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   // touch while rendering — claiming solely inside an effect would mean a jump
   // requested while this conversation is already open never re-renders the
   // component, so the effect would never re-run and the jump would be dropped.
-  const pendingJumpMessageId =
-    conversationId && messageJumpStore.conversationId === conversationId
-      ? messageJumpStore.messageId
+  //
+  // The match is on the message this list RENDERS rather than on the
+  // `conversationId` prop, which for channels is the MLS *group* id (it feeds
+  // roster banners) and so would never equal a channel permalink's target.
+  const requestedJumpMessageId = messageJumpStore.messageId;
+  const jumpTargetMessageId =
+    requestedJumpMessageId &&
+    sortedMessages.some((m) => m.id === requestedJumpMessageId)
+      ? requestedJumpMessageId
       : null;
 
-  // Consume a pending permalink jump for this conversation: scroll the target
-  // into view and flash it. The class is applied imperatively to the row that
-  // is already in the DOM, so this needs no change to `MessageItem` and adds no
-  // wrapper element to the timeline.
+  // Consume a pending permalink jump: scroll the target into view and flash it.
+  // The class is applied imperatively to the row that is already in the DOM, so
+  // this needs no change to `MessageItem` and adds no wrapper to the timeline.
   //
-  // Depends on `timeline.length` so a jump that arrives before the target has
-  // been rendered (the conversation is still loading) retries once messages land.
+  // A jump requested before its target has loaded simply is not claimed yet —
+  // it stays pending and this effect re-runs when the message arrives.
   useEffect(() => {
-    if (!conversationId || !pendingJumpMessageId) {
-      return;
-    }
-    const messageId = messageJumpStore.claim(conversationId);
-    if (!messageId) {
+    if (!jumpTargetMessageId) {
       return;
     }
     const el = containerRef.current?.querySelector(
-      `[data-testid="message-${messageId}"]`,
+      `[data-testid="message-${jumpTargetMessageId}"]`,
     );
     if (!el) {
-      // Target not rendered yet — put the request back so the next render
-      // (after more history loads) can claim it.
-      messageJumpStore.request(conversationId, messageId);
+      return;
+    }
+    if (!messageJumpStore.claimMessage(jumpTargetMessageId)) {
       return;
     }
     el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -371,7 +372,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       messageJumpStore.clearHighlight();
     }, HIGHLIGHT_MS);
     return () => clearTimeout(timer);
-  }, [conversationId, pendingJumpMessageId, timeline.length]);
+  }, [jumpTargetMessageId, timeline.length]);
 
   if (timeline.length === 0) {
     return (
