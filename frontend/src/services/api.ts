@@ -89,6 +89,19 @@ export async function lockUnlock(): Promise<void> {
   await invoke('lock');
 }
 
+/// Push this device's idle auto-lock window (#851) to the backend, which owns
+/// the deadline and the timer. `null` turns auto-lock off. Rust rejects any
+/// value the UI doesn't offer — see `AUTO_LOCK_OPTIONS` in `utils/autoLock.ts`.
+export async function setAutoLockTimeout(minutes: number | null): Promise<void> {
+  await invoke('set_auto_lock_timeout', { minutes });
+}
+
+/// Tell the backend a human just interacted with this device, resetting the
+/// idle deadline. Throttled by the caller — never call this per keystroke.
+export async function reportUserActivity(): Promise<void> {
+  await invoke('report_user_activity');
+}
+
 export async function getSession(): Promise<AuthResult | null> {
   const profile = await invoke<RawUserProfile | null>('get_session');
   if (!profile) {
