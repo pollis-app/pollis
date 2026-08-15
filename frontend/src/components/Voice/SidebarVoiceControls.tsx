@@ -1,15 +1,16 @@
 import React from "react";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 import { Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { appStore } from "../../stores/appStore";
 import { voiceSession } from "../../voice";
 import { gateOf, micIndicatorOf, type MicIndicator } from "../../types/voice-state";
 import { useShortcutLabel } from "../../keyboard";
 import {
-  micControlTitle,
-  micControlAriaLabel,
-  deafenControlTitle,
-  deafenControlAriaLabel,
+  micControlTitleKey,
+  micControlAriaLabelKey,
+  deafenControlTitleKey,
+  deafenControlAriaLabelKey,
 } from "./voiceControlLabels";
 
 /**
@@ -49,6 +50,7 @@ const MIC_TONE: Record<MicIndicator, string> = {
  * from the others.
  */
 export const SidebarVoiceControls: React.FC = observer(() => {
+  const { t } = useTranslation("voice");
   const { voiceState } = appStore;
   const gate = gateOf(voiceState);
   // Four states, not a bool: deafened and push-to-talk-idle both close the
@@ -68,8 +70,8 @@ export const SidebarVoiceControls: React.FC = observer(() => {
           data-testid="sidebar-voice-mute"
           data-mic-state={micIndicator}
           onClick={() => voiceSession.toggleMute()}
-          aria-label={micControlAriaLabel(micIndicator, pttCombo)}
-          title={micControlTitle(micIndicator, pttCombo)}
+          aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
+          title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
           className={`icon-btn-sm ${MIC_TONE[micIndicator]}`}
         >
           {micIndicator === "live" || micIndicator === "ptt-idle" ? (
@@ -83,8 +85,8 @@ export const SidebarVoiceControls: React.FC = observer(() => {
           type="button"
           data-testid="sidebar-voice-listen-only"
           data-mic-state="listen-only"
-          aria-label="No microphone detected — listening only"
-          title="No microphone detected — listening only"
+          aria-label={t("controls.listenOnly")}
+          title={t("controls.listenOnly")}
           className="icon-btn-sm text-dim hover:text-dim disabled:cursor-default"
           disabled
         >
@@ -101,8 +103,8 @@ export const SidebarVoiceControls: React.FC = observer(() => {
         data-testid="sidebar-voice-deafen"
         data-deafened={gate.deafened}
         onClick={() => voiceSession.toggleDeafen()}
-        aria-label={deafenControlAriaLabel(gate.deafened)}
-        title={deafenControlTitle(gate.deafened)}
+        aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
+        title={t(deafenControlTitleKey(gate.deafened))}
         className={`icon-btn-sm ${gate.deafened ? "text-danger hover:text-danger" : ""}`}
       >
         {gate.deafened ? (

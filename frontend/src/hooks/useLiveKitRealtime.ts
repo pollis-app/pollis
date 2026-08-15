@@ -22,6 +22,7 @@ import { keyChangeStore } from '../stores/keyChangeStore';
 import { rosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
 import { peerVerificationKeys } from './queries/useUserProfile';
 import { listPendingEnrollmentRequests } from '../services/api';
+import i18n from '../i18n';
 
 // Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
@@ -298,8 +299,8 @@ export function useLiveKitRealtime() {
         // Most recent first (the Rust query orders by created_at DESC).
         const r = pending[0];
         notify('enrollment', {
-          title: 'New device sign-in',
-          body: 'A new device is requesting access to your account',
+          title: i18n.t('settings:notify.enrollmentTitle'),
+          body: i18n.t('settings:notify.enrollmentBody'),
           enrollment: {
             requestId: r.request_id,
             newDeviceId: r.new_device_id,
@@ -380,13 +381,12 @@ export function useLiveKitRealtime() {
         }).catch((err) => {
           console.warn('[realtime] dm_created: process_pending_commits failed:', err);
         });
+        const dmSenderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
         notify('dm_request', {
           roomId: event.conversation_id,
-          title: 'New conversation',
-          body: event.sender_username
-            ? `${event.sender_username} started a conversation with you`
-            : 'Someone started a conversation with you',
-          senderUsername: event.sender_username ?? 'Someone',
+          title: i18n.t('dms:notify.requestTitle'),
+          body: i18n.t('dms:notify.requestBody', { name: dmSenderUsername }),
+          senderUsername: dmSenderUsername,
         });
         return;
       }
@@ -421,14 +421,24 @@ export function useLiveKitRealtime() {
         // Only invites raise a user-facing notification. Approvals and
         // generic reconciles are silent — query invalidation handles them.
         if (event.kind === 'invite') {
-          const groupPart = event.group_name ? ` to ${event.group_name}` : '';
+          let inviteBody: string;
+          if (!event.inviter_username) {
+            inviteBody = i18n.t('channels:notify.inviteBodyUnknown');
+          } else if (event.group_name) {
+            inviteBody = i18n.t('channels:notify.inviteBodyToGroup', {
+              name: event.inviter_username,
+              group: event.group_name,
+            });
+          } else {
+            inviteBody = i18n.t('channels:notify.inviteBody', {
+              name: event.inviter_username,
+            });
+          }
           notify('group_invite', {
             roomId: event.conversation_id ?? undefined,
-            title: 'New group invite',
-            body: event.inviter_username
-              ? `${event.inviter_username} invited you${groupPart}`
-              : 'You have been invited to a group',
-            senderUsername: event.inviter_username ?? 'Someone',
+            title: i18n.t('channels:notify.inviteTitle'),
+            body: inviteBody,
+            senderUsername: event.inviter_username ?? i18n.t('nav:statusBar.someone'),
           });
         }
         return;
@@ -528,8 +538,8 @@ export function useLiveKitRealtime() {
         // account-takeover vector. Sound + OS notification + overlay are
         // all configured on the 'enrollment' category.
         notify('enrollment', {
-          title: 'New device sign-in',
-          body: 'A new device is requesting access to your account',
+          title: i18n.t('settings:notify.enrollmentTitle'),
+          body: i18n.t('settings:notify.enrollmentBody'),
           enrollment: {
             requestId: event.request_id,
             newDeviceId: event.new_device_id,
@@ -547,8 +557,8 @@ export function useLiveKitRealtime() {
           callerUsername: event.caller_username,
         });
         notify('incoming_call', {
-          title: 'Incoming call',
-          body: `@${event.caller_username} is calling`,
+          title: i18n.t('voice:notify.incomingCallTitle'),
+          body: i18n.t('voice:notify.incomingCallBody', { name: event.caller_username }),
           senderUsername: event.caller_username,
           roomId: event.call_id,
         });
@@ -712,12 +722,12 @@ export function useLiveKitRealtime() {
         if (event.sender_id === currentUserIdRef.current) {
           return;
         }
-        const senderUsername = event.sender_username ?? 'Someone';
-        const title = roomNameMapRef.current.get(event.channel_id) ?? 'New mention';
+        const senderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
+        const title = roomNameMapRef.current.get(event.channel_id) ?? i18n.t('chat:notify.mentionTitle');
         notify('all_mention', {
           roomId: event.channel_id,
           title,
-          body: `${senderUsername} mentioned @all`,
+          body: i18n.t('chat:notify.allMentionBody', { name: senderUsername }),
           senderUsername,
         });
         return;
@@ -731,12 +741,12 @@ export function useLiveKitRealtime() {
         if (event.sender_id === currentUserIdRef.current) {
           return;
         }
-        const senderUsername = event.sender_username ?? 'Someone';
-        const title = roomNameMapRef.current.get(event.channel_id) ?? 'New mention';
+        const senderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
+        const title = roomNameMapRef.current.get(event.channel_id) ?? i18n.t('chat:notify.mentionTitle');
         notify('user_mention', {
           roomId: event.channel_id,
           title,
-          body: `${senderUsername} mentioned you`,
+          body: i18n.t('chat:notify.userMentionBody', { name: senderUsername }),
           senderUsername,
         });
         return;
@@ -748,7 +758,7 @@ export function useLiveKitRealtime() {
 
       const channelId = event.channel_id;
       const conversationId = event.conversation_id;
-      const senderUsername = event.sender_username ?? 'Someone';
+      const senderUsername = event.sender_username ?? i18n.t('nav:statusBar.someone');
       const incomingId = channelId ?? conversationId;
 
       // Messages from the same user on another device should update the
@@ -766,8 +776,8 @@ export function useLiveKitRealtime() {
         return;
       }
 
-      const title = roomNameMapRef.current.get(incomingId) ?? 'New message';
-      const body = `${senderUsername}: New message`;
+      const title = roomNameMapRef.current.get(incomingId) ?? i18n.t('chat:notify.newMessageTitle');
+      const body = i18n.t('chat:notify.newMessageBody', { name: senderUsername });
       notify(conversationId ? 'direct_message' : 'channel_message', {
         roomId: incomingId,
         title,

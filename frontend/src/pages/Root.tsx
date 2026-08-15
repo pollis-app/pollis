@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { exit } from "../bridge";
 import { Users, MessageCircle, Mail, UserPlus, LogOut, Power, Link as LinkIcon } from "lucide-react";
@@ -10,6 +11,7 @@ import { useDMConversations } from "../hooks/queries/useMessages";
 import type { RouterContext } from "../types/router";
 
 export const RootPage: React.FC = observer(() => {
+  const { t } = useTranslation("nav");
   const navigate = useNavigate();
   const router = useRouter();
   const { onLogout } = router.options.context as RouterContext;
@@ -23,46 +25,46 @@ export const RootPage: React.FC = observer(() => {
   const items: TerminalMenuItem[] = [
     {
       id: "groups",
-      label: "Groups",
+      label: t("home.groups"),
       icon: <Users size={14} />,
-      description: "Communities, Organizations, Teams, and overly-ambitious group chats",
+      description: t("home.groupsDescription"),
       action: () => navigate({ to: "/groups" }),
       testId: "menu-item-groups",
     },
     {
       id: "dms",
-      label: "Direct Messages",
+      label: t("home.dms"),
       icon: <MessageCircle size={14} />,
-      description: "Private, end-to-end encrypted conversations with individuals",
+      description: t("home.dmsDescription"),
       action: () => navigate({ to: "/dms" }),
       badge: totalDMUnread > 0 ? totalDMUnread : undefined,
       testId: "menu-item-dms",
     },
     {
       id: "invites",
-      label: "Invites",
+      label: t("home.invites"),
       icon: <Mail size={14} />,
       description: pendingInvites.length > 0
-        ? <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{pendingInvites.length} pending</span>
-        : "No pending invites",
+        ? <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{t("home.pending", { count: pendingInvites.length })}</span>
+        : t("home.noPendingInvites"),
       action: () => navigate({ to: "/invites" }),
       type: "system" as const,
       testId: "menu-item-invites",
     },
     {
       id: "join",
-      label: "Join a Group",
+      label: t("home.join"),
       icon: <LinkIcon size={14} />,
-      description: "Redeem an invite link or join code",
+      description: t("home.joinDescription"),
       action: () => navigate({ to: "/join" }),
       type: "system" as const,
       testId: "menu-item-join",
     },
     ...(pendingJoinRequests.length > 0 ? [{
       id: "join-requests",
-      label: "Join Requests",
+      label: t("home.joinRequests"),
       icon: <UserPlus size={14} />,
-      description: <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{pendingJoinRequests.length} pending</span>,
+      description: <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{t("home.pending", { count: pendingJoinRequests.length })}</span>,
       action: () => navigate({ to: "/join-requests" }),
       type: "system" as const,
       testId: "menu-item-join-requests",
@@ -70,7 +72,7 @@ export const RootPage: React.FC = observer(() => {
     { id: "__sep1__", label: "", type: "separator" },
     {
       id: "logout",
-      label: "Log out",
+      label: t("home.logout"),
       icon: <LogOut size={14} />,
       action: onLogout,
       type: "system",
@@ -78,7 +80,7 @@ export const RootPage: React.FC = observer(() => {
     },
     {
       id: "exit",
-      label: "Exit",
+      label: t("home.exit"),
       icon: <Power size={14} />,
       action: () => exit(0),
       type: "system",

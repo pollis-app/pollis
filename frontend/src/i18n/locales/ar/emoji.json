@@ -1,0 +1,54 @@
+{
+  "picker": {
+    "label": "منتقي الرموز التعبيرية",
+    "triggerLabel": "الرموز التعبيرية",
+    "searchLabel": "بحث",
+    "searchPlaceholder": "ابحث عن رمز تعبيري",
+    "resultsFor": "نتائج البحث عن \"{{query}}\"",
+    "recent": "الأكثر استخدامًا",
+    "custom": "مخصصة",
+    "empty": "لا توجد رموز تعبيرية مطابقة.",
+    "previewHint": "اختر رمزًا تعبيريًا",
+    "railLabel": "فئات الرموز التعبيرية"
+  },
+  "categories": {
+    "people": "الأشخاص",
+    "nature": "الطبيعة",
+    "food": "الطعام",
+    "activity": "الأنشطة",
+    "travel": "السفر",
+    "objects": "الأشياء",
+    "symbols": "الرموز",
+    "flags": "الأعلام"
+  },
+  "skinTone": {
+    "groupLabel": "لون البشرة",
+    "default": "لون البشرة الافتراضي",
+    "numbered": "لون البشرة {{index}}"
+  },
+  "manage": {
+    "title": "الرموز التعبيرية المخصصة",
+    "signInRequired": "يرجى تسجيل الدخول",
+    "shortcodeLabel": "الرمز المختصر",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "يُكتب على هيئة ‎:shortcode:‎ — a–z و 0–9 و _",
+    "shortcodeInvalid": "استخدم من 2 إلى 32 حرفًا: a–z و 0–9 و _",
+    "shortcodeTaken": "الرمز ‎:{{shortcode}}:‎ مستخدَم بالفعل في هذه المجموعة",
+    "chooseImage": "اختيار صورة",
+    "shrinking": "جارٍ تصغير الصورة…",
+    "filePickerTitle": "اختر صورة رمز تعبيري",
+    "imageFilterName": "الصور",
+    "addFailed": "تعذّرت إضافة هذا الرمز التعبيري",
+    "removeFailed": "تعذّرت إزالة هذا الرمز التعبيري",
+    "storageNote": "يُعاد ترميز الصور إلى أقل من 48 كيلوبايت قبل الرفع، فلا مشكلة في حجم الملف الأصلي. الصور المتطابقة تتشارك نسخة مخزَّنة واحدة عبر كل مجموعة تستخدمها. ولا يوجد حد لعدد ما يمكن لهذه المجموعة إضافته.",
+    "stored_zero": "{{count}} رمز تعبيري · {{size}} مخزَّنة",
+    "stored_one": "{{count}} رمز تعبيري · {{size}} مخزَّنة",
+    "stored_two": "{{count}} رمزان تعبيريان · {{size}} مخزَّنة",
+    "stored_few": "{{count}} رموز تعبيرية · {{size}} مخزَّنة",
+    "stored_many": "{{count}} رمزًا تعبيريًا · {{size}} مخزَّنة",
+    "stored_other": "{{count}} رمز تعبيري · {{size}} مخزَّنة",
+    "empty": "لا توجد رموز تعبيرية مخصصة بعد. يمكن لأي عضو في المجموعة إضافة واحد.",
+    "sizeAnimated": "متحرك · {{size}}",
+    "remove": "إزالة ‎:{{shortcode}}:‎"
+  }
+}

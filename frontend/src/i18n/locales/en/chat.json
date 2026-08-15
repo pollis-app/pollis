@@ -1,0 +1,110 @@
+{
+  "message": {
+    "fromLabel": "Message from {{name}}",
+    "unknownAuthor": "unknown",
+    "deleted": "[deleted]",
+    "encrypted": "[encrypted]",
+    "redacted": "[redacted]",
+    "edited": "(edited)"
+  },
+  "status": {
+    "pending": "pending",
+    "sending": "sending",
+    "sent": "sent",
+    "failed": "failed",
+    "cancelled": "cancelled"
+  },
+  "actions": {
+    "reply": "Reply",
+    "replyInThread": "Reply in thread",
+    "save": "Save message",
+    "removeBookmark": "Remove bookmark",
+    "copyLink": "Copy link to message",
+    "copyLinkCopied": "Link copied",
+    "copyLinkFailed": "Couldn't copy link",
+    "edit": "Edit message",
+    "delete": "Delete message",
+    "deleteAsAdmin": "Delete message (admin)"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} reply",
+    "replyCount_other": "{{count}} replies"
+  },
+  "receipts": {
+    "readByEveryone": "Read by everyone",
+    "readByCount_one": "Read by {{count}} of {{total}}",
+    "readByCount_other": "Read by {{count}} of {{total}}",
+    "deliveredCount_one": "Delivered to {{count}} of {{total}}",
+    "deliveredCount_other": "Delivered to {{count}} of {{total}}"
+  },
+  "list": {
+    "empty": "No messages yet. Start the conversation.",
+    "unknownAuthor": "Unknown",
+    "blockedAuthor": "blocked user",
+    "blockedBody": "[blocked]"
+  },
+  "roster": {
+    "joined": "{{name}} joined the group",
+    "left": "{{name}} left the group",
+    "deviceAdded": "{{name}} added a new device",
+    "deviceRemoved": "{{name}} removed a device"
+  },
+  "replyBar": {
+    "replyingTo": "replying to <name>{{name}}</name>",
+    "scrollToMessage": "Scroll to replied message",
+    "dismiss": "Dismiss reply",
+    "encrypted": "[Encrypted message]"
+  },
+  "queue": {
+    "heading": "Queue",
+    "pendingPlaceholder": "[Pending message]",
+    "cancel": "Cancel message",
+    "retry": "retry",
+    "failedCount_one": "failed ×{{count}}",
+    "failedCount_other": "failed ×{{count}}"
+  },
+  "reactions": {
+    "add": "Add reaction",
+    "pillLabel_one": "{{emoji}} {{count}} reaction",
+    "pillLabel_other": "{{emoji}} {{count}} reactions"
+  },
+  "preview": {
+    "noMessages": "No messages yet",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[attachment]",
+    "attachments_other": "[{{count}} attachments]"
+  },
+  "attachment": {
+    "viewLabel": "View {{filename}}",
+    "openLabel": "Open {{filename}}",
+    "downloadLabel": "Download {{filename}}",
+    "loading": "loading…",
+    "error": "err",
+    "failedToLoad": "Failed to load",
+    "failedToDownload": "Failed to download",
+    "lightboxFetch": "fetch",
+    "lightboxDone": "[ done ]",
+    "lightboxDownload": "[download]",
+    "lightboxClose": "[esc]"
+  },
+  "unfurl": {
+    "loadImage": "Load image",
+    "loadVideo": "Load video",
+    "loadTitle": "Load media from {{url}} — this contacts that site directly",
+    "loadDescription": "Load media from {{url}}. This contacts that site directly and reveals your IP address to it.",
+    "openLabel": "Open {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "New message",
+    "newMessageBody": "{{name}}: New message",
+    "mentionTitle": "New mention",
+    "allMentionBody": "{{name}} mentioned @all",
+    "userMentionBody": "{{name}} mentioned you"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  }
+}

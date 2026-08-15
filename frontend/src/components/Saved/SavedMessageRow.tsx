@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import type { SavedMessage } from "../../hooks/queries/useBookmarks";
 
@@ -29,6 +30,7 @@ export const SavedMessageRow: React.FC<SavedMessageRowProps> = ({
   conversationLabel,
   senderLabel,
 }) => {
+  const { t } = useTranslation("saved");
   const isTerminal = useSkin() === "terminal";
 
   const metaClass = isTerminal
@@ -42,7 +44,7 @@ export const SavedMessageRow: React.FC<SavedMessageRowProps> = ({
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <div className="flex min-w-0 items-center gap-2">
         <span className={`${metaClass} shrink-0 text-accent`}>
-          {conversationLabel ?? "conversation"}
+          {conversationLabel ?? t("row.conversationFallback")}
         </span>
         {senderLabel && (
           <span className={`${metaClass} min-w-0 truncate`}>{senderLabel}</span>
@@ -51,7 +53,7 @@ export const SavedMessageRow: React.FC<SavedMessageRowProps> = ({
 
       {item.available ? (
         <span data-testid={`saved-content-${item.message_id}`} className={bodyClass}>
-          {item.content && item.content.length > 0 ? item.content : "(no text)"}
+          {item.content && item.content.length > 0 ? item.content : t("row.noText")}
         </span>
       ) : (
         // Honest placeholder. It says only that THIS DEVICE no longer holds the
@@ -61,7 +63,7 @@ export const SavedMessageRow: React.FC<SavedMessageRowProps> = ({
           data-testid={`saved-unavailable-${item.message_id}`}
           className={`${bodyClass} italic text-dim`}
         >
-          You do not have this message on this device.
+          {t("row.unavailable")}
         </span>
       )}
     </div>

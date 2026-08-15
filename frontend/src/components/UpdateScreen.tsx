@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { check, relaunch, invoke } from "../bridge";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 
@@ -10,6 +11,7 @@ type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "re
  * it, installs it, and relaunches — no user interaction required.
  */
 export const UpdateScreen: React.FC = () => {
+  const { t } = useTranslation("nav");
   const [phase, setPhase] = useState<UpdatePhase>("preparing");
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,17 +94,19 @@ export const UpdateScreen: React.FC = () => {
   const label = (() => {
     switch (phase) {
       case "preparing":
-        return "Preparing to update…";
+        return t("update.preparing");
       case "checking":
-        return "Checking for updates…";
+        return t("update.checking");
       case "downloading":
-        return progress !== null ? `Downloading update… ${progress}%` : "Downloading update…";
+        return progress !== null
+          ? t("update.downloadingProgress", { progress })
+          : t("update.downloading");
       case "installing":
-        return "Installing update…";
+        return t("update.installing");
       case "relaunching":
-        return "Relaunching…";
+        return t("update.relaunching");
       case "error":
-        return `Update failed: ${error}`;
+        return t("update.failed", { error });
     }
   })();
 

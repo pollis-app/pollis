@@ -1,0 +1,82 @@
+{
+  "actions": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "close": "Close",
+    "copy": "Copy",
+    "delete": "Delete",
+    "goBack": "Go back",
+    "moreOptions": "More options",
+    "save": "Save"
+  },
+  "states": {
+    "buttonLoading": "Loading...",
+    "loading": "Loading…"
+  },
+  "time": {
+    "today": "Today",
+    "yesterday": "Yesterday"
+  },
+  "presence": {
+    "label": "Presence: {{status}}",
+    "offline": "offline",
+    "online": "online"
+  },
+  "list": {
+    "empty": "No items."
+  },
+  "grid": {
+    "empty": "No one here yet."
+  },
+  "menu": {
+    "escHint": "Esc to go back",
+    "navigationLabel": "Navigation menu",
+    "navigateHint": "navigate",
+    "selectHint": "Enter to select"
+  },
+  "media": {
+    "mute": "Mute",
+    "pause": "Pause",
+    "play": "Play",
+    "seek": "Seek audio",
+    "skipBackward": "Skip backward 10 seconds",
+    "skipForward": "Skip forward 10 seconds",
+    "unmute": "Unmute",
+    "volume": "Volume"
+  },
+  "composer": {
+    "addAttachment": "Add attachment",
+    "allMentionHint": "notifies everyone in this channel",
+    "filePickerTitle": "Add files",
+    "inputLabel": "Message input",
+    "placeholder": "Type a message…",
+    "previewAlt": "Preview",
+    "removeAttachment": "Remove {{name}}",
+    "send": "Send message"
+  },
+  "mentions": {
+    "listLabel": "Mention suggestions",
+    "matching": "Members matching <hl>@{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Avatar",
+    "loading": "Loading",
+    "otpDigit": "OTP digit {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}}s",
+    "seconds_other": "{{count}}s",
+    "minutes_one": "{{count}}m",
+    "minutes_other": "{{count}}m",
+    "hours_one": "{{count}}h",
+    "hours_other": "{{count}}h",
+    "days_one": "{{count}}d",
+    "days_other": "{{count}}d",
+    "weeks_one": "{{count}}w",
+    "weeks_other": "{{count}}w",
+    "months_one": "{{count}}mo",
+    "months_other": "{{count}}mo",
+    "years_one": "{{count}}y",
+    "years_other": "{{count}}y"
+  }
+}

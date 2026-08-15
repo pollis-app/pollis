@@ -1,8 +1,10 @@
 import React, { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { startGame, type GameHandle } from "../arcade/game";
 
 export const ArcadePage: React.FC = () => {
+  const { t } = useTranslation("arcade");
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -15,7 +17,7 @@ export const ArcadePage: React.FC = () => {
   }, []);
 
   return (
-    <PageShell title="ARCADE">
+    <PageShell title={t("page.title")}>
       <div
         className="w-full h-full flex"
         style={{ background: "#000" }}

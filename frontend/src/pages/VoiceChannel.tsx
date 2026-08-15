@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { Pencil, Trash2, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 import { appStore } from "../stores/appStore";
 import { useDeleteChannel, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { VoiceStage } from "../components/Voice/stage/VoiceStage";
@@ -15,6 +16,7 @@ import { voiceSession } from "../voice";
 
 
 export const VoiceChannelPage: React.FC = observer(() => {
+  const { t } = useTranslation("voice");
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/voice/$channelId" });
   const {
@@ -104,7 +106,7 @@ export const VoiceChannelPage: React.FC = observer(() => {
               params: { groupId, channelId },
             })
           }
-          aria-label="Rename channel"
+          aria-label={t("channel.renameLabel")}
           className="icon-btn-sm flex-shrink-0"
         >
           <Pencil size={14} aria-hidden="true" />
@@ -112,7 +114,7 @@ export const VoiceChannelPage: React.FC = observer(() => {
         <button
           data-testid="delete-channel-trigger"
           onClick={() => setPendingDeleteChannelId(channelId)}
-          aria-label="Delete channel"
+          aria-label={t("channel.deleteLabel")}
           className="icon-btn-sm flex-shrink-0"
         >
           <Trash2 size={14} aria-hidden="true" />
@@ -129,12 +131,12 @@ export const VoiceChannelPage: React.FC = observer(() => {
         style={{ borderTop: "1px solid var(--c-border)", background: "var(--c-surface)" }}
       >
         <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: "var(--c-text-muted)" }}>
-          delete channel
+          {t("channel.deleteHeading")}
         </span>
         <button
           data-testid="delete-channel-cancel"
           onClick={() => setPendingDeleteChannelId(null)}
-          aria-label="Cancel delete"
+          aria-label={t("channel.deleteCancelLabel")}
           className="icon-btn-sm flex-shrink-0"
         >
           <X size={20} aria-hidden="true" />
@@ -145,17 +147,17 @@ export const VoiceChannelPage: React.FC = observer(() => {
         style={{ background: "var(--c-surface)" }}
       >
         <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
-          This voice channel and any in-call state will be permanently deleted. This cannot be undone.
+          {t("channel.deleteWarning")}
         </p>
         <Button
           data-testid="delete-channel-confirm"
           variant="danger"
           onClick={handleConfirmDelete}
           isLoading={deleteChannelMutation.isPending}
-          loadingText="Deleting…"
+          loadingText={t("channel.deleting")}
           autoFocus
         >
-          Delete
+          {t("common:actions.delete")}
         </Button>
       </div>
     </div>

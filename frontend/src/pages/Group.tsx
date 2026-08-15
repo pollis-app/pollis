@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil, Smile } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
@@ -10,6 +11,7 @@ import { useVoiceRoomCounts } from "../hooks/queries/useVoiceParticipants";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 export const GroupPage: React.FC = observer(() => {
+  const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId" });
   const { setSelectedGroupId, setSelectedChannelId, markRead, unreadCounts } = appStore;
@@ -28,7 +30,7 @@ export const GroupPage: React.FC = observer(() => {
   if (isLoading) {
     return (
       <TerminalMenu
-        items={[{ id: "__loading__", label: "Loading…", disabled: true }]}
+        items={[{ id: "__loading__", label: t("common:states.loading"), disabled: true }]}
       />
     );
   }
@@ -37,11 +39,11 @@ export const GroupPage: React.FC = observer(() => {
     return (
       <TerminalMenu
         items={[
-          { id: "__not-found__", label: "Group not found", disabled: true },
+          { id: "__not-found__", label: t("group.notFound"), disabled: true },
           {
             id: "__back__",
-            label: "Go back",
-            icon: <ArrowLeft size={14} />,
+            label: t("common:actions.goBack"),
+            icon: <ArrowLeft size={14} className="rtl-mirror" />,
             action: () => navigate({ to: "/groups" }),
             type: "system",
           },
@@ -75,7 +77,10 @@ export const GroupPage: React.FC = observer(() => {
       id: ch.id,
       label: ch.name,
       icon: <Volume2 size={14} />,
-      description: count > 0 ? `${count} in call` : (ch.description || "Join voice chat"),
+      description:
+        count > 0
+          ? t("group.inCall", { count })
+          : (ch.description || t("group.joinVoiceChat")),
       action: () => {
         navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
       },
@@ -100,7 +105,7 @@ export const GroupPage: React.FC = observer(() => {
     { id: "__sep__", label: "", type: "separator" as const },
     {
       id: "members",
-      label: "Members",
+      label: t("group.members"),
       icon: <Users size={14} />,
       action: () => navigate({ to: "/groups/$groupId/members", params: { groupId } }),
       type: "system" as const,
@@ -110,7 +115,7 @@ export const GroupPage: React.FC = observer(() => {
     // person rather than gatekept — so this sits outside the admin block.
     {
       id: "group-emoji",
-      label: "Custom Emoji",
+      label: t("group.customEmoji"),
       icon: <Smile size={14} />,
       action: () => navigate({ to: "/groups/$groupId/emoji", params: { groupId } }),
       type: "system" as const,
@@ -119,7 +124,7 @@ export const GroupPage: React.FC = observer(() => {
     ...(isAdmin ? [
       {
         id: "rename-group",
-        label: "Rename Group",
+        label: t("group.rename"),
         icon: <Pencil size={14} />,
         action: () => navigate({ to: "/groups/$groupId/rename", params: { groupId } }),
         type: "system" as const,
@@ -127,7 +132,7 @@ export const GroupPage: React.FC = observer(() => {
       },
       {
         id: "create-channel",
-        label: "New Channel",
+        label: t("group.newChannel"),
         icon: <Plus size={14} />,
         action: () => {
           setSelectedGroupId(group.id);
@@ -138,7 +143,7 @@ export const GroupPage: React.FC = observer(() => {
       },
       {
         id: "invite-member",
-        label: "Invite Member",
+        label: t("group.inviteMember"),
         icon: <UserPlus size={14} />,
         action: () => navigate({ to: "/groups/$groupId/invite", params: { groupId } }),
         type: "system" as const,
@@ -146,7 +151,7 @@ export const GroupPage: React.FC = observer(() => {
       },
       {
         id: "join-requests",
-        label: "Join Requests",
+        label: t("group.joinRequests"),
         icon: <Inbox size={14} />,
         action: () => navigate({ to: "/groups/$groupId/join-requests", params: { groupId } }),
         badge: joinRequests.length > 0 ? joinRequests.length : undefined,
@@ -156,7 +161,7 @@ export const GroupPage: React.FC = observer(() => {
     ] : []),
     {
       id: "leave-group",
-      label: "Leave Group",
+      label: t("group.leave"),
       icon: <LogOut size={14} />,
       action: () => navigate({ to: "/groups/$groupId/leave", params: { groupId } }),
       type: "system" as const,
@@ -164,8 +169,8 @@ export const GroupPage: React.FC = observer(() => {
     },
     {
       id: "__back__",
-      label: "Go back",
-      icon: <ArrowLeft size={14} />,
+      label: t("common:actions.goBack"),
+      icon: <ArrowLeft size={14} className="rtl-mirror" />,
       action: () => navigate({ to: "/groups" }),
       type: "system",
     },

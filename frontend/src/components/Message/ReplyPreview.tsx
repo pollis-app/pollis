@@ -1,4 +1,5 @@
 import React from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import type { Message } from '../../types';
 import { getUsernameColor, useBackgroundIsLight } from '../../utils/usernameColor';
@@ -16,6 +17,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
   onDismiss,
   onScrollToMessage,
 }) => {
+  const { t } = useTranslation('chat');
   const isLightBg = useBackgroundIsLight();
   const message = allMessages.find((m) => m.id === messageId);
   if (!message) {
@@ -23,7 +25,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
   }
   const author = message.sender_username ?? message.sender_id;
   const authorColor = getUsernameColor(author, isLightBg);
-  const content = message.content_decrypted || '[Encrypted message]';
+  const content = message.content_decrypted || t('replyBar.encrypted');
   const snippet = content.length > 80 ? content.substring(0, 80) + '...' : content;
 
   return (
@@ -34,16 +36,22 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
     >
       <div className="flex-1 min-w-0">
         <span className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
-          replying to{' '}
-          <span className="font-semibold" style={{ color: authorColor }}>
-            {author}
-          </span>
+          <Trans
+            t={t}
+            i18nKey="replyBar.replyingTo"
+            values={{ name: author }}
+            components={{
+              name: (
+                <span className="font-semibold" style={{ color: authorColor }} />
+              ),
+            }}
+          />
         </span>
         <button
           data-testid="reply-preview-scroll-button"
           onClick={() => onScrollToMessage?.(messageId)}
-          aria-label="Scroll to replied message"
-          className="block w-full text-left"
+          aria-label={t('replyBar.scrollToMessage')}
+          className="block w-full text-start"
         >
           <p className="text-xs font-mono truncate" style={{ color: 'var(--c-accent-dim)' }}>{snippet}</p>
         </button>
@@ -51,7 +59,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
       <button
         data-testid="dismiss-reply-button"
         onClick={onDismiss}
-        aria-label="Dismiss reply"
+        aria-label={t('replyBar.dismiss')}
         className="icon-btn-sm flex-shrink-0"
       >
         <X size={17} aria-hidden="true" />

@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
@@ -32,6 +33,7 @@ interface ThreadMessageRowProps {
  */
 export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
   ({ message, isRoot = false }) => {
+    const { t } = useTranslation("nav");
     const skin = useSkin();
     const isTerminal = skin !== "refined";
     const author = message.sender_username ?? message.sender_id;
@@ -43,7 +45,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
 
     const body = message.deleted_at ? (
       <p className={`italic text-muted ${isTerminal ? "text-base" : "text-sm"}`}>
-        Message deleted
+        {t("thread.messageDeleted")}
       </p>
     ) : (
       <>
@@ -59,7 +61,7 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
           <p
             className={`italic text-muted ${isTerminal ? "text-base" : "text-sm"}`}
           >
-            [encrypted]
+            {t("thread.encrypted")}
           </p>
         )}
         {(message.attachments ?? []).map((attachment) => (

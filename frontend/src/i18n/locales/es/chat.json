@@ -1,0 +1,110 @@
+{
+  "message": {
+    "fromLabel": "Mensaje de {{name}}",
+    "unknownAuthor": "desconocido",
+    "deleted": "[eliminado]",
+    "encrypted": "[cifrado]",
+    "redacted": "[retirado]",
+    "edited": "(editado)"
+  },
+  "status": {
+    "pending": "pendiente",
+    "sending": "enviando",
+    "sent": "enviado",
+    "failed": "fallido",
+    "cancelled": "cancelado"
+  },
+  "actions": {
+    "reply": "Responder",
+    "replyInThread": "Responder en el hilo",
+    "save": "Guardar mensaje",
+    "removeBookmark": "Quitar marcador",
+    "copyLink": "Copiar enlace al mensaje",
+    "copyLinkCopied": "Enlace copiado",
+    "copyLinkFailed": "No se pudo copiar el enlace",
+    "edit": "Editar mensaje",
+    "delete": "Eliminar mensaje",
+    "deleteAsAdmin": "Eliminar mensaje (admin)"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} respuesta",
+    "replyCount_other": "{{count}} respuestas"
+  },
+  "receipts": {
+    "readByEveryone": "Leído por todos",
+    "readByCount_one": "Leído por {{count}} de {{total}}",
+    "readByCount_other": "Leído por {{count}} de {{total}}",
+    "deliveredCount_one": "Entregado a {{count}} de {{total}}",
+    "deliveredCount_other": "Entregado a {{count}} de {{total}}"
+  },
+  "list": {
+    "empty": "Todavía no hay mensajes. Empieza la conversación.",
+    "unknownAuthor": "Desconocido",
+    "blockedAuthor": "usuario bloqueado",
+    "blockedBody": "[bloqueado]"
+  },
+  "roster": {
+    "joined": "{{name}} se unió al grupo",
+    "left": "{{name}} salió del grupo",
+    "deviceAdded": "{{name}} añadió un dispositivo nuevo",
+    "deviceRemoved": "{{name}} quitó un dispositivo"
+  },
+  "replyBar": {
+    "replyingTo": "respondiendo a <name>{{name}}</name>",
+    "scrollToMessage": "Ir al mensaje respondido",
+    "dismiss": "Descartar respuesta",
+    "encrypted": "[Mensaje cifrado]"
+  },
+  "queue": {
+    "heading": "Cola",
+    "pendingPlaceholder": "[Mensaje pendiente]",
+    "cancel": "Cancelar mensaje",
+    "retry": "reintentar",
+    "failedCount_one": "fallido ×{{count}}",
+    "failedCount_other": "fallidos ×{{count}}"
+  },
+  "reactions": {
+    "add": "Añadir reacción",
+    "pillLabel_one": "{{emoji}} {{count}} reacción",
+    "pillLabel_other": "{{emoji}} {{count}} reacciones"
+  },
+  "preview": {
+    "noMessages": "Todavía no hay mensajes",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[adjunto]",
+    "attachments_other": "[{{count}} adjuntos]"
+  },
+  "attachment": {
+    "viewLabel": "Ver {{filename}}",
+    "openLabel": "Abrir {{filename}}",
+    "downloadLabel": "Descargar {{filename}}",
+    "loading": "cargando…",
+    "error": "err",
+    "failedToLoad": "No se pudo cargar",
+    "failedToDownload": "No se pudo descargar",
+    "lightboxFetch": "cargar",
+    "lightboxDone": "[ hecho ]",
+    "lightboxDownload": "[descargar]",
+    "lightboxClose": "[esc]"
+  },
+  "unfurl": {
+    "loadImage": "Cargar imagen",
+    "loadVideo": "Cargar vídeo",
+    "loadTitle": "Cargar contenido de {{url}}: esto contacta directamente con ese sitio",
+    "loadDescription": "Cargar contenido de {{url}}. Esto contacta directamente con ese sitio y le revela tu dirección IP.",
+    "openLabel": "Abrir {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "Mensaje nuevo",
+    "newMessageBody": "{{name}}: mensaje nuevo",
+    "mentionTitle": "Mención nueva",
+    "allMentionBody": "{{name}} ha mencionado a @all",
+    "userMentionBody": "{{name}} te ha mencionado"
+  },
+  "fileSize": {
+    "bytes": "{{size}} B",
+    "kilobytes": "{{size}} KB",
+    "megabytes": "{{size}} MB",
+    "gigabytes": "{{size}} GB"
+  }
+}

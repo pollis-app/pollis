@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke, Channel } from "../bridge";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -26,6 +27,7 @@ function cssVar(name: string, fallback: string): string {
  * with xterm.js + the WebGL addon.
  */
 const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
+  const { t } = useTranslation("nav");
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -178,7 +180,9 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
           term.focus();
         })
         .catch((err) => {
-          term.write(`\r\n\x1b[31mfailed to start shell: ${err}\x1b[0m\r\n`);
+          term.write(
+            `\r\n\x1b[31m${t("terminal.shellFailed", { error: err })}\x1b[0m\r\n`,
+          );
         });
     });
 
@@ -245,6 +249,10 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
       }
       term.dispose();
     };
+    // Deliberately empty: this effect owns the PTY for the app's lifetime.
+    // `t` is captured on purpose — the only copy it produces is a one-shot
+    // spawn failure written into the scrollback, and re-running on a language
+    // change would kill and respawn the user's shell.
   }, []);
 
   // Becoming visible after a toggle: the container had zero size while

@@ -187,19 +187,10 @@ export function relayServingConfigEquals(
   );
 }
 
-/**
- * Plain-language reason a consented device isn't relaying right now. Kept
- * next to the type so a new Rust variant shows up as a compile error here.
- */
-export function relayServingHoldLabel(hold: RelayServingHold): string {
-  switch (hold) {
-    case "metered_network":
-      return "paused — this connection isn't Wi-Fi";
-    case "on_battery":
-      return "paused — running on battery";
-    case "offline":
-      return "paused — no network connection";
-    case "no_inbound_path":
-      return "paused — other devices can't reach this one through your network";
-  }
-}
+// The plain-language reason a consented device isn't relaying used to live
+// here as English literals. It is now `holdLabel` in
+// `components/Preferences/RelayServingSection.tsx`, which resolves the same
+// exhaustive switch through the translation catalogue (#855) — a hook is the
+// wrong place for copy, and `t()` must not run at module scope. The switch is
+// still exhaustive over `RelayServingHold`, so a new Rust variant remains a
+// compile error, just at the render site instead of here.

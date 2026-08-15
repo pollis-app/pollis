@@ -1,0 +1,9 @@
+{
+  "boundary": {
+    "instruction": "Veuillez redémarrer l'application.",
+    "message": "Une erreur inattendue s'est produite.",
+    "restart": "Redémarrer",
+    "tag": "ERREUR FATALE",
+    "title": "Une erreur est survenue"
+  }
+}

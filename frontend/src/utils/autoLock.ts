@@ -20,7 +20,6 @@ export const AUTO_LOCK_EVENT = "auto-lock";
 export interface AutoLockOption {
   /** Minutes of inactivity, or `null` for "never lock". */
   minutes: number | null;
-  label: string;
 }
 
 /**
@@ -28,12 +27,15 @@ export interface AutoLockOption {
  * (`AUTO_LOCK_OPTIONS_MINUTES`), so a value that isn't here can't be installed
  * even by a caller that bypasses this UI.
  */
+// `minutes` only — the human label is derived from it by `autoLockLabel` in
+// `pages/SecurityPage.tsx`, so the copy lives in the translation catalogue
+// rather than in a util (#855).
 export const AUTO_LOCK_OPTIONS: readonly AutoLockOption[] = [
-  { minutes: null, label: "Off" },
-  { minutes: 1, label: "1 min" },
-  { minutes: 5, label: "5 min" },
-  { minutes: 15, label: "15 min" },
-  { minutes: 60, label: "1 hour" },
+  { minutes: null },
+  { minutes: 1 },
+  { minutes: 5 },
+  { minutes: 15 },
+  { minutes: 60 },
 ] as const;
 
 /**

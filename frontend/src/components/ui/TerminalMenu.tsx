@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronRight, ArrowUp, ArrowDown, Settings } from "lucide-react";
 import { Button } from "./Button";
 
@@ -40,6 +41,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
   className = "",
   autoFocus = true,
 }) => {
+  const { t } = useTranslation("common");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isFocused, setIsFocused] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -153,7 +155,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
         }
       }}
       role="menu"
-      aria-label="Navigation menu"
+      aria-label={t("menu.navigationLabel")}
     >
       {/* Keyboard hints */}
       <div
@@ -166,13 +168,13 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
       >
         <ArrowUp className="w-3 h-3" />
         <ArrowDown className="w-3 h-3" />
-        <span>navigate</span>
+        <span>{t("menu.navigateHint")}</span>
         <span className="mx-1" style={{ color: "var(--c-border-active)" }}>•</span>
-        <span>Enter to select</span>
+        <span>{t("menu.selectHint")}</span>
         {onEsc && (
           <>
             <span className="mx-1" style={{ color: "var(--c-border-active)" }}>•</span>
-            <span>Esc to go back</span>
+            <span>{t("menu.escHint")}</span>
           </>
         )}
       </div>
@@ -200,7 +202,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
               data-testid={item.testId}
               className="flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors"
               style={{
-                borderLeft: `3px solid ${isSelected ? "var(--c-accent)" : "transparent"}`,
+                borderInlineStart: `3px solid ${isSelected ? "var(--c-accent)" : "transparent"}`,
                 background: isSelected ? "var(--c-active)" : undefined,
                 opacity: item.disabled ? 0.4 : 1,
                 cursor: item.disabled ? "not-allowed" : "pointer",
@@ -213,7 +215,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
               {/* Chevron indicator — stays centered in the full row height */}
               <div className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
                 {isSelected
-                  ? <ChevronRight className="w-4 h-4" style={{ color: "var(--c-accent)" }} />
+                  ? <ChevronRight className="w-4 h-4 rtl-mirror" style={{ color: "var(--c-accent)" }} />
                   : <div className="w-4 h-4" />
                 }
               </div>
@@ -262,7 +264,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
               {item.secondaryAction && (
                 <Button
                   data-testid={item.testId ? `${item.testId}-secondary` : undefined}
-                  aria-label={item.secondaryActionLabel ?? "More options"}
+                  aria-label={item.secondaryActionLabel ?? t("actions.moreOptions")}
                   variant="ghost"
                   className="flex-shrink-0 !px-1 !py-0.5"
                   onClick={(e) => {

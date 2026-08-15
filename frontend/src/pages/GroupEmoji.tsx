@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { appStore } from "../stores/appStore";
 import { dialogOpen } from "../bridge";
@@ -44,6 +45,7 @@ function formatBytes(bytes: number): string {
  * per-person total, which is what an attacker would have to pay.
  */
 export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
+  const { t } = useTranslation("emoji");
   const { currentUser } = appStore;
   const { data: emoji = [], isLoading } = useGroupEmoji(groupId);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
@@ -60,11 +62,11 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
     setError(null);
     const trimmed = shortcode.trim().toLowerCase();
     if (!SHORTCODE_RE.test(trimmed)) {
-      setError("Use 2–32 characters: a–z, 0–9 and _");
+      setError(t("manage.shortcodeInvalid"));
       return;
     }
     if (emoji.some((e) => e.shortcode === trimmed)) {
-      setError(`:${trimmed}: is already taken in this group`);
+      setError(t("manage.shortcodeTaken", { shortcode: trimmed }));
       return;
     }
 
@@ -72,8 +74,13 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
     // so a multi-megabyte source never crosses the JSON IPC.
     const picked = await dialogOpen({
       multiple: false,
-      title: "Choose an emoji image",
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+      title: t("manage.filePickerTitle"),
+      filters: [
+        {
+          name: t("manage.imageFilterName"),
+          extensions: ["png", "jpg", "jpeg", "gif", "webp"],
+        },
+      ],
     });
     const path = Array.isArray(picked) ? picked[0] : picked;
     if (!path) {
@@ -84,7 +91,7 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
       await uploadEmoji.mutateAsync({ groupId, shortcode: trimmed, path });
       setShortcode("");
     } catch (err) {
-      setError(errorMessage(err, "Could not add that emoji"));
+      setError(errorMessage(err, t("manage.addFailed")));
     }
   };
 
@@ -93,14 +100,14 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
     try {
       await removeEmoji.mutateAsync({ groupId, shortcode: code });
     } catch (err) {
-      setError(errorMessage(err, "Could not remove that emoji"));
+      setError(errorMessage(err, t("manage.removeFailed")));
     }
   };
 
   if (!currentUser) {
     return (
       <div data-testid="group-emoji-no-user" className="flex items-center justify-center flex-1 bg-bg">
-        <p className="text-xs font-mono text-muted">Please sign in</p>
+        <p className="text-xs font-mono text-muted">{t("manage.signInRequired")}</p>
       </div>
     );
   }
@@ -113,11 +120,11 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
         <div className="w-full max-w-xl flex flex-col gap-5">
           <div className="flex items-end gap-2">
             <TextInput
-              label="Shortcode"
+              label={t("manage.shortcodeLabel")}
               value={shortcode}
               onChange={(value) => setShortcode(value.toLowerCase())}
-              placeholder="party_parrot"
-              description="Typed as :shortcode: — a–z, 0–9 and _"
+              placeholder={t("manage.shortcodePlaceholder")}
+              description={t("manage.shortcodeDescription")}
               disabled={uploadEmoji.isPending}
               data-testid="group-emoji-shortcode"
               id="group-emoji-shortcode"
@@ -125,10 +132,10 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
             <Button
               onClick={handleAdd}
               isLoading={uploadEmoji.isPending}
-              loadingText="Shrinking…"
+              loadingText={t("manage.shrinking")}
               data-testid="group-emoji-add"
             >
-              Choose image
+              {t("manage.chooseImage")}
             </Button>
           </div>
 
@@ -139,26 +146,27 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
           )}
 
           <p className="text-xs font-mono text-muted">
-            Images are re-encoded to under 48 KB before upload, so a big source file is
-            fine. Identical images share one stored copy across every group that uses
-            them. There is no limit on how many this group can have.
+            {t("manage.storageNote")}
           </p>
 
           <div className="flex items-center justify-between">
             <span className="section-label px-0">
-              {emoji.length} emoji · {formatBytes(totalBytes)} stored
+              {t("manage.stored", {
+                count: emoji.length,
+                size: formatBytes(totalBytes),
+              })}
             </span>
           </div>
 
           {isLoading && (
             <p data-testid="group-emoji-loading" className="text-xs font-mono text-muted">
-              Loading…
+              {t("common:states.loading")}
             </p>
           )}
 
           {!isLoading && emoji.length === 0 && (
             <p data-testid="group-emoji-empty" className="text-xs font-mono text-muted">
-              No custom emoji yet. Anyone in the group can add one.
+              {t("manage.empty")}
             </p>
           )}
 
@@ -181,15 +189,16 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
                     :{item.shortcode}:
                   </span>
                   <span className="text-xs font-mono text-muted shrink-0">
-                    {item.animated ? "animated · " : ""}
-                    {formatBytes(item.size_bytes)}
+                    {item.animated
+                      ? t("manage.sizeAnimated", { size: formatBytes(item.size_bytes) })
+                      : formatBytes(item.size_bytes)}
                   </span>
                   {canRemove && (
                     <button
                       type="button"
                       onClick={() => handleRemove(item.shortcode)}
                       className="icon-btn-sm shrink-0"
-                      aria-label={`Remove :${item.shortcode}:`}
+                      aria-label={t("manage.remove", { shortcode: item.shortcode })}
                       data-testid={`group-emoji-remove-${item.shortcode}`}
                     >
                       <Trash2 size={14} className="size-[0.933rem]" />

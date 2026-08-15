@@ -1,0 +1,49 @@
+{
+  "picker": {
+    "label": "表情选择器",
+    "triggerLabel": "表情",
+    "searchLabel": "搜索",
+    "searchPlaceholder": "搜索表情",
+    "resultsFor": "“{{query}}”的搜索结果",
+    "recent": "常用",
+    "custom": "自定义",
+    "empty": "没有匹配的表情。",
+    "previewHint": "选择一个表情",
+    "railLabel": "表情分类"
+  },
+  "categories": {
+    "people": "人物",
+    "nature": "自然",
+    "food": "食物",
+    "activity": "活动",
+    "travel": "旅行",
+    "objects": "物品",
+    "symbols": "符号",
+    "flags": "旗帜"
+  },
+  "skinTone": {
+    "groupLabel": "肤色",
+    "default": "默认肤色",
+    "numbered": "肤色 {{index}}"
+  },
+  "manage": {
+    "title": "自定义表情",
+    "signInRequired": "请先登录",
+    "shortcodeLabel": "短代码",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "输入 :短代码: 即可使用 — 仅限 a–z、0–9 和 _",
+    "shortcodeInvalid": "请使用 2–32 个字符：a–z、0–9 和 _",
+    "shortcodeTaken": ":{{shortcode}}: 在此群组中已被占用",
+    "chooseImage": "选择图片",
+    "shrinking": "压缩中…",
+    "filePickerTitle": "选择表情图片",
+    "imageFilterName": "图片",
+    "addFailed": "无法添加该表情",
+    "removeFailed": "无法移除该表情",
+    "storageNote": "图片会在上传前重新编码到 48 KB 以内，因此源文件较大也没关系。相同的图片在所有使用它的群组之间共享同一份存储。此群组可添加的数量没有上限。",
+    "stored_other": "{{count}} 个表情 · 已占用 {{size}}",
+    "empty": "还没有自定义表情。群组中的任何人都可以添加。",
+    "sizeAnimated": "动图 · {{size}}",
+    "remove": "移除 :{{shortcode}}:"
+  }
+}

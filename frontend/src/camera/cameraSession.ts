@@ -18,6 +18,7 @@
 import { reaction } from "mobx";
 
 import { Channel, invoke } from "../bridge";
+import i18n from "../i18n";
 import { appStore } from "../stores/appStore";
 import type { CameraEvent, CameraList } from "./types";
 
@@ -29,14 +30,20 @@ import type { CameraEvent, CameraList } from "./types";
 export const LOCAL_CAMERA_PREVIEW_KEY = "__local_camera_preview__";
 
 /** Collapse a raw backend camera error into one clear status-bar sentence.
- *  Unknown shapes pass through unchanged so a novel error is never hidden. */
+ *  Unknown shapes pass through unchanged so a novel error is never hidden.
+ *
+ *  Resolved through `i18n.t` rather than a component's `useTranslation`: the
+ *  result is a one-shot string that lands in the voice state union (and the
+ *  settings preview) at the moment capture fails, and is never re-rendered from
+ *  its source. The lookup happens per call, so it is never a module-load
+ *  snapshot of the language. */
 export function friendlyCameraError(raw: string): string {
   const r = raw.toLowerCase();
   if (
     r.includes("not yet supported") ||
     r.includes("unsupported")
   ) {
-    return "Webcam capture isn't available on this platform yet.";
+    return i18n.t("voice:cameraError.unsupported");
   }
   if (
     r.includes("permission") ||
@@ -44,20 +51,20 @@ export function friendlyCameraError(raw: string): string {
     r.includes("not authorized") ||
     r.includes("tcc")
   ) {
-    return "Camera access is blocked. Grant Pollis camera permission, then try again.";
+    return i18n.t("voice:cameraError.permission");
   }
   if (r.includes("busy") || r.includes("in use") || r.includes("ebusy")) {
-    return "The camera is in use by another app. Close it and try again.";
+    return i18n.t("voice:cameraError.busy");
   }
   if (
     r.includes("helper binary") ||
     r.includes("helper not found") ||
     r.includes("no such file")
   ) {
-    return "Camera helper is missing. Reinstall Pollis to restore it.";
+    return i18n.t("voice:cameraError.helperMissing");
   }
   if (r.includes("no camera") || r.includes("no devices") || r.includes("no video")) {
-    return "No webcam was found.";
+    return i18n.t("voice:cameraError.noCamera");
   }
   return raw;
 }

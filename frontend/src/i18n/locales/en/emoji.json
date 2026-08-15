@@ -1,0 +1,50 @@
+{
+  "picker": {
+    "label": "Emoji picker",
+    "triggerLabel": "Emoji",
+    "searchLabel": "Search",
+    "searchPlaceholder": "Search emoji",
+    "resultsFor": "Results for \"{{query}}\"",
+    "recent": "Frequently used",
+    "custom": "Custom",
+    "empty": "No emoji match that.",
+    "previewHint": "Pick an emoji",
+    "railLabel": "Emoji categories"
+  },
+  "categories": {
+    "people": "People",
+    "nature": "Nature",
+    "food": "Food",
+    "activity": "Activities",
+    "travel": "Travel",
+    "objects": "Objects",
+    "symbols": "Symbols",
+    "flags": "Flags"
+  },
+  "skinTone": {
+    "groupLabel": "Skin tone",
+    "default": "Default skin tone",
+    "numbered": "Skin tone {{index}}"
+  },
+  "manage": {
+    "title": "Custom Emoji",
+    "signInRequired": "Please sign in",
+    "shortcodeLabel": "Shortcode",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Typed as :shortcode: — a–z, 0–9 and _",
+    "shortcodeInvalid": "Use 2–32 characters: a–z, 0–9 and _",
+    "shortcodeTaken": ":{{shortcode}}: is already taken in this group",
+    "chooseImage": "Choose image",
+    "shrinking": "Shrinking…",
+    "filePickerTitle": "Choose an emoji image",
+    "imageFilterName": "Images",
+    "addFailed": "Could not add that emoji",
+    "removeFailed": "Could not remove that emoji",
+    "storageNote": "Images are re-encoded to under 48 KB before upload, so a big source file is fine. Identical images share one stored copy across every group that uses them. There is no limit on how many this group can have.",
+    "stored_one": "{{count}} emoji · {{size}} stored",
+    "stored_other": "{{count}} emoji · {{size}} stored",
+    "empty": "No custom emoji yet. Anyone in the group can add one.",
+    "sizeAnimated": "animated · {{size}}",
+    "remove": "Remove :{{shortcode}}:"
+  }
+}

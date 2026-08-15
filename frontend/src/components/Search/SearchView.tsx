@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useSearchMessages } from "../../hooks/queries/useSearchMessages";
 import { formatShortDateTime } from "../../utils/format";
 import type { SearchResult } from "../../types";
@@ -48,6 +49,7 @@ interface SearchViewProps {
 // ─── SearchView ───────────────────────────────────────────────────────────────
 
 export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation }) => {
+  const { t } = useTranslation("search");
   const [inputValue, setInputValue] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,7 +91,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
           className="text-xs font-mono text-center"
           style={{ color: "var(--c-text-muted)", paddingTop: "2rem" }}
         >
-          Search your message history
+          {t("view.emptyHint")}
         </p>
       );
     }
@@ -100,7 +102,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
           className="text-xs font-mono text-center"
           style={{ color: "var(--c-text-muted)", paddingTop: "2rem" }}
         >
-          Searching…
+          {t("view.searching")}
         </p>
       );
     }
@@ -111,7 +113,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
         className="text-xs font-mono text-center"
         style={{ color: "var(--c-text-muted)", paddingTop: "2rem" }}
       >
-        No results
+        {t("view.noResults")}
       </p>
     );
   };
@@ -134,7 +136,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
           ref={inputRef}
           type="text"
           className="pollis-input font-mono"
-          placeholder="Search messages…"
+          placeholder={t("view.placeholder")}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           autoComplete="off"
@@ -145,7 +147,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
             className="text-xs font-mono mt-1"
             style={{ color: "var(--c-text-muted)" }}
           >
-            Type at least 2 characters to search
+            {t("view.minLength")}
           </p>
         )}
       </div>
@@ -159,7 +161,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
                 <button
                   data-testid="search-result-item"
                   onClick={() => handleResultClick(result)}
-                  className="w-full text-left px-4 py-3 transition-colors bg-transparent hover:bg-[var(--c-hover)]"
+                  className="w-full text-start px-4 py-3 transition-colors bg-transparent hover:bg-[var(--c-hover)]"
                   style={{ borderBottom: "1px solid var(--c-border)" }}
                 >
                   {/* Sender and timestamp row */}

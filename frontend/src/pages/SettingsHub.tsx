@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { Palette, User, ShieldCheck, Volume2, Keyboard } from "lucide-react";
 import { PageShell } from "../components/Layout/PageShell";
@@ -9,58 +10,60 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 export const SettingsHubPage: React.FC = observer(() => {
+  const { t } = useTranslation("settings");
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const { data: profile } = useUserProfile();
 
   const headlineName =
-    profile?.preferred_name || (profile?.username ? `@${profile.username}` : "Account");
+    profile?.preferred_name ||
+    (profile?.username ? `@${profile.username}` : t("hub.headlineFallback"));
 
   const items: TerminalMenuItem[] = [
     {
       id: "preferences",
-      label: "Preferences",
+      label: t("hub.preferencesLabel"),
       icon: <Palette size={14} />,
-      description: "Colors, font size, etc.",
+      description: t("hub.preferencesDescription"),
       action: () => navigate({ to: "/preferences" }),
       testId: "menu-item-preferences",
     },
     {
       id: "user",
-      label: "User Settings",
+      label: t("hub.userLabel"),
       icon: <User size={14} />,
-      description: "Profile, username, avatar",
+      description: t("hub.userDescription"),
       action: () => navigate({ to: "/user" }),
       testId: "menu-item-user",
     },
     {
       id: "voice",
-      label: "Voice & Video",
+      label: t("hub.voiceLabel"),
       icon: <Volume2 size={14} />,
-      description: "Microphone, speaker, camera, audio processing",
+      description: t("hub.voiceDescription"),
       action: () => navigate({ to: "/voice-settings" }),
       testId: "menu-item-voice-settings",
     },
     {
       id: "security",
-      label: "Security",
+      label: t("hub.securityLabel"),
       icon: <ShieldCheck size={14} />,
-      description: "Device enrollments, identity resets",
+      description: t("hub.securityDescription"),
       action: () => navigate({ to: "/security" }),
       testId: "menu-item-security",
     },
     {
       id: "shortcuts",
-      label: "Key Bindings",
+      label: t("hub.shortcutsLabel"),
       icon: <Keyboard size={14} />,
-      description: "Global keyboard shortcuts reference",
+      description: t("hub.shortcutsDescription"),
       action: () => navigate({ to: "/shortcuts" }),
       testId: "menu-item-shortcuts",
     },
   ];
 
   return (
-    <PageShell title="Account" scrollable>
+    <PageShell title={t("hub.title")} scrollable>
       <div data-testid="settings-hub-page" className="flex justify-center px-6 py-10">
         <div className="w-full max-w-md flex flex-col gap-6">
           {/* Own-profile header — mirrors the layout of viewing another
@@ -80,7 +83,7 @@ export const SettingsHubPage: React.FC = observer(() => {
                   className="font-mono text-xs truncate"
                   style={{ color: "var(--c-text-muted)" }}
                 >
-                  @{profile.username}
+                  <bdi>@{profile.username}</bdi>
                 </div>
               )}
             </div>
@@ -88,7 +91,7 @@ export const SettingsHubPage: React.FC = observer(() => {
               userId={currentUser?.id}
               avatarKey={profile?.avatar_url}
               size={72}
-              alt={`${headlineName} avatar`}
+              alt={t("hub.avatarAlt", { name: headlineName })}
               testId="settings-hub-avatar"
               variant="profile"
             />

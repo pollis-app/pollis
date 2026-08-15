@@ -29,12 +29,14 @@
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
     "blurhash": "^2.0.5",
+    "i18next": "^26.3.6",
     "lucide-react": "^0.344.0",
     "mobx": "^6.16.0",
     "mobx-react-lite": "^4.1.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-i18next": "^17.0.11"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",

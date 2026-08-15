@@ -1,5 +1,6 @@
 import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
@@ -25,6 +26,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
   onForgotPin,
   onSwitchAccount,
 }) => {
+  const { t } = useTranslation("auth");
   const [pin, setPin] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,15 +81,22 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
           <div className="flex flex-col gap-5">
             <div>
               <h2 className="text-sm font-mono font-semibold" style={{ color: "var(--c-text)" }}>
-                Enter PIN
+                {t("pinEntry.headline")}
               </h2>
               <p
                 className="text-xs mt-1 font-mono"
                 style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
               >
                 {username
-                  ? <>Unlock Pollis as <span style={{ color: "var(--c-accent)" }}>{username}</span></>
-                  : "Unlock Pollis on this device."}
+                  ? (
+                    <Trans
+                      t={t}
+                      i18nKey="pinEntry.unlockAs"
+                      values={{ username }}
+                      components={{ name: <span style={{ color: "var(--c-accent)" }} /> }}
+                    />
+                  )
+                  : t("pinEntry.unlockDevice")}
               </p>
             </div>
 
@@ -126,11 +135,11 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
               type="button"
               onClick={handleSubmit}
               isLoading={isLoading}
-              loadingText="Unlocking…"
+              loadingText={t("pinEntry.unlocking")}
               disabled={pin.length < 4}
               className="w-full"
             >
-              Unlock
+              {t("pinEntry.unlock")}
             </Button>
 
             <div className="flex flex-col gap-1 items-center">
@@ -146,7 +155,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
                   padding: "0.25rem 0",
                 }}
               >
-                Forgot PIN? Recover with Secret Key
+                {t("pinEntry.forgot")}
               </button>
               {onSwitchAccount && (
                 <button
@@ -161,7 +170,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
                     padding: "0.25rem 0",
                   }}
                 >
-                  Use a different account
+                  {t("pinEntry.switchAccount")}
                 </button>
               )}
             </div>

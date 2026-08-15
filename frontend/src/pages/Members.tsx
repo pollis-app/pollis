@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { ShieldCheck, ShieldAlert } from "lucide-react";
 import { appStore } from "../stores/appStore";
@@ -15,6 +16,7 @@ interface MembersProps {
 }
 
 export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) => {
+  const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const { data: members = [], isLoading } = useGroupMembers(groupId);
@@ -38,7 +40,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
     <NavigableList
       items={members}
       isLoading={isLoading}
-      emptyLabel="No members."
+      emptyLabel={t("members.empty")}
       testId="members-list"
       getKey={(m) => m.user_id}
       rowTestId={(m) => `member-row-${m.user_id}`}
@@ -64,7 +66,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
         const badge = isSelf ? null : verification?.key_changed ? (
           <span
             data-testid={`member-verification-changed-${m.user_id}`}
-            title="Identity key changed — re-verify"
+            title={t("members.keyChanged")}
             style={{ display: "inline-flex", color: "#f0b429", flexShrink: 0 }}
           >
             <ShieldAlert size={14} />
@@ -72,7 +74,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
         ) : verification?.verified ? (
           <span
             data-testid={`member-verification-verified-${m.user_id}`}
-            title="Verified contact"
+            title={t("members.verified")}
             style={{ display: "inline-flex", color: "var(--c-accent)", flexShrink: 0 }}
           >
             <ShieldCheck size={14} />
@@ -86,8 +88,8 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
             <span className="truncate">{m.username ?? m.user_id}</span>
             {badge}
             {isSelf && (
-              <span className="ml-1" style={{ color: "var(--c-text-muted)" }}>
-                (you)
+              <span className="ms-1" style={{ color: "var(--c-text-muted)" }}>
+                {t("members.self")}
               </span>
             )}
           </span>
@@ -101,7 +103,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
         return [
           <Switch
             id={`member-admin-toggle-${m.user_id}`}
-            label="admin"
+            label={t("members.adminToggle")}
             checked={m.role === "admin"}
             onChange={() => {
               const newRole = m.role === "admin" ? "member" : "admin";
@@ -118,7 +120,7 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
               })
             }
           >
-            kick
+            {t("members.kick")}
           </Button>,
         ];
       }}

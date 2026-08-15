@@ -45,13 +45,13 @@ export const TextInput: React.FC<TextInputProps> = ({
         style={{ color: "var(--c-text)", letterSpacing: "0.5px" }}
       >
         {label}
-        {required && <span className="ml-1" style={{ color: "var(--c-danger)" }}>*</span>}
+        {required && <span className="ms-1" style={{ color: "var(--c-danger)" }}>*</span>}
       </label>
 
       <div className="relative">
         {isFocused && !disabled && (
           <ChevronRight
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none"
+            className="absolute start-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none rtl-mirror"
             style={{ color: "var(--c-accent)" }}
           />
         )}
@@ -74,8 +74,8 @@ export const TextInput: React.FC<TextInputProps> = ({
           aria-invalid={!!error}
           className="w-full py-2 placeholder-leading-1 font-mono text-sm focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black transition-all"
           style={{
-            paddingLeft: isFocused && !disabled ? "1.5rem" : "0.75rem",
-            paddingRight: "0.75rem",
+            paddingInlineStart: isFocused && !disabled ? "1.5rem" : "0.75rem",
+            paddingInlineEnd: "0.75rem",
             background: "var(--c-surface)",
             color: "var(--c-text)",
             border: `2px solid ${error ? "var(--c-danger)" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,

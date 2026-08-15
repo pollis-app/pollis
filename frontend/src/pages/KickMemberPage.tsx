@@ -1,10 +1,12 @@
 import React from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useKickMember, useGroupMembers } from "../hooks/queries/useGroups";
 import { Button } from "../components/ui/Button";
 import { PageShell } from "../components/Layout/PageShell";
 
 export const KickMemberPage: React.FC = () => {
+  const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const { groupId, userId } = useParams({ from: "/groups/$groupId/members/$userId/kick" });
   const kickMutation = useKickMember();
@@ -12,18 +14,22 @@ export const KickMemberPage: React.FC = () => {
   const member = members.find((m) => m.user_id === userId);
 
   return (
-    <PageShell title="Remove Member">
+    <PageShell title={t("kickMember.pageTitle")}>
       <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
         <p className="text-xs font-mono text-center" style={{ color: "var(--c-text-dim)" }}>
-          Remove <strong>{member?.username ?? userId}</strong> from this group?
+          <Trans
+            i18nKey="channels:kickMember.confirm"
+            values={{ name: member?.username ?? userId }}
+            components={{ strong: <strong /> }}
+          />
           <br />
-          They will need a new invite to rejoin.
+          {t("kickMember.rejoinNotice")}
         </p>
         {kickMutation.isError && (
           <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
             {kickMutation.error instanceof Error
               ? kickMutation.error.message
-              : "Failed to remove member"}
+              : t("kickMember.removeFailed")}
           </p>
         )}
         <div className="flex gap-3">
@@ -40,16 +46,16 @@ export const KickMemberPage: React.FC = () => {
             }}
             disabled={kickMutation.isPending}
             isLoading={kickMutation.isPending}
-            loadingText="Removing…"
+            loadingText={t("kickMember.submitting")}
           >
-            Yes, Remove
+            {t("kickMember.confirmButton")}
           </Button>
           <Button
             data-testid="kick-member-cancel"
             variant="secondary"
             onClick={() => navigate({ to: "/groups/$groupId/members", params: { groupId } })}
           >
-            Cancel
+            {t("common:actions.cancel")}
           </Button>
         </div>
       </div>

@@ -1,0 +1,9 @@
+{
+  "boundary": {
+    "instruction": "Please restart the application.",
+    "message": "An unexpected error occurred.",
+    "restart": "Restart",
+    "tag": "FATAL ERROR",
+    "title": "Something went wrong"
+  }
+}

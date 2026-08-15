@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { EmailOTPAuth } from "./EmailOTPAuth";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
@@ -18,6 +19,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onAuthSuccess,
   onWipeComplete,
 }) => {
+  const { t } = useTranslation("auth");
   const [view, setView] = useState<"login" | "wipe">("login");
   const [authStep, setAuthStep] = useState<"email" | "otp">("email");
   const [prefillEmail, setPrefillEmail] = useState<string | undefined>(undefined);
@@ -42,14 +44,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <div data-testid="wipe-confirm-section" className="flex flex-col gap-5">
               <div>
                 <h2 className="text-sm font-mono font-semibold" style={{ color: "var(--c-text)" }}>
-                  Delete local profiles
+                  {t("wipe.title")}
                 </h2>
                 <p
                   className="text-xs mt-2 font-mono"
                   style={{ color: "var(--c-danger)", lineHeight: 1.5 }}
                 >
-                  This will delete all local databases, keys, and saved
-                  accounts on this device. Your remote account is not affected.
+                  {t("wipe.warning")}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -58,7 +59,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   variant="danger"
                   className="flex-1"
                   isLoading={isWiping}
-                  loadingText="Wiping..."
+                  loadingText={t("wipe.wiping")}
                   onClick={async () => {
                     setIsWiping(true);
                     try {
@@ -72,7 +73,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     }
                   }}
                 >
-                  Wipe all local data
+                  {t("wipe.confirm")}
                 </Button>
                 <Button
                   data-testid="wipe-cancel-button"
@@ -81,7 +82,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   disabled={isWiping}
                   onClick={() => setView("login")}
                 >
-                  Cancel
+                  {t("common:actions.cancel")}
                 </Button>
               </div>
             </div>
@@ -90,7 +91,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               <div>
 
                 <p className="text-xs mt-1 font-mono" style={{ color: "var(--c-text-accent)" }}>
-                  Enter your email to continue
+                  {t("login.prompt")}
                 </p>
               </div>
 
@@ -98,7 +99,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               {knownAccounts.length > 0 && authStep === "email" && (
                 <div className="flex flex-col gap-1">
                   <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                    Previously signed in:
+                    {t("login.previousAccounts")}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {[...knownAccounts]
@@ -148,7 +149,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     marginTop: "1rem",
                   }}
                 >
-                  Delete local profiles
+                  {t("wipe.open")}
                 </button>
               )}
             </div>

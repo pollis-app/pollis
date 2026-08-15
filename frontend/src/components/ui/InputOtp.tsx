@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface InputOtpProps {
   length?: number;
@@ -17,6 +18,7 @@ export const InputOtp: React.FC<InputOtpProps> = ({
   autoFocus = false,
   mask = false,
 }) => {
+  const { t } = useTranslation("common");
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -77,7 +79,12 @@ export const InputOtp: React.FC<InputOtpProps> = ({
   };
 
   return (
-    <div className="flex items-center gap-1 justify-evenly">
+    // Pinned `ltr`: a 6-digit code is read left-to-right in every locale,
+    // and this row IS the code. Left to inherit `dir=rtl` the boxes reverse,
+    // so box 1 renders rightmost while the digits still read leftmost-first.
+    // Keeping the container LTR also keeps ArrowLeft/ArrowRight meaning
+    // previous/next, which is what `handleKeyDown` assumes.
+    <div dir="ltr" className="flex items-center gap-1 justify-evenly">
       {digits.map((digit, index) => {
         const isFocused = focusedIndex === index;
         return (
@@ -99,7 +106,7 @@ export const InputOtp: React.FC<InputOtpProps> = ({
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            aria-label={`OTP digit ${index + 1}`}
+            aria-label={t("a11y.otpDigit", { index: index + 1 })}
             className="w-10 h-12 text-center font-mono text-lg font-medium transition-all"
             style={{
               background: isFocused ? "var(--c-accent)" : "var(--c-surface)",

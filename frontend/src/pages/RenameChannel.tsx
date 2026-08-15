@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useUpdateChannel, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
@@ -14,6 +15,7 @@ interface RenameChannelProps {
 }
 
 export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, channelId, onSuccess }) => {
+  const { t } = useTranslation("channels");
   const { currentUser } = appStore;
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const updateChannel = useUpdateChannel();
@@ -36,15 +38,15 @@ export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, 
     e.preventDefault();
     setError(null);
     if (!name.trim()) {
-      setError("Name is required");
+      setError(t("errors.nameRequired"));
       return;
     }
     if (!currentUser) {
-      setError("User not found");
+      setError(t("errors.userNotFound"));
       return;
     }
     if (!channel) {
-      setError("Channel not found");
+      setError(t("renameChannel.notFound"));
       return;
     }
     const trimmedName = name.trim();
@@ -64,14 +66,14 @@ export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, 
       });
       onSuccess?.();
     } catch (err) {
-      setError(errorMessage(err, "Failed to rename channel"));
+      setError(errorMessage(err, t("renameChannel.renameFailed")));
     }
   };
 
   if (!currentUser) {
     return (
       <div data-testid="rename-channel-no-user" className="flex items-center justify-center flex-1" style={{ background: "var(--c-bg)" }}>
-        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>Please sign in</p>
+        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>{t("errors.signInRequired")}</p>
       </div>
     );
   }
@@ -79,7 +81,7 @@ export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, 
   if (!channel) {
     return (
       <div data-testid="rename-channel-not-found" className="flex items-center justify-center flex-1" style={{ background: "var(--c-bg)" }}>
-        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>Channel not found</p>
+        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>{t("renameChannel.notFound")}</p>
       </div>
     );
   }
@@ -97,10 +99,10 @@ export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, 
           className="w-full max-w-md flex flex-col gap-5"
         >
           <TextInput
-            label="Channel Name"
+            label={t("renameChannel.nameLabel")}
             value={name}
             onChange={setName}
-            placeholder="general"
+            placeholder={t("renameChannel.namePlaceholder")}
             disabled={updateChannel.isPending}
             id="rename-channel-name"
             required
@@ -108,10 +110,10 @@ export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, 
           <input data-testid="rename-channel-name-input" type="hidden" value={name} readOnly />
 
           <TextArea
-            label="Description"
+            label={t("renameChannel.descriptionLabel")}
             value={description}
             onChange={setDescription}
-            placeholder="Optional description…"
+            placeholder={t("renameChannel.descriptionPlaceholder")}
             disabled={updateChannel.isPending}
             rows={2}
             id="rename-channel-description"
@@ -128,10 +130,10 @@ export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, 
             data-testid="rename-channel-submit-button"
             type="submit"
             isLoading={updateChannel.isPending}
-            loadingText="Saving…"
+            loadingText={t("renameChannel.submitting")}
             className="w-full"
           >
-            Save
+            {t("renameChannel.submit")}
           </Button>
         </form>
       </div>

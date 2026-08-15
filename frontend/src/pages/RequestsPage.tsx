@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { appStore } from "../stores/appStore";
@@ -21,17 +22,19 @@ import type { DmChannel } from "../types";
 // here. The MLS envelope is decrypted during the normal polling flow —
 // acceptance is a UI-only flag, not a decryption gate.
 const RequestPreview: React.FC<{ dmChannelId: string }> = ({ dmChannelId }) => {
+  const { t } = useTranslation("dms");
   const { data: message, isLoading } = useLastMessage(null, dmChannelId);
 
   if (isLoading) {
     return <ScrambleText text={null} placeholderLength={28} typeSpeed={25} />;
   }
 
-  const text = message?.content_decrypted ?? "(no message yet)";
+  const text = message?.content_decrypted ?? t("requests.noMessageYet");
   return <ScrambleText text={text} placeholderLength={28} typeSpeed={25} />;
 };
 
 export const RequestsPage: React.FC = observer(() => {
+  const { t } = useTranslation("dms");
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const { data: requests = [], isLoading } = useDMRequests();
@@ -65,7 +68,7 @@ export const RequestsPage: React.FC = observer(() => {
   };
 
   return (
-    <PageShell title="Message Requests">
+    <PageShell title={t("requests.pageTitle")}>
       <div
         data-testid="requests-page"
         className="flex-1 flex flex-col overflow-auto"
@@ -74,13 +77,13 @@ export const RequestsPage: React.FC = observer(() => {
         <NavigableList
           items={requests}
           isLoading={isLoading}
-          emptyLabel="No pending requests."
+          emptyLabel={t("requests.empty")}
           getKey={(c) => c.id}
           rowTestId={(c) => `request-${c.id}`}
           onEnterRow={(c) => handleAccept(c.id)}
           renderRow={(c) => {
             const other = findOther(c);
-            const name = other?.username ?? other?.user_id ?? "Unknown";
+            const name = other?.username ?? other?.user_id ?? t("requests.unknownSender");
             const groupSize = c.members.length;
             return (
               <div className="flex-1 min-w-0 flex flex-col gap-0.5">
@@ -91,10 +94,10 @@ export const RequestsPage: React.FC = observer(() => {
                   {name}
                   {groupSize > 2 && (
                     <span
-                      className="ml-2 text-xs"
+                      className="ms-2 text-xs"
                       style={{ color: "var(--c-text-muted)" }}
                     >
-                      (+{groupSize - 2} others)
+                      {t("requests.others", { count: groupSize - 2 })}
                     </span>
                   )}
                 </span>
@@ -114,7 +117,7 @@ export const RequestsPage: React.FC = observer(() => {
               disabled={acceptMutation.isPending || blockMutation.isPending}
               variant="primary"
             >
-              accept
+              {t("requests.accept")}
             </Button>,
             <Button size="sm"
               data-testid={`block-request-${c.id}`}
@@ -122,7 +125,7 @@ export const RequestsPage: React.FC = observer(() => {
               disabled={acceptMutation.isPending || blockMutation.isPending}
               variant="secondary"
             >
-              block
+              {t("requests.block")}
             </Button>,
           ]}
           trailing={(c) => <span>{timeAgo(c.created_at)}</span>}

@@ -1,0 +1,134 @@
+{
+  "message": {
+    "fromLabel": "رسالة من {{name}}",
+    "unknownAuthor": "غير معروف",
+    "deleted": "[محذوفة]",
+    "encrypted": "[مشفَّرة]",
+    "redacted": "[محجوبة]",
+    "edited": "(مُعدَّلة)"
+  },
+  "status": {
+    "pending": "قيد الانتظار",
+    "sending": "جارٍ الإرسال",
+    "sent": "أُرسلت",
+    "failed": "فشلت",
+    "cancelled": "أُلغيت"
+  },
+  "actions": {
+    "reply": "رد",
+    "replyInThread": "الرد في سلسلة",
+    "save": "حفظ الرسالة",
+    "removeBookmark": "إزالة من المحفوظات",
+    "copyLink": "نسخ رابط الرسالة",
+    "copyLinkCopied": "تم نسخ الرابط",
+    "copyLinkFailed": "تعذّر نسخ الرابط",
+    "edit": "تعديل الرسالة",
+    "delete": "حذف الرسالة",
+    "deleteAsAdmin": "حذف الرسالة (مشرف)"
+  },
+  "thread": {
+    "replyCount_zero": "{{count}} رد",
+    "replyCount_one": "{{count}} رد",
+    "replyCount_two": "{{count}} ردان",
+    "replyCount_few": "{{count}} ردود",
+    "replyCount_many": "{{count}} ردًّا",
+    "replyCount_other": "{{count}} رد"
+  },
+  "receipts": {
+    "readByEveryone": "قرأها الجميع",
+    "readByCount_zero": "قرأها {{count}} من أصل {{total}}",
+    "readByCount_one": "قرأها {{count}} شخص من أصل {{total}}",
+    "readByCount_two": "قرأها {{count}} شخصان من أصل {{total}}",
+    "readByCount_few": "قرأها {{count}} أشخاص من أصل {{total}}",
+    "readByCount_many": "قرأها {{count}} شخصًا من أصل {{total}}",
+    "readByCount_other": "قرأها {{count}} شخص من أصل {{total}}",
+    "deliveredCount_zero": "سُلِّمت إلى {{count}} من أصل {{total}}",
+    "deliveredCount_one": "سُلِّمت إلى {{count}} شخص من أصل {{total}}",
+    "deliveredCount_two": "سُلِّمت إلى {{count}} شخصين من أصل {{total}}",
+    "deliveredCount_few": "سُلِّمت إلى {{count}} أشخاص من أصل {{total}}",
+    "deliveredCount_many": "سُلِّمت إلى {{count}} شخصًا من أصل {{total}}",
+    "deliveredCount_other": "سُلِّمت إلى {{count}} شخص من أصل {{total}}"
+  },
+  "list": {
+    "empty": "لا توجد رسائل بعد. ابدأ المحادثة.",
+    "unknownAuthor": "غير معروف",
+    "blockedAuthor": "مستخدم محظور",
+    "blockedBody": "[محظورة]"
+  },
+  "roster": {
+    "joined": "انضم {{name}} إلى المجموعة",
+    "left": "غادر {{name}} المجموعة",
+    "deviceAdded": "أضاف {{name}} جهازًا جديدًا",
+    "deviceRemoved": "أزال {{name}} أحد أجهزته"
+  },
+  "replyBar": {
+    "replyingTo": "رد على <name>{{name}}</name>",
+    "scrollToMessage": "التمرير إلى الرسالة المُردّ عليها",
+    "dismiss": "إلغاء الرد",
+    "encrypted": "[رسالة مشفَّرة]"
+  },
+  "queue": {
+    "heading": "قائمة الانتظار",
+    "pendingPlaceholder": "[رسالة قيد الانتظار]",
+    "cancel": "إلغاء الرسالة",
+    "retry": "إعادة المحاولة",
+    "failedCount_zero": "فشل {{count}} مرة",
+    "failedCount_one": "فشل {{count}} مرة",
+    "failedCount_two": "فشل {{count}} مرتين",
+    "failedCount_few": "فشل {{count}} مرات",
+    "failedCount_many": "فشل {{count}} مرةً",
+    "failedCount_other": "فشل {{count}} مرة"
+  },
+  "reactions": {
+    "add": "إضافة تفاعل",
+    "pillLabel_zero": "{{emoji}} {{count}} تفاعل",
+    "pillLabel_one": "{{emoji}} {{count}} تفاعل",
+    "pillLabel_two": "{{emoji}} {{count}} تفاعلان",
+    "pillLabel_few": "{{emoji}} {{count}} تفاعلات",
+    "pillLabel_many": "{{emoji}} {{count}} تفاعلًا",
+    "pillLabel_other": "{{emoji}} {{count}} تفاعل"
+  },
+  "preview": {
+    "noMessages": "لا توجد رسائل بعد",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_zero": "[{{count}} مرفق]",
+    "attachments_one": "[مرفق]",
+    "attachments_two": "[مرفقان]",
+    "attachments_few": "[{{count}} مرفقات]",
+    "attachments_many": "[{{count}} مرفقًا]",
+    "attachments_other": "[{{count}} مرفق]"
+  },
+  "attachment": {
+    "viewLabel": "عرض {{filename}}",
+    "openLabel": "فتح {{filename}}",
+    "downloadLabel": "تنزيل {{filename}}",
+    "loading": "جارٍ التحميل…",
+    "error": "خطأ",
+    "failedToLoad": "تعذّر التحميل",
+    "failedToDownload": "تعذّر التنزيل",
+    "lightboxFetch": "جلب",
+    "lightboxDone": "[ تم ]",
+    "lightboxDownload": "[تنزيل]",
+    "lightboxClose": "[esc]"
+  },
+  "unfurl": {
+    "loadImage": "تحميل الصورة",
+    "loadVideo": "تحميل الفيديو",
+    "loadTitle": "تحميل الوسائط من {{url}} — سيتصل هذا بالموقع مباشرة",
+    "loadDescription": "تحميل الوسائط من {{url}}. سيتصل هذا بالموقع مباشرة ويكشف له عنوان IP الخاص بك.",
+    "openLabel": "فتح {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "رسالة جديدة",
+    "newMessageBody": "{{name}}: رسالة جديدة",
+    "mentionTitle": "إشارة جديدة",
+    "allMentionBody": "أشار {{name}} إلى ‎@all",
+    "userMentionBody": "أشار {{name}} إليك"
+  },
+  "fileSize": {
+    "bytes": "{{size}} بايت",
+    "kilobytes": "{{size}} ك.ب",
+    "megabytes": "{{size}} م.ب",
+    "gigabytes": "{{size}} ج.ب"
+  }
+}

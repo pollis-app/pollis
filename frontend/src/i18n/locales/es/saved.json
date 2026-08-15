@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "Guardados",
+    "unresolved": "No tienes este mensaje en este dispositivo.",
+    "empty": "No hay mensajes guardados. Usa la acción de marcador en un mensaje para guardarlo.",
+    "unsave": "quitar"
+  },
+  "row": {
+    "conversationFallback": "conversación",
+    "noText": "(sin texto)",
+    "unavailable": "No tienes este mensaje en este dispositivo."
+  }
+}

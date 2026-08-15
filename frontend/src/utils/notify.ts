@@ -2,6 +2,7 @@ import { sendNotification } from '../bridge';
 import { playSfx } from './sfx';
 import { logIgnored } from './log';
 import { appStore } from '../stores/appStore';
+import i18n from '../i18n';
 
 export type Category =
   | 'direct_message'
@@ -150,8 +151,11 @@ export function notify(category: Category, payload: NotifyPayload = {}): void {
   }
 
   if (config.osNotif && prefs.allowOsNotif && prefs.osPermissionGranted && ringtoneAllowed && !cooled) {
-    const title = payload.title ?? 'New message';
-    const body = payload.body ?? (payload.senderUsername ? `${payload.senderUsername}: New message` : '');
+    const title = payload.title ?? i18n.t('chat:notify.newMessageTitle');
+    const body = payload.body
+      ?? (payload.senderUsername
+        ? i18n.t('chat:notify.newMessageBody', { name: payload.senderUsername })
+        : '');
     sendNotification({ title, body }).catch(logIgnored);
     fired = true;
   }

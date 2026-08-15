@@ -1,0 +1,71 @@
+{
+  "list": {
+    "newMessage": "Нове повідомлення",
+    "requests": "Запити",
+    "blocked": "Заблоковані користувачі",
+    "avatarAlt": "Аватар {{name}}",
+    "settingsFor": "Налаштування для {{name}}",
+    "verified": "Перевірений контакт",
+    "keyChanged": "Ключ ідентичності змінився — перевірте ще раз"
+  },
+  "conversation": {
+    "fallbackTitle": "Особисте повідомлення",
+    "viewProfile": "Переглянути профіль @{{name}}",
+    "call": "Подзвонити @{{name}}",
+    "returnToCall": "Повернутися до дзвінка з @{{name}}"
+  },
+  "settings": {
+    "pageTitle": "Налаштування розмови",
+    "leave": "Залишити розмову",
+    "submitting": "Виходимо…",
+    "leaveFailed": "Не вдалося залишити розмову",
+    "cancel": "Скасувати (Esc)"
+  },
+  "start": {
+    "pageTitle": "Нове повідомлення",
+    "identifierLabel": "Ім'я користувача або пошта",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "Почати розмову",
+    "submitting": "Починаємо…",
+    "identifierRequired": "Потрібен ідентифікатор користувача",
+    "userNotFound": "Користувача не знайдено",
+    "startFailed": "Не вдалося почати розмову"
+  },
+  "requests": {
+    "pageTitle": "Запити на листування",
+    "empty": "Немає запитів в очікуванні.",
+    "noMessageYet": "(повідомлень ще немає)",
+    "unknownSender": "Невідомо",
+    "others_one": "(+{{count}} інших)",
+    "others_few": "(+{{count}} інших)",
+    "others_many": "(+{{count}} інших)",
+    "others_other": "(+{{count}} інших)",
+    "accept": "прийняти",
+    "block": "заблокувати"
+  },
+  "blocked": {
+    "pageTitle": "Заблоковані користувачі",
+    "empty": "Заблокованих користувачів немає.",
+    "unblock": "розблокувати"
+  },
+  "profile": {
+    "fallbackName": "Користувач",
+    "fallbackTitle": "Профіль",
+    "notFound": "Користувача не знайдено",
+    "avatarAlt": "Аватар {{name}}",
+    "sendMessage": "Надіслати повідомлення",
+    "block": "Заблокувати",
+    "safetyNumber": "Номер безпеки",
+    "statusVerified": "Перевірено",
+    "statusChanged": "Змінився — перевірте ще раз",
+    "statusUnverified": "Не перевірено",
+    "keyChangedWarning": "Ключ ідентичності цього контакту змінився з часу останньої перевірки. Звірте номер ще раз іншим каналом зв'язку, перш ніж довіряти йому.",
+    "compareHint": "Звірте ці цифри з {{name}} довіреним каналом (особисто або дзвінком, у якому впізнаєте голос). Якщо вони збігаються, позначте контакт як перевірений.",
+    "removeVerification": "Скасувати перевірку",
+    "markVerified": "Позначити перевіреним"
+  },
+  "notify": {
+    "requestTitle": "Нова розмова",
+    "requestBody": "{{name}} хоче почати з вами розмову"
+  }
+}

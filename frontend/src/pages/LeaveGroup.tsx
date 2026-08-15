@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -8,6 +9,7 @@ import { Button } from "../components/ui/Button";
 import { PageShell } from "../components/Layout/PageShell";
 
 export const LeaveGroupPage: React.FC = observer(() => {
+  const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId/leave" });
   const { setSelectedGroupId, setSelectedChannelId } = appStore;
@@ -21,16 +23,20 @@ export const LeaveGroupPage: React.FC = observer(() => {
   }
 
   return (
-    <PageShell title="Leave Group">
+    <PageShell title={t("leaveGroup.pageTitle")}>
       <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
         <p className="text-xs font-mono text-center" style={{ color: "var(--c-text-dim)" }}>
-          Are you sure you want to leave <strong>{group.name}</strong>?
+          <Trans
+            i18nKey="channels:leaveGroup.confirm"
+            values={{ name: group.name }}
+            components={{ strong: <strong /> }}
+          />
           <br />
-          You will need a new invite to rejoin.
+          {t("leaveGroup.rejoinNotice")}
         </p>
         {leaveGroupMutation.isError && (
           <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
-            {errorMessage(leaveGroupMutation.error, "Failed to leave group")}
+            {errorMessage(leaveGroupMutation.error, t("leaveGroup.leaveFailed"))}
           </p>
         )}
         <div className="flex gap-3">
@@ -49,16 +55,16 @@ export const LeaveGroupPage: React.FC = observer(() => {
             }}
             disabled={leaveGroupMutation.isPending}
             isLoading={leaveGroupMutation.isPending}
-            loadingText="Leaving…"
+            loadingText={t("leaveGroup.submitting")}
           >
-            Yes, Leave
+            {t("leaveGroup.confirmButton")}
           </Button>
           <Button
             data-testid="leave-group-cancel"
             variant="secondary"
             onClick={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
           >
-            Cancel
+            {t("common:actions.cancel")}
           </Button>
         </div>
       </div>

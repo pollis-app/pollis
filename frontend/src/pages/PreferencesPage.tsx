@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import {
   invoke,
@@ -20,6 +21,7 @@ import {
   useMessageRetention,
   useSetMessageRetention,
   MESSAGE_RETENTION_OPTIONS,
+  RETENTION_FOREVER,
 } from "../hooks/queries/useMessageRetention";
 import {
   useRelayServingStatus,
@@ -29,6 +31,7 @@ import {
   type RelayServingConfig,
 } from "../hooks/queries/useRelayServing";
 import { RelayServingSection } from "../components/Preferences/RelayServingSection";
+import { LanguageSection } from "../components/Preferences/LanguageSection";
 import {
   hslToHex,
   hexToHsl,
@@ -70,6 +73,7 @@ function relayServingFromPrefs(prefs: PreferencesData): RelayServingConfig {
 }
 
 export const PreferencesPage: React.FC = observer(() => {
+  const { t } = useTranslation("settings");
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
@@ -428,6 +432,20 @@ export const PreferencesPage: React.FC = observer(() => {
     saveDeviceCallRingtone(currentUser?.id, val);
   };
 
+  // `MESSAGE_RETENTION_OPTIONS` lives in `hooks/queries/useMessageRetention.ts`
+  // — module-level data, so its `label` can't be translated there without
+  // freezing the language at import time. Key off the stable `days` value and
+  // translate here, at the render site, instead.
+  const retentionLabel = (days: number): string => {
+    if (days === RETENTION_FOREVER) {
+      return t("retention.optionForever");
+    }
+    if (days % 365 === 0) {
+      return t("retention.optionYears", { count: days / 365 });
+    }
+    return t("retention.optionDays", { count: days });
+  };
+
   const handleAllowDesktopNotifications = async (val: boolean) => {
     setAllowDesktopNotifications(val);
     save({ notifications: val });
@@ -445,7 +463,7 @@ export const PreferencesPage: React.FC = observer(() => {
   };
 
   return (
-    <PageShell title="Preferences" scrollable>
+    <PageShell title={t("preferences.title")} scrollable>
       <div
         data-testid="preferences-page"
         className="flex-1 flex flex-col overflow-auto"
@@ -454,22 +472,27 @@ export const PreferencesPage: React.FC = observer(() => {
         <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
           <div className="w-full max-w-md flex flex-col gap-8">
 
+            {/* Language (this device). Deliberately first: someone who cannot
+                read the UI needs the control that fixes that at the top, not
+                buried under colour pickers. */}
+            <LanguageSection userId={currentUser?.id ?? null} />
+
             {/* Appearance — UI skin (synced across devices) */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Appearance
+                {t("appearance.heading")}
               </h2>
               <div
                 role="radiogroup"
-                aria-label="UI skin"
+                aria-label={t("appearance.ariaLabel")}
                 className="flex gap-2 flex-wrap"
               >
                 {([
-                  { value: "terminal", label: "Terminal" },
-                  { value: "refined", label: "Refined" },
+                  { value: "terminal", label: t("appearance.skinTerminal") },
+                  { value: "refined", label: t("appearance.skinRefined") },
                 ] as const).map((opt) => (
                   <Button
                     key={opt.value}
@@ -488,9 +511,7 @@ export const PreferencesPage: React.FC = observer(() => {
                 ))}
               </div>
               <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                Terminal is the default IRC/monospace look. Refined is a
-                friendlier, proportional-sans layout for people who prefer a
-                more conventional chat app. Syncs across your devices.
+                {t("appearance.description")}
               </p>
             </section>
 
@@ -500,14 +521,14 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Accent Color
+                {t("accent.heading")}
               </h2>
 
               <div className="flex items-center gap-2">
                 <label
                   className="flex-shrink-0 cursor-pointer overflow-hidden focus-within:ring-4 focus-within:ring-[var(--c-accent)] focus-within:ring-offset-2 focus-within:ring-offset-black"
                   style={{ width: 40, height: 40, borderRadius: 8, padding: 0 }}
-                  title="Pick accent color"
+                  title={t("accent.pickTitle")}
                 >
                   <input
                     type="color"
@@ -547,15 +568,15 @@ export const PreferencesPage: React.FC = observer(() => {
               {/* Quick presets */}
               <div className="flex gap-2 flex-wrap">
                 {[
-                  { label: "Orange", h: 38, s: 90 },
-                  { label: "Green", h: 150, s: 62 },
-                  { label: "Blue", h: 210, s: 80 },
-                  { label: "Purple", h: 270, s: 70 },
-                  { label: "Red", h: 0, s: 85 },
-                  { label: "Cyan", h: 185, s: 75 },
+                  { id: "orange", label: t("accent.presetOrange"), h: 38, s: 90 },
+                  { id: "green", label: t("accent.presetGreen"), h: 150, s: 62 },
+                  { id: "blue", label: t("accent.presetBlue"), h: 210, s: 80 },
+                  { id: "purple", label: t("accent.presetPurple"), h: 270, s: 70 },
+                  { id: "red", label: t("accent.presetRed"), h: 0, s: 85 },
+                  { id: "cyan", label: t("accent.presetCyan"), h: 185, s: 75 },
                 ].map((preset) => (
                   <button
-                    key={preset.label}
+                    key={preset.id}
                     onClick={() => {
                       setHue(preset.h);
                       setSaturation(preset.s);
@@ -584,14 +605,14 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Background Color
+                {t("background.heading")}
               </h2>
 
               <div className="flex items-center gap-2">
                 <label
                   className="flex-shrink-0 cursor-pointer overflow-hidden focus-within:ring-4 focus-within:ring-[var(--c-accent)] focus-within:ring-offset-2 focus-within:ring-offset-black"
                   style={{ width: 40, height: 40, padding: 0, borderRadius: "0.5rem", outline: "2px solid var(--c-accent)", outlineOffset: "-1px" }}
-                  title="Pick background color"
+                  title={t("background.pickTitle")}
                 >
                   <input
                     type="color"
@@ -631,15 +652,15 @@ export const PreferencesPage: React.FC = observer(() => {
               {/* Quick presets */}
               <div className="flex gap-2 flex-wrap">
                 {[
-                  { label: "Match accent", h: hue, s: 20 },
-                  { label: "Neutral", h: 0, s: 0 },
-                  { label: "Warm", h: 30, s: 15 },
-                  { label: "Cool", h: 220, s: 15 },
-                  { label: "Green", h: 150, s: 12 },
-                  { label: "Purple", h: 270, s: 12 },
+                  { id: "match-accent", label: t("background.presetMatchAccent"), h: hue, s: 20 },
+                  { id: "neutral", label: t("background.presetNeutral"), h: 0, s: 0 },
+                  { id: "warm", label: t("background.presetWarm"), h: 30, s: 15 },
+                  { id: "cool", label: t("background.presetCool"), h: 220, s: 15 },
+                  { id: "green", label: t("background.presetGreen"), h: 150, s: 12 },
+                  { id: "purple", label: t("background.presetPurple"), h: 270, s: 12 },
                 ].map((preset) => (
                   <button
-                    key={preset.label}
+                    key={preset.id}
                     onClick={() => {
                       setBgHue(preset.h);
                       setBgSaturation(preset.s);
@@ -672,12 +693,12 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Display (this device)
+                {t("display.heading")}
               </h2>
               <div className="flex flex-col gap-1.5">
                 <RangeSlider
                   id="pref-font-size"
-                  label="Font size — px"
+                  label={t("display.fontSizeLabel")}
                   value={fontSize}
                   min={12}
                   max={20}
@@ -685,29 +706,29 @@ export const PreferencesPage: React.FC = observer(() => {
                   onChange={handleFontSize}
                 />
                 <div className="flex justify-between text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                  <span>12px small</span>
-                  <span>16px normal</span>
-                  <span>20px large</span>
+                  <span>{t("display.fontSizeSmall")}</span>
+                  <span>{t("display.fontSizeNormal")}</span>
+                  <span>{t("display.fontSizeLarge")}</span>
                 </div>
                 <p className="text-xs font-mono mt-1" style={{ color: "var(--c-text-muted)" }}>
-                  Font size is per-device — it won't sync to your other devices.
+                  {t("display.fontSizeNote")}
                 </p>
               </div>
               <p
                 className="font-mono"
                 style={{ fontSize, color: "var(--c-text-dim)" }}
               >
-                The quick brown fox jumps over the lazy dog.
+                {t("display.fontSizeSample")}
               </p>
               <div className="flex flex-col gap-1.5 mt-4">
                 <Switch
                   id="pref-call-ringtone"
-                  label="Incoming call ringtone"
+                  label={t("display.callRingtoneLabel")}
                   checked={allowCallRingtone}
                   onChange={handleAllowCallRingtone}
                 />
                 <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                  Plays a looping ring on this device when someone calls. Off here doesn't mute the alert badge or your other devices.
+                  {t("display.callRingtoneDescription")}
                 </p>
               </div>
             </section>
@@ -718,43 +739,40 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Layout
+                {t("layout.heading")}
               </h2>
               <div className="flex flex-col gap-1.5">
                 <Switch
                   id="pref-sidebar-default"
-                  label="Show sidebar by default"
+                  label={t("layout.sidebarLabel")}
                   checked={sidebarOpenByDefault}
                   onChange={handleSidebarOpenByDefault}
                 />
                 <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                  Controls whether the left sidebar is open when the app starts. Toggle ad-hoc with {toggleSidebarLabel}.
+                  {t("layout.sidebarDescription", { shortcut: toggleSidebarLabel })}
                 </p>
               </div>
               <div className="flex flex-col gap-1.5">
                 <Switch
                   id="pref-right-panel-default"
-                  label="Show details panel by default"
+                  label={t("layout.rightPanelLabel")}
                   checked={rightPanelOpenByDefault ?? skin === "refined"}
                   onChange={handleRightPanelOpenByDefault}
                 />
                 <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                  Members and shared media for the channel or conversation
-                  you're viewing. Until you set this, it follows your theme —
-                  shown in Refined, hidden in Terminal. Toggle ad-hoc with{" "}
-                  {toggleRightPanelLabel}.
+                  {t("layout.rightPanelDescription", { shortcut: toggleRightPanelLabel })}
                 </p>
               </div>
               {!isMac && (
                 <div className="flex flex-col gap-1.5">
                   <Switch
                     id="pref-close-to-tray"
-                    label="Close to tray"
+                    label={t("layout.closeToTrayLabel")}
                     checked={closeToTray}
                     onChange={handleCloseToTray}
                   />
                   <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                    When on, closing the window hides Pollis to the system tray instead of quitting. Right-click the tray icon to quit. If your desktop environment doesn't show tray icons (bare GNOME without the AppIndicator extension), turn this off.
+                    {t("layout.closeToTrayDescription")}
                   </p>
                 </div>
               )}
@@ -762,12 +780,12 @@ export const PreferencesPage: React.FC = observer(() => {
                 <div className="flex flex-col gap-1.5">
                   <Switch
                     id="pref-menubar-icon"
-                    label="Show menu bar icon"
+                    label={t("layout.menubarIconLabel")}
                     checked={menubarIcon}
                     onChange={handleMenubarIcon}
                   />
                   <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                    Adds a Pollis icon to the macOS menu bar (top right). Click it to open the window, mute the mic while in a call, or quit the app. Off by default — the dock icon already keeps Pollis reachable when the window is closed.
+                    {t("layout.menubarIconDescription")}
                   </p>
                 </div>
               )}
@@ -779,17 +797,17 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Notifications
+                {t("notifications.heading")}
               </h2>
               <Switch
                 id="pref-notifications"
-                label="Desktop notifications"
+                label={t("notifications.desktopLabel")}
                 checked={allowDesktopNotifications}
                 onChange={handleAllowDesktopNotifications}
               />
               <Switch
                 id="pref-sound-effects"
-                label="Sound effects"
+                label={t("notifications.soundEffectsLabel")}
                 checked={allowSoundEffects}
                 onChange={handleAllowSoundEffects}
               />
@@ -801,21 +819,20 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Read receipts
+                {t("readReceipts.heading")}
               </h2>
               <Switch
                 id="pref-read-receipts"
-                label="Send read receipts"
+                label={t("readReceipts.toggleLabel")}
                 checked={sendReadReceipts}
                 onChange={handleSendReadReceipts}
               />
               <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                In direct messages, lets the people you are talking to see when their
-                messages reached your device and when you read them. Turning this off
-                also hides <em>their</em> receipts from you — you will no longer see
-                whether your own messages were delivered or read. Receipts are
-                end-to-end encrypted like any message; our servers never see who read
-                what. Group channels never send receipts.
+                <Trans
+                  t={t}
+                  i18nKey="readReceipts.description"
+                  components={{ em: <em /> }}
+                />
               </p>
             </section>
 
@@ -826,21 +843,22 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Local message history
+                {t("retention.heading")}
               </h2>
               <div
                 role="radiogroup"
-                aria-label="Local message history retention"
+                aria-label={t("retention.ariaLabel")}
                 className="flex gap-2 flex-wrap"
               >
                 {MESSAGE_RETENTION_OPTIONS.map((option) => {
                   const selected = retentionDays === option.days;
+                  const label = retentionLabel(option.days);
                   return (
                     <Button
                       key={option.days}
                       variant={selected ? "primary" : "secondary"}
                       size="sm"
-                      aria-label={option.label}
+                      aria-label={label}
                       data-testid={`pref-retention-${option.days}`}
                       onClick={() => {
                         if (selected) {
@@ -849,16 +867,13 @@ export const PreferencesPage: React.FC = observer(() => {
                         setRetention.mutate(option.days);
                       }}
                     >
-                      {option.label}
+                      {label}
                     </Button>
                   );
                 })}
               </div>
               <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                Controls how much message history is kept on this device. Older
-                messages are deleted from local storage to save space. This does
-                not affect your other devices or the people you're talking to, and
-                you'll still receive new messages normally.
+                {t("retention.description")}
               </p>
             </section>
 
@@ -869,17 +884,17 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Network privacy (relay)
+                {t("overlay.heading")}
               </h2>
               <div
                 role="radiogroup"
-                aria-label="Network privacy relay mode"
+                aria-label={t("overlay.ariaLabel")}
                 className="flex gap-2 flex-wrap"
               >
                 {([
-                  { value: "off", label: "Off" },
-                  { value: "prefer", label: "Prefer" },
-                  { value: "strict", label: "Strict" },
+                  { value: "off", label: t("overlay.modeOff") },
+                  { value: "prefer", label: t("overlay.modePrefer") },
+                  { value: "strict", label: t("overlay.modeStrict") },
                 ] as const).map((opt) => (
                   <Button
                     key={opt.value}
@@ -894,20 +909,29 @@ export const PreferencesPage: React.FC = observer(() => {
                 ))}
               </div>
               <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                Routes Pollis's own traffic (messages, sync) through a relay so our
-                servers see the relay's address, not yours. Calls connect directly.
-                This hides your IP from Pollis — it is not anonymity, and does not
-                change end-to-end encryption.
+                {t("overlay.description")}
               </p>
               <ul className="flex flex-col gap-1 text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
                 <li>
-                  <span style={{ color: "var(--c-text-dim)" }}>Off</span> — Direct connection (default, fastest).
+                  <Trans
+                    t={t}
+                    i18nKey="overlay.itemOff"
+                    components={{ mode: <span style={{ color: "var(--c-text-dim)" }} /> }}
+                  />
                 </li>
                 <li>
-                  <span style={{ color: "var(--c-text-dim)" }}>Prefer</span> — Use the relay when available; fall back to a direct connection if it isn't.
+                  <Trans
+                    t={t}
+                    i18nKey="overlay.itemPrefer"
+                    components={{ mode: <span style={{ color: "var(--c-text-dim)" }} /> }}
+                  />
                 </li>
                 <li>
-                  <span style={{ color: "var(--c-text-dim)" }}>Strict</span> — Only connect through the relay. If no relay is reachable, sending is paused rather than revealing your IP.
+                  <Trans
+                    t={t}
+                    i18nKey="overlay.itemStrict"
+                    components={{ mode: <span style={{ color: "var(--c-text-dim)" }} /> }}
+                  />
                 </li>
               </ul>
               {overlayStatus !== null && (
@@ -916,7 +940,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   className="text-xs font-mono"
                   style={{ color: "var(--c-danger)" }}
                 >
-                  Couldn't apply relay mode: {overlayStatus} — currently {overlayMode}.
+                  {t("overlay.applyError", { error: overlayStatus, mode: overlayMode })}
                 </p>
               )}
             </section>
@@ -937,11 +961,11 @@ export const PreferencesPage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
               >
-                Voice
+                {t("voice.heading")}
               </h2>
               <div className="self-start">
                 <Button variant="secondary" size="sm" onClick={() => navigate({ to: "/voice-settings" })}>
-                  Voice & Video
+                  {t("voice.openButton")}
                 </Button>
               </div>
             </section>

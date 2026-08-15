@@ -1,0 +1,68 @@
+{
+  "list": {
+    "newMessage": "新消息",
+    "requests": "请求",
+    "blocked": "已屏蔽用户",
+    "avatarAlt": "{{name}} 的头像",
+    "settingsFor": "{{name}} 的设置",
+    "verified": "已验证的联系人",
+    "keyChanged": "身份密钥已更改 — 请重新验证"
+  },
+  "conversation": {
+    "fallbackTitle": "私信",
+    "viewProfile": "查看 @{{name}} 的个人资料",
+    "call": "呼叫 @{{name}}",
+    "returnToCall": "返回与 @{{name}} 的通话"
+  },
+  "settings": {
+    "pageTitle": "对话设置",
+    "leave": "退出对话",
+    "submitting": "退出中…",
+    "leaveFailed": "退出对话失败",
+    "cancel": "取消（Esc）"
+  },
+  "start": {
+    "pageTitle": "新消息",
+    "identifierLabel": "用户名或邮箱",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "开始对话",
+    "submitting": "创建中…",
+    "identifierRequired": "请填写用户标识",
+    "userNotFound": "未找到该用户",
+    "startFailed": "无法开始对话"
+  },
+  "requests": {
+    "pageTitle": "消息请求",
+    "empty": "没有待处理的请求。",
+    "noMessageYet": "（还没有消息）",
+    "unknownSender": "未知",
+    "others_other": "（另有 {{count}} 人）",
+    "accept": "接受",
+    "block": "屏蔽"
+  },
+  "blocked": {
+    "pageTitle": "已屏蔽用户",
+    "empty": "没有已屏蔽的用户。",
+    "unblock": "取消屏蔽"
+  },
+  "profile": {
+    "fallbackName": "用户",
+    "fallbackTitle": "个人资料",
+    "notFound": "未找到该用户",
+    "avatarAlt": "{{name}} 的头像",
+    "sendMessage": "发送消息",
+    "block": "屏蔽",
+    "safetyNumber": "安全号码",
+    "statusVerified": "已验证",
+    "statusChanged": "已更改 — 请重新验证",
+    "statusUnverified": "未验证",
+    "keyChangedWarning": "自你上次验证以来，此联系人的身份密钥已更改。请通过其他渠道再次核对安全号码，确认无误后再信任它。",
+    "compareHint": "请通过可信渠道（当面，或一通你能确认对方身份的电话）与 {{name}} 核对这些数字。如果一致，就把此联系人标记为已验证。",
+    "removeVerification": "取消验证标记",
+    "markVerified": "标记为已验证"
+  },
+  "notify": {
+    "requestTitle": "新的对话",
+    "requestBody": "{{name}} 与你开始了一段对话"
+  }
+}

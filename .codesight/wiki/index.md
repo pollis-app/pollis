@@ -21,6 +21,7 @@ Start here. Navigate to the article you need.
 - [Screen-Capture Helper Split](./capture-split.md) — Per-platform capture subprocess + shared socket protocol; Linux two-backend session-type routing (#281), macOS SCK isolation (#283)
 - [Authorized-Secrets Broker](./secrets-broker.md) — Server-side LiveKit token minting + R2 SigV4 presign so API secrets never ship in the client bundle (#393)
 - [Media Permissions](./media-permissions.md) — OS camera/mic/screen access: live status, revoke-on-quit, manual revoke; honest per-OS behavior (#443)
+- [Localization (i18n)](./i18n.md) — i18next setup, namespace/key conventions, device-local language preference, adding a locale (#855)
 - [Terminal Client (pollis-tui)](./pollis-tui.md) — Headless ratatui/crossterm client on `pollis-core` (no Tauri/IPC): architecture, run headless, the auth-order gotcha
 
 ## Quick Reference

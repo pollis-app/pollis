@@ -1,5 +1,6 @@
 import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
@@ -15,17 +16,20 @@ interface PinCreateScreenProps {
   // Back button. Omit to hide (e.g. first-run migration where there's
   // nowhere safe to go back to).
   onCancel?: () => void;
-  headline?: string;
-  subline?: string;
+  // Required rather than defaulted so the copy always comes from a caller that
+  // has translated it — a literal default here would be untranslatable.
+  headline: string;
+  subline: string;
 }
 
 export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
   oldPin,
   onCreated,
   onCancel,
-  headline = "Set a PIN",
-  subline = "4 digits. You'll use it to unlock Pollis on this device.",
+  headline,
+  subline,
 }) => {
+  const { t } = useTranslation("auth");
   const [step, setStep] = useState<"enter" | "confirm">("enter");
   const [firstPin, setFirstPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
@@ -57,7 +61,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
 
   const handleSubmit = async () => {
     if (firstPin !== confirmPin) {
-      setError("PINs don't match — try again");
+      setError(t("pinCreate.mismatch"));
       setStep("enter");
       setFirstPin("");
       setConfirmPin("");
@@ -99,13 +103,13 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
           <div className="flex flex-col gap-5">
             <div>
               <h2 className="text-sm font-mono font-semibold" style={{ color: "var(--c-text)" }}>
-                {step === "confirm" ? "Confirm PIN" : headline}
+                {step === "confirm" ? t("pinCreate.confirmHeadline") : headline}
               </h2>
               <p
                 className="text-xs mt-1 font-mono"
                 style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
               >
-                {step === "confirm" ? "Enter the PIN again to confirm." : subline}
+                {step === "confirm" ? t("pinCreate.confirmSubline") : subline}
               </p>
             </div>
 
@@ -147,11 +151,11 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
               type="button"
               onClick={handleSubmit}
               isLoading={isLoading}
-              loadingText="Saving…"
+              loadingText={t("pinCreate.saving")}
               disabled={currentValue.length < 4}
               className="w-full"
             >
-              {step === "confirm" ? "Save PIN" : "Continue"}
+              {step === "confirm" ? t("pinCreate.save") : t("pinCreate.continue")}
             </Button>
 
             {onCancel && (
@@ -167,7 +171,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
                   padding: "0.25rem 0",
                 }}
               >
-                Cancel
+                {t("common:actions.cancel")}
               </button>
             )}
           </div>

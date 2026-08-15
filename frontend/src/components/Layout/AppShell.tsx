@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke, getCurrentWindow, hideWindow } from "../../bridge";
@@ -45,6 +46,7 @@ import type { RouterContext } from "../../types/router";
 const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
 
 export const AppShell: React.FC = observer(() => {
+  const { t } = useTranslation("nav");
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -533,7 +535,7 @@ export const AppShell: React.FC = observer(() => {
   // Find the voice channel name for the VoiceBar
   const voiceChannelName = useMemo(() => {
     if (!activeVoiceChannelId) {
-      return "voice";
+      return t("shell.voiceChannelFallback");
     }
     if (activeVoiceChannelId.startsWith("call-")) {
       // 1:1 DM call — show the other person's name, not a generic "call".
@@ -554,7 +556,7 @@ export const AppShell: React.FC = observer(() => {
           return incomingCall.callerUsername;
         }
       }
-      return "Call";
+      return t("shell.callChannel");
     }
     for (const g of groupsWithChannels ?? []) {
       const ch = g.channels.find((c) => c.id === activeVoiceChannelId);
@@ -562,8 +564,8 @@ export const AppShell: React.FC = observer(() => {
         return ch.name;
       }
     }
-    return "voice";
-  }, [activeVoiceChannelId, groupsWithChannels, voiceState, voiceParticipants, incomingCall]);
+    return t("shell.voiceChannelFallback");
+  }, [activeVoiceChannelId, groupsWithChannels, voiceState, voiceParticipants, incomingCall, t]);
 
   return (
     <div
@@ -655,7 +657,7 @@ export const AppShell: React.FC = observer(() => {
             }}
           >
             <span className="text-sm font-mono" style={{ color: "var(--c-accent)" }}>
-              drop files to send
+              {t("shell.dropFiles")}
             </span>
           </div>
         </div>
@@ -688,11 +690,11 @@ export const AppShell: React.FC = observer(() => {
               lineHeight: 0,
             }}
             onClick={() => router.navigate({ to: "/update" })}
-            aria-label={`Update available: ${availableUpdateVersion}`}
-            title={`Update available: ${availableUpdateVersion}`}
+            aria-label={t("statusBar.updateAvailableTitle", { version: availableUpdateVersion })}
+            title={t("statusBar.updateAvailableTitle", { version: availableUpdateVersion })}
           >
             <Download className="w-4 h-4" />
-            <span>Update available</span>
+            <span>{t("statusBar.updateAvailable")}</span>
           </button>
         )}
         {/* Fixed-height, always-rendered slot so the bar doesn't reflow as
@@ -733,9 +735,9 @@ export const AppShell: React.FC = observer(() => {
                   }).catch((e) => console.warn("dismiss_call_on_my_devices failed", e));
                 }
               }}
-              aria-label={`Answer call from @${incomingCall.callerUsername}`}
+              aria-label={t("statusBar.answerCall", { username: incomingCall.callerUsername })}
             >
-              <Phone className="w-4 h-4" />: @{incomingCall.callerUsername}
+              <Phone className="w-4 h-4" />: <bdi>@{incomingCall.callerUsername}</bdi>
             </button>
             <button
               data-testid="status-bar-incoming-call-decline"
@@ -755,7 +757,7 @@ export const AppShell: React.FC = observer(() => {
                   }).catch((e) => console.warn("dismiss_call_on_my_devices failed", e));
                 }
               }}
-              aria-label="Decline call"
+              aria-label={t("statusBar.declineCall")}
             >
               <X className="w-4 h-4" />
             </button>
@@ -775,7 +777,7 @@ export const AppShell: React.FC = observer(() => {
               className="cursor-pointer"
               style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
               onClick={() => setVoiceError(null)}
-              aria-label="Dismiss voice error"
+              aria-label={t("statusBar.dismissVoiceError")}
             >
               <X className="w-4 h-4" />
             </button>
@@ -798,7 +800,7 @@ export const AppShell: React.FC = observer(() => {
               className="cursor-pointer"
               style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
               onClick={() => shareStopped()}
-              aria-label="Dismiss screen share error"
+              aria-label={t("statusBar.dismissScreenShareError")}
             >
               <X className="w-4 h-4" />
             </button>
@@ -812,7 +814,7 @@ export const AppShell: React.FC = observer(() => {
               setStatusBarAlert(null);
             }}
           >
-            <Mail className="w-4 h-4" />: @{statusBarAlert.senderUsername}
+            <Mail className="w-4 h-4" />: <bdi>@{statusBarAlert.senderUsername}</bdi>
           </button>
         ) : isSyncing ? (
           <div
@@ -820,7 +822,7 @@ export const AppShell: React.FC = observer(() => {
             className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
             style={{ color: barInk }}
           >
-            <span>syncing…</span>
+            <span>{t("statusBar.syncing")}</span>
             <LoadingSpinner size="sm" />
           </div>
         ) : null}

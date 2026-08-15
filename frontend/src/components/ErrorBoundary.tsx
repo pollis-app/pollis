@@ -1,6 +1,80 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { DotMatrix, gameOfLifeAlgorithm } from "./ui/DotMatrix";
 import { Button } from "./ui/Button";
+
+/**
+ * The fallback UI, split out as a function component purely so it can call
+ * `useTranslation` — the boundary itself has to stay a class, since only a
+ * class can implement `getDerivedStateFromError`.
+ */
+const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
+  const { t } = useTranslation("errors");
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100%",
+        width: "100%",
+        background: "var(--c-bg)",
+        overflow: "hidden",
+      }}
+    >
+      <DotMatrix algorithm={gameOfLifeAlgorithm} speed={0.6} />
+
+      {/* Content */}
+      <div
+        style={{
+          position: "relative",
+          zIndex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "1.5rem",
+          padding: "2.5rem",
+          background: "var(--c-surface)",
+          border: "1px solid var(--c-border)",
+          borderRadius: "0.5rem",
+          maxWidth: 360,
+          width: "100%",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
+          <span
+            className="font-mono text-xs"
+            style={{ color: "var(--c-accent)", letterSpacing: "0.15em" }}
+          >
+            {t("boundary.tag")}
+          </span>
+          <h1
+            className="font-mono text-base"
+            style={{ color: "var(--c-text)", margin: 0 }}
+          >
+            {t("boundary.title")}
+          </h1>
+        </div>
+
+        <p
+          className="font-mono text-xs text-center"
+          style={{ color: "var(--c-text-muted)", margin: 0, lineHeight: 1.6 }}
+        >
+          {t("boundary.message")}
+          <br />
+          {t("boundary.instruction")}
+        </p>
+
+        <Button onClick={onRestart}>
+          {t("boundary.restart")}
+        </Button>
+      </div>
+    </div>
+  );
+};
 
 export class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -38,69 +112,7 @@ export class ErrorBoundary extends React.Component<
 
   render() {
     if (this.state.hasError) {
-      return (
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            height: "100%",
-            width: "100%",
-            background: "var(--c-bg)",
-            overflow: "hidden",
-          }}
-        >
-          <DotMatrix algorithm={gameOfLifeAlgorithm} speed={0.6} />
-
-          {/* Content */}
-          <div
-            style={{
-              position: "relative",
-              zIndex: 1,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "1.5rem",
-              padding: "2.5rem",
-              background: "var(--c-surface)",
-              border: "1px solid var(--c-border)",
-              borderRadius: "0.5rem",
-              maxWidth: 360,
-              width: "100%",
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
-              <span
-                className="font-mono text-xs"
-                style={{ color: "var(--c-accent)", letterSpacing: "0.15em" }}
-              >
-                FATAL ERROR
-              </span>
-              <h1
-                className="font-mono text-base"
-                style={{ color: "var(--c-text)", margin: 0 }}
-              >
-                Something went wrong
-              </h1>
-            </div>
-
-            <p
-              className="font-mono text-xs text-center"
-              style={{ color: "var(--c-text-muted)", margin: 0, lineHeight: 1.6 }}
-            >
-              An unexpected error occurred.
-              <br />
-              Please restart the application.
-            </p>
-
-            <Button onClick={this.handleRestart}>
-              Restart
-            </Button>
-          </div>
-        </div>
-      );
+      return <ErrorFallback onRestart={this.handleRestart} />;
     }
 
     return this.props.children;

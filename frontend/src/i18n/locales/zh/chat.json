@@ -1,0 +1,104 @@
+{
+  "message": {
+    "fromLabel": "来自 {{name}} 的消息",
+    "unknownAuthor": "未知",
+    "deleted": "[已删除]",
+    "encrypted": "[已加密]",
+    "redacted": "[已隐去]",
+    "edited": "（已编辑）"
+  },
+  "status": {
+    "pending": "待发送",
+    "sending": "发送中",
+    "sent": "已发送",
+    "failed": "发送失败",
+    "cancelled": "已取消"
+  },
+  "actions": {
+    "reply": "回复",
+    "replyInThread": "在话题中回复",
+    "save": "收藏消息",
+    "removeBookmark": "取消收藏",
+    "copyLink": "复制消息链接",
+    "copyLinkCopied": "链接已复制",
+    "copyLinkFailed": "无法复制链接",
+    "edit": "编辑消息",
+    "delete": "删除消息",
+    "deleteAsAdmin": "删除消息（管理员）"
+  },
+  "thread": {
+    "replyCount_other": "{{count}} 条回复"
+  },
+  "receipts": {
+    "readByEveryone": "所有人均已读",
+    "readByCount_other": "{{total}} 人中 {{count}} 人已读",
+    "deliveredCount_other": "{{total}} 人中已送达 {{count}} 人"
+  },
+  "list": {
+    "empty": "还没有消息。开始对话吧。",
+    "unknownAuthor": "未知",
+    "blockedAuthor": "已屏蔽的用户",
+    "blockedBody": "[已屏蔽]"
+  },
+  "roster": {
+    "joined": "{{name}} 加入了群组",
+    "left": "{{name}} 退出了群组",
+    "deviceAdded": "{{name}} 添加了一台新设备",
+    "deviceRemoved": "{{name}} 移除了一台设备"
+  },
+  "replyBar": {
+    "replyingTo": "正在回复 <name>{{name}}</name>",
+    "scrollToMessage": "滚动到被回复的消息",
+    "dismiss": "取消回复",
+    "encrypted": "[加密消息]"
+  },
+  "queue": {
+    "heading": "队列",
+    "pendingPlaceholder": "[待发送的消息]",
+    "cancel": "取消发送",
+    "retry": "重试",
+    "failedCount_other": "失败 ×{{count}}"
+  },
+  "reactions": {
+    "add": "添加表情回应",
+    "pillLabel_other": "{{emoji}} {{count}} 个回应"
+  },
+  "preview": {
+    "noMessages": "还没有消息",
+    "withSender": "{{name}}：{{text}}",
+    "attachments_other": "[{{count}} 个附件]"
+  },
+  "attachment": {
+    "viewLabel": "查看 {{filename}}",
+    "openLabel": "打开 {{filename}}",
+    "downloadLabel": "下载 {{filename}}",
+    "loading": "加载中…",
+    "error": "错误",
+    "failedToLoad": "加载失败",
+    "failedToDownload": "下载失败",
+    "lightboxFetch": "获取",
+    "lightboxDone": "[ 完成 ]",
+    "lightboxDownload": "[  下载  ]",
+    "lightboxClose": "[esc]"
+  },
+  "unfurl": {
+    "loadImage": "加载图片",
+    "loadVideo": "加载视频",
+    "loadTitle": "从 {{url}} 加载媒体 — 这会直接连接该网站",
+    "loadDescription": "从 {{url}} 加载媒体。这会直接连接该网站，并向其暴露你的 IP 地址。",
+    "openLabel": "打开 {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "新消息",
+    "newMessageBody": "{{name}}：新消息",
+    "mentionTitle": "新的提及",
+    "allMentionBody": "{{name}} 提及了 @all",
+    "userMentionBody": "{{name}} 提及了你"
+  },
+  "fileSize": {
+    "bytes": "{{size}}B",
+    "kilobytes": "{{size}}KB",
+    "megabytes": "{{size}}MB",
+    "gigabytes": "{{size}}GB"
+  }
+}

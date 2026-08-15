@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import i18n from "../../i18n";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
@@ -45,28 +47,12 @@ function compactTimestamp(d: Date): string {
 }
 
 function downloadEmergencyKit(secretKey: string, email?: string | null) {
-  const text = [
-    "POLLIS — EMERGENCY KIT",
-    "======================",
-    "",
-    "Your Secret Key is the only way to recover access to your account",
-    "from a new device when you don't have any other Pollis device with",
-    "you. Treat it like a master password.",
-    "",
-    "If you lose this key AND lose access to all of your devices,",
-    "your account is unrecoverable. Pollis cannot reset it for you.",
-    "",
-    "  SECRET KEY:",
-    "",
-    `    ${secretKey}`,
-    "",
-    "Store this file somewhere safe (a password manager, encrypted",
-    "backup, or printed and locked away). Anyone with this key + your",
-    "email address can sign in as you on a new device.",
-    "",
-    `Generated: ${new Date().toISOString()}`,
-    "",
-  ].join("\n");
+  // One-shot file contents, produced on click and never re-rendered, so the
+  // i18n singleton is the right lookup here rather than a `useTranslation` `t`.
+  const text = i18n.t("auth:emergencyKit.document", {
+    secretKey,
+    generated: new Date().toISOString(),
+  });
 
   const parts = ["pollis-emergency-kit"];
   if (import.meta.env.DEV) {
@@ -97,6 +83,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
   email,
   onConfirmed,
 }) => {
+  const { t } = useTranslation("auth");
   const [phase, setPhase] = useState<Phase>("warn");
   const [confirmInput, setConfirmInput] = useState("");
   const [showError, setShowError] = useState(false);
@@ -138,29 +125,33 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                   className="text-base font-mono font-bold mb-8"
                   style={{ color: "var(--c-danger)" }}
                 >
-                  Read before continuing
+                  {t("secretKey.warnTitle")}
                 </h1>
                 <p
                   className="text-xs mt-2 font-mono"
                   style={{ color: "var(--c-text)", lineHeight: 1.6 }}
                 >
-                  You will be presented with a <strong>Secret Key</strong> — the
-                  only way to sign in on a new device without access to an
-                  existing one.
+                  <Trans
+                    t={t}
+                    i18nKey="secretKey.warnIntro"
+                    components={{ strong: <strong /> }}
+                  />
                 </p>
                 <p
                   className="text-xs mt-4 font-mono"
                   style={{ color: "var(--c-text-dim)", lineHeight: 1.6 }}
                 >
-                  It is shown <strong style={{ color: "var(--c-text)" }}>once</strong> and never stored.
-                  If you lose it and every device, and the account is unrecoverable.
+                  <Trans
+                    t={t}
+                    i18nKey="secretKey.warnOnce"
+                    components={{ emph: <strong style={{ color: "var(--c-text)" }} /> }}
+                  />
                 </p>
                 <p
                   className="text-xs mt-3 mb-4 font-mono"
                   style={{ color: "var(--c-text)", lineHeight: 1.6 }}
                 >
-                  Have a password manager open, or be ready to print or write
-                  it down somewhere safe.
+                  {t("secretKey.warnPrepare")}
                 </p>
               </div>
               <Button
@@ -168,7 +159,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                 onClick={() => setPhase("show")}
                 className="w-full"
               >
-                I understand, show me the key
+                {t("secretKey.acknowledge")}
               </Button>
             </div>
           </Card>
@@ -200,13 +191,13 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                   className="text-base font-mono font-bold mb-4"
                   style={{ color: "var(--c-accent)" }}
                 >
-                  Your Secret Key
+                  {t("secretKey.showTitle")}
                 </h1>
                 <p
                   className="text-xs mt-1 font-mono"
                   style={{ color: "var(--c-text-dim)" }}
                 >
-                  Save this somewhere safe. You will not see it again.
+                  {t("secretKey.showSubtitle")}
                 </p>
               </div>
 
@@ -241,7 +232,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                   className="w-full"
                   size="sm"
                 >
-                  {downloaded ? "Downloaded" : "Download Emergency Kit (.txt)"}
+                  {downloaded ? t("secretKey.downloaded") : t("secretKey.download")}
                 </Button>
                 <Button
                   data-testid="copy-secret-key-button"
@@ -258,7 +249,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                   className="w-fit-content mx-auto"
                   size="sm"
                 >
-                  {copied ? "Copied" : "Copy to clipboard"}
+                  {copied ? t("secretKey.copied") : t("secretKey.copy")}
                 </Button>
               </div>
 
@@ -267,7 +258,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                 onClick={() => setPhase("confirm")}
                 className="w-full"
               >
-                I've saved it — continue
+                {t("secretKey.saved")}
               </Button>
             </div>
           </Card>
@@ -298,26 +289,26 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                 className="text-base font-mono font-bold"
                 style={{ color: "var(--c-text)" }}
               >
-                Confirm your Secret Key
+                {t("secretKey.confirmTitle")}
               </h1>
               <p
                 className="text-xs mt-1 font-mono"
                 style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
               >
-                Paste the key you just saved to prove you can retrieve it.
+                {t("secretKey.confirmSubtitle")}
               </p>
             </div>
 
             <TextInput
               data-testid="secret-key-confirm-input"
-              label="Secret Key"
+              label={t("secretKey.inputLabel")}
               value={confirmInput}
               onChange={(v) => {
                 setConfirmInput(v);
                 setShowError(false);
               }}
               placeholder="A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-              error={showError && !matches ? "Doesn't match — try again" : undefined}
+              error={showError && !matches ? t("secretKey.mismatch") : undefined}
             />
 
             <div className="flex flex-col gap-2">
@@ -327,7 +318,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                 disabled={!matches}
                 className="w-full"
               >
-                Confirm
+                {t("secretKey.confirmButton")}
               </Button>
               <Button
                 data-testid="secret-key-back-button"
@@ -335,7 +326,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                 variant="ghost"
                 className="w-full"
               >
-                Show the key again
+                {t("secretKey.showAgain")}
               </Button>
             </div>
           </div>

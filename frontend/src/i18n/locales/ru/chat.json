@@ -1,0 +1,122 @@
+{
+  "message": {
+    "fromLabel": "Сообщение от {{name}}",
+    "unknownAuthor": "неизвестно",
+    "deleted": "[удалено]",
+    "encrypted": "[зашифровано]",
+    "redacted": "[скрыто]",
+    "edited": "(изменено)"
+  },
+  "status": {
+    "pending": "в очереди",
+    "sending": "отправка",
+    "sent": "отправлено",
+    "failed": "ошибка",
+    "cancelled": "отменено"
+  },
+  "actions": {
+    "reply": "Ответить",
+    "replyInThread": "Ответить в треде",
+    "save": "Сохранить сообщение",
+    "removeBookmark": "Убрать из закладок",
+    "copyLink": "Копировать ссылку на сообщение",
+    "copyLinkCopied": "Ссылка скопирована",
+    "copyLinkFailed": "Не удалось скопировать ссылку",
+    "edit": "Изменить сообщение",
+    "delete": "Удалить сообщение",
+    "deleteAsAdmin": "Удалить сообщение (админ)"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} ответ",
+    "replyCount_few": "{{count}} ответа",
+    "replyCount_many": "{{count}} ответов",
+    "replyCount_other": "{{count}} ответа"
+  },
+  "receipts": {
+    "readByEveryone": "Прочитали все",
+    "readByCount_one": "Прочитано {{count}} из {{total}}",
+    "readByCount_few": "Прочитано {{count}} из {{total}}",
+    "readByCount_many": "Прочитано {{count}} из {{total}}",
+    "readByCount_other": "Прочитано {{count}} из {{total}}",
+    "deliveredCount_one": "Доставлено {{count}} из {{total}}",
+    "deliveredCount_few": "Доставлено {{count}} из {{total}}",
+    "deliveredCount_many": "Доставлено {{count}} из {{total}}",
+    "deliveredCount_other": "Доставлено {{count}} из {{total}}"
+  },
+  "list": {
+    "empty": "Сообщений пока нет. Начните разговор.",
+    "unknownAuthor": "Неизвестно",
+    "blockedAuthor": "заблокированный пользователь",
+    "blockedBody": "[заблокировано]"
+  },
+  "roster": {
+    "joined": "{{name}} теперь в группе",
+    "left": "{{name}} больше не в группе",
+    "deviceAdded": "У {{name}} появилось новое устройство",
+    "deviceRemoved": "У {{name}} удалено устройство"
+  },
+  "replyBar": {
+    "replyingTo": "ответ для <name>{{name}}</name>",
+    "scrollToMessage": "Перейти к сообщению, на которое отвечаете",
+    "dismiss": "Отменить ответ",
+    "encrypted": "[Зашифрованное сообщение]"
+  },
+  "queue": {
+    "heading": "Очередь",
+    "pendingPlaceholder": "[Сообщение в очереди]",
+    "cancel": "Отменить отправку",
+    "retry": "повторить",
+    "failedCount_one": "ошибка ×{{count}}",
+    "failedCount_few": "ошибка ×{{count}}",
+    "failedCount_many": "ошибка ×{{count}}",
+    "failedCount_other": "ошибка ×{{count}}"
+  },
+  "reactions": {
+    "add": "Добавить реакцию",
+    "pillLabel_one": "{{emoji}} {{count}} реакция",
+    "pillLabel_few": "{{emoji}} {{count}} реакции",
+    "pillLabel_many": "{{emoji}} {{count}} реакций",
+    "pillLabel_other": "{{emoji}} {{count}} реакции"
+  },
+  "preview": {
+    "noMessages": "Сообщений пока нет",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} вложение]",
+    "attachments_few": "[{{count}} вложения]",
+    "attachments_many": "[{{count}} вложений]",
+    "attachments_other": "[{{count}} вложения]"
+  },
+  "attachment": {
+    "viewLabel": "Посмотреть {{filename}}",
+    "openLabel": "Открыть {{filename}}",
+    "downloadLabel": "Скачать {{filename}}",
+    "loading": "загрузка…",
+    "error": "сбой",
+    "failedToLoad": "Не удалось загрузить",
+    "failedToDownload": "Не удалось скачать",
+    "lightboxFetch": "загрузить",
+    "lightboxDone": "[ готово ]",
+    "lightboxDownload": "[скачать]",
+    "lightboxClose": "[esc]"
+  },
+  "unfurl": {
+    "loadImage": "Загрузить изображение",
+    "loadVideo": "Загрузить видео",
+    "loadTitle": "Загрузить медиа с {{url}} — это прямое обращение к тому сайту",
+    "loadDescription": "Загрузить медиа с {{url}}. Это прямое обращение к тому сайту, и он увидит ваш IP-адрес.",
+    "openLabel": "Открыть {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "Новое сообщение",
+    "newMessageBody": "{{name}}: новое сообщение",
+    "mentionTitle": "Новое упоминание",
+    "allMentionBody": "{{name}}: упоминание @all",
+    "userMentionBody": "{{name}}: вас упомянули"
+  },
+  "fileSize": {
+    "bytes": "{{size}} Б",
+    "kilobytes": "{{size}} КБ",
+    "megabytes": "{{size}} МБ",
+    "gigabytes": "{{size}} ГБ"
+  }
+}

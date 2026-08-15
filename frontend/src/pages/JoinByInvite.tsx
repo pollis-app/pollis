@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
@@ -30,6 +31,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   initialToken = "",
   autoRedeem = false,
 }) => {
+  const { t } = useTranslation("channels");
   const skin = useSkin();
   const navigate = useNavigate();
   const [token, setToken] = useState(initialToken);
@@ -68,11 +70,15 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   const body = (
     <>
       <TextInput
-        label={isRefined ? "Invite link or code" : "INVITE LINK OR CODE"}
+        label={
+          isRefined
+            ? t("joinByInvite.tokenLabel")
+            : t("joinByInvite.tokenLabelTerminal")
+        }
         value={token}
         onChange={setToken}
-        placeholder="https://pollis.com/invite/…"
-        description="Paste the link you were sent, or just the code."
+        placeholder={t("joinByInvite.tokenPlaceholder")}
+        description={t("joinByInvite.tokenDescription")}
         disabled={redeemMutation.isPending}
         data-testid="invite-token-input"
         autoFocus={!autoRedeem}
@@ -89,10 +95,14 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
           type="submit"
           disabled={!token.trim()}
           isLoading={redeemMutation.isPending}
-          loadingText={isRefined ? "Joining…" : "JOINING…"}
+          loadingText={
+            isRefined
+              ? t("joinByInvite.submitting")
+              : t("joinByInvite.submittingTerminal")
+          }
           data-testid="redeem-invite-link"
         >
-          {isRefined ? "Join group" : "[JOIN GROUP]"}
+          {isRefined ? t("joinByInvite.submit") : t("joinByInvite.submitTerminal")}
         </Button>
       </div>
     </>
@@ -120,11 +130,9 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
               isRefined ? "text-base font-semibold text-fg" : "text-base text-accent"
             }
           >
-            {isRefined ? "Join a group" : "> JOIN A GROUP"}
+            {isRefined ? t("joinByInvite.heading") : t("joinByInvite.headingTerminal")}
           </h2>
-          <p className="mt-1 mb-4 text-xs text-dim">
-            Invite links let you join without an admin looking you up first.
-          </p>
+          <p className="mt-1 mb-4 text-xs text-dim">{t("joinByInvite.blurb")}</p>
           {body}
         </form>
       </div>

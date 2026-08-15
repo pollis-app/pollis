@@ -1,0 +1,16 @@
+{
+  "page": {
+    "title": "АРКАДА"
+  },
+  "hud": {
+    "score": "РАХУНОК  {{score}}",
+    "time": "ЧАС      {{time}}",
+    "gameOver": "ГРУ ЗАВЕРШЕНО",
+    "final_one": "підсумок {{count}} очко · {{time}}",
+    "final_few": "підсумок {{count}} очки · {{time}}",
+    "final_many": "підсумок {{count}} очок · {{time}}",
+    "final_other": "підсумок {{count}} очка · {{time}}",
+    "restartHint": "R — почати заново · esc — вийти",
+    "controls": "WASD — рух · миша — приціл · клік/пробіл — постріл · esc — вихід"
+  }
+}

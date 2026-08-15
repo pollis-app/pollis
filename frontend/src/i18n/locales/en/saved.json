@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "Saved",
+    "unresolved": "You do not have this message on this device.",
+    "empty": "No saved messages. Use the bookmark action on a message to save it.",
+    "unsave": "unsave"
+  },
+  "row": {
+    "conversationFallback": "conversation",
+    "noText": "(no text)",
+    "unavailable": "You do not have this message on this device."
+  }
+}

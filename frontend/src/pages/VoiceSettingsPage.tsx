@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
 import { RangeSlider } from "../components/ui/RangeSlider";
@@ -62,7 +63,7 @@ const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onCh
       </select>
       <ChevronDown
         size={14}
-        className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"
+        className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none"
         style={{ color: "var(--c-text-muted)" }}
       />
     </div>
@@ -74,40 +75,54 @@ interface NoiseSuppressionSelectProps {
   onChange: (level: NoiseSuppressionLevel) => void;
 }
 
-const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, onChange }) => (
-  <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
-    <span style={{ color: "var(--c-text-muted)" }}>Noise Suppression</span>
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as NoiseSuppressionLevel)}
-        style={selectStyle}
-        onFocus={(e) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; }}
-        onBlur={(e) => { e.currentTarget.style.borderColor = "var(--c-border)"; }}
-      >
-        <option value="off">Off</option>
-        <option value="low">Low</option>
-        <option value="moderate">Moderate</option>
-        <option value="high">High</option>
-      </select>
-      <ChevronDown
-        size={14}
-        className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"
-        style={{ color: "var(--c-text-muted)" }}
-      />
-    </div>
-    <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-      Filters out background hum, fans, and traffic. Higher settings also strip away quieter speech,
-      so leave at Moderate unless your room is noisy.
-    </span>
-  </div>
-);
+// The option values are wire values (persisted in preferences and passed to the
+// Rust APM) — only the labels are translated, keyed off the value.
+const NOISE_SUPPRESSION_LABEL_KEY: Record<NoiseSuppressionLevel, string> = {
+  off: "settings.noiseSuppressionOff",
+  low: "settings.noiseSuppressionLow",
+  moderate: "settings.noiseSuppressionModerate",
+  high: "settings.noiseSuppressionHigh",
+};
 
-/** fps → one-line use-case hint shown under the framerate selector. */
-const SCREEN_SHARE_FPS_HINTS: Record<number, string> = {
-  15: "Documents & browsing",
-  30: "Standard",
-  60: "Motion & gameplay",
+const NOISE_SUPPRESSION_LEVELS: NoiseSuppressionLevel[] = ["off", "low", "moderate", "high"];
+
+const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, onChange }) => {
+  const { t } = useTranslation("voice");
+  return (
+    <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
+      <span style={{ color: "var(--c-text-muted)" }}>{t("settings.noiseSuppression")}</span>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value as NoiseSuppressionLevel)}
+          style={selectStyle}
+          onFocus={(e) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = "var(--c-border)"; }}
+        >
+          {NOISE_SUPPRESSION_LEVELS.map((level) => (
+            <option key={level} value={level}>
+              {t(NOISE_SUPPRESSION_LABEL_KEY[level])}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          size={14}
+          className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none"
+          style={{ color: "var(--c-text-muted)" }}
+        />
+      </div>
+      <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+        {t("settings.noiseSuppressionHint")}
+      </span>
+    </div>
+  );
+};
+
+/** fps → the key of the one-line use-case hint shown under the selector. */
+const SCREEN_SHARE_FPS_HINT_KEYS: Record<number, string> = {
+  15: "settings.fpsHintDocuments",
+  30: "settings.fpsHintStandard",
+  60: "settings.fpsHintMotion",
 };
 
 interface ScreenShareFpsSelectProps {
@@ -115,37 +130,39 @@ interface ScreenShareFpsSelectProps {
   onChange: (fps: number) => void;
 }
 
-const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onChange }) => (
-  <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
-    <span style={{ color: "var(--c-text-muted)" }}>Capture Framerate</span>
-    <div className="flex gap-2">
-      {SCREEN_SHARE_FPS_OPTIONS.map((fps) => (
-        <Button
-          key={fps}
-          data-testid={`screenshare-fps-${fps}`}
-          variant={value === fps ? "primary" : "secondary"}
-          size="sm"
-          onClick={() => onChange(fps)}
-        >
-          {fps} fps
-        </Button>
-      ))}
+const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onChange }) => {
+  const { t } = useTranslation("voice");
+  return (
+    <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
+      <span style={{ color: "var(--c-text-muted)" }}>{t("settings.captureFramerate")}</span>
+      <div className="flex gap-2">
+        {SCREEN_SHARE_FPS_OPTIONS.map((fps) => (
+          <Button
+            key={fps}
+            data-testid={`screenshare-fps-${fps}`}
+            variant={value === fps ? "primary" : "secondary"}
+            size="sm"
+            onClick={() => onChange(fps)}
+          >
+            {t("settings.fpsOption", { fps })}
+          </Button>
+        ))}
+      </div>
+      <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+        {t("settings.fpsHint", {
+          hint: t(SCREEN_SHARE_FPS_HINT_KEYS[value] ?? "settings.fpsHintStandard"),
+        })}
+      </span>
     </div>
-    <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-      {SCREEN_SHARE_FPS_HINTS[value] ?? "Standard"}. Higher is smoother for
-      video and gameplay but uses more CPU and bandwidth; drop to 15 fps for
-      documents or a constrained machine/network. Takes effect on your next
-      screen share.
-    </span>
-  </div>
-);
+  );
+};
 
-const PERMISSION_LABEL: Record<PermissionState, string> = {
-  granted: "✅ Granted",
-  denied: "⛔ Denied",
-  notDetermined: "— Not requested",
-  perSession: "Managed by the system",
-  unsupported: "Unavailable",
+const PERMISSION_LABEL_KEY: Record<PermissionState, string> = {
+  granted: "settings.permissionGranted",
+  denied: "settings.permissionDenied",
+  notDetermined: "settings.permissionNotRequested",
+  perSession: "settings.permissionPerSession",
+  unsupported: "settings.permissionUnsupported",
 };
 
 /** One camera/mic permission row: status + a deep-link to System Settings.
@@ -158,18 +175,19 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
   state,
   onManage,
 }) => {
+  const { t } = useTranslation("voice");
   const deepLinkable = state === "granted" || state === "denied" || state === "notDetermined";
   return (
     <div className="flex items-center justify-between gap-3" style={{ maxWidth: 320 }}>
       <div className="flex flex-col">
         <span style={{ color: "var(--c-text)" }}>{label}</span>
         <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-          {PERMISSION_LABEL[state]}
+          {t(PERMISSION_LABEL_KEY[state])}
         </span>
       </div>
       {deepLinkable && (
         <Button variant="secondary" size="sm" onClick={onManage}>
-          Manage in System Settings
+          {t("settings.manageInSystemSettings")}
         </Button>
       )}
     </div>
@@ -182,7 +200,11 @@ const selectStyle: React.CSSProperties = {
   background: "var(--c-surface)",
   color: "var(--c-text)",
   border: "2px solid var(--c-border)",
-  padding: "6px 28px 6px 8px",
+  // Logical padding: the trailing 28px reserves room for the caret, which
+  // sits on the inline-END edge and therefore swaps sides under `dir=rtl`.
+  paddingBlock: "6px",
+  paddingInlineStart: "8px",
+  paddingInlineEnd: "28px",
   fontFamily: "var(--font-mono)",
   fontSize: "inherit",
   outline: "none",
@@ -207,6 +229,7 @@ async function pushApmConfig(config: ApmConfig): Promise<void> {
 }
 
 export const VoiceSettingsPage: React.FC = observer(() => {
+  const { t } = useTranslation("voice");
   const preferences = usePreferences();
   const test = useVoiceTest();
 
@@ -352,7 +375,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
   };
 
   return (
-    <PageShell title="Voice & Video" scrollable>
+    <PageShell title={t("settings.title")} scrollable>
       <div className="flex justify-center px-6 py-8">
       <div className="flex flex-col gap-8 w-full max-w-md">
 
@@ -361,21 +384,21 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
           >
-            Devices
+            {t("settings.devicesHeading")}
           </h2>
           <DeviceSelect
-            label="Microphone"
+            label={t("settings.microphone")}
             devices={inputs}
             value={selectedInput}
             onChange={setInput}
-            fallbackLabel="Default microphone"
+            fallbackLabel={t("settings.defaultMicrophone")}
           />
           <DeviceSelect
-            label="Speaker"
+            label={t("settings.speaker")}
             devices={outputs}
             value={selectedOutput}
             onChange={setOutput}
-            fallbackLabel="Default speaker"
+            fallbackLabel={t("settings.defaultSpeaker")}
           />
         </section>
 
@@ -384,20 +407,20 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
           >
-            Camera
+            {t("settings.cameraHeading")}
           </h2>
           {cam.kind === "loading" ? (
-            <span style={{ color: "var(--c-text-muted)" }}>Detecting cameras…</span>
+            <span style={{ color: "var(--c-text-muted)" }}>{t("settings.detectingCameras")}</span>
           ) : cam.kind === "empty" ? (
-            <span style={{ color: "var(--c-text-muted)" }}>No camera detected.</span>
+            <span style={{ color: "var(--c-text-muted)" }}>{t("settings.noCameraDetected")}</span>
           ) : (
             <>
               <DeviceSelect
-                label="Camera"
+                label={t("settings.camera")}
                 devices={cameraPreviewStore.devices}
                 value={cam.deviceId}
                 onChange={setCamera}
-                fallbackLabel="No camera"
+                fallbackLabel={t("settings.noCameraOption")}
               />
               {/* Self-preview (mirrored). Off by default — the user opts in. 16:9
                   letterbox; RemoteVideoTile contains + auto-mirrors the key. */}
@@ -419,8 +442,8 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                     {cam.kind === "failed"
                       ? cam.error
                       : cam.kind === "starting"
-                        ? "Starting…"
-                        : "Preview is off — turn it on to check your camera."}
+                        ? t("settings.starting")
+                        : t("settings.previewOff")}
                   </span>
                 )}
               </div>
@@ -433,10 +456,10 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                   onClick={togglePreview}
                 >
                   {cam.kind === "live"
-                    ? "Stop camera"
+                    ? t("settings.stopCamera")
                     : cam.kind === "starting"
-                      ? "Starting…"
-                      : "Test camera"}
+                      ? t("settings.starting")
+                      : t("settings.testCamera")}
                 </Button>
               </div>
             </>
@@ -449,15 +472,15 @@ export const VoiceSettingsPage: React.FC = observer(() => {
               className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
               style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
             >
-              Permissions
+              {t("settings.permissionsHeading")}
             </h2>
             <PermissionRow
-              label="Camera"
+              label={t("settings.camera")}
               state={permissions.data.camera}
               onManage={() => { void openPrivacySettings("camera"); }}
             />
             <PermissionRow
-              label="Microphone"
+              label={t("settings.microphone")}
               state={permissions.data.microphone}
               onManage={() => { void openPrivacySettings("microphone"); }}
             />
@@ -469,18 +492,18 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
           >
-            Test
+            {t("settings.testHeading")}
           </h2>
 
           {/* ── Microphone test ────────────────────────────────────────── */}
           <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
-            <span style={{ color: "var(--c-text-muted)" }}>Microphone</span>
+            <span style={{ color: "var(--c-text-muted)" }}>{t("settings.microphone")}</span>
 
             {/* Level meter. Reserves its height even when idle so the
                 layout doesn't jump on start/stop. */}
             <div
               data-testid="voice-test-meter"
-              aria-label="Microphone level"
+              aria-label={t("settings.micLevelLabel")}
               style={{
                 height: 12,
                 background: "var(--c-surface)",
@@ -519,8 +542,8 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                   }
                 >
                   {test.phase === "mic_listening"
-                    ? "Stop mic test"
-                    : "Start mic test"}
+                    ? t("settings.stopMicTest")
+                    : t("settings.startMicTest")}
                 </Button>
               </div>
               <div className="flex">
@@ -534,10 +557,10 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                   }
                 >
                   {test.phase === "recording"
-                    ? "Recording…"
+                    ? t("settings.recording")
                     : test.phase === "playing"
-                      ? "Playing…"
-                      : "Record 3s & play back"}
+                      ? t("settings.playing")
+                      : t("settings.recordAndPlayBack")}
                 </Button>
               </div>
             </div>
@@ -546,17 +569,17 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                 mic test starts/stops. Disabled unless the mic test is live. */}
             <Switch
               className="mt-4"
-              label="Hear myself (may echo)"
+              label={t("settings.hearMyself")}
               checked={test.monitor}
               disabled={test.phase !== "mic_listening"}
               onChange={(enabled) => test.setMonitor(enabled, selectedOutput)}
-              description="Loops the mic back through the selected output. Use headphones to avoid feedback."
+              description={t("settings.hearMyselfDescription")}
             />
           </div>
 
           {/* ── Speaker test ───────────────────────────────────────────── */}
           <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
-            <span style={{ color: "var(--c-text-muted)" }}>Speaker</span>
+            <span style={{ color: "var(--c-text-muted)" }}>{t("settings.speaker")}</span>
             <div className="flex flex-wrap gap-2">
               <Button
                 data-testid="voice-test-play-sweep"
@@ -565,7 +588,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                 disabled={test.phase === "playing" || test.phase === "recording"}
                 onClick={() => test.playTone(selectedOutput, "sweep")}
               >
-                Play sweep
+                {t("settings.playSweep")}
               </Button>
               <Button
                 data-testid="voice-test-play-chime"
@@ -574,7 +597,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                 disabled={test.phase === "playing" || test.phase === "recording"}
                 onClick={() => test.playTone(selectedOutput, "chime")}
               >
-                Play chime
+                {t("settings.playChime")}
               </Button>
               {/* Always rendered so the row doesn't grow/shrink when a tone
                   starts/stops. Disabled when there's nothing to stop. */}
@@ -585,7 +608,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                 disabled={test.phase !== "playing"}
                 onClick={() => test.stopPlayback()}
               >
-                Stop
+                {t("settings.stopPlayback")}
               </Button>
             </div>
           </div>
@@ -606,39 +629,43 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
           >
-            Audio Processing
+            {t("settings.audioProcessingHeading")}
           </h2>
 
           <VoiceInputModeSelect value={inputMode} onChange={handleInputMode} />
 
           <RangeSlider
-            label="Microphone Boost"
+            label={t("settings.micBoost")}
             value={micBoost}
             onChange={(v) => savePrefsAndPushApm({ mic_boost_db: v })}
             min={0}
             max={20}
             step={1}
-            sublabel="Adds extra volume to your mic before anything else processes it. Use this if you're still too quiet even at full system volume."
-            description={micBoost === 0 ? "off" : `+${micBoost} dB`}
+            sublabel={t("settings.micBoostSublabel")}
+            description={
+              micBoost === 0
+                ? t("settings.micBoostOff")
+                : t("settings.micBoostValue", { db: micBoost })
+            }
           />
 
           <Switch
-            label="Auto Volume Leveling"
+            label={t("settings.autoVolumeLeveling")}
             checked={autoGain}
             onChange={(enabled) => savePrefsAndPushApm({ auto_gain_control: enabled })}
-            description="Keeps your voice at a consistent level — quiet speech is brought up, loud bursts are reined in. Turn off if you'd rather set mic volume yourself."
+            description={t("settings.autoVolumeLevelingDescription")}
           />
 
           <RangeSlider
-            label="Auto Volume Target"
+            label={t("settings.autoVolumeTarget")}
             value={agcTarget}
             onChange={(v) => savePrefsAndPushApm({ agc_target_dbfs: v })}
             min={3}
             max={15}
             step={1}
             disabled={!autoGain}
-            sublabel="How loud Auto Volume Leveling tries to make you. Lower = louder (3 may clip on a hot mic), higher = quieter. Most people are happy at 6."
-            description={`level ${agcTarget}`}
+            sublabel={t("settings.autoVolumeTargetSublabel")}
+            description={t("settings.autoVolumeTargetValue", { level: agcTarget })}
           />
 
           <NoiseSuppressionSelect
@@ -647,17 +674,17 @@ export const VoiceSettingsPage: React.FC = observer(() => {
           />
 
           <Switch
-            label="Echo Cancellation"
+            label={t("settings.echoCancellation")}
             checked={aecEnabled}
             onChange={(enabled) => savePrefsAndPushApm({ echo_cancellation: enabled })}
-            description="Stops your speaker audio from being picked up by your mic and sent back to others. Leave on unless you're always on headphones."
+            description={t("settings.echoCancellationDescription")}
           />
 
           <Switch
-            label="Click Suppression"
+            label={t("settings.clickSuppression")}
             checked={clickSuppression}
             onChange={(enabled) => savePrefsAndPushApm({ click_suppression: enabled })}
-            description="A smarter noise filter that catches keyboard typing and mouse clicks the regular Noise Suppression misses. Uses about 5% of one CPU core. Tip: turn Noise Suppression down to Low or Off when this is on so they don't fight each other."
+            description={t("settings.clickSuppressionDescription")}
           />
         </section>
 
@@ -666,7 +693,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
           >
-            Screen Share
+            {t("settings.screenShareHeading")}
           </h2>
           <ScreenShareFpsSelect value={screenShareFps} onChange={handleScreenShareFps} />
         </section>
@@ -676,13 +703,13 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
           >
-            Behavior
+            {t("settings.behaviorHeading")}
           </h2>
           <Switch
-            label="Auto Join Voice"
+            label={t("settings.autoJoinVoice")}
             checked={autoJoinVoice}
             onChange={handleAutoJoinVoice}
-            description="Automatically join voice when opening a voice channel. Disable to preview who's in the channel before joining."
+            description={t("settings.autoJoinVoiceDescription")}
           />
         </section>
 

@@ -1,0 +1,73 @@
+{
+  "list": {
+    "newMessage": "رسالة جديدة",
+    "requests": "الطلبات",
+    "blocked": "المستخدمون المحظورون",
+    "avatarAlt": "الصورة الرمزية لـ {{name}}",
+    "settingsFor": "إعدادات المحادثة مع {{name}}",
+    "verified": "جهة اتصال موثَّقة",
+    "keyChanged": "تغيّر مفتاح الهوية — أعد التحقق"
+  },
+  "conversation": {
+    "fallbackTitle": "رسالة مباشرة",
+    "viewProfile": "عرض الملف الشخصي لـ ‎@{{name}}",
+    "call": "الاتصال بـ ‎@{{name}}",
+    "returnToCall": "العودة إلى المكالمة مع ‎@{{name}}"
+  },
+  "settings": {
+    "pageTitle": "إعدادات المحادثة",
+    "leave": "مغادرة المحادثة",
+    "submitting": "جارٍ المغادرة…",
+    "leaveFailed": "تعذّرت مغادرة المحادثة",
+    "cancel": "إلغاء (Esc)"
+  },
+  "start": {
+    "pageTitle": "رسالة جديدة",
+    "identifierLabel": "اسم المستخدم أو البريد الإلكتروني",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "بدء المحادثة",
+    "submitting": "جارٍ البدء…",
+    "identifierRequired": "معرّف المستخدم مطلوب",
+    "userNotFound": "المستخدم غير موجود",
+    "startFailed": "تعذّر بدء المحادثة"
+  },
+  "requests": {
+    "pageTitle": "طلبات المراسلة",
+    "empty": "لا توجد طلبات قيد الانتظار.",
+    "noMessageYet": "(لا توجد رسالة بعد)",
+    "unknownSender": "غير معروف",
+    "others_zero": "(+{{count}} آخر)",
+    "others_one": "(+{{count}} آخر)",
+    "others_two": "(+{{count}} آخران)",
+    "others_few": "(+{{count}} آخرين)",
+    "others_many": "(+{{count}} آخرَ)",
+    "others_other": "(+{{count}} آخر)",
+    "accept": "قبول",
+    "block": "حظر"
+  },
+  "blocked": {
+    "pageTitle": "المستخدمون المحظورون",
+    "empty": "لا يوجد مستخدمون محظورون.",
+    "unblock": "إلغاء الحظر"
+  },
+  "profile": {
+    "fallbackName": "مستخدم",
+    "fallbackTitle": "الملف الشخصي",
+    "notFound": "المستخدم غير موجود",
+    "avatarAlt": "الصورة الرمزية لـ {{name}}",
+    "sendMessage": "إرسال رسالة",
+    "block": "حظر",
+    "safetyNumber": "رقم الأمان",
+    "statusVerified": "موثَّق",
+    "statusChanged": "تغيّر — أعد التحقق",
+    "statusUnverified": "غير موثَّق",
+    "keyChangedWarning": "تغيّر مفتاح هوية جهة الاتصال هذه منذ آخر مرة تحققت فيها منه. قارن رقم الأمان مرة أخرى عبر قناة خارجية قبل الوثوق به.",
+    "compareHint": "قارن هذه الأرقام مع {{name}} عبر قناة موثوقة (لقاء مباشر، أو مكالمة تعرف صوت صاحبها). إذا تطابقت، فضع علامة موثَّق على جهة الاتصال هذه.",
+    "removeVerification": "إزالة التوثيق",
+    "markVerified": "وضع علامة موثَّق"
+  },
+  "notify": {
+    "requestTitle": "محادثة جديدة",
+    "requestBody": "بدأ {{name}} محادثة معك"
+  }
+}

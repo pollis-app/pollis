@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../ui/Button";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import type { InviteLinkSummary } from "../../hooks/queries/useGroups";
@@ -21,28 +22,35 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
   onRevoke,
   isRevoking,
 }) => {
+  const { t } = useTranslation("channels");
   const skin = useSkin();
 
   const usesLabel =
-    link.max_uses != null ? `${link.uses}/${link.max_uses} uses` : `${link.uses} uses`;
+    link.max_uses != null
+      ? t("inviteLinks.rowUsesOfMax", { used: link.uses, count: link.max_uses })
+      : t("inviteLinks.rowUses", { count: link.uses });
 
   // `is_live` is computed server-side so this badge cannot disagree with what
   // redemption will actually do.
   let status: string;
   if (link.revoked_at) {
-    status = "Revoked";
+    status = t("inviteLinks.statusRevoked");
   } else if (link.is_live) {
-    status = "Active";
+    status = t("inviteLinks.statusActive");
   } else {
-    status = "Expired";
+    status = t("inviteLinks.statusExpired");
   }
 
   const detail = [
     usesLabel,
     link.expires_at
-      ? `expires ${new Date(link.expires_at).toLocaleDateString()}`
-      : "no expiry",
-    link.creator_username ? `by @${link.creator_username}` : null,
+      ? t("inviteLinks.expiresOn", {
+          date: new Date(link.expires_at).toLocaleDateString(),
+        })
+      : t("inviteLinks.noExpiry"),
+    link.creator_username
+      ? t("inviteLinks.createdBy", { name: link.creator_username })
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -67,7 +75,7 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
             isLoading={isRevoking}
             data-testid="revoke-invite-link"
           >
-            Revoke
+            {t("inviteLinks.revoke")}
           </Button>
         )}
       </div>
@@ -91,7 +99,7 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
           isLoading={isRevoking}
           data-testid="revoke-invite-link"
         >
-          [REVOKE]
+          {t("inviteLinks.revokeTerminal")}
         </Button>
       )}
     </div>

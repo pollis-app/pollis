@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "收藏",
+    "unresolved": "此设备上没有这条消息。",
+    "empty": "暂无收藏的消息。在消息上使用收藏操作即可保存。",
+    "unsave": "取消收藏"
+  },
+  "row": {
+    "conversationFallback": "对话",
+    "noText": "（无文字）",
+    "unavailable": "此设备上没有这条消息。"
+  }
+}

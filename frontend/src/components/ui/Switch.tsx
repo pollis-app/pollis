@@ -72,7 +72,7 @@ export const Switch: React.FC<SwitchProps> = ({
       {description && (
         <p
           id={descriptionId}
-          className="text-xs font-mono ml-12"
+          className="text-xs font-mono ms-12"
           style={{ color: "var(--c-text-muted)" }}
         >
           {description}

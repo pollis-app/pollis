@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { NavigableList } from "../components/ui/NavigableList";
 import { Button } from "../components/ui/Button";
@@ -41,16 +42,20 @@ function comboFromEvent(e: KeyboardEvent): string | null {
 }
 
 export const KeyboardShortcutsPage: React.FC = () => {
+  const { t } = useTranslation("settings");
   const { query, save } = usePreferences();
   const overrides = query.data?.shortcut_overrides ?? {};
   const [capturingId, setCapturingId] = useState<ShortcutCommandId | null>(null);
 
+  // Command titles are stored as translation keys (see `keyboard/commands.ts`)
+  // and resolved here, at render time, so switching language re-labels the
+  // list instead of leaving it on whatever language the module was imported in.
   const rows: Row[] = ALL_SHORTCUT_COMMAND_IDS.map((id) => {
     const meta = SHORTCUT_COMMANDS[id];
     const override = overrides[id];
     return {
       id,
-      title: meta.title,
+      title: t(meta.titleKey),
       combo: override ?? meta.defaultCombo,
       isOverridden: override !== undefined && override !== meta.defaultCombo,
     };
@@ -124,7 +129,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
   }, [capturingId, overrides, persistOverrides]);
 
   return (
-    <PageShell title="Key Bindings" scrollable>
+    <PageShell title={t("shortcuts.title")} scrollable>
       <div
         data-testid="keyboard-shortcuts-page"
         className="flex-1 flex flex-col overflow-hidden"
@@ -139,7 +144,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
               setCapturingId(r.id);
             }
           }}
-          emptyLabel="No shortcuts."
+          emptyLabel={t("shortcuts.empty")}
           renderRow={(r) => (
             <span
               className="flex-1 truncate"
@@ -156,7 +161,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
                 type="button"
                 disabled={!dataLoaded}
                 onClick={() => setCapturingId(r.id)}
-                aria-label={`Rebind ${r.title}`}
+                aria-label={t("shortcuts.rebindLabel", { name: r.title })}
                 data-testid={`shortcut-${r.id}-edit`}
                 className="font-mono text-xs"
                 style={{
@@ -172,7 +177,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
                   opacity: dataLoaded ? 1 : 0.6,
                 }}
               >
-                {isCapturing ? "Press keys…" : formatCombo(r.combo)}
+                {isCapturing ? t("shortcuts.capturing") : formatCombo(r.combo)}
               </button>,
             ];
             if (r.isOverridden) {
@@ -182,10 +187,10 @@ export const KeyboardShortcutsPage: React.FC = () => {
                   variant="ghost"
                   size="xs"
                   onClick={() => resetToDefault(r.id)}
-                  aria-label={`Reset ${r.title} to default`}
+                  aria-label={t("shortcuts.resetLabel", { name: r.title })}
                   data-testid={`shortcut-${r.id}-reset`}
                 >
-                  reset
+                  {t("shortcuts.resetButton")}
                 </Button>,
               );
             }

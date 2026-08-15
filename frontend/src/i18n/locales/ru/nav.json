@@ -1,0 +1,186 @@
+{
+  "sidebar": {
+    "groups": "группы",
+    "dms": "лс",
+    "account": "аккаунт",
+    "saved": "Сохранённое",
+    "preferences": "Параметры",
+    "userSettings": "Настройки пользователя",
+    "voiceAndVideo": "Аудио и видео",
+    "security": "Безопасность",
+    "keyBindings": "Горячие клавиши",
+    "softwareUpdate": "Обновление ПО",
+    "expandGroup": "Развернуть {{name}}",
+    "collapseGroup": "Свернуть {{name}}",
+    "keyChanged": "Ключ идентификации изменился — проверьте заново",
+    "verified": "Проверенный контакт",
+    "dmAvatarAlt": "Аватар {{name}}",
+    "close": "Закрыть боковую панель ({{shortcut}})"
+  },
+  "profile": {
+    "you": "Вы",
+    "call": "Звонок",
+    "voice": "Голос",
+    "settings": "Настройки",
+    "voiceConnected": "Голос подключён",
+    "stopScreenShare": "Остановить показ экрана",
+    "shareScreen": "Показать экран",
+    "disconnect": "Отключиться"
+  },
+  "breadcrumb": {
+    "home": "Главная",
+    "groups": "Группы",
+    "createGroup": "Создать группу",
+    "findGroup": "Найти группу",
+    "newChannel": "Новый канал",
+    "voice": "голос",
+    "joinRequests": "Запросы на вступление",
+    "inviteMember": "Пригласить участника",
+    "leaveGroup": "Покинуть группу",
+    "members": "Участники",
+    "removeMember": "Исключить участника",
+    "directMessages": "Личные сообщения",
+    "newMessage": "Новое сообщение",
+    "requests": "Запросы",
+    "blockedUsers": "Заблокированные",
+    "conversationSettings": "Настройки переписки",
+    "account": "Аккаунт",
+    "preferences": "Параметры",
+    "userSettings": "Настройки пользователя",
+    "profile": "Профиль",
+    "security": "Безопасность",
+    "voiceSettings": "Голос",
+    "invites": "Приглашения",
+    "joinAGroup": "Вступить в группу",
+    "search": "Поиск",
+    "searchButton": "Поиск ({{shortcut}})",
+    "settings": "Настройки"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Непрочитанных сообщений в группах: {{count}}",
+    "groupsUnread_few": "Непрочитанных сообщений в группах: {{count}}",
+    "groupsUnread_many": "Непрочитанных сообщений в группах: {{count}}",
+    "groupsUnread_other": "Непрочитанных сообщений в группах: {{count}}",
+    "dmsUnread_one": "Непрочитанных личных сообщений: {{count}}",
+    "dmsUnread_few": "Непрочитанных личных сообщений: {{count}}",
+    "dmsUnread_many": "Непрочитанных личных сообщений: {{count}}",
+    "dmsUnread_other": "Непрочитанных личных сообщений: {{count}}",
+    "joinRequests_one": "Запросов на вступление: {{count}}",
+    "joinRequests_few": "Запросов на вступление: {{count}}",
+    "joinRequests_many": "Запросов на вступление: {{count}}",
+    "joinRequests_other": "Запросов на вступление: {{count}}",
+    "invites_one": "Ожидающих приглашений: {{count}}",
+    "invites_few": "Ожидающих приглашений: {{count}}",
+    "invites_many": "Ожидающих приглашений: {{count}}",
+    "invites_other": "Ожидающих приглашений: {{count}}",
+    "someone": "Кто-то",
+    "updateAvailable": "Доступно обновление",
+    "updateAvailableTitle": "Доступно обновление: {{version}}",
+    "answerCall": "Ответить на звонок от @{{username}}",
+    "declineCall": "Отклонить звонок",
+    "dismissVoiceError": "Скрыть ошибку голосовой связи",
+    "dismissScreenShareError": "Скрыть ошибку показа экрана",
+    "syncing": "синхронизация…"
+  },
+  "shell": {
+    "dropFiles": "перетащите файлы, чтобы отправить",
+    "voiceChannelFallback": "голос",
+    "callChannel": "Звонок"
+  },
+  "panel": {
+    "thread": "Тред",
+    "details": "Детали",
+    "ariaLabel": "Детали переписки",
+    "closeThread": "Закрыть панель треда ({{shortcut}})",
+    "closeDetails": "Закрыть панель деталей ({{shortcut}})"
+  },
+  "members": {
+    "count_one": "Участники — {{count}}",
+    "count_few": "Участники — {{count}}",
+    "count_many": "Участники — {{count}}",
+    "count_other": "Участники — {{count}}",
+    "onlineCount_one": "В сети — {{count}}",
+    "onlineCount_few": "В сети — {{count}}",
+    "onlineCount_many": "В сети — {{count}}",
+    "onlineCount_other": "В сети — {{count}}",
+    "empty": "Участников нет.",
+    "noneOnline": "Никого нет в сети.",
+    "you": "Вы",
+    "admin": "админ"
+  },
+  "media": {
+    "heading": "Медиа",
+    "empty": "Медиафайлов пока нет."
+  },
+  "thread": {
+    "loading": "Загрузка ответов…",
+    "empty": "Ответов пока нет. Начните тред ниже.",
+    "placeholder": "Ответить в треде…",
+    "messageDeleted": "Сообщение удалено",
+    "encrypted": "[зашифровано]"
+  },
+  "chat": {
+    "noSelection": "Выберите канал, чтобы начать переписку"
+  },
+  "dmRequest": {
+    "heading": "запрос на переписку",
+    "body": "<name>{{name}}</name> хочет писать вам сообщения.",
+    "accept": "Принять",
+    "accepting": "Принимаем…",
+    "block": "Заблокировать",
+    "blocking": "Блокируем…"
+  },
+  "editBar": {
+    "heading": "изменение сообщения",
+    "cancel": "Отменить изменение",
+    "hint": "Enter — сохранить · Shift+Enter — новая строка · Esc — отмена"
+  },
+  "deleteChannel": {
+    "heading": "удаление канала",
+    "cancel": "Отменить удаление",
+    "body": "Этот канал и все его сообщения будут удалены безвозвратно. Отменить это будет нельзя.",
+    "deleting": "Удаление…"
+  },
+  "deleteMessage": {
+    "heading": "удаление сообщения",
+    "moderateHeading": "удаление сообщения (админ)",
+    "body": "Сообщение будет удалено у всех, включая тех, кто уже его получил.",
+    "moderateBody": "Это сообщение и его вложения будут удалены у всех в канале.",
+    "cancel": "Отменить удаление",
+    "deleting": "Удаление…",
+    "remove": "Удалить"
+  },
+  "update": {
+    "preparing": "Подготовка к обновлению…",
+    "checking": "Проверка обновлений…",
+    "downloading": "Загрузка обновления…",
+    "downloadingProgress": "Загрузка обновления… {{progress}}%",
+    "installing": "Установка обновления…",
+    "relaunching": "Перезапуск…",
+    "failed": "Не удалось обновить: {{error}}"
+  },
+  "home": {
+    "groups": "Группы",
+    "groupsDescription": "Сообщества, организации, команды и чрезмерно амбициозные групповые чаты",
+    "dms": "Личные сообщения",
+    "dmsDescription": "Приватные переписки один на один со сквозным шифрованием",
+    "invites": "Приглашения",
+    "noPendingInvites": "Приглашений нет",
+    "pending_one": "{{count}} ожидает",
+    "pending_few": "{{count}} ожидает",
+    "pending_many": "{{count}} ожидает",
+    "pending_other": "{{count}} ожидает",
+    "join": "Вступить в группу",
+    "joinDescription": "Активируйте ссылку-приглашение или код",
+    "joinRequests": "Запросы на вступление",
+    "logout": "Выйти",
+    "exit": "Выход"
+  },
+  "titleBar": {
+    "minimize": "Свернуть",
+    "maximize": "Развернуть"
+  },
+  "terminal": {
+    "shellFailed": "не удалось запустить оболочку: {{error}}"
+  }
+}

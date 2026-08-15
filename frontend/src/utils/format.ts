@@ -1,8 +1,22 @@
+import i18n from "../i18n";
+
+// Unit suffix keys, smallest first. The index is the power of 1024, so the
+// list order is load-bearing.
+const FILE_SIZE_UNIT_KEYS = [
+  "chat:fileSize.bytes",
+  "chat:fileSize.kilobytes",
+  "chat:fileSize.megabytes",
+  "chat:fileSize.gigabytes",
+] as const;
+
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) { return ""; }
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${parseFloat((bytes / Math.pow(1024, i)).toFixed(1))}${sizes[i]}`;
+  const power = Math.floor(Math.log(bytes) / Math.log(1024));
+  // Anything past GB keeps the largest unit rather than running off the end
+  // of the table.
+  const i = Math.min(Math.max(power, 0), FILE_SIZE_UNIT_KEYS.length - 1);
+  const size = parseFloat((bytes / Math.pow(1024, i)).toFixed(1));
+  return i18n.t(FILE_SIZE_UNIT_KEYS[i], { size });
 }
 
 export function formatDuration(seconds: number): string {
@@ -33,10 +47,10 @@ export function formatDayDivider(ms: number): string {
   const dayDiff = Math.round((todayStart - dayStart) / 86_400_000);
 
   if (dayDiff === 0) {
-    return "Today";
+    return i18n.t("common:time.today");
   }
   if (dayDiff === 1) {
-    return "Yesterday";
+    return i18n.t("common:time.yesterday");
   }
   if (dayDiff > 1 && dayDiff <= 6) {
     return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });

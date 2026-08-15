@@ -250,7 +250,7 @@ input[type="range"]::-moz-range-thumb {
 
   /* Sidebar nav item ───────────────────────────────────────────── */
   .sidebar-item {
-    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-left text-xs transition-colors duration-100 cursor-pointer select-none;
+    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-start text-xs transition-colors duration-100 cursor-pointer select-none;
     border-radius: var(--radius-chip);
     color: var(--c-text-dim);
   }
@@ -263,8 +263,8 @@ input[type="range"]::-moz-range-thumb {
   .sidebar-item-active {
     color: var(--c-accent);
     background: var(--c-active);
-    border-left: 2px solid var(--c-accent);
-    padding-left: calc(0.75rem - 2px);
+    border-inline-start: 2px solid var(--c-accent);
+    padding-inline-start: calc(0.75rem - 2px);
   }
 
   /* Icon buttons ───────────────────────────────────────────────── */
@@ -377,6 +377,32 @@ input[type="range"]::-moz-range-thumb {
   /* Divider ────────────────────────────────────────────────────── */
   .divider {
     border-top: 1px solid var(--c-border);
+  }
+
+  /* Direction-aware icons (#855) ───────────────────────────────────
+     Only glyphs that ENCODE reading direction carry these: back/forward
+     chevrons, reply and exit arrows, the collapse caret, the composer's
+     send arrow. A mic, a checkmark, a trash can or a media transport
+     button must NOT — mirroring those just makes them look broken.
+
+     `.rtl-mirror` is for a glyph drawn for LTR: it flips under `dir=rtl`.
+     `.rtl-unmirror` is for a glyph the LTR design already draws flipped
+     (`scaleX(-1)` inline) — under `dir=rtl` it returns to its natural
+     orientation, which is the mirrored one. */
+  .rtl-mirror {
+    transform: scaleX(1);
+  }
+
+  [dir="rtl"] .rtl-mirror {
+    transform: scaleX(-1);
+  }
+
+  .rtl-unmirror {
+    transform: scaleX(-1);
+  }
+
+  [dir="rtl"] .rtl-unmirror {
+    transform: scaleX(1);
   }
 }
 

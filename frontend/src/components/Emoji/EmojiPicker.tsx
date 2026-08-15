@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 import { appStore } from "../../stores/appStore";
 import { useUsableEmoji } from "../../hooks/queries/useEmoji";
 import { TextInput } from "../ui/TextInput";
@@ -58,6 +59,7 @@ interface Section {
  */
 export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
   ({ onSelect, onClose, closeOnSelect = false, className = "" }) => {
+    const { t } = useTranslation("emoji");
     const { currentUser } = appStore;
     const { data: customEmoji = [] } = useUsableEmoji(currentUser?.id ?? null);
 
@@ -82,7 +84,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
         return [
           {
             id: "results",
-            title: `Results for "${trimmed}"`,
+            title: t("picker.resultsFor", { query: trimmed }),
             items: searchEmoji(trimmed, customEmoji),
           },
         ];
@@ -92,7 +94,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
 
       const recents = resolveRecents(recentIds, customEmoji);
       if (recents.length > 0) {
-        out.push({ id: "recent", title: "Frequently used", items: recents });
+        out.push({ id: "recent", title: t("picker.recent"), items: recents });
       }
 
       // Custom emoji grouped by the group that registered them — the shape
@@ -108,7 +110,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
         const name = customEmoji.find((e) => e.group_id === groupId)?.group_name;
         out.push({
           id: `custom-${groupId}`,
-          title: name && name.length > 0 ? name : "Custom",
+          title: name && name.length > 0 ? name : t("picker.custom"),
           items,
         });
       }
@@ -116,7 +118,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
       for (const category of EMOJI_CATEGORIES) {
         out.push({
           id: category.id,
-          title: category.label,
+          title: t(`categories.${category.id}`),
           items: STANDARD_EMOJI.filter((e) => e.category === category.id).map((emoji) => ({
             kind: "standard" as const,
             emoji,
@@ -124,7 +126,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
         });
       }
       return out;
-    }, [query, customEmoji, recentIds]);
+    }, [query, customEmoji, recentIds, t]);
 
     // Flat navigation order — the index each cell carries and what the arrow
     // keys step through.
@@ -253,16 +255,16 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
       <div
         data-testid="emoji-picker"
         role="dialog"
-        aria-label="Emoji picker"
+        aria-label={t("picker.label")}
         onKeyDown={handleKeyDown}
         className={`panel-raised flex flex-col overflow-hidden w-[22rem] h-[24rem] ${className}`}
       >
         <div className="shrink-0 p-2 border-b border-line">
           <TextInput
-            label="Search"
+            label={t("picker.searchLabel")}
             value={query}
             onChange={setQuery}
-            placeholder="Search emoji"
+            placeholder={t("picker.searchPlaceholder")}
             data-testid="emoji-picker-search"
             autoFocus
           />
@@ -293,7 +295,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
                 data-testid="emoji-picker-empty"
                 className="text-xs font-mono text-muted p-3 text-center"
               >
-                No emoji match that.
+                {t("picker.empty")}
               </p>
             )}
           </div>
@@ -321,7 +323,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
                 </span>
               </>
             ) : (
-              <span className="text-xs font-mono text-muted truncate">Pick an emoji</span>
+              <span className="text-xs font-mono text-muted truncate">{t("picker.previewHint")}</span>
             )}
           </div>
           <SkinTonePicker toneIndex={toneIndex} onChange={handleToneChange} />

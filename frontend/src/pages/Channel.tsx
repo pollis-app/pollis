@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { Pencil, Trash2 } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
@@ -7,6 +8,7 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 export const ChannelPage: React.FC = observer(() => {
+  const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/channels/$channelId" });
   const setSelectedChannelId = appStore.setSelectedChannelId;
@@ -40,7 +42,7 @@ export const ChannelPage: React.FC = observer(() => {
   const channel = group?.channels.find((c) => c.id === channelId);
   const isAdmin = group?.current_user_role === "admin";
 
-  const title = channel ? channel.name : "Channel";
+  const title = channel ? channel.name : t("channel.fallbackTitle");
 
   return (
     <div className="flex flex-col h-full">
@@ -58,7 +60,7 @@ export const ChannelPage: React.FC = observer(() => {
             <button
               data-testid="rename-channel-trigger"
               onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
-              aria-label="Rename channel"
+              aria-label={t("channel.renameLabel")}
               className="icon-btn-sm flex-shrink-0 padding-0"
             >
               <Pencil size={14} aria-hidden="true" />
@@ -66,7 +68,7 @@ export const ChannelPage: React.FC = observer(() => {
             <button
               data-testid="delete-channel-trigger"
               onClick={() => setPendingDeleteChannelId(channelId)}
-              aria-label="Delete channel"
+              aria-label={t("channel.deleteLabel")}
               className="icon-btn-sm flex-shrink-0 padding-0"
             >
               <Trash2 size={14} aria-hidden="true" />

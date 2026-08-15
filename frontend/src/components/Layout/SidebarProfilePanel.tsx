@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { useRouter } from "@tanstack/react-router";
 import { Settings as SettingsIcon, Volume2, Monitor, MonitorOff, PhoneOff } from "lucide-react";
@@ -23,13 +24,14 @@ import { shareOf } from "../../types/voice-state";
  * `VoiceStage` tray. No participant count (per the design brief).
  */
 export const SidebarProfilePanel: React.FC = observer(() => {
+  const { t } = useTranslation("nav");
   const router = useRouter();
   const { data: profile } = useUserProfile();
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { voiceState } = appStore;
 
   const displayName =
-    profile?.preferred_name || profile?.username || "You";
+    profile?.preferred_name || profile?.username || t("profile.you");
   const handle = profile?.username ? `@${profile.username}` : null;
 
   const inVoice = voiceState.kind === "joined";
@@ -44,7 +46,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
       return "";
     }
     if (voiceChannelId.startsWith("call-")) {
-      return "Call";
+      return t("profile.call");
     }
     for (const group of groupsWithChannels ?? []) {
       const channel = group.channels.find((c) => c.id === voiceChannelId);
@@ -52,7 +54,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
         return channel.name;
       }
     }
-    return "Voice";
+    return t("profile.voice");
   })();
 
   return (
@@ -71,15 +73,15 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             {displayName}
           </span>
           {handle && (
-            <span className="truncate text-2xs text-muted">{handle}</span>
+            <bdi className="truncate text-2xs text-muted">{handle}</bdi>
           )}
         </div>
         <button
           type="button"
           data-testid="sidebar-profile-settings"
           onClick={() => router.navigate({ to: "/settings" })}
-          aria-label="Settings"
-          title="Settings"
+          aria-label={t("profile.settings")}
+          title={t("profile.settings")}
           className="icon-btn-sm"
         >
           <SettingsIcon size={15} className="size-[0.933rem] shrink-0" />
@@ -102,7 +104,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
               className="text-2xs font-semibold"
               style={{ color: "var(--c-voice-connected, var(--c-accent))" }}
             >
-              Voice Connected
+              {t("profile.voiceConnected")}
             </span>
             <span className="truncate text-2xs text-muted">{voiceChannelName}</span>
           </div>
@@ -113,8 +115,8 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             type="button"
             data-testid="sidebar-voice-screenshare"
             onClick={() => toggleScreenShare(share)}
-            aria-label={shareActive ? "Stop screen share" : "Share screen"}
-            title={shareActive ? "Stop screen share" : "Share screen"}
+            aria-label={shareActive ? t("profile.stopScreenShare") : t("profile.shareScreen")}
+            title={shareActive ? t("profile.stopScreenShare") : t("profile.shareScreen")}
             className="icon-btn-sm"
             style={shareActive ? { color: "var(--c-accent)" } : undefined}
           >
@@ -124,8 +126,8 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             type="button"
             data-testid="sidebar-voice-disconnect"
             onClick={() => voiceSession.leave()}
-            aria-label="Disconnect"
-            title="Disconnect"
+            aria-label={t("profile.disconnect")}
+            title={t("profile.disconnect")}
             className="icon-btn-sm hover:text-[var(--c-danger)]"
           >
             <PhoneOff size={15} />

@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
 import { useAvatarBlobUrl } from "../../hooks/queries/useUserProfile";
 import type { PresenceStatus } from "../../stores/presenceStore";
@@ -23,12 +24,16 @@ const PRESENCE_COLORS: Record<PresenceStatus, string> = {
 export const Avatar: React.FC<AvatarProps> = ({
   avatarKey,
   size = 24,
-  alt = "Avatar",
+  alt,
   testId,
   variant = "list",
   presence,
 }) => {
+  const { t } = useTranslation("common");
   const { data: blobUrl } = useAvatarBlobUrl(avatarKey ?? null);
+  // Resolved at render, not as a default parameter, so the fallback follows
+  // a language change.
+  const resolvedAlt = alt ?? t("a11y.avatar");
 
   const dim = `${size}px`;
   const isProfile = variant === "profile";
@@ -76,12 +81,12 @@ export const Avatar: React.FC<AvatarProps> = ({
     <span style={containerStyle} data-testid={testId}>
       <img
         src={blobUrl}
-        alt={alt}
+        alt={resolvedAlt}
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
       />
     </span>
   ) : (
-    <span style={containerStyle} data-testid={testId} aria-label={alt}>
+    <span style={containerStyle} data-testid={testId} aria-label={resolvedAlt}>
       <User
         size={Math.round(size * 0.6)}
         aria-hidden="true"
@@ -99,7 +104,7 @@ export const Avatar: React.FC<AvatarProps> = ({
       {inner}
       <span
         data-testid={testId ? `${testId}-presence` : undefined}
-        aria-label={`Presence: ${presence}`}
+        aria-label={t("presence.label", { status: t(`presence.${presence}`) })}
         style={dotStyle}
       />
     </span>

@@ -9,6 +9,7 @@ import React from "react";
 import { X } from "lucide-react";
 
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 import { appStore } from "../../stores/appStore";
 import { RemoteVideoTile } from "./RemoteVideoTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
@@ -17,6 +18,7 @@ import { shareOf } from "../../types/voice-state";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 
 export const ScreenShareViewer: React.FC = observer(() => {
+  const { t } = useTranslation("voice");
   const {
     viewingScreenShareTrackKey,
     voiceParticipants,
@@ -45,7 +47,7 @@ export const ScreenShareViewer: React.FC = observer(() => {
       return null;
     }
     trackKey = LOCAL_PREVIEW_KEY;
-    label = currentUser?.username ?? "you";
+    label = currentUser?.username ?? t("viewer.you");
     width = screenShareLocalDimensions?.width;
     height = screenShareLocalDimensions?.height;
   } else {
@@ -90,15 +92,15 @@ export const ScreenShareViewer: React.FC = observer(() => {
         }}
       >
         <span>
-          watching {label}
+          {t("viewer.watching", { name: label })}
           {resLabel ? ` — ${resLabel}` : ""}
           {fpsLabel ? ` · ${fpsLabel}` : ""}
         </span>
         <button
           data-testid="screenshare-viewer-close"
           onClick={close}
-          aria-label="Close stream"
-          title="Close stream (Esc)"
+          aria-label={t("viewer.closeLabel")}
+          title={t("viewer.closeTitle")}
           style={{
             background: "none",
             border: "none",
@@ -118,7 +120,7 @@ export const ScreenShareViewer: React.FC = observer(() => {
       <div
         onClick={close}
         role="button"
-        aria-label="Close stream"
+        aria-label={t("viewer.closeLabel")}
         style={{
           flex: 1,
           minHeight: 0,

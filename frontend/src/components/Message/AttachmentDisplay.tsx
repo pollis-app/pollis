@@ -1,5 +1,6 @@
 import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { decode } from "blurhash";
 import { dialogSave, writeFile } from "../../bridge";
 import { Download, Film, Check } from "lucide-react";
@@ -67,6 +68,7 @@ const lightboxBtnStyle: React.CSSProperties = {
 };
 
 export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
+  const { t } = useTranslation("chat");
   const isImage = attachment.content_type.startsWith("image/");
   const isVideo = attachment.content_type.startsWith("video/");
   const isAudio = attachment.content_type.startsWith("audio/");
@@ -174,7 +176,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
     // A previously fetched URL rendered and then errored past the retry cap —
     // stop re-fetching, surface the failure instead of spinning.
     if (renderFailuresRef.current > MAX_RENDER_RETRIES) {
-      setError("Failed to load");
+      setError(t("attachment.failedToLoad"));
       return;
     }
 
@@ -188,7 +190,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
     fetchUrl.then((url) => {
       if (mounted) { setDownloadUrl(url); }
     }).catch((err) => {
-      if (mounted) { setError(errorMessage(err, "Failed to load")); }
+      if (mounted) { setError(errorMessage(err, t("attachment.failedToLoad"))); }
     }).finally(() => {
       if (mounted) { setIsLoading(false); }
     });
@@ -253,7 +255,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
         setTimeout(() => setDownloadStatus("idle"), 2000);
       }
     } catch (err) {
-      setError(errorMessage(err, "Failed to download"));
+      setError(errorMessage(err, t("attachment.failedToDownload")));
       setDownloadStatus("idle");
     }
   };
@@ -276,7 +278,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
       setDownloadUrl(url);
       setViewerOpen(true);
     } catch (err) {
-      setError(errorMessage(err, "Failed to load"));
+      setError(errorMessage(err, t("attachment.failedToLoad")));
     } finally {
       setIsLoading(false);
     }
@@ -304,11 +306,11 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
         style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
       >
         {downloadStatus === "downloading" ? (
-          <>[ fetch <LoadingSpinner size="sm" /> ]</>
+          <>[ {t("attachment.lightboxFetch")} <LoadingSpinner size="sm" /> ]</>
         ) : downloadStatus === "done" ? (
-          "[ done ]"
+          t("attachment.lightboxDone")
         ) : (
-          "[download]"
+          t("attachment.lightboxDownload")
         )}
       </button>
       <button
@@ -316,7 +318,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
         className="text-xs font-mono transition-colors text-[var(--c-text-dim)] bg-transparent hover:bg-[var(--c-accent)] hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black"
         style={lightboxBtnStyle}
       >
-        [esc]
+        {t("attachment.lightboxClose")}
       </button>
     </div>
   );
@@ -342,7 +344,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
         <button
           onClick={handleDownload}
           disabled={downloadStatus !== "idle"}
-          aria-label={`Download ${attachment.filename}`}
+          aria-label={t("attachment.downloadLabel", { filename: attachment.filename })}
           className="flex-shrink-0 p-1"
           style={{ color: downloadStatus === "done" ? "var(--c-accent)" : "var(--c-text-dim)", lineHeight: 0 }}
         >
@@ -366,7 +368,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
           data-testid={`attachment-${attachment.id}`}
           onClick={() => { if (downloadUrl) { setViewerOpen(true); } }}
           disabled={!downloadUrl}
-          aria-label={`View ${attachment.filename}`}
+          aria-label={t("attachment.viewLabel", { filename: attachment.filename })}
           title={attachment.filename}
           style={{
             width: 96,
@@ -408,7 +410,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
             </div>
           ) : (
             <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-              {error ? "err" : "…"}
+              {error ? t("attachment.error") : "…"}
             </span>
           )}
         </button>
@@ -478,7 +480,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
               }}
             >
               <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                {isLoading ? "loading…" : error ? error : "…"}
+                {isLoading ? t("attachment.loading") : error ? error : "…"}
               </span>
             </div>
           )}
@@ -528,7 +530,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
           data-testid={`attachment-${attachment.id}`}
           onClick={!isPending && !isLoading ? handleVideoOpen : undefined}
           disabled={isPending || isLoading}
-          aria-label={`Open ${attachment.filename}`}
+          aria-label={t("attachment.openLabel", { filename: attachment.filename })}
           title={attachment.filename}
           style={{
             display: "flex",
@@ -587,7 +589,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
               style={{
                 position: "absolute",
                 bottom: 4,
-                right: 4,
+                insetInlineEnd: 4,
                 zIndex: 2,
                 fontSize: 10,
                 lineHeight: 1,
@@ -676,14 +678,14 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
         </span>
       )}
       {error ? (
-        <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>err</span>
+        <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>{t("attachment.error")}</span>
       ) : isPending ? (
         <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>…</span>
       ) : (
         <button
           onClick={handleDownload}
           disabled={downloadStatus !== "idle"}
-          aria-label={`Download ${attachment.filename}`}
+          aria-label={t("attachment.downloadLabel", { filename: attachment.filename })}
           className="flex-shrink-0"
           style={{
             color: downloadStatus === "done" ? "var(--c-accent)" : "var(--c-text-dim)",

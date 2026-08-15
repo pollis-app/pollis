@@ -14,7 +14,8 @@
     "build:tauri": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build'",
     "build:tauri:linux": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build --target x86_64-unknown-linux-gnu'",
     "build:tauri:macos": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build --target universal-apple-darwin'",
-    "build:tauri:windows": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'"
+    "build:tauri:windows": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'",
+    "i18n:check": "node scripts/i18n-check.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

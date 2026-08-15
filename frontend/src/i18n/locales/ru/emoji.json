@@ -1,0 +1,52 @@
+{
+  "picker": {
+    "label": "Выбор эмодзи",
+    "triggerLabel": "Эмодзи",
+    "searchLabel": "Поиск",
+    "searchPlaceholder": "Поиск эмодзи",
+    "resultsFor": "Результаты по запросу «{{query}}»",
+    "recent": "Часто используемые",
+    "custom": "Свои",
+    "empty": "Подходящих эмодзи нет.",
+    "previewHint": "Выберите эмодзи",
+    "railLabel": "Категории эмодзи"
+  },
+  "categories": {
+    "people": "Люди",
+    "nature": "Природа",
+    "food": "Еда",
+    "activity": "Занятия",
+    "travel": "Путешествия",
+    "objects": "Предметы",
+    "symbols": "Символы",
+    "flags": "Флаги"
+  },
+  "skinTone": {
+    "groupLabel": "Тон кожи",
+    "default": "Тон кожи по умолчанию",
+    "numbered": "Тон кожи {{index}}"
+  },
+  "manage": {
+    "title": "Свои эмодзи",
+    "signInRequired": "Войдите в аккаунт",
+    "shortcodeLabel": "Короткое имя",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Вводится как :короткое_имя: — a–z, 0–9 и _",
+    "shortcodeInvalid": "Используйте 2–32 символа: a–z, 0–9 и _",
+    "shortcodeTaken": ":{{shortcode}}: уже занято в этой группе",
+    "chooseImage": "Выбрать изображение",
+    "shrinking": "Сжатие…",
+    "filePickerTitle": "Выберите изображение для эмодзи",
+    "imageFilterName": "Изображения",
+    "addFailed": "Не удалось добавить эмодзи",
+    "removeFailed": "Не удалось удалить эмодзи",
+    "storageNote": "Перед загрузкой изображения пережимаются до 48 КБ, так что большой исходный файл — не проблема. Одинаковые изображения хранятся в одном экземпляре на все группы, где они используются. Ограничения на количество эмодзи в группе нет.",
+    "stored_one": "{{count}} эмодзи · {{size}} на диске",
+    "stored_few": "{{count}} эмодзи · {{size}} на диске",
+    "stored_many": "{{count}} эмодзи · {{size}} на диске",
+    "stored_other": "{{count}} эмодзи · {{size}} на диске",
+    "empty": "Своих эмодзи пока нет. Добавить может любой участник группы.",
+    "sizeAnimated": "анимированное · {{size}}",
+    "remove": "Удалить :{{shortcode}}:"
+  }
+}

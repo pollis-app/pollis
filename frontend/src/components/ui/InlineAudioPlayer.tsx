@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Play, Pause } from "lucide-react";
 import { formatDuration } from "../../utils/format";
 
@@ -17,6 +18,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
   autoPlay = false,
   onClick,
 }) => {
+  const { t } = useTranslation("common");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -90,7 +92,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         onClick={togglePlay}
         className="p-1 rounded transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
         style={{ color: "var(--c-accent)" }}
-        aria-label={isPlaying ? "Pause" : "Play"}
+        aria-label={isPlaying ? t("media.pause") : t("media.play")}
       >
         {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
       </button>
@@ -113,7 +115,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         onClick={(e) => e.stopPropagation()}
         className="flex-1 h-1 rounded appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
         disabled={!duration}
-        aria-label="Seek audio"
+        aria-label={t("media.seek")}
       />
 
       <span

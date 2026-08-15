@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Users, Plus, Search } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
@@ -8,6 +9,7 @@ import { observer } from "mobx-react-lite";
 import { useUserGroupsWithChannels, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
 
 export const GroupsPage: React.FC = observer(() => {
+  const { t } = useTranslation("channels");
   const navigate = useNavigate();
   const { setSelectedGroupId } = appStore;
 
@@ -26,9 +28,17 @@ export const GroupsPage: React.FC = observer(() => {
   }, [allJoinRequests]);
 
   const groupItems: TerminalMenuItem[] = groupsLoading
-    ? [{ id: "__loading__", label: "Loading…", disabled: true }]
+    ? [{ id: "__loading__", label: t("common:states.loading"), disabled: true }]
     : groupsError
-      ? [{ id: "__error__", label: `Error: ${errorMessage(groupsError, "Failed to load")}`, disabled: true }]
+      ? [
+          {
+            id: "__error__",
+            label: t("groups.loadError", {
+              message: errorMessage(groupsError, t("groups.loadFailed")),
+            }),
+            disabled: true,
+          },
+        ]
       : groups.map((g) => {
         const textChannels = g.channels.filter((ch) => ch.channel_type === "text");
         const totalUnread = appStore.unreadFor(textChannels);
@@ -39,7 +49,7 @@ export const GroupsPage: React.FC = observer(() => {
         if (pendingJoinCount > 0) {
           description = (
             <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>
-              {pendingJoinCount} join request{pendingJoinCount !== 1 ? "s" : ""} pending
+              {t("groups.joinRequestsPending", { count: pendingJoinCount })}
             </span>
           );
         }
@@ -61,7 +71,7 @@ export const GroupsPage: React.FC = observer(() => {
   let items: TerminalMenuItem[] = [
     {
       id: "create-group",
-      label: "Create Group",
+      label: t("groups.create"),
       icon: <Plus size={14} />,
       action: () => navigate({ to: "/groups/new" }),
       type: "system",
@@ -69,7 +79,7 @@ export const GroupsPage: React.FC = observer(() => {
     },
     {
       id: "search-group",
-      label: "Find Group",
+      label: t("groups.find"),
       icon: <Search size={14} />,
       action: () => navigate({ to: "/groups/search" }),
       type: "system",
@@ -84,8 +94,8 @@ export const GroupsPage: React.FC = observer(() => {
 
   items.push({
     id: "__back__",
-    label: "Go back",
-    icon: <ArrowLeft size={14} />,
+    label: t("common:actions.goBack"),
+    icon: <ArrowLeft size={14} className="rtl-mirror" />,
     action: () => navigate({ to: "/" }),
     type: "system",
   });

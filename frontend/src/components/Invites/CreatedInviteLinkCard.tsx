@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, Copy } from "lucide-react";
 import { Button } from "../ui/Button";
 import { useSkin } from "../../hooks/queries/usePreferences";
@@ -19,6 +20,7 @@ interface CreatedInviteLinkCardProps {
  * turn into a support question later.
  */
 export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ link }) => {
+  const { t } = useTranslation("channels");
   const skin = useSkin();
   const [copied, setCopied] = useState(false);
 
@@ -34,12 +36,15 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
 
   const bounds: string[] = [];
   if (link.max_uses != null) {
-    bounds.push(`${link.max_uses} use${link.max_uses === 1 ? "" : "s"}`);
+    bounds.push(t("inviteLinks.maxUses", { count: link.max_uses }));
   }
   if (link.expires_at) {
-    bounds.push(`expires ${new Date(link.expires_at).toLocaleString()}`);
+    bounds.push(
+      t("inviteLinks.expiresOn", { date: new Date(link.expires_at).toLocaleString() }),
+    );
   }
-  const boundsLabel = bounds.length > 0 ? bounds.join(" · ") : "No expiry · unlimited uses";
+  const boundsLabel =
+    bounds.length > 0 ? bounds.join(" · ") : t("inviteLinks.unbounded");
 
   if (skin === "refined") {
     return (
@@ -47,12 +52,11 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
         data-testid="created-invite-link"
         className="rounded-lg border border-line-strong bg-surface-raised p-4"
       >
-        <p className="text-sm font-semibold text-fg">Invite link created</p>
-        <p className="mt-1 text-xs text-dim">
-          Copy it now — this is the only time it can be shown.
-        </p>
+        <p className="text-sm font-semibold text-fg">{t("inviteLinks.created")}</p>
+        <p className="mt-1 text-xs text-dim">{t("inviteLinks.copyNotice")}</p>
         <div className="mt-3 flex items-center gap-2">
           <code
+            dir="ltr"
             data-testid="created-invite-link-url"
             className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded border border-line bg-surface px-3 py-2 text-xs text-fg"
           >
@@ -63,11 +67,11 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
             variant={copied ? "secondary" : "primary"}
             size="sm"
             data-testid="copy-invite-link"
-            aria-label="Copy invite link"
+            aria-label={t("inviteLinks.copyLabel")}
           >
             <span className="flex items-center gap-1.5">
               {copied ? <Check size={14} /> : <Copy size={14} />}
-              {copied ? "Copied" : "Copy"}
+              {copied ? t("inviteLinks.copied") : t("inviteLinks.copy")}
             </span>
           </Button>
         </div>
@@ -81,12 +85,11 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
       data-testid="created-invite-link"
       className="border border-line-strong bg-surface-raised p-3"
     >
-      <p className="text-sm text-accent">&gt; INVITE LINK CREATED</p>
-      <p className="mt-1 text-xs text-dim">
-        Copy it now — this is the only time it can be shown.
-      </p>
+      <p className="text-sm text-accent">{t("inviteLinks.createdTerminal")}</p>
+      <p className="mt-1 text-xs text-dim">{t("inviteLinks.copyNotice")}</p>
       <div className="mt-2 flex items-center gap-2">
         <code
+          dir="ltr"
           data-testid="created-invite-link-url"
           className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap border border-line bg-bg px-2 py-1.5 text-xs text-fg"
         >
@@ -97,9 +100,9 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
           variant={copied ? "secondary" : "primary"}
           size="sm"
           data-testid="copy-invite-link"
-          aria-label="Copy invite link"
+          aria-label={t("inviteLinks.copyLabel")}
         >
-          {copied ? "[COPIED]" : "[COPY]"}
+          {copied ? t("inviteLinks.copiedTerminal") : t("inviteLinks.copyTerminal")}
         </Button>
       </div>
       <p className="mt-2 text-xs text-muted">{boundsLabel}</p>

@@ -1,0 +1,52 @@
+{
+  "picker": {
+    "label": "Вибір емодзі",
+    "triggerLabel": "Емодзі",
+    "searchLabel": "Пошук",
+    "searchPlaceholder": "Шукати емодзі",
+    "resultsFor": "Результати за запитом «{{query}}»",
+    "recent": "Часто використовувані",
+    "custom": "Власні",
+    "empty": "Немає відповідних емодзі.",
+    "previewHint": "Виберіть емодзі",
+    "railLabel": "Категорії емодзі"
+  },
+  "categories": {
+    "people": "Люди",
+    "nature": "Природа",
+    "food": "Їжа",
+    "activity": "Заняття",
+    "travel": "Подорожі",
+    "objects": "Предмети",
+    "symbols": "Символи",
+    "flags": "Прапори"
+  },
+  "skinTone": {
+    "groupLabel": "Відтінок шкіри",
+    "default": "Типовий відтінок шкіри",
+    "numbered": "Відтінок шкіри {{index}}"
+  },
+  "manage": {
+    "title": "Власні емодзі",
+    "signInRequired": "Спочатку увійдіть",
+    "shortcodeLabel": "Скорочений код",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Набирається як :код: — a–z, 0–9 і _",
+    "shortcodeInvalid": "Використайте 2–32 символи: a–z, 0–9 і _",
+    "shortcodeTaken": ":{{shortcode}}: уже зайнято в цій групі",
+    "chooseImage": "Вибрати зображення",
+    "shrinking": "Стискання…",
+    "filePickerTitle": "Виберіть зображення для емодзі",
+    "imageFilterName": "Зображення",
+    "addFailed": "Не вдалося додати це емодзі",
+    "removeFailed": "Не вдалося прибрати це емодзі",
+    "storageNote": "Зображення перекодовуються до розміру менш ніж 48 КБ перед вивантаженням, тож великий вихідний файл — не проблема. Однакові зображення зберігаються однією копією на всі групи, що їх використовують. Кількість емодзі в групі не обмежена.",
+    "stored_one": "{{count}} емодзі · {{size}} збережено",
+    "stored_few": "{{count}} емодзі · {{size}} збережено",
+    "stored_many": "{{count}} емодзі · {{size}} збережено",
+    "stored_other": "{{count}} емодзі · {{size}} збережено",
+    "empty": "Власних емодзі ще немає. Додати може будь-хто з групи.",
+    "sizeAnimated": "анімоване · {{size}}",
+    "remove": "Прибрати :{{shortcode}}:"
+  }
+}

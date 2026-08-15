@@ -1,0 +1,18 @@
+{
+  "page": {
+    "title": "الأركيد"
+  },
+  "hud": {
+    "score": "النقاط  {{score}}",
+    "time": "الوقت   {{time}}",
+    "gameOver": "انتهت اللعبة",
+    "final_zero": "النتيجة النهائية {{count}} نقطة · {{time}}",
+    "final_one": "النتيجة النهائية {{count}} نقطة · {{time}}",
+    "final_two": "النتيجة النهائية {{count}} نقطتان · {{time}}",
+    "final_few": "النتيجة النهائية {{count}} نقاط · {{time}}",
+    "final_many": "النتيجة النهائية {{count}} نقطةً · {{time}}",
+    "final_other": "النتيجة النهائية {{count}} نقطة · {{time}}",
+    "restartHint": "اضغط R لإعادة البدء · esc للخروج",
+    "controls": "WASD للحركة · الفأرة للتصويب · النقر/المسافة للإطلاق · esc للخروج"
+  }
+}

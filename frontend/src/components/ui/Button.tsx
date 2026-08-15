@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 
 const Spinner = () => (
   <span
@@ -35,7 +36,7 @@ export const Button: React.FC<ButtonProps> = ({
   onClick,
   disabled = false,
   isLoading = false,
-  loadingText = "Loading...",
+  loadingText,
   className = "",
   variant = "primary",
   size = "md",
@@ -46,6 +47,10 @@ export const Button: React.FC<ButtonProps> = ({
   "aria-pressed": ariaPressed,
   "data-testid": testId,
 }) => {
+  const { t } = useTranslation("common");
+  // Resolved here rather than as a default parameter value so the fallback
+  // follows a language change instead of snapshotting the boot language.
+  const resolvedLoadingText = loadingText ?? t("states.buttonLoading");
   const isPrimary = variant === "primary";
   const isDanger = variant === "danger";
   const isGhost = variant === "ghost";
@@ -71,7 +76,7 @@ export const Button: React.FC<ButtonProps> = ({
       className={`inline-flex items-center justify-center gap-2 font-mono font-medium rounded-[var(--radius-control)] tracking-[0.5px] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${variantClass} ${size === "xs" ? "px-1.5 py-0.5 text-[10px]" : size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}
     >
       {isLoading && <Spinner />}
-      {isLoading ? loadingText : children}
+      {isLoading ? resolvedLoadingText : children}
     </button>
   );
 };

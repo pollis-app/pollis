@@ -19,6 +19,7 @@
 
 import React, { useState } from "react";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft, Volume2, VolumeX, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal } from "lucide-react";
 
 import { appStore } from "../../../stores/appStore";
@@ -26,10 +27,10 @@ import type { VoiceParticipant } from "../../../types";
 import { shareOf, cameraOf, screenshareOf, gateOf, micIndicatorOf } from "../../../types/voice-state";
 import { useShortcutLabel } from "../../../keyboard";
 import {
-  micControlTitle,
-  micControlAriaLabel,
-  deafenControlTitle,
-  deafenControlAriaLabel,
+  micControlTitleKey,
+  micControlAriaLabelKey,
+  deafenControlTitleKey,
+  deafenControlAriaLabelKey,
 } from "../voiceControlLabels";
 import { isMuted } from "../../../voice/participantAudio";
 import { LOCAL_PREVIEW_KEY } from "../../../screenshare/screenShareSession";
@@ -81,6 +82,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     footer,
     callMode = false,
   }) => {
+    const { t } = useTranslation("voice");
     const {
       voiceParticipants,
       voiceActiveSpeakerIds,
@@ -238,8 +240,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const ringStatus =
       callMode && !spotlight && !hasRemoteParticipant
         ? isJoining
-          ? "Connecting…"
-          : "Ringing…"
+          ? t("stage.connecting")
+          : t("stage.ringing")
         : null;
 
     const previewPeople: StageTileModel[] = observerParticipants.map((p) => ({
@@ -262,17 +264,19 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       <button
         className="vs-tray-leave"
         data-testid={callMode ? "call-hang-up" : "voice-tray-leave"}
-        title={callMode ? "Hang up" : "Leave channel"}
-        aria-label={callMode ? "Hang up" : "Leave voice channel"}
+        title={callMode ? t("stage.hangUp") : t("stage.leaveTitle")}
+        aria-label={callMode ? t("stage.hangUp") : t("controls.leaveChannel")}
         onClick={onLeave}
       >
         {callMode ? (
           <PhoneOff size={14} />
         ) : (
-          // Exit arrow points left (mirrored) — a "leave" gesture.
-          <LogOut size={14} style={{ transform: "scaleX(-1)" }} />
+          // Exit arrow points against the reading direction (mirrored) — a
+          // "leave" gesture. `rtl-unmirror` returns it to its natural drawing
+          // under `dir=rtl`, where "backwards" is rightwards.
+          <LogOut size={14} className="rtl-unmirror" />
         )}
-        {callMode ? "Hang up" : "Leave"}
+        {callMode ? t("stage.hangUp") : t("stage.leave")}
       </button>
     );
 
@@ -285,10 +289,10 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         >
           <button
             onClick={onBack}
-            aria-label="Back"
-            className="mr-3 inline-flex items-center gap-1 leading-none transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
+            aria-label={t("common:actions.back")}
+            className="me-3 inline-flex items-center gap-1 leading-none transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
           >
-            <ArrowLeft size={12} />
+            <ArrowLeft size={12} className="rtl-mirror" />
           </button>
           <span style={{ flex: 1, color: "var(--c-accent)" }} className="flex items-center gap-1.5">
             {callMode ? <Phone size={12} /> : <Volume2 size={12} />}
@@ -308,9 +312,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               {previewPeople.length === 0 ? (
                 // Empty: label + CTA centered together as one group.
                 <div className="vs-preview-empty">
-                  <span className="vs-preview-empty-label">No one in this channel</span>
+                  <span className="vs-preview-empty-label">{t("stage.emptyRoster")}</span>
                   <Button data-testid="voice-join-cta" variant="primary" onClick={onJoin}>
-                    Join Voice
+                    {t("stage.joinVoice")}
                   </Button>
                 </div>
               ) : (
@@ -328,7 +332,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   />
                   <div className="vs-preview-cta">
                     <Button data-testid="voice-join-cta" variant="primary" onClick={onJoin}>
-                      Join Voice
+                      {t("stage.joinVoice")}
                     </Button>
                   </div>
                 </>
@@ -340,7 +344,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 {focused ? (
                   <StageTile participant={focused} mode="big" onFocus={setFocusId} onView={onView} />
                 ) : (
-                  <div className="vs-tile vs-empty">no active stream</div>
+                  <div className="vs-tile vs-empty">{t("stage.noActiveStream")}</div>
                 )}
               </div>
               <div className="vs-film">
@@ -364,7 +368,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 items={people}
                 getKey={(p) => p.tileKey}
                 testId="voice-channel-view"
-                emptyLabel={callMode ? "Calling…" : "Connecting…"}
+                emptyLabel={callMode ? t("stage.calling") : t("stage.connecting")}
                 autoFocus={false}
                 minCellWidth={180}
                 maxCellWidth={240}
@@ -402,8 +406,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                       }
                       data-testid="voice-tray-mute"
                       data-mic-state={micIndicator}
-                      title={micControlTitle(micIndicator, pttCombo)}
-                      aria-label={micControlAriaLabel(micIndicator, pttCombo)}
+                      title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
+                      aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
                       onClick={() => voiceSession.toggleMute()}
                     >
                       {micIndicator === "live" || micIndicator === "ptt-idle" ? (
@@ -416,8 +420,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     <button
                       className="vs-tray-btn on"
                       data-testid="voice-tray-listen-only"
-                      title="No microphone detected — listening only"
-                      aria-label="No microphone detected — listening only"
+                      title={t("controls.listenOnly")}
+                      aria-label={t("controls.listenOnly")}
                       disabled
                     >
                       <MicOff size={15} />
@@ -430,8 +434,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     className={"vs-tray-btn danger" + (gate.deafened ? " on" : "")}
                     data-testid="voice-tray-deafen"
                     data-deafened={gate.deafened}
-                    title={deafenControlTitle(gate.deafened)}
-                    aria-label={deafenControlAriaLabel(gate.deafened)}
+                    title={t(deafenControlTitleKey(gate.deafened))}
+                    aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
                     onClick={() => voiceSession.toggleDeafen()}
                   >
                     {gate.deafened ? <VolumeX size={15} /> : <Volume2 size={15} />}
@@ -439,8 +443,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   <button
                     className={"vs-tray-btn" + (shareActive ? " on" : "")}
                     data-testid="voice-tray-screenshare"
-                    title={shareActive ? "Stop screen share" : shareInFlight ? "Cancel (recover)" : "Share screen"}
-                    aria-label={shareActive ? "Stop screen share" : "Share screen"}
+                    title={shareActive ? t("controls.stopScreenShare") : shareInFlight ? t("controls.cancelRecover") : t("controls.shareScreen")}
+                    aria-label={shareActive ? t("controls.stopScreenShare") : t("controls.shareScreen")}
                     onClick={() => toggleScreenShare(share)}
                   >
                     {shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
@@ -448,8 +452,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   <button
                     className={"vs-tray-btn" + (cameraActive ? " on" : "")}
                     data-testid="voice-tray-camera"
-                    title={cameraActive ? "Turn off camera" : cameraPicking ? "Cancel" : cameraInFlight ? "Cancel (recover)" : "Turn on camera"}
-                    aria-label={cameraActive ? "Turn off camera" : "Turn on camera"}
+                    title={cameraActive ? t("controls.turnOffCamera") : cameraPicking ? t("common:actions.cancel") : cameraInFlight ? t("controls.cancelRecover") : t("controls.turnOnCamera")}
+                    aria-label={cameraActive ? t("controls.turnOffCamera") : t("controls.turnOnCamera")}
                     onClick={() => toggleCamera(camera)}
                   >
                     {cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
@@ -459,7 +463,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 </div>
               ) : (
                 <Button data-testid="voice-join-leave-button" variant="primary" size="sm" className="h-[1.75rem]" onClick={onJoin}>
-                  <Phone size={14} /> Join
+                  <Phone size={14} /> {t("stage.join")}
                 </Button>
               )}
             </div>
@@ -469,7 +473,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                 data-testid="voice-settings-link"
                 onClick={onOpenSettings}
               >
-                <SlidersHorizontal size={15} /> Voice Settings
+                <SlidersHorizontal size={15} /> {t("stage.settingsLink")}
               </button>
             </div>
           </div>

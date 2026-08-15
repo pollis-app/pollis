@@ -13,6 +13,8 @@
 //  - Fixed-timestep simulation at 60 Hz with an accumulator; render runs
 //    every rAF. Spiral-of-death guarded by max-frame clamp.
 
+import i18n from "../i18n";
+
 const WORLD_W = 1280;
 const WORLD_H = 720;
 const TICK_HZ = 60;
@@ -661,24 +663,33 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     const t = state.gameOver ? state.finalElapsedMs : state.elapsedMs;
     const mm = Math.floor(t / 60000).toString().padStart(2, "0");
     const ss = Math.floor((t % 60000) / 1000).toString().padStart(2, "0");
-    c.fillText(`SCORE  ${state.score.toString().padStart(6, "0")}`, 14, 12);
-    c.fillText(`TIME   ${mm}:${ss}`, 14, 30);
+    // Resolved per frame rather than cached: the HUD is redrawn every frame
+    // anyway, so this is what makes a language change show up without
+    // restarting the game.
+    c.fillText(
+      i18n.t("arcade:hud.score", {
+        score: state.score.toString().padStart(6, "0"),
+      }),
+      14,
+      12,
+    );
+    c.fillText(i18n.t("arcade:hud.time", { time: `${mm}:${ss}` }), 14, 30);
     if (state.gameOver) {
       c.textAlign = "center";
       c.font = '28px "JetBrains Mono", ui-monospace, monospace';
-      c.fillText("GAME OVER", cssW / 2, cssH / 2 - 28);
+      c.fillText(i18n.t("arcade:hud.gameOver"), cssW / 2, cssH / 2 - 28);
       c.font = '14px "JetBrains Mono", ui-monospace, monospace';
       c.fillText(
-        `final ${state.score} pts · ${mm}:${ss}`,
+        i18n.t("arcade:hud.final", { count: state.score, time: `${mm}:${ss}` }),
         cssW / 2,
         cssH / 2 + 10,
       );
-      c.fillText("press R to restart · esc to exit", cssW / 2, cssH / 2 + 32);
+      c.fillText(i18n.t("arcade:hud.restartHint"), cssW / 2, cssH / 2 + 32);
     } else {
       c.textAlign = "right";
       c.font = '11px "JetBrains Mono", ui-monospace, monospace';
       c.globalAlpha = 0.6;
-      c.fillText("WASD move · mouse aim · click/space fire · esc exit", cssW - 14, 14);
+      c.fillText(i18n.t("arcade:hud.controls"), cssW - 14, 14);
     }
     c.restore();
   }

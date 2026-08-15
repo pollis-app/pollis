@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Monitor, Square, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 import { appStore } from "../../stores/appStore";
 import {
   friendlyScreenShareError,
@@ -20,6 +21,7 @@ import { Card } from "../ui/Card";
  *  Windows: windows-rs Monitor/Window enumeration + GDI thumbnails).
  *  Industry-standard pattern — what Slack/Discord/Zoom do. */
 export const ScreenSharePicker: React.FC = observer(() => {
+  const { t } = useTranslation("voice");
   // Picker only renders when shareState.kind === 'picking', so sources are
   // guaranteed present. Narrowed via the union; bail to null defensively
   // for the brief frame where state may have transitioned away.
@@ -99,14 +101,14 @@ export const ScreenSharePicker: React.FC = observer(() => {
         }}
       >
         <div className="flex items-center gap-3">
-          <span style={{ color: "var(--c-accent)" }}>Share screen</span>
+          <span style={{ color: "var(--c-accent)" }}>{t("share.heading")}</span>
           <div className="flex items-center gap-1">
             <Button
               variant={tab === "displays" ? "primary" : "secondary"}
               size="sm"
               onClick={() => setTab("displays")}
             >
-              Displays
+              {t("share.displaysTab")}
               <span className="opacity-70">[{displays.length}]</span>
             </Button>
             <Button
@@ -114,7 +116,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
               size="sm"
               onClick={() => setTab("windows")}
             >
-              Windows
+              {t("share.windowsTab")}
               <span className="opacity-70">[{windows.length}]</span>
             </Button>
           </div>
@@ -124,11 +126,11 @@ export const ScreenSharePicker: React.FC = observer(() => {
           size="xs"
           onClick={handleCancel}
           disabled={busy}
-          aria-label="Cancel screen share"
+          aria-label={t("share.cancelLabel")}
           data-testid="screen-share-picker-cancel"
         >
           <X size={12} />
-          Cancel
+          {t("common:actions.cancel")}
         </Button>
       </header>
 
@@ -138,7 +140,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
             className="h-full flex items-center justify-center"
             style={{ color: "var(--c-text-muted)" }}
           >
-            No {tab} available.
+            {tab === "displays" ? t("share.noDisplays") : t("share.noWindows")}
           </div>
         ) : (
           <div
@@ -196,7 +198,7 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
     type="button"
     onClick={onPick}
     disabled={disabled}
-    className="text-left font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] rounded-[6px]"
+    className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] rounded-[6px]"
     style={{ minHeight: 100 }}
   >
     <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
@@ -270,9 +272,10 @@ const WindowCard: React.FC<{
   disabled: boolean;
   onPick: () => void;
 }> = ({ window, disabled, onPick }) => {
+  const { t } = useTranslation("voice");
   // Title fallback: most chat apps name a window after their conversation;
   // if the OS gave us no title, use the app name.
-  const primary = window.title || window.app_name || "Untitled window";
+  const primary = window.title || window.app_name || t("share.untitledWindow");
   const secondary =
     window.title && window.app_name && window.title !== window.app_name
       ? window.app_name

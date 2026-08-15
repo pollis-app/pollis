@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
@@ -13,10 +14,10 @@ import { toggleCamera } from "../../camera/cameraActions";
 import { shareOf, cameraOf, gateOf, micIndicatorOf } from "../../types/voice-state";
 import { useShortcutLabel } from "../../keyboard";
 import {
-  micControlTitle,
-  micControlAriaLabel,
-  deafenControlTitle,
-  deafenControlAriaLabel,
+  micControlTitleKey,
+  micControlAriaLabelKey,
+  deafenControlTitleKey,
+  deafenControlAriaLabelKey,
 } from "./voiceControlLabels";
 
 interface VoiceBarProps {
@@ -25,6 +26,7 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelName }) => {
+  const { t } = useTranslation("voice");
   const {
     voiceParticipants,
     voiceState,
@@ -79,7 +81,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   return (
     <div
       data-testid="voice-bar"
-      className="flex items-center pl-1 pr-3 gap-2 font-mono text-xs flex-shrink-0"
+      className="flex items-center ps-1 pe-3 gap-2 font-mono text-xs flex-shrink-0"
       style={{
         height: 28,
         borderTop: "1px solid var(--c-border)",
@@ -101,8 +103,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         }}
         title={
           channelId.startsWith("call-")
-            ? "Return to call"
-            : `Go to ${channelName} voice channel`
+            ? t("bar.returnToCall")
+            : t("bar.goToChannel", { name: channelName })
         }
       >
         <Volume2 size={12} />
@@ -125,8 +127,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
                 : "var(--c-danger)"
           }
           onClick={toggleMute}
-          title={micControlTitle(micIndicator, pttCombo)}
-          aria-label={micControlAriaLabel(micIndicator, pttCombo)}
+          title={t(micControlTitleKey(micIndicator), { combo: pttCombo })}
+          aria-label={t(micControlAriaLabelKey(micIndicator), { combo: pttCombo })}
           square
         >
           {micIndicator === "live" || micIndicator === "ptt-idle" ? (
@@ -139,8 +141,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         <PillButton
           data-testid="voice-bar-listen-only"
           accent="var(--c-text-dim)"
-          title="No microphone detected — listening only"
-          aria-label="No microphone detected — listening only"
+          title={t("controls.listenOnly")}
+          aria-label={t("controls.listenOnly")}
           square
         >
           <MicOff size={12} />
@@ -156,8 +158,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         data-deafened={gate.deafened}
         accent={gate.deafened ? "var(--c-danger)" : "var(--c-accent)"}
         onClick={toggleDeafen}
-        title={deafenControlTitle(gate.deafened)}
-        aria-label={deafenControlAriaLabel(gate.deafened)}
+        title={t(deafenControlTitleKey(gate.deafened))}
+        aria-label={t(deafenControlAriaLabelKey(gate.deafened))}
         square
       >
         {gate.deafened ? <VolumeX size={12} /> : <Volume2 size={12} />}
@@ -176,19 +178,19 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         onClick={() => toggleScreenShare(share)}
         title={
           shareActive
-            ? "Stop screen share"
+            ? t("controls.stopScreenShare")
             : share.kind === "picking"
-              ? "Cancel"
+              ? t("common:actions.cancel")
               : shareInFlight
-                ? "Cancel (recover)"
-                : "Go live (share screen)"
+                ? t("controls.cancelRecover")
+                : t("controls.goLive")
         }
         aria-label={
           shareActive
-            ? "Stop screen share"
+            ? t("controls.stopScreenShare")
             : share.kind === "picking"
-              ? "Cancel screen share picker"
-              : "Share screen"
+              ? t("controls.cancelSharePicker")
+              : t("controls.shareScreen")
         }
         square
       >
@@ -204,19 +206,19 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         onClick={() => toggleCamera(camera)}
         title={
           cameraActive
-            ? "Turn off camera"
+            ? t("controls.turnOffCamera")
             : camera.kind === "picking"
-              ? "Cancel"
+              ? t("common:actions.cancel")
               : cameraInFlight
-                ? "Cancel (recover)"
-                : "Turn on camera"
+                ? t("controls.cancelRecover")
+                : t("controls.turnOnCamera")
         }
         aria-label={
           cameraActive
-            ? "Turn off camera"
+            ? t("controls.turnOffCamera")
             : camera.kind === "picking"
-              ? "Cancel camera picker"
-              : "Turn on camera"
+              ? t("controls.cancelCameraPicker")
+              : t("controls.turnOnCamera")
         }
         square
       >
@@ -228,8 +230,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         data-testid="voice-bar-leave-button"
         accent="var(--c-danger)"
         onClick={leave}
-        title="Leave voice channel"
-        aria-label="Leave voice channel"
+        title={t("controls.leaveChannel")}
+        aria-label={t("controls.leaveChannel")}
         square
       >
         <PhoneOff size={12} />
@@ -239,13 +241,13 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
 
       {/* Participant count */}
       <span data-testid="voice-bar-participant-count" style={{ color: "var(--c-text-dim)" }}>
-        {participantCount} participant{participantCount !== 1 ? "s" : ""}
+        {t("bar.participants", { count: participantCount })}
       </span>
 
       {/* Security indicator — audio is transport-encrypted (TLS) but not E2EE for v1 */}
       <span
         data-testid="voice-bar-security-indicator"
-        style={{ marginLeft: "auto", color: "var(--c-text-dim)" }}
+        style={{ marginInlineStart: "auto", color: "var(--c-text-dim)" }}
         className="flex items-center gap-1"
       >
         {lastRemoteSpeakerId
@@ -261,8 +263,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       <button
         data-testid="voice-bar-settings-button"
         onClick={() => navigate({ to: "/voice-settings" })}
-        aria-label="Voice settings"
-        title="Voice settings"
+        aria-label={t("bar.settings")}
+        title={t("bar.settings")}
         className="flex items-center justify-center transition-colors flex-shrink-0 text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
         style={{
           width: 20,

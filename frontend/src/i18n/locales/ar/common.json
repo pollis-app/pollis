@@ -1,0 +1,110 @@
+{
+  "actions": {
+    "back": "رجوع",
+    "cancel": "إلغاء",
+    "close": "إغلاق",
+    "copy": "نسخ",
+    "delete": "حذف",
+    "goBack": "العودة",
+    "moreOptions": "خيارات أخرى",
+    "save": "حفظ"
+  },
+  "states": {
+    "buttonLoading": "جارٍ التحميل...",
+    "loading": "جارٍ التحميل…"
+  },
+  "time": {
+    "today": "اليوم",
+    "yesterday": "أمس"
+  },
+  "presence": {
+    "label": "الحالة: {{status}}",
+    "offline": "غير متصل",
+    "online": "متصل"
+  },
+  "list": {
+    "empty": "لا توجد عناصر."
+  },
+  "grid": {
+    "empty": "لا أحد هنا بعد."
+  },
+  "menu": {
+    "escHint": "Esc للرجوع",
+    "navigationLabel": "قائمة التنقل",
+    "navigateHint": "للتنقل",
+    "selectHint": "Enter للاختيار"
+  },
+  "media": {
+    "mute": "كتم الصوت",
+    "pause": "إيقاف مؤقت",
+    "play": "تشغيل",
+    "seek": "تغيير موضع الصوت",
+    "skipBackward": "الرجوع 10 ثوانٍ",
+    "skipForward": "التقدم 10 ثوانٍ",
+    "unmute": "إلغاء كتم الصوت",
+    "volume": "مستوى الصوت"
+  },
+  "composer": {
+    "addAttachment": "إضافة مرفق",
+    "allMentionHint": "يُنبِّه كل من في هذه القناة",
+    "filePickerTitle": "إضافة ملفات",
+    "inputLabel": "حقل كتابة الرسالة",
+    "placeholder": "اكتب رسالة…",
+    "previewAlt": "معاينة",
+    "removeAttachment": "إزالة {{name}}",
+    "send": "إرسال الرسالة"
+  },
+  "mentions": {
+    "listLabel": "اقتراحات الإشارة",
+    "matching": "الأعضاء المطابقون لـ <hl>@{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "الصورة الرمزية",
+    "loading": "جارٍ التحميل",
+    "otpDigit": "خانة الرمز {{index}}"
+  },
+  "timeAgo": {
+    "seconds_zero": "{{count}} ثانية",
+    "seconds_one": "{{count}} ثانية",
+    "seconds_two": "{{count}} ثانيتان",
+    "seconds_few": "{{count}} ثوانٍ",
+    "seconds_many": "{{count}} ثانيةً",
+    "seconds_other": "{{count}} ثانية",
+    "minutes_zero": "{{count}} دقيقة",
+    "minutes_one": "{{count}} دقيقة",
+    "minutes_two": "{{count}} دقيقتان",
+    "minutes_few": "{{count}} دقائق",
+    "minutes_many": "{{count}} دقيقةً",
+    "minutes_other": "{{count}} دقيقة",
+    "hours_zero": "{{count}} ساعة",
+    "hours_one": "{{count}} ساعة",
+    "hours_two": "{{count}} ساعتان",
+    "hours_few": "{{count}} ساعات",
+    "hours_many": "{{count}} ساعةً",
+    "hours_other": "{{count}} ساعة",
+    "days_zero": "{{count}} يوم",
+    "days_one": "{{count}} يوم",
+    "days_two": "{{count}} يومان",
+    "days_few": "{{count}} أيام",
+    "days_many": "{{count}} يومًا",
+    "days_other": "{{count}} يوم",
+    "weeks_zero": "{{count}} أسبوع",
+    "weeks_one": "{{count}} أسبوع",
+    "weeks_two": "{{count}} أسبوعان",
+    "weeks_few": "{{count}} أسابيع",
+    "weeks_many": "{{count}} أسبوعًا",
+    "weeks_other": "{{count}} أسبوع",
+    "months_zero": "{{count}} شهر",
+    "months_one": "{{count}} شهر",
+    "months_two": "{{count}} شهران",
+    "months_few": "{{count}} أشهر",
+    "months_many": "{{count}} شهرًا",
+    "months_other": "{{count}} شهر",
+    "years_zero": "{{count}} سنة",
+    "years_one": "{{count}} سنة",
+    "years_two": "{{count}} سنتان",
+    "years_few": "{{count}} سنوات",
+    "years_many": "{{count}} سنةً",
+    "years_other": "{{count}} سنة"
+  }
+}

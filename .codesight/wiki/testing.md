@@ -591,6 +591,8 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | `invite-links.spec.ts` | Invite-link create / one-time copy / revoke, in BOTH skins (#847) |
 | `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849) |
 | `autolock.spec.ts` | Idle auto-lock: the window is chosen, reaches the backend and survives a restart; the shell reports activity; a backend lock drops to the PIN gate **and empties the query cache**, in BOTH skins (#851) |
+| `i18n.spec.ts` | The language selector, switching, per-device persistence, OS-locale default and the English fallback — driven through a synthetic locale so it survives the real language list changing, in BOTH skins (#855) |
+| `rtl.spec.ts` | Right-to-left layout, asserted as **measured geometry** (`getBoundingClientRect`, a `Range` over the text, the painted physical border edge) rather than a `dir` attribute — which passes on unmirrored code. Drives the real `ar` locale and pins the LTR case in the same body, in BOTH skins (#855) |
 
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
 | `bookmarks.spec.ts` | Saved messages + permalink jump/highlight in BOTH skins (#854) |

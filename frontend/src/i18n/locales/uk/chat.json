@@ -1,0 +1,122 @@
+{
+  "message": {
+    "fromLabel": "Повідомлення від {{name}}",
+    "unknownAuthor": "невідомо",
+    "deleted": "[видалено]",
+    "encrypted": "[зашифровано]",
+    "redacted": "[приховано]",
+    "edited": "(змінено)"
+  },
+  "status": {
+    "pending": "очікує",
+    "sending": "надсилається",
+    "sent": "надіслано",
+    "failed": "помилка",
+    "cancelled": "скасовано"
+  },
+  "actions": {
+    "reply": "Відповісти",
+    "replyInThread": "Відповісти в гілці",
+    "save": "Зберегти повідомлення",
+    "removeBookmark": "Прибрати із збережених",
+    "copyLink": "Копіювати посилання на повідомлення",
+    "copyLinkCopied": "Посилання скопійовано",
+    "copyLinkFailed": "Не вдалося скопіювати посилання",
+    "edit": "Змінити повідомлення",
+    "delete": "Видалити повідомлення",
+    "deleteAsAdmin": "Видалити повідомлення (адмін)"
+  },
+  "thread": {
+    "replyCount_one": "{{count}} відповідь",
+    "replyCount_few": "{{count}} відповіді",
+    "replyCount_many": "{{count}} відповідей",
+    "replyCount_other": "{{count}} відповіді"
+  },
+  "receipts": {
+    "readByEveryone": "Прочитали всі",
+    "readByCount_one": "Прочитали {{count}} з {{total}}",
+    "readByCount_few": "Прочитали {{count}} з {{total}}",
+    "readByCount_many": "Прочитали {{count}} з {{total}}",
+    "readByCount_other": "Прочитали {{count}} з {{total}}",
+    "deliveredCount_one": "Доставлено {{count}} з {{total}}",
+    "deliveredCount_few": "Доставлено {{count}} з {{total}}",
+    "deliveredCount_many": "Доставлено {{count}} з {{total}}",
+    "deliveredCount_other": "Доставлено {{count}} з {{total}}"
+  },
+  "list": {
+    "empty": "Повідомлень ще немає. Почніть розмову.",
+    "unknownAuthor": "Невідомо",
+    "blockedAuthor": "заблокований користувач",
+    "blockedBody": "[заблоковано]"
+  },
+  "roster": {
+    "joined": "{{name}} тепер у групі",
+    "left": "{{name}} більше не в групі",
+    "deviceAdded": "{{name}}: додано новий пристрій",
+    "deviceRemoved": "{{name}}: пристрій прибрано"
+  },
+  "replyBar": {
+    "replyingTo": "відповідь для <name>{{name}}</name>",
+    "scrollToMessage": "Перейти до повідомлення, на яке відповідаєте",
+    "dismiss": "Скасувати відповідь",
+    "encrypted": "[Зашифроване повідомлення]"
+  },
+  "queue": {
+    "heading": "Черга",
+    "pendingPlaceholder": "[Повідомлення в очікуванні]",
+    "cancel": "Скасувати повідомлення",
+    "retry": "повторити",
+    "failedCount_one": "помилок ×{{count}}",
+    "failedCount_few": "помилок ×{{count}}",
+    "failedCount_many": "помилок ×{{count}}",
+    "failedCount_other": "помилок ×{{count}}"
+  },
+  "reactions": {
+    "add": "Додати реакцію",
+    "pillLabel_one": "{{emoji}} {{count}} реакція",
+    "pillLabel_few": "{{emoji}} {{count}} реакції",
+    "pillLabel_many": "{{emoji}} {{count}} реакцій",
+    "pillLabel_other": "{{emoji}} {{count}} реакції"
+  },
+  "preview": {
+    "noMessages": "Повідомлень ще немає",
+    "withSender": "{{name}}: {{text}}",
+    "attachments_one": "[{{count}} вкладення]",
+    "attachments_few": "[{{count}} вкладення]",
+    "attachments_many": "[{{count}} вкладень]",
+    "attachments_other": "[{{count}} вкладення]"
+  },
+  "attachment": {
+    "viewLabel": "Переглянути {{filename}}",
+    "openLabel": "Відкрити {{filename}}",
+    "downloadLabel": "Завантажити {{filename}}",
+    "loading": "завантаження…",
+    "error": "пом",
+    "failedToLoad": "Не вдалося завантажити",
+    "failedToDownload": "Не вдалося завантажити файл",
+    "lightboxFetch": "отримати",
+    "lightboxDone": "[ готово ]",
+    "lightboxDownload": "[завантажити]",
+    "lightboxClose": "[esc]"
+  },
+  "unfurl": {
+    "loadImage": "Завантажити зображення",
+    "loadVideo": "Завантажити відео",
+    "loadTitle": "Завантажити медіа з {{url}} — це напряму звертається до того сайту",
+    "loadDescription": "Завантажити медіа з {{url}}. Це напряму звертається до того сайту й розкриває йому вашу IP-адресу.",
+    "openLabel": "Відкрити {{url}}"
+  },
+  "notify": {
+    "newMessageTitle": "Нове повідомлення",
+    "newMessageBody": "{{name}}: нове повідомлення",
+    "mentionTitle": "Нова згадка",
+    "allMentionBody": "Згадка @all від {{name}}",
+    "userMentionBody": "Вас згадано: {{name}}"
+  },
+  "fileSize": {
+    "bytes": "{{size}} Б",
+    "kilobytes": "{{size}} КБ",
+    "megabytes": "{{size}} МБ",
+    "gigabytes": "{{size}} ГБ"
+  }
+}

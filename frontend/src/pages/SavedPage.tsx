@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { NavigableList } from "../components/ui/NavigableList";
 import { Button } from "../components/ui/Button";
@@ -21,6 +22,7 @@ import { errorMessage } from "../utils/errorMessage";
  * nothing syncs it, and no server knows it exists.
  */
 export const SavedPage: React.FC = () => {
+  const { t } = useTranslation("saved");
   const { data: saved = [], isLoading } = useSavedMessages();
   const { data: groups = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
@@ -80,7 +82,7 @@ export const SavedPage: React.FC = () => {
   );
 
   return (
-    <PageShell title="Saved">
+    <PageShell title={t("page.title")}>
       <div
         data-testid="saved-page"
         className="flex h-full flex-1 flex-col overflow-hidden bg-bg"
@@ -90,7 +92,7 @@ export const SavedPage: React.FC = () => {
             data-testid="saved-unresolved-notice"
             className="mx-4 mt-3 rounded border border-line bg-surface-raised px-3 py-2 text-xs text-dim"
           >
-            You do not have this message on this device.
+            {t("page.unresolved")}
           </div>
         )}
 
@@ -98,7 +100,7 @@ export const SavedPage: React.FC = () => {
           items={saved}
           isLoading={isLoading}
           testId="saved-list"
-          emptyLabel="No saved messages. Use the bookmark action on a message to save it."
+          emptyLabel={t("page.empty")}
           getKey={(item) => item.message_id}
           rowTestId={(item) => `saved-${item.message_id}`}
           renderRow={(item) => (
@@ -122,7 +124,7 @@ export const SavedPage: React.FC = () => {
               onClick={() => void handleUnsave(item.message_id)}
               disabled={unsaveMutation.isPending}
             >
-              unsave
+              {t("page.unsave")}
             </Button>,
           ]}
           trailing={(item) => <span>{timeAgo(item.saved_at)}</span>}

@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { ChevronLeft, Search as SearchIcon, Settings as SettingsIcon } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -20,28 +21,29 @@ interface Segment {
  * `observer()` component — it reads the MobX `appStore.channels` observable.
  */
 function useBreadcrumbTrail(): Segment[] {
+  const { t } = useTranslation("nav");
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
   const channels = appStore.channels;
 
   return useMemo<Segment[]>(() => {
-    const out: Segment[] = [{ label: "Home", to: "/" }];
+    const out: Segment[] = [{ label: t("breadcrumb.home"), to: "/" }];
 
     if (pathname === "/") {
       return out;
     }
 
     if (pathname.startsWith("/groups")) {
-      out.push({ label: "Groups", to: "/groups" });
+      out.push({ label: t("breadcrumb.groups"), to: "/groups" });
 
       const groupIdMatch = pathname.match(/^\/groups\/([^/]+)/);
       const groupId = groupIdMatch?.[1];
 
       if (groupId === "new") {
-        out.push({ label: "Create Group", to: "/groups/new" });
+        out.push({ label: t("breadcrumb.createGroup"), to: "/groups/new" });
       } else if (groupId === "search") {
-        out.push({ label: "Find Group", to: "/groups/search" });
+        out.push({ label: t("breadcrumb.findGroup"), to: "/groups/search" });
       } else if (groupId) {
         const group = groupsWithChannels?.find((g) => g.id === groupId);
         if (group) {
@@ -52,7 +54,7 @@ function useBreadcrumbTrail(): Segment[] {
           const channelIdMatch = pathname.match(/\/channels\/([^/]+)/);
           const channelId = channelIdMatch?.[1];
           if (channelId === "new") {
-            out.push({ label: "New Channel", to: `/groups/${groupId}/channels/new` });
+            out.push({ label: t("breadcrumb.newChannel"), to: `/groups/${groupId}/channels/new` });
           } else if (channelId) {
             const groupChannels = channels[groupId] ?? [];
             const ch = groupChannels.find((c) => c.id === channelId);
@@ -65,34 +67,34 @@ function useBreadcrumbTrail(): Segment[] {
           const channelId = channelIdMatch?.[1];
           const ch = group?.channels.find((c) => c.id === channelId);
           out.push({
-            label: ch?.name ?? "voice",
+            label: ch?.name ?? t("breadcrumb.voice"),
             to: `/groups/${groupId}/voice/${channelId}`,
           });
         } else if (pathname.endsWith("/join-requests")) {
-          out.push({ label: "Join Requests", to: `/groups/${groupId}/join-requests` });
+          out.push({ label: t("breadcrumb.joinRequests"), to: `/groups/${groupId}/join-requests` });
         } else if (pathname.endsWith("/invite")) {
-          out.push({ label: "Invite Member", to: `/groups/${groupId}/invite` });
+          out.push({ label: t("breadcrumb.inviteMember"), to: `/groups/${groupId}/invite` });
         } else if (pathname.endsWith("/leave")) {
-          out.push({ label: "Leave Group", to: `/groups/${groupId}/leave` });
+          out.push({ label: t("breadcrumb.leaveGroup"), to: `/groups/${groupId}/leave` });
         } else if (pathname.endsWith("/members")) {
-          out.push({ label: "Members", to: `/groups/${groupId}/members` });
+          out.push({ label: t("breadcrumb.members"), to: `/groups/${groupId}/members` });
         } else if (pathname.includes("/members/") && pathname.endsWith("/kick")) {
-          out.push({ label: "Members", to: `/groups/${groupId}/members` });
-          out.push({ label: "Remove Member", to: pathname });
+          out.push({ label: t("breadcrumb.members"), to: `/groups/${groupId}/members` });
+          out.push({ label: t("breadcrumb.removeMember"), to: pathname });
         }
       }
     } else if (pathname.startsWith("/dms")) {
-      out.push({ label: "Direct Messages", to: "/dms" });
+      out.push({ label: t("breadcrumb.directMessages"), to: "/dms" });
 
       const convIdMatch = pathname.match(/^\/dms\/([^/]+)/);
       const conversationId = convIdMatch?.[1];
 
       if (conversationId === "new") {
-        out.push({ label: "New Message", to: "/dms/new" });
+        out.push({ label: t("breadcrumb.newMessage"), to: "/dms/new" });
       } else if (conversationId === "requests") {
-        out.push({ label: "Requests", to: "/dms/requests" });
+        out.push({ label: t("breadcrumb.requests"), to: "/dms/requests" });
       } else if (conversationId === "blocked") {
-        out.push({ label: "Blocked Users", to: "/dms/blocked" });
+        out.push({ label: t("breadcrumb.blockedUsers"), to: "/dms/blocked" });
       } else if (conversationId) {
         const conv = dmConversations.find((c) => c.id === conversationId);
         if (conv) {
@@ -103,39 +105,39 @@ function useBreadcrumbTrail(): Segment[] {
         }
         if (pathname.endsWith("/settings")) {
           out.push({
-            label: "Conversation Settings",
+            label: t("breadcrumb.conversationSettings"),
             to: `/dms/${conversationId}/settings`,
           });
         }
       }
     } else if (pathname === "/settings") {
-      out.push({ label: "Account", to: "/settings" });
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
     } else if (pathname === "/preferences") {
-      out.push({ label: "Account", to: "/settings" });
-      out.push({ label: "Preferences", to: "/preferences" });
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
+      out.push({ label: t("breadcrumb.preferences"), to: "/preferences" });
     } else if (pathname === "/user") {
-      out.push({ label: "Account", to: "/settings" });
-      out.push({ label: "User Settings", to: "/user" });
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
+      out.push({ label: t("breadcrumb.userSettings"), to: "/user" });
     } else if (pathname.startsWith("/user/")) {
-      out.push({ label: "Profile", to: pathname });
+      out.push({ label: t("breadcrumb.profile"), to: pathname });
     } else if (pathname === "/security") {
-      out.push({ label: "Account", to: "/settings" });
-      out.push({ label: "Security", to: "/security" });
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
+      out.push({ label: t("breadcrumb.security"), to: "/security" });
     } else if (pathname === "/voice-settings") {
-      out.push({ label: "Account", to: "/settings" });
-      out.push({ label: "Voice", to: "/voice-settings" });
+      out.push({ label: t("breadcrumb.account"), to: "/settings" });
+      out.push({ label: t("breadcrumb.voiceSettings"), to: "/voice-settings" });
     } else if (pathname === "/invites") {
-      out.push({ label: "Invites", to: "/invites" });
+      out.push({ label: t("breadcrumb.invites"), to: "/invites" });
     } else if (pathname === "/join" || pathname.startsWith("/invite/")) {
-      out.push({ label: "Join a Group", to: "/join" });
+      out.push({ label: t("breadcrumb.joinAGroup"), to: "/join" });
     } else if (pathname === "/join-requests") {
-      out.push({ label: "Join Requests", to: "/join-requests" });
+      out.push({ label: t("breadcrumb.joinRequests"), to: "/join-requests" });
     } else if (pathname === "/search") {
-      out.push({ label: "Search", to: "/search" });
+      out.push({ label: t("breadcrumb.search"), to: "/search" });
     }
 
     return out;
-  }, [pathname, groupsWithChannels, dmConversations, channels]);
+  }, [pathname, groupsWithChannels, dmConversations, channels, t]);
 }
 
 /**
@@ -145,6 +147,7 @@ function useBreadcrumbTrail(): Segment[] {
  * trail itself ("Home / Direct Messages / @someone").
  */
 export const BreadcrumbNav: React.FC = observer(() => {
+  const { t } = useTranslation("nav");
   const router = useRouter();
   const skin = useSkin();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -177,10 +180,10 @@ export const BreadcrumbNav: React.FC = observer(() => {
           <button
             data-testid="breadcrumb-back-button"
             onClick={handleBack}
-            aria-label="Back"
+            aria-label={t("common:actions.back")}
             className="flex items-center justify-center text-dim transition-colors hover:text-accent"
           >
-            <ChevronLeft size={18} />
+            <ChevronLeft size={18} className="rtl-mirror" />
           </button>
         ) : (
           <div className="w-[18px]" aria-hidden="true" />
@@ -199,7 +202,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
                   </span>
                 )}
                 {isLast ? (
-                  <span className="truncate font-semibold text-accent">{seg.label}</span>
+                  <bdi className="truncate font-semibold text-accent">{seg.label}</bdi>
                 ) : (
                   <button
                     onClick={() => router.navigate({ to: seg.to })}
@@ -216,8 +219,8 @@ export const BreadcrumbNav: React.FC = observer(() => {
           <button
             data-testid="breadcrumb-search-button"
             onClick={openSearch}
-            aria-label={`Search (${searchLabel})`}
-            title={`Search (${searchLabel})`}
+            aria-label={t("breadcrumb.searchButton", { shortcut: searchLabel })}
+            title={t("breadcrumb.searchButton", { shortcut: searchLabel })}
             className="flex items-center gap-1.5 text-dim transition-colors hover:text-accent"
           >
             <SearchIcon size={16} />
@@ -231,7 +234,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
           <button
             data-testid="breadcrumb-settings-button"
             onClick={() => router.navigate({ to: "/settings" })}
-            aria-label="Settings"
+            aria-label={t("breadcrumb.settings")}
             className={`flex items-center justify-center rounded-[var(--radius-control)] p-1 transition-colors hover:bg-hover hover:text-accent ${isOnSettingsHub ? "text-accent" : "text-dim"}`}
           >
             <SettingsIcon size={18} />
@@ -252,15 +255,15 @@ export const BreadcrumbNav: React.FC = observer(() => {
         display: "flex",
         alignItems: "center",
         gap: 8,
-        paddingLeft: 8,
-        paddingRight: 12,
+        paddingInlineStart: 8,
+        paddingInlineEnd: 12,
       }}
     >
       {parentTo ? (
         <button
           data-testid="breadcrumb-back-button"
           onClick={handleBack}
-          aria-label="Back"
+          aria-label={t("common:actions.back")}
           className="flex items-center justify-center transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
           style={{
             width: 20,
@@ -271,7 +274,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
             cursor: "pointer",
           }}
         >
-          <ChevronLeft size={14} />
+          <ChevronLeft size={14} className="rtl-mirror" />
         </button>
       ) : (
         <div style={{ width: 20, height: 20 }} aria-hidden="true" />
@@ -285,7 +288,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
           <React.Fragment key={`${seg.to}-${i}`}>
             {i > 0 && <span style={{ opacity: 0.5 }}> / </span>}
             {i === segments.length - 1 ? (
-              <span style={{ color: "var(--c-text)" }}>{seg.label}</span>
+              <bdi style={{ color: "var(--c-text)" }}>{seg.label}</bdi>
             ) : (
               <button
                 onClick={() => router.navigate({ to: seg.to })}
@@ -307,8 +310,8 @@ export const BreadcrumbNav: React.FC = observer(() => {
       <button
         data-testid="breadcrumb-search-button"
         onClick={openSearch}
-        aria-label={`Search (${searchLabel})`}
-        title={`Search (${searchLabel})`}
+        aria-label={t("breadcrumb.searchButton", { shortcut: searchLabel })}
+        title={t("breadcrumb.searchButton", { shortcut: searchLabel })}
         className="flex items-center gap-1.5 transition-colors text-[var(--c-text)] hover:text-[var(--c-accent)]"
         style={{
           height: 20,
@@ -337,7 +340,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
       <button
         data-testid="breadcrumb-settings-button"
         onClick={() => router.navigate({ to: "/settings" })}
-        aria-label="Settings"
+        aria-label={t("breadcrumb.settings")}
         className={`flex items-center justify-center transition-colors bg-transparent hover:bg-[var(--c-hover)] hover:text-[var(--c-accent)] ${isOnSettingsHub ? "text-[var(--c-accent)]" : "text-[var(--c-text)]"}`}
         style={{
           width: 24,

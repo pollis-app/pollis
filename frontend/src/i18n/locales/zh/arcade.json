@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "街机"
+  },
+  "hud": {
+    "score": "得分  {{score}}",
+    "time": "时间  {{time}}",
+    "gameOver": "游戏结束",
+    "final_other": "最终 {{count}} 分 · {{time}}",
+    "restartHint": "按 R 重新开始 · 按 Esc 退出",
+    "controls": "WASD 移动 · 鼠标瞄准 · 点击/空格射击 · Esc 退出"
+  }
+}

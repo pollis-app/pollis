@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useUpdateGroup, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
@@ -13,6 +14,7 @@ interface RenameGroupProps {
 }
 
 export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSuccess }) => {
+  const { t } = useTranslation("channels");
   const { currentUser } = appStore;
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const updateGroup = useUpdateGroup();
@@ -34,15 +36,15 @@ export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSu
     e.preventDefault();
     setError(null);
     if (!name.trim()) {
-      setError("Name is required");
+      setError(t("errors.nameRequired"));
       return;
     }
     if (!currentUser) {
-      setError("User not found");
+      setError(t("errors.userNotFound"));
       return;
     }
     if (!group) {
-      setError("Group not found");
+      setError(t("renameGroup.notFound"));
       return;
     }
     const trimmedName = name.trim();
@@ -61,14 +63,14 @@ export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSu
       });
       onSuccess?.();
     } catch (err) {
-      setError(errorMessage(err, "Failed to rename group"));
+      setError(errorMessage(err, t("renameGroup.renameFailed")));
     }
   };
 
   if (!currentUser) {
     return (
       <div data-testid="rename-group-no-user" className="flex items-center justify-center flex-1" style={{ background: "var(--c-bg)" }}>
-        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>Please sign in</p>
+        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>{t("errors.signInRequired")}</p>
       </div>
     );
   }
@@ -76,7 +78,7 @@ export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSu
   if (!group) {
     return (
       <div data-testid="rename-group-not-found" className="flex items-center justify-center flex-1" style={{ background: "var(--c-bg)" }}>
-        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>Group not found</p>
+        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>{t("renameGroup.notFound")}</p>
       </div>
     );
   }
@@ -94,10 +96,10 @@ export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSu
           className="w-full max-w-md flex flex-col gap-5"
         >
           <TextInput
-            label="Group Name"
+            label={t("renameGroup.nameLabel")}
             value={name}
             onChange={setName}
-            placeholder="My Group"
+            placeholder={t("renameGroup.namePlaceholder")}
             disabled={updateGroup.isPending}
             id="rename-group-name"
             required
@@ -105,10 +107,10 @@ export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSu
           <input data-testid="rename-group-name-input" type="hidden" value={name} readOnly />
 
           <TextArea
-            label="Description"
+            label={t("renameGroup.descriptionLabel")}
             value={description}
             onChange={setDescription}
-            placeholder="Optional description…"
+            placeholder={t("renameGroup.descriptionPlaceholder")}
             disabled={updateGroup.isPending}
             rows={2}
             id="rename-group-description"
@@ -125,10 +127,10 @@ export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSu
             data-testid="rename-group-submit-button"
             type="submit"
             isLoading={updateGroup.isPending}
-            loadingText="Saving…"
+            loadingText={t("renameGroup.submitting")}
             className="w-full"
           >
-            Save
+            {t("renameGroup.submit")}
           </Button>
         </form>
       </div>

@@ -26,8 +26,15 @@ export type ShortcutCategory = "Application" | "Navigation" | "Voice";
 
 export interface ShortcutCommandMeta {
   id: ShortcutCommandId;
-  /** Human-facing name for a future shortcuts/settings page. */
-  title: string;
+  /**
+   * Translation key for the human-facing name, in the `settings` namespace.
+   *
+   * A key rather than the copy itself: this table is module-level data,
+   * evaluated once at import time, so a `t()` call here would snapshot
+   * whatever language was active on the very first import and never update.
+   * Every consumer translates at its own render site instead.
+   */
+  titleKey: string;
   /** Grouping for that future page. */
   category: ShortcutCategory;
   /**
@@ -57,13 +64,13 @@ export const SHORTCUT_COMMANDS: Record<
 > = {
   "app.toggleSidebar": {
     id: "app.toggleSidebar",
-    title: "Toggle sidebar",
+    titleKey: "shortcuts.appToggleSidebar",
     category: "Application",
     defaultCombo: "mod+b",
   },
   "app.toggleRightPanel": {
     id: "app.toggleRightPanel",
-    title: "Toggle details panel",
+    titleKey: "shortcuts.appToggleRightPanel",
     category: "Application",
     // Mirrors mod+b for the left sidebar, shifted — the two panels are the
     // same gesture on opposite edges.
@@ -71,49 +78,49 @@ export const SHORTCUT_COMMANDS: Record<
   },
   "app.toggleTerminal": {
     id: "app.toggleTerminal",
-    title: "Toggle terminal",
+    titleKey: "shortcuts.appToggleTerminal",
     category: "Application",
     defaultCombo: "mod+`",
   },
   "app.toggleSearch": {
     id: "app.toggleSearch",
-    title: "Open search",
+    titleKey: "shortcuts.appToggleSearch",
     category: "Application",
     defaultCombo: "mod+k",
   },
   "app.lock": {
     id: "app.lock",
-    title: "Lock app",
+    titleKey: "shortcuts.appLock",
     category: "Application",
     defaultCombo: "mod+l",
   },
   "app.closeWindow": {
     id: "app.closeWindow",
-    title: "Hide / close window",
+    titleKey: "shortcuts.appCloseWindow",
     category: "Application",
     defaultCombo: "mod+w",
   },
   "app.sync": {
     id: "app.sync",
-    title: "Sync (refetch + MLS)",
+    titleKey: "shortcuts.appSync",
     category: "Application",
     defaultCombo: "mod+r",
   },
   "nav.back": {
     id: "nav.back",
-    title: "Go back",
+    titleKey: "shortcuts.navBack",
     category: "Navigation",
     defaultCombo: "escape",
   },
   "voice.toggleMute": {
     id: "voice.toggleMute",
-    title: "Toggle mute",
+    titleKey: "shortcuts.voiceToggleMute",
     category: "Voice",
     defaultCombo: "mod+shift+m",
   },
   "voice.toggleDeafen": {
     id: "voice.toggleDeafen",
-    title: "Toggle deafen",
+    titleKey: "shortcuts.voiceToggleDeafen",
     category: "Voice",
     // Sits next to Toggle mute on the same modifier pair, the way Discord
     // pairs the two controls.
@@ -121,7 +128,7 @@ export const SHORTCUT_COMMANDS: Record<
   },
   "voice.pushToTalk": {
     id: "voice.pushToTalk",
-    title: "Push to talk (hold)",
+    titleKey: "shortcuts.voicePushToTalk",
     category: "Voice",
     // Deliberately a modifier combo rather than a bare key. The dispatcher
     // has no "is the user typing" guard, so a bare-key default would
@@ -133,7 +140,7 @@ export const SHORTCUT_COMMANDS: Record<
   },
   "voice.leave": {
     id: "voice.leave",
-    title: "Leave call",
+    titleKey: "shortcuts.voiceLeave",
     category: "Voice",
     defaultCombo: "mod+shift+h",
   },

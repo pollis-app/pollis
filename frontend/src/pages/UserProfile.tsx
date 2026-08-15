@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, MessageCircle, Ban } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -18,6 +19,7 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 export const UserProfilePage: React.FC = observer(() => {
+  const { t } = useTranslation("dms");
   const navigate = useNavigate();
   const { userId } = useParams({ from: "/user/$userId" });
   const currentUser = appStore.currentUser;
@@ -53,15 +55,18 @@ export const UserProfilePage: React.FC = observer(() => {
   };
 
   const headlineName =
-    profile?.preferred_name || (profile?.username ? `@${profile.username}` : "User");
-  const title = profile?.preferred_name || (profile?.username ? `@${profile.username}` : "Profile");
+    profile?.preferred_name
+    || (profile?.username ? `@${profile.username}` : t("profile.fallbackName"));
+  const title =
+    profile?.preferred_name
+    || (profile?.username ? `@${profile.username}` : t("profile.fallbackTitle"));
 
   const items: TerminalMenuItem[] = !profile || isSelf
     ? [
         {
           id: "back",
-          label: "Go back",
-          icon: <ArrowLeft size={14} />,
+          label: t("common:actions.goBack"),
+          icon: <ArrowLeft size={14} className="rtl-mirror" />,
           action: () => navigate({ to: "/dms" }),
           type: "system",
           testId: "user-profile-back",
@@ -70,7 +75,7 @@ export const UserProfilePage: React.FC = observer(() => {
     : [
         {
           id: "send-message",
-          label: "Send Message",
+          label: t("profile.sendMessage"),
           icon: <MessageCircle size={14} />,
           action: handleDM,
           disabled: dmMutation.isPending,
@@ -78,7 +83,7 @@ export const UserProfilePage: React.FC = observer(() => {
         },
         {
           id: "block",
-          label: "Block",
+          label: t("profile.block"),
           icon: <Ban size={14} />,
           action: handleBlock,
           disabled: blockMutation.isPending,
@@ -88,8 +93,8 @@ export const UserProfilePage: React.FC = observer(() => {
         { id: "__sep__", label: "", type: "separator" },
         {
           id: "back",
-          label: "Go back",
-          icon: <ArrowLeft size={14} />,
+          label: t("common:actions.goBack"),
+          icon: <ArrowLeft size={14} className="rtl-mirror" />,
           action: () => navigate({ to: "/dms" }),
           type: "system",
           testId: "user-profile-back",
@@ -102,11 +107,11 @@ export const UserProfilePage: React.FC = observer(() => {
         <div className="w-full max-w-md flex flex-col gap-6">
           {isLoading ? (
             <span className="text-xs font-mono self-center" style={{ color: "var(--c-text-muted)" }}>
-              Loading…
+              {t("common:states.loading")}
             </span>
           ) : !profile ? (
             <span className="text-xs font-mono self-center" style={{ color: "var(--c-text-muted)" }}>
-              User not found
+              {t("profile.notFound")}
             </span>
           ) : (
             <>
@@ -129,7 +134,7 @@ export const UserProfilePage: React.FC = observer(() => {
                       className="font-mono text-xs truncate"
                       style={{ color: "var(--c-text-muted)" }}
                     >
-                      @{profile.username}
+                      <bdi>@{profile.username}</bdi>
                     </div>
                   )}
                 </div>
@@ -137,7 +142,7 @@ export const UserProfilePage: React.FC = observer(() => {
                   userId={profile.id}
                   avatarKey={profile.avatar_url}
                   size={72}
-                  alt={`${headlineName} avatar`}
+                  alt={t("profile.avatarAlt", { name: headlineName })}
                   testId="user-profile-avatar"
                   variant="profile"
                 />
@@ -154,7 +159,7 @@ export const UserProfilePage: React.FC = observer(() => {
                       className="font-mono text-xs uppercase tracking-wide"
                       style={{ color: "var(--c-text-muted)" }}
                     >
-                      Safety number
+                      {t("profile.safetyNumber")}
                     </span>
                     <span
                       data-testid="safety-status"
@@ -169,14 +174,15 @@ export const UserProfilePage: React.FC = observer(() => {
                       }}
                     >
                       {safety.status === "verified"
-                        ? "Verified"
+                        ? t("profile.statusVerified")
                         : safety.status === "changed"
-                          ? "Changed — re-verify"
-                          : "Not verified"}
+                          ? t("profile.statusChanged")
+                          : t("profile.statusUnverified")}
                     </span>
                   </div>
                   <div className="flex items-start gap-4">
                     <code
+                      dir="ltr"
                       data-testid="safety-number-digits"
                       className="font-mono text-sm leading-relaxed break-all flex-1"
                       style={{ color: "var(--c-text)" }}
@@ -216,17 +222,14 @@ export const UserProfilePage: React.FC = observer(() => {
                       className="font-mono text-xs"
                       style={{ color: "var(--c-danger)" }}
                     >
-                      This contact's identity key changed since you last verified
-                      it. Compare the number again out-of-band before trusting it.
+                      {t("profile.keyChangedWarning")}
                     </span>
                   )}
                   <p
                     className="font-mono text-xs"
                     style={{ color: "var(--c-text-muted)" }}
                   >
-                    Compare these digits with {headlineName} over a trusted
-                    channel (in person, a call you recognise). If they match,
-                    mark this contact verified.
+                    {t("profile.compareHint", { name: headlineName })}
                   </p>
                   <div>
                     <Button
@@ -238,8 +241,8 @@ export const UserProfilePage: React.FC = observer(() => {
                       data-testid="safety-verify-toggle"
                     >
                       {safety.status === "verified"
-                        ? "Remove verification"
-                        : "Mark verified"}
+                        ? t("profile.removeVerification")
+                        : t("profile.markVerified")}
                     </Button>
                   </div>
                 </div>

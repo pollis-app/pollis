@@ -1,10 +1,12 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { usePendingInvites, useAcceptInvite, useDeclineInvite } from "../hooks/queries";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
 
 export const InvitesPage: React.FC = () => {
+  const { t } = useTranslation("channels");
   const { data: invites = [], isLoading } = usePendingInvites();
   const acceptMutation = useAcceptInvite();
   const declineMutation = useDeclineInvite();
@@ -26,7 +28,7 @@ export const InvitesPage: React.FC = () => {
   };
 
   return (
-    <PageShell title="Invites">
+    <PageShell title={t("invites.pageTitle")}>
       <div
         data-testid="invites-page"
         className="flex-1 flex flex-col overflow-auto"
@@ -35,7 +37,7 @@ export const InvitesPage: React.FC = () => {
         <NavigableList
           items={invites}
           isLoading={isLoading}
-          emptyLabel="No pending invites."
+          emptyLabel={t("invites.empty")}
           getKey={(invite) => invite.id}
           rowTestId={(invite) => `invite-${invite.id}`}
           renderRow={(invite) => (
@@ -50,7 +52,7 @@ export const InvitesPage: React.FC = () => {
                 className="text-xs font-mono truncate"
                 style={{ color: "var(--c-text-muted)" }}
               >
-                Invited by {invite.inviter_username ?? invite.inviter_id}
+                {t("invites.invitedBy", { name: invite.inviter_username ?? invite.inviter_id })}
               </span>
             </div>
           )}
@@ -61,7 +63,7 @@ export const InvitesPage: React.FC = () => {
               disabled={acceptMutation.isPending || declineMutation.isPending}
               variant="primary"
             >
-              accept
+              {t("invites.accept")}
             </Button>,
             <Button size="sm"
               data-testid={`decline-invite-${invite.id}`}
@@ -69,7 +71,7 @@ export const InvitesPage: React.FC = () => {
               disabled={acceptMutation.isPending || declineMutation.isPending}
               variant="secondary"
             >
-              decline
+              {t("invites.decline")}
             </Button>,
           ]}
         />

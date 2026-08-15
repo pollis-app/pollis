@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { Phone, PhoneCall } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
@@ -19,6 +20,7 @@ type RawDmMember = { user_id: string; username?: string; accepted_at?: string | 
 type RawDmChannel = { id: string; members: RawDmMember[] };
 
 export const DMPage: React.FC = observer(() => {
+  const { t } = useTranslation("dms");
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
   const setSelectedConversationId = appStore.setSelectedConversationId;
@@ -180,14 +182,14 @@ export const DMPage: React.FC = observer(() => {
                 cursor: "pointer",
                 fontSize: "inherit",
               }}
-              aria-label={`View profile of @${username}`}
+              aria-label={t("conversation.viewProfile", { name: username })}
             >
-              @{username}
+              <bdi>@{username}</bdi>
             </button>
           ) : conv || pendingRequest ? (
             `@${username}`
           ) : (
-            "Direct Message"
+            t("conversation.fallbackTitle")
           )}
         </span>
         {canCall && (() => {
@@ -217,18 +219,18 @@ export const DMPage: React.FC = observer(() => {
               }
               aria-label={
                 inCallWithThisUser
-                  ? `Return to call with @${username}`
-                  : `Call @${username}`
+                  ? t("conversation.returnToCall", { name: username })
+                  : t("conversation.call", { name: username })
               }
               title={
                 inCallWithThisUser
-                  ? `Return to call with @${username}`
-                  : `Call @${username}`
+                  ? t("conversation.returnToCall", { name: username })
+                  : t("conversation.call", { name: username })
               }
               className="icon-btn-sm flex-shrink-0"
               style={{
                 position: "absolute",
-                right: "0.75rem",
+                insetInlineEnd: "0.75rem",
                 color: inCallWithThisUser ? "var(--c-accent)" : undefined,
               }}
             >

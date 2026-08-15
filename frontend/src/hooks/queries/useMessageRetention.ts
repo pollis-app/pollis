@@ -8,11 +8,15 @@ export const RETENTION_FOREVER = 0;
 
 // Allowed retention windows, validated identically in the Rust core
 // (`set_message_retention` rejects anything not in this set).
+//
+// `days` only — the human label is derived from it by `retentionLabel` in
+// `pages/PreferencesPage.tsx`, so the copy lives in the translation catalogue
+// rather than in a hook (#855).
 export const MESSAGE_RETENTION_OPTIONS = [
-  { label: "Forever", days: RETENTION_FOREVER },
-  { label: "1 year", days: 365 },
-  { label: "90 days", days: 90 },
-  { label: "30 days", days: 30 },
+  { days: RETENTION_FOREVER },
+  { days: 365 },
+  { days: 90 },
+  { days: 30 },
 ] as const;
 
 const messageRetentionKey = ["message_retention"] as const;

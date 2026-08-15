@@ -28,13 +28,16 @@ export const MentionToken: React.FC<MentionTokenProps> = ({ name, isSelf, skin }
     ? "bg-accent text-bg font-semibold"
     : "bg-active text-accent";
 
+  // `<bdi>`, not `<span>`: a Latin handle inside an Arabic sentence is a
+  // direction change, and without isolation the neutral "@" (and any
+  // punctuation that follows the token) reorders around it.
   return (
-    <span
+    <bdi
       data-testid={isSelf ? "mention-self" : "mention-other"}
       data-mention={name}
       className={`${shared} ${font} ${tone}`}
     >
       @{name}
-    </span>
+    </bdi>
   );
 };

@@ -1,0 +1,82 @@
+{
+  "actions": {
+    "back": "Retour",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "copy": "Copier",
+    "delete": "Supprimer",
+    "goBack": "Revenir en arrière",
+    "moreOptions": "Plus d'options",
+    "save": "Enregistrer"
+  },
+  "states": {
+    "buttonLoading": "Chargement...",
+    "loading": "Chargement…"
+  },
+  "time": {
+    "today": "Aujourd'hui",
+    "yesterday": "Hier"
+  },
+  "presence": {
+    "label": "Présence : {{status}}",
+    "offline": "hors ligne",
+    "online": "en ligne"
+  },
+  "list": {
+    "empty": "Aucun élément."
+  },
+  "grid": {
+    "empty": "Personne pour l'instant."
+  },
+  "menu": {
+    "escHint": "Échap pour revenir",
+    "navigationLabel": "Menu de navigation",
+    "navigateHint": "naviguer",
+    "selectHint": "Entrée pour sélectionner"
+  },
+  "media": {
+    "mute": "Couper le son",
+    "pause": "Pause",
+    "play": "Lecture",
+    "seek": "Se déplacer dans l'audio",
+    "skipBackward": "Reculer de 10 secondes",
+    "skipForward": "Avancer de 10 secondes",
+    "unmute": "Réactiver le son",
+    "volume": "Volume"
+  },
+  "composer": {
+    "addAttachment": "Ajouter une pièce jointe",
+    "allMentionHint": "notifie tout le monde dans ce canal",
+    "filePickerTitle": "Ajouter des fichiers",
+    "inputLabel": "Champ de message",
+    "placeholder": "Écrivez un message…",
+    "previewAlt": "Aperçu",
+    "removeAttachment": "Retirer {{name}}",
+    "send": "Envoyer le message"
+  },
+  "mentions": {
+    "listLabel": "Suggestions de mention",
+    "matching": "Membres correspondant à <hl>@{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Avatar",
+    "loading": "Chargement",
+    "otpDigit": "Chiffre {{index}} du code"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} s",
+    "seconds_other": "{{count}} s",
+    "minutes_one": "{{count}} min",
+    "minutes_other": "{{count}} min",
+    "hours_one": "{{count}} h",
+    "hours_other": "{{count}} h",
+    "days_one": "{{count}} j",
+    "days_other": "{{count}} j",
+    "weeks_one": "{{count}} sem.",
+    "weeks_other": "{{count}} sem.",
+    "months_one": "{{count}} mois",
+    "months_other": "{{count}} mois",
+    "years_one": "{{count}} an",
+    "years_other": "{{count}} ans"
+  }
+}

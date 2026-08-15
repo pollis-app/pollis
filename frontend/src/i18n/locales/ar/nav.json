@@ -1,0 +1,200 @@
+{
+  "sidebar": {
+    "groups": "المجموعات",
+    "dms": "الرسائل المباشرة",
+    "account": "الحساب",
+    "saved": "المحفوظات",
+    "preferences": "التفضيلات",
+    "userSettings": "إعدادات المستخدم",
+    "voiceAndVideo": "الصوت والفيديو",
+    "security": "الأمان",
+    "keyBindings": "اختصارات المفاتيح",
+    "softwareUpdate": "تحديث البرنامج",
+    "expandGroup": "توسيع {{name}}",
+    "collapseGroup": "طي {{name}}",
+    "keyChanged": "تغيّر مفتاح الهوية — أعد التحقق",
+    "verified": "جهة اتصال موثَّقة",
+    "dmAvatarAlt": "الصورة الرمزية لـ {{name}}",
+    "close": "إغلاق الشريط الجانبي ({{shortcut}})"
+  },
+  "profile": {
+    "you": "أنت",
+    "call": "اتصال",
+    "voice": "الصوت",
+    "settings": "الإعدادات",
+    "voiceConnected": "الصوت متصل",
+    "stopScreenShare": "إيقاف مشاركة الشاشة",
+    "shareScreen": "مشاركة الشاشة",
+    "disconnect": "قطع الاتصال"
+  },
+  "breadcrumb": {
+    "home": "الرئيسية",
+    "groups": "المجموعات",
+    "createGroup": "إنشاء مجموعة",
+    "findGroup": "البحث عن مجموعة",
+    "newChannel": "قناة جديدة",
+    "voice": "صوت",
+    "joinRequests": "طلبات الانضمام",
+    "inviteMember": "دعوة عضو",
+    "leaveGroup": "مغادرة المجموعة",
+    "members": "الأعضاء",
+    "removeMember": "إزالة عضو",
+    "directMessages": "الرسائل المباشرة",
+    "newMessage": "رسالة جديدة",
+    "requests": "الطلبات",
+    "blockedUsers": "المستخدمون المحظورون",
+    "conversationSettings": "إعدادات المحادثة",
+    "account": "الحساب",
+    "preferences": "التفضيلات",
+    "userSettings": "إعدادات المستخدم",
+    "profile": "الملف الشخصي",
+    "security": "الأمان",
+    "voiceSettings": "الصوت",
+    "invites": "الدعوات",
+    "joinAGroup": "الانضمام إلى مجموعة",
+    "search": "بحث",
+    "searchButton": "بحث ({{shortcut}})",
+    "settings": "الإعدادات"
+  },
+  "statusBar": {
+    "groupsUnread_zero": "رسائل المجموعات غير المقروءة: {{count}}",
+    "groupsUnread_one": "رسائل المجموعات غير المقروءة: {{count}}",
+    "groupsUnread_two": "رسائل المجموعات غير المقروءة: {{count}}",
+    "groupsUnread_few": "رسائل المجموعات غير المقروءة: {{count}}",
+    "groupsUnread_many": "رسائل المجموعات غير المقروءة: {{count}}",
+    "groupsUnread_other": "رسائل المجموعات غير المقروءة: {{count}}",
+    "dmsUnread_zero": "الرسائل المباشرة غير المقروءة: {{count}}",
+    "dmsUnread_one": "الرسائل المباشرة غير المقروءة: {{count}}",
+    "dmsUnread_two": "الرسائل المباشرة غير المقروءة: {{count}}",
+    "dmsUnread_few": "الرسائل المباشرة غير المقروءة: {{count}}",
+    "dmsUnread_many": "الرسائل المباشرة غير المقروءة: {{count}}",
+    "dmsUnread_other": "الرسائل المباشرة غير المقروءة: {{count}}",
+    "joinRequests_zero": "طلبات الانضمام المعلّقة: {{count}}",
+    "joinRequests_one": "طلبات الانضمام المعلّقة: {{count}}",
+    "joinRequests_two": "طلبات الانضمام المعلّقة: {{count}}",
+    "joinRequests_few": "طلبات الانضمام المعلّقة: {{count}}",
+    "joinRequests_many": "طلبات الانضمام المعلّقة: {{count}}",
+    "joinRequests_other": "طلبات الانضمام المعلّقة: {{count}}",
+    "invites_zero": "الدعوات المعلّقة: {{count}}",
+    "invites_one": "الدعوات المعلّقة: {{count}}",
+    "invites_two": "الدعوات المعلّقة: {{count}}",
+    "invites_few": "الدعوات المعلّقة: {{count}}",
+    "invites_many": "الدعوات المعلّقة: {{count}}",
+    "invites_other": "الدعوات المعلّقة: {{count}}",
+    "someone": "شخص ما",
+    "updateAvailable": "يتوفر تحديث",
+    "updateAvailableTitle": "يتوفر تحديث: {{version}}",
+    "answerCall": "الرد على مكالمة من ‎@{{username}}",
+    "declineCall": "رفض المكالمة",
+    "dismissVoiceError": "إخفاء خطأ الصوت",
+    "dismissScreenShareError": "إخفاء خطأ مشاركة الشاشة",
+    "syncing": "جارٍ المزامنة…"
+  },
+  "shell": {
+    "dropFiles": "أفلت الملفات لإرسالها",
+    "voiceChannelFallback": "صوت",
+    "callChannel": "مكالمة"
+  },
+  "panel": {
+    "thread": "السلسلة",
+    "details": "التفاصيل",
+    "ariaLabel": "تفاصيل المحادثة",
+    "closeThread": "إغلاق لوحة السلسلة ({{shortcut}})",
+    "closeDetails": "إغلاق لوحة التفاصيل ({{shortcut}})"
+  },
+  "members": {
+    "count_zero": "الأعضاء — {{count}}",
+    "count_one": "الأعضاء — {{count}}",
+    "count_two": "الأعضاء — {{count}}",
+    "count_few": "الأعضاء — {{count}}",
+    "count_many": "الأعضاء — {{count}}",
+    "count_other": "الأعضاء — {{count}}",
+    "onlineCount_zero": "المتصلون — {{count}}",
+    "onlineCount_one": "المتصلون — {{count}}",
+    "onlineCount_two": "المتصلون — {{count}}",
+    "onlineCount_few": "المتصلون — {{count}}",
+    "onlineCount_many": "المتصلون — {{count}}",
+    "onlineCount_other": "المتصلون — {{count}}",
+    "empty": "لا يوجد أعضاء لعرضهم.",
+    "noneOnline": "لا أحد متصل.",
+    "you": "أنت",
+    "admin": "مشرف"
+  },
+  "media": {
+    "heading": "الوسائط",
+    "empty": "لم تُشارك أي وسائط بعد."
+  },
+  "thread": {
+    "loading": "جارٍ تحميل الردود…",
+    "empty": "لا توجد ردود بعد. ابدأ السلسلة بالأسفل.",
+    "placeholder": "رد في السلسلة…",
+    "messageDeleted": "حُذفت الرسالة",
+    "encrypted": "[مشفَّرة]"
+  },
+  "chat": {
+    "noSelection": "اختر قناة لبدء المراسلة"
+  },
+  "dmRequest": {
+    "heading": "طلب مراسلة",
+    "body": "يريد <name>{{name}}</name> إرسال رسائل إليك.",
+    "accept": "قبول",
+    "accepting": "جارٍ القبول…",
+    "block": "حظر",
+    "blocking": "جارٍ الحظر…"
+  },
+  "editBar": {
+    "heading": "تعديل الرسالة",
+    "cancel": "إلغاء التعديل",
+    "hint": "Enter للحفظ · Shift+Enter لسطر جديد · Esc للإلغاء"
+  },
+  "deleteChannel": {
+    "heading": "حذف القناة",
+    "cancel": "إلغاء الحذف",
+    "body": "ستُحذف هذه القناة وجميع رسائلها نهائيًا. ولا يمكن التراجع عن ذلك.",
+    "deleting": "جارٍ الحذف…"
+  },
+  "deleteMessage": {
+    "heading": "حذف الرسالة",
+    "moderateHeading": "إزالة الرسالة (مشرف)",
+    "body": "ستُحذف هذه الرسالة لدى الجميع، بمن فيهم من استلمها بالفعل.",
+    "moderateBody": "ستُزال هذه الرسالة ومرفقاتها لدى كل من في القناة.",
+    "cancel": "إلغاء الحذف",
+    "deleting": "جارٍ الحذف…",
+    "remove": "إزالة"
+  },
+  "update": {
+    "preparing": "جارٍ التحضير للتحديث…",
+    "checking": "جارٍ البحث عن تحديثات…",
+    "downloading": "جارٍ تنزيل التحديث…",
+    "downloadingProgress": "جارٍ تنزيل التحديث… {{progress}}%",
+    "installing": "جارٍ تثبيت التحديث…",
+    "relaunching": "جارٍ إعادة التشغيل…",
+    "failed": "فشل التحديث: {{error}}"
+  },
+  "home": {
+    "groups": "المجموعات",
+    "groupsDescription": "مجتمعات ومؤسسات وفرق ومحادثات جماعية طموحة أكثر من اللازم",
+    "dms": "الرسائل المباشرة",
+    "dmsDescription": "محادثات خاصة ومشفَّرة طرفًا إلى طرف مع الأفراد",
+    "invites": "الدعوات",
+    "noPendingInvites": "لا توجد دعوات قيد الانتظار",
+    "pending_zero": "{{count}} دعوة قيد الانتظار",
+    "pending_one": "{{count}} دعوة قيد الانتظار",
+    "pending_two": "{{count}} دعوتان قيد الانتظار",
+    "pending_few": "{{count}} دعوات قيد الانتظار",
+    "pending_many": "{{count}} دعوةً قيد الانتظار",
+    "pending_other": "{{count}} دعوة قيد الانتظار",
+    "join": "الانضمام إلى مجموعة",
+    "joinDescription": "استخدم رابط دعوة أو رمز انضمام",
+    "joinRequests": "طلبات الانضمام",
+    "logout": "تسجيل الخروج",
+    "exit": "خروج"
+  },
+  "titleBar": {
+    "minimize": "تصغير",
+    "maximize": "تكبير"
+  },
+  "terminal": {
+    "shellFailed": "تعذّر بدء الصدفة: {{error}}"
+  }
+}

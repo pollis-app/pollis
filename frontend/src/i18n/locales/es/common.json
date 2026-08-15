@@ -1,0 +1,82 @@
+{
+  "actions": {
+    "back": "Atrás",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "copy": "Copiar",
+    "delete": "Eliminar",
+    "goBack": "Volver",
+    "moreOptions": "Más opciones",
+    "save": "Guardar"
+  },
+  "states": {
+    "buttonLoading": "Cargando...",
+    "loading": "Cargando…"
+  },
+  "time": {
+    "today": "Hoy",
+    "yesterday": "Ayer"
+  },
+  "presence": {
+    "label": "Presencia: {{status}}",
+    "offline": "sin conexión",
+    "online": "en línea"
+  },
+  "list": {
+    "empty": "No hay elementos."
+  },
+  "grid": {
+    "empty": "Todavía no hay nadie."
+  },
+  "menu": {
+    "escHint": "Esc para volver",
+    "navigationLabel": "Menú de navegación",
+    "navigateHint": "navegar",
+    "selectHint": "Intro para seleccionar"
+  },
+  "media": {
+    "mute": "Silenciar",
+    "pause": "Pausar",
+    "play": "Reproducir",
+    "seek": "Avanzar el audio",
+    "skipBackward": "Retroceder 10 segundos",
+    "skipForward": "Avanzar 10 segundos",
+    "unmute": "Activar sonido",
+    "volume": "Volumen"
+  },
+  "composer": {
+    "addAttachment": "Añadir adjunto",
+    "allMentionHint": "avisa a todo el mundo en este canal",
+    "filePickerTitle": "Añadir archivos",
+    "inputLabel": "Campo de mensaje",
+    "placeholder": "Escribe un mensaje…",
+    "previewAlt": "Vista previa",
+    "removeAttachment": "Quitar {{name}}",
+    "send": "Enviar mensaje"
+  },
+  "mentions": {
+    "listLabel": "Sugerencias de menciones",
+    "matching": "Miembros que coinciden con <hl>@{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Avatar",
+    "loading": "Cargando",
+    "otpDigit": "Dígito {{index}} del código"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}}s",
+    "seconds_other": "{{count}}s",
+    "minutes_one": "{{count}}min",
+    "minutes_other": "{{count}}min",
+    "hours_one": "{{count}}h",
+    "hours_other": "{{count}}h",
+    "days_one": "{{count}}d",
+    "days_other": "{{count}}d",
+    "weeks_one": "{{count}}sem",
+    "weeks_other": "{{count}}sem",
+    "months_one": "{{count}}mes",
+    "months_other": "{{count}}mes",
+    "years_one": "{{count}}a",
+    "years_other": "{{count}}a"
+  }
+}

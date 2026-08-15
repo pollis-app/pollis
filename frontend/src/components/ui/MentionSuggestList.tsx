@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Avatar } from "./Avatar";
 import type { MentionCandidate } from "../../utils/mentions";
 
@@ -54,6 +55,7 @@ export const MentionSuggestList: React.FC<MentionSuggestListProps> = ({
   onSelect,
   onHover,
 }) => {
+  const { t } = useTranslation("common");
   const activeRef = useRef<HTMLButtonElement>(null);
 
   // Keep the highlighted row in view when the arrow keys walk past the edge
@@ -70,11 +72,18 @@ export const MentionSuggestList: React.FC<MentionSuggestListProps> = ({
     <div
       data-testid="mention-suggest-list"
       role="listbox"
-      aria-label="Mention suggestions"
+      aria-label={t("mentions.listLabel")}
       className="absolute bottom-full left-0 right-0 z-20 mb-1 mx-2 overflow-hidden rounded-panel border border-line bg-surface-raised"
     >
       <div className="px-3 py-1.5 border-b border-line text-2xs text-muted select-none">
-        Members matching <span className="text-fg">@{query}</span>
+        {/* `Trans` rather than two keys: the typed query is highlighted
+            mid-sentence, and a translator must be free to move it. */}
+        <Trans
+          i18nKey="mentions.matching"
+          ns="common"
+          values={{ query }}
+          components={{ hl: <span className="text-fg" /> }}
+        />
       </div>
       {/* Caps the list at roughly six rows (max-h-60 is 15rem, so it tracks
           the user's font setting rather than a pixel height). */}
@@ -97,7 +106,7 @@ export const MentionSuggestList: React.FC<MentionSuggestListProps> = ({
                 onSelect(c);
               }}
               onMouseEnter={() => onHover(i)}
-              className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-hover ${
+              className={`w-full flex items-center gap-2 px-3 py-1.5 text-start text-sm hover:bg-hover ${
                 isActive ? "bg-active" : ""
               }`}
             >

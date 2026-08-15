@@ -5,6 +5,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 
 // Reusable arrow-key-navigable 2D grid.
 //
@@ -90,9 +91,13 @@ export function NavigableGrid<T>({
   aspect = 16 / 9,
   gap = 12,
   autoFocus = true,
-  emptyLabel = "No one here yet.",
+  emptyLabel,
   testId,
 }: NavigableGridProps<T>) {
+  const { t } = useTranslation("common");
+  // Resolved at render, not as a default parameter, so the fallback follows
+  // a language change.
+  const resolvedEmptyLabel = emptyLabel ?? t("grid.empty");
   // Track the grid container via a state-backed ref callback rather than
   // useRef + useLayoutEffect with [] deps. The grid root is conditionally
   // rendered (empty-state vs items-state are different JSX subtrees), so
@@ -197,7 +202,7 @@ export function NavigableGrid<T>({
         style={{ color: "var(--c-text-dim)" }}
         data-testid={testId}
       >
-        {emptyLabel}
+        {resolvedEmptyLabel}
       </div>
     );
   }

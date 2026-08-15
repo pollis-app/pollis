@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { invoke } from "../bridge";
@@ -17,6 +18,7 @@ interface CreateGroupProps {
 }
 
 export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) => {
+  const { t } = useTranslation("channels");
   const { currentUser, addGroup, setSelectedGroupId } = appStore;
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -31,16 +33,16 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setError("Name is required");
+      setError(t("errors.nameRequired"));
       return;
     }
     const finalSlug = (slugEdited ? slug : deriveSlug(name)).trim();
     if (!finalSlug) {
-      setError("Slug must contain at least one letter or number");
+      setError(t("createGroup.slugInvalid"));
       return;
     }
     if (!currentUser) {
-      setError("User not found");
+      setError(t("errors.userNotFound"));
       return;
     }
     setIsLoading(true);
@@ -70,7 +72,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id) });
       onSuccess?.(group.id);
     } catch (err) {
-      setError(errorMessage(err, "Failed to create group"));
+      setError(errorMessage(err, t("createGroup.createFailed")));
     } finally {
       setIsLoading(false);
     }
@@ -79,7 +81,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
   if (!currentUser) {
     return (
       <div data-testid="create-group-no-user" className="flex items-center justify-center flex-1" style={{ background: 'var(--c-bg)' }}>
-        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Please sign in</p>
+        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>{t("errors.signInRequired")}</p>
       </div>
     );
   }
@@ -97,13 +99,13 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           className="w-full max-w-md flex flex-col gap-5"
         >
           <TextInput
-            label="Group Name"
+            label={t("createGroup.nameLabel")}
             value={name}
             onChange={(val) => {
               setName(val);
               if (!slugEdited) { setSlug(deriveSlug(val)); }
             }}
-            placeholder="Engineering"
+            placeholder={t("createGroup.namePlaceholder")}
             disabled={isLoading}
             id="create-group-name"
             required
@@ -112,22 +114,22 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           <input data-testid="create-group-name-input" type="hidden" value={name} readOnly />
 
           <TextInput
-            label="Slug"
+            label={t("createGroup.slugLabel")}
             value={slug}
             onChange={(val) => { setSlug(val.toLowerCase()); setSlugEdited(true); }}
-            placeholder="engineering"
+            placeholder={t("createGroup.slugPlaceholder")}
             disabled={isLoading}
             id="create-group-slug"
             required
-            description="Auto-generated from name. Letters, numbers, hyphens."
+            description={t("createGroup.slugDescription")}
           />
           <input data-testid="create-group-slug-input" type="hidden" value={slug} readOnly />
 
           <TextArea
-            label="Description"
+            label={t("createGroup.descriptionLabel")}
             value={description}
             onChange={setDescription}
-            placeholder="Optional description…"
+            placeholder={t("createGroup.descriptionPlaceholder")}
             disabled={isLoading}
             rows={3}
             id="create-group-description"
@@ -135,19 +137,19 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           <input data-testid="create-group-description-input" type="hidden" value={description} readOnly />
 
           <Switch
-            label="Create a default text channel"
+            label={t("createGroup.textChannelLabel")}
             checked={createTextChannel}
             onChange={setCreateTextChannel}
             disabled={isLoading}
-            description="Adds a #General text channel to the new group. You can always add channels later."
+            description={t("createGroup.textChannelDescription")}
           />
 
           <Switch
-            label="Create a default voice channel"
+            label={t("createGroup.voiceChannelLabel")}
             checked={createVoiceChannel}
             onChange={setCreateVoiceChannel}
             disabled={isLoading}
-            description="Adds a Voice Chat channel to the new group. You can always add channels later."
+            description={t("createGroup.voiceChannelDescription")}
           />
 
           {error && (
@@ -160,10 +162,10 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
             data-testid="create-group-submit-button"
             type="submit"
             isLoading={isLoading}
-            loadingText="Creating…"
+            loadingText={t("createGroup.submitting")}
             className="w-full"
           >
-            Create Group
+            {t("createGroup.submit")}
           </Button>
         </form>
       </div>

@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { JoinByInvite } from "./JoinByInvite";
 
@@ -7,8 +8,10 @@ import { JoinByInvite } from "./JoinByInvite";
  * surface is the `/invite/$token` deep link.
  */
 export const JoinByInvitePage: React.FC = () => {
+  const { t } = useTranslation("channels");
+
   return (
-    <PageShell title="Join a Group">
+    <PageShell title={t("joinByInvite.pageTitle")}>
       <JoinByInvite />
     </PageShell>
   );

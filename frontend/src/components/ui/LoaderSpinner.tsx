@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 
 /**
  * Props for the LoadingSpinner component.
@@ -64,6 +65,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   size = "base",
   className = "",
 }) => {
+  const { t } = useTranslation("common");
   const sizeClasses = {
     sm: "text-xs",
     base: "text-2xl",
@@ -74,7 +76,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
     <span
       className={`loader-spinner inline-block font-mono ${sizeClasses[size]} ${className}`}
       style={{ color: "var(--c-accent)" }}
-      aria-label="Loading"
+      aria-label={t("a11y.loading")}
     />
   );
 };

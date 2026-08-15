@@ -1,0 +1,96 @@
+{
+  "actions": {
+    "back": "Назад",
+    "cancel": "Отмена",
+    "close": "Закрыть",
+    "copy": "Копировать",
+    "delete": "Удалить",
+    "goBack": "Назад",
+    "moreOptions": "Ещё",
+    "save": "Сохранить"
+  },
+  "states": {
+    "buttonLoading": "Загрузка...",
+    "loading": "Загрузка…"
+  },
+  "time": {
+    "today": "Сегодня",
+    "yesterday": "Вчера"
+  },
+  "presence": {
+    "label": "Статус: {{status}}",
+    "offline": "не в сети",
+    "online": "в сети"
+  },
+  "list": {
+    "empty": "Ничего нет."
+  },
+  "grid": {
+    "empty": "Здесь пока никого нет."
+  },
+  "menu": {
+    "escHint": "Esc — назад",
+    "navigationLabel": "Меню навигации",
+    "navigateHint": "навигация",
+    "selectHint": "Enter — выбрать"
+  },
+  "media": {
+    "mute": "Выключить звук",
+    "pause": "Пауза",
+    "play": "Воспроизвести",
+    "seek": "Перемотка",
+    "skipBackward": "Назад на 10 секунд",
+    "skipForward": "Вперёд на 10 секунд",
+    "unmute": "Включить звук",
+    "volume": "Громкость"
+  },
+  "composer": {
+    "addAttachment": "Добавить вложение",
+    "allMentionHint": "уведомит всех в этом канале",
+    "filePickerTitle": "Добавить файлы",
+    "inputLabel": "Поле ввода сообщения",
+    "placeholder": "Введите сообщение…",
+    "previewAlt": "Предпросмотр",
+    "removeAttachment": "Убрать {{name}}",
+    "send": "Отправить сообщение"
+  },
+  "mentions": {
+    "listLabel": "Подсказки упоминаний",
+    "matching": "Участники по запросу <hl>@{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Аватар",
+    "loading": "Загрузка",
+    "otpDigit": "Цифра кода {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} с",
+    "seconds_few": "{{count}} с",
+    "seconds_many": "{{count}} с",
+    "seconds_other": "{{count}} с",
+    "minutes_one": "{{count}} мин",
+    "minutes_few": "{{count}} мин",
+    "minutes_many": "{{count}} мин",
+    "minutes_other": "{{count}} мин",
+    "hours_one": "{{count}} ч",
+    "hours_few": "{{count}} ч",
+    "hours_many": "{{count}} ч",
+    "hours_other": "{{count}} ч",
+    "days_one": "{{count}} д",
+    "days_few": "{{count}} д",
+    "days_many": "{{count}} д",
+    "days_other": "{{count}} д",
+    "weeks_one": "{{count}} нед",
+    "weeks_few": "{{count}} нед",
+    "weeks_many": "{{count}} нед",
+    "weeks_other": "{{count}} нед",
+    "months_one": "{{count}} мес",
+    "months_few": "{{count}} мес",
+    "months_many": "{{count}} мес",
+    "months_other": "{{count}} мес",
+    "years_one": "{{count}} год",
+    "years_few": "{{count}} года",
+    "years_many": "{{count}} лет",
+    "years_other": "{{count}} года"
+  }
+}

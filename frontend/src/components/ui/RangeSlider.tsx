@@ -40,7 +40,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
       >
         {label}
         <span
-          className="inline-block ml-2 px-1.5 py-0.5 font-mono font-bold text-xs"
+          className="inline-block ms-2 px-1.5 py-0.5 font-mono font-bold text-xs"
           style={{
             background: "var(--c-active)",
             border: "1px solid var(--c-border-active)",

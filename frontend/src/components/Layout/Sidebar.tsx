@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import {
   ChevronDown,
@@ -40,10 +41,12 @@ const iconProps = {
   className: "size-[0.933rem] shrink-0",
 } as const;
 
-// Per-depth left padding (10 + indent*16 px @ 15px base ⇒ rem, scalable).
+// Per-depth LEADING padding (10 + indent*16 px @ 15px base ⇒ rem, scalable).
+// Logical (`ps-`), not `pl-`: the indent scheme is the reading-order nesting
+// of the tree, so under `dir=rtl` it has to grow from the right edge.
 // indent is only ever 1 (group / dm / settings) or 2 (channel).
 const indentPadClass = (indent: number): string =>
-  indent >= 2 ? "pl-[2.8rem]" : "pl-[1.733rem]";
+  indent >= 2 ? "ps-[2.8rem]" : "ps-[1.733rem]";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -51,6 +54,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) => {
+  const { t } = useTranslation("nav");
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
@@ -144,24 +148,25 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 
   const isOnSettingsHub = pathname === "/settings";
   const settingsItems = [
-    { id: "saved", label: "Saved", icon: <Bookmark {...iconProps} />, to: "/saved" as const, isActive: pathname === "/saved" },
-    { id: "preferences", label: "Preferences", icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
-    { id: "user", label: "User Settings", icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
-    { id: "voice-settings", label: "Voice & Video", icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
-    { id: "security", label: "Security", icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || pathname.startsWith("/security/") },
-    { id: "shortcuts", label: "Key Bindings", icon: <Keyboard {...iconProps} />, to: "/shortcuts" as const, isActive: pathname === "/shortcuts" },
-    { id: "update", label: "Software Update", icon: <Download {...iconProps} />, to: "/update" as const, isActive: pathname === "/update" },
+    { id: "saved", label: t("sidebar.saved"), icon: <Bookmark {...iconProps} />, to: "/saved" as const, isActive: pathname === "/saved" },
+    { id: "preferences", label: t("sidebar.preferences"), icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
+    { id: "user", label: t("sidebar.userSettings"), icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
+    { id: "voice-settings", label: t("sidebar.voiceAndVideo"), icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
+    { id: "security", label: t("sidebar.security"), icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || pathname.startsWith("/security/") },
+    { id: "shortcuts", label: t("sidebar.keyBindings"), icon: <Keyboard {...iconProps} />, to: "/shortcuts" as const, isActive: pathname === "/shortcuts" },
+    { id: "update", label: t("sidebar.softwareUpdate"), icon: <Download {...iconProps} />, to: "/update" as const, isActive: pathname === "/update" },
   ];
   const isOnAnySettings = isOnSettingsHub || settingsItems.some((s) => s.isActive);
 
   return (
     <aside
       data-testid="sidebar"
-      className="flex w-[var(--side-w)] shrink-0 flex-col border-r border-line bg-surface font-mono"
+      className="flex w-[var(--side-w)] shrink-0 flex-col border-e border-line bg-surface font-mono"
     >
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <SectionHeader
-          label="groups"
+          testId="groups"
+          label={t("sidebar.groups")}
           icon={<Users {...iconProps} />}
           isActive={isOnGroups}
           onClick={() => router.navigate({ to: "/groups" })}
@@ -182,7 +187,9 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                   chevron={{
                     isCollapsed,
                     onToggle: () => toggleGroup(group.id),
-                    ariaLabel: isCollapsed ? `Expand ${group.name}` : `Collapse ${group.name}`,
+                    ariaLabel: isCollapsed
+                      ? t("sidebar.expandGroup", { name: group.name })
+                      : t("sidebar.collapseGroup", { name: group.name }),
                   }}
                   label={group.name}
                   badge={isCollapsed && groupUnread > 0 ? groupUnread : null}
@@ -228,7 +235,8 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         </ul>
 
         <SectionHeader
-          label="dms"
+          testId="dms"
+          label={t("sidebar.dms")}
           icon={<MessageCircle {...iconProps} />}
           isActive={isOnDms}
           onClick={() => router.navigate({ to: "/dms" })}
@@ -247,7 +255,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
             const trailing = verification?.key_changed ? (
               <span
                 data-testid={`dm-verification-changed-${c.id}`}
-                title="Identity key changed — re-verify"
+                title={t("sidebar.keyChanged")}
                 className="inline-flex shrink-0 text-[#f0b429]"
               >
                 <ShieldAlert {...iconProps} />
@@ -255,7 +263,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
             ) : verification?.verified ? (
               <span
                 data-testid={`dm-verification-verified-${c.id}`}
-                title="Verified contact"
+                title={t("sidebar.verified")}
                 className="inline-flex shrink-0 text-accent"
               >
                 <ShieldCheck {...iconProps} />
@@ -276,7 +284,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                       userId={c.user2_id ?? null}
                       avatarKey={c.user2_avatar_url}
                       size={20}
-                      alt={`${c.user2_identifier} avatar`}
+                      alt={t("sidebar.dmAvatarAlt", { name: c.user2_identifier })}
                       testId={`sidebar-dm-avatar-${c.id}`}
                     />
                   ) : (
@@ -297,7 +305,8 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         </ul>
 
         <SectionHeader
-          label="account"
+          testId="account"
+          label={t("sidebar.account")}
           icon={<SettingsIcon {...iconProps} />}
           isActive={isOnAnySettings}
           onClick={() => router.navigate({ to: "/settings" })}
@@ -325,11 +334,11 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
           type="button"
           data-testid="sidebar-close"
           onClick={onToggle}
-          aria-label={`Close sidebar (${toggleSidebarLabel})`}
-          title={`Close sidebar (${toggleSidebarLabel})`}
-          className="flex shrink-0 items-center gap-2 px-2.5 min-h-bar border-t border-line text-xs text-left cursor-pointer transition-colors text-muted hover:text-fg"
+          aria-label={t("sidebar.close", { shortcut: toggleSidebarLabel })}
+          title={t("sidebar.close", { shortcut: toggleSidebarLabel })}
+          className="flex shrink-0 items-center gap-2 px-2.5 min-h-bar border-t border-line text-xs text-start cursor-pointer transition-colors text-muted hover:text-fg"
         >
-          <span className="flex-1">Close</span>
+          <span className="flex-1">{t("common:actions.close")}</span>
           <kbd
             aria-hidden="true"
             className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-2xs leading-[1.2]"
@@ -343,6 +352,9 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 });
 
 interface SectionHeaderProps {
+  /** Stable id for the `data-testid`. Deliberately separate from `label`,
+      which is translated and must never move a test selector. */
+  testId: string;
   label: string;
   icon: React.ReactNode;
   isActive: boolean;
@@ -354,10 +366,10 @@ interface SectionHeaderProps {
   borderedBottom?: boolean;
 }
 
-const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, onClick, badge, bordered, borderedBottom }) => {
+const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isActive, onClick, badge, bordered, borderedBottom }) => {
   const cls = [
     "sticky top-0 z-[1] flex w-full h-bar items-center gap-1.5 px-2.5",
-    "uppercase tracking-[0.08em] text-left cursor-pointer",
+    "uppercase tracking-[0.08em] text-start cursor-pointer",
     "transition-colors duration-75 bg-surface hover:bg-hover",
     isActive ? "text-accent" : "text-muted",
     bordered ? "mt-1 border-t border-line" : "",
@@ -370,7 +382,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       type="button"
       onClick={onClick}
       className={cls}
-      data-testid={`sidebar-row-${label.toLowerCase().replace(/\s+/g, "-")}`}
+      data-testid={`sidebar-row-${testId}`}
     >
       {icon}
       <span className="flex-1 leading-[100%] text-[0.8rem]">{label}</span>
@@ -402,7 +414,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
   return (
     <div
       data-active={isActive ? "true" : "false"}
-      className={`sidebar-row flex w-full items-stretch border-l-2 transition-colors ${
+      className={`sidebar-row flex w-full items-stretch border-s-2 transition-colors ${
         isActive
           ? "bg-hover border-accent text-accent"
           : "bg-transparent border-transparent text-fg hover:bg-hover"
@@ -417,20 +429,27 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
             chevron.onToggle();
           }}
           aria-label={chevron.ariaLabel}
-          className={`inline-flex items-center pr-0 cursor-pointer text-inherit ${indentPadClass(indent)}`}
+          className={`inline-flex items-center pe-0 cursor-pointer text-inherit ${indentPadClass(indent)}`}
         >
-          {chevron.isCollapsed ? <ChevronRight {...iconProps} /> : <ChevronDown {...iconProps} />}
+          {chevron.isCollapsed ? (
+            <ChevronRight {...iconProps} className={`${iconProps.className} rtl-mirror`} />
+          ) : (
+            <ChevronDown {...iconProps} />
+          )}
         </button>
       )}
       <button
         type="button"
         onClick={onClick}
-        className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pr-2.5 text-base text-left cursor-pointer text-inherit ${
-          chevron ? "pl-[0.4rem]" : indentPadClass(indent)
+        className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pe-2.5 text-base text-start cursor-pointer text-inherit ${
+          chevron ? "ps-[0.4rem]" : indentPadClass(indent)
         }`}
       >
         {leading}
-        <span className="flex-1 truncate">{label}</span>
+        {/* Group / channel / DM names are user-generated: isolate them so a
+            Latin name in an Arabic sidebar (or the reverse) cannot drag the
+            trailing badge to the wrong end of the row. */}
+        <bdi className="flex-1 truncate">{label}</bdi>
         {trailing}
         {badge != null && <UnreadBadge count={badge} />}
       </button>

@@ -1,5 +1,6 @@
 import { errorMessage } from "../../utils/errorMessage";
 import React, { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
@@ -47,6 +48,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   onCancel,
   onResetComplete,
 }) => {
+  const { t } = useTranslation("auth");
   const [state, setState] = useState<GatePhase>({ phase: "choose" });
   const [isStarting, setIsStarting] = useState(false);
   const pollTimerRef = useRef<number | null>(null);
@@ -112,7 +114,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
       // (matching the other panes) so the real backend reason surfaces instead
       // of a generic message. This also lets the session-error routing in the
       // "error" pane detect "sign in again" cases.
-      const message = errorMessage(err) || "Failed to start enrollment";
+      const message = errorMessage(err) || t("enroll.startFailed");
       setState({ phase: "error", message });
     } finally {
       setIsStarting(false);
@@ -172,13 +174,13 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
                 className="text-sm font-mono uppercase tracking-wider mb-8"
                 style={{ color: "var(--c-accent)", letterSpacing: "0.15em" }}
               >
-                New device
+                {t("enroll.badge")}
               </p>
               <h1
                 className="text-base font-mono font-bold mt-1 mb-8"
                 style={{ color: "var(--c-text)" }}
               >
-                Authorize this device to add it to your account
+                {t("enroll.title")}
               </h1>
             </div>
 
@@ -219,9 +221,9 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
 
             {state.phase === "rejected" && (
               <ResultPane
-                heading="Request rejected"
-                body="One of your other devices rejected this enrollment. If that wasn't you, change your email password immediately."
-                actionLabel="Try again"
+                heading={t("enroll.rejectedHeading")}
+                body={t("enroll.rejectedBody")}
+                actionLabel={t("enroll.tryAgain")}
                 onAction={restart}
                 onCancel={onCancel}
                 tone="error"
@@ -230,9 +232,9 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
 
             {state.phase === "expired" && (
               <ResultPane
-                heading="Request expired"
-                body="The 10-minute approval window passed. You can start a new request."
-                actionLabel="Try again"
+                heading={t("enroll.expiredHeading")}
+                body={t("enroll.expiredBody")}
+                actionLabel={t("enroll.tryAgain")}
                 onAction={restart}
                 onCancel={onCancel}
                 tone="muted"
@@ -248,9 +250,9 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
               const needsResignin = /session|sign in/i.test(state.message);
               return (
                 <ResultPane
-                  heading="Something went wrong"
+                  heading={t("enroll.errorHeading")}
                   body={state.message}
-                  actionLabel={needsResignin ? "Sign in again" : "Try again"}
+                  actionLabel={needsResignin ? t("enroll.signInAgain") : t("enroll.tryAgain")}
                   onAction={needsResignin ? onCancel : restart}
                   onCancel={onCancel}
                   tone="error"
@@ -271,64 +273,67 @@ const ChoosePane: React.FC<{
   onUseSecretKey: () => void;
   onCancel: () => void;
   isStarting: boolean;
-}> = ({ onStartApproval, onUseSecretKey, onCancel, isStarting }) => (
-  <div className="flex flex-col gap-3 mb-4">
-    <Button
-      data-testid="enroll-via-approval-button"
-      onClick={onStartApproval}
-      isLoading={isStarting}
-      loadingText="Requesting…"
-      className="w-full mb-2"
-    >
-      Approve from another device
-    </Button>
-    <p
-      className="text-xs font-mono mb-4"
-      style={{ color: "var(--c-text-muted)" }}
-    >
-      You'll see a verification code here. Open Pollis on a device you're already
-      signed in to and confirm the code.
-    </p>
-
-    <div
-      style={{
-        borderTop: "1px solid var(--c-border)",
-        paddingTop: "1rem",
-      }}
-    >
+}> = ({ onStartApproval, onUseSecretKey, onCancel, isStarting }) => {
+  const { t } = useTranslation("auth");
+  return (
+    <div className="flex flex-col gap-3 mb-4">
       <Button
-        data-testid="enroll-via-secret-key-button"
-        onClick={onUseSecretKey}
-        variant="secondary"
-        className="w-full mt-4"
+        data-testid="enroll-via-approval-button"
+        onClick={onStartApproval}
+        isLoading={isStarting}
+        loadingText={t("enroll.requesting")}
+        className="w-full mb-2"
       >
-        Use my Secret Key instead
+        {t("enroll.approveFromDevice")}
       </Button>
       <p
-        className="text-xs font-mono mt-4"
+        className="text-xs font-mono mb-4"
         style={{ color: "var(--c-text-muted)" }}
       >
-        For when you don't have any other Pollis device with you.
+        {t("enroll.approveHint")}
       </p>
-    </div>
 
-    <Button
-      data-testid="enrollment-cancel-button"
-      onClick={onCancel}
-      variant="primary"
-      size="sm"
-      className="w-full mt-12"
-    >
-      Cancel and sign in as someone else
-    </Button>
-  </div>
-);
+      <div
+        style={{
+          borderTop: "1px solid var(--c-border)",
+          paddingTop: "1rem",
+        }}
+      >
+        <Button
+          data-testid="enroll-via-secret-key-button"
+          onClick={onUseSecretKey}
+          variant="secondary"
+          className="w-full mt-4"
+        >
+          {t("enroll.useSecretKey")}
+        </Button>
+        <p
+          className="text-xs font-mono mt-4"
+          style={{ color: "var(--c-text-muted)" }}
+        >
+          {t("enroll.useSecretKeyHint")}
+        </p>
+      </div>
+
+      <Button
+        data-testid="enrollment-cancel-button"
+        onClick={onCancel}
+        variant="primary"
+        size="sm"
+        className="w-full mt-12"
+      >
+        {t("enroll.cancelAndSwitch")}
+      </Button>
+    </div>
+  );
+};
 
 const AwaitingApprovalPane: React.FC<{
   code: string;
   expiresAt: string;
   onCancel: () => void;
 }> = ({ code, expiresAt, onCancel }) => {
+  const { t } = useTranslation("auth");
   const [secondsLeft, setSecondsLeft] = useState(() => secondsUntil(expiresAt));
   useEffect(() => {
     const t = window.setInterval(() => {
@@ -340,8 +345,7 @@ const AwaitingApprovalPane: React.FC<{
   return (
     <div className="flex flex-col gap-4">
       <p className="text-xs font-mono" style={{ color: "var(--c-text)" }}>
-        Open Pollis on another device that's already signed in. You'll see a
-        prompt asking you to confirm this code:
+        {t("enroll.awaitingIntro")}
       </p>
       <div
         data-testid="verification-code-display"
@@ -360,8 +364,9 @@ const AwaitingApprovalPane: React.FC<{
       <div className="flex items-center gap-2 justify-center">
         <LoadingSpinner size="sm" />
         <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-          Waiting for approval…{" "}
-          {secondsLeft > 0 ? `(${formatSecondsLeft(secondsLeft)})` : "(expired)"}
+          {secondsLeft > 0
+            ? t("enroll.awaitingCountdown", { time: formatCountdown(secondsLeft) })
+            : t("enroll.awaitingExpired")}
         </span>
       </div>
       <Button
@@ -370,7 +375,7 @@ const AwaitingApprovalPane: React.FC<{
         variant="ghost"
         className="w-full"
       >
-        Cancel
+        {t("common:actions.cancel")}
       </Button>
     </div>
   );
@@ -382,6 +387,7 @@ const SecretKeyFallbackPane: React.FC<{
   onBack: () => void;
   onWantReset: () => void;
 }> = ({ userId, onRecovered, onBack, onWantReset }) => {
+  const { t } = useTranslation("auth");
   const [value, setValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -398,7 +404,7 @@ const SecretKeyFallbackPane: React.FC<{
     } catch (err) {
       // Surface the real backend reason (Tauri rejects with a string, not an
       // Error) instead of a generic "Recovery failed".
-      const message = errorMessage(err) || "Recovery failed";
+      const message = errorMessage(err) || t("recover.failed");
       setError(message);
     } finally {
       setIsLoading(false);
@@ -411,17 +417,17 @@ const SecretKeyFallbackPane: React.FC<{
         className="text-xs font-mono"
         style={{ color: "var(--c-text)", lineHeight: 1.6 }}
       >
-        Paste the Secret Key from your Emergency Kit.
+        {t("recover.intro")}
       </p>
       <p
         className="text-xs font-mono mb-2"
         style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
       >
-        Recovery can take a few seconds while this device is registered.
+        {t("recover.hint")}
       </p>
       <TextInput
         data-testid="secret-key-recovery-input"
-        label="Secret Key"
+        label={t("recover.inputLabel")}
         value={value.trim()}
         onChange={(v) => {
           setValue(v);
@@ -437,10 +443,10 @@ const SecretKeyFallbackPane: React.FC<{
         onClick={handleRecover}
         disabled={!value.trim()}
         isLoading={isLoading}
-        loadingText="Recovering…"
+        loadingText={t("recover.recovering")}
         className="w-full mb-4"
       >
-        Recover account
+        {t("recover.submit")}
       </Button>
       <Button
         data-testid="secret-key-fallback-back-button"
@@ -449,7 +455,7 @@ const SecretKeyFallbackPane: React.FC<{
         disabled={isLoading}
         className="w-full"
       >
-        Back
+        {t("common:actions.back")}
       </Button>
 
       <div
@@ -464,7 +470,7 @@ const SecretKeyFallbackPane: React.FC<{
           disabled={isLoading}
           className="text-xs font-mono"
         >
-          I've lost my Secret Key — reset my account
+          {t("recover.wantReset")}
         </Button>
       </div>
     </div>
@@ -477,6 +483,7 @@ const ResetConfirmPane: React.FC<{
   onResetComplete: (newSecretKey: string) => void;
   onBack: () => void;
 }> = ({ userId, expectedEmail, onResetComplete, onBack }) => {
+  const { t } = useTranslation("auth");
   const [typedEmail, setTypedEmail] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -498,7 +505,7 @@ const ResetConfirmPane: React.FC<{
       // Tauri rejects with a serialized string, not an Error — fall back to
       // String(err) (matching PinEntryScreen) so the real backend reason
       // surfaces instead of a generic "Reset failed".
-      const message = errorMessage(err) || "Reset failed";
+      const message = errorMessage(err) || t("reset.failed");
       setError(message);
     } finally {
       setIsLoading(false);
@@ -512,29 +519,25 @@ const ResetConfirmPane: React.FC<{
           className="text-sm font-mono font-bold"
           style={{ color: "var(--c-danger)" }}
         >
-          Reset this account
+          {t("reset.title")}
         </h2>
         <p
           className="text-xs mt-2 font-mono"
           style={{ color: "var(--c-text)", lineHeight: 1.6 }}
         >
-          Your messages on this device will be wiped for good. You'll
-          leave your groups (admins can invite you back) and your other
-          devices will be signed out.
+          {t("reset.body")}
         </p>
         <p
           className="text-xs mt-2 font-mono mb-4"
           style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
         >
-          You'll keep your email and username, and a new Secret Key will
-          be shown once. Save it somewhere safe — lose it and the only
-          way back in is to do all of this again.
+          {t("reset.keepNote")}
         </p>
       </div>
 
       <Checkbox
         data-testid="reset-acknowledge-checkbox"
-        label="I understand that all of my messages will be removed from this device and I will be removed from all of my groups and conversations."
+        label={t("reset.acknowledge")}
         checked={acknowledged}
         onChange={setAcknowledged}
         disabled={isLoading}
@@ -543,7 +546,7 @@ const ResetConfirmPane: React.FC<{
 
       <TextInput
         data-testid="reset-confirm-email-input"
-        label={`Type your email to confirm`}
+        label={t("reset.emailLabel")}
         value={typedEmail}
         onChange={(v) => {
           setTypedEmail(v);
@@ -559,11 +562,11 @@ const ResetConfirmPane: React.FC<{
         onClick={handleReset}
         disabled={!canSubmit}
         isLoading={isLoading}
-        loadingText="Resetting…"
+        loadingText={t("reset.resetting")}
         variant="danger"
         className="w-full mt-2"
       >
-        Yes, reset my account
+        {t("reset.submit")}
       </Button>
       <Button
         data-testid="reset-back-button"
@@ -572,7 +575,7 @@ const ResetConfirmPane: React.FC<{
         disabled={isLoading}
         className="w-full"
       >
-        Back
+        {t("common:actions.back")}
       </Button>
     </div>
   );
@@ -585,39 +588,42 @@ const ResultPane: React.FC<{
   onAction: () => void;
   onCancel: () => void;
   tone: "error" | "muted";
-}> = ({ heading, body, actionLabel, onAction, onCancel, tone }) => (
-  <div className="flex flex-col gap-4">
-    <div>
-      <h2
-        className="text-sm font-mono font-bold"
-        style={{ color: tone === "error" ? "var(--c-danger)" : "var(--c-text)" }}
+}> = ({ heading, body, actionLabel, onAction, onCancel, tone }) => {
+  const { t } = useTranslation("auth");
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h2
+          className="text-sm font-mono font-bold"
+          style={{ color: tone === "error" ? "var(--c-danger)" : "var(--c-text)" }}
+        >
+          {heading}
+        </h2>
+        <p
+          className="text-xs mt-2 font-mono"
+          style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
+        >
+          {body}
+        </p>
+      </div>
+      <Button
+        data-testid="enrollment-result-action-button"
+        onClick={onAction}
+        className="w-full"
       >
-        {heading}
-      </h2>
-      <p
-        className="text-xs mt-2 font-mono"
-        style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
+        {actionLabel}
+      </Button>
+      <Button
+        data-testid="enrollment-result-cancel-button"
+        onClick={onCancel}
+        variant="ghost"
+        className="w-full"
       >
-        {body}
-      </p>
+        {t("enroll.signInAsSomeoneElse")}
+      </Button>
     </div>
-    <Button
-      data-testid="enrollment-result-action-button"
-      onClick={onAction}
-      className="w-full"
-    >
-      {actionLabel}
-    </Button>
-    <Button
-      data-testid="enrollment-result-cancel-button"
-      onClick={onCancel}
-      variant="ghost"
-      className="w-full"
-    >
-      Sign in as someone else
-    </Button>
-  </div>
-);
+  );
+};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -627,8 +633,10 @@ function secondsUntil(rfc3339: string): number {
   return Math.max(0, Math.floor((target - now) / 1000));
 }
 
-function formatSecondsLeft(s: number): string {
+// Clock-style M:SS. The surrounding copy ("… left") lives in the catalogue so
+// translators can put the unit wherever their language needs it.
+function formatCountdown(s: number): string {
   const m = Math.floor(s / 60);
   const r = s % 60;
-  return `${m}:${r.toString().padStart(2, "0")} left`;
+  return `${m}:${r.toString().padStart(2, "0")}`;
 }

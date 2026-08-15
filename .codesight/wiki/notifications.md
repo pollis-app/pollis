@@ -88,6 +88,8 @@ In `useLiveKitRealtime.ts`, the `new_message` handler categorizes:
 
 ```ts
 if (isOwnMessage || isSelected || !incomingId) return;
+// `title` / `body` fall back to `chat:notify.newMessageTitle` / `.newMessageBody`
+// when the room name or preview is unavailable — see the localization note below.
 notify(conversationId ? 'direct_message' : 'channel_message', { roomId, title, body, senderUsername });
 ```
 
@@ -105,12 +107,22 @@ The membership handler reads the `kind` discriminator (see below):
 if (event.kind === 'invite') {
   notify('group_invite', {
     roomId: event.conversation_id,
-    title: 'New group invite',
-    body: `${event.inviter_username} invited you to ${event.group_name}`,
-    senderUsername: event.inviter_username ?? 'Someone',
+    title: i18n.t('channels:notify.inviteTitle'),
+    body: inviteBody,
+    senderUsername: event.inviter_username ?? i18n.t('nav:statusBar.someone'),
   });
 }
 ```
+
+**Notification copy is localized (#855).** Titles and bodies come from the
+translation catalogues via `i18n.t()` rather than string literals — the direct
+`i18n` instance, not `useTranslation`, because a notification is produced once
+and never re-rendered (see `frontend/src/i18n/README.md`). The invite body in
+particular is no longer a template literal: `${inviter} invited you${groupPart}`
+became three complete-sentence keys chosen by an explicit branch
+(`channels:notify.inviteBody` / `inviteBodyToGroup` / `inviteBodyUnknown`),
+because a sentence assembled from fragments cannot be translated into a
+language that orders those fragments differently.
 
 `group_invite`'s `alert` needs a `senderUsername` to fire the status-bar alert (the gate is `alert && roomId && senderUsername`). Both the invite and DM-request pings carry the counterparty's public username on the wire — see the payload note below. Before #396 the DM-request alert showed a `'New DM'` placeholder and group invites raised no status-bar alert at all.
 

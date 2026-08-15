@@ -8,6 +8,7 @@
 // start straight away (Discord/Zoom do the same) — the picker only earns its
 // keep when there's a choice to make.
 
+import i18n from "../i18n";
 import { appStore } from "../stores/appStore";
 import { cameraSession, friendlyCameraError } from "./cameraSession";
 import type { CameraState } from "../types/voice-state";
@@ -40,7 +41,7 @@ export function toggleCamera(camera: CameraState): void {
     try {
       const list = await cameraSession.listDevices();
       if (list.cameras.length === 0) {
-        appStore.cameraFailed("No webcam was found.");
+        appStore.cameraFailed(i18n.t("voice:cameraError.noCamera"));
         return;
       }
       if (list.cameras.length === 1) {

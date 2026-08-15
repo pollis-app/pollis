@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { useAllPendingJoinRequests, useApproveJoinRequest, useRejectJoinRequest } from "../hooks/queries";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
@@ -6,6 +7,7 @@ import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
 
 export const AllJoinRequestsPage: React.FC = () => {
+  const { t } = useTranslation("channels");
   const { data: allRequests = [], isLoading } = useAllPendingJoinRequests();
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const approveMutation = useApproveJoinRequest();
@@ -52,7 +54,7 @@ export const AllJoinRequestsPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <PageShell title="Join Requests">
+      <PageShell title={t("joinRequests.allPageTitle")}>
         <div
           data-testid="all-join-requests-page"
           className="flex-1 flex flex-col overflow-auto"
@@ -60,7 +62,7 @@ export const AllJoinRequestsPage: React.FC = () => {
         >
           <div className="px-4 py-4">
             <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-              Loading…
+              {t("common:states.loading")}
             </p>
           </div>
         </div>
@@ -70,15 +72,15 @@ export const AllJoinRequestsPage: React.FC = () => {
 
   if (groupIds.length === 0) {
     return (
-      <PageShell title="Join Requests">
+      <PageShell title={t("joinRequests.allPageTitle")}>
         <div
           data-testid="all-join-requests-page"
           className="flex-1 flex flex-col overflow-auto"
           style={{ background: "var(--c-bg)" }}
         >
-          <div className="flex-1" style={{ paddingTop: "1rem", paddingLeft: "1rem", paddingRight: "1rem" }}>
-            <p className="text-xs font-mono text-left" style={{ color: "var(--c-text-dim)" }}>
-              No pending join requests.
+          <div className="flex-1" style={{ paddingTop: "1rem", paddingInline: "1rem" }}>
+            <p className="text-xs font-mono text-start" style={{ color: "var(--c-text-dim)" }}>
+              {t("joinRequests.allEmpty")}
             </p>
           </div>
         </div>
@@ -87,7 +89,7 @@ export const AllJoinRequestsPage: React.FC = () => {
   }
 
   return (
-    <PageShell title="Join Requests">
+    <PageShell title={t("joinRequests.allPageTitle")}>
       <div
         data-testid="all-join-requests-page"
         className="flex-1 flex flex-col overflow-auto"
@@ -101,7 +103,11 @@ export const AllJoinRequestsPage: React.FC = () => {
             <div key={groupId} className="flex flex-col">
               <div className="px-4 py-4">
                 <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
-                  Pending requests to join <span style={{ color: "var(--c-accent)" }}>{groupName}</span>
+                  <Trans
+                    i18nKey="channels:joinRequests.pendingFor"
+                    values={{ name: groupName }}
+                    components={{ accent: <span style={{ color: "var(--c-accent)" }} /> }}
+                  />
                 </p>
               </div>
 
@@ -124,7 +130,7 @@ export const AllJoinRequestsPage: React.FC = () => {
                     disabled={approveMutation.isPending || rejectMutation.isPending}
                     variant="primary"
                   >
-                    approve
+                    {t("joinRequests.approve")}
                   </Button>,
                   <Button size="sm"
                     data-testid={`reject-request-${req.id}`}
@@ -132,7 +138,7 @@ export const AllJoinRequestsPage: React.FC = () => {
                     disabled={approveMutation.isPending || rejectMutation.isPending}
                     variant="secondary"
                   >
-                    reject
+                    {t("joinRequests.reject")}
                   </Button>,
                 ]}
               />

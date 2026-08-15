@@ -1,4 +1,5 @@
 import React from "react";
+import { Trans, useTranslation } from "react-i18next";
 
 import { Button } from "../ui/Button";
 import { useShortcutLabel } from "../../keyboard";
@@ -9,9 +10,11 @@ interface VoiceInputModeSelectProps {
   onChange: (mode: VoiceInputMode) => void;
 }
 
-const MODE_OPTIONS: { mode: VoiceInputMode; label: string }[] = [
-  { mode: "voice_activity", label: "Voice Activity" },
-  { mode: "push_to_talk", label: "Push to Talk" },
+// The mode values are wire values (persisted in preferences and sent to the
+// Rust gate) — only the labels are translated, keyed off the value.
+const MODE_OPTIONS: { mode: VoiceInputMode; labelKey: string }[] = [
+  { mode: "voice_activity", labelKey: "inputMode.voiceActivity" },
+  { mode: "push_to_talk", labelKey: "inputMode.pushToTalk" },
 ];
 
 /**
@@ -25,13 +28,14 @@ export const VoiceInputModeSelect: React.FC<VoiceInputModeSelectProps> = ({
   value,
   onChange,
 }) => {
+  const { t } = useTranslation("voice");
   // Read through the same resolver the dispatcher uses, so a rebound key
   // shows up here immediately instead of advertising a stale default.
   const pttCombo = useShortcutLabel("voice.pushToTalk");
 
   return (
     <div className="flex flex-col gap-2 max-w-[20rem]" data-testid="voice-input-mode">
-      <span className="text-muted">Input Mode</span>
+      <span className="text-muted">{t("inputMode.heading")}</span>
       <div className="flex gap-2">
         {MODE_OPTIONS.map((opt) => (
           <Button
@@ -41,20 +45,20 @@ export const VoiceInputModeSelect: React.FC<VoiceInputModeSelectProps> = ({
             size="sm"
             onClick={() => onChange(opt.mode)}
           >
-            {opt.label}
+            {t(opt.labelKey)}
           </Button>
         ))}
       </div>
       <span className="text-xs font-mono text-muted">
         {value === "push_to_talk" ? (
-          <>
-            Your microphone is off until you hold{" "}
-            <span className="text-fg">{pttCombo}</span>, and closes again the
-            moment you let go — or if the window loses focus. Rebind it in Key
-            Bindings.
-          </>
+          <Trans
+            t={t}
+            i18nKey="inputMode.pushToTalkHint"
+            values={{ combo: pttCombo }}
+            components={{ combo: <span className="text-fg" /> }}
+          />
         ) : (
-          "Your microphone is open whenever you are not muted. Best with headphones and a quiet room."
+          t("inputMode.voiceActivityHint")
         )}
       </span>
     </div>

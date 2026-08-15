@@ -1,5 +1,6 @@
 import { errorMessage as toErrorMessage } from "../utils/errorMessage";
 import React, { useState, useEffect, useCallback } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   getVersion,
   check as checkForUpdate,
@@ -14,6 +15,7 @@ import type { ManagedInstallInfo } from "../types";
 type Status = "checking" | "available" | "none" | "error" | "managed";
 
 export const UpdatePage: React.FC = observer(() => {
+  const { t } = useTranslation("settings");
   const setUpdateRequired = appStore.setUpdateRequired;
   const cachedAvailable = appStore.availableUpdateVersion;
   const setAvailableUpdateVersion = appStore.setAvailableUpdateVersion;
@@ -26,8 +28,8 @@ export const UpdatePage: React.FC = observer(() => {
   const [managed, setManaged] = useState<ManagedInstallInfo | null>(null);
 
   useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
-  }, []);
+    getVersion().then(setAppVersion).catch(() => setAppVersion(t("update.versionUnknown")));
+  }, [t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,13 +83,13 @@ export const UpdatePage: React.FC = observer(() => {
           return;
         }
         setStatus("error");
-        setErrorMessage(toErrorMessage(err, "Failed to check for updates"));
+        setErrorMessage(toErrorMessage(err, t("update.checkFailed")));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [setAvailableUpdateVersion]);
+  }, [setAvailableUpdateVersion, t]);
 
   const handleInstall = useCallback(async () => {
     if (status !== "available") {
@@ -110,7 +112,7 @@ export const UpdatePage: React.FC = observer(() => {
   }, [managed]);
 
   return (
-    <PageShell title="Software Update" scrollable>
+    <PageShell title={t("update.title")} scrollable>
       <div
         className="flex-1 flex flex-col overflow-auto"
         style={{ background: "var(--c-bg)" }}
@@ -122,29 +124,34 @@ export const UpdatePage: React.FC = observer(() => {
                 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
                 style={{ color: "var(--c-text-dim)", borderColor: "var(--c-border)" }}
               >
-                Software Update
+                {t("update.heading")}
               </h2>
 
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                  Current version: <span style={{ color: "var(--c-text)" }}>{appVersion || "Loading..."}</span>
+                  <Trans
+                    t={t}
+                    i18nKey="update.currentVersion"
+                    values={{ version: appVersion || t("update.versionLoading") }}
+                    components={{ val: <span style={{ color: "var(--c-text)" }} /> }}
+                  />
                 </p>
 
                 {status === "checking" && (
                   <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                    Checking for updates…
+                    {t("update.checking")}
                   </p>
                 )}
 
                 {status === "available" && (
                   <p className="text-xs font-mono" style={{ color: "var(--c-accent)" }}>
-                    Update available: {version}
+                    {t("update.available", { version })}
                   </p>
                 )}
 
                 {status === "none" && (
                   <p className="text-xs font-mono" style={{ color: "var(--c-accent-dim)" }}>
-                    You're up to date!
+                    {t("update.upToDate")}
                   </p>
                 )}
 
@@ -158,16 +165,14 @@ export const UpdatePage: React.FC = observer(() => {
                   <>
                     {version && (
                       <p className="text-xs font-mono" style={{ color: "var(--c-accent)" }}>
-                        Update available: {version}
+                        {t("update.available", { version })}
                       </p>
                     )}
                     <p
                       className="text-xs font-mono"
                       style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
                     >
-                      This install is managed by {managed.display_name}. Pollis can't
-                      update itself from inside the app — use your package manager,
-                      then relaunch.
+                      {t("update.managedNote", { manager: managed.display_name })}
                     </p>
                     {managed.update_command && (
                       <div
@@ -183,6 +188,7 @@ export const UpdatePage: React.FC = observer(() => {
                         }}
                       >
                         <code
+                          dir="ltr"
                           className="text-xs font-mono"
                           style={{ color: "var(--c-text)" }}
                           data-testid="update-page-managed-command"
@@ -194,7 +200,7 @@ export const UpdatePage: React.FC = observer(() => {
                           size="sm"
                           onClick={handleCopyCommand}
                         >
-                          Copy
+                          {t("common:actions.copy")}
                         </Button>
                       </div>
                     )}
@@ -207,10 +213,10 @@ export const UpdatePage: React.FC = observer(() => {
                   onClick={handleInstall}
                   disabled={isInstalling}
                   isLoading={isInstalling}
-                  loadingText="Installing…"
+                  loadingText={t("update.installing")}
                   variant="primary"
                 >
-                  Install update
+                  {t("update.installButton")}
                 </Button>
               )}
             </section>

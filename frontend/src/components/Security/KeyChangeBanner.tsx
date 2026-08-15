@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { ShieldAlert, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -24,6 +25,7 @@ export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = observer(({
   peerUserId,
   peerLabel,
 }) => {
+  const { t } = useTranslation("settings");
   const navigate = useNavigate();
   const flagged = peerUserId ? keyChangeStore.flagged[peerUserId] : undefined;
   const acknowledge = keyChangeStore.acknowledge;
@@ -32,7 +34,7 @@ export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = observer(({
     return null;
   }
 
-  const name = peerLabel ?? "this contact";
+  const name = peerLabel ?? t("keyChange.defaultName");
   return (
     <div
       data-testid="key-change-banner"
@@ -47,11 +49,11 @@ export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = observer(({
       <ShieldAlert size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
       <div className="flex-1 min-w-0">
         <span style={{ color: "#f0b429", fontWeight: 600 }}>
-          Safety number changed
+          {t("keyChange.heading")}
         </span>
         <span style={{ color: "var(--c-text-muted)" }}>
-          {" "}— {name}'s identity key is different from what was pinned. Verify
-          out-of-band before trusting this conversation.
+          {" "}
+          {t("keyChange.body", { name })}
         </span>
       </div>
       <button
@@ -70,13 +72,13 @@ export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = observer(({
           flexShrink: 0,
         }}
       >
-        Verify
+        {t("keyChange.verifyButton")}
       </button>
       <button
         type="button"
         data-testid="key-change-banner-dismiss"
         onClick={() => acknowledge(peerUserId)}
-        aria-label="Dismiss safety number warning"
+        aria-label={t("keyChange.dismissLabel")}
         className="icon-btn-sm"
         style={{ flexShrink: 0, color: "inherit" }}
       >

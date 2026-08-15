@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
@@ -13,6 +14,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 
 export const SearchGroupPage: React.FC = observer(() => {
+  const { t } = useTranslation("search");
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const queryClient = useQueryClient();
@@ -30,7 +32,7 @@ export const SearchGroupPage: React.FC = observer(() => {
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!slug.trim()) {
-      setSearchError("Please enter a group slug");
+      setSearchError(t("group.slugRequired"));
       return;
     }
     setIsSearching(true);
@@ -40,7 +42,7 @@ export const SearchGroupPage: React.FC = observer(() => {
       const group = await invoke<{ id: string; name: string; description?: string }>('search_group_by_slug', { slug: slug.trim() });
       setFoundGroup(group);
     } catch (err) {
-      setSearchError(errorMessage(err, "Group not found"));
+      setSearchError(errorMessage(err, t("group.notFound")));
     } finally {
       setIsSearching(false);
     }
@@ -57,7 +59,7 @@ export const SearchGroupPage: React.FC = observer(() => {
   };
 
   return (
-    <PageShell title="Find Group">
+    <PageShell title={t("group.title")}>
       <div
         data-testid="search-group-page"
         className="flex-1 flex flex-col overflow-auto"
@@ -68,10 +70,10 @@ export const SearchGroupPage: React.FC = observer(() => {
 
             <form onSubmit={handleSearch} className="flex flex-col gap-3">
               <TextInput
-                label="Group Slug"
+                label={t("group.slugLabel")}
                 value={slug}
                 onChange={setSlug}
-                placeholder="my-group"
+                placeholder={t("group.slugPlaceholder")}
                 disabled={isSearching}
                 id="search-group-slug"
               />
@@ -82,9 +84,9 @@ export const SearchGroupPage: React.FC = observer(() => {
                 type="submit"
                 disabled={!slug.trim() || isSearching}
                 isLoading={isSearching}
-                loadingText="Searching…"
+                loadingText={t("group.searching")}
               >
-                Search
+                {t("group.submit")}
               </Button>
             </form>
 
@@ -112,7 +114,7 @@ export const SearchGroupPage: React.FC = observer(() => {
                     data-testid="go-to-group-button"
                     onClick={() => navigate({ to: "/groups/$groupId", params: { groupId: foundGroup.id } })}
                   >
-                    Go to Group
+                    {t("group.goToGroup")}
                   </Button>
                 ) : myJoinRequest?.status === "pending" ? (
                   <p
@@ -120,7 +122,7 @@ export const SearchGroupPage: React.FC = observer(() => {
                     className="text-xs font-mono"
                     style={{ color: 'var(--c-text-muted)' }}
                   >
-                    Request pending — a group admin will review it shortly.
+                    {t("group.requestPending")}
                   </p>
                 ) : myJoinRequest?.status === "rejected" ? (
                   <div className="flex flex-col gap-2">
@@ -129,16 +131,16 @@ export const SearchGroupPage: React.FC = observer(() => {
                       className="text-xs font-mono"
                       style={{ color: 'var(--c-danger)' }}
                     >
-                      Your request was declined.
+                      {t("group.requestRejected")}
                     </p>
                     <Button
                       data-testid="try-again-button"
                       onClick={handleRequestAccess}
                       disabled={requestAccessMutation.isPending}
                       isLoading={requestAccessMutation.isPending}
-                      loadingText="Sending request…"
+                      loadingText={t("group.sendingRequest")}
                     >
-                      Try Again
+                      {t("group.tryAgain")}
                     </Button>
                   </div>
                 ) : (
@@ -147,9 +149,9 @@ export const SearchGroupPage: React.FC = observer(() => {
                     onClick={handleRequestAccess}
                     disabled={requestAccessMutation.isPending}
                     isLoading={requestAccessMutation.isPending}
-                    loadingText="Sending request…"
+                    loadingText={t("group.sendingRequest")}
                   >
-                    Request Access
+                    {t("group.requestAccess")}
                   </Button>
                 )}
               </Card>

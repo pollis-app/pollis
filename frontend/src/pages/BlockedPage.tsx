@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { PageShell } from "../components/Layout/PageShell";
 import { useBlockedUsers, useUnblockUser } from "../hooks/queries";
 import { Button } from "../components/ui/Button";
@@ -7,6 +8,7 @@ import { NavigableList } from "../components/ui/NavigableList";
 import { timeAgo } from "../utils/timeAgo";
 
 export const BlockedPage: React.FC = () => {
+  const { t } = useTranslation("dms");
   const { data: blocked = [], isLoading } = useBlockedUsers();
   const unblockMutation = useUnblockUser();
 
@@ -20,7 +22,7 @@ export const BlockedPage: React.FC = () => {
   };
 
   return (
-    <PageShell title="Blocked Users">
+    <PageShell title={t("blocked.pageTitle")}>
       <div
         data-testid="blocked-page"
         className="flex-1 flex flex-col overflow-auto"
@@ -29,7 +31,7 @@ export const BlockedPage: React.FC = () => {
         <NavigableList
           items={blocked}
           isLoading={isLoading}
-          emptyLabel="No blocked users."
+          emptyLabel={t("blocked.empty")}
           getKey={(b) => b.user_id}
           rowTestId={(b) => `blocked-${b.user_id}`}
           renderRow={(b) => (
@@ -47,7 +49,7 @@ export const BlockedPage: React.FC = () => {
               disabled={unblockMutation.isPending}
               variant="secondary"
             >
-              unblock
+              {t("blocked.unblock")}
             </Button>,
           ]}
           trailing={(b) => <span>{timeAgo(b.blocked_at)}</span>}

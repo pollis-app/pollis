@@ -1,0 +1,13 @@
+{
+  "page": {
+    "title": "Enregistrés",
+    "unresolved": "Vous n'avez pas ce message sur cet appareil.",
+    "empty": "Aucun message enregistré. Utilisez l'action signet sur un message pour l'enregistrer.",
+    "unsave": "retirer"
+  },
+  "row": {
+    "conversationFallback": "conversation",
+    "noText": "(aucun texte)",
+    "unavailable": "Vous n'avez pas ce message sur cet appareil."
+  }
+}

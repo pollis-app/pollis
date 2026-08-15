@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@tanstack/react-router";
 import { Hash, MessageCircle, UserPlus, Mail } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -12,6 +13,7 @@ interface SummaryItemProps {
   icon: React.ReactNode;
   count: number;
   to: string;
+  /** Already-translated, count-aware accessible name. */
   label: string;
   color: string;
   testId: string;
@@ -27,7 +29,7 @@ const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color
   return (
     <button
       data-testid={testId}
-      aria-label={`${label}: ${count}`}
+      aria-label={label}
       onClick={() => router.navigate({ to })}
       className={`bg-transparent flex items-center gap-1 font-mono text-xs hover:opacity-50`}
       style={{
@@ -41,7 +43,7 @@ const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color
           minWidth: "2ch",
           height: "1em",
           lineHeight: 1,
-          textAlign: "left",
+          textAlign: "start",
           fontVariantNumeric: "tabular-nums",
         }}
       >
@@ -62,6 +64,7 @@ interface StatusBarSummaryProps {
  * row doesn't jitter as counts change.
  */
 export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ color }) => {
+  const { t } = useTranslation("nav");
   const unreadCounts = appStore.unreadCounts;
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
@@ -92,7 +95,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
     if (request) {
       const requester = request.members.find((m) => m.user_id === request.created_by);
       appStore.setStatusBarAlert({
-        senderUsername: requester?.username ?? "Someone",
+        senderUsername: requester?.username ?? t("statusBar.someone"),
         roomId: request.id,
       });
       return;
@@ -100,7 +103,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
     const invite = pendingInvites[0];
     if (invite) {
       appStore.setStatusBarAlert({
-        senderUsername: invite.inviter_username ?? invite.group_name ?? "Someone",
+        senderUsername: invite.inviter_username ?? invite.group_name ?? t("statusBar.someone"),
         roomId: invite.group_id,
       });
     }
@@ -126,7 +129,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
         icon={<Hash size={12} />}
         count={groupUnread}
         to="/groups"
-        label="Unread group messages"
+        label={t("statusBar.groupsUnread", { count: groupUnread })}
         color={color}
       />
       <SummaryItem
@@ -134,7 +137,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
         icon={<MessageCircle size={12} />}
         count={dmUnread}
         to="/dms"
-        label="Unread direct messages"
+        label={t("statusBar.dmsUnread", { count: dmUnread })}
         color={color}
       />
       <SummaryItem
@@ -142,7 +145,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
         icon={<UserPlus size={12} />}
         count={joinRequestCount}
         to="/join-requests"
-        label="Pending join requests"
+        label={t("statusBar.joinRequests", { count: joinRequestCount })}
         color={color}
       />
       <SummaryItem
@@ -150,7 +153,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
         icon={<Mail size={12} />}
         count={inviteCount}
         to="/invites"
-        label="Pending invites"
+        label={t("statusBar.invites", { count: inviteCount })}
         color={color}
       />
     </div>

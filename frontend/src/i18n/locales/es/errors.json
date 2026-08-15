@@ -1,0 +1,9 @@
+{
+  "boundary": {
+    "instruction": "Reinicia la aplicación.",
+    "message": "Se ha producido un error inesperado.",
+    "restart": "Reiniciar",
+    "tag": "ERROR FATAL",
+    "title": "Algo ha salido mal"
+  }
+}

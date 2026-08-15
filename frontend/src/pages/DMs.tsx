@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Inbox, Ban, Plus, ShieldCheck, ShieldAlert } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
@@ -11,6 +12,7 @@ import { LastMessagePreview } from "../components/Message/LastMessagePreview";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 
 export const DMsPage: React.FC = observer(() => {
+  const { t } = useTranslation("dms");
   const navigate = useNavigate();
   const { setSelectedConversationId, markRead, unreadCounts } = appStore;
 
@@ -32,7 +34,7 @@ export const DMsPage: React.FC = observer(() => {
 
   items.push({
     id: "new-dm",
-    label: "New Message",
+    label: t("list.newMessage"),
     icon: <Plus size={14} />,
     action: () => navigate({ to: "/dms/new" }),
     type: "system" as const,
@@ -42,7 +44,7 @@ export const DMsPage: React.FC = observer(() => {
   if (requests.length > 0) {
     items.push({
       id: "dm-requests",
-      label: "Requests",
+      label: t("list.requests"),
       icon: <Inbox size={14} />,
       action: () => navigate({ to: "/dms/requests" }),
       type: "system" as const,
@@ -53,7 +55,7 @@ export const DMsPage: React.FC = observer(() => {
 
   items.push({
     id: "dm-blocked",
-    label: "Blocked Users",
+    label: t("list.blocked"),
     icon: <Ban size={14} />,
     action: () => navigate({ to: "/dms/blocked" }),
     type: "system" as const,
@@ -68,14 +70,14 @@ export const DMsPage: React.FC = observer(() => {
         const trailingIndicator = verification?.key_changed ? (
           <ShieldAlert
             size={14}
-            aria-label="Identity key changed — re-verify"
+            aria-label={t("list.keyChanged")}
             data-testid={`dm-verification-changed-${c.id}`}
             style={{ color: "#f0b429" }}
           />
         ) : verification?.verified ? (
           <ShieldCheck
             size={14}
-            aria-label="Verified contact"
+            aria-label={t("list.verified")}
             data-testid={`dm-verification-verified-${c.id}`}
             style={{ color: "var(--c-accent)" }}
           />
@@ -88,7 +90,7 @@ export const DMsPage: React.FC = observer(() => {
               userId={c.user2_id ?? null}
               avatarKey={c.user2_avatar_url}
               size={24}
-              alt={`${c.user2_identifier} avatar`}
+              alt={t("list.avatarAlt", { name: c.user2_identifier })}
               testId={`dm-avatar-${c.id}`}
             />
           ),
@@ -102,7 +104,7 @@ export const DMsPage: React.FC = observer(() => {
           trailingIndicator,
           testId: `dm-option-${c.id}`,
           secondaryAction: () => navigate({ to: "/dms/$conversationId/settings", params: { conversationId: c.id } }),
-          secondaryActionLabel: `Settings for ${c.user2_identifier}`,
+          secondaryActionLabel: t("list.settingsFor", { name: c.user2_identifier }),
         };
       }),
     );
@@ -110,8 +112,8 @@ export const DMsPage: React.FC = observer(() => {
 
   items.push({
     id: "__back__",
-    label: "Go back",
-    icon: <ArrowLeft size={14} />,
+    label: t("common:actions.goBack"),
+    icon: <ArrowLeft size={14} className="rtl-mirror" />,
     action: () => navigate({ to: "/" }),
     type: "system",
   });

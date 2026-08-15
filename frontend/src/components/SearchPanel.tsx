@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { Hash, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon, Link as LinkIcon } from "lucide-react";
 import { PresenceAvatar } from "./ui/PresenceAvatar";
@@ -184,25 +185,42 @@ function buildPersonResults(
   return out;
 }
 
-const PAGE_RESULTS: SearchResultItem[] = [
-  { type: "page", id: "page-settings", name: "User", breadcrumb: "/user", path: "/user", keywords: "account profile username email avatar settings" },
-  { type: "page", id: "page-settings-hub", name: "Settings", breadcrumb: "/settings", path: "/settings", keywords: "preferences user security" },
-  { type: "page", id: "page-preferences", name: "Preferences", breadcrumb: "/preferences", path: "/preferences", keywords: "theme color font notifications appearance" },
-  { type: "page", id: "page-voice-settings", name: "Voice & Video", breadcrumb: "/settings/voice", path: "/voice-settings", keywords: "microphone speaker audio mic noise suppression echo cancellation agc auto join camera webcam video preview permissions" },
-  { type: "page", id: "page-security", name: "Security", breadcrumb: "/security", path: "/security", keywords: "audit log devices identity key rotation camera microphone screen permission permissions revoke privacy access" },
-  { type: "page", id: "page-shortcuts", name: "Key Bindings", breadcrumb: "/shortcuts", path: "/shortcuts", keywords: "key bindings keyboard shortcuts hotkeys keybindings cmd ctrl" },
-  { type: "page", id: "page-update", name: "Software Update", breadcrumb: "/update", path: "/update", keywords: "update version upgrade install release" },
-  { type: "page", id: "page-invites", name: "Invites", breadcrumb: "/invites", path: "/invites", keywords: "pending invitations groups" },
-  { type: "page", id: "page-join", name: "Join a Group", breadcrumb: "/join", path: "/join", keywords: "invite link code redeem join group" },
-  { type: "page", id: "page-join-requests", name: "Join Requests", breadcrumb: "/join-requests", path: "/join-requests", keywords: "pending group membership" },
-  { type: "page", id: "page-dm-requests", name: "DM Requests", breadcrumb: "/dms/requests", path: "/dms/requests", keywords: "direct message pending" },
-  { type: "page", id: "page-dm-blocked", name: "Blocked Users", breadcrumb: "/dms/blocked", path: "/dms/blocked", keywords: "block list direct message" },
-  { type: "page", id: "page-dm-new", name: "Start DM", breadcrumb: "/dms/new", path: "/dms/new", keywords: "new direct message create" },
-  { type: "page", id: "page-groups", name: "Groups", breadcrumb: "/groups", path: "/groups", keywords: "list all" },
-  { type: "page", id: "page-groups-new", name: "Create Group", breadcrumb: "/groups/new", path: "/groups/new", keywords: "new create" },
-  { type: "page", id: "page-groups-search", name: "Find Groups", breadcrumb: "/groups/search", path: "/groups/search", keywords: "discover search public" },
-  { type: "page", id: "page-saved", name: "Saved", breadcrumb: "/saved", path: "/saved", keywords: "saved bookmark bookmarks starred pinned later permalink link" },
-  { type: "page", id: "page-arcade", name: "Arcade", breadcrumb: "/arcade", path: "/arcade", keywords: "arcade game asteroids ship shoot easter egg play" },
+/**
+ * A jumpable static page, before its copy is resolved.
+ *
+ * `nameKey` and `keywordsKey` are translation keys, not copy: this table is
+ * module-level, so it cannot call `t()` itself without freezing the language at
+ * import time. The panel resolves both at render time, which is also what keeps
+ * matching honest — the query is compared against the label the user can
+ * actually see, in whatever language they are reading.
+ */
+interface PageResultSpec {
+  id: string;
+  nameKey: string;
+  keywordsKey: string;
+  breadcrumb: string;
+  path: string;
+}
+
+const PAGE_RESULTS: PageResultSpec[] = [
+  { id: "page-settings", nameKey: "pages.userName", keywordsKey: "pages.userKeywords", breadcrumb: "/user", path: "/user" },
+  { id: "page-settings-hub", nameKey: "pages.settingsName", keywordsKey: "pages.settingsKeywords", breadcrumb: "/settings", path: "/settings" },
+  { id: "page-preferences", nameKey: "pages.preferencesName", keywordsKey: "pages.preferencesKeywords", breadcrumb: "/preferences", path: "/preferences" },
+  { id: "page-voice-settings", nameKey: "pages.voiceName", keywordsKey: "pages.voiceKeywords", breadcrumb: "/settings/voice", path: "/voice-settings" },
+  { id: "page-security", nameKey: "pages.securityName", keywordsKey: "pages.securityKeywords", breadcrumb: "/security", path: "/security" },
+  { id: "page-shortcuts", nameKey: "pages.shortcutsName", keywordsKey: "pages.shortcutsKeywords", breadcrumb: "/shortcuts", path: "/shortcuts" },
+  { id: "page-update", nameKey: "pages.updateName", keywordsKey: "pages.updateKeywords", breadcrumb: "/update", path: "/update" },
+  { id: "page-invites", nameKey: "pages.invitesName", keywordsKey: "pages.invitesKeywords", breadcrumb: "/invites", path: "/invites" },
+  { id: "page-join", nameKey: "pages.joinName", keywordsKey: "pages.joinKeywords", breadcrumb: "/join", path: "/join" },
+  { id: "page-join-requests", nameKey: "pages.joinRequestsName", keywordsKey: "pages.joinRequestsKeywords", breadcrumb: "/join-requests", path: "/join-requests" },
+  { id: "page-dm-requests", nameKey: "pages.dmRequestsName", keywordsKey: "pages.dmRequestsKeywords", breadcrumb: "/dms/requests", path: "/dms/requests" },
+  { id: "page-dm-blocked", nameKey: "pages.dmBlockedName", keywordsKey: "pages.dmBlockedKeywords", breadcrumb: "/dms/blocked", path: "/dms/blocked" },
+  { id: "page-dm-new", nameKey: "pages.dmNewName", keywordsKey: "pages.dmNewKeywords", breadcrumb: "/dms/new", path: "/dms/new" },
+  { id: "page-groups", nameKey: "pages.groupsName", keywordsKey: "pages.groupsKeywords", breadcrumb: "/groups", path: "/groups" },
+  { id: "page-groups-new", nameKey: "pages.groupsNewName", keywordsKey: "pages.groupsNewKeywords", breadcrumb: "/groups/new", path: "/groups/new" },
+  { id: "page-groups-search", nameKey: "pages.groupsSearchName", keywordsKey: "pages.groupsSearchKeywords", breadcrumb: "/groups/search", path: "/groups/search" },
+  { id: "page-saved", nameKey: "pages.savedName", keywordsKey: "pages.savedKeywords", breadcrumb: "/saved", path: "/saved" },
+  { id: "page-arcade", nameKey: "pages.arcadeName", keywordsKey: "pages.arcadeKeywords", breadcrumb: "/arcade", path: "/arcade" },
 ];
 
 function filterResults(
@@ -224,6 +242,7 @@ function filterResults(
 // ─── SearchPanel ─────────────────────────────────────────────────────────────
 
 export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClose }) => {
+  const { t } = useTranslation("search");
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   // Pasting a message permalink (#854) takes over the panel: there is nothing
@@ -245,12 +264,27 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     appStore.voiceState.kind === 'idle' ? null : appStore.voiceState.channelId;
   const currentUserId = appStore.currentUser?.id ?? null;
 
+  // Page copy resolved in the active language, so `filterResults` matches what
+  // is on screen rather than the translation keys behind it.
+  const pageResults = useMemo<SearchResultItem[]>(
+    () =>
+      PAGE_RESULTS.map((page) => ({
+        type: "page" as const,
+        id: page.id,
+        name: t(page.nameKey),
+        breadcrumb: page.breadcrumb,
+        path: page.path,
+        keywords: t(page.keywordsKey),
+      })),
+    [t]
+  );
+
   // Build the full list of searchable items, active voice channel sorted to top
   const allItems = useMemo(() => {
     const channels = buildChannelResults(groupsWithChannels);
     const voiceChannels = buildVoiceResults(groupsWithChannels);
     const people = buildPersonResults(allGroupMembers, dmConversations, currentUserId);
-    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...people, ...PAGE_RESULTS];
+    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...people, ...pageResults];
     if (activeVoiceChannelId) {
       const activeIdx = combined.findIndex(
         (i) => i.type === "voice" && i.channelId === activeVoiceChannelId
@@ -261,7 +295,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
       }
     }
     return combined;
-  }, [groupsWithChannels, dmConversations, allGroupMembers, activeVoiceChannelId, currentUserId]);
+  }, [groupsWithChannels, dmConversations, allGroupMembers, activeVoiceChannelId, currentUserId, pageResults]);
 
   // Resolve a pasted permalink against the LOCAL database only. There is no
   // server lookup here and there must never be one — that endpoint is what
@@ -481,7 +515,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Jump to channel, voice, DM, user, or settings..."
+            placeholder={t("panel.placeholder")}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -518,15 +552,15 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         >
           <ArrowUp className="w-3 h-3" />
           <ArrowDown className="w-3 h-3" />
-          <span>navigate</span>
+          <span>{t("panel.hintNavigate")}</span>
           <span className="mx-1" style={{ color: "var(--c-border-active)" }}>
             &bull;
           </span>
-          <span>Enter to select</span>
+          <span>{t("panel.hintSelect")}</span>
           <span className="mx-1" style={{ color: "var(--c-border-active)" }}>
             &bull;
           </span>
-          <span>Esc to close</span>
+          <span>{t("panel.hintClose")}</span>
         </div>
 
         {/* Results */}
@@ -548,10 +582,10 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
               <LinkIcon size={14} className="flex-shrink-0" />
               {permalinkStatus === "missing" ? (
                 <span data-testid="permalink-unresolved">
-                  You do not have this message on this device.
+                  {t("panel.permalinkMissing")}
                 </span>
               ) : (
-                <span data-testid="permalink-resolving">Opening message…</span>
+                <span data-testid="permalink-resolving">{t("panel.permalinkResolving")}</span>
               )}
             </div>
           ) : filteredItems.length === 0 ? (
@@ -561,8 +595,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
               style={{ color: "var(--c-text-muted)" }}
             >
               {query.trim()
-                ? "No matches found"
-                : "Jump to a channel, voice channel, DM, user, or settings page"}
+                ? t("panel.noMatches")
+                : t("panel.emptyHint")}
             </div>
           ) : (
             filteredItems.map((item, index) => {
@@ -576,7 +610,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                   data-testid="search-panel-result-item"
                   className="flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors"
                   style={{
-                    borderLeft: `3px solid ${isSelected ? "var(--c-accent)" : "transparent"}`,
+                    borderInlineStart: `3px solid ${isSelected ? "var(--c-accent)" : "transparent"}`,
                     background: isSelected ? "var(--c-active)" : undefined,
                   }}
                   onClick={() => handleSelect(item)}
@@ -615,7 +649,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                     >
                       <span>{item.name}</span>
                       {item.type === "voice" && item.channelId === activeVoiceChannelId && (
-                        <span className="font-mono text-xs" style={{ color: "var(--c-accent)" }}>[live]</span>
+                        <span className="font-mono text-xs" style={{ color: "var(--c-accent)" }}>{t("panel.live")}</span>
                       )}
                     </div>
                     <div

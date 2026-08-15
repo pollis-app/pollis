@@ -1,0 +1,172 @@
+{
+  "sidebar": {
+    "groups": "groups",
+    "dms": "dms",
+    "account": "account",
+    "saved": "Saved",
+    "preferences": "Preferences",
+    "userSettings": "User Settings",
+    "voiceAndVideo": "Voice & Video",
+    "security": "Security",
+    "keyBindings": "Key Bindings",
+    "softwareUpdate": "Software Update",
+    "expandGroup": "Expand {{name}}",
+    "collapseGroup": "Collapse {{name}}",
+    "keyChanged": "Identity key changed — re-verify",
+    "verified": "Verified contact",
+    "dmAvatarAlt": "{{name}} avatar",
+    "close": "Close sidebar ({{shortcut}})"
+  },
+  "profile": {
+    "you": "You",
+    "call": "Call",
+    "voice": "Voice",
+    "settings": "Settings",
+    "voiceConnected": "Voice Connected",
+    "stopScreenShare": "Stop screen share",
+    "shareScreen": "Share screen",
+    "disconnect": "Disconnect"
+  },
+  "breadcrumb": {
+    "home": "Home",
+    "groups": "Groups",
+    "createGroup": "Create Group",
+    "findGroup": "Find Group",
+    "newChannel": "New Channel",
+    "voice": "voice",
+    "joinRequests": "Join Requests",
+    "inviteMember": "Invite Member",
+    "leaveGroup": "Leave Group",
+    "members": "Members",
+    "removeMember": "Remove Member",
+    "directMessages": "Direct Messages",
+    "newMessage": "New Message",
+    "requests": "Requests",
+    "blockedUsers": "Blocked Users",
+    "conversationSettings": "Conversation Settings",
+    "account": "Account",
+    "preferences": "Preferences",
+    "userSettings": "User Settings",
+    "profile": "Profile",
+    "security": "Security",
+    "voiceSettings": "Voice",
+    "invites": "Invites",
+    "joinAGroup": "Join a Group",
+    "search": "Search",
+    "searchButton": "Search ({{shortcut}})",
+    "settings": "Settings"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Unread group messages: {{count}}",
+    "groupsUnread_other": "Unread group messages: {{count}}",
+    "dmsUnread_one": "Unread direct messages: {{count}}",
+    "dmsUnread_other": "Unread direct messages: {{count}}",
+    "joinRequests_one": "Pending join requests: {{count}}",
+    "joinRequests_other": "Pending join requests: {{count}}",
+    "invites_one": "Pending invites: {{count}}",
+    "invites_other": "Pending invites: {{count}}",
+    "someone": "Someone",
+    "updateAvailable": "Update available",
+    "updateAvailableTitle": "Update available: {{version}}",
+    "answerCall": "Answer call from @{{username}}",
+    "declineCall": "Decline call",
+    "dismissVoiceError": "Dismiss voice error",
+    "dismissScreenShareError": "Dismiss screen share error",
+    "syncing": "syncing…"
+  },
+  "shell": {
+    "dropFiles": "drop files to send",
+    "voiceChannelFallback": "voice",
+    "callChannel": "Call"
+  },
+  "panel": {
+    "thread": "Thread",
+    "details": "Details",
+    "ariaLabel": "Conversation details",
+    "closeThread": "Close thread panel ({{shortcut}})",
+    "closeDetails": "Close details panel ({{shortcut}})"
+  },
+  "members": {
+    "count_one": "Members — {{count}}",
+    "count_other": "Members — {{count}}",
+    "onlineCount_one": "Online — {{count}}",
+    "onlineCount_other": "Online — {{count}}",
+    "empty": "No members to show.",
+    "noneOnline": "No one online.",
+    "you": "You",
+    "admin": "admin"
+  },
+  "media": {
+    "heading": "Media",
+    "empty": "No media shared yet."
+  },
+  "thread": {
+    "loading": "Loading replies…",
+    "empty": "No replies yet. Start the thread below.",
+    "placeholder": "Reply in thread…",
+    "messageDeleted": "Message deleted",
+    "encrypted": "[encrypted]"
+  },
+  "chat": {
+    "noSelection": "Select a channel to start messaging"
+  },
+  "dmRequest": {
+    "heading": "message request",
+    "body": "<name>{{name}}</name> wants to send you messages.",
+    "accept": "Accept",
+    "accepting": "Accepting…",
+    "block": "Block",
+    "blocking": "Blocking…"
+  },
+  "editBar": {
+    "heading": "editing message",
+    "cancel": "Cancel editing",
+    "hint": "Enter to save · Shift+Enter for newline · Esc to cancel"
+  },
+  "deleteChannel": {
+    "heading": "delete channel",
+    "cancel": "Cancel delete",
+    "body": "This channel and all of its messages will be permanently deleted. This cannot be undone.",
+    "deleting": "Deleting…"
+  },
+  "deleteMessage": {
+    "heading": "delete message",
+    "moderateHeading": "remove message (admin)",
+    "body": "This message will be deleted for everyone, including people who already received it.",
+    "moderateBody": "This message and its attachments will be removed for everyone in the channel.",
+    "cancel": "Cancel delete",
+    "deleting": "Deleting…",
+    "remove": "Remove"
+  },
+  "update": {
+    "preparing": "Preparing to update…",
+    "checking": "Checking for updates…",
+    "downloading": "Downloading update…",
+    "downloadingProgress": "Downloading update… {{progress}}%",
+    "installing": "Installing update…",
+    "relaunching": "Relaunching…",
+    "failed": "Update failed: {{error}}"
+  },
+  "home": {
+    "groups": "Groups",
+    "groupsDescription": "Communities, Organizations, Teams, and overly-ambitious group chats",
+    "dms": "Direct Messages",
+    "dmsDescription": "Private, end-to-end encrypted conversations with individuals",
+    "invites": "Invites",
+    "noPendingInvites": "No pending invites",
+    "pending_one": "{{count}} pending",
+    "pending_other": "{{count}} pending",
+    "join": "Join a Group",
+    "joinDescription": "Redeem an invite link or join code",
+    "joinRequests": "Join Requests",
+    "logout": "Log out",
+    "exit": "Exit"
+  },
+  "titleBar": {
+    "minimize": "Minimize",
+    "maximize": "Maximize"
+  },
+  "terminal": {
+    "shellFailed": "failed to start shell: {{error}}"
+  }
+}

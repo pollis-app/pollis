@@ -1,0 +1,69 @@
+{
+  "list": {
+    "newMessage": "Nouveau message",
+    "requests": "Demandes",
+    "blocked": "Utilisateurs bloqués",
+    "avatarAlt": "Avatar de {{name}}",
+    "settingsFor": "Paramètres de {{name}}",
+    "verified": "Contact vérifié",
+    "keyChanged": "Clé d'identité modifiée — à revérifier"
+  },
+  "conversation": {
+    "fallbackTitle": "Message privé",
+    "viewProfile": "Voir le profil de @{{name}}",
+    "call": "Appeler @{{name}}",
+    "returnToCall": "Revenir à l'appel avec @{{name}}"
+  },
+  "settings": {
+    "pageTitle": "Paramètres de la conversation",
+    "leave": "Quitter la conversation",
+    "submitting": "Sortie…",
+    "leaveFailed": "Échec de la sortie de la conversation",
+    "cancel": "Annuler (Échap)"
+  },
+  "start": {
+    "pageTitle": "Nouveau message",
+    "identifierLabel": "Nom d'utilisateur ou e-mail",
+    "identifierPlaceholder": "ami@pollis.com",
+    "submit": "Démarrer la conversation",
+    "submitting": "Démarrage…",
+    "identifierRequired": "L'identifiant de l'utilisateur est obligatoire",
+    "userNotFound": "Utilisateur introuvable",
+    "startFailed": "Échec du démarrage de la conversation"
+  },
+  "requests": {
+    "pageTitle": "Demandes de message",
+    "empty": "Aucune demande en attente.",
+    "noMessageYet": "(aucun message pour l'instant)",
+    "unknownSender": "Inconnu",
+    "others_one": "(+{{count}} autre)",
+    "others_other": "(+{{count}} autres)",
+    "accept": "accepter",
+    "block": "bloquer"
+  },
+  "blocked": {
+    "pageTitle": "Utilisateurs bloqués",
+    "empty": "Aucun utilisateur bloqué.",
+    "unblock": "débloquer"
+  },
+  "profile": {
+    "fallbackName": "Utilisateur",
+    "fallbackTitle": "Profil",
+    "notFound": "Utilisateur introuvable",
+    "avatarAlt": "Avatar de {{name}}",
+    "sendMessage": "Envoyer un message",
+    "block": "Bloquer",
+    "safetyNumber": "Numéro de sécurité",
+    "statusVerified": "Vérifié",
+    "statusChanged": "Modifié — à revérifier",
+    "statusUnverified": "Non vérifié",
+    "keyChangedWarning": "La clé d'identité de ce contact a changé depuis votre dernière vérification. Comparez à nouveau le numéro par un autre moyen avant de lui faire confiance.",
+    "compareHint": "Comparez ces chiffres avec {{name}} via un canal de confiance (en personne, ou un appel dont vous reconnaissez la voix). S'ils correspondent, marquez ce contact comme vérifié.",
+    "removeVerification": "Retirer la vérification",
+    "markVerified": "Marquer comme vérifié"
+  },
+  "notify": {
+    "requestTitle": "Nouvelle conversation",
+    "requestBody": "{{name}} a démarré une conversation avec vous"
+  }
+}

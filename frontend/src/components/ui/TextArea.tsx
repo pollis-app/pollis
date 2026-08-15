@@ -48,7 +48,7 @@ export const TextArea: React.FC<TextAreaProps> = ({
       <div className="relative">
         {isFocused && !disabled && (
           <ChevronRight
-            className="absolute left-2 top-3 w-3 h-3 pointer-events-none"
+            className="absolute start-2 top-3 w-3 h-3 pointer-events-none rtl-mirror"
             style={{ color: "var(--c-accent)" }}
           />
         )}
@@ -69,8 +69,8 @@ export const TextArea: React.FC<TextAreaProps> = ({
           aria-invalid={!!error}
           className="w-full py-2 font-mono text-sm resize-none focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black transition-all"
           style={{
-            paddingLeft: isFocused && !disabled ? "1.5rem" : "0.75rem",
-            paddingRight: "0.75rem",
+            paddingInlineStart: isFocused && !disabled ? "1.5rem" : "0.75rem",
+            paddingInlineEnd: "0.75rem",
             background: "var(--c-surface)",
             color: "var(--c-text)",
             border: `2px solid ${error ? "var(--c-danger)" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,

@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { ShieldCheck, Clock, AlertTriangle, ShieldQuestion } from "lucide-react";
 import { shellOpen } from "../../bridge";
 import type { BuildVerifyStatus } from "../../types";
@@ -22,28 +23,32 @@ const VERIFY_DOCS_URL =
 // advisory — these alert, they never block launch/update. `mismatch` is the only
 // danger-toned case (solid danger color — NO neon/glow per repo rules); the rest
 // sit in accent/muted text.
+//
+// `labelKey` is a `settings` translation key rather than the copy itself: this
+// table is module-level, so a `t()` here would snapshot the language at import
+// time. It is resolved in the component below, on every render.
 const statusConfig: Record<
   BuildVerifyStatus,
-  { icon: React.ReactElement; label: string; color: string }
+  { icon: React.ReactElement; labelKey: string; color: string }
 > = {
   verified: {
     icon: <ShieldCheck size={14} aria-hidden="true" />,
-    label: "Build publicly verified",
+    labelKey: "security.buildStatusVerified",
     color: "var(--c-accent)",
   },
   pending: {
     icon: <Clock size={14} aria-hidden="true" />,
-    label: "Build publication pending",
+    labelKey: "security.buildStatusPending",
     color: "var(--c-text-muted)",
   },
   mismatch: {
     icon: <AlertTriangle size={14} aria-hidden="true" />,
-    label: "Build not in public log",
+    labelKey: "security.buildStatusMismatch",
     color: "var(--c-danger)",
   },
   unavailable: {
     icon: <ShieldQuestion size={14} aria-hidden="true" />,
-    label: "Verification unavailable",
+    labelKey: "security.buildStatusUnavailable",
     color: "var(--c-text-muted)",
   },
 };
@@ -60,7 +65,8 @@ export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
   detail,
   testId = "build-verify",
 }) => {
-  const { icon, label, color } = statusConfig[status];
+  const { t } = useTranslation("settings");
+  const { icon, labelKey, color } = statusConfig[status];
   const showReason = status === "mismatch" || status === "unavailable";
 
   return (
@@ -74,7 +80,7 @@ export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
         style={{ color }}
       >
         {icon}
-        {label}
+        {t(labelKey)}
       </span>
       {/* Append the report's reason and the verify-guide link so the user can
           act on it. */}
@@ -98,7 +104,7 @@ export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
               void shellOpen(VERIFY_DOCS_URL);
             }}
           >
-            How to verify this build independently &rarr;
+            {t("security.buildVerifyGuideLink")}
           </button>
         </>
       )}

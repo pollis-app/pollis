@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { MessageItem } from "./MessageItem";
 import "./messageHighlight.css";
 import { useBlockedUsers } from "../../hooks/queries";
@@ -72,20 +73,21 @@ const RosterChangeBanner: React.FC<{
   banner: RosterBanner;
   resolveName: (userId: string) => string;
 }> = ({ banner, resolveName }) => {
+  const { t } = useTranslation("chat");
   const name = resolveName(banner.payload.user_id);
   let label: string;
   switch (banner.payload.kind) {
     case "joined":
-      label = `${name} joined the group`;
+      label = t("roster.joined", { name });
       break;
     case "left":
-      label = `${name} left the group`;
+      label = t("roster.left", { name });
       break;
     case "device_added":
-      label = `${name} added a new device`;
+      label = t("roster.deviceAdded", { name });
       break;
     case "device_removed":
-      label = `${name} removed a device`;
+      label = t("roster.deviceRemoved", { name });
       break;
   }
   return (
@@ -151,6 +153,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   isFetchingMore,
   onLoadMore,
 }) => {
+  const { t } = useTranslation("chat");
   const skin = useSkin();
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -405,7 +408,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         style={{ background: "var(--c-bg)" }}
       >
         <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-          No messages yet. Start the conversation.
+          {t("list.empty")}
         </p>
       </div>
     );
@@ -423,7 +426,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           className="text-xs font-mono text-center py-2"
           style={{ color: "var(--c-text-muted)" }}
         >
-          Loading…
+          {t("common:states.loading")}
         </p>
       )}
       {timeline.map((item, idx) => {
@@ -469,13 +472,13 @@ export const MessageList: React.FC<MessageListProps> = observer(({
                 className="flex-shrink-0 font-mono text-sm"
                 style={{ color: "var(--c-text-dim)" }}
               >
-                blocked user
+                {t("list.blockedAuthor")}
               </span>
               <span
                 className="font-mono text-sm"
                 style={{ color: "var(--c-text-muted)" }}
               >
-                [blocked]
+                {t("list.blockedBody")}
               </span>
             </div>
           </div>
@@ -487,7 +490,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
             authorUsername={
               getAuthorUsername
                 ? getAuthorUsername(message.sender_id, message)
-                : "Unknown"
+                : t("list.unknownAuthor")
             }
             isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
             canModerate={viewerIsAdmin}

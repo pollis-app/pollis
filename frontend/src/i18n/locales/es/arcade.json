@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "ARCADE"
+  },
+  "hud": {
+    "score": "PUNTOS {{score}}",
+    "time": "TIEMPO {{time}}",
+    "gameOver": "FIN DEL JUEGO",
+    "final_one": "final {{count}} pts · {{time}}",
+    "final_other": "final {{count}} pts · {{time}}",
+    "restartHint": "pulsa R para reiniciar · esc para salir",
+    "controls": "WASD mover · ratón apuntar · clic/espacio disparar · esc salir"
+  }
+}

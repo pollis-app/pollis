@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../../stores/appStore";
 import { presenceStore } from "../../../stores/presenceStore";
@@ -44,6 +45,7 @@ interface Person {
  */
 export const MembersPanel: React.FC<MembersPanelProps> = observer(
   ({ groupId, channelId, conversationId }) => {
+    const { t } = useTranslation("nav");
     const { data: groupMembers = [] } = useGroupMembers(groupId);
     const { messages } = useMessages(channelId, conversationId);
     const isTerminal = useSkin() === "terminal";
@@ -73,7 +75,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           ? [
               {
                 userId: currentUser.id,
-                label: "You",
+                label: t("members.you"),
                 avatarKey: null,
                 isAdmin: false,
               },
@@ -110,7 +112,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           ? [
               {
                 userId: currentUser.id,
-                label: "You",
+                label: t("members.you"),
                 avatarKey: null,
                 isAdmin: false,
               },
@@ -135,6 +137,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           return a.label.localeCompare(b.label);
         });
     }, [
+      t,
       hasContext,
       conversationId,
       dmConversations,
@@ -179,13 +182,15 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
         <section className={isTerminal ? "flex flex-col" : "flex flex-col gap-1"}>
           <SectionHeader
             label={
-              hasContext ? `Members — ${people.length}` : `Online — ${people.length}`
+              hasContext
+                ? t("members.count", { count: people.length })
+                : t("members.onlineCount", { count: people.length })
             }
             isTerminal={isTerminal}
           />
           {people.length === 0 ? (
             <p className={emptyClass}>
-              {hasContext ? "No members to show." : "No one online."}
+              {hasContext ? t("members.empty") : t("members.noneOnline")}
             </p>
           ) : (
             people.map((person) => (
@@ -204,7 +209,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           <section
             className={isTerminal ? "flex flex-col gap-1 pb-2" : "flex flex-col gap-2"}
           >
-            <SectionHeader label="Media" isTerminal={isTerminal} bordered />
+            <SectionHeader label={t("media.heading")} isTerminal={isTerminal} bordered />
             <MediaGrid attachments={attachments} />
           </section>
         )}

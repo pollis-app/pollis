@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { shellOpen } from "../../bridge";
 
 // Known limitation (low priority): inline previews only fire when the URL ends in
@@ -84,6 +85,7 @@ function isFirstParty(url: string): boolean {
 }
 
 export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
+  const { t } = useTranslation("chat");
   const links = useMemo(() => extractMediaLinks(text), [text]);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   // Third-party media loads only when the reader asks for it.
@@ -134,11 +136,13 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
               onClick={() =>
                 setRevealed((prev) => new Set(prev).add(link.url))
               }
-              title={`Load media from ${href} — this contacts that site directly`}
-              aria-label={`Load media from ${href}. This contacts that site directly and reveals your IP address to it.`}
+              title={t("unfurl.loadTitle", { url: href })}
+              aria-label={t("unfurl.loadDescription", { url: href })}
               className="flex h-24 w-24 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-line bg-surface-raised px-2 text-center text-2xs text-muted hover:bg-hover hover:text-fg"
             >
-              Load {link.kind}
+              {link.kind === "image"
+                ? t("unfurl.loadImage")
+                : t("unfurl.loadVideo")}
             </button>
           );
         }
@@ -156,7 +160,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
               onClick={() => handleClick(link.url)}
               className="p-0 bg-transparent border-0 cursor-pointer flex-shrink-0"
               title={href}
-              aria-label={`Open ${href}`}
+              aria-label={t("unfurl.openLabel", { url: href })}
             >
               <img src={href} alt="" onError={onError} style={thumbStyle} />
             </button>

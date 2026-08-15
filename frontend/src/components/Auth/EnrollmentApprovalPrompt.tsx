@@ -1,5 +1,6 @@
 import { errorMessage } from "../../utils/errorMessage";
 import React, { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
@@ -24,6 +25,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
   verificationCode,
   onResolved,
 }) => {
+  const { t } = useTranslation("auth");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +36,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
       await api.approveDeviceEnrollment(requestId, verificationCode);
       onResolved();
     } catch (err) {
-      setError(errorMessage(err, "Failed to approve"));
+      setError(errorMessage(err, t("approval.approveFailed")));
     } finally {
       setIsLoading(false);
     }
@@ -47,7 +49,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
       await api.rejectDeviceEnrollment(requestId);
       onResolved();
     } catch (err) {
-      setError(errorMessage(err, "Failed to reject"));
+      setError(errorMessage(err, t("approval.rejectFailed")));
     } finally {
       setIsLoading(false);
     }
@@ -94,29 +96,30 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
                 className="text-xs font-mono uppercase tracking-wider"
                 style={{ color: "var(--c-danger)", letterSpacing: "0.15em" }}
               >
-                ⚠ Security request
+                {t("approval.badge")}
               </p>
               <h1
                 className="text-base font-mono font-bold mt-1"
                 style={{ color: "var(--c-text)" }}
               >
-                A new device wants to enroll
+                {t("approval.title")}
               </h1>
               <p
                 className="text-xs mt-2 font-mono"
                 style={{ color: "var(--c-text)", lineHeight: 1.6 }}
               >
-                A device claiming to be yours (id <code>{shortDeviceId}</code>)
-                just signed in with your email and is asking to be added to
-                your account.
+                <Trans
+                  t={t}
+                  i18nKey="approval.body"
+                  values={{ deviceId: shortDeviceId }}
+                  components={{ code: <code /> }}
+                />
               </p>
               <p
                 className="text-xs mt-2 font-mono"
                 style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
               >
-                Only approve if you started this on another device just now.
-                The code below MUST match the code shown on the new
-                device. If it doesn't match, reject this request.
+                {t("approval.instruction")}
               </p>
             </div>
 
@@ -150,10 +153,10 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
                 data-testid="approve-enrollment-button"
                 onClick={handleApprove}
                 isLoading={isLoading}
-                loadingText="Approving…"
+                loadingText={t("approval.approving")}
                 className="w-full"
               >
-                Yes, this is me — approve
+                {t("approval.approve")}
               </Button>
               <Button
                 data-testid="reject-enrollment-button"
@@ -162,7 +165,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
                 variant="danger"
                 className="w-full"
               >
-                Not me — reject
+                {t("approval.reject")}
               </Button>
             </div>
           </div>

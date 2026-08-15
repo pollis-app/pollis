@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { formatDuration } from "../../utils/format";
 import {
   Play,
@@ -26,6 +27,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   loop = false,
   preload = "metadata",
 }) => {
+  const { t } = useTranslation("common");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -159,7 +161,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           onChange={handleSeek}
           className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
           disabled={!duration}
-          aria-label="Seek audio"
+          aria-label={t("media.seek")}
         />
         <div className="flex justify-between text-xs font-mono mt-1" style={{ color: "var(--c-text-dim)" }}>
           <span>{formatDuration(currentTime)}</span>
@@ -174,7 +176,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             onClick={skipBackward}
             className="p-2 rounded transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
             style={btnStyle}
-            aria-label="Skip backward 10 seconds"
+            aria-label={t("media.skipBackward")}
           >
             <SkipBack className="w-4 h-4" />
           </button>
@@ -183,7 +185,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             onClick={togglePlay}
             className="p-3 rounded transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
             style={btnStyle}
-            aria-label={isPlaying ? "Pause" : "Play"}
+            aria-label={isPlaying ? t("media.pause") : t("media.play")}
           >
             {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
           </button>
@@ -192,7 +194,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             onClick={skipForward}
             className="p-2 rounded transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
             style={btnStyle}
-            aria-label="Skip forward 10 seconds"
+            aria-label={t("media.skipForward")}
           >
             <SkipForward className="w-4 h-4" />
           </button>
@@ -204,7 +206,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             onClick={toggleMute}
             className="p-2 rounded transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
             style={btnStyle}
-            aria-label={isMuted ? "Unmute" : "Mute"}
+            aria-label={isMuted ? t("media.unmute") : t("media.mute")}
           >
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
@@ -217,7 +219,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             value={isMuted ? 0 : volume}
             onChange={handleVolumeChange}
             className="w-20 h-2 rounded-lg appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
-            aria-label="Volume"
+            aria-label={t("media.volume")}
           />
         </div>
       </div>

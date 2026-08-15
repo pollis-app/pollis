@@ -48,8 +48,12 @@ export const LinkifiedText: React.FC<LinkifiedTextProps> = ({ text }) => {
 
     const url = match[0];
     parts.push(
+      // A URL is an identifier, never prose: it reads left-to-right in every
+      // locale, so it is pinned `ltr` and isolated from the surrounding text
+      // rather than inheriting the paragraph direction.
       <a
         key={match.index}
+        dir="ltr"
         href={ensureProtocol(url)}
         onClick={(e) => handleClick(e, url)}
         className="message-link"

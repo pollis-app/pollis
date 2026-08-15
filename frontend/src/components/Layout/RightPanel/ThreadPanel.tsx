@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../../stores/appStore";
 import {
@@ -29,6 +30,7 @@ interface ThreadPanelProps {
  */
 export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
   ({ threadId, channelId, conversationId }) => {
+    const { t } = useTranslation("nav");
     const { messages } = useMessages(channelId, conversationId);
     const { data: replies = [], isLoading } = useThreadMessages(threadId);
     const sendMessage = useSendMessage();
@@ -66,10 +68,10 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
           )}
 
           {isLoading ? (
-            <p className="px-1 text-xs text-muted">Loading replies…</p>
+            <p className="px-1 text-xs text-muted">{t("thread.loading")}</p>
           ) : replies.length === 0 ? (
             <p className="px-1 text-xs text-muted">
-              No replies yet. Start the thread below.
+              {t("thread.empty")}
             </p>
           ) : (
             <div className="flex flex-col gap-2">
@@ -93,7 +95,7 @@ export const ThreadPanel: React.FC<ThreadPanelProps> = observer(
         <div className="shrink-0 border-t border-line p-2">
           <ChatInput
             onSend={submit}
-            placeholder="Reply in thread…"
+            placeholder={t("thread.placeholder")}
             draftKey={`thread:${threadId}`}
           />
         </div>

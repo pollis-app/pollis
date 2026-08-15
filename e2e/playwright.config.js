@@ -11,7 +11,20 @@
 // end-to-end. Neither replaces the other.
 const { defineConfig, devices } = require("@playwright/test");
 
-const PORT = 5174;
+// Derived from the checkout path, not fixed, and overridable with
+// `POLLIS_E2E_PORT`. A hardcoded port plus `reuseExistingServer` silently
+// serves ANOTHER checkout's dev server when two worktrees run the suite at
+// once — which is how a locale branch once "passed" 100 tests against a
+// different branch's code. A wrong-but-green run is worse than a failure.
+const crypto = require("node:crypto");
+const PORT =
+  Number(process.env.POLLIS_E2E_PORT) ||
+  5174 +
+    (parseInt(
+      crypto.createHash("sha1").update(__dirname).digest("hex").slice(0, 6),
+      16,
+    ) %
+      300);
 
 module.exports = defineConfig({
   testDir: __dirname,

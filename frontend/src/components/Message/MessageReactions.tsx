@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useReactions, useAddReaction, useRemoveReaction } from "../../hooks/queries/useReactions";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
@@ -39,6 +40,7 @@ const ReactionEmoji: React.FC<{ emoji: string }> = ({ emoji }) => {
 };
 
 export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ messageId }) => {
+  const { t } = useTranslation("chat");
   const { currentUser } = appStore;
   const { data: reactions = [] } = useReactions(messageId);
   const addReaction = useAddReaction();
@@ -88,7 +90,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
   const hasReactions = reactions.length > 0;
 
   return (
-    <div className="flex items-center flex-wrap gap-1 ml-[3.25rem] mt-0.5">
+    <div className="flex items-center flex-wrap gap-1 ms-[3.25rem] mt-0.5">
       {/* Existing reaction pills */}
       {hasReactions && reactions.map((reaction) => {
         const reacted = currentUser
@@ -105,7 +107,10 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
               color: reacted ? "var(--c-accent)" : "var(--c-text-muted)",
               borderColor: reacted ? "var(--c-border-active)" : undefined,
             }}
-            aria-label={`${reaction.emoji} ${reaction.count} reaction${reaction.count !== 1 ? "s" : ""}`}
+            aria-label={t("reactions.pillLabel", {
+              emoji: reaction.emoji,
+              count: reaction.count,
+            })}
             aria-pressed={reacted}
           >
             <ReactionEmoji emoji={reaction.emoji} />
@@ -121,7 +126,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
           onClick={() => setPickerOpen((prev) => !prev)}
           className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity panel-raised px-1.5 py-0.5 text-xs font-mono"
           style={{ color: "var(--c-text-muted)" }}
-          aria-label="Add reaction"
+          aria-label={t("reactions.add")}
           aria-expanded={pickerOpen}
         >
           +
@@ -133,7 +138,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
           wrapper — no portal, no fixed overlay, no backdrop.
         */}
         {pickerOpen && (
-          <div data-testid="reaction-picker" className="absolute bottom-full mb-1 left-0 z-40">
+          <div data-testid="reaction-picker" className="absolute bottom-full mb-1 start-0 z-40">
             <EmojiPicker onSelect={handlePickerEmoji} onClose={() => setPickerOpen(false)} closeOnSelect />
           </div>
         )}

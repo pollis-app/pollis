@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 // Reusable keyboard-navigable list.
 //
@@ -65,12 +66,17 @@ export function NavigableList<T>({
   onEnterRow,
   onClickRow,
   isLoading = false,
-  loadingLabel = "Loading…",
-  emptyLabel = "No items.",
+  loadingLabel,
+  emptyLabel,
   rowTestId,
   testId,
   autoFocus = true,
 }: NavigableListProps<T>) {
+  const { t } = useTranslation("common");
+  // Resolved at render, not as default parameter values, so the fallbacks
+  // follow a language change.
+  const resolvedLoadingLabel = loadingLabel ?? t("states.loading");
+  const resolvedEmptyLabel = emptyLabel ?? t("list.empty");
   const [nav, setNav] = useState<NavState>({ rowIndex: 0, colIndex: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   // Tracks whether the user has actually navigated yet. Until they do,
@@ -214,7 +220,7 @@ export function NavigableList<T>({
     return (
       <div className="flex-1 flex items-center justify-center">
         <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-          {loadingLabel}
+          {resolvedLoadingLabel}
         </p>
       </div>
     );
@@ -222,9 +228,9 @@ export function NavigableList<T>({
 
   if (items.length === 0) {
     return (
-      <div className="flex-1" style={{ paddingTop: "1rem", paddingLeft: "1rem", paddingRight: "1rem" }}>
-        <p className="text-xs font-mono text-left" style={{ color: "var(--c-text-dim)" }}>
-          {emptyLabel}
+      <div className="flex-1" style={{ paddingTop: "1rem", paddingInline: "1rem" }}>
+        <p className="text-xs font-mono text-start" style={{ color: "var(--c-text-dim)" }}>
+          {resolvedEmptyLabel}
         </p>
       </div>
     );
@@ -251,7 +257,7 @@ export function NavigableList<T>({
             className="flex items-center px-4 py-2 gap-3 text-xs font-mono select-none"
             style={{
               background: isRowFocused ? "var(--c-active)" : undefined,
-              borderLeft: isRowFocused
+              borderInlineStart: isRowFocused
                 ? "2px solid var(--c-accent)"
                 : "2px solid transparent",
             }}

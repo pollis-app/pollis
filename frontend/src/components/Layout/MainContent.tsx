@@ -1,4 +1,5 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -46,6 +47,7 @@ interface MainContentProps {
 }
 
 export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequest = null }) => {
+  const { t } = useTranslation("nav");
   const {
     selectedChannelId,
     selectedConversationId,
@@ -438,7 +440,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           className="text-xs font-mono"
           style={{ color: 'var(--c-text-muted)' }}
         >
-          Select a channel to start messaging
+          {t("chat.noSelection")}
         </p>
       </div>
     );
@@ -508,7 +510,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
           >
             <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
-              message request
+              {t("dmRequest.heading")}
             </span>
           </div>
           <div
@@ -516,7 +518,12 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             style={{ background: 'var(--c-surface)' }}
           >
             <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
-              <span style={{ color: 'var(--c-text)' }}>{pendingDmRequest.senderName}</span> wants to send you messages.
+              <Trans
+                ns="nav"
+                i18nKey="dmRequest.body"
+                values={{ name: pendingDmRequest.senderName }}
+                components={{ name: <span style={{ color: 'var(--c-text)' }} /> }}
+              />
             </p>
             <div className="flex items-center gap-2 flex-shrink-0">
               <Button
@@ -524,21 +531,21 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
                 variant="primary"
                 onClick={handleAcceptDmRequest}
                 isLoading={acceptDmRequestMutation.isPending}
-                loadingText="Accepting…"
+                loadingText={t("dmRequest.accepting")}
                 disabled={acceptDmRequestMutation.isPending || blockUserMutation.isPending}
                 autoFocus
               >
-                Accept
+                {t("dmRequest.accept")}
               </Button>
               <Button
                 data-testid="dm-request-block"
                 variant="secondary"
                 onClick={handleBlockDmRequest}
                 isLoading={blockUserMutation.isPending}
-                loadingText="Blocking…"
+                loadingText={t("dmRequest.blocking")}
                 disabled={acceptDmRequestMutation.isPending || blockUserMutation.isPending}
               >
-                Block
+                {t("dmRequest.block")}
               </Button>
             </div>
           </div>
@@ -550,12 +557,12 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
           >
             <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
-              editing message
+              {t("editBar.heading")}
             </span>
             <button
               data-testid="cancel-edit-button"
               onClick={handleCancelEdit}
-              aria-label="Cancel editing"
+              aria-label={t("editBar.cancel")}
               className="icon-btn-sm flex-shrink-0"
             >
               <X size={20} aria-hidden="true" />
@@ -589,7 +596,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
               }}
             />
             <p className="text-2xs font-mono mt-1" style={{ color: 'var(--c-text-muted)' }}>
-              Enter to save · Shift+Enter for newline · Esc to cancel
+              {t("editBar.hint")}
             </p>
           </div>
         </div>
@@ -600,12 +607,12 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
           >
             <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
-              delete channel
+              {t("deleteChannel.heading")}
             </span>
             <button
               data-testid="delete-channel-cancel"
               onClick={() => setPendingDeleteChannelId(null)}
-              aria-label="Cancel delete"
+              aria-label={t("deleteChannel.cancel")}
               className="icon-btn-sm flex-shrink-0"
             >
               <X size={20} aria-hidden="true" />
@@ -616,27 +623,29 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             style={{ background: 'var(--c-surface)' }}
           >
             <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
-              This channel and all of its messages will be permanently deleted. This cannot be undone.
+              {t("deleteChannel.body")}
             </p>
             <Button
               data-testid="delete-channel-confirm"
               variant="danger"
               onClick={handleConfirmDeleteChannel}
               isLoading={deleteChannelMutation.isPending}
-              loadingText="Deleting…"
+              loadingText={t("deleteChannel.deleting")}
               autoFocus
             >
-              Delete
+              {t("common:actions.delete")}
             </Button>
           </div>
         </div>
       ) : pendingDeleteId ? (() => {
         const target = allMessages.find((m) => m.id === pendingDeleteId);
         const isModerating = !!target && !!currentUser && target.sender_id !== currentUser.id;
-        const heading = isModerating ? "remove message (admin)" : "delete message";
+        const heading = isModerating
+          ? t("deleteMessage.moderateHeading")
+          : t("deleteMessage.heading");
         const body = isModerating
-          ? "This message and its attachments will be removed for everyone in the channel."
-          : "This message will be deleted for everyone, including people who already received it.";
+          ? t("deleteMessage.moderateBody")
+          : t("deleteMessage.body");
         return (
           <div data-testid="delete-message-bar">
             <div
@@ -649,7 +658,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
               <button
                 data-testid="delete-message-cancel"
                 onClick={() => setPendingDeleteId(null)}
-                aria-label="Cancel delete"
+                aria-label={t("deleteMessage.cancel")}
                 className="icon-btn-sm flex-shrink-0"
               >
                 <X size={20} aria-hidden="true" />
@@ -667,10 +676,10 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
                 variant="danger"
                 onClick={handleConfirmDelete}
                 isLoading={deleteMessageMutation.isPending}
-                loadingText="Deleting…"
+                loadingText={t("deleteMessage.deleting")}
                 autoFocus
               >
-                {isModerating ? "Remove" : "Delete"}
+                {isModerating ? t("deleteMessage.remove") : t("common:actions.delete")}
               </Button>
             </div>
           </div>

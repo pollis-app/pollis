@@ -1,0 +1,172 @@
+{
+  "sidebar": {
+    "groups": "grupos",
+    "dms": "mds",
+    "account": "cuenta",
+    "saved": "Guardados",
+    "preferences": "Preferencias",
+    "userSettings": "Ajustes de usuario",
+    "voiceAndVideo": "Voz y vídeo",
+    "security": "Seguridad",
+    "keyBindings": "Atajos de teclado",
+    "softwareUpdate": "Actualización de software",
+    "expandGroup": "Expandir {{name}}",
+    "collapseGroup": "Contraer {{name}}",
+    "keyChanged": "La clave de identidad ha cambiado: vuelve a verificar",
+    "verified": "Contacto verificado",
+    "dmAvatarAlt": "Avatar de {{name}}",
+    "close": "Cerrar la barra lateral ({{shortcut}})"
+  },
+  "profile": {
+    "you": "Tú",
+    "call": "Llamar",
+    "voice": "Voz",
+    "settings": "Ajustes",
+    "voiceConnected": "Voz conectada",
+    "stopScreenShare": "Dejar de compartir pantalla",
+    "shareScreen": "Compartir pantalla",
+    "disconnect": "Desconectar"
+  },
+  "breadcrumb": {
+    "home": "Inicio",
+    "groups": "Grupos",
+    "createGroup": "Crear grupo",
+    "findGroup": "Buscar grupo",
+    "newChannel": "Canal nuevo",
+    "voice": "voz",
+    "joinRequests": "Solicitudes de acceso",
+    "inviteMember": "Invitar miembro",
+    "leaveGroup": "Salir del grupo",
+    "members": "Miembros",
+    "removeMember": "Expulsar miembro",
+    "directMessages": "Mensajes directos",
+    "newMessage": "Mensaje nuevo",
+    "requests": "Solicitudes",
+    "blockedUsers": "Usuarios bloqueados",
+    "conversationSettings": "Ajustes de la conversación",
+    "account": "Cuenta",
+    "preferences": "Preferencias",
+    "userSettings": "Ajustes de usuario",
+    "profile": "Perfil",
+    "security": "Seguridad",
+    "voiceSettings": "Voz",
+    "invites": "Invitaciones",
+    "joinAGroup": "Unirse a un grupo",
+    "search": "Buscar",
+    "searchButton": "Buscar ({{shortcut}})",
+    "settings": "Ajustes"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Mensajes de grupo sin leer: {{count}}",
+    "groupsUnread_other": "Mensajes de grupo sin leer: {{count}}",
+    "dmsUnread_one": "Mensajes directos sin leer: {{count}}",
+    "dmsUnread_other": "Mensajes directos sin leer: {{count}}",
+    "joinRequests_one": "Solicitudes de acceso pendientes: {{count}}",
+    "joinRequests_other": "Solicitudes de acceso pendientes: {{count}}",
+    "invites_one": "Invitaciones pendientes: {{count}}",
+    "invites_other": "Invitaciones pendientes: {{count}}",
+    "someone": "Alguien",
+    "updateAvailable": "Actualización disponible",
+    "updateAvailableTitle": "Actualización disponible: {{version}}",
+    "answerCall": "Responder a la llamada de @{{username}}",
+    "declineCall": "Rechazar la llamada",
+    "dismissVoiceError": "Descartar el error de voz",
+    "dismissScreenShareError": "Descartar el error al compartir pantalla",
+    "syncing": "sincronizando…"
+  },
+  "shell": {
+    "dropFiles": "suelta los archivos para enviarlos",
+    "voiceChannelFallback": "voz",
+    "callChannel": "Llamada"
+  },
+  "panel": {
+    "thread": "Hilo",
+    "details": "Detalles",
+    "ariaLabel": "Detalles de la conversación",
+    "closeThread": "Cerrar el panel de hilo ({{shortcut}})",
+    "closeDetails": "Cerrar el panel de detalles ({{shortcut}})"
+  },
+  "members": {
+    "count_one": "Miembros — {{count}}",
+    "count_other": "Miembros — {{count}}",
+    "onlineCount_one": "En línea — {{count}}",
+    "onlineCount_other": "En línea — {{count}}",
+    "empty": "No hay miembros que mostrar.",
+    "noneOnline": "No hay nadie en línea.",
+    "you": "Tú",
+    "admin": "admin"
+  },
+  "media": {
+    "heading": "Multimedia",
+    "empty": "Todavía no se ha compartido nada."
+  },
+  "thread": {
+    "loading": "Cargando respuestas…",
+    "empty": "Todavía no hay respuestas. Empieza el hilo abajo.",
+    "placeholder": "Responder en el hilo…",
+    "messageDeleted": "Mensaje eliminado",
+    "encrypted": "[cifrado]"
+  },
+  "chat": {
+    "noSelection": "Selecciona un canal para empezar a enviar mensajes"
+  },
+  "dmRequest": {
+    "heading": "solicitud de mensaje",
+    "body": "<name>{{name}}</name> quiere enviarte mensajes.",
+    "accept": "Aceptar",
+    "accepting": "Aceptando…",
+    "block": "Bloquear",
+    "blocking": "Bloqueando…"
+  },
+  "editBar": {
+    "heading": "editando mensaje",
+    "cancel": "Cancelar la edición",
+    "hint": "Intro para guardar · Mayús+Intro para salto de línea · Esc para cancelar"
+  },
+  "deleteChannel": {
+    "heading": "eliminar canal",
+    "cancel": "Cancelar la eliminación",
+    "body": "Este canal y todos sus mensajes se eliminarán de forma permanente. No se puede deshacer.",
+    "deleting": "Eliminando…"
+  },
+  "deleteMessage": {
+    "heading": "eliminar mensaje",
+    "moderateHeading": "quitar mensaje (admin)",
+    "body": "Este mensaje se eliminará para todo el mundo, incluidas las personas que ya lo hayan recibido.",
+    "moderateBody": "Este mensaje y sus adjuntos se quitarán para todo el mundo en el canal.",
+    "cancel": "Cancelar la eliminación",
+    "deleting": "Eliminando…",
+    "remove": "Quitar"
+  },
+  "update": {
+    "preparing": "Preparando la actualización…",
+    "checking": "Buscando actualizaciones…",
+    "downloading": "Descargando la actualización…",
+    "downloadingProgress": "Descargando la actualización… {{progress}}%",
+    "installing": "Instalando la actualización…",
+    "relaunching": "Reiniciando…",
+    "failed": "Error al actualizar: {{error}}"
+  },
+  "home": {
+    "groups": "Grupos",
+    "groupsDescription": "Comunidades, organizaciones, equipos y chats de grupo demasiado ambiciosos",
+    "dms": "Mensajes directos",
+    "dmsDescription": "Conversaciones privadas y cifradas de extremo a extremo con otras personas",
+    "invites": "Invitaciones",
+    "noPendingInvites": "No hay invitaciones pendientes",
+    "pending_one": "{{count}} pendiente",
+    "pending_other": "{{count}} pendientes",
+    "join": "Unirse a un grupo",
+    "joinDescription": "Canjea un enlace o un código de invitación",
+    "joinRequests": "Solicitudes de acceso",
+    "logout": "Cerrar sesión",
+    "exit": "Salir"
+  },
+  "titleBar": {
+    "minimize": "Minimizar",
+    "maximize": "Maximizar"
+  },
+  "terminal": {
+    "shellFailed": "no se pudo iniciar la shell: {{error}}"
+  }
+}

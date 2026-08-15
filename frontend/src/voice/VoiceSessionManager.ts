@@ -3,6 +3,7 @@ import { logIgnored } from '../utils/log';
 import { Channel, invoke } from '../bridge';
 
 import { reaction } from 'mobx';
+import i18n from '../i18n';
 import { appStore } from '../stores/appStore';
 import type { VoiceParticipant, VoiceConnectionQuality } from '../types';
 import type { ParticipantVideo, VoiceGateState, VoiceInputMode } from '../types/voice-state';
@@ -162,6 +163,11 @@ const INITIAL_STATE: VoiceSessionState = {
  * LiveKit server is down/unreachable) collapse to a single clear line; any
  * other message passes through so genuine config/permission errors stay
  * visible.
+ *
+ * Resolved through `i18n.t` rather than a component's `useTranslation`: the
+ * result is a one-shot string that lands in `voiceError` at the moment the join
+ * fails (the status bar renders it verbatim) and is never re-derived. The lookup
+ * happens per call, so it is never a module-load snapshot of the language.
  */
 function friendlyJoinError(raw: string): string {
   const m = raw.toLowerCase();
@@ -173,10 +179,10 @@ function friendlyJoinError(raw: string): string {
     m.includes('connection refused') ||
     m.includes('dns')
   ) {
-    return "Couldn't reach the voice server — check your connection and try again.";
+    return i18n.t('voice:joinError.unreachable');
   }
   if (m.includes('not configured')) {
-    return 'Voice is not configured on this server.';
+    return i18n.t('voice:joinError.notConfigured');
   }
   return raw;
 }

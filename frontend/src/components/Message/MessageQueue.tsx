@@ -1,10 +1,12 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Clock, Send, AlertCircle } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { appStore } from '../../stores/appStore';
 import { Button } from '../ui/Button';
 
 export const MessageQueue: React.FC = observer(() => {
+  const { t } = useTranslation('chat');
   const {
     messageQueue,
     removeFromMessageQueue,
@@ -22,7 +24,7 @@ export const MessageQueue: React.FC = observer(() => {
   }
 
   const getMessageContent = (_messageId: string): string => {
-    return '[Pending message]';
+    return t('queue.pendingPlaceholder');
   };
 
   const handleCancel = (queueItemId: string, _messageId: string) => {
@@ -44,7 +46,7 @@ export const MessageQueue: React.FC = observer(() => {
       style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
     >
       <span className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
-        Queue
+        {t('queue.heading')}
       </span>
 
       <div className="flex flex-col gap-1">
@@ -68,13 +70,13 @@ export const MessageQueue: React.FC = observer(() => {
                 className="text-2xs font-mono"
                 style={{ color: 'var(--c-text-muted)' }}
               >
-                {item.status}
+                {t(`status.${item.status}`)}
               </span>
               <p className="text-xs font-mono flex-1 truncate" style={{ color: 'var(--c-text-dim)' }}>{snippet}</p>
               <button
                 data-testid={`cancel-queue-item-${item.id}`}
                 onClick={() => handleCancel(item.id, item.message_id)}
-                aria-label="Cancel message"
+                aria-label={t('queue.cancel')}
                 className="icon-btn-sm"
               >
                 <X size={14} aria-hidden="true" />
@@ -95,7 +97,7 @@ export const MessageQueue: React.FC = observer(() => {
             >
               <AlertCircle size={14} aria-hidden="true" style={{ color: 'var(--c-danger)' }} />
               <span className="text-2xs font-mono" style={{ color: 'var(--c-danger)' }}>
-                failed ×{item.retry_count}
+                {t('queue.failedCount', { count: item.retry_count })}
               </span>
               <p className="text-xs font-mono flex-1 truncate" style={{ color: 'var(--c-text-dim)' }}>{snippet}</p>
               <div className="flex items-center gap-1">
@@ -105,12 +107,12 @@ export const MessageQueue: React.FC = observer(() => {
                   variant="ghost"
                   size="xs"
                 >
-                  retry
+                  {t('queue.retry')}
                 </Button>
                 <button
                   data-testid={`cancel-queue-item-${item.id}`}
                   onClick={() => handleCancel(item.id, item.message_id)}
-                  aria-label="Cancel message"
+                  aria-label={t('queue.cancel')}
                   className="icon-btn-sm"
                 >
                   <X size={14} aria-hidden="true" />

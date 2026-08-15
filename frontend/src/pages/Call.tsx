@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 import { invoke } from "../bridge";
 import { appStore } from "../stores/appStore";
 import { VoiceStage } from "../components/Voice/stage/VoiceStage";
@@ -36,6 +37,7 @@ const DEFER_CANCEL_MS = 200;
 const pendingCancels = new Map<string, ReturnType<typeof setTimeout>>();
 
 export const CallPage: React.FC = observer(() => {
+  const { t } = useTranslation("voice");
   const navigate = useNavigate();
   const { callId } = useParams({ from: "/call/$callId" });
   const roomName = `call-${callId}`;
@@ -67,8 +69,8 @@ export const CallPage: React.FC = observer(() => {
         return incomingCall.callerUsername;
       }
     }
-    return "Call";
-  }, [voiceState, voiceParticipants, incomingCall]);
+    return t("call.defaultTitle");
+  }, [voiceState, voiceParticipants, incomingCall, t]);
 
   // Bounce-back guard. Three cases:
   //   1. Voice is our room → stay.

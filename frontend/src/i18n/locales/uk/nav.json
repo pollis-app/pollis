@@ -1,0 +1,186 @@
+{
+  "sidebar": {
+    "groups": "групи",
+    "dms": "особисті",
+    "account": "обліковий запис",
+    "saved": "Збережене",
+    "preferences": "Параметри",
+    "userSettings": "Налаштування користувача",
+    "voiceAndVideo": "Звук і відео",
+    "security": "Безпека",
+    "keyBindings": "Комбінації клавіш",
+    "softwareUpdate": "Оновлення програми",
+    "expandGroup": "Розгорнути {{name}}",
+    "collapseGroup": "Згорнути {{name}}",
+    "keyChanged": "Ключ ідентичності змінився — перевірте ще раз",
+    "verified": "Перевірений контакт",
+    "dmAvatarAlt": "Аватар {{name}}",
+    "close": "Закрити бічну панель ({{shortcut}})"
+  },
+  "profile": {
+    "you": "Ви",
+    "call": "Дзвінок",
+    "voice": "Голос",
+    "settings": "Налаштування",
+    "voiceConnected": "Голос підключено",
+    "stopScreenShare": "Зупинити демонстрацію екрана",
+    "shareScreen": "Демонструвати екран",
+    "disconnect": "Від'єднатися"
+  },
+  "breadcrumb": {
+    "home": "Головна",
+    "groups": "Групи",
+    "createGroup": "Створити групу",
+    "findGroup": "Знайти групу",
+    "newChannel": "Новий канал",
+    "voice": "голос",
+    "joinRequests": "Запити на приєднання",
+    "inviteMember": "Запросити учасника",
+    "leaveGroup": "Залишити групу",
+    "members": "Учасники",
+    "removeMember": "Вилучити учасника",
+    "directMessages": "Особисті повідомлення",
+    "newMessage": "Нове повідомлення",
+    "requests": "Запити",
+    "blockedUsers": "Заблоковані користувачі",
+    "conversationSettings": "Налаштування розмови",
+    "account": "Обліковий запис",
+    "preferences": "Параметри",
+    "userSettings": "Налаштування користувача",
+    "profile": "Профіль",
+    "security": "Безпека",
+    "voiceSettings": "Голос",
+    "invites": "Запрошення",
+    "joinAGroup": "Приєднатися до групи",
+    "search": "Пошук",
+    "searchButton": "Пошук ({{shortcut}})",
+    "settings": "Налаштування"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Непрочитані повідомлення в групах: {{count}}",
+    "groupsUnread_few": "Непрочитані повідомлення в групах: {{count}}",
+    "groupsUnread_many": "Непрочитані повідомлення в групах: {{count}}",
+    "groupsUnread_other": "Непрочитані повідомлення в групах: {{count}}",
+    "dmsUnread_one": "Непрочитані особисті повідомлення: {{count}}",
+    "dmsUnread_few": "Непрочитані особисті повідомлення: {{count}}",
+    "dmsUnread_many": "Непрочитані особисті повідомлення: {{count}}",
+    "dmsUnread_other": "Непрочитані особисті повідомлення: {{count}}",
+    "joinRequests_one": "Запити на приєднання в очікуванні: {{count}}",
+    "joinRequests_few": "Запити на приєднання в очікуванні: {{count}}",
+    "joinRequests_many": "Запити на приєднання в очікуванні: {{count}}",
+    "joinRequests_other": "Запити на приєднання в очікуванні: {{count}}",
+    "invites_one": "Запрошення в очікуванні: {{count}}",
+    "invites_few": "Запрошення в очікуванні: {{count}}",
+    "invites_many": "Запрошення в очікуванні: {{count}}",
+    "invites_other": "Запрошення в очікуванні: {{count}}",
+    "someone": "Хтось",
+    "updateAvailable": "Доступне оновлення",
+    "updateAvailableTitle": "Доступне оновлення: {{version}}",
+    "answerCall": "Відповісти на дзвінок від @{{username}}",
+    "declineCall": "Відхилити дзвінок",
+    "dismissVoiceError": "Сховати помилку голосу",
+    "dismissScreenShareError": "Сховати помилку демонстрації екрана",
+    "syncing": "синхронізація…"
+  },
+  "shell": {
+    "dropFiles": "перетягніть файли, щоб надіслати",
+    "voiceChannelFallback": "голос",
+    "callChannel": "Дзвінок"
+  },
+  "panel": {
+    "thread": "Гілка",
+    "details": "Подробиці",
+    "ariaLabel": "Подробиці розмови",
+    "closeThread": "Закрити панель гілки ({{shortcut}})",
+    "closeDetails": "Закрити панель подробиць ({{shortcut}})"
+  },
+  "members": {
+    "count_one": "Учасники — {{count}}",
+    "count_few": "Учасники — {{count}}",
+    "count_many": "Учасники — {{count}}",
+    "count_other": "Учасники — {{count}}",
+    "onlineCount_one": "У мережі — {{count}}",
+    "onlineCount_few": "У мережі — {{count}}",
+    "onlineCount_many": "У мережі — {{count}}",
+    "onlineCount_other": "У мережі — {{count}}",
+    "empty": "Немає учасників для показу.",
+    "noneOnline": "Нікого немає в мережі.",
+    "you": "Ви",
+    "admin": "адмін"
+  },
+  "media": {
+    "heading": "Медіа",
+    "empty": "Медіафайлами ще не ділилися."
+  },
+  "thread": {
+    "loading": "Завантаження відповідей…",
+    "empty": "Відповідей ще немає. Почніть гілку нижче.",
+    "placeholder": "Відповісти в гілці…",
+    "messageDeleted": "Повідомлення видалено",
+    "encrypted": "[зашифровано]"
+  },
+  "chat": {
+    "noSelection": "Виберіть канал, щоб почати листування"
+  },
+  "dmRequest": {
+    "heading": "запит на листування",
+    "body": "<name>{{name}}</name> хоче писати вам повідомлення.",
+    "accept": "Прийняти",
+    "accepting": "Приймаємо…",
+    "block": "Заблокувати",
+    "blocking": "Блокування…"
+  },
+  "editBar": {
+    "heading": "редагування повідомлення",
+    "cancel": "Скасувати редагування",
+    "hint": "Enter — зберегти · Shift+Enter — новий рядок · Esc — скасувати"
+  },
+  "deleteChannel": {
+    "heading": "видалення каналу",
+    "cancel": "Скасувати видалення",
+    "body": "Цей канал і всі його повідомлення буде видалено назавжди. Скасувати це неможливо.",
+    "deleting": "Видалення…"
+  },
+  "deleteMessage": {
+    "heading": "видалення повідомлення",
+    "moderateHeading": "вилучення повідомлення (адмін)",
+    "body": "Це повідомлення буде видалено для всіх, зокрема для тих, хто вже його отримав.",
+    "moderateBody": "Це повідомлення та його вкладення буде вилучено для всіх у каналі.",
+    "cancel": "Скасувати видалення",
+    "deleting": "Видалення…",
+    "remove": "Вилучити"
+  },
+  "update": {
+    "preparing": "Готуємося до оновлення…",
+    "checking": "Перевірка оновлень…",
+    "downloading": "Завантаження оновлення…",
+    "downloadingProgress": "Завантаження оновлення… {{progress}}%",
+    "installing": "Встановлення оновлення…",
+    "relaunching": "Перезапуск…",
+    "failed": "Не вдалося оновити: {{error}}"
+  },
+  "home": {
+    "groups": "Групи",
+    "groupsDescription": "Спільноти, організації, команди та надто амбітні групові чати",
+    "dms": "Особисті повідомлення",
+    "dmsDescription": "Приватні розмови з наскрізним шифруванням",
+    "invites": "Запрошення",
+    "noPendingInvites": "Немає запрошень в очікуванні",
+    "pending_one": "{{count}} очікує",
+    "pending_few": "{{count}} очікують",
+    "pending_many": "{{count}} очікують",
+    "pending_other": "{{count}} очікує",
+    "join": "Приєднатися до групи",
+    "joinDescription": "Скористайтеся посиланням-запрошенням або кодом",
+    "joinRequests": "Запити на приєднання",
+    "logout": "Вийти",
+    "exit": "Закрити Pollis"
+  },
+  "titleBar": {
+    "minimize": "Згорнути",
+    "maximize": "Розгорнути"
+  },
+  "terminal": {
+    "shellFailed": "не вдалося запустити оболонку: {{error}}"
+  }
+}

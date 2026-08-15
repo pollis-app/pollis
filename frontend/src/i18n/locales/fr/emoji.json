@@ -1,0 +1,50 @@
+{
+  "picker": {
+    "label": "Sélecteur d'émojis",
+    "triggerLabel": "Émoji",
+    "searchLabel": "Rechercher",
+    "searchPlaceholder": "Rechercher un émoji",
+    "resultsFor": "Résultats pour « {{query}} »",
+    "recent": "Fréquemment utilisés",
+    "custom": "Personnalisés",
+    "empty": "Aucun émoji ne correspond.",
+    "previewHint": "Choisissez un émoji",
+    "railLabel": "Catégories d'émojis"
+  },
+  "categories": {
+    "people": "Personnes",
+    "nature": "Nature",
+    "food": "Nourriture",
+    "activity": "Activités",
+    "travel": "Voyage",
+    "objects": "Objets",
+    "symbols": "Symboles",
+    "flags": "Drapeaux"
+  },
+  "skinTone": {
+    "groupLabel": "Teinte de peau",
+    "default": "Teinte de peau par défaut",
+    "numbered": "Teinte de peau {{index}}"
+  },
+  "manage": {
+    "title": "Émojis personnalisés",
+    "signInRequired": "Veuillez vous connecter",
+    "shortcodeLabel": "Code court",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Se saisit sous la forme :code: — a–z, 0–9 et _",
+    "shortcodeInvalid": "Utilisez 2 à 32 caractères : a–z, 0–9 et _",
+    "shortcodeTaken": ":{{shortcode}}: est déjà utilisé dans ce groupe",
+    "chooseImage": "Choisir une image",
+    "shrinking": "Compression…",
+    "filePickerTitle": "Choisir une image d'émoji",
+    "imageFilterName": "Images",
+    "addFailed": "Impossible d'ajouter cet émoji",
+    "removeFailed": "Impossible de retirer cet émoji",
+    "storageNote": "Les images sont ré-encodées à moins de 48 Ko avant l'envoi : un fichier source volumineux ne pose donc pas de problème. Des images identiques partagent une seule copie stockée entre tous les groupes qui les utilisent. Le nombre d'émojis de ce groupe n'est pas limité.",
+    "stored_one": "{{count}} émoji · {{size}} en stockage",
+    "stored_other": "{{count}} émojis · {{size}} en stockage",
+    "empty": "Aucun émoji personnalisé pour l'instant. N'importe quel membre du groupe peut en ajouter un.",
+    "sizeAnimated": "animé · {{size}}",
+    "remove": "Retirer :{{shortcode}}:"
+  }
+}

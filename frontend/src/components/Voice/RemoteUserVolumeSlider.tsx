@@ -1,4 +1,5 @@
 import React, { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "../../bridge";
 import { Volume2 } from "lucide-react";
 import {
@@ -30,6 +31,7 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
   identity,
   participantName,
 }) => {
+  const { t } = useTranslation("voice");
   const { save, query } = usePreferences();
 
   const userId = userIdFromVoiceIdentity(identity);
@@ -85,7 +87,7 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
         step={0.05}
         value={value}
         onChange={(e) => handleChange(Number(e.target.value))}
-        aria-label={`Output volume for ${participantName}`}
+        aria-label={t("tile.volumeFor", { name: participantName })}
         data-testid={`voice-volume-slider-${userId}`}
         className="
           w-20 h-1 rounded-md appearance-none cursor-pointer

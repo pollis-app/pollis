@@ -1,0 +1,75 @@
+{
+  "actions": {
+    "back": "返回",
+    "cancel": "取消",
+    "close": "关闭",
+    "copy": "复制",
+    "delete": "删除",
+    "goBack": "返回",
+    "moreOptions": "更多选项",
+    "save": "保存"
+  },
+  "states": {
+    "buttonLoading": "加载中...",
+    "loading": "加载中…"
+  },
+  "time": {
+    "today": "今天",
+    "yesterday": "昨天"
+  },
+  "presence": {
+    "label": "状态：{{status}}",
+    "offline": "离线",
+    "online": "在线"
+  },
+  "list": {
+    "empty": "暂无内容。"
+  },
+  "grid": {
+    "empty": "这里还没有人。"
+  },
+  "menu": {
+    "escHint": "按 Esc 返回",
+    "navigationLabel": "导航菜单",
+    "navigateHint": "移动",
+    "selectHint": "按 Enter 选择"
+  },
+  "media": {
+    "mute": "静音",
+    "pause": "暂停",
+    "play": "播放",
+    "seek": "调整播放进度",
+    "skipBackward": "后退 10 秒",
+    "skipForward": "前进 10 秒",
+    "unmute": "取消静音",
+    "volume": "音量"
+  },
+  "composer": {
+    "addAttachment": "添加附件",
+    "allMentionHint": "会通知此频道中的所有人",
+    "filePickerTitle": "添加文件",
+    "inputLabel": "消息输入框",
+    "placeholder": "输入消息…",
+    "previewAlt": "预览",
+    "removeAttachment": "移除 {{name}}",
+    "send": "发送消息"
+  },
+  "mentions": {
+    "listLabel": "提及建议",
+    "matching": "匹配 <hl>@{{query}}</hl> 的成员"
+  },
+  "a11y": {
+    "avatar": "头像",
+    "loading": "加载中",
+    "otpDigit": "验证码第 {{index}} 位"
+  },
+  "timeAgo": {
+    "seconds_other": "{{count}}秒",
+    "minutes_other": "{{count}}分",
+    "hours_other": "{{count}}小时",
+    "days_other": "{{count}}天",
+    "weeks_other": "{{count}}周",
+    "months_other": "{{count}}个月",
+    "years_other": "{{count}}年"
+  }
+}

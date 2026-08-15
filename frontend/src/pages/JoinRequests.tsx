@@ -1,4 +1,5 @@
 import React from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useGroupJoinRequests, useApproveJoinRequest, useRejectJoinRequest } from "../hooks/queries";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
@@ -9,6 +10,7 @@ interface JoinRequestsProps {
 }
 
 export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }) => {
+  const { t } = useTranslation("channels");
   const { data: requests = [], isLoading } = useGroupJoinRequests(groupId);
   const approveMutation = useApproveJoinRequest();
   const rejectMutation = useRejectJoinRequest();
@@ -37,14 +39,18 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
     >
       <div className="px-4 py-4">
         <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
-          Pending requests to join <span style={{ color: "var(--c-accent)" }}>{groupName}</span>
+          <Trans
+            i18nKey="channels:joinRequests.pendingFor"
+            values={{ name: groupName }}
+            components={{ accent: <span style={{ color: "var(--c-accent)" }} /> }}
+          />
         </p>
       </div>
 
       <NavigableList
         items={requests}
         isLoading={isLoading}
-        emptyLabel="No pending requests."
+        emptyLabel={t("joinRequests.empty")}
         getKey={(req) => req.id}
         rowTestId={(req) => `join-request-${req.id}`}
         renderRow={(req) => (
@@ -62,7 +68,7 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
             disabled={approveMutation.isPending || rejectMutation.isPending}
             variant="primary"
           >
-            approve
+            {t("joinRequests.approve")}
           </Button>,
           <Button size="sm"
             data-testid={`reject-request-${req.id}`}
@@ -70,7 +76,7 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
             disabled={approveMutation.isPending || rejectMutation.isPending}
             variant="secondary"
           >
-            reject
+            {t("joinRequests.reject")}
           </Button>,
         ]}
       />

@@ -1,0 +1,172 @@
+{
+  "sidebar": {
+    "groups": "groupes",
+    "dms": "mp",
+    "account": "compte",
+    "saved": "Enregistrés",
+    "preferences": "Préférences",
+    "userSettings": "Paramètres utilisateur",
+    "voiceAndVideo": "Voix et vidéo",
+    "security": "Sécurité",
+    "keyBindings": "Raccourcis clavier",
+    "softwareUpdate": "Mise à jour",
+    "expandGroup": "Développer {{name}}",
+    "collapseGroup": "Réduire {{name}}",
+    "keyChanged": "Clé d'identité modifiée — à revérifier",
+    "verified": "Contact vérifié",
+    "dmAvatarAlt": "Avatar de {{name}}",
+    "close": "Fermer la barre latérale ({{shortcut}})"
+  },
+  "profile": {
+    "you": "Vous",
+    "call": "Appel",
+    "voice": "Vocal",
+    "settings": "Paramètres",
+    "voiceConnected": "Vocal connecté",
+    "stopScreenShare": "Arrêter le partage d'écran",
+    "shareScreen": "Partager l'écran",
+    "disconnect": "Déconnecter"
+  },
+  "breadcrumb": {
+    "home": "Accueil",
+    "groups": "Groupes",
+    "createGroup": "Créer un groupe",
+    "findGroup": "Trouver un groupe",
+    "newChannel": "Nouveau canal",
+    "voice": "vocal",
+    "joinRequests": "Demandes d'adhésion",
+    "inviteMember": "Inviter un membre",
+    "leaveGroup": "Quitter le groupe",
+    "members": "Membres",
+    "removeMember": "Retirer un membre",
+    "directMessages": "Messages privés",
+    "newMessage": "Nouveau message",
+    "requests": "Demandes",
+    "blockedUsers": "Utilisateurs bloqués",
+    "conversationSettings": "Paramètres de la conversation",
+    "account": "Compte",
+    "preferences": "Préférences",
+    "userSettings": "Paramètres utilisateur",
+    "profile": "Profil",
+    "security": "Sécurité",
+    "voiceSettings": "Vocal",
+    "invites": "Invitations",
+    "joinAGroup": "Rejoindre un groupe",
+    "search": "Recherche",
+    "searchButton": "Rechercher ({{shortcut}})",
+    "settings": "Paramètres"
+  },
+  "statusBar": {
+    "groupsUnread_one": "Messages de groupe non lus : {{count}}",
+    "groupsUnread_other": "Messages de groupe non lus : {{count}}",
+    "dmsUnread_one": "Messages privés non lus : {{count}}",
+    "dmsUnread_other": "Messages privés non lus : {{count}}",
+    "joinRequests_one": "Demandes d'adhésion en attente : {{count}}",
+    "joinRequests_other": "Demandes d'adhésion en attente : {{count}}",
+    "invites_one": "Invitations en attente : {{count}}",
+    "invites_other": "Invitations en attente : {{count}}",
+    "someone": "Quelqu'un",
+    "updateAvailable": "Mise à jour disponible",
+    "updateAvailableTitle": "Mise à jour disponible : {{version}}",
+    "answerCall": "Répondre à l'appel de @{{username}}",
+    "declineCall": "Refuser l'appel",
+    "dismissVoiceError": "Ignorer l'erreur vocale",
+    "dismissScreenShareError": "Ignorer l'erreur de partage d'écran",
+    "syncing": "synchronisation…"
+  },
+  "shell": {
+    "dropFiles": "déposez des fichiers pour les envoyer",
+    "voiceChannelFallback": "vocal",
+    "callChannel": "Appel"
+  },
+  "panel": {
+    "thread": "Fil",
+    "details": "Détails",
+    "ariaLabel": "Détails de la conversation",
+    "closeThread": "Fermer le panneau de fil ({{shortcut}})",
+    "closeDetails": "Fermer le panneau de détails ({{shortcut}})"
+  },
+  "members": {
+    "count_one": "Membres — {{count}}",
+    "count_other": "Membres — {{count}}",
+    "onlineCount_one": "En ligne — {{count}}",
+    "onlineCount_other": "En ligne — {{count}}",
+    "empty": "Aucun membre à afficher.",
+    "noneOnline": "Personne en ligne.",
+    "you": "Vous",
+    "admin": "admin"
+  },
+  "media": {
+    "heading": "Médias",
+    "empty": "Aucun média partagé pour l'instant."
+  },
+  "thread": {
+    "loading": "Chargement des réponses…",
+    "empty": "Aucune réponse pour l'instant. Lancez le fil ci-dessous.",
+    "placeholder": "Répondre dans le fil…",
+    "messageDeleted": "Message supprimé",
+    "encrypted": "[chiffré]"
+  },
+  "chat": {
+    "noSelection": "Sélectionnez un canal pour commencer à discuter"
+  },
+  "dmRequest": {
+    "heading": "demande de message",
+    "body": "<name>{{name}}</name> souhaite vous envoyer des messages.",
+    "accept": "Accepter",
+    "accepting": "Acceptation…",
+    "block": "Bloquer",
+    "blocking": "Blocage…"
+  },
+  "editBar": {
+    "heading": "modification du message",
+    "cancel": "Annuler la modification",
+    "hint": "Entrée pour enregistrer · Maj+Entrée pour un saut de ligne · Échap pour annuler"
+  },
+  "deleteChannel": {
+    "heading": "supprimer le canal",
+    "cancel": "Annuler la suppression",
+    "body": "Ce canal et tous ses messages seront définitivement supprimés. Cette action est irréversible.",
+    "deleting": "Suppression…"
+  },
+  "deleteMessage": {
+    "heading": "supprimer le message",
+    "moderateHeading": "retirer le message (admin)",
+    "body": "Ce message sera supprimé pour tout le monde, y compris pour les personnes qui l'ont déjà reçu.",
+    "moderateBody": "Ce message et ses pièces jointes seront retirés pour tous les membres du canal.",
+    "cancel": "Annuler la suppression",
+    "deleting": "Suppression…",
+    "remove": "Retirer"
+  },
+  "update": {
+    "preparing": "Préparation de la mise à jour…",
+    "checking": "Recherche de mises à jour…",
+    "downloading": "Téléchargement de la mise à jour…",
+    "downloadingProgress": "Téléchargement de la mise à jour… {{progress}} %",
+    "installing": "Installation de la mise à jour…",
+    "relaunching": "Redémarrage…",
+    "failed": "Échec de la mise à jour : {{error}}"
+  },
+  "home": {
+    "groups": "Groupes",
+    "groupsDescription": "Communautés, organisations, équipes et discussions de groupe trop ambitieuses",
+    "dms": "Messages privés",
+    "dmsDescription": "Conversations privées, chiffrées de bout en bout, avec des personnes",
+    "invites": "Invitations",
+    "noPendingInvites": "Aucune invitation en attente",
+    "pending_one": "{{count}} en attente",
+    "pending_other": "{{count}} en attente",
+    "join": "Rejoindre un groupe",
+    "joinDescription": "Utiliser un lien d'invitation ou un code d'accès",
+    "joinRequests": "Demandes d'adhésion",
+    "logout": "Se déconnecter",
+    "exit": "Quitter"
+  },
+  "titleBar": {
+    "minimize": "Réduire",
+    "maximize": "Agrandir"
+  },
+  "terminal": {
+    "shellFailed": "échec du démarrage du shell : {{error}}"
+  }
+}

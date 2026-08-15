@@ -1,0 +1,96 @@
+{
+  "actions": {
+    "back": "Назад",
+    "cancel": "Скасувати",
+    "close": "Закрити",
+    "copy": "Копіювати",
+    "delete": "Видалити",
+    "goBack": "Повернутися",
+    "moreOptions": "Більше дій",
+    "save": "Зберегти"
+  },
+  "states": {
+    "buttonLoading": "Завантаження...",
+    "loading": "Завантаження…"
+  },
+  "time": {
+    "today": "Сьогодні",
+    "yesterday": "Вчора"
+  },
+  "presence": {
+    "label": "Присутність: {{status}}",
+    "offline": "не в мережі",
+    "online": "у мережі"
+  },
+  "list": {
+    "empty": "Немає елементів."
+  },
+  "grid": {
+    "empty": "Тут поки нікого немає."
+  },
+  "menu": {
+    "escHint": "Esc — назад",
+    "navigationLabel": "Меню навігації",
+    "navigateHint": "навігація",
+    "selectHint": "Enter — вибрати"
+  },
+  "media": {
+    "mute": "Вимкнути звук",
+    "pause": "Пауза",
+    "play": "Відтворити",
+    "seek": "Перемотати аудіо",
+    "skipBackward": "Назад на 10 секунд",
+    "skipForward": "Вперед на 10 секунд",
+    "unmute": "Увімкнути звук",
+    "volume": "Гучність"
+  },
+  "composer": {
+    "addAttachment": "Додати вкладення",
+    "allMentionHint": "сповіщає всіх у цьому каналі",
+    "filePickerTitle": "Додати файли",
+    "inputLabel": "Поле введення повідомлення",
+    "placeholder": "Напишіть повідомлення…",
+    "previewAlt": "Попередній перегляд",
+    "removeAttachment": "Прибрати {{name}}",
+    "send": "Надіслати повідомлення"
+  },
+  "mentions": {
+    "listLabel": "Підказки згадок",
+    "matching": "Учасники за запитом <hl>@{{query}}</hl>"
+  },
+  "a11y": {
+    "avatar": "Аватар",
+    "loading": "Завантаження",
+    "otpDigit": "Цифра коду {{index}}"
+  },
+  "timeAgo": {
+    "seconds_one": "{{count}} с",
+    "seconds_few": "{{count}} с",
+    "seconds_many": "{{count}} с",
+    "seconds_other": "{{count}} с",
+    "minutes_one": "{{count}} хв",
+    "minutes_few": "{{count}} хв",
+    "minutes_many": "{{count}} хв",
+    "minutes_other": "{{count}} хв",
+    "hours_one": "{{count}} год",
+    "hours_few": "{{count}} год",
+    "hours_many": "{{count}} год",
+    "hours_other": "{{count}} год",
+    "days_one": "{{count}} д",
+    "days_few": "{{count}} д",
+    "days_many": "{{count}} д",
+    "days_other": "{{count}} д",
+    "weeks_one": "{{count}} тиж",
+    "weeks_few": "{{count}} тиж",
+    "weeks_many": "{{count}} тиж",
+    "weeks_other": "{{count}} тиж",
+    "months_one": "{{count}} міс",
+    "months_few": "{{count}} міс",
+    "months_many": "{{count}} міс",
+    "months_other": "{{count}} міс",
+    "years_one": "{{count}} р",
+    "years_few": "{{count}} р",
+    "years_many": "{{count}} р",
+    "years_other": "{{count}} р"
+  }
+}

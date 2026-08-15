@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { invoke } from "../bridge";
@@ -17,6 +18,7 @@ interface CreateChannelProps {
 }
 
 export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess }) => {
+  const { t } = useTranslation("channels");
   const { selectedGroupId, currentUser, addChannel, channels, groups, setSelectedChannelId } = appStore;
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -32,12 +34,12 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setError("Name is required");
+      setError(t("errors.nameRequired"));
       return;
     }
     const finalSlug = (slugEdited ? slug : deriveSlug(name)).trim();
     if (!finalSlug) {
-      setError("Slug is required");
+      setError(t("createChannel.slugRequired"));
       return;
     }
     const groupChannels = selectedGroupId ? channels[selectedGroupId] || [] : [];
@@ -47,15 +49,15 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
       return existingSlug === channelSlugLower;
     });
     if (duplicateExists) {
-      setError(`A channel named "${finalSlug}" already exists`);
+      setError(t("createChannel.duplicate", { slug: finalSlug }));
       return;
     }
     if (!currentUser) {
-      setError("User not found");
+      setError(t("errors.userNotFound"));
       return;
     }
     if (!selectedGroupId) {
-      setError("Please select a group first");
+      setError(t("createChannel.noGroupSelected"));
       return;
     }
     setIsLoading(true);
@@ -85,7 +87,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
       ]);
       onSuccess?.(channel.id, channel.channel_type as "text" | "voice");
     } catch (err) {
-      setError(errorMessage(err, "Failed to create channel"));
+      setError(errorMessage(err, t("createChannel.createFailed")));
     } finally {
       setIsLoading(false);
     }
@@ -94,7 +96,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
   if (!currentUser) {
     return (
       <div data-testid="create-channel-no-user" className="flex items-center justify-center flex-1" style={{ background: 'var(--c-bg)' }}>
-        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Please sign in</p>
+        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>{t("errors.signInRequired")}</p>
       </div>
     );
   }
@@ -102,13 +104,13 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
   if (!selectedGroupId || !currentGroup) {
     return (
       <div data-testid="create-channel-no-group" className="flex flex-col items-center justify-center flex-1 gap-3" style={{ background: 'var(--c-bg)' }}>
-        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Select a group first</p>
+        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>{t("createChannel.selectGroupFirst")}</p>
         <button
           data-testid="create-channel-go-home-button"
           onClick={() => onSuccess?.("", "text")}
           className="text-xs font-mono transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
         >
-          Go Home
+          {t("createChannel.goHome")}
         </button>
       </div>
     );
@@ -127,13 +129,13 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           className="w-full max-w-md flex flex-col gap-5"
         >
           <TextInput
-            label="Channel Name"
+            label={t("createChannel.nameLabel")}
             value={name}
             onChange={(val) => {
               setName(val);
               if (!slugEdited) { setSlug(deriveSlug(val)); }
             }}
-            placeholder="general"
+            placeholder={t("createChannel.namePlaceholder")}
             disabled={isLoading}
             id="create-channel-name"
             required
@@ -141,10 +143,10 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <input data-testid="create-channel-name-input" type="hidden" value={name} readOnly />
 
           <TextInput
-            label="Slug"
+            label={t("createChannel.slugLabel")}
             value={slug}
             onChange={(val) => { setSlug(val.toLowerCase()); setSlugEdited(true); }}
-            placeholder="general"
+            placeholder={t("createChannel.slugPlaceholder")}
             disabled={isLoading}
             id="create-channel-slug"
             required
@@ -152,10 +154,10 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <input data-testid="create-channel-slug-input" type="hidden" value={slug} readOnly />
 
           <TextArea
-            label="Description"
+            label={t("createChannel.descriptionLabel")}
             value={description}
             onChange={setDescription}
-            placeholder="Optional description…"
+            placeholder={t("createChannel.descriptionPlaceholder")}
             disabled={isLoading}
             rows={2}
             id="create-channel-description"
@@ -163,12 +165,12 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <input data-testid="create-channel-description-input" type="hidden" value={description} readOnly />
 
           <Switch
-            label="Voice channel"
+            label={t("createChannel.voiceLabel")}
             checked={channelType === "voice"}
             onChange={(checked) => setChannelType(checked ? "voice" : "text")}
             disabled={isLoading}
             id="create-channel-type"
-            description="Voice channels support audio/video calls instead of text messages."
+            description={t("createChannel.voiceDescription")}
           />
           <input data-testid="create-channel-type-input" type="hidden" value={channelType} readOnly />
 
@@ -182,10 +184,10 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
             data-testid="create-channel-submit-button"
             type="submit"
             isLoading={isLoading}
-            loadingText="Creating…"
+            loadingText={t("createChannel.submitting")}
             className="w-full"
           >
-            Create Channel
+            {t("createChannel.submit")}
           </Button>
         </form>
       </div>

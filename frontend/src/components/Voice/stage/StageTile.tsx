@@ -13,6 +13,7 @@
 // mixer volume), and useScreenShareStats. lucide icons throughout.
 
 import React, { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Mic, MicOff, Maximize, Pin } from "lucide-react";
 
 import type { VoiceConnectionQuality } from "../../../types";
@@ -122,6 +123,7 @@ export const StageTile: React.FC<Props> = ({
   onFocus,
   onView,
 }) => {
+  const { t } = useTranslation("voice");
   const big = mode === "big";
   const preview = mode === "preview";
   const media = p.media;
@@ -199,7 +201,7 @@ export const StageTile: React.FC<Props> = ({
           ) : (
             <span className={"vs-ic" + (p.isSpeaking ? " accent" : "")}><Mic size={13} /></span>
           )}
-          <span className="vs-nm" title={p.name}>{p.name}</span>
+          <bdi className="vs-nm" title={p.name}>{p.name}</bdi>
         </span>
       </div>
 
@@ -209,8 +211,8 @@ export const StageTile: React.FC<Props> = ({
           <span
             data-testid={`voice-tile-connecting-${p.tileKey}`}
             className="flex items-center leading-none"
-            title="Connecting…"
-            aria-label="Connecting"
+            title={t("tile.connectingTitle")}
+            aria-label={t("tile.connectingLabel")}
           >
             <LoadingSpinner size="sm" />
           </span>
@@ -218,7 +220,7 @@ export const StageTile: React.FC<Props> = ({
           <span
             className="vs-tag vs-pad6"
             data-testid={`voice-tile-quality-${p.tileKey}`}
-            title={`Connection: ${p.connectionQuality ?? "excellent"}`}
+            title={t("tile.quality", { quality: p.connectionQuality ?? "excellent" })}
           >
             <span className={"vs-sig " + signalClass(p.connectionQuality)}>
               <i /><i /><i /><i />
@@ -230,7 +232,7 @@ export const StageTile: React.FC<Props> = ({
       {/* LIVE badge: only useful before you join — once you're in the
           channel the video itself makes it obvious who's streaming. */}
       {isVideo && preview && (
-        <div className="vs-bl"><span className="vs-tag live">LIVE</span></div>
+        <div className="vs-bl"><span className="vs-tag live">{t("tile.liveBadge")}</span></div>
       )}
 
       {/* res · fps badge on any in-call video tile (camera or screenshare). The
@@ -256,8 +258,8 @@ export const StageTile: React.FC<Props> = ({
         <div className="vs-hover">
           <button
             className="vs-hbtn"
-            title="fullscreen"
-            aria-label="Open fullscreen"
+            title={t("tile.fullscreenTitle")}
+            aria-label={t("tile.fullscreenLabel")}
             onClick={(e) => { e.stopPropagation(); onView?.(videoTrack.trackKey); }}
           >
             <Maximize size={17} />
@@ -265,8 +267,8 @@ export const StageTile: React.FC<Props> = ({
           {focusable && (
             <button
               className="vs-hbtn"
-              title="spotlight"
-              aria-label="Spotlight this video"
+              title={t("tile.spotlightTitle")}
+              aria-label={t("tile.spotlightLabel")}
               onClick={(e) => { e.stopPropagation(); onFocus?.(p.tileKey); }}
             >
               <Pin size={17} />

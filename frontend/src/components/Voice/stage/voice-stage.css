@@ -185,11 +185,15 @@
    height: var(--eq2, 60%);
 }
 
-/* corner overlays */
+/* Corner overlays. These are CHROME laid over the video, not part of the
+   picture, so they are anchored logically and swap sides under `dir=rtl`
+   the way Zoom/Teams move the participant-name badge — the `l`/`r` in the
+   class names now mean leading/trailing, not left/right. The video frame
+   itself is of course never mirrored. */
 .vs-tl {
    position: absolute;
    top: 8px;
-   left: 8px;
+   inset-inline-start: 8px;
    z-index: 3;
    display: flex;
    align-items: center;
@@ -200,7 +204,7 @@
 .vs-tr {
    position: absolute;
    top: 8px;
-   right: 8px;
+   inset-inline-end: 8px;
    z-index: 3;
    display: flex;
    align-items: center;
@@ -210,7 +214,7 @@
 .vs-bl {
    position: absolute;
    bottom: 8px;
-   left: 8px;
+   inset-inline-start: 8px;
    z-index: 3;
    display: flex;
    align-items: center;
@@ -220,7 +224,7 @@
 .vs-br {
    position: absolute;
    bottom: 8px;
-   right: 8px;
+   inset-inline-end: 8px;
    z-index: 3;
    display: flex;
    align-items: center;
@@ -370,7 +374,9 @@
    color: var(--c-accent);
 }
 
-/* volume — opaque; persistent in preview, hover/keyboard-focus in-call */
+/* volume — opaque; persistent in preview, hover/keyboard-focus in-call.
+   `left`/`right` are both pinned, so this is a full-width strip with no
+   directional meaning; it is left physical deliberately. */
 .vs-vol {
    position: absolute;
    left: 8px;

@@ -1,0 +1,71 @@
+{
+  "list": {
+    "newMessage": "Новое сообщение",
+    "requests": "Запросы",
+    "blocked": "Заблокированные",
+    "avatarAlt": "Аватар {{name}}",
+    "settingsFor": "Настройки для {{name}}",
+    "verified": "Проверенный контакт",
+    "keyChanged": "Ключ идентификации изменился — проверьте заново"
+  },
+  "conversation": {
+    "fallbackTitle": "Личное сообщение",
+    "viewProfile": "Открыть профиль @{{name}}",
+    "call": "Позвонить @{{name}}",
+    "returnToCall": "Вернуться к звонку с @{{name}}"
+  },
+  "settings": {
+    "pageTitle": "Настройки переписки",
+    "leave": "Покинуть переписку",
+    "submitting": "Выход…",
+    "leaveFailed": "Не удалось покинуть переписку",
+    "cancel": "Отмена (Esc)"
+  },
+  "start": {
+    "pageTitle": "Новое сообщение",
+    "identifierLabel": "Имя пользователя или эл. почта",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "Начать переписку",
+    "submitting": "Начинаем…",
+    "identifierRequired": "Укажите имя пользователя или эл. почту",
+    "userNotFound": "Пользователь не найден",
+    "startFailed": "Не удалось начать переписку"
+  },
+  "requests": {
+    "pageTitle": "Запросы на переписку",
+    "empty": "Запросов нет.",
+    "noMessageYet": "(сообщения пока нет)",
+    "unknownSender": "Неизвестно",
+    "others_one": "(+ещё {{count}})",
+    "others_few": "(+ещё {{count}})",
+    "others_many": "(+ещё {{count}})",
+    "others_other": "(+ещё {{count}})",
+    "accept": "принять",
+    "block": "заблокировать"
+  },
+  "blocked": {
+    "pageTitle": "Заблокированные пользователи",
+    "empty": "Заблокированных пользователей нет.",
+    "unblock": "разблокировать"
+  },
+  "profile": {
+    "fallbackName": "Пользователь",
+    "fallbackTitle": "Профиль",
+    "notFound": "Пользователь не найден",
+    "avatarAlt": "Аватар {{name}}",
+    "sendMessage": "Написать сообщение",
+    "block": "Заблокировать",
+    "safetyNumber": "Номер безопасности",
+    "statusVerified": "Проверен",
+    "statusChanged": "Изменился — проверьте заново",
+    "statusUnverified": "Не проверен",
+    "keyChangedWarning": "Ключ идентификации этого контакта изменился с момента последней проверки. Прежде чем доверять ему, сверьте номер заново по другому каналу связи.",
+    "compareHint": "Сверьте эти цифры с {{name}} по доверенному каналу (лично или в звонке, где вы узнаёте собеседника). Если они совпадают, отметьте контакт как проверенный.",
+    "removeVerification": "Снять отметку о проверке",
+    "markVerified": "Отметить как проверенный"
+  },
+  "notify": {
+    "requestTitle": "Новая переписка",
+    "requestBody": "{{name}} хочет начать переписку с вами"
+  }
+}

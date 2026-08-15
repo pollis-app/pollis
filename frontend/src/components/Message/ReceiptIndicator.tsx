@@ -12,6 +12,7 @@
  * single check mark cannot honestly summarise five people. A 1:1 DM is the
  * degenerate case and shows the bare tick.
  */
+import { useTranslation } from "react-i18next";
 import { Check, CheckCheck } from "lucide-react";
 import type { MessageReceipts } from "../../types";
 
@@ -31,6 +32,7 @@ interface ReceiptIndicatorProps {
 }
 
 export function ReceiptIndicator({ receipts, peerCount, visible }: ReceiptIndicatorProps) {
+  const { t } = useTranslation("chat");
   if (!visible || !receipts || peerCount < 1) {
     return null;
   }
@@ -47,10 +49,10 @@ export function ReceiptIndicator({ receipts, peerCount, visible }: ReceiptIndica
   const anyRead = readCount > 0;
 
   const label = allRead
-    ? "Read by everyone"
+    ? t("receipts.readByEveryone")
     : anyRead
-      ? `Read by ${readCount} of ${peerCount}`
-      : `Delivered to ${deliveredCount} of ${peerCount}`;
+      ? t("receipts.readByCount", { count: readCount, total: peerCount })
+      : t("receipts.deliveredCount", { count: deliveredCount, total: peerCount });
 
   // Accent only once EVERY peer has read it; a partial read stays muted so the
   // strong colour keeps meaning one specific thing.
@@ -58,7 +60,7 @@ export function ReceiptIndicator({ receipts, peerCount, visible }: ReceiptIndica
 
   return (
     <span
-      className={`ml-1 inline-flex items-center gap-0.5 align-middle ${tone}`}
+      className={`ms-1 inline-flex items-center gap-0.5 align-middle ${tone}`}
       title={label}
       aria-label={label}
       data-testid={`receipt-${receipts.message_id}`}

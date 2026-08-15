@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Video, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
 
 import { appStore } from "../../stores/appStore";
 import { cameraSession, friendlyCameraError } from "../../camera/cameraSession";
@@ -14,6 +15,7 @@ import { Card } from "../ui/Card";
  *  shown when there's more than one camera; the single-camera case starts
  *  directly without a picker (see `cameraActions`). */
 export const CameraPicker: React.FC = observer(() => {
+  const { t } = useTranslation("voice");
   const cameras =
     appStore.voiceState.kind === "joined" &&
     appStore.voiceState.camera.kind === "picking"
@@ -76,18 +78,18 @@ export const CameraPicker: React.FC = observer(() => {
         style={{ borderBottom: "1px solid var(--c-border)", color: "var(--c-text)" }}
       >
         <span style={{ color: "var(--c-accent)" }} className="flex items-center gap-2">
-          <Video size={13} /> Choose a camera
+          <Video size={13} /> {t("camera.pickerHeading")}
         </span>
         <Button
           variant="ghost"
           size="xs"
           onClick={handleCancel}
           disabled={busy}
-          aria-label="Cancel camera selection"
+          aria-label={t("camera.cancelLabel")}
           data-testid="camera-picker-cancel"
         >
           <X size={12} />
-          Cancel
+          {t("common:actions.cancel")}
         </Button>
       </header>
 
@@ -103,7 +105,7 @@ export const CameraPicker: React.FC = observer(() => {
               onClick={() => handlePick(c)}
               disabled={busy}
               data-testid={`camera-picker-device-${c.id}`}
-              className="text-left font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] rounded-[6px]"
+              className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] rounded-[6px]"
               style={{ minHeight: 100 }}
             >
               <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">

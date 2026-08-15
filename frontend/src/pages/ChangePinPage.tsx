@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { InputOtp } from "../components/ui/InputOtp";
@@ -9,6 +10,7 @@ import * as api from "../services/api";
 type Step = "old" | "new" | "confirm";
 
 export const ChangePinPage: React.FC = () => {
+  const { t } = useTranslation("settings");
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>("old");
   const [oldPin, setOldPin] = useState("");
@@ -50,7 +52,7 @@ export const ChangePinPage: React.FC = () => {
 
   const handleSubmit = async () => {
     if (newPin !== confirmPin) {
-      setError("New PINs don't match — try again");
+      setError(t("changePin.mismatch"));
       resetToOld();
       return;
     }
@@ -69,10 +71,15 @@ export const ChangePinPage: React.FC = () => {
 
   const currentValue = step === "old" ? oldPin : step === "new" ? newPin : confirmPin;
   const setCurrent = step === "old" ? setOldPin : step === "new" ? setNewPin : setConfirmPin;
-  const heading = step === "old" ? "Current PIN" : step === "new" ? "New PIN" : "Confirm new PIN";
+  const heading =
+    step === "old"
+      ? t("changePin.headingOld")
+      : step === "new"
+      ? t("changePin.headingNew")
+      : t("changePin.headingConfirm");
 
   return (
-    <PageShell title="Change PIN" scrollable>
+    <PageShell title={t("changePin.title")} scrollable>
       <div className="flex justify-center px-6 py-8">
       <div
         className="flex flex-col gap-4 w-full max-w-md font-mono"
@@ -82,13 +89,13 @@ export const ChangePinPage: React.FC = () => {
         {done ? (
           <div className="flex flex-col gap-4">
             <p className="text-xs" style={{ color: "var(--c-accent)" }}>
-              PIN updated.
+              {t("changePin.updated")}
             </p>
             <Button
               data-testid="change-pin-done-button"
               onClick={() => navigate({ to: "/security" })}
             >
-              Done
+              {t("changePin.doneButton")}
             </Button>
           </div>
         ) : (
@@ -102,10 +109,10 @@ export const ChangePinPage: React.FC = () => {
                 style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
               >
                 {step === "old"
-                  ? "Enter your current 4-digit PIN to continue."
+                  ? t("changePin.hintOld")
                   : step === "new"
-                  ? "Enter a new 4-digit PIN."
-                  : "Enter the new PIN again to confirm."}
+                  ? t("changePin.hintNew")
+                  : t("changePin.hintConfirm")}
               </p>
             </div>
 
@@ -144,7 +151,7 @@ export const ChangePinPage: React.FC = () => {
               variant="ghost"
               onClick={() => navigate({ to: "/security" })}
             >
-              Cancel
+              {t("common:actions.cancel")}
             </Button>
           </div>
         )}

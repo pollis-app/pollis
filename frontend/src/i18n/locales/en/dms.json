@@ -1,0 +1,69 @@
+{
+  "list": {
+    "newMessage": "New Message",
+    "requests": "Requests",
+    "blocked": "Blocked Users",
+    "avatarAlt": "{{name}} avatar",
+    "settingsFor": "Settings for {{name}}",
+    "verified": "Verified contact",
+    "keyChanged": "Identity key changed — re-verify"
+  },
+  "conversation": {
+    "fallbackTitle": "Direct Message",
+    "viewProfile": "View profile of @{{name}}",
+    "call": "Call @{{name}}",
+    "returnToCall": "Return to call with @{{name}}"
+  },
+  "settings": {
+    "pageTitle": "Conversation Settings",
+    "leave": "Leave conversation",
+    "submitting": "Leaving…",
+    "leaveFailed": "Failed to leave conversation",
+    "cancel": "Cancel (Esc)"
+  },
+  "start": {
+    "pageTitle": "New Message",
+    "identifierLabel": "Username or Email",
+    "identifierPlaceholder": "friend@pollis.com",
+    "submit": "Start Conversation",
+    "submitting": "Starting…",
+    "identifierRequired": "User identifier is required",
+    "userNotFound": "User not found",
+    "startFailed": "Failed to start conversation"
+  },
+  "requests": {
+    "pageTitle": "Message Requests",
+    "empty": "No pending requests.",
+    "noMessageYet": "(no message yet)",
+    "unknownSender": "Unknown",
+    "others_one": "(+{{count}} others)",
+    "others_other": "(+{{count}} others)",
+    "accept": "accept",
+    "block": "block"
+  },
+  "blocked": {
+    "pageTitle": "Blocked Users",
+    "empty": "No blocked users.",
+    "unblock": "unblock"
+  },
+  "profile": {
+    "fallbackName": "User",
+    "fallbackTitle": "Profile",
+    "notFound": "User not found",
+    "avatarAlt": "{{name}} avatar",
+    "sendMessage": "Send Message",
+    "block": "Block",
+    "safetyNumber": "Safety number",
+    "statusVerified": "Verified",
+    "statusChanged": "Changed — re-verify",
+    "statusUnverified": "Not verified",
+    "keyChangedWarning": "This contact's identity key changed since you last verified it. Compare the number again out-of-band before trusting it.",
+    "compareHint": "Compare these digits with {{name}} over a trusted channel (in person, a call you recognise). If they match, mark this contact verified.",
+    "removeVerification": "Remove verification",
+    "markVerified": "Mark verified"
+  },
+  "notify": {
+    "requestTitle": "New conversation",
+    "requestBody": "{{name}} started a conversation with you"
+  }
+}

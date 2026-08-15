@@ -1,6 +1,13 @@
 /* Invisible frameless-window resize handles. See WindowResizeEdges.tsx.
  * The root is click-through; only the strips themselves catch the pointer,
- * so the app UI underneath stays fully interactive. */
+ * so the app UI underneath stays fully interactive.
+ *
+ * `left`/`right` here are PHYSICAL on purpose and must not be converted to
+ * logical properties (#855). These strips are screen edges, not content: the
+ * `.wre-w` handle has to sit under the physical west edge of the window
+ * because that is the edge the compositor will drag, and the `ew-resize` /
+ * `nwse-resize` cursors name physical directions too. Mirroring them under
+ * `dir=rtl` would leave every handle grabbing the wrong edge. */
 
 .wre-root {
   position: fixed;

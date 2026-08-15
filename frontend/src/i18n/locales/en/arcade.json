@@ -1,0 +1,14 @@
+{
+  "page": {
+    "title": "ARCADE"
+  },
+  "hud": {
+    "score": "SCORE  {{score}}",
+    "time": "TIME   {{time}}",
+    "gameOver": "GAME OVER",
+    "final_one": "final {{count}} pts · {{time}}",
+    "final_other": "final {{count}} pts · {{time}}",
+    "restartHint": "press R to restart · esc to exit",
+    "controls": "WASD move · mouse aim · click/space fire · esc exit"
+  }
+}

@@ -9,6 +9,7 @@ import { reaction } from "mobx";
 
 import { Channel, invoke } from "../bridge";
 
+import i18n from "../i18n";
 import { appStore } from "../stores/appStore";
 import { voiceSession } from "../voice/VoiceSessionManager";
 import {
@@ -99,6 +100,11 @@ export type ScreenShareEvent =
  * permission denied, missing helper binary, picker dismissed) get a fixed
  * friendly message; anything else passes through unchanged so we never hide
  * a novel error.
+ *
+ * Resolved through `i18n.t` rather than a component's `useTranslation`: the
+ * result is a one-shot string that lands in the voice state union at the moment
+ * capture fails and is never re-rendered from its source. The lookup happens per
+ * call, so it is never a module-load snapshot of the language.
  */
 export function friendlyScreenShareError(raw: string): string {
   const r = raw.toLowerCase();
@@ -108,7 +114,7 @@ export function friendlyScreenShareError(raw: string): string {
     r.includes("no source selected") ||
     r.includes("picker")
   ) {
-    return "Screen share cancelled — no window or screen was picked.";
+    return i18n.t("voice:shareError.cancelled");
   }
   // Check "unsupported desktop" BEFORE the permission branch: this is
   // not something the user can grant (the DE has no ScreenCast backend
@@ -120,7 +126,7 @@ export function friendlyScreenShareError(raw: string): string {
     r.includes("does not provide a screen-sharing backend") ||
     r.includes("no screencast")
   ) {
-    return "Screen sharing isn't available on this desktop environment. It has no screen-sharing backend (xdg-desktop-portal ScreenCast). Use GNOME, KDE, or an X11 session.";
+    return i18n.t("voice:shareError.unsupportedDesktop");
   }
   if (
     r.includes("permission") ||
@@ -133,7 +139,7 @@ export function friendlyScreenShareError(raw: string): string {
     // Kept short so it fits the status bar on a single line. The
     // dismiss "X" + the surrounding bar chrome eat ~80 px on a narrow
     // window; ~50 chars is a safe ceiling.
-    return "Allow Pollis in macOS Privacy → Screen Recording.";
+    return i18n.t("voice:shareError.permission");
   }
   if (
     r.includes("helper binary") ||
@@ -141,10 +147,10 @@ export function friendlyScreenShareError(raw: string): string {
     (r.includes("not found") && r.includes("helper")) ||
     r.includes("no such file")
   ) {
-    return "Screen share helper is missing. Reinstall Pollis to restore it.";
+    return i18n.t("voice:shareError.helperMissing");
   }
   if (r.includes("portal")) {
-    return "Screen share is unavailable — the desktop screen-sharing portal did not respond.";
+    return i18n.t("voice:shareError.portal");
   }
   return raw;
 }

@@ -1,0 +1,50 @@
+{
+  "picker": {
+    "label": "Selector de emojis",
+    "triggerLabel": "Emoji",
+    "searchLabel": "Buscar",
+    "searchPlaceholder": "Buscar emoji",
+    "resultsFor": "Resultados de \"{{query}}\"",
+    "recent": "Usados con frecuencia",
+    "custom": "Personalizados",
+    "empty": "Ningún emoji coincide.",
+    "previewHint": "Elige un emoji",
+    "railLabel": "Categorías de emojis"
+  },
+  "categories": {
+    "people": "Personas",
+    "nature": "Naturaleza",
+    "food": "Comida",
+    "activity": "Actividades",
+    "travel": "Viajes",
+    "objects": "Objetos",
+    "symbols": "Símbolos",
+    "flags": "Banderas"
+  },
+  "skinTone": {
+    "groupLabel": "Tono de piel",
+    "default": "Tono de piel predeterminado",
+    "numbered": "Tono de piel {{index}}"
+  },
+  "manage": {
+    "title": "Emojis personalizados",
+    "signInRequired": "Inicia sesión",
+    "shortcodeLabel": "Código corto",
+    "shortcodePlaceholder": "party_parrot",
+    "shortcodeDescription": "Se escribe como :codigo: — a–z, 0–9 y _",
+    "shortcodeInvalid": "Usa de 2 a 32 caracteres: a–z, 0–9 y _",
+    "shortcodeTaken": ":{{shortcode}}: ya está en uso en este grupo",
+    "chooseImage": "Elegir imagen",
+    "shrinking": "Reduciendo…",
+    "filePickerTitle": "Elige una imagen para el emoji",
+    "imageFilterName": "Imágenes",
+    "addFailed": "No se pudo añadir ese emoji",
+    "removeFailed": "No se pudo quitar ese emoji",
+    "storageNote": "Las imágenes se vuelven a codificar por debajo de 48 KB antes de subirse, así que no pasa nada si el archivo original es grande. Las imágenes idénticas comparten una sola copia almacenada en todos los grupos que las usen. No hay límite de cuántos puede tener este grupo.",
+    "stored_one": "{{count}} emoji · {{size}} almacenados",
+    "stored_other": "{{count}} emojis · {{size}} almacenados",
+    "empty": "Todavía no hay emojis personalizados. Cualquiera del grupo puede añadir uno.",
+    "sizeAnimated": "animado · {{size}}",
+    "remove": "Quitar :{{shortcode}}:"
+  }
+}

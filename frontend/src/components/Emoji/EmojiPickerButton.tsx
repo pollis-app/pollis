@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Smile } from "lucide-react";
 import { EmojiPicker } from "./EmojiPicker";
 
@@ -37,8 +38,9 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
   align = "right",
   className = "",
   "data-testid": testId = "emoji-picker-button",
-  ariaLabel = "Emoji",
+  ariaLabel,
 }) => {
+  const { t } = useTranslation("emoji");
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -57,9 +59,13 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
     };
   }, [open]);
 
+  const label = ariaLabel ?? t("picker.triggerLabel");
+
   const positionClass = [
     placement === "up" ? "bottom-full mb-1" : "top-full mt-1",
-    align === "right" ? "right-0" : "left-0",
+    // `start`/`end`, not `left`/`right`: the panel is anchored to the edge
+    // of the trigger that faces INTO the content, which swaps under RTL.
+    align === "right" ? "end-0" : "start-0",
   ].join(" ");
 
   return (
@@ -67,10 +73,10 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
       <button
         type="button"
         data-testid={testId}
-        aria-label={ariaLabel}
+        aria-label={label}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title={ariaLabel}
+        title={label}
         onClick={() => setOpen((prev) => !prev)}
         className="icon-btn-sm"
         style={{ color: open ? "var(--c-accent)" : undefined }}

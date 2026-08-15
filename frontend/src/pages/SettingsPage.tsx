@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Upload, User } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageShell } from "../components/Layout/PageShell";
@@ -13,6 +14,7 @@ import { Button } from "../components/ui/Button";
 import { convertFileSrc, invoke } from "../bridge";
 
 export const SettingsPage: React.FC = observer(() => {
+  const { t } = useTranslation("settings");
   const { currentUser } = appStore;
 
   const { data: userData, isLoading } = useUserProfile();
@@ -120,9 +122,9 @@ export const SettingsPage: React.FC = observer(() => {
       setFileInputKey((prev) => prev + 1);
       setSaveSuccess(true);
     } catch (error) {
-      setUploadError(errorMessage(error, "Failed to upload avatar"));
+      setUploadError(errorMessage(error, t("user.avatarUploadFailed")));
     }
-  }, [selectedFile, currentUser, preview, updateAvatarMutation]);
+  }, [selectedFile, currentUser, preview, updateAvatarMutation, t]);
 
   useEffect(() => {
     if (saveSuccess) {
@@ -157,7 +159,7 @@ export const SettingsPage: React.FC = observer(() => {
     if (!currentUser) { return; }
     const target = pendingNewEmail.trim();
     if (!target) {
-      setEmailChangeError("Enter a new email address.");
+      setEmailChangeError(t("user.newEmailRequired"));
       return;
     }
     setEmailChangePending(true);
@@ -175,7 +177,7 @@ export const SettingsPage: React.FC = observer(() => {
   const handleVerifyEmailChange = async () => {
     if (!currentUser) { return; }
     if (!emailOtpCode.trim()) {
-      setEmailChangeError("Enter the code from your email.");
+      setEmailChangeError(t("user.verificationCodeRequired"));
       return;
     }
     setEmailChangePending(true);
@@ -198,16 +200,16 @@ export const SettingsPage: React.FC = observer(() => {
 
   if (!currentUser) {
     return (
-      <PageShell title="User Settings" scrollable>
+      <PageShell title={t("user.title")} scrollable>
         <div data-testid="settings-no-user" className="flex items-center justify-center flex-1" style={{ background: 'var(--c-bg)' }}>
-          <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Please sign in</p>
+          <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>{t("user.signInPrompt")}</p>
         </div>
       </PageShell>
     );
   }
 
   return (
-    <PageShell title="User Settings" scrollable>
+    <PageShell title={t("user.title")} scrollable>
       <div
         data-testid="settings-page"
         className="flex-1 flex flex-col overflow-auto"
@@ -219,29 +221,29 @@ export const SettingsPage: React.FC = observer(() => {
             {/* Account */}
             <section className="flex flex-col gap-4 mb-12">
               <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
-                Account
+                {t("user.accountHeading")}
               </h2>
 
               {isLoading ? (
                 <span data-testid="settings-loading" className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
-                  Loading…
+                  {t("common:states.loading")}
                 </span>
               ) : (
                 <div className="flex flex-col gap-4">
                   <TextInput
-                    label="Username"
+                    label={t("user.usernameLabel")}
                     value={username}
                     onChange={setUsername}
-                    placeholder="username"
+                    placeholder={t("user.usernamePlaceholder")}
                     id="settings-username"
                   />
                   <input data-testid="settings-username-input" type="hidden" value={username} readOnly />
 
                   <TextInput
-                    label="Preferred name"
+                    label={t("user.preferredNameLabel")}
                     value={preferredName}
                     onChange={setPreferredName}
-                    placeholder="What people call you"
+                    placeholder={t("user.preferredNamePlaceholder")}
                     id="settings-preferred-name"
                   />
                   <input data-testid="settings-preferred-name-input" type="hidden" value={preferredName} readOnly />
@@ -265,13 +267,13 @@ export const SettingsPage: React.FC = observer(() => {
                 <p data-testid="settings-save-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
                   {updateProfileMutation.error instanceof Error
                     ? updateProfileMutation.error.message
-                    : "Failed to save"}
+                    : t("user.saveFailed")}
                 </p>
               )}
 
               {saveSuccess && (
                 <p data-testid="settings-save-success" className="text-xs font-mono" style={{ color: 'var(--c-accent-dim)' }}>
-                  Saved.
+                  {t("user.saved")}
                 </p>
               )}
 
@@ -280,9 +282,9 @@ export const SettingsPage: React.FC = observer(() => {
                 onClick={handleSave}
                 disabled={updateProfileMutation.isPending}
                 isLoading={updateProfileMutation.isPending}
-                loadingText="Saving…"
+                loadingText={t("user.saving")}
               >
-                Save Changes
+                {t("user.saveButton")}
               </Button>
             </section>
 
@@ -291,21 +293,21 @@ export const SettingsPage: React.FC = observer(() => {
                 via the OTP-verified flow below. */}
             <section className="flex flex-col gap-4 mb-12">
               <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
-                Email
+                {t("user.emailHeading")}
               </h2>
 
               {isLoading ? (
                 <span className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
-                  Loading…
+                  {t("common:states.loading")}
                 </span>
               ) : emailChangeStep === "idle" ? (
                 <div className="flex flex-col gap-1.5">
                   <TextInput
-                    label="Email"
+                    label={t("user.emailLabel")}
                     value={email}
                     onChange={() => { /* read-only — change via the button below */ }}
                     type="email"
-                    placeholder="you@example.com"
+                    placeholder={t("user.emailPlaceholder")}
                     id="settings-email"
                     disabled
                   />
@@ -322,17 +324,17 @@ export const SettingsPage: React.FC = observer(() => {
                     }}
                     className="self-start mt-3"
                   >
-                    Change Email
+                    {t("user.changeEmailButton")}
                   </Button>
                 </div>
               ) : emailChangeStep === "request" ? (
                 <div className="flex flex-col gap-2">
                   <TextInput
-                    label="New email"
+                    label={t("user.newEmailLabel")}
                     value={pendingNewEmail}
                     onChange={setPendingNewEmail}
                     type="email"
-                    placeholder="you@example.com"
+                    placeholder={t("user.emailPlaceholder")}
                     id="settings-email-new"
                     disabled={emailChangePending}
                   />
@@ -348,9 +350,9 @@ export const SettingsPage: React.FC = observer(() => {
                       size="sm"
                       onClick={handleSendEmailChangeOtp}
                       isLoading={emailChangePending}
-                      loadingText="Sending…"
+                      loadingText={t("user.sending")}
                     >
-                      Send Code
+                      {t("user.sendCodeButton")}
                     </Button>
                     <Button
                       data-testid="settings-email-cancel"
@@ -359,17 +361,22 @@ export const SettingsPage: React.FC = observer(() => {
                       onClick={cancelEmailChange}
                       disabled={emailChangePending}
                     >
-                      Cancel
+                      {t("common:actions.cancel")}
                     </Button>
                   </div>
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                    Code sent to <span style={{ color: "var(--c-text)" }}>{pendingNewEmail}</span>.
+                    <Trans
+                      t={t}
+                      i18nKey="user.codeSent"
+                      values={{ email: pendingNewEmail }}
+                      components={{ addr: <span style={{ color: "var(--c-text)" }} /> }}
+                    />
                   </p>
                   <TextInput
-                    label="Verification code"
+                    label={t("user.verificationCodeLabel")}
                     value={emailOtpCode}
                     onChange={setEmailOtpCode}
                     placeholder="000000"
@@ -388,9 +395,9 @@ export const SettingsPage: React.FC = observer(() => {
                       size="sm"
                       onClick={handleVerifyEmailChange}
                       isLoading={emailChangePending}
-                      loadingText="Verifying…"
+                      loadingText={t("user.verifying")}
                     >
-                      Verify
+                      {t("user.verifyButton")}
                     </Button>
                     <Button
                       data-testid="settings-email-back"
@@ -403,7 +410,7 @@ export const SettingsPage: React.FC = observer(() => {
                       }}
                       disabled={emailChangePending}
                     >
-                      Back
+                      {t("common:actions.back")}
                     </Button>
                   </div>
                 </div>
@@ -413,7 +420,7 @@ export const SettingsPage: React.FC = observer(() => {
             {/* Avatar */}
             <section className="flex flex-col gap-4 mb-12">
               <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
-                Avatar
+                {t("user.avatarHeading")}
               </h2>
 
               <div className="flex items-center gap-4">
@@ -422,15 +429,15 @@ export const SettingsPage: React.FC = observer(() => {
                   className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer rounded-panel"
                   style={{ border: '2px solid var(--c-border)', background: 'var(--c-surface-high)' }}
                   onClick={() => fileInputRef.current?.click()}
-                  title="Click to choose image"
+                  title={t("user.avatarPickTitle")}
                 >
                   {preview ? (
-                    <img data-testid="avatar-new-preview" src={preview} alt="Preview" className="w-full h-full object-cover" />
+                    <img data-testid="avatar-new-preview" src={preview} alt={t("user.avatarPreviewAlt")} className="w-full h-full object-cover" />
                   ) : currentAvatarUrl ? (
                     <img
                       data-testid="avatar-current"
                       src={currentAvatarUrl}
-                      alt="Avatar"
+                      alt={t("user.avatarAlt")}
                       className="w-full h-full object-cover"
                       onError={() => setCurrentAvatarUrl(null)}
                     />
@@ -446,7 +453,7 @@ export const SettingsPage: React.FC = observer(() => {
                     style={{ color: 'var(--c-accent)' }}
                   >
                     <Upload size={14} aria-hidden="true" />
-                    Choose image
+                    {t("user.chooseImage")}
                   </label>
                   <input
                     key={fileInputKey}
@@ -457,11 +464,11 @@ export const SettingsPage: React.FC = observer(() => {
                     accept="image/*"
                     onChange={handleFileChange}
                     disabled={updateAvatarMutation.isPending}
-                    aria-label="Select avatar image"
+                    aria-label={t("user.avatarInputLabel")}
                     className="sr-only"
                   />
                   <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
-                    PNG, JPG, GIF — max 5MB
+                    {t("user.avatarHint")}
                   </p>
                 </div>
               </div>
@@ -474,7 +481,7 @@ export const SettingsPage: React.FC = observer(() => {
 
               {saveSuccess && !selectedFile && (
                 <p data-testid="avatar-upload-success" className="text-xs font-mono" style={{ color: 'var(--c-accent-dim)' }}>
-                  Avatar updated.
+                  {t("user.avatarUpdated")}
                 </p>
               )}
 
@@ -484,9 +491,9 @@ export const SettingsPage: React.FC = observer(() => {
                   onClick={handleAvatarUpload}
                   disabled={updateAvatarMutation.isPending}
                   isLoading={updateAvatarMutation.isPending}
-                  loadingText="Uploading…"
+                  loadingText={t("user.uploading")}
                 >
-                  Upload Avatar
+                  {t("user.uploadAvatarButton")}
                 </Button>
               )}
             </section>

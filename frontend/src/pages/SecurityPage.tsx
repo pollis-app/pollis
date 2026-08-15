@@ -1,5 +1,7 @@
 import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState, useCallback } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
@@ -37,57 +39,64 @@ const LEARN_DASHBOARDS_URL = "https://pollis.com/learn#reading-the-dashboards";
 
 // Map a PermissionState onto a human label + solid token color for the status
 // pill. No neon/glow — solid text colors only.
-function permissionPill(state: PermissionState | undefined): {
+function permissionPill(
+  t: TFunction<"settings">,
+  state: PermissionState | undefined,
+): {
   label: string;
   color: string;
 } {
   switch (state) {
     case "granted":
-      return { label: "Granted", color: "var(--c-accent)" };
+      return { label: t("security.permissionGranted"), color: "var(--c-accent)" };
     case "denied":
-      return { label: "Denied", color: "var(--c-danger)" };
+      return { label: t("security.permissionDenied"), color: "var(--c-danger)" };
     case "notDetermined":
-      return { label: "Not set", color: "var(--c-text-muted)" };
+      return { label: t("security.permissionNotSet"), color: "var(--c-text-muted)" };
     case "perSession":
-      return { label: "Per session", color: "var(--c-text-dim)" };
+      return { label: t("security.permissionPerSession"), color: "var(--c-text-dim)" };
     case "unsupported":
-      return { label: "Not applicable", color: "var(--c-text-muted)" };
+      return { label: t("security.permissionNotApplicable"), color: "var(--c-text-muted)" };
     default:
-      return { label: "Checking…", color: "var(--c-text-muted)" };
+      return { label: t("security.permissionChecking"), color: "var(--c-text-muted)" };
   }
 }
 
 /// Human-readable summary for each `security_event.kind` the backend
 /// currently emits. Unknown kinds fall through to the raw string so we
 /// never silently drop new event types.
-function describe(event: api.SecurityEvent): { heading: string; detail: string } {
+function describe(
+  t: TFunction<"settings">,
+  event: api.SecurityEvent,
+): { heading: string; detail: string } {
   switch (event.kind) {
     case "device_enrolled":
       return {
-        heading: "New device enrolled",
+        heading: t("security.eventDeviceEnrolledHeading"),
         detail: event.device_id
-          ? `Device ${shortId(event.device_id)} was added to your account.`
-          : "A new device was added to your account.",
+          ? t("security.eventDeviceEnrolledDetail", { device: shortId(event.device_id) })
+          : t("security.eventDeviceEnrolledDetailUnknown"),
       };
     case "device_rejected":
       return {
-        heading: "Enrollment rejected",
+        heading: t("security.eventDeviceRejectedHeading"),
         detail: event.device_id
-          ? `A request from device ${shortId(event.device_id)} was rejected.`
-          : "A device enrollment request was rejected.",
+          ? t("security.eventDeviceRejectedDetail", { device: shortId(event.device_id) })
+          : t("security.eventDeviceRejectedDetailUnknown"),
       };
     case "identity_reset":
       return {
-        heading: "Account identity reset",
-        detail:
-          "You reset your account. All previous devices and groups were orphaned.",
+        heading: t("security.eventIdentityResetHeading"),
+        detail: t("security.eventIdentityResetDetail"),
       };
     case "secret_key_rotated":
       return {
-        heading: "Secret Key rotated",
-        detail: "Your Secret Key was changed. The old one no longer works.",
+        heading: t("security.eventSecretKeyRotatedHeading"),
+        detail: t("security.eventSecretKeyRotatedDetail"),
       };
     default:
+      // The raw backend `kind` for an event type this build doesn't know
+      // about: a wire value, deliberately not translated.
       return {
         heading: event.kind,
         detail: event.metadata ?? "",
@@ -113,7 +122,15 @@ const sectionHeaderStyle: React.CSSProperties = {
   borderColor: "var(--c-border)",
 };
 
+// The word the user must type to arm account deletion. Deliberately NOT part
+// of the translatable copy: the label and placeholder are interpolated from
+// this constant, so a locale cannot instruct the user to type a word the
+// comparison will never accept — which would make the button permanently dead
+// for everyone reading that language.
+const DELETE_CONFIRM_WORD = "DELETE";
+
 export const SecurityPage: React.FC = observer(() => {
+  const { t } = useTranslation("settings");
   const navigate = useNavigate();
   const router = useRouter();
   const { onDeleteAccount } = router.options.context as RouterContext;
@@ -154,6 +171,19 @@ export const SecurityPage: React.FC = observer(() => {
   useEffect(() => {
     setAutoLockMinutes(loadDeviceAutoLockMinutes(currentUser?.id));
   }, [currentUser?.id]);
+
+  // `AUTO_LOCK_OPTIONS` lives in `utils/autoLock.ts` — module-level data, so
+  // its `label` can't be translated there without freezing the language at
+  // import time. Key off the stable `minutes` value and translate here instead.
+  const autoLockLabel = (minutes: number | null): string => {
+    if (minutes === null) {
+      return t("security.autoLockOff");
+    }
+    if (minutes % 60 === 0) {
+      return t("security.autoLockHours", { count: minutes / 60 });
+    }
+    return t("security.autoLockMinutes", { count: minutes });
+  };
 
   const handleAutoLock = (minutes: number | null) => {
     setAutoLockMinutes(minutes);
@@ -215,10 +245,10 @@ export const SecurityPage: React.FC = observer(() => {
       .listUserDevices(currentUser.id)
       .then(setDevices)
       .catch((err) => {
-        setDevicesError(errorMessage(err, "Failed to load devices"));
+        setDevicesError(errorMessage(err, t("security.devicesLoadFailed")));
         setDevices([]);
       });
-  }, [currentUser?.id]);
+  }, [currentUser?.id, t]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -234,7 +264,7 @@ export const SecurityPage: React.FC = observer(() => {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(errorMessage(err, "Failed to load security events"));
+          setError(errorMessage(err, t("security.eventsLoadFailed")));
           setEvents([]);
         }
       });
@@ -260,7 +290,7 @@ export const SecurityPage: React.FC = observer(() => {
       cancelConfirm();
       loadDevices();
     } catch (err) {
-      setDevicesError(errorMessage(err, "Failed to revoke device"));
+      setDevicesError(errorMessage(err, t("security.revokeFailed")));
     } finally {
       setRevoking(false);
     }
@@ -273,7 +303,7 @@ export const SecurityPage: React.FC = observer(() => {
     if (!currentUser) {
       return;
     }
-    if (deleteConfirmText !== "DELETE") {
+    if (deleteConfirmText !== DELETE_CONFIRM_WORD) {
       return;
     }
     setIsDeleting(true);
@@ -289,13 +319,13 @@ export const SecurityPage: React.FC = observer(() => {
         console.error("[SecurityPage] onDeleteAccount callback is undefined — falling back to logout only");
       }
     } catch (err) {
-      setDeleteError(errorMessage(err, "Failed to delete account"));
+      setDeleteError(errorMessage(err, t("security.deleteAccountFailed")));
       setIsDeleting(false);
     }
-  }, [currentUser, deleteConfirmText, onDeleteAccount]);
+  }, [currentUser, deleteConfirmText, onDeleteAccount, t]);
 
   return (
-    <PageShell title="Security" scrollable>
+    <PageShell title={t("security.title")} scrollable>
       <div className="flex justify-center px-6 py-8">
         <div
           className="flex flex-col gap-8 w-full max-w-md font-mono"
@@ -305,12 +335,10 @@ export const SecurityPage: React.FC = observer(() => {
               against the public transparency log (#330). */}
           <section className="flex flex-col gap-4 mb-12" data-testid="account-key-section">
             <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
-              Account key
+              {t("security.accountKeyHeading")}
             </h2>
             <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
-              Your identity key is published to a public, append-only log so
-              anyone can confirm contacts are talking to the real you. This
-              checks that the log agrees with the key on this device.
+              {t("security.accountKeyDescription")}
             </p>
             {selfAudit && (
               <AccountKeyAuditLine
@@ -326,14 +354,10 @@ export const SecurityPage: React.FC = observer(() => {
               (#484). Never mandatory, never gates launch/update. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="this-build-section">
             <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
-              This build
+              {t("security.thisBuildHeading")}
             </h2>
             <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
-              Every release Pollis ships is fingerprinted into the same public,
-              append-only log. This confirms the build you're running is one
-              Pollis published there and independently verified by third-party
-              rebuilders — it does not by itself prove the build matches the
-              source, since a tampered app could lie about its own fingerprint.
+              {t("security.thisBuildDescription")}
             </p>
 
             {/* Reciprocal link into the /learn explainer that decodes this page
@@ -349,7 +373,7 @@ export const SecurityPage: React.FC = observer(() => {
                 void shellOpen(LEARN_DASHBOARDS_URL);
               }}
             >
-              What these verdicts mean &rarr;
+              {t("security.verdictsLink")}
             </button>
 
             {/* Version + commit of the running build. Commit is only shown once
@@ -357,11 +381,13 @@ export const SecurityPage: React.FC = observer(() => {
                 build actually baked one in. */}
             <div className="flex flex-col gap-0.5 text-xs" style={{ color: "var(--c-text-dim)" }}>
               <span data-testid="build-version">
-                Version {buildVerify.data?.version ?? appVersion ?? "—"}
+                {t("security.buildVersion", {
+                  version: buildVerify.data?.version ?? appVersion ?? "—",
+                })}
               </span>
               {buildVerify.data?.commit && (
                 <span data-testid="build-commit">
-                  Commit {shortId(buildVerify.data.commit)}
+                  {t("security.buildCommit", { commit: shortId(buildVerify.data.commit) })}
                 </span>
               )}
             </div>
@@ -380,7 +406,7 @@ export const SecurityPage: React.FC = observer(() => {
                 className="text-xs"
                 style={{ color: "var(--c-danger)" }}
               >
-                Couldn't check this build right now. Try again in a moment.
+                {t("security.buildVerifyError")}
               </p>
             )}
 
@@ -389,10 +415,10 @@ export const SecurityPage: React.FC = observer(() => {
                 data-testid="verify-build-button"
                 variant="secondary"
                 isLoading={buildVerify.isPending}
-                loadingText="Verifying…"
+                loadingText={t("security.verifying")}
                 onClick={() => buildVerify.mutate()}
               >
-                Verify this build
+                {t("security.verifyBuildButton")}
               </Button>
             </div>
           </section>
@@ -400,18 +426,17 @@ export const SecurityPage: React.FC = observer(() => {
           {/* PIN */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
-              PIN
+              {t("security.pinHeading")}
             </h2>
             <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
-              The local PIN unlocks Pollis on this device. It never leaves the
-              device and can't be recovered — use your Secret Key if you forget it.
+              {t("security.pinDescription")}
             </p>
             <div className="self-start">
               <Button
                 data-testid="change-pin-button"
                 onClick={() => navigate({ to: "/security/change-pin" })}
               >
-                Change PIN
+                {t("security.changePinButton")}
               </Button>
             </div>
           </section>
@@ -422,13 +447,10 @@ export const SecurityPage: React.FC = observer(() => {
               does not sync to your other devices. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="auto-lock-section">
             <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
-              Auto-lock
+              {t("security.autoLockHeading")}
             </h2>
             <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
-              Lock Pollis back to the PIN screen after a period with no mouse or
-              keyboard activity, so walking away from this machine doesn't leave
-              your decrypted conversations on screen. You can always lock
-              immediately with {lockLabel}.
+              {t("security.autoLockDescription", { shortcut: lockLabel })}
             </p>
             {/* A group of toggle buttons rather than the `role="radiogroup"`
                 the neighbouring selectors use: without `role="radio"` +
@@ -438,17 +460,18 @@ export const SecurityPage: React.FC = observer(() => {
                 renders identically. */}
             <div
               role="group"
-              aria-label="Auto-lock after inactivity"
+              aria-label={t("security.autoLockAriaLabel")}
               className="flex gap-2 flex-wrap"
             >
               {AUTO_LOCK_OPTIONS.map((option) => {
                 const selected = autoLockMinutes === option.minutes;
+                const label = autoLockLabel(option.minutes);
                 return (
                   <Button
-                    key={option.label}
+                    key={option.minutes ?? "off"}
                     variant={selected ? "primary" : "secondary"}
                     size="sm"
-                    aria-label={option.label}
+                    aria-label={label}
                     aria-pressed={selected}
                     data-testid={`auto-lock-${option.minutes ?? "off"}`}
                     onClick={() => {
@@ -458,28 +481,23 @@ export const SecurityPage: React.FC = observer(() => {
                       handleAutoLock(option.minutes);
                     }}
                   >
-                    {option.label}
+                    {label}
                   </Button>
                 );
               })}
             </div>
             <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
-              Applies to this device only. A call in progress keeps Pollis
-              unlocked — locking would close the local database out from under
-              the call. Nothing is lost when it locks: your messages are on
-              disk, and entering your PIN brings you straight back.
+              {t("security.autoLockNote")}
             </p>
           </section>
 
           {/* Devices */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
-              Devices
+              {t("security.devicesHeading")}
             </h2>
             <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
-              Every device signed in to your account. Revoke any you don't
-              recognise — the device loses access to all groups and DMs on its
-              next sync.
+              {t("security.devicesDescription")}
             </p>
 
             {devicesError && (
@@ -504,11 +522,17 @@ export const SecurityPage: React.FC = observer(() => {
                 }}
               >
                 <p className="text-xs" style={{ color: "var(--c-text)" }}>
-                  Revoke <strong>{deviceDisplayName(confirmingDevice)}</strong>? This
-                  cannot be undone.
+                  <Trans
+                    t={t}
+                    i18nKey="security.revokeConfirmPrompt"
+                    values={{ device: deviceDisplayName(confirmingDevice) }}
+                    components={{ name: <strong /> }}
+                  />
                 </p>
                 <TextInput
-                  label={`Type "${deviceDisplayName(confirmingDevice)}" to confirm`}
+                  label={t("security.revokeConfirmInputLabel", {
+                    device: deviceDisplayName(confirmingDevice),
+                  })}
                   value={confirmInput}
                   onChange={setConfirmInput}
                   autoFocus
@@ -523,7 +547,7 @@ export const SecurityPage: React.FC = observer(() => {
                     }
                     onClick={revoke}
                   >
-                    {revoking ? "Revoking…" : "Revoke device"}
+                    {revoking ? t("security.revoking") : t("security.revokeConfirmSubmit")}
                   </Button>
                   <Button
                     variant="secondary"
@@ -531,7 +555,7 @@ export const SecurityPage: React.FC = observer(() => {
                     disabled={revoking}
                     onClick={cancelConfirm}
                   >
-                    Cancel
+                    {t("common:actions.cancel")}
                   </Button>
                 </div>
               </div>
@@ -544,8 +568,8 @@ export const SecurityPage: React.FC = observer(() => {
                 autoFocus={false}
                 items={devices ?? []}
                 isLoading={devices === null}
-                loadingLabel="Loading devices…"
-                emptyLabel="No devices registered."
+                loadingLabel={t("security.devicesLoading")}
+                emptyLabel={t("security.devicesEmpty")}
                 getKey={(d) => d.device_id}
                 rowTestId={(d) => `device-${d.device_id}`}
                 renderRow={(d) => (
@@ -554,7 +578,7 @@ export const SecurityPage: React.FC = observer(() => {
                       {deviceDisplayName(d)}
                     </span>
                     <span style={{ color: "var(--c-text-dim)" }}>
-                      Last seen {formatDateTime(d.last_seen)}
+                      {t("security.deviceLastSeen", { time: formatDateTime(d.last_seen) })}
                     </span>
                   </div>
                 )}
@@ -573,7 +597,7 @@ export const SecurityPage: React.FC = observer(() => {
                             setDevicesError(null);
                           }}
                         >
-                          Revoke
+                          {t("security.revokeButton")}
                         </Button>,
                       ]
                 }
@@ -584,12 +608,10 @@ export const SecurityPage: React.FC = observer(() => {
           {/* Security events */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
-              Security events
+              {t("security.eventsHeading")}
             </h2>
             <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
-              Every time a device is added to your account, an enrollment is
-              rejected, or your identity is reset, it shows up here. Check it if
-              you ever suspect someone has accessed your account.
+              {t("security.eventsDescription")}
             </p>
 
             {error && (
@@ -611,15 +633,15 @@ export const SecurityPage: React.FC = observer(() => {
                 focus here and scrolled the user down to it. A plain list has no
                 focus to steal. */}
             {events === null ? (
-              <p className="text-xs font-mono text-muted">Loading…</p>
+              <p className="text-xs font-mono text-muted">{t("common:states.loading")}</p>
             ) : events.length === 0 ? (
               <p className="text-xs font-mono text-dim">
-                No security events recorded yet.
+                {t("security.eventsEmpty")}
               </p>
             ) : (
               <div data-testid="security-events-list" className="flex flex-col">
                 {events.slice(0, visibleEvents).map((event) => {
-                  const { heading, detail } = describe(event);
+                  const { heading, detail } = describe(t, event);
                   return (
                     <div
                       key={event.id}
@@ -646,7 +668,9 @@ export const SecurityPage: React.FC = observer(() => {
                         setVisibleEvents((n) => n + SECURITY_EVENTS_PAGE_SIZE)
                       }
                     >
-                      Show older events ({events.length - visibleEvents} more)
+                      {t("security.eventsShowOlder", {
+                        count: events.length - visibleEvents,
+                      })}
                     </Button>
                   </div>
                 )}
@@ -659,19 +683,31 @@ export const SecurityPage: React.FC = observer(() => {
               so it sits with Devices rather than in Preferences. */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
-              Media permissions
+              {t("security.mediaHeading")}
             </h2>
 
             {/* Live OS status for each media device. */}
             <div className="flex flex-col gap-2">
               {[
-                { label: "Camera", state: mediaPermissions.data?.camera },
-                { label: "Microphone", state: mediaPermissions.data?.microphone },
-                { label: "Screen share", state: mediaPermissions.data?.screen },
+                {
+                  key: "camera",
+                  label: t("security.mediaCamera"),
+                  state: mediaPermissions.data?.camera,
+                },
+                {
+                  key: "microphone",
+                  label: t("security.mediaMicrophone"),
+                  state: mediaPermissions.data?.microphone,
+                },
+                {
+                  key: "screen",
+                  label: t("security.mediaScreenShare"),
+                  state: mediaPermissions.data?.screen,
+                },
               ].map((row) => {
-                const pill = permissionPill(row.state);
+                const pill = permissionPill(t, row.state);
                 return (
-                  <div key={row.label} className="flex items-center justify-between">
+                  <div key={row.key} className="flex items-center justify-between">
                     <span className="text-sm" style={{ color: "var(--c-text)" }}>
                       {row.label}
                     </span>
@@ -689,13 +725,12 @@ export const SecurityPage: React.FC = observer(() => {
             <div className="flex flex-col gap-1.5">
               <Switch
                 id="pref-revoke-media-on-exit"
-                label="Revoke system permissions when Pollis quits"
+                label={t("security.revokeMediaOnExitLabel")}
                 checked={revokeMediaOnExit}
                 onChange={handleRevokeMediaOnExit}
               />
               <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                When on, Pollis clears its saved camera / microphone / screen
-                permissions as it quits, so the OS asks again next time.
+                {t("security.revokeMediaOnExitDescription")}
               </p>
             </div>
 
@@ -705,17 +740,17 @@ export const SecurityPage: React.FC = observer(() => {
               {confirmingRevoke ? (
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
-                    This clears Pollis's saved permissions.
+                    {t("security.revokeNowNote")}
                   </span>
                   <Button variant="primary" size="sm" onClick={handleRevokeNow}>
-                    Confirm
+                    {t("security.revokeNowConfirm")}
                   </Button>
                   <Button
                     variant="secondary"
                     size="sm"
                     onClick={() => setConfirmingRevoke(false)}
                   >
-                    Cancel
+                    {t("common:actions.cancel")}
                   </Button>
                 </div>
               ) : (
@@ -725,7 +760,7 @@ export const SecurityPage: React.FC = observer(() => {
                   disabled={revokeMedia.isPending}
                   onClick={() => setConfirmingRevoke(true)}
                 >
-                  Revoke now
+                  {t("security.revokeNowButton")}
                 </Button>
               )}
             </div>
@@ -739,14 +774,10 @@ export const SecurityPage: React.FC = observer(() => {
 
             {/* Honest, per-OS explanation of what "Revoke now" does. */}
             <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-              {isMac &&
-                "Clears Pollis's saved permission; macOS will ask again next time you use each feature."}
-              {isLinux &&
-                "Linux grants media access per session — Pollis stores no standing grant, so there's nothing to revoke here."}
-              {isWindows &&
-                "Camera and microphone status comes from Windows privacy settings. “Revoke now” opens those settings so you can turn Pollis off; screen sharing isn't tracked there."}
-              {!isMac && !isLinux && !isWindows &&
-                "Media permission controls aren't available on this platform."}
+              {isMac && t("security.mediaNoteMac")}
+              {isLinux && t("security.mediaNoteLinux")}
+              {isWindows && t("security.mediaNoteWindows")}
+              {!isMac && !isLinux && !isWindows && t("security.mediaNoteOther")}
             </p>
           </section>
 
@@ -757,20 +788,20 @@ export const SecurityPage: React.FC = observer(() => {
               className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
               style={{ color: "hsl(0 60% 55%)", borderColor: "hsl(0 60% 30% / 40%)" }}
             >
-              Danger Zone
+              {t("security.dangerZoneHeading")}
             </h2>
 
             <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
-              Permanently delete your account and all associated data. This cannot be undone.
+              {t("security.dangerZoneDescription")}
             </p>
 
             <TextInput
-              label="Type DELETE to confirm"
+              label={t("security.deleteConfirmLabel", { word: DELETE_CONFIRM_WORD })}
               id="settings-delete-confirm"
               data-testid="settings-delete-confirm-input"
               value={deleteConfirmText}
               onChange={setDeleteConfirmText}
-              placeholder="DELETE"
+              placeholder={DELETE_CONFIRM_WORD}
               disabled={isDeleting}
               error={deleteError || undefined}
             />
@@ -778,13 +809,13 @@ export const SecurityPage: React.FC = observer(() => {
             <Button
               data-testid="settings-delete-account-button"
               onClick={handleDeleteAccount}
-              disabled={deleteConfirmText !== "DELETE" || isDeleting}
+              disabled={deleteConfirmText !== DELETE_CONFIRM_WORD || isDeleting}
               isLoading={isDeleting}
-              loadingText="Deleting account…"
+              loadingText={t("security.deletingAccount")}
               variant="danger"
               className="w-full"
             >
-              Delete my account
+              {t("security.deleteAccountButton")}
             </Button>
           </section>
         </div>

@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { MessagesSquare } from "lucide-react";
 
 interface ThreadReplyCountProps {
@@ -20,6 +21,7 @@ export const ThreadReplyCount: React.FC<ThreadReplyCountProps> = ({
   count,
   onOpen,
 }) => {
+  const { t } = useTranslation("chat");
   if (count <= 0 || !onOpen) {
     return null;
   }
@@ -32,7 +34,7 @@ export const ThreadReplyCount: React.FC<ThreadReplyCountProps> = ({
       className="mt-1 flex items-center gap-1 rounded px-1 py-0.5 text-xs text-accent hover:bg-hover"
     >
       <MessagesSquare size={12} aria-hidden />
-      {count === 1 ? "1 reply" : `${count} replies`}
+      {t("thread.replyCount", { count })}
     </button>
   );
 };

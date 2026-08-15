@@ -1,5 +1,6 @@
 import { errorMessage } from '../../utils/errorMessage';
 import React, { useState, useEffect, useRef } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
 import * as api from '../../services/api';
 import { Button } from '../ui/Button';
@@ -19,6 +20,7 @@ interface EmailOTPAuthProps {
 }
 
 export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEmail, prefillNonce, onStepChange }) => {
+  const { t } = useTranslation('auth');
   const [step, setStepRaw] = useState<'email' | 'otp'>('email');
   const setStep = (s: 'email' | 'otp') => {
     setStepRaw(s);
@@ -61,7 +63,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
         setStep('otp');
       })
       .catch((err) => {
-        setError(errorMessage(err, 'Failed to send code'));
+        setError(errorMessage(err, t('otp.sendFailed')));
       })
       .finally(() => {
         setIsLoading(false);
@@ -80,7 +82,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
       await api.requestOTP(email.trim());
       setStep('otp');
     } catch (err) {
-      setError(errorMessage(err, 'Failed to send code'));
+      setError(errorMessage(err, t('otp.sendFailed')));
     } finally {
       setIsLoading(false);
     }
@@ -97,7 +99,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
       const result = await api.verifyOTP(email.trim(), otp.trim());
       await onSuccess(result);
     } catch (err) {
-      setError(errorMessage(err, 'Invalid code'));
+      setError(errorMessage(err, t('otp.invalidCode')));
     } finally {
       setIsLoading(false);
     }
@@ -107,7 +109,12 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     return (
       <div data-testid="otp-form-container" className="flex flex-col gap-4">
         <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
-          Code sent to <span style={{ color: 'var(--c-accent)' }}>{email}</span>
+          <Trans
+            t={t}
+            i18nKey="otp.sentTo"
+            values={{ email }}
+            components={{ address: <span style={{ color: 'var(--c-accent)' }} /> }}
+          />
         </p>
         {error && (
           <p data-testid="auth-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
@@ -117,7 +124,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
         <form data-testid="otp-form" onSubmit={handleVerifyOTP} className="flex flex-col gap-4">
           <div>
             <label className="block text-xs font-mono font-medium mb-2" style={{ color: 'var(--c-text-dim)' }}>
-              Enter code
+              {t('otp.codeLabel')}
             </label>
             <InputOtp
               value={otp}
@@ -132,11 +139,11 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
             data-testid="verify-otp-button"
             type="submit"
             isLoading={isLoading}
-            loadingText="Verifying…"
+            loadingText={t('otp.verifying')}
             disabled={otp.length < 6}
             className="w-full mb-8"
           >
-            Verify
+            {t('otp.verify')}
           </Button>
         </form>
         <button
@@ -145,7 +152,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
           className="inline-flex items-center gap-1 leading-none text-xs font-mono"
           style={{ color: 'var(--c-text-muted)' }}
         >
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} className="rtl-mirror" /> {t('common:actions.back')}
         </button>
       </div>
     );
@@ -162,11 +169,11 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
         <TextInput
           id="email-input"
           data-testid="email-input"
-          label="Email"
+          label={t('otp.emailLabel')}
           type="email"
           value={email}
           onChange={setEmail}
-          placeholder="you@example.com"
+          placeholder={t('otp.emailPlaceholder')}
           autoComplete="email"
           autoFocus
           disabled={isLoading}
@@ -176,11 +183,11 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
           data-testid="send-otp-button"
           type="submit"
           isLoading={isLoading}
-          loadingText="Sending…"
+          loadingText={t('otp.sending')}
           disabled={!email.trim()}
           className="w-full"
         >
-          Continue
+          {t('otp.continue')}
         </Button>
       </form>
     </div>

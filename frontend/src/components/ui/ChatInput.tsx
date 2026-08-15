@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useImperativeHandle } from "react";
+import { useTranslation } from "react-i18next";
 import {
   dialogOpen,
   writeFile,
@@ -98,6 +99,7 @@ const AttachmentPreview: React.FC<{
   onRemove: (id: string) => void;
   onExpand: (url: string, type: "image" | "video") => void;
 }> = ({ attachment, onRemove, onExpand }) => {
+  const { t } = useTranslation("common");
   const hasVisualPreview = attachment.type === "image" || attachment.type === "video";
   const canExpand = hasVisualPreview && !!attachment.preview && !attachment.loading;
 
@@ -141,7 +143,7 @@ const AttachmentPreview: React.FC<{
       </div>
       <button
         onClick={() => onRemove(attachment.id)}
-        aria-label={`Remove ${attachment.name}`}
+        aria-label={t("composer.removeAttachment", { name: attachment.name })}
         className="absolute flex items-center justify-center"
         style={{
           top: -6,
@@ -162,7 +164,7 @@ const AttachmentPreview: React.FC<{
 
 const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputProps> = ({
   onSend,
-  placeholder = "Type a message…",
+  placeholder,
   disabled = false,
   autoFocus = false,
   className = "",
@@ -171,6 +173,10 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   draftKey = null,
   canNotifyAll = false,
 }, ref) => {
+  const { t } = useTranslation("common");
+  // Resolved at render, not as a default parameter, so the fallback follows
+  // a language change.
+  const resolvedPlaceholder = placeholder ?? t("composer.placeholder");
   const [message, setMessage] = useState(() => getDraft(draftKey));
   // Re-sync message when draftKey changes within the same mount (e.g. the
   // user navigates from #general to #random without unmounting MainContent).
@@ -336,7 +342,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       const result = await dialogOpen({
         multiple: true,
         directory: false,
-        title: "Add files",
+        title: t("composer.filePickerTitle"),
       }).catch((err) => { console.error("[ChatInput] open dialog failed:", err); return null; });
       if (!result) { return; }
       await handlePaths(Array.isArray(result) ? result : [result]);
@@ -346,7 +352,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       // (success, cancel, or error) so the user can keep typing.
       textareaRef.current?.focus();
     }
-  }, [attachments.length, maxAttachments, handlePaths]);
+  }, [attachments.length, maxAttachments, handlePaths, t]);
 
   // ── Paste (File objects, written to temp first) ───────────────────────────
   const handleBrowserFile = useCallback(async (file: File) => {
@@ -664,7 +670,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         >
           <span style={{ fontWeight: 600 }}>@all</span>
           <span style={{ color: "var(--c-text-muted)" }}>
-            notifies everyone in this channel
+            {t("composer.allMentionHint")}
           </span>
         </div>
       )}
@@ -675,7 +681,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         <button
           onClick={handlePickFiles}
           disabled={disabled || attachments.length >= maxAttachments}
-          aria-label="Add attachment"
+          aria-label={t("composer.addAttachment")}
           className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-[var(--c-text-muted)] enabled:hover:text-[var(--c-accent)]"
           style={{ opacity: disabled ? 0.4 : 1 }}
         >
@@ -714,7 +720,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             onBlur={() => setIsFocused(false)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={placeholder}
+            placeholder={resolvedPlaceholder}
             disabled={disabled}
             autoFocus={autoFocus}
             autoComplete="off"
@@ -733,7 +739,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
               border: "none",
               opacity: disabled ? 0.5 : 1,
             }}
-            aria-label="Message input"
+            aria-label={t("composer.inputLabel")}
           />
           <MentionGhost
             value={message}
@@ -747,13 +753,13 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           onClick={handleSend}
           disabled={disabled || (!message.trim() && attachments.length === 0) || hasLoadingAttachments}
           data-testid="message-send-button"
-          aria-label="Send message"
+          aria-label={t("composer.send")}
           className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-[var(--c-text-muted)] enabled:hover:text-[var(--c-accent)]"
           style={{
             opacity: disabled || (!message.trim() && !attachments.length) ? 0.3 : 1,
           }}
         >
-          <ChevronRight className="w-4 h-4" />
+          <ChevronRight className="w-4 h-4 rtl-mirror" />
         </button>
       </div>
 
@@ -784,7 +790,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           ) : (
             <img
               src={expandedPreview.url}
-              alt="Preview"
+              alt={t("composer.previewAlt")}
               style={{ maxWidth: "90vw", maxHeight: "85vh", objectFit: "contain", cursor: "default", borderRadius: "1rem" }}
               onClick={(e) => e.stopPropagation()}
             />

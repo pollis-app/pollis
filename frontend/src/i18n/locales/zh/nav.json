@@ -1,0 +1,165 @@
+{
+  "sidebar": {
+    "groups": "群组",
+    "dms": "私信",
+    "account": "账户",
+    "saved": "收藏",
+    "preferences": "偏好设置",
+    "userSettings": "用户设置",
+    "voiceAndVideo": "语音与视频",
+    "security": "安全",
+    "keyBindings": "快捷键",
+    "softwareUpdate": "软件更新",
+    "expandGroup": "展开 {{name}}",
+    "collapseGroup": "折叠 {{name}}",
+    "keyChanged": "身份密钥已更改 — 请重新验证",
+    "verified": "已验证的联系人",
+    "dmAvatarAlt": "{{name}} 的头像",
+    "close": "关闭侧边栏（{{shortcut}}）"
+  },
+  "profile": {
+    "you": "你",
+    "call": "通话",
+    "voice": "语音",
+    "settings": "设置",
+    "voiceConnected": "语音已连接",
+    "stopScreenShare": "停止屏幕共享",
+    "shareScreen": "共享屏幕",
+    "disconnect": "断开连接"
+  },
+  "breadcrumb": {
+    "home": "主页",
+    "groups": "群组",
+    "createGroup": "创建群组",
+    "findGroup": "查找群组",
+    "newChannel": "新建频道",
+    "voice": "语音",
+    "joinRequests": "加入申请",
+    "inviteMember": "邀请成员",
+    "leaveGroup": "退出群组",
+    "members": "成员",
+    "removeMember": "移除成员",
+    "directMessages": "私信",
+    "newMessage": "新消息",
+    "requests": "申请",
+    "blockedUsers": "已屏蔽用户",
+    "conversationSettings": "对话设置",
+    "account": "账户",
+    "preferences": "偏好设置",
+    "userSettings": "用户设置",
+    "profile": "个人资料",
+    "security": "安全",
+    "voiceSettings": "语音",
+    "invites": "邀请",
+    "joinAGroup": "加入群组",
+    "search": "搜索",
+    "searchButton": "搜索（{{shortcut}}）",
+    "settings": "设置"
+  },
+  "statusBar": {
+    "groupsUnread_other": "未读群组消息：{{count}}",
+    "dmsUnread_other": "未读私信：{{count}}",
+    "joinRequests_other": "待处理的加入申请：{{count}}",
+    "invites_other": "待处理的邀请：{{count}}",
+    "someone": "某人",
+    "updateAvailable": "有可用更新",
+    "updateAvailableTitle": "有可用更新：{{version}}",
+    "answerCall": "接听 @{{username}} 的来电",
+    "declineCall": "拒接来电",
+    "dismissVoiceError": "忽略语音错误",
+    "dismissScreenShareError": "忽略屏幕共享错误",
+    "syncing": "同步中…"
+  },
+  "shell": {
+    "dropFiles": "拖放文件即可发送",
+    "voiceChannelFallback": "语音",
+    "callChannel": "通话"
+  },
+  "panel": {
+    "thread": "话题",
+    "details": "详情",
+    "ariaLabel": "对话详情",
+    "closeThread": "关闭话题面板（{{shortcut}}）",
+    "closeDetails": "关闭详情面板（{{shortcut}}）"
+  },
+  "members": {
+    "count_other": "成员 — {{count}}",
+    "onlineCount_other": "在线 — {{count}}",
+    "empty": "没有可显示的成员。",
+    "noneOnline": "当前无人在线。",
+    "you": "你",
+    "admin": "管理员"
+  },
+  "media": {
+    "heading": "媒体",
+    "empty": "还没有共享的媒体文件。"
+  },
+  "thread": {
+    "loading": "正在加载回复…",
+    "empty": "还没有回复。在下方开始这个话题吧。",
+    "placeholder": "在话题中回复…",
+    "messageDeleted": "消息已删除",
+    "encrypted": "[已加密]"
+  },
+  "chat": {
+    "noSelection": "选择一个频道以开始聊天"
+  },
+  "dmRequest": {
+    "heading": "私信请求",
+    "body": "<name>{{name}}</name> 想给你发消息。",
+    "accept": "接受",
+    "accepting": "接受中…",
+    "block": "屏蔽",
+    "blocking": "屏蔽中…"
+  },
+  "editBar": {
+    "heading": "编辑消息",
+    "cancel": "取消编辑",
+    "hint": "Enter 保存 · Shift+Enter 换行 · Esc 取消"
+  },
+  "deleteChannel": {
+    "heading": "删除频道",
+    "cancel": "取消删除",
+    "body": "此频道及其所有消息将被永久删除，且无法撤销。",
+    "deleting": "删除中…"
+  },
+  "deleteMessage": {
+    "heading": "删除消息",
+    "moderateHeading": "移除消息（管理员）",
+    "body": "这条消息将对所有人删除，包括已经收到它的人。",
+    "moderateBody": "这条消息及其附件将对频道中的所有人移除。",
+    "cancel": "取消删除",
+    "deleting": "删除中…",
+    "remove": "移除"
+  },
+  "update": {
+    "preparing": "正在准备更新…",
+    "checking": "正在检查更新…",
+    "downloading": "正在下载更新…",
+    "downloadingProgress": "正在下载更新… {{progress}}%",
+    "installing": "正在安装更新…",
+    "relaunching": "正在重启…",
+    "failed": "更新失败：{{error}}"
+  },
+  "home": {
+    "groups": "群组",
+    "groupsDescription": "社区、组织、团队，以及野心过大的群聊",
+    "dms": "私信",
+    "dmsDescription": "与个人之间的私密端到端加密对话",
+    "invites": "邀请",
+    "noPendingInvites": "没有待处理的邀请",
+    "pending_other": "{{count}} 条待处理",
+    "join": "加入群组",
+    "joinDescription": "使用邀请链接或加入码",
+    "joinRequests": "加入申请",
+    "logout": "退出登录",
+    "exit": "退出"
+  },
+  "titleBar": {
+    "minimize": "最小化",
+    "maximize": "最大化"
+  },
+  "terminal": {
+    "shellFailed": "无法启动 shell：{{error}}"
+  }
+}
