@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { LinkifiedText } from "../ui/LinkifiedText";
+import { EmojiText } from "../Emoji/EmojiText";
 import { MentionToken } from "./MentionToken";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
@@ -52,7 +53,11 @@ export const MessageBody: React.FC<MessageBodyProps> = observer(({ text }) => {
     for (const m of mentions) {
       if (m.start > cursor) {
         nodes.push(
-          <LinkifiedText key={`t${cursor}`} text={text.slice(cursor, m.start)} />,
+          <EmojiText
+            key={`t${cursor}`}
+            text={text.slice(cursor, m.start)}
+            renderText={(t, k) => <LinkifiedText key={k} text={t} />}
+          />,
         );
       }
       // `@all` speaks to everyone, so it is a mention of the reader too.
@@ -63,13 +68,21 @@ export const MessageBody: React.FC<MessageBodyProps> = observer(({ text }) => {
       cursor = m.end;
     }
     if (cursor < text.length) {
-      nodes.push(<LinkifiedText key={`t${cursor}`} text={text.slice(cursor)} />);
+      nodes.push(
+        <EmojiText
+          key={`t${cursor}`}
+          text={text.slice(cursor)}
+          renderText={(t, k) => <LinkifiedText key={k} text={t} />}
+        />,
+      );
     }
     return nodes;
   }, [text, known, selfName, skin]);
 
   if (parts === null) {
-    return <LinkifiedText text={text} />;
+    return (
+      <EmojiText text={text} renderText={(t, k) => <LinkifiedText key={k} text={t} />} />
+    );
   }
 
   return <>{parts}</>;

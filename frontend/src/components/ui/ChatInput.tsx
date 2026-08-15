@@ -9,6 +9,7 @@ import {
   readClipboardImageToTemp,
 } from "../../bridge";
 import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
+import { EmojiPickerButton } from "../Emoji/EmojiPickerButton";
 import { getFileIcon, mimeFromName } from "../../utils/fileIcon";
 import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize } from "../../utils/format";
@@ -187,6 +188,24 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   // Lightbox for previewing attachments before send.
   const [expandedPreview, setExpandedPreview] = useState<{ url: string; type: "image" | "video" } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Insert emoji text at the caret, not at the end — appending would be wrong
+  // the moment someone picks an emoji mid-sentence, which is the common case.
+  const insertAtCursor = useCallback((text: string) => {
+    const el = textareaRef.current;
+    setMessage((prev) => {
+      const start = el?.selectionStart ?? prev.length;
+      const end = el?.selectionEnd ?? prev.length;
+      const next = prev.slice(0, start) + text + prev.slice(end);
+      // Restore the caret after React has painted the new value.
+      requestAnimationFrame(() => {
+        const caret = start + text.length;
+        el?.focus();
+        el?.setSelectionRange(caret, caret);
+      });
+      return next;
+    });
+  }, []);
 
   // Close preview lightbox on Escape.
   useEffect(() => {
@@ -662,6 +681,10 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         >
           <Plus className="w-4 h-4" />
         </button>
+
+        {/* Opens upward: the composer sits at the bottom of the window. The
+            panel is in-flow within the composer, never a portal. */}
+        <EmojiPickerButton onSelect={insertAtCursor} placement="up" />
 
         {/* Positioning context for the terminal skin's inline ghost, which
             mirrors this exact box. */}
