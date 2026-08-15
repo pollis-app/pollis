@@ -177,6 +177,17 @@ mod tests {
         }
     }
 
+    // The DS must reproduce this byte-for-byte (`pollis-delivery/src/invite_token.rs`
+    // pins the SAME vector). If either side's `hash_secret` changes, both tests
+    // fail and the mirrored format has drifted.
+    #[test]
+    fn hash_secret_matches_the_pollis_delivery_vector() {
+        assert_eq!(
+            hash_secret("test-secret"),
+            "9caf06bb4436cdbfa20af9121a626bc1093c4f54b31c0fa937957856135345b6"
+        );
+    }
+
     #[test]
     fn malformed_tokens_are_rejected() {
         assert!(parse("").is_none());
