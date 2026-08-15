@@ -865,6 +865,13 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'write_clipboard_text': {
+      // A preload may set `failClipboard` to model an OS clipboard write that
+      // fails — the Rust command returns false rather than throwing, and that
+      // false used to be discarded by the caller (#889). Nothing is written in
+      // that case, so a test can also prove the clipboard was left alone.
+      if (preload.failClipboard) {
+        return false;
+      }
       const { text } = args as { text: string };
       store.clipboard = text;
       return true;

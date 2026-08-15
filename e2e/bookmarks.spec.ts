@@ -101,8 +101,13 @@ function preloadState(skin: Skin, bookmarks: unknown[] = []) {
  * meaningless here — every assertion below navigates through the UI and checks
  * what is RENDERED instead.
  */
-async function boot(page: Page, skin: Skin, bookmarks: unknown[] = []) {
-  const state = preloadState(skin, bookmarks);
+async function boot(
+  page: Page,
+  skin: Skin,
+  bookmarks: unknown[] = [],
+  opts: { failClipboard?: boolean } = {},
+) {
+  const state = { ...preloadState(skin, bookmarks), ...opts };
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
     // `@tauri-apps/api/window` is NOT vite-aliased (only `/core` and `/event`
@@ -369,6 +374,54 @@ for (const skin of SKINS) {
       expect(clipboard).not.toContain("Acme");
       expect(clipboard).not.toContain("general");
       expect(clipboard).not.toContain("bob");
+    });
+
+    test("a successful copy confirms itself on the button", async ({ page }) => {
+      await boot(page, skin);
+      await gotoChannel(page);
+
+      const copyButton = page
+        .getByTestId(`message-${CHANNEL_MESSAGE_ID}`)
+        .getByTestId("copy-link-button");
+
+      await expect(copyButton).toHaveAttribute("data-copy-state", "idle");
+      await copyButton.click();
+
+      // Every other copy affordance people use confirms itself; a silent
+      // success reads as "the button is broken" (#889).
+      await expect(copyButton).toHaveAttribute("data-copy-state", "copied");
+      await expect(copyButton).toHaveAccessibleName("Link copied");
+
+      // And it goes back on its own rather than sticking.
+      await expect(copyButton).toHaveAttribute("data-copy-state", "idle", {
+        timeout: 5000,
+      });
+    });
+
+    test("a failed copy is distinguishable from a successful one", async ({
+      page,
+    }) => {
+      await boot(page, skin, [], { failClipboard: true });
+      await gotoChannel(page);
+
+      const copyButton = page
+        .getByTestId(`message-${CHANNEL_MESSAGE_ID}`)
+        .getByTestId("copy-link-button");
+
+      await copyButton.click();
+
+      // The whole point of #889: the failure must not look like the success.
+      await expect(copyButton).toHaveAttribute("data-copy-state", "failed");
+      await expect(copyButton).toHaveAccessibleName("Couldn't copy link");
+
+      // Nothing was put on the clipboard, so the user has nothing to paste —
+      // which is exactly why they need to be told.
+      const clipboard = await page.evaluate(
+        () =>
+          (window as unknown as { __tauriMock: { clipboard: string } })
+            .__tauriMock.clipboard,
+      );
+      expect(clipboard).toBe("");
     });
 
     test("saving from the message row lands in the saved list", async ({ page }) => {

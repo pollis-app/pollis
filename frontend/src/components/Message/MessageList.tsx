@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useMemo, useState } from "react";
 import { MessageItem } from "./MessageItem";
 import "./messageHighlight.css";
 import { useBlockedUsers } from "../../hooks/queries";
@@ -309,6 +309,23 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   const savedMessageIds = useSavedMessageIds();
   const toggleSavedMutation = useToggleSavedMessage();
   const { copyPermalink } = useMessagePermalink();
+  // Which message's copy-link button is currently showing an outcome, and
+  // which outcome (#889). One at a time: the affordance is per-message but the
+  // feedback is about the click that just happened.
+  const [copyLinkState, setCopyLinkState] = useState<{
+    messageId: string;
+    state: "copied" | "failed";
+  } | null>(null);
+
+  // Clear the badge a couple of seconds after it appears, and never leave a
+  // timer behind that would set state on an unmounted list.
+  useEffect(() => {
+    if (!copyLinkState) {
+      return;
+    }
+    const timer = window.setTimeout(() => setCopyLinkState(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copyLinkState]);
 
   const handleToggleSave = useCallback(
     (messageId: string) => {
@@ -318,16 +335,20 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   );
 
   const handleCopyLink = useCallback(
-    (messageId: string) => {
+    async (messageId: string) => {
       const message = sortedMessages.find((m) => m.id === messageId);
       // The message's OWN conversation, never the list's `conversationId` prop
       // — that prop is the MLS group id for channels, which would produce a
       // permalink that resolves nowhere.
       const targetConversationId = message?.conversation_id;
       if (!targetConversationId) {
+        // No conversation to link to is itself a failure the user should see,
+        // rather than a click that does nothing at all (#889).
+        setCopyLinkState({ messageId, state: "failed" });
         return;
       }
-      void copyPermalink(targetConversationId, messageId);
+      const ok = await copyPermalink(targetConversationId, messageId);
+      setCopyLinkState({ messageId, state: ok ? "copied" : "failed" });
     },
     [sortedMessages, copyPermalink],
   );
@@ -480,6 +501,11 @@ export const MessageList: React.FC<MessageListProps> = observer(({
             isSaved={savedMessageIds.has(message.id)}
             onToggleSave={handleToggleSave}
             onCopyLink={handleCopyLink}
+            copyLinkState={
+              copyLinkState?.messageId === message.id
+                ? copyLinkState.state
+                : "idle"
+            }
             receipts={receipts}
             peerCount={peerCount}
             isDm={isDm}

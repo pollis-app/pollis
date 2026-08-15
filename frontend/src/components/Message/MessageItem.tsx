@@ -1,5 +1,5 @@
 import React from "react";
-import { Reply, CornerUpLeft, Edit2, Trash2, MessagesSquare, Bookmark, Link } from "lucide-react";
+import { Reply, CornerUpLeft, Edit2, Trash2, MessagesSquare, Bookmark, Link, Check, AlertCircle } from "lucide-react";
 import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
 import { observer } from "mobx-react-lite";
@@ -38,6 +38,9 @@ interface MessageItemProps {
    * pass them the affordances simply don't render. Wired from `MessageList`. */
   onToggleSave?: (messageId: string) => void;
   onCopyLink?: (messageId: string) => void;
+  /** Transient outcome of THIS message's last copy-link click (#889).
+   *  `idle` for every message but the one just acted on. */
+  copyLinkState?: "idle" | "copied" | "failed";
   isSaved?: boolean;
   onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
@@ -69,6 +72,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   onDelete,
   onToggleSave,
   onCopyLink,
+  copyLinkState = "idle",
   isSaved = false,
   onScrollToReply,
   receipts,
@@ -79,6 +83,27 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const isOwn = message.sender_id === currentUser?.id;
   const isLightBg = useBackgroundIsLight();
   const skin = useSkin();
+  // Copy-link feedback (#889). A clipboard write that failed used to look
+  // exactly like one that succeeded — both silent — so the affordance read as
+  // broken. Both skins show the same three states; only the glyph size differs.
+  const copyLinkIcon =
+    copyLinkState === "copied"
+      ? Check
+      : copyLinkState === "failed"
+        ? AlertCircle
+        : Link;
+  const copyLinkLabel =
+    copyLinkState === "copied"
+      ? "Link copied"
+      : copyLinkState === "failed"
+        ? "Couldn't copy link"
+        : "Copy link to message";
+  const copyLinkTone =
+    copyLinkState === "copied"
+      ? "text-[var(--c-text-accent)]"
+      : copyLinkState === "failed"
+        ? "text-[var(--c-danger)]"
+        : "text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]";
 
   // Stable per-user color for non-own, non-admin authors. Key on username
   // when available so the same person keeps the same color across groups
@@ -304,11 +329,13 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             {onCopyLink && (
               <button
                 data-testid="copy-link-button"
+                data-copy-state={copyLinkState}
                 onClick={() => onCopyLink(message.id)}
-                aria-label="Copy link to message"
-                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+                aria-label={copyLinkLabel}
+                title={copyLinkLabel}
+                className={`p-1 ${copyLinkTone}`}
               >
-                <Link size={16} />
+                {React.createElement(copyLinkIcon, { size: 16 })}
               </button>
             )}
             {isOwn && onEdit && (
@@ -482,11 +509,17 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             {onCopyLink && (
               <button
                 data-testid="copy-link-button"
+                data-copy-state={copyLinkState}
                 onClick={() => onCopyLink(message.id)}
-                aria-label="Copy link to message"
-                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+                aria-label={copyLinkLabel}
+                title={copyLinkLabel}
+                className={`${
+                  copyLinkState === "idle"
+                    ? "opacity-0 group-hover:opacity-100"
+                    : "opacity-100"
+                } ${copyLinkTone}`}
               >
-                <Link size={18} />
+                {React.createElement(copyLinkIcon, { size: 18 })}
               </button>
             )}
             {isOwn && onEdit && (
