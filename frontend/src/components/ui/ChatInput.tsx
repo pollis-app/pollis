@@ -683,8 +683,14 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         </button>
 
         {/* Opens upward: the composer sits at the bottom of the window. The
-            panel is in-flow within the composer, never a portal. */}
-        <EmojiPickerButton onSelect={insertAtCursor} placement="up" />
+            panel is in-flow within the composer, never a portal.
+
+            `align="left"` — the panel's LEFT edge tracks this trigger, so it
+            grows rightwards across the message area. The default (`right`)
+            grows leftwards, and this trigger sits hard against the content
+            region's left edge, which AppShell clips with `overflow: hidden` —
+            so most of the panel was being cut off and left unclickable. */}
+        <EmojiPickerButton onSelect={insertAtCursor} placement="up" align="left" />
 
         {/* Positioning context for the terminal skin's inline ghost, which
             mirrors this exact box. */}
