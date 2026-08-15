@@ -283,8 +283,19 @@ function emojiDataUrl(shortcode: string, contentHash: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-/** Snapshot the gate exactly as `TransmitGate::snapshot` does. */
-function gateSnapshot(): Record<string, unknown> {
+/**
+ * Snapshot the gate exactly as `TransmitGate::snapshot` does.
+ *
+ * A preload may set `nullGateCommands` to a list of command names that should
+ * resolve to nothing instead of a snapshot. That is not a shape Rust produces
+ * today; it exists so a test can reproduce #888 — a gate command returning
+ * nothing, which used to throw a TypeError into `applyGate`'s catch and read
+ * as a silent no-op.
+ */
+function gateSnapshot(command?: string): Record<string, unknown> | null {
+  if (command && (preload.nullGateCommands ?? []).includes(command)) {
+    return null;
+  }
   const gate = store.voiceGate;
   // Derived in Rust, never recomputed by the UI — so it is derived here too.
   const transmitting = gate.self_muted
@@ -748,7 +759,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (gate.deafened) {
         gate.muted_before_deafen = muted;
       }
-      return gateSnapshot();
+      return gateSnapshot(command);
     }
 
     case 'toggle_voice_deafen': {
@@ -763,7 +774,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         gate.self_muted = true;
         gate.ptt_held = false;
       }
-      return gateSnapshot();
+      return gateSnapshot(command);
     }
 
     case 'set_voice_input_mode': {
@@ -771,22 +782,22 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       store.voiceGate.mode = mode;
       // Switching mode always drops a held latch, in either direction.
       store.voiceGate.ptt_held = false;
-      return gateSnapshot();
+      return gateSnapshot(command);
     }
 
     case 'set_voice_ptt_held': {
       const { held } = args as { held: boolean };
       store.voiceGate.ptt_held = held;
-      return gateSnapshot();
+      return gateSnapshot(command);
     }
 
     case 'release_voice_ptt': {
       store.voiceGate.ptt_held = false;
-      return gateSnapshot();
+      return gateSnapshot(command);
     }
 
     case 'get_voice_gate_state':
-      return gateSnapshot();
+      return gateSnapshot(command);
 
     // Voice room observation, device enumeration and the mic-test rig. There
     // is no audio hardware behind the browser build, so these are inert.

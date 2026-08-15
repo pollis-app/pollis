@@ -371,7 +371,17 @@ class VoiceSessionManager {
       return;
     }
     try {
-      const gate = await invoke<VoiceGateState>(command, args);
+      // Typed nullable deliberately: `invoke` resolves to whatever the command
+      // actually returned, and a gate command that returns nothing used to make
+      // the reads below throw a TypeError straight into the catch — turning a
+      // real backend fault into a silent no-op (#888). Mirroring an unknown
+      // gate is not possible, so bail loudly and leave the last good state up
+      // rather than writing a half-built one.
+      const gate = await invoke<VoiceGateState | null>(command, args);
+      if (!gate) {
+        console.error(`[voice] ${command} returned no gate state; leaving the previous gate in place`);
+        return;
+      }
       const localIdentity = this.localIdentity;
       // The local tile follows what the room sees: not transmitting reads
       // as muted to everyone else, so it should look muted to us too. The

@@ -47,8 +47,15 @@ const STRIP = {
 
 type InputMode = "voice_activity" | "push_to_talk";
 
-function preloadState(skin: Skin, inputMode: InputMode) {
+function preloadState(
+  skin: Skin,
+  inputMode: InputMode,
+  nullGateCommands: string[] = [],
+) {
   return {
+    // Commands the mock should answer with nothing instead of a gate
+    // snapshot. Empty for every test but the #888 regression below.
+    nullGateCommands,
     session: USER,
     profile: { id: USER.id, username: USER.username },
     preferences: JSON.stringify({ skin, voice_input_mode: inputMode }),
@@ -80,7 +87,12 @@ function preloadState(skin: Skin, inputMode: InputMode) {
   };
 }
 
-async function boot(page: Page, skin: Skin, inputMode: InputMode = "voice_activity") {
+async function boot(
+  page: Page,
+  skin: Skin,
+  inputMode: InputMode = "voice_activity",
+  nullGateCommands: string[] = [],
+) {
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
     // `@tauri-apps/api/window` is NOT vite-aliased (only `/core` and `/event`
@@ -98,7 +110,7 @@ async function boot(page: Page, skin: Skin, inputMode: InputMode = "voice_activi
       runCallback: () => {},
       invoke: () => Promise.resolve(null),
     };
-  }, preloadState(skin, inputMode));
+  }, preloadState(skin, inputMode, nullGateCommands));
   await page.goto("/");
   await expect(page.getByTestId("sidebar")).toBeVisible();
 }
@@ -370,3 +382,57 @@ for (const skin of SKINS) {
     });
   });
 }
+
+/**
+ * #888 — a gate command that returns nothing must not be mistaken for one that
+ * returned a gate.
+ *
+ * `applyGate` read `gate.transmitting` straight off the resolved value, so a
+ * command returning nothing threw a `TypeError` into its own catch. The catch
+ * logged at warn level and carried on, which made a genuine backend fault
+ * indistinguishable from a successful no-op.
+ *
+ * Asserted on the console rather than on pixels on purpose: leaving the last
+ * good state up is the CORRECT outcome and the screen looks the same either
+ * way, so the only honest signal is whether the failure was reported or
+ * swallowed as a type error.
+ */
+test("a gate command returning nothing is reported, not swallowed as a TypeError", async ({
+  page,
+}) => {
+  const messages: string[] = [];
+  page.on("console", (msg) => {
+    messages.push(`${msg.type()}: ${msg.text()}`);
+  });
+  page.on("pageerror", (err) => {
+    messages.push(`pageerror: ${err.message}`);
+  });
+
+  await boot(page, "terminal", "voice_activity", ["toggle_voice_mute"]);
+  await joinVoice(page, "terminal");
+
+  const before = await readStrip(page, "terminal");
+  await page.getByTestId(STRIP.terminal.mic).click();
+  await expect
+    .poll(() => messages.some((m) => m.includes("toggle_voice_mute")))
+    .toBe(true);
+
+  // The failure is named, not inferred from a stack trace.
+  expect(
+    messages.some(
+      (m) => m.includes("returned no gate state") && m.startsWith("error:"),
+    ),
+  ).toBe(true);
+  // And it is not a deref blowing up inside the handler. Scoped to the gate's
+  // own fields: the browser harness emits unrelated `unregisterListener`
+  // teardown noise that has nothing to do with this path.
+  expect(
+    messages.filter(
+      (m) => m.includes("transmitting") || m.includes("self_muted"),
+    ),
+  ).toEqual([]);
+
+  // An unknown gate must leave the last good state alone rather than write a
+  // half-built one.
+  expect(await readStrip(page, "terminal")).toEqual(before);
+});
