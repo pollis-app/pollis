@@ -241,6 +241,7 @@ Dispatched by the `#[tauri::command]` shim under `src-tauri/src/commands/pin.rs`
 - `unlock(user_id: String, pin: String) -> Result<UserProfile>`
   - Replaces the keystore-read path in today's `get_session` (auth.rs:333-351). Returns the same `UserProfile` shape, reconstructed from `accounts.json` + Turso verification + freshly-recomputed `enrollment_required`.
 - `lock() -> Result<()>`
+  - Since #851 it also has a **timer** caller: `commands/autolock.rs` drives it after a device-local idle window (Off by default; 1 / 5 / 15 / 60 min). The deadline lives in Rust, not the renderer, because a WebView throttles its own timers exactly when the window is hidden. An active voice session suppresses it. See the `autolock` section of `commands.md`.
   - Drops `AppState.unlock` and calls `state.unload_user_db()`. Does not touch `accounts.json` — `last_active_user` persists so the login screen can still offer the "continue as X" chip. This is what current `logout(delete_data=false)` becomes (auth.rs:623-665 loses its session-slot delete and its `clear_last_active_user` call).
 - `get_unlock_state() -> Result<UnlockStateSnapshot>`
   - Replaces `get_session`. Returns `{ last_active_user_id, is_unlocked, user_profile }` where `user_profile` is only populated if unlocked. Frontend uses this to decide between "PIN entry for user X," "PIN setup flow," or "full login screen." Never blocks on keystore reads — only reads `accounts.json` and in-memory state.

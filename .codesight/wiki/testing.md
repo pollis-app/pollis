@@ -590,12 +590,13 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | `emoji.spec.ts` | The custom-emoji picker (full standard set, search, caret-accurate insertion) and `<:name:hash>` rendering, in BOTH skins (#848) |
 | `invite-links.spec.ts` | Invite-link create / one-time copy / revoke, in BOTH skins (#847) |
 | `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849) |
+| `autolock.spec.ts` | Idle auto-lock: the window is chosen, reaches the backend and survives a restart; the shell reports activity; a backend lock drops to the PIN gate **and empties the query cache**, in BOTH skins (#851) |
 
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
 | `bookmarks.spec.ts` | Saved messages + permalink jump/highlight in BOTH skins (#854) |
 | `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
 
-Three things to know before writing one:
+Four things to know before writing one:
 
 - **Fixtures go in `window.__POLLIS_PRELOAD__`** via `page.addInitScript`, read
   once by the mock on load. Extend `MockStore` in `frontend/src/__mocks__/tauri-core.ts`
@@ -609,3 +610,9 @@ Three things to know before writing one:
   catch it and the page dies in an error boundary. When a Rust command is renamed
   (`get_channel_messages` → `read_channel_messages`) the mock silently rots until
   someone runs these specs.
+- **Backend-pushed events are drivable.** `frontend/src/__mocks__/tauri-event.ts`
+  keeps a listener registry and exposes `window.__tauriEmit(name, payload)`, so a
+  spec can stand in for the shell's `AppHandle::emit` (`autolock.spec.ts` fires
+  `auto-lock` this way). It used to drop every handler on the floor, which made
+  that whole class of behaviour untestable in this tier. `bridge/invoke.ts`
+  unwraps `e.payload`, so the registry delivers `{ payload }`, as real Tauri does.
