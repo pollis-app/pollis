@@ -320,9 +320,11 @@
             <p>On Linux this goes one step further: after every release an automated rebuild from the public source confirms the released app matches, byte for byte. On macOS and Windows that last step isn't there yet, so on those two the log proves the app matches what Pollis published, not yet that those bytes came from the source you can read.</p>
           </div>
           <div class="dev">
-            <p>Binary transparency (shipped). Each released artifact's hashes plus its build recipe are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a single pinned log key (post-quantum <strong>ML-DSA-44</strong>; the key is published on the <a href="artifacts.html">artifacts page</a>). <code>pollis-verify release &lt;tag&gt;</code> checks a build against the log, trusting only that key rather than Pollis's word.</p>
+            <p>Binary transparency (shipped). Each released artifact's hashes are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a single pinned log key (post-quantum <strong>ML-DSA-44</strong>; the key is published on the <a href="artifacts.html">artifacts page</a>). <code>pollis-verify release &lt;tag&gt;</code> checks a build against the log, trusting only that key rather than Pollis's word.</p>
+            <p>Each leaf also carries a <code>toolchain</code> field meant to record the exact build recipe — and here it has to be said plainly that <strong>every leaf published so far records <code>unknown</code> in it.</strong> No workflow ever set those values, so all <strong>258</strong> entries in the log today, through v1.9.7, carry <code>"rustc": "unknown"</code>. The log is append-only, so those leaves cannot be corrected; they are permanently wrong about the recipe, while remaining correct about the hashes, which is what the log is actually relied on for. The release workflow now hard-fails rather than recording <code>unknown</code>, so <strong>leaves from the next release onward carry a real recipe</strong>. Do not read the existing 258 as containing one.</p>
+            <p>Also published per release, from the next release onward: a <strong>CycloneDX SBOM</strong> (<code>pollis-&lt;tag&gt;.cdx.json</code>) listing every Rust and JavaScript dependency the build resolved, and a build-recipe sidecar per platform. The SBOM is itself a provenance subject, so its digest is anchored in Sigstore's public log and a quieter replacement could not go unnoticed.</p>
             <p>Also shipped: a post-release workflow that rebuilds the Linux AppImage from public source and asserts its hash against the log, failing the job on any mismatch; SLSA build provenance plus keyless <code>cosign</code> signatures on every artifact for all three platforms, published beside the downloads and anchored in Sigstore's public Rekor log, so verification needs no Pollis-held key; and an in-app "verify this build" button on the security screen, which hashes the running binary and re-runs the same release check the CLI does.</p>
-            <p>Their limits, stated plainly: the rebuild covers the Linux AppImage only (not <code>.deb</code>/<code>.rpm</code>, not macOS, not Windows) and needs the published build recipe rather than source alone, because a build-time value is baked in; its verdict is a public CI run rather than a published artifact. Provenance is not a release gate, and two earlier releases shipped without it. The in-app check is advisory, proves log inclusion rather than reproduction from source, and reports <code>pending</code> until the log's next daily rebuild covers a new release.</p>
+            <p>Their limits, stated plainly: the rebuild covers the Linux AppImage only (not <code>.deb</code>/<code>.rpm</code>, not macOS, not Windows) and needs the published build recipe rather than source alone, because a build-time value is baked in; every release's verdict is now published as a durable ledger on the <a href="assurance.html">assurance page</a>, including the two historical red runs that were a since-fixed reporting bug and the one that was a real, still-unexplained non-reproduction. Provenance is not a release gate, and two earlier releases shipped without it. The in-app check is advisory, proves log inclusion rather than reproduction from source, and reports <code>pending</code> until the log's next daily rebuild covers a new release.</p>
           </div>
         </div>
       </div>
@@ -415,6 +417,14 @@
         <a href="index.html" class="footer-link">Home</a>
         <a href="transparency.html" class="footer-link">Transparency</a>
         <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="device-security.html" class="footer-link">Lost device</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <!-- TODO(#877): retention — uncomment once docs/metadata-retention-policy.md
+        is signed off by the owner and docs/retention-public-draft.html is moved
+        to website/retention.html. Owner sign-off is the ONLY blocker.
+        <a href="retention.html" class="footer-link">Retention</a>
+        -->
         <a href="learn.html" class="footer-link">Learn</a>
         <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
           <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">

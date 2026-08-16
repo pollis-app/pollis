@@ -112,7 +112,7 @@
             <a class="linux-format-link" href="https://cdn.pollis.com/releases/latest/pollis-latest-linux.AppImage"
               data-platform="linux">.AppImage</a>
           </div>
-          <span class="download-detail">Arch Linux: <a href="https://aur.archlinux.org/packages/pollis" class="aur-link" target="_blank" rel="noopener noreferrer">AUR</a></span>
+          <span class="download-detail">Arch Linux: <code>yay -S pollis</code> (<a href="https://aur.archlinux.org/packages/pollis" class="aur-link" target="_blank" rel="noopener noreferrer">AUR</a>)</span>
         </div>
       </div>
 
@@ -140,6 +140,14 @@
       </section>
     </section>
 
+      <!-- Arch is called out here, not only on the download card: this block is
+           what a Linux user copies, and on Arch the packaged build is the right
+           answer. install.sh detects pacman and redirects rather than laying
+           down an AppImage that would shadow /usr/bin/pollis, but saying so is
+           better than relying on the script to correct the reader. -->
+      <p class="install-note">
+        On Arch, install the package instead: <code>yay -S pollis</code>.
+      </p>
       <div class="install-block">
         <span class="install-label">macOS &amp; Linux</span>
         <code id="install-cmd" class="install-cmd">curl -fsSL https://cdn.pollis.com/releases/install.sh | bash</code>
@@ -188,6 +196,14 @@
       <a href="security.html" class="footer-link">Security</a>
       <a href="transparency.html" class="footer-link">Transparency</a>
       <a href="artifacts.html" class="footer-link">Artifacts</a>
+      <a href="device-security.html" class="footer-link">Lost device</a>
+      <a href="assurance.html" class="footer-link">Assurance</a>
+      <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+      <!-- TODO(#877): retention — uncomment once docs/metadata-retention-policy.md
+      is signed off by the owner and docs/retention-public-draft.html is moved
+      to website/retention.html. Owner sign-off is the ONLY blocker.
+      <a href="retention.html" class="footer-link">Retention</a>
+      -->
       <a href="learn.html" class="footer-link">Learn</a>
       <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">

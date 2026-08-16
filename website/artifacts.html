@@ -568,6 +568,126 @@
         </div>
       </section>
 
+      <!-- E. The second anchor: Sigstore / SLSA -->
+      <section class="art-section">
+        <h2 class="art-section-title">The second anchor: Sigstore, SLSA and the SBOM</h2>
+        <p class="art-section-lede">
+          Everything above trusts one Pollis-held key. This section trusts <strong>none</strong>. Every release
+          artifact also carries a keyless <code>cosign</code> signature and a SLSA build-provenance attestation,
+          both anchored in <a class="art-inline" href="https://docs.sigstore.dev/" target="_blank"
+            rel="noopener noreferrer">Sigstore</a>'s public Rekor transparency log — which Pollis does not operate,
+          cannot write to selectively, and cannot retract from. There is no Pollis key anywhere in these checks. The
+          signing identity is the release workflow itself, so what a signature asserts is
+          "<em>this file came out of <code>desktop-release.yml</code> at this tag</em>", not "someone at Pollis
+          approved this".
+        </p>
+
+        <div class="art-card">
+          <p class="art-key-label">1 · FETCH THE ARTIFACT AND ITS EVIDENCE</p>
+          <p class="art-note" style="margin-bottom: 0.75rem;">
+            Use the <strong>version-pinned</strong> path. The <code>releases/latest/</code> shortcut carries the
+            installers only — no signature, certificate or attestation is published under it — so a verification
+            recipe written against <code>latest</code> cannot work.
+          </p>
+          <ul class="art-cmds">
+            <li>
+              <code class="art-cmd">BASE=https://cdn.pollis.com/releases/v1.9.7
+ART=pollis-v1.9.7-windows.exe
+curl -sSLO "$BASE/$ART"                 # the artifact
+curl -sSLO "$BASE/$ART.sig"             # cosign detached signature
+curl -sSLO "$BASE/$ART.pem"             # cosign signing certificate
+curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation</code>
+              <span class="art-cmd-note">Substitute any released tag and any of
+                <code>-macos.dmg</code>, <code>-windows.exe</code>, <code>-linux.AppImage</code>,
+                <code>-linux.deb</code>, <code>-linux.rpm</code>.</span>
+            </li>
+          </ul>
+
+          <p class="art-key-label" style="margin-top: 1.5rem;">2 · VERIFY THE COSIGN SIGNATURE</p>
+          <ul class="art-cmds">
+            <li>
+              <code class="art-cmd">cosign verify-blob \
+  --certificate-identity-regexp '^https://github\.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --signature   "$ART.sig" \
+  --certificate "$ART.pem" \
+  "$ART"</code>
+              <span class="art-cmd-note">Prints <code>Verified OK</code>. The identity pattern is the point:
+                without it, cosign would accept a signature from <em>any</em> Sigstore identity, which proves
+                nothing. cosign 3.x also prints a deprecation notice for <code>--signature</code> and
+                <code>--certificate</code>; the check still runs and still passes.</span>
+            </li>
+          </ul>
+
+          <p class="art-key-label" style="margin-top: 1.5rem;">3 · VERIFY THE SLSA BUILD PROVENANCE</p>
+          <ul class="art-cmds">
+            <li>
+              <code class="art-cmd">gh attestation verify "$ART" \
+  --bundle "$ART.intoto.jsonl" \
+  --repo actuallydan/pollis \
+  --cert-identity-regex '^https://github\.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com</code>
+              <span class="art-cmd-note">Prints <code>✓ Verification succeeded!</code> and names the build workflow
+                and tag. Exit status <code>0</code> is the verdict — <code>gh</code> prints the banner only to a
+                terminal, so in a script check the status, not the output. The flag is
+                <code>--cert-identity-regex</code>, with no trailing "p".</span>
+            </li>
+            <li>
+              <code class="art-cmd">slsa-verifier verify-artifact "$ART" \
+  --provenance-path "$ART.intoto.jsonl" \
+  --source-uri github.com/actuallydan/pollis \
+  --source-tag v1.9.7</code>
+              <span class="art-cmd-note">The same check with a standalone verifier, if you would rather not
+                trust GitHub's own CLI to grade GitHub's own attestation.</span>
+            </li>
+          </ul>
+
+          <p class="art-key-label" style="margin-top: 1.5rem;">4 · READ THE DEPENDENCY LIST (SBOM)</p>
+          <p class="art-note">
+            Each release publishes a CycloneDX software bill of materials at
+            <code>$BASE/pollis-&lt;tag&gt;.cdx.json</code>, catalogued from <code>Cargo.lock</code> and
+            <code>pnpm-lock.yaml</code> at the tagged commit. It is also a provenance subject, so its digest is
+            recorded in Rekor alongside the installers — a quieter SBOM published later cannot replace it without
+            the substitution being provable. Verify it exactly like any other artifact, then read it:
+          </p>
+          <ul class="art-cmds">
+            <li>
+              <code class="art-cmd">curl -sSL "$BASE/pollis-v1.9.7.cdx.json" | jq '.components | length'</code>
+              <span class="art-cmd-note">SBOMs begin at the first release after 16 August 2026; earlier tags have
+                no <code>.cdx.json</code> and the URL returns 404. See the limits below.</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="art-note art-note--strong">
+          <p><strong>Where this guarantee ends:</strong></p>
+          <p style="margin-top: 0.6rem;">
+            cosign and SLSA prove <strong>build provenance</strong> — that these exact bytes were produced by that
+            workflow, at that tag, in that repository, and that the record is in a public log Pollis does not
+            control. They do <strong>not</strong> prove the bytes reproduce from source; that is the separate
+            rebuild check, and it covers the Linux AppImage only. They also do not prove the source was good: a
+            workflow faithfully building bad source produces a perfectly valid attestation.
+          </p>
+          <p style="margin-top: 0.6rem;">
+            <strong>GitHub Actions is inside the trust boundary here</strong>, and the whitepaper says so. The
+            signing identity is a workflow running on GitHub's infrastructure, so anyone able to alter that
+            workflow, or GitHub itself, can mint a signature that verifies. This anchor removes Pollis's key from
+            the trust path; it does not remove GitHub from it.
+          </p>
+          <p style="margin-top: 0.6rem;">
+            Provenance is <strong>not</strong> a release gate, and two early releases shipped without it. Signatures
+            and attestations are retained on the CDN indefinitely, but <strong>installers older than the last three
+            releases are pruned</strong> — for those, GitHub Releases remains the permanent archive.
+          </p>
+          <p style="margin-top: 0.6rem;">
+            The SBOM lists what the <strong>lockfiles</strong> resolved to, not what the linker actually consumed.
+            Vendored C and C++ compiled inside build scripts — notably <code>webrtc-sys</code> and
+            <code>webrtc-audio-processing-sys</code> — is <strong>not</strong> catalogued. It is also not yet a leaf
+            in the binaries transparency log.
+          </p>
+        </div>
+      </section>
+
       <!-- Honest scope -->
       <section class="art-section">
         <div class="art-note art-note--strong">
@@ -601,6 +721,14 @@
         <a href="faq.html" class="footer-link">FAQ</a>
         <a href="transparency.html" class="footer-link">Transparency</a>
         <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="device-security.html" class="footer-link">Lost device</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <!-- TODO(#877): retention — uncomment once docs/metadata-retention-policy.md
+        is signed off by the owner and docs/retention-public-draft.html is moved
+        to website/retention.html. Owner sign-off is the ONLY blocker.
+        <a href="retention.html" class="footer-link">Retention</a>
+        -->
         <a href="learn.html" class="footer-link">Learn</a>
         <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
           <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">

@@ -1,0 +1,304 @@
+/* ── Shared long-form document page ───────────────────────────────
+   The pages added by #877 ("already earned, never published") are all the
+   same shape: a reading column, sections of prose, a few tables, and the
+   house "where the guarantee ends" box. They previously would have meant
+   five near-identical <style> blocks, so the shape lives here once and the
+   pages carry only their own content.
+
+   Loaded AFTER styles.css, so it inherits the same tokens
+   (--c-bg / --c-text / --c-text-muted / --c-accent / --c-border) and never
+   redefines a colour of its own. */
+
+.doc-main {
+  width: 100%;
+  max-width: 860px;
+  padding: 4rem 2rem 2rem;
+  position: relative;
+  z-index: 1;
+}
+
+.doc-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--c-text-muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  margin-bottom: 2rem;
+  transition: color 0.15s;
+}
+
+.doc-back:hover {
+  color: var(--c-accent);
+}
+
+/* ── Header ───────────────────────────────────────────────────── */
+.doc-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.doc-title {
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  color: var(--c-accent);
+  margin-bottom: 0.75rem;
+}
+
+.doc-subtitle {
+  color: var(--c-text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+/* ── Lede / explainer box ─────────────────────────────────────── */
+.doc-explainer {
+  border: 2px solid var(--c-accent);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 2.5rem;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--c-text);
+  background: #000;
+}
+
+.doc-explainer strong {
+  color: var(--c-text);
+}
+
+/* ── Sections ─────────────────────────────────────────────────── */
+.doc-section {
+  margin-bottom: 2.5rem;
+}
+
+.doc-section-title {
+  font-size: 1.25rem;
+  color: var(--c-text);
+  margin-bottom: 0.35rem;
+}
+
+.doc-sub-title {
+  font-size: 1rem;
+  color: var(--c-text);
+  margin: 1.75rem 0 0.5rem;
+}
+
+.doc-section p {
+  font-size: 0.9rem;
+  color: var(--c-text-muted);
+  line-height: 1.7;
+  margin-bottom: 0.9rem;
+}
+
+.doc-section p strong,
+.doc-section li strong {
+  color: var(--c-text);
+}
+
+.doc-section ul,
+.doc-section ol {
+  margin: 0 0 1rem 1.25rem;
+  font-size: 0.9rem;
+  color: var(--c-text-muted);
+  line-height: 1.7;
+}
+
+.doc-section li {
+  margin-bottom: 0.4rem;
+}
+
+/* ── Card ─────────────────────────────────────────────────────── */
+.doc-card {
+  background: #000;
+  border: 2px solid var(--c-accent);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.doc-card > :last-child {
+  margin-bottom: 0;
+}
+
+/* ── Tables ───────────────────────────────────────────────────── */
+/* Wide tables scroll inside their own wrapper — the page body must never
+   scroll sideways on a phone. */
+.doc-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+}
+
+.doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  min-width: 34rem;
+}
+
+.doc-table caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 0.78rem;
+  color: var(--c-text-muted);
+  padding-bottom: 0.5rem;
+}
+
+.doc-table th {
+  text-align: left;
+  font-weight: 700;
+  color: var(--c-text-muted);
+  padding: 0.5rem 0.9rem 0.5rem 0;
+  border-bottom: 1px solid var(--c-border);
+  vertical-align: bottom;
+}
+
+.doc-table td {
+  padding: 0.6rem 0.9rem 0.6rem 0;
+  border-bottom: 1px solid var(--c-border);
+  vertical-align: top;
+  color: var(--c-text);
+  line-height: 1.6;
+}
+
+.doc-table tr:last-child td {
+  border-bottom: none;
+}
+
+.doc-table td.doc-td-dim {
+  color: var(--c-text-muted);
+}
+
+/* ── Commands ─────────────────────────────────────────────────── */
+.doc-cmd {
+  display: block;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--c-text);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  white-space: pre;
+  margin-bottom: 0.35rem;
+}
+
+.doc-cmd-note {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--c-text-muted);
+  line-height: 1.6;
+  margin-bottom: 1.25rem;
+}
+
+.doc-out {
+  display: block;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  font-size: 0.78rem;
+  color: var(--c-text-muted);
+  border-left: 2px solid var(--c-border);
+  padding: 0.15rem 0 0.15rem 0.9rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-bottom: 1.25rem;
+}
+
+/* ── Badges ───────────────────────────────────────────────────── */
+.doc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.7rem;
+  border: 2px solid var(--c-border);
+  white-space: nowrap;
+}
+
+.doc-badge--pass {
+  color: #0f1117;
+  background: #7bd88f;
+  border-color: #7bd88f;
+}
+
+.doc-badge--fail {
+  color: #0f1117;
+  background: #f1707b;
+  border-color: #f1707b;
+}
+
+.doc-badge--warn {
+  color: #0f1117;
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+}
+
+.doc-badge--info {
+  color: var(--c-text);
+  background: transparent;
+  border-color: var(--c-border);
+}
+
+/* ── "Where the guarantee ends" ───────────────────────────────── */
+/* The house honesty box. Deliberately the same treatment everywhere so a
+   reader learns to look for it. */
+.doc-limit {
+  border-left: 2px solid var(--c-accent);
+  padding-left: 1rem;
+  margin: 1.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--c-text-muted);
+  line-height: 1.7;
+}
+
+.doc-limit p {
+  font-size: 0.85rem;
+  margin-bottom: 0.6rem;
+}
+
+.doc-limit > :last-child {
+  margin-bottom: 0;
+}
+
+.doc-limit-title {
+  display: block;
+  color: var(--c-text);
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Links inside document prose ──────────────────────────────── */
+.doc-section a,
+.doc-explainer a,
+.doc-limit a,
+.doc-table a {
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(253, 186, 116, 0.4);
+  text-underline-offset: 2px;
+}
+
+.doc-section a:hover,
+.doc-explainer a:hover,
+.doc-limit a:hover,
+.doc-table a:hover {
+  text-decoration-color: var(--c-accent);
+}
+
+.doc-section code,
+.doc-explainer code,
+.doc-limit code,
+.doc-table code {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+/* ── Status line for a page whose data loads at runtime ───────── */
+.doc-loading {
+  font-size: 0.85rem;
+  color: var(--c-text-muted);
+  font-style: italic;
+}

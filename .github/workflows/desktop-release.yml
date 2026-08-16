@@ -1222,6 +1222,39 @@ jobs:
             artifacts/pollis-windows/**/*.payload-sha256
             artifacts/pollis-*/**/*.toolchain.json
             artifacts/pollis-sbom/*.cdx.json
+          # #877: the release body was GitHub's auto-generated PR-title list and
+          # nothing else — the ONE unattested link in a chain where every other
+          # step carries a signature, a provenance attestation and a
+          # transparency-log entry. A reader had no human-written statement of
+          # what changed and no pointer to any of the verification they could do.
+          #
+          # `generate_release_notes: true` is kept: the machine list is a
+          # genuinely useful index of merged work. This prepends the part a
+          # person needs first. The header is static rather than sliced out of
+          # CHANGELOG.md, because a release must never fail on a text-extraction
+          # step, and a stale-but-correct pointer beats a clever one that breaks
+          # the release when a heading is renamed.
+          body: |
+            ## What changed
+
+            See [CHANGELOG.md](https://github.com/actuallydan/pollis/blob/${{ github.ref_name }}/CHANGELOG.md)
+            for this release's entry, written for the person installing it.
+
+            ## Verify what you downloaded
+
+            Every artifact below is published with its SHA-256 in a public,
+            append-only transparency log, a keyless `cosign` signature, a SLSA
+            build-provenance attestation, and a CycloneDX SBOM.
+
+            - Commands to check all of it: <https://pollis.com/artifacts>
+            - Whether this release rebuilt bit-for-bit from source:
+              <https://pollis.com/assurance>
+
+            The installers verify automatically — `install.sh` requires the hash
+            it downloaded to appear in the transparency log at a *different*
+            origin from the CDN, and runs `cosign` when it is available.
+
+            ---
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

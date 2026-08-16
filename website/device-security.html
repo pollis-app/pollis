@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Lost or Stolen Device</title>
+  <meta name="description"
+    content="What to do if a device with Pollis on it is lost or stolen: how to revoke it, what that stops, and what someone holding it can still read." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Lost or Stolen Device" />
+  <meta property="og:description"
+    content="Revoke a device, and understand exactly what revocation does and does not undo." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="doc-main reading-surface">
+      <a href="index.html" class="doc-back">&larr; Back to Pollis</a>
+
+      <div class="doc-header">
+        <h1 class="doc-title">Lost or stolen device</h1>
+        <p class="doc-subtitle">
+          What to do, what it fixes, and — the part most guides skip — what it does not.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        <strong>Do this now, from another device you still have:</strong>
+        open Pollis, go to <strong>Security</strong> in the sidebar, find the missing device under
+        <strong>Devices</strong>, and press <strong>Revoke</strong>. You will be asked to type the device's name
+        to confirm.
+        <br /><br />
+        That single action removes the device from every conversation you are in and rotates the encryption keys,
+        so it cannot read anything sent afterwards. It also stops the device authenticating to our servers at all,
+        from the very next request.
+        <br /><br />
+        If that device was your <strong>only</strong> device, skip to
+        <a href="#only-device">"If it was your only device"</a> — the answer is different and more drastic.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What revoking actually does</h2>
+        <p>Revocation is not a flag someone might ignore. Four separate things happen:</p>
+        <ul>
+          <li>
+            <strong>It is removed from every conversation's encryption group.</strong> Your revoking device
+            immediately issues a removal for each group and DM you share, and that removal rotates the group keys.
+            This is the part that matters: the removed device cannot derive the new keys, so messages sent after
+            the removal lands are unreadable to it. Forever, not until it reconnects.
+          </li>
+          <li>
+            <strong>It can no longer authenticate.</strong> Every request to our Delivery Service is signed by the
+            device, and the server checks the revocation tombstone before accepting a signature. The cached copy
+            of that device's key is evicted at the moment of revocation, so this takes effect on the next request
+            rather than when some timer lapses.
+          </li>
+          <li>
+            <strong>Its leftover credentials are deleted.</strong> Its unclaimed key material and its delivery
+            cursor are removed in the same transaction, so it cannot be silently re-added to a group by material
+            it published earlier.
+          </li>
+          <li>
+            <strong>Other members enforce it too.</strong> If your removal never lands — you go offline
+            mid-revocation, say — every other member's app re-checks the roster on launch and reconnect, and will
+            perform the removal itself. It does not depend on your device staying online.
+          </li>
+        </ul>
+        <p>
+          You cannot revoke the device you are currently using; log out instead. That restriction is deliberate,
+          and it is why a second device matters.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What someone holding the device can still get</h2>
+        <p>
+          This is the honest part, and it is the reason to act on the thief's device as well as on your account.
+        </p>
+
+        <h3 class="doc-sub-title">Your existing history on that device: yes, if they get past the PIN</h3>
+        <p>
+          Revocation is a forward-looking control. It cannot reach into a machine you no longer hold and delete
+          anything — <strong>there is no remote wipe</strong>, and the sign-out that a cooperative device performs
+          deliberately leaves local data in place.
+        </p>
+        <p>
+          The messages on that device are stored in a database encrypted with AES-256. The key to it is not on
+          disk in usable form: it is sealed with a key derived from your PIN using a deliberately slow function,
+          and the sealed blob lives in the operating system's keychain. So the practical question is whether an
+          attacker can read that keychain.
+        </p>
+        <p>
+          <strong>If they can</strong> — because they know your computer's login password, or found it unlocked —
+          then a four-digit PIN is on the order of an hour of computation to search exhaustively. The ten-attempt
+          limit inside the app bounds someone typing at the screen; it does not bound someone working offline
+          against a copy of the disk. <strong>If they cannot</strong> read the keychain, the database is
+          indistinguishable from random noise and the history is safe.
+        </p>
+        <p>
+          The action that follows from this is simple and it is not about Pollis: <strong>change your computer's
+          login password and make sure full-disk encryption is on.</strong> A longer PIN helps too.
+        </p>
+
+        <h3 class="doc-sub-title">New messages: no</h3>
+        <p>
+          Once the removal commit lands, the device is outside the group and the keys have moved on. There is a
+          window — between your revocation and each member's app processing it — in which it still holds the
+          previous keys and can read anything sealed under them. Members who are online close that window in
+          seconds; a member whose device is offline closes it when they next open the app.
+        </p>
+
+        <h3 class="doc-sub-title">Encrypted traffic: it can still download it, but not read it</h3>
+        <p>
+          Apps read message envelopes directly from the database using a read-only credential that is compiled
+          into every copy of Pollis, so it can be extracted from any installation. A revoked device can therefore
+          keep pulling <em>ciphertext</em> and public metadata. It cannot decrypt anything sent after its removal.
+          This is a known limitation and is stated in the whitepaper.
+        </p>
+
+        <div class="doc-limit">
+          <span class="doc-limit-title">Two things revocation does not do, that you might expect</span>
+          <p>
+            <strong>Your contacts are not notified.</strong> Safety numbers in Pollis identify a
+            <em>person</em>, not a device — every device chains to one account identity, which is what lets you
+            verify someone once instead of once per device. Revoking a device does not change that account
+            identity, so nobody's safety number changes and no key-change warning appears for anyone you talk to.
+            If you want your contacts to see something, you have to tell them.
+          </p>
+          <p>
+            <strong>It is not recorded in your security event list.</strong> Device enrollments and rejections are
+            logged there; revocation is not. The only visible trace is the device disappearing from your
+            <strong>Devices</strong> list. Both of these are gaps rather than design decisions, and they are named
+            here rather than left for you to discover.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section" id="only-device">
+        <h2 class="doc-section-title">If it was your only device</h2>
+        <p>
+          There is no way to revoke a device from itself, and no second device to do it from. The only remaining
+          path is a full identity reset, performed from a new device at the sign-in screen — the link reads
+          <strong>"I've lost my Secret Key — reset my account"</strong>. You confirm by typing your email address.
+        </p>
+        <p>This is genuinely destructive, and you should know the price before you start:</p>
+        <ul>
+          <li><strong>Every other device is removed</strong>, including the lost one.</li>
+          <li>
+            <strong>You leave every group and DM.</strong> Admins can invite you back; you do not rejoin
+            automatically.
+          </li>
+          <li>
+            <strong>Your message history does not come with you.</strong> There is no key backup and no server-side
+            copy of your history, by design. A new device starts empty. That is one of the small number of
+            deliberate, disclosed limits in Pollis — the price of us never holding a key that could restore it.
+          </li>
+          <li>
+            <strong>Your account identity changes</strong>, so your contacts <em>will</em> see a key-change
+            warning. Expect to re-verify with anyone who checks safety numbers.
+          </li>
+        </ul>
+        <p>
+          One thing to be aware of: this path is gated on receiving a one-time code by email and typing your own
+          address. Whoever controls your email account can therefore trigger it. Securing that mailbox is worth
+          more than any setting inside Pollis.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">If you think someone read your messages</h2>
+        <p>
+          Revoking handles the device. If you suspect the compromise went further — someone had your account, not
+          just your hardware — the reset above rotates your account identity and is the stronger move, at the cost
+          of your group memberships and history.
+        </p>
+        <p>
+          If you have found a weakness in Pollis itself rather than lost a laptop, please report it privately
+          through a
+          <a href="https://github.com/actuallydan/pollis/security/advisories/new" target="_blank"
+            rel="noopener noreferrer">GitHub security advisory</a>; the machine-readable policy is at
+          <a href="/.well-known/security.txt"><code>/.well-known/security.txt</code></a>.
+        </p>
+      </section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="faq.html" class="footer-link">FAQ</a>
+        <a href="transparency.html" class="footer-link">Transparency</a>
+        <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <!-- TODO(#877): retention — uncomment once docs/metadata-retention-policy.md
+             is signed off by the owner and docs/retention-public-draft.html is moved
+             to website/retention.html. Owner sign-off is the ONLY blocker.
+        <a href="retention.html" class="footer-link">Retention</a>
+        -->
+        <a href="learn.html" class="footer-link">Learn</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>

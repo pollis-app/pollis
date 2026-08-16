@@ -2025,7 +2025,7 @@ Each log introduced by the problem it protects against, an attempted split being
 
         <div class="ln-limit">
           <div class="ln-limit-label">Where the guarantee ends today</div>
-          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux AppImage closes that last loop today — the Linux <code>.deb</code> and <code>.rpm</code> are not rebuilt either — and the same approach is being extended to the rest. The rebuild's verdict is a public continuous-integration run you can read, not a report we publish as an artifact. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
+          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux AppImage closes that last loop today — the Linux <code>.deb</code> and <code>.rpm</code> are not rebuilt either — and the same approach is being extended to the rest. Every rebuild's verdict is now published per release on the <a href="assurance.html">assurance page</a>, reds included. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
         </div>
 
         <figure class="ln-figure">
@@ -2205,6 +2205,14 @@ PASS: release binaries tree is valid</code></pre>
             That comparison is the whole basis of a transparency log.
           </p>
           <p>
+            We publish our own half of one such comparison: after every release a
+            separate workflow rebuilds the Linux payload from public source and
+            checks it against the log, and each verdict — including the release
+            that did not reproduce, and the two that were never checked at all —
+            is recorded on the <a href="assurance.html">assurance page</a>. Your
+            run of <code>pollis-verify</code> is the independent half.
+          </p>
+          <p>
             <strong>Where it comes from.</strong> <code>pollis-verify</code> ships as
             a standalone program with checksums, and its built-in key is printed in
             the release notes. It is also buildable from source, and if you are
@@ -2332,6 +2340,14 @@ Both dashboards labelled, a single release row taken apart, the same root shown 
         <a href="security.html" class="footer-link">Security</a>
         <a href="transparency.html" class="footer-link">Transparency</a>
         <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="device-security.html" class="footer-link">Lost device</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <!-- TODO(#877): retention — uncomment once docs/metadata-retention-policy.md
+             is signed off by the owner and docs/retention-public-draft.html is moved
+             to website/retention.html. Owner sign-off is the ONLY blocker.
+        <a href="retention.html" class="footer-link">Retention</a>
+        -->
         <a href="faq.html" class="footer-link">FAQ</a>
       </div>
     </div>

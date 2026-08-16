@@ -264,7 +264,7 @@
 
         <p>Three further pieces have since landed, and each closes a different gap. After every release, a separate automated workflow rebuilds the Linux AppImage from public source and asserts that the hash it gets matches the entry already sitting in the log; if the two disagree, that job fails loudly rather than quietly. Every release artifact, on all three platforms, now also carries a build provenance record and a keyless signature anchored in Sigstore's public Rekor log, which is a second anchor that Pollis does not operate and that you check with no Pollis key involved anywhere. And the app itself has a "verify this build" button on its security screen, which hashes the binary it is actually running and checks that hash against the log.</p>
 
-        <p>Being honest about the edges of all three, because they are real. The rebuild covers the Linux AppImage only: the macOS and Windows payloads are recorded in the log and anyone can recompute their fingerprints from the installer they downloaded, but neither is reproducible from source yet, and the Linux <code>.deb</code> and <code>.rpm</code> are not rebuilt either. Reproducing a build today needs the published build recipe rather than the source alone, because one build-time value is baked into the binary. Each rebuild's verdict is a public continuous-integration run you can go and read, not a report Pollis publishes as an artifact. The provenance step is not a release gate, and two earlier releases shipped without it. And the in-app check is advisory: it tells you the binary you are running is one that was published, never that it was built from the source you can read, and on a brand-new release it will say pending until the log's next daily rebuild picks the release up.</p>
+        <p>Being honest about the edges of all three, because they are real. The rebuild covers the Linux AppImage only: the macOS and Windows payloads are recorded in the log and anyone can recompute their fingerprints from the installer they downloaded, but neither is reproducible from source yet, and the Linux <code>.deb</code> and <code>.rpm</code> are not rebuilt either. Reproducing a build today needs the published build recipe rather than the source alone, because one build-time value is baked into the binary. Each rebuild's verdict is now published as a permanent per-release record on the <a class="art-inline" href="assurance.html">assurance page</a> — including the releases that were never checked at all, and the one release that genuinely did not reproduce. The provenance step is not a release gate, and two earlier releases shipped without it. And the in-app check is advisory: it tells you the binary you are running is one that was published, never that it was built from the source you can read, and on a brand-new release it will say pending until the log's next daily rebuild picks the release up.</p>
 
         <p>Compared to apps you have probably used, the picture is roughly this. Signal and WhatsApp encrypt your messages end to end the same way Pollis does, but they use the older Signal Protocol with X3DH and the Double Ratchet, designed in 2014; Pollis uses the newer MLS, which is better suited to large groups and to people with multiple devices. Slack and Microsoft Teams do not encrypt your messages end to end at all; the server reads everything. Enterprise add-ons such as Slack Enterprise Key Management and Microsoft 365 Customer Key let large customers control the encryption keys used at rest, but those features are about key custody, not end-to-end encryption — the server still has access to plaintext for indexing, search, and compliance. Discord is in the Slack camp for messages: the server reads chat, but its 2024 DAVE protocol does provide end-to-end encryption for voice and video; Pollis applies the same kind of frame-level encryption to its voice channels, keyed off the MLS group, so the two are comparable on the voice axis. Element and Matrix encrypt their group chat, but with a different system called Megolm, which trades some of the post-compromise security MLS provides for the ability to back up message history through the server, which Pollis intentionally does not do. iMessage encrypts messages but pairwise rather than at the group level, and by default backs up to iCloud in a form Apple holds the keys to; users who turn on Apple's Advanced Data Protection get an end-to-end encrypted backup, but it's an opt-in. The closest analog to Pollis in cryptographic shape is Wire, which also uses MLS through OpenMLS, in roughly the same configuration. The closest analog to Pollis in product shape is Slack, with the difference that the server cannot read your messages.</p>
 
@@ -284,6 +284,16 @@
           <a class="button" href="https://github.com/actuallydan/pollis/blob/main/docs/security-whitepaper.md" target="_blank" rel="noopener noreferrer">Read the whitepaper on GitHub &rarr;</a>
           <p class="meta">Pinned to <code>main</code>. The repo's revision history captures every change.</p>
         </div>
+
+        <h2>Reporting a vulnerability</h2>
+
+        <p>Report privately through a <a href="https://github.com/actuallydan/pollis/security/advisories/new" target="_blank" rel="noopener noreferrer">GitHub security advisory</a> rather than a public issue. The machine-readable policy is published at <a href="/.well-known/security.txt"><code>/.well-known/security.txt</code></a>, and the terms — safe harbour, response times, what is out of scope — are in the <a href="https://github.com/actuallydan/pollis/security/policy" target="_blank" rel="noopener noreferrer">disclosure policy</a>.</p>
+
+        <p>Pollis is <strong>source-available, not open source</strong>: it is licensed under PolyForm Noncommercial 1.0.0, so you may read, build, audit and modify it for noncommercial purposes, and commercial use needs a separate licence. Auditing the code and publishing what you find is explicitly within that permission.</p>
+
+        <h2>What we check, and what it found</h2>
+
+        <p>The claims on this page are backed by checks that run continuously: an independent rebuild of every release, machine-checked proofs of the parts where a bug would lose messages, and a dependency policy enforced on every change. Their results — including the release that did not reproduce and the two that were never checked — are published on the <a href="assurance.html">assurance page</a>. Who can see what, and where they run, is on the <a href="subprocessors.html">subprocessors page</a>. If a device has been lost or stolen, start at <a href="device-security.html">lost or stolen device</a>.</p>
       </article>
 
       <div class="footer-links">
@@ -291,6 +301,14 @@
         <a href="faq.html" class="footer-link">FAQ</a>
         <a href="transparency.html" class="footer-link">Transparency</a>
         <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="device-security.html" class="footer-link">Lost device</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <!-- TODO(#877): retention — uncomment once docs/metadata-retention-policy.md
+        is signed off by the owner and docs/retention-public-draft.html is moved
+        to website/retention.html. Owner sign-off is the ONLY blocker.
+        <a href="retention.html" class="footer-link">Retention</a>
+        -->
         <a href="learn.html" class="footer-link">Learn</a>
         <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
           <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">

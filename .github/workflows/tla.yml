@@ -45,7 +45,14 @@ jobs:
       # config: CommitLog (OnePerEpoch ∧ Gapless ∧ LineageMonotone ∧
       # OpeningClosesTheHead ∧ NoForeignAdopt) and Delivery
       # (NoLossForCurrentMember ∧ CursorMonotone ∧ AcceptedLossesOnly).
+      #
+      # TLC_LOG_DIR (#877) tees each config's full output so the results can be
+      # published. Without it the state counts and counterexamples existed only
+      # in this job's log, which ages out — so "we model-check the epoch and
+      # delivery machines" was a claim with no durable evidence behind it.
       - name: TLC — CommitLog + Delivery (sound, all invariants pass)
+        env:
+          TLC_LOG_DIR: ${{ runner.temp }}/tlc
         run: scripts/tlc-check.sh
 
       # Teeth: each broken variant MUST fail — CommitLog's dropped submit-guard
@@ -54,4 +61,30 @@ jobs:
       # fastest-member retention guard. A clean pass here means an invariant
       # lost its teeth and is a regression.
       - name: TLC — CommitLog + Delivery (broken variants must be refuted)
+        env:
+          TLC_LOG_DIR: ${{ runner.temp }}/tlc
         run: scripts/tlc-check.sh --broken
+
+      # Publish the result (#877). Two renderings of one source: the run summary
+      # is what a reader lands on from pollis.com/assurance, and the JSON is the
+      # durable artifact. `if: always()` because a refuted sound spec is exactly
+      # the run whose numbers and counterexample someone needs to read.
+      - name: Publish TLC results
+        if: always()
+        env:
+          TLC_LOG_DIR: ${{ runner.temp }}/tlc
+        run: |
+          set -euo pipefail
+          scripts/tlc-summary.sh "${{ runner.temp }}/tla-results.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload TLC results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tla-results
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            ${{ runner.temp }}/tla-results.json
+            ${{ runner.temp }}/tlc/*.log

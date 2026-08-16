@@ -33,6 +33,9 @@ on:
 
 permissions:
   contents: read
+  # `actions: read` is for the rebuild-ledger check below, which reads the
+  # public run history of rebuild-verify.yml through the Actions API.
+  actions: read
 
 jobs:
   verify:
@@ -171,7 +174,29 @@ jobs:
           fi
           echo "✓ security.txt is valid and expires in ${days} days (${expires})"
 
-      # 5. Staleness. Not a claim being wrong, but the condition that produces it.
+      # 5. The published rebuild-verdict ledger still matches reality (#877).
+      #
+      # /assurance publishes a per-release "did this reproduce from source"
+      # record, generated from the Actions API into website/rebuild-ledger.json
+      # and committed. That file is the durable home for a verdict that
+      # otherwise expires with a 90-day CI artifact — but a static file about a
+      # moving history rots the moment a release ships and nobody regenerates
+      # it, and a page that silently under-reports its own failures is worse
+      # than one that never claimed to report them.
+      #
+      # Fails when rebuild-verify has run since the ledger was last published.
+      # Fetch depth matters: the ledger resolves a run's tag from `headSha` for
+      # runs with no log (a skipped run — i.e. a release that was never checked
+      # at all), which needs the tags present.
+      - name: Rebuild-verdict ledger is up to date
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --quiet --depth=1 origin '+refs/tags/*:refs/tags/*' || true
+          ./scripts/rebuild-ledger.sh --check
+
+      # 6. Staleness. Not a claim being wrong, but the condition that produces it.
       #    Warn rather than fail: a deliberate hold on publishing is legitimate
       #    (#406), a *forgotten* one is what we are surfacing.
       - name: Warn if the deployed site lags main
