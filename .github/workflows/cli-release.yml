@@ -273,3 +273,100 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
+
+  # Keyless build provenance for the CLI (#877).
+  #
+  # Until now the CLI release published three bare binaries and a latest.json,
+  # with nothing anyone could check them against — so `cli-install.sh` could not
+  # verify its download even in principle, and a "verify what you install" fix
+  # to the script alone would have been theatre. This mirrors the desktop
+  # `provenance` job: a SLSA v1 in-toto attestation plus a cosign keyless
+  # signature and certificate for each binary, published NEXT TO it on
+  # cdn.pollis.com, anchored in Sigstore's public Rekor log.
+  #
+  # Rekor is the point. The CLI binaries live on the same CDN as the install
+  # script that fetches them, so anything Pollis publishes there is only as
+  # trustworthy as that origin. Sigstore is not operated by Pollis, and the
+  # signing identity is this workflow's GitHub Actions OIDC identity, so a
+  # binary swapped on the CDN cannot be given a valid signature.
+  #
+  # `needs: [publish-cli]`, so the release is already out when this runs: a
+  # failure here delays provenance, it never corrupts a shipped CLI.
+  provenance-cli:
+    needs: [resolve-version, publish-cli]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load production secrets
+        run: |
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Staged under the EXACT names publish-cli uploaded to R2, so a verifier
+      # resolves signature and binary by the same path.
+      - name: Stage CLI binaries under their published names
+        run: |
+          set -euo pipefail
+          mkdir -p prov
+          cp artifacts/pollis-cli-linux/pollis       prov/pollis-linux
+          cp artifacts/pollis-cli-macos/pollis       prov/pollis-macos
+          cp artifacts/pollis-cli-windows/pollis.exe prov/pollis-windows.exe
+          ls -1 prov
+
+      - name: Generate SLSA build provenance (keyless, Fulcio/Rekor)
+        id: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: prov/*
+
+      # Pinned exactly, and to the cosign 2.x CLI the sign-blob flags below are
+      # written for — same reasoning as the desktop provenance job.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: 'v2.6.5'
+
+      - name: cosign sign-blob each CLI binary
+        run: |
+          set -euo pipefail
+          for f in prov/*; do
+            base="$(basename "$f")"
+            cosign sign-blob --yes \
+              --output-signature "prov/${base}.sig" \
+              --output-certificate "prov/${base}.pem" \
+              "$f"
+          done
+
+      - name: Publish provenance + cosign signatures to R2
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BUNDLE="${{ steps.attest.outputs.bundle-path }}"
+          for f in prov/*; do
+            base="$(basename "$f")"
+            case "$base" in
+              *.sig|*.pem|*.intoto.jsonl) continue ;;
+            esac
+            aws s3 cp "$BUNDLE" "s3://pollis/releases/cli/${VERSION}/${base}.intoto.jsonl" \
+              --endpoint-url "${ENDPOINT}" --content-type "application/json"
+            aws s3 cp "prov/${base}.sig" "s3://pollis/releases/cli/${VERSION}/${base}.sig" \
+              --endpoint-url "${ENDPOINT}" --content-type "text/plain"
+            aws s3 cp "prov/${base}.pem" "s3://pollis/releases/cli/${VERSION}/${base}.pem" \
+              --endpoint-url "${ENDPOINT}" --content-type "application/x-pem-file"
+          done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto

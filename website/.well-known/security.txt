@@ -1,13 +1,38 @@
 # Security policy for Pollis (pollis.com)
-# https://securitytxt.org/
+# https://securitytxt.org/  —  format: RFC 9116
+#
+# `Expires` is REQUIRED by RFC 9116 §2.5.5 and this file had none, so every
+# conforming parser rejected the whole file as invalid — the practical effect
+# being that a researcher's tooling reported "no security.txt" for a host that
+# had one. Keep it under a year out, and refresh it when it nears expiry;
+# .github/workflows/website-verify.yml fails once it is inside 30 days, so this
+# cannot rot silently the way it did before.
 
+# One Contact, deliberately. The previous file also listed the public issue
+# tracker, immediately below a note telling researchers not to use it — RFC 9116
+# reads Contact entries as a preference-ordered list of where to report, so
+# advertising a channel we ask people not to use is a contradiction a parser
+# cannot see and a human has to guess at. No `mailto:` is listed because no
+# monitored security mailbox exists; naming one that bounces would be worse than
+# naming none.
 Contact: https://github.com/actuallydan/pollis/security/advisories/new
-Contact: https://github.com/actuallydan/pollis/issues
-Policy: https://github.com/actuallydan/pollis/security/policy
+Expires: 2027-08-01T00:00:00.000Z
 Preferred-Languages: en
 Canonical: https://pollis.com/.well-known/security.txt
+Policy: https://github.com/actuallydan/pollis/security/policy
 
-# Please report vulnerabilities privately via a GitHub security advisory
-# (the first Contact link) rather than a public issue. Pollis is source-available
-# under the PolyForm Noncommercial License 1.0.0; the transparency tooling and
-# verifier are at https://github.com/actuallydan/pollis
+# Please report vulnerabilities privately via a GitHub security advisory (the
+# first Contact link) rather than a public issue. The disclosure policy behind
+# the Policy link states the safe-harbour terms, the response times we commit
+# to, and what is out of scope.
+#
+# Pollis is SOURCE-AVAILABLE, not open source: it is licensed under PolyForm
+# Noncommercial 1.0.0, so you may read, build, audit and modify it for
+# noncommercial purposes, and commercial use needs a separate licence. See
+# LICENSE.md. Auditing the code and publishing what you find is explicitly
+# within that permission.
+#
+# The transparency tooling and the independent verifier are at
+# https://github.com/actuallydan/pollis — `pollis-verify` checks our published
+# Merkle trees against a pinned ML-DSA-44 key with nothing of ours on the trust
+# path.

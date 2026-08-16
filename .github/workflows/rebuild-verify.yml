@@ -161,21 +161,72 @@ jobs:
           # dispatched transparency-publish and the tree takes a few minutes to
           # rebuild and sign. Asserting immediately would report "not the logged
           # payload" for a release that is merely not logged YET — the single most
-          # misleading thing a verifiability tool can say, and exactly the false
-          # alarm that cost an afternoon of investigation. Bounded, so a genuinely
+          # misleading thing a verifiability tool can say. Bounded, so a genuinely
           # absent tag still fails rather than hanging.
-          for attempt in $(seq 1 20); do
-            if ./target/release/pollis-verify release "${VERIFY_BASE_URL}" "${{ env.TAG }}" --json \
-                 > release-report.json 2>/dev/null; then
+          #
+          # THE EXIT CODE IS NOT THE SIGNAL. `pollis-verify release` exits 0 for a
+          # tag that is not in the tree at all: chain_valid is computed as
+          # `sth_sig_ok && all_included && invariant_ok`, and over an EMPTY artifact
+          # set the last two are vacuously true, so an unpublished tag verifies
+          # perfectly and reports `found: false`. The old loop tested only the exit
+          # status, so it "succeeded" on attempt 1 every time and never waited at
+          # all — then the rebuild ran for ~40 minutes and failed against an empty
+          # report. Three of the last six runs went red exactly this way, including
+          # v1.9.5, which reproduced BYTE-IDENTICALLY (0 differing bytes) and still
+          # reported failure. A verification signal that cries wolf is worse than no
+          # signal: nobody can act on a genuine red once they have learned to expect
+          # false ones. So the loop gates on `.found`, and the exit code is checked
+          # separately below for what it does mean.
+          #
+          # 40 × 30s = 20 minutes. The old bound (10) was never reached because the
+          # loop never looped; this is sized for a real tree rebuild-and-sign after
+          # a release dispatch, and the job is idle while it waits.
+          published=0
+          for attempt in $(seq 1 40); do
+            rc=0
+            ./target/release/pollis-verify release "${VERIFY_BASE_URL}" "${{ env.TAG }}" --json \
+              > release-report.json 2>/dev/null || rc=$?
+            if [ "${rc}" -eq 0 ] && jq -e '.found == true' release-report.json >/dev/null 2>&1; then
               echo "tag ${{ env.TAG }} is in the log (attempt ${attempt})"
+              published=1
               break
             fi
-            echo "waiting for ${{ env.TAG }} to appear in the binaries tree (attempt ${attempt}/20)…"
+            echo "waiting for ${{ env.TAG }} to appear in the binaries tree (attempt ${attempt}/40)…"
             sleep 30
           done
-          # Re-run unguarded so a genuine absence fails loudly with its real error.
-          ./target/release/pollis-verify release "${VERIFY_BASE_URL}" "${{ env.TAG }}" --json \
-            > release-report.json
+
+          # Three outcomes, each of which has to READ differently — the whole point
+          # of this rewrite. Conflating them is what made a red run meaningless.
+          if [ "${published}" -ne 1 ]; then
+            # (a) NOT A REPRODUCIBILITY RESULT. The tree simply never picked the tag
+            #     up, so nothing has been said about whether the build reproduces.
+            echo "::error title=Release not published to the transparency log::${{ env.TAG }} never appeared in the binaries tree"
+            echo "::error::${{ env.TAG }} is still not in the binaries tree after 20 minutes."
+            echo "::error::"
+            echo "::error::THIS IS NOT A REPRODUCIBILITY FAILURE. Nothing here says the build"
+            echo "::error::did not reproduce — the rebuild was not even attempted, because there"
+            echo "::error::is no logged payload to compare against. This is a PUBLISHING problem:"
+            echo "::error::check the release's attest-and-log job and the transparency-publish run"
+            echo "::error::it dispatches. Re-run this workflow once the tag is in the tree."
+            jq '.' release-report.json || true
+            exit 1
+          fi
+
+          # (b) The tag IS logged, but the log itself does not verify — a bad STH
+          #     signature, a missing inclusion proof, or an invariant violation.
+          #     This IS an alarm, and it is about the LOG, not about the rebuild.
+          if ! jq -e '.chain_valid == true' release-report.json >/dev/null 2>&1; then
+            echo "::error title=Transparency log does not verify::${{ env.TAG }} is present but the tree failed verification"
+            echo "::error::${{ env.TAG }} is in the binaries tree, but the tree does not verify"
+            echo "::error::against the pinned key. This is a LOG integrity finding, not a"
+            echo "::error::reproducibility one, and it is the serious kind. Violations:"
+            jq -r '.violations[]? | "::error::  - \(.)"' release-report.json || true
+            jq '.' release-report.json
+            exit 1
+          fi
+
+          # (c) Published and valid — the only state in which a later hash mismatch
+          #     genuinely means "did not reproduce".
           echo "── transparency log report for ${{ env.TAG }} ──"
           jq '.' release-report.json
 
@@ -503,6 +554,7 @@ jobs:
             echo "   AppImage payload for ${{ env.TAG }}, verified against the"
             echo "   pinned key ${PINNED_LOG_KEY}."
           else
+            echo "::error title=Did not reproduce::rebuilt Linux payload does not match the logged one"
             echo "::error::reproduced Linux AppImage payload hash ${HASH} is NOT the"
             echo "::error::logged payload for ${{ env.TAG }}. Either the build did not"
             echo "::error::reproduce (see docs/reproducible-builds-residuals.md — e.g. a"
@@ -511,10 +563,11 @@ jobs:
             jq -r '.artifacts[] | select(.platform=="linux" and .layer=="payload")
                    | "  \(.bundle): \(.payload_sha256)"' release-report.json || true
             echo "::error::"
-            echo "::error::A tag with NO logged linux payload above means the release is not"
-            echo "::error::in the transparency tree yet (it is built by the daily"
-            echo "::error::transparency-publish cron, not at release time) — that is a"
-            echo "::error::DIFFERENT condition from a byte divergence, so do not read it as one."
+            echo "::error::This message now means what it says. The verify-log-inclusion job"
+            echo "::error::will not reach this point unless the tag is genuinely published in"
+            echo "::error::the tree AND the tree verifies, so an unpublished release can no"
+            echo "::error::longer surface here as a byte divergence — it fails earlier with its"
+            echo "::error::own message. A red run at THIS step is a real reproducibility finding."
 
             # Name the differing files rather than leaving a bare hash mismatch.
             #

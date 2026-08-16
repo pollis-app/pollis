@@ -214,6 +214,32 @@ tree can never stand in for another:
   — is a transparency/accountability property, not a proof the macOS/Windows bytes
   were built from the published source; that step is the independent rebuilders'.
 
+  **The recipe in the leaf (#877).** Each leaf's `toolchain` object is the build
+  recipe a rebuilder is meant to install. For 258 leaves (v1.3.4 → v1.9.7) it read
+  `{"rustc":"unknown","node":"unknown","pnpm":"unknown"}` next to a floating
+  runner label, because `scripts/attest-binaries.sh` defaulted the fields and no
+  workflow set them. Each build job now writes a
+  `pollis-<tag>-<platform>.toolchain.json` sidecar with the real versions and a
+  dated runner image (`ubuntu22@20250804.1.0`; the Linux value names the
+  capture-helper's image too, since the AppImage embeds a binary built on it), and
+  `load_toolchain` **hard-fails** rather than defaulting — a silent default is what
+  let 26 releases publish a false recipe with green runs. The existing leaves are
+  **not** backfilled: the tree is append-only by design.
+
+  Two adjacent defects in the same class, also fixed: `attest-and-log` now requires
+  `provenance` to have succeeded *and* proves each leaf's `provenance_uri` resolves
+  before appending (v1.9.0/v1.9.1 baked permanent 404s), and the R2 retention prune
+  no longer deletes the attestations, signatures, SBOMs and recipe sidecars those
+  URIs point at.
+
+  **SBOM (#877).** Every release publishes a CycloneDX SBOM covering both the Rust
+  and JS dependency graphs (`pollis-<tag>.cdx.json`, from the `--locked` lockfiles
+  at the tag). It is a SLSA provenance subject, so its digest is anchored in Rekor
+  and a later, quieter SBOM cannot silently replace it. It is **not** yet a
+  binaries-tree leaf: that needs a new `Layer::Sbom` in the frozen `BinaryRecord`
+  contract plus a `pollis-verify` release ahead of it, since a deployed verifier
+  cannot decode an unknown layer variant.
+
 This is the scalable backstop the TOFU layer above always wanted: TOFU catches a
 swap only on the next message and only for keys *this* device has seen; the log
 makes every user's full history auditable by anyone.

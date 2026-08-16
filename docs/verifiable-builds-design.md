@@ -297,16 +297,48 @@ deterministic):
   "layer": "signed",                 // "payload" (reproducible) | "signed" (wrapped) | "exe" (main binary as installed)
   "payload_sha256": "<hex>",         // hash of the reproducible pre-signature payload
   "artifact_sha256": "<hex>",        // hash of the *shipped* artifact (== payload_sha256 for layer=payload)
-  "toolchain": {                      // the reproducibility recipe, pinned
-    "rustc": "1.NN.0",
-    "node": "20.x.y",
-    "pnpm": "9.x.y",
-    "runner_image": "macos-14@<digest>",
+  "toolchain": {                      // the reproducibility recipe (see below)
+    "rustc": "1.96.0",
+    "node": "20.19.5",
+    "pnpm": "10.25.0",
+    "runner_image": "ubuntu22@20250804.1.0+helper:ubuntu24@20250804.1.0",
     "source_date_epoch": 1700000000
   },
   "provenance_uri": "cdn.pollis.com/releases/v1.3.0/pollis-v1.3.0-macos.dmg.intoto.jsonl"
 }
 ```
+
+> **The recipe was fiction until #877, and the fiction is permanent.** Every leaf
+> written between v1.3.4 and v1.9.7 — **258 of them** — carries
+> `{"rustc":"unknown","node":"unknown","pnpm":"unknown"}` with a bare floating
+> runner label. `scripts/attest-binaries.sh` defaulted the three version fields
+> and no workflow ever set them, while this document called the object "the
+> reproducibility recipe, pinned". Nothing detected it because a wrong recipe and
+> a right one produce identical green runs.
+>
+> Two things changed. The values are now captured **in the build job**, which is
+> the only place that knows them — the attest job runs on a different runner with
+> no rustc, node or pnpm installed, so asking it would have recorded the toolchain
+> of a machine that built nothing. And a missing recipe is now a **hard failure**
+> rather than a default: `load_toolchain` refuses to emit a leaf without one.
+> Transport is the same tiny-sidecar pattern the payload digest uses
+> (`pollis-<tag>-<platform>.toolchain.json`, published as a release asset so the
+> backfill path can fetch it too).
+>
+> **The 258 existing leaves are not repaired.** The tree is append-only by design;
+> rewriting history to make our own records look better is precisely what the log
+> exists to prevent. They stand as written, and tags predating #877 cannot be
+> re-attested with a true recipe because no sidecar was ever published for them.
+>
+> `runner_image` is now `<ImageOS>@<ImageVersion>` — one immutable, dated
+> `actions/runner-images` build (e.g. `ubuntu22@20250804.1.0`) rather than the
+> floating `ubuntu-22.04` label, which is re-imaged every few weeks. It is still
+> **not digest-pinned**: GitHub publishes no content digest for a hosted runner
+> image, so this is the most specific identity available (residuals §6). The
+> Linux value names **two** images, because the AppImage embeds
+> `pollis-capture-linux`, compiled in a separate job on `ubuntu-24.04`; a recipe
+> naming only the app runner would send a rebuilder to the wrong image for part
+> of the payload.
 
 Design notes:
 - **Two leaves per shipped file** where signing applies: one `layer:"payload"`
