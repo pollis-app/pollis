@@ -363,7 +363,7 @@ GitHub CLI, trusting only the GitHub Actions identity + issuer:
 gh attestation verify "$ART" \
   --bundle "$ART.intoto.jsonl" \
   --repo actuallydan/pollis \
-  --cert-identity-regexp '^https://github.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --cert-identity-regex '^https://github.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
   --cert-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

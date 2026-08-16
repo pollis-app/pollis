@@ -308,6 +308,24 @@ a:hover {
   margin-top: 1.25rem;
 }
 
+/* Sits directly above the curl-pipe-bash block, pointing Arch users at the
+   packaged build instead (#877). Shares the code-chip treatment above. */
+.install-note {
+  color: var(--c-text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+  margin-bottom: 0.75rem;
+}
+
+.install-note code {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  color: var(--c-accent);
+  background: rgba(253, 186, 116, 0.08);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
 /* ── Footer links (GitHub etc.) ──────────────────────────────── */
 /* `flex-wrap` is required, not cosmetic: #877 took the footer from six links to
    nine, and without it the row overflows its container on a narrow viewport and
