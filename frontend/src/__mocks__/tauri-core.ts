@@ -33,8 +33,26 @@ interface MockMessage {
   sender_id: string;
   content?: string;
   reply_to_id?: string;
-  sent_at: string;
+  /**
+   * Normally an ISO-8601 string, exactly as `pollis-core` serializes it.
+   *
+   * A NUMBER is allowed as the legacy epoch-**seconds** shape: the renderer
+   * turns `sent_at` into `created_at` with `new Date(sent_at).getTime()`,
+   * which passes a seconds-magnitude number straight through, and every
+   * component that formats a message timestamp is required to run it through
+   * `toMs` before rendering. Only a spec that is testing that normalisation
+   * should use it — see `e2e/thread-panel.spec.ts` (#874).
+   */
+  sent_at: string | number;
   edited_at?: string;
+  thread_id?: string;
+}
+
+/** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
+interface MockThreadSummary {
+  thread_id: string;
+  reply_count: number;
+  last_reply_at?: string;
 }
 
 interface MockProfile {
@@ -132,6 +150,13 @@ interface MockStore {
   groups: MockGroup[];
   channels: Record<string, MockChannel[]>;
   messages: Record<string, MockMessage[]>;
+  // Thread replies (#825), keyed by the ROOT message's id — local-only in
+  // production too, because `thread_id` lives inside the MLS ciphertext.
+  threadMessages: Record<string, MockMessage[]>;
+  // Per-conversation reply counts, keyed by conversation id. Separate from
+  // `threadMessages` on purpose: the channel row renders the count without
+  // loading the thread, so a preload can seed one without the other.
+  threadSummaries: Record<string, MockThreadSummary[]>;
   dmChannels: MockDmChannel[];
   // Keyed by group id. Drives the @mention candidate list (#843), which is
   // deliberately derived from roster membership only.
@@ -215,6 +240,8 @@ const store: MockStore = {
   groups: preload.groups ?? [],
   channels: preload.channels ?? {},
   messages: preload.messages ?? {},
+  threadMessages: preload.threadMessages ?? {},
+  threadSummaries: preload.threadSummaries ?? {},
   dmChannels: preload.dmChannels ?? [],
   groupMembers: preload.groupMembers ?? {},
   bookmarks: preload.bookmarks ?? [],
@@ -271,14 +298,18 @@ function readMessagePage(
   if (!store.paginate) {
     return { messages: all, next_cursor: null };
   }
+  // `sent_at` is an ISO string in every paginating spec, but the type also
+  // admits the legacy numeric shape, so order on the string spelling rather
+  // than calling `localeCompare` on something that might be a number.
+  const at = (m: MockMessage) => String(m.sent_at);
   const chronological = [...all].sort((a, b) =>
-    a.sent_at === b.sent_at ? a.id.localeCompare(b.id) : a.sent_at.localeCompare(b.sent_at),
+    at(a) === at(b) ? a.id.localeCompare(b.id) : at(a).localeCompare(at(b)),
   );
   const older = cursor
     ? chronological.filter(
         (m) =>
-          m.sent_at < cursor.sent_at ||
-          (m.sent_at === cursor.sent_at && m.id < cursor.id),
+          at(m) < cursor.sent_at ||
+          (at(m) === cursor.sent_at && m.id < cursor.id),
       )
     : chronological;
   const size = limit && limit > 0 ? limit : older.length;
@@ -288,7 +319,7 @@ function readMessagePage(
   return {
     messages: page,
     next_cursor: hasMore
-      ? { sent_at: oldestReturned.sent_at, id: oldestReturned.id }
+      ? { sent_at: at(oldestReturned), id: oldestReturned.id }
       : null,
   };
 }
@@ -442,9 +473,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_group_invites':
     case 'list_security_events':
     case 'get_pinned_messages':
-    case 'read_thread_messages':
-    case 'list_thread_summaries':
       return [];
+
+    // Threads (#825). Keyed by the root message id and by conversation id
+    // respectively, matching the two Rust commands. Empty unless a preload
+    // seeds them, so every spec that predates threads is unaffected.
+    case 'read_thread_messages':
+      return store.threadMessages[args.threadId as string] ?? [];
+
+    case 'list_thread_summaries':
+      return store.threadSummaries[args.conversationId as string] ?? [];
 
     // Realtime / MLS background work the browser build has no backend for.
     case 'connect_rooms':

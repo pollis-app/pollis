@@ -56,10 +56,44 @@ export function activeLocale(): string {
   return i18n.resolvedLanguage || i18n.language || "en";
 }
 
+/**
+ * Normalise a `Message.created_at` to epoch **milliseconds**.
+ *
+ * `created_at` is documented as "the primary timestamp" and every producer is
+ * *supposed* to hand over milliseconds, but the shape is a bare `number`, so a
+ * seconds-precision value is indistinguishable at the type level and silently
+ * renders as January 1970 — a wrong answer on screen, not a crash. Every
+ * component that formats a message timestamp therefore normalises first.
+ *
+ * The cutover is `1e12` ms (2001-09-09). Anything below it cannot be a
+ * plausible message time in milliseconds, and anything at or above it cannot
+ * be a plausible one in seconds (year 33658), so the two ranges do not
+ * overlap for any timestamp this app will ever hold.
+ *
+ * Lived in three copies (`MessageItem`, `MessageList`, and inline in
+ * `timeAgo`) and was **missing** from the fourth caller, `ThreadMessageRow`,
+ * which is exactly the failure mode a copy-pasted guard has (#874).
+ */
+export function toMs(timestamp: number): number {
+  return timestamp < 1e12 ? timestamp * 1000 : timestamp;
+}
+
 // Time-of-day label, e.g. "3:07 PM". Expects epoch milliseconds.
 export function formatTimeOfDay(ms: number): string {
   return new Date(ms).toLocaleTimeString(activeLocale(), {
     hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Zero-padded clock time, e.g. "03:07 PM" — the narrow-column shape the thread
+ * panel uses, where a ragged `9:07` / `10:07` left edge is visible against the
+ * author name beside it. Expects epoch milliseconds.
+ */
+export function formatClockTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString(activeLocale(), {
+    hour: "2-digit",
     minute: "2-digit",
   });
 }

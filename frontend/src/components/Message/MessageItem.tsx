@@ -2,7 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Reply, CornerUpLeft } from "lucide-react";
 import { ThreadReplyCount } from "./ThreadReplyCount";
-import { formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
+import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { MessageBody } from "./MessageBody";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
@@ -61,11 +61,6 @@ interface MessageItemProps {
   peerCount?: number;
   isDm?: boolean;
 }
-
-// `created_at` arrives as unix seconds or milliseconds depending on source;
-// normalize to milliseconds before formatting.
-const toMs = (timestamp: number): number =>
-  timestamp < 1e12 ? timestamp * 1000 : timestamp;
 
 export const MessageItem: React.FC<MessageItemProps> = observer(({
   message,

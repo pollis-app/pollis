@@ -14,7 +14,7 @@ import { useBlockedUsers } from "../../hooks/queries";
 import { useGroupMembers } from "../../hooks/queries/useGroups";
 import { observer } from "mobx-react-lite";
 import { rosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
-import { formatDayDivider } from "../../utils/format";
+import { formatDayDivider, toMs } from "../../utils/format";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import {
   useSavedMessageIds,
@@ -36,9 +36,6 @@ import type { Message } from "../../types";
 
 // How long the permalink jump highlight stays on the target row.
 const HIGHLIGHT_MS = 1800;
-
-const toMs = (timestamp: number): number =>
-  timestamp < 1e12 ? timestamp * 1000 : timestamp;
 
 const startOfLocalDay = (d: Date): number =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
