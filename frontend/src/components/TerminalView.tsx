@@ -289,12 +289,12 @@ const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     <div
       data-testid="terminal-view"
       ref={containerRef}
+      className="bg-bg"
       style={{
         flex: 1,
         minWidth: 0,
         minHeight: 0,
         overflow: "hidden",
-        background: "var(--c-bg)",
         padding: "6px 8px",
       }}
     />

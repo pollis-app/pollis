@@ -113,10 +113,10 @@ export const UpdateScreen: React.FC = () => {
   return (
     <div
       data-testid="update-screen"
+      className="bg-bg"
       style={{
         height: "100%",
         width: "100%",
-        background: "var(--c-bg)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -138,8 +138,7 @@ export const UpdateScreen: React.FC = () => {
         <div className="flex items-center gap-2">
           {phase !== "error" && <LoadingSpinner size="sm" />}
           <span
-            className="text-xs font-mono"
-            style={{ color: phase === "error" ? "var(--c-danger)" : "var(--c-text)" }}
+            className={`text-xs font-mono ${phase === "error" ? "text-danger" : "text-fg"}`}
           >
             {label}
           </span>
@@ -147,20 +146,20 @@ export const UpdateScreen: React.FC = () => {
 
         {phase === "downloading" && progress !== null && (
           <div
+            className="bg-line"
             style={{
               width: "100%",
               maxWidth: 280,
               height: 4,
               borderRadius: 2,
-              background: "var(--c-border)",
               overflow: "hidden",
             }}
           >
             <div
+              className="bg-accent"
               style={{
                 width: `${progress}%`,
                 height: "100%",
-                background: "var(--c-accent)",
                 transition: "width 0.2s ease",
               }}
             />

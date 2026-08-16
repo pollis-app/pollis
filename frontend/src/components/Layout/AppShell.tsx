@@ -608,13 +608,13 @@ export const AppShell: React.FC = observer(() => {
   return (
     <div
       data-testid="terminal-app"
+      className="bg-bg"
       style={{
         height: "100%",
         width: "100%",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        background: "var(--c-bg)",
         position: "relative",
       }}
     >
@@ -694,7 +694,7 @@ export const AppShell: React.FC = observer(() => {
               padding: "28px 56px",
             }}
           >
-            <span className="text-sm font-mono" style={{ color: "var(--c-accent)" }}>
+            <span className="text-sm font-mono text-accent">
               {t("shell.dropFiles")}
             </span>
           </div>
@@ -704,9 +704,9 @@ export const AppShell: React.FC = observer(() => {
       {/* Bottom bar — unread summary on the left, status alert on the right */}
       {/* On chat screens, invert: dark bg with accent text. Otherwise: accent bg with dark text. */}
       <div
+        className="border-t border-line"
         style={{
           flexShrink: 0,
-          borderTop: "1px solid var(--c-border)",
           background: barBg,
           display: "flex",
           alignItems: "center",
@@ -719,11 +719,10 @@ export const AppShell: React.FC = observer(() => {
         {availableUpdateVersion && (
           <button
             data-testid="status-bar-update-available"
-            className="text-xs font-mono flex items-center gap-1 cursor-pointer"
+            className="text-xs font-mono flex items-center gap-1 cursor-pointer border-0"
             style={{
               color: barInk,
               background: "none",
-              border: "none",
               padding: 0,
               lineHeight: 0,
             }}
@@ -746,8 +745,8 @@ export const AppShell: React.FC = observer(() => {
           >
             <button
               data-testid="status-bar-incoming-call-accept"
-              className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
-              style={{ color: "inherit", background: "none", border: "none", padding: 0 }}
+              className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0 }}
               onClick={() => {
                 // Order matters: route first (so the old voice page unmounts
                 // before activeVoiceChannelId flips and any in-flight Call
@@ -779,8 +778,8 @@ export const AppShell: React.FC = observer(() => {
             </button>
             <button
               data-testid="status-bar-incoming-call-decline"
-              className="cursor-pointer"
-              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              className="cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => {
                 const callerId = incomingCall.callerId;
                 const callId = incomingCall.callId;
@@ -812,8 +811,8 @@ export const AppShell: React.FC = observer(() => {
             </span>
             <button
               data-testid="status-bar-voice-error-dismiss"
-              className="cursor-pointer"
-              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              className="cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => setVoiceError(null)}
               aria-label={t("statusBar.dismissVoiceError")}
             >
@@ -835,8 +834,8 @@ export const AppShell: React.FC = observer(() => {
             </span>
             <button
               data-testid="status-bar-screenshare-error-dismiss"
-              className="cursor-pointer"
-              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              className="cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => shareStopped()}
               aria-label={t("statusBar.dismissScreenShareError")}
             >
@@ -845,8 +844,8 @@ export const AppShell: React.FC = observer(() => {
           </div>
         ) : statusBarAlert ? (
           <button
-            className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
-            style={{ color: barInk, background: "none", border: "none", padding: 0 }}
+            className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
+            style={{ color: barInk, background: "none", padding: 0 }}
             onClick={() => {
               router.navigate({ to: "/dms/$conversationId", params: { conversationId: statusBarAlert.roomId } });
               setStatusBarAlert(null);

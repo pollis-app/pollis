@@ -473,8 +473,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   return (
     <div
       data-testid="main-content"
-      className="flex-1 flex flex-col overflow-hidden min-w-0"
-      style={{ background: 'var(--c-bg)' }}
+      className="flex-1 flex flex-col overflow-hidden min-w-0 bg-bg"
     >
       <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         {messagesLoading ? (
@@ -524,23 +523,21 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       {pendingDmRequest ? (
         <div data-testid="dm-request-bar">
           <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
           >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
               {t("dmRequest.heading")}
             </span>
           </div>
           <div
-            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-            style={{ background: 'var(--c-surface)' }}
+            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
           >
-            <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+            <p className="text-xs font-mono text-dim">
               <Trans
                 ns="nav"
                 i18nKey="dmRequest.body"
                 values={{ name: pendingDmRequest.senderName }}
-                components={{ name: <span style={{ color: 'var(--c-text)' }} /> }}
+                components={{ name: <span className="text-fg" /> }}
               />
             </p>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -571,10 +568,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       ) : editingMessage ? (
         <div data-testid="edit-message-bar">
           <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
           >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
               {t("editBar.heading")}
             </span>
             <button
@@ -586,7 +582,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
               <X size={20} aria-hidden="true" />
             </button>
           </div>
-          <div className="px-4 pb-3 pt-1" style={{ background: 'var(--c-surface)' }}>
+          <div className="px-4 pb-3 pt-1 bg-surface">
             <textarea
               ref={editTextareaRef}
               data-testid="edit-message-bar-input"
@@ -613,7 +609,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
                 opacity: editMessageMutation.isPending ? 0.5 : 1,
               }}
             />
-            <p className="text-2xs font-mono mt-1" style={{ color: 'var(--c-text-muted)' }}>
+            <p className="text-2xs font-mono mt-1 text-muted">
               {t("editBar.hint")}
             </p>
           </div>
@@ -621,10 +617,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       ) : isDeletingThisChannel ? (
         <div data-testid="delete-channel-bar">
           <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
           >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
               {t("deleteChannel.heading")}
             </span>
             <button
@@ -637,10 +632,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             </button>
           </div>
           <div
-            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-            style={{ background: 'var(--c-surface)' }}
+            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
           >
-            <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+            <p className="text-xs font-mono text-dim">
               {t("deleteChannel.body")}
             </p>
             <Button
@@ -667,10 +661,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         return (
           <div data-testid="delete-message-bar">
             <div
-              className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-              style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+              className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
             >
-              <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+              <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
                 {heading}
               </span>
               <button
@@ -683,10 +676,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
               </button>
             </div>
             <div
-              className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-              style={{ background: 'var(--c-surface)' }}
+              className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
             >
-              <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+              <p className="text-xs font-mono text-dim">
                 {body}
               </p>
               <Button

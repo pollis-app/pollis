@@ -153,7 +153,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   return (
     <aside
       data-testid="sidebar"
-      className="flex w-[var(--side-w)] shrink-0 flex-col border-e border-line bg-surface font-mono"
+      className="flex w-side shrink-0 flex-col border-e border-line bg-surface font-mono"
     >
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <SectionHeader
