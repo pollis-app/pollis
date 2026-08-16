@@ -573,6 +573,7 @@ pub fn run() {
             commands::messages::get_dm_messages,
             commands::messages::read_channel_messages,
             commands::messages::read_dm_messages,
+            commands::messages::read_last_messages,
             commands::messages::read_thread_messages,
             commands::messages::list_thread_summaries,
             commands::messages::ingest_channel_envelopes,

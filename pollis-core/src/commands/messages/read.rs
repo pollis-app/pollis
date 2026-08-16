@@ -320,6 +320,92 @@ pub async fn read_dm_messages(
     Ok(MessagePage { messages, next_cursor })
 }
 
+/// Bound-parameter chunk size for [`read_last_messages`]. SQLite's default
+/// `SQLITE_MAX_VARIABLE_NUMBER` is 999 on older builds; staying well under it
+/// means a sidebar of any size is a fixed number of statements rather than a
+/// runtime error nobody can reproduce with three channels.
+const LAST_MESSAGE_ID_CHUNK: usize = 400;
+
+/// The batched newest-per-conversation SELECT, for `n` bound conversation ids.
+///
+/// Lifted out of [`read_last_messages`] so the ordering claim below is testable
+/// without an `AppState`: the whole correctness of a preview row is "is this
+/// really the newest message", and that lives entirely in this string.
+///
+/// The window's ordering key (`sent_at DESC, id DESC`) is deliberately the same
+/// one `read_local_channel_page` uses. A preview and the top of the opened
+/// conversation showing different messages is the failure this pins shut.
+pub(crate) fn last_messages_sql(n: usize) -> String {
+    let placeholders = (1..=n).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
+    format!(
+        "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+         FROM (
+           SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id,
+                  ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY sent_at DESC, id DESC) AS rn
+           FROM message
+           WHERE conversation_id IN ({placeholders})
+         )
+         WHERE rn = 1"
+    )
+}
+
+/// The newest message in each of `conversation_ids`, in ONE round trip (#874).
+///
+/// The sidebar draws one preview row per channel and per DM, and each row used
+/// to ask for its own page of one message — so a 20-row sidebar cost 20 IPC
+/// calls on mount, 20 more on every window focus, and 20 more on every delete
+/// event. The work is identical whether it is asked for once or twenty times:
+/// one indexed scan of the local `message` table plus one username hydration.
+/// This asks for it once.
+///
+/// Conversations with no local messages are simply ABSENT from the result. The
+/// caller keys the response by `conversation_id`, so "no row" and "no messages"
+/// are the same answer and a null placeholder would only add a second spelling
+/// of it.
+pub async fn read_last_messages(
+    conversation_ids: Vec<String>,
+    state: &Arc<AppState>,
+) -> Result<Vec<ChannelMessage>> {
+    if conversation_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // De-duplicate. Two rows pointing at the same conversation must not make
+    // the query do the work twice, and the caller keys by id regardless.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let ids: Vec<String> = conversation_ids
+        .into_iter()
+        .filter(|id| seen.insert(id.clone()))
+        .collect();
+
+    // rusqlite statements are not `Send`, so the whole DB read is scoped in a
+    // block — the same reason `read_thread_messages` does it. An explicit
+    // `drop()` is not enough; the generated future would still capture them.
+    let mut messages: Vec<ChannelMessage> = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+        let mut out: Vec<ChannelMessage> = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(LAST_MESSAGE_ID_CHUNK) {
+            let sql = last_messages_sql(chunk.len());
+            let mut stmt = db.conn().prepare(&sql)?;
+            let mapped =
+                stmt.query_map(rusqlite::params_from_iter(chunk.iter()), row_to_channel_message)?;
+            for r in mapped {
+                if let Ok(m) = r {
+                    out.push(m);
+                }
+            }
+        }
+        out
+    };
+
+    attach_sender_usernames_local(state, &mut messages).await?;
+    Ok(messages)
+}
+
 /// All messages sent by a given user across all their channels,
 /// ordered by group name, then channel name, then timestamp.
 pub async fn list_messages_by_sender(
