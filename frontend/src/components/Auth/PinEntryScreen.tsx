@@ -66,8 +66,8 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
   return (
     <div
       data-testid="pin-entry-screen"
-      className="flex flex-col h-full w-full"
-      style={{ background: "var(--c-bg)", position: "relative" }}
+      className="flex flex-col h-full w-full bg-bg"
+      style={{ position: "relative" }}
     >
       <div style={{ position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none" }}>
         <DotMatrix />
@@ -80,12 +80,12 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
         <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 360 }}>
           <div className="flex flex-col gap-5">
             <div>
-              <h2 className="text-sm font-mono font-semibold" style={{ color: "var(--c-text)" }}>
+              <h2 className="text-sm font-mono font-semibold text-fg">
                 {t("pinEntry.headline")}
               </h2>
               <p
-                className="text-xs mt-1 font-mono"
-                style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
+                className="text-xs mt-1 font-mono text-muted"
+                style={{ lineHeight: 1.5 }}
               >
                 {username
                   ? (
@@ -93,7 +93,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
                       t={t}
                       i18nKey="pinEntry.unlockAs"
                       values={{ username }}
-                      components={{ name: <span style={{ color: "var(--c-accent)" }} /> }}
+                      components={{ name: <span className="text-accent" /> }}
                     />
                   )
                   : t("pinEntry.unlockDevice")}
@@ -103,8 +103,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
             {error && (
               <p
                 data-testid="pin-entry-error"
-                className="text-xs font-mono"
-                style={{ color: "var(--c-danger)" }}
+                className="text-xs font-mono text-danger"
               >
                 {error}
               </p>
@@ -146,11 +145,9 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
               <button
                 data-testid="pin-forgot-button"
                 onClick={onForgotPin}
-                className="text-xs font-mono"
+                className="text-xs font-mono text-muted border-0"
                 style={{
-                  color: "var(--c-text-muted)",
                   background: "none",
-                  border: "none",
                   cursor: "pointer",
                   padding: "0.25rem 0",
                 }}
@@ -161,11 +158,9 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
                 <button
                   data-testid="pin-switch-account-button"
                   onClick={onSwitchAccount}
-                  className="text-xs font-mono"
+                  className="text-xs font-mono text-muted border-0"
                   style={{
-                    color: "var(--c-text-muted)",
                     background: "none",
-                    border: "none",
                     cursor: "pointer",
                     padding: "0.25rem 0",
                   }}
