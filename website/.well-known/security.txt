@@ -8,6 +8,6 @@ Preferred-Languages: en
 Canonical: https://pollis.com/.well-known/security.txt
 
 # Please report vulnerabilities privately via a GitHub security advisory
-# (the first Contact link) rather than a public issue. Pollis is open source;
-# the transparency tooling and verifier are at
-# https://github.com/actuallydan/pollis
+# (the first Contact link) rather than a public issue. Pollis is source-available
+# under the PolyForm Noncommercial License 1.0.0; the transparency tooling and
+# verifier are at https://github.com/actuallydan/pollis

@@ -427,7 +427,8 @@
         one local string comparison (the pinned signing key). You don't have to take our word for any of it: re-run the
         exact same checks yourself with our
         <a href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
-          rel="noopener noreferrer">open-source <code>pollis-verify</code> command-line tool</a>, or query the
+          rel="noopener noreferrer"><code>pollis-verify</code> command-line tool</a> (source-available; see the
+        <a href="faq.html">FAQ</a> on licensing), or query the
         <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
           rel="noopener noreferrer">public verification API</a> directly (rate limits apply). Only the CLI gives you a
         trustless verdict.
@@ -469,8 +470,10 @@
           <p class="art-card-desc">
             This is the tool auditors run to independently re-check everything on this page, trusting only the one
             pinned key, with no server on the path. Prebuilt Linux and macOS binaries (with <code>.sha256</code>
-            files) ship on the <code>pollis-verify-*</code> releases, but building it from the open-source repo is the
-            stronger move, since a verifier we hand you is a verifier we could have tampered with.
+            files) ship on the <code>pollis-verify-*</code> releases, but building it from the public repo is the
+            stronger move, since a verifier we hand you is a verifier we could have tampered with. The source is
+            readable and buildable by anyone; the licence is PolyForm Noncommercial 1.0.0, which is source-available
+            rather than OSI open source, and that limits what you may ship — not what you may audit.
           </p>
           <ul class="art-cmds">
             <li>
