@@ -5,6 +5,7 @@ use crate::error::{Error, Result};
 use crate::state::AppState;
 
 use super::types::JoinRequest;
+use super::authz;
 
 /// Request access to a group. Creates a pending join request.
 pub async fn request_group_access(
@@ -53,12 +54,12 @@ pub async fn request_group_access(
     // who reviewed the previous request is available for future UI use. DS seam:
     // route the upsert (authorized as the requester server-side) through the
     // Delivery Service.
-    let body = serde_json::json!({
-        "id": id,
-        "group_id": group_id,
-        "requester_id": requester_id,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/join-requests/create", &body).await?;
+    let body = pollis_api::groups::CreateJoinRequestBody {
+        id,
+        group_id: group_id.clone(),
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // Notify the group's existing admins so the pending-request list (menu
     // badge + bottom bar) refreshes live instead of waiting for a manual
@@ -75,7 +76,14 @@ pub async fn request_group_access(
     Ok(())
 }
 
-/// Get all pending join requests for a group. Requester must be a member.
+/// Get all pending join requests for a group. Admins only.
+///
+/// #875: this used to answer `Ok(vec![])` for a non-member and for a non-admin
+/// member alike — indistinguishable from "no one has asked to join". Both now
+/// report the real condition. The UI already gates the affordance on
+/// `current_user_role === 'admin'` (`Group.tsx`), so nothing that used to
+/// succeed starts failing; what changes is that a caller who should not be
+/// asking now learns so.
 pub async fn get_group_join_requests(
     group_id: String,
     requester_id: String,
@@ -83,19 +91,7 @@ pub async fn get_group_join_requests(
 ) -> Result<Vec<JoinRequest>> {
     let conn = state.remote_db.conn().await?;
 
-    // Only admins can view join requests; non-admins get an empty list
-    let mut rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id],
-    ).await?;
-    let role: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        return Ok(Vec::new());
-    };
-    if role != "admin" {
-        return Ok(Vec::new());
-    }
+    authz::require_admin(&conn, &group_id, &requester_id, "view join requests").await?;
 
     let mut req_rows = conn.query(
         "SELECT jr.id, jr.group_id, jr.requester_id, u.username, jr.status, jr.created_at
@@ -170,30 +166,18 @@ pub async fn approve_join_request(
         return Err(Error::Other(anyhow::anyhow!("join request not found or already processed")));
     };
 
-    // Only admins can approve join requests
-    let mut member_rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), approver_id.clone()],
-    ).await?;
-    let approver_role: String = if let Some(row) = member_rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
-    };
-    if approver_role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only admins can approve join requests")));
-    }
+    authz::require_admin(&conn, &group_id, &approver_id, "approve join requests").await?;
 
     let now = chrono::Utc::now().to_rfc3339();
 
     // DS seam: route the member-add + request-approve through the Delivery
     // Service (one transactional, admin-gated write).
-    let body = serde_json::json!({
-        "request_id": request_id,
-        "approver_id": approver_id,
-        "reviewed_at": now,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/join-requests/approve", &body).await?;
+    let body = pollis_api::groups::ApproveJoinRequestBody {
+        request_id,
+        approver_id: Some(approver_id.clone()),
+        reviewed_at: now,
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // Reconcile adds the requester's devices to the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
@@ -243,29 +227,17 @@ pub async fn reject_join_request(
         return Err(Error::Other(anyhow::anyhow!("join request not found or already processed")));
     };
 
-    // Only admins can reject join requests
-    let mut member_rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), approver_id.clone()],
-    ).await?;
-    let approver_role: String = if let Some(row) = member_rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
-    };
-    if approver_role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only admins can reject join requests")));
-    }
+    authz::require_admin(&conn, &group_id, &approver_id, "reject join requests").await?;
 
     let now = chrono::Utc::now().to_rfc3339();
     // DS seam: route the status update through the Delivery Service (admin
     // re-derived server-side).
-    let body = serde_json::json!({
-        "request_id": request_id,
-        "approver_id": approver_id,
-        "reviewed_at": now,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/join-requests/reject", &body).await?;
+    let body = pollis_api::groups::RejectJoinRequestBody {
+        request_id,
+        approver_id: Some(approver_id),
+        reviewed_at: now,
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(())
 }

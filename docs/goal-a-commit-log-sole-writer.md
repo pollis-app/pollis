@@ -125,7 +125,7 @@ alongside the existing read-write `remote_db`.
 
 ## 4. Migration + tokens + env
 
-- **`pollis-core/src/db/migrations/000007_commit_log_db.sql`** — `CREATE TABLE`
+- **`pollis-schema/migrations/000007_commit_log_db.sql`** — `CREATE TABLE`
   the three tables (+ `idx_mls_commit_conv`, `idx_mls_welcome_recip`),
   **no FKs**. This migration is applied to the **log DB**, not the main DB.
 - **Do NOT drop** the three tables from the main DB now — old shipped clients
@@ -220,7 +220,7 @@ function no longer needs a same-conn write).
 | Stream | Status | Branch / PR | Notes |
 |---|---|---|---|
 | S1 Spine + reads | ✅ done (uncommitted) | working tree | `log_db` conn + fallback; R1–R5 repointed; R6 deferred (shared read+write conn). Only external `new_with_parts` caller (`flows/harness.rs`) updated. |
-| S2 Migration + env | ✅ done (uncommitted) | working tree | 3 tables, no FKs, indexes incl. unique epoch; `.env.example` documents `LOG_DB_URL`/`LOG_DB_TOKEN`/`LOG_DB_ADMIN_TOKEN`. **Relocated** to `pollis-core/src/db/migrations-log/000001_commit_log_db.sql` (own dir/sequence) so `db-apply.sh` provisions the log DB with *only* these 3 tables — not the whole main baseline. Not in the `include_str!` list (never applied to main/local DB). |
+| S2 Migration + env | ✅ done (uncommitted) | working tree | 3 tables, no FKs, indexes incl. unique epoch; `.env.example` documents `LOG_DB_URL`/`LOG_DB_TOKEN`/`LOG_DB_ADMIN_TOKEN`. **Relocated** to `pollis-schema/migrations-log/000001_commit_log_db.sql` (own dir/sequence) so `db-apply.sh` provisions the log DB with *only* these 3 tables — not the whole main baseline. Not in the `include_str!` list (never applied to main/local DB). |
 | S3 DS log-DB connection | ✅ done (uncommitted) | working tree | `AppState.log_db` (+fallback); `build_router_with_log_db`; submit/commits handlers use log conn; **auth stays on main DB** (`user_device` lives there). `cargo check -p pollis-delivery` clean. |
 | S4a DS write endpoints | ✅ done (uncommitted) | working tree | `pollis-delivery/src/writes.rs`: `POST /v1/group-info`, `/v1/welcomes/ack`, `/v1/welcomes/reset`, `/v1/welcomes/purge`; shared `gate()` auth; writes on `log_db`, authz on `db`. (is_member bug fixed by S6.) |
 | S4b Client signing + seams | ✅ done (uncommitted) | working tree | `ds_client.rs::ds_post` signs the 4 `X-Pollis-*` headers (= #419 Step 1); `http_submit` now signs too; **W4/W5/W6/W7/W8 all routed via DS**, R6 moved to `log_db`. |

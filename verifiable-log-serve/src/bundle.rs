@@ -13,7 +13,7 @@
 //! discovery manifest (`/v1/index.json`).
 
 use serde::{Deserialize, Serialize};
-use verifiable_log::{ConsistencyProof, Entry, InclusionProof, Sth};
+use verifiable_log::{ConsistencyProof, Entry, InclusionProof, Sth, VerifyingKey};
 
 /// The served-bundle **wire format version**: the shape of the discovery
 /// manifests and the artifact set a verifier fetches. It is the number a verifier
@@ -156,6 +156,19 @@ pub struct PublicKeyDoc {
     pub keys: Vec<PublicKeyEntry>,
 }
 
+/// Wall-clock milliseconds, for rotation-overlap expiry.
+///
+/// A *verifier* is allowed a clock (unlike the builder, whose output must be
+/// deterministic). A clock wrong in the past can only keep a retired key trusted
+/// slightly too long; one wrong in the future retires it early and degrades to
+/// "unverified", never to a false alarm about tampering.
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 impl Bundle {
     /// The `public_key.json` this bundle publishes: the active signing key first,
     /// then any keys still inside their overlap window.
@@ -177,6 +190,17 @@ impl Bundle {
             public_key: self.public_key.clone(),
             keys,
         }
+    }
+
+    /// Every key a head in this bundle may verify under at `now_ms`, as
+    /// `(key_id, key)` pairs ready for [`Sth::verify_any_with_context`].
+    ///
+    /// This is the single place a verify path turns a bundle into verifying keys,
+    /// so the rotation-overlap window is applied identically on every path. Using
+    /// `public_key` alone instead — which the group, account and release cores did
+    /// before #875 — makes an honest log mid-rotation look tampered with.
+    pub fn key_candidates(&self, now_ms: u64) -> Vec<(String, VerifyingKey)> {
+        self.public_key_doc().verifying_candidates(now_ms)
     }
 }
 
@@ -200,6 +224,37 @@ impl PublicKeyDoc {
         self.keys
             .iter()
             .filter(|k| k.not_after.is_none_or(|exp| now_ms <= exp))
+            .cloned()
+            .collect()
+    }
+
+    /// [`Self::active_keys`] parsed into verifying keys, as `(key_id, key)` pairs
+    /// ready for [`Sth::verify_any_with_context`]. Entries whose hex does not
+    /// decode are dropped rather than failing the whole set — one malformed
+    /// published entry must not disarm the keys that are fine.
+    pub fn verifying_candidates(&self, now_ms: u64) -> Vec<(String, VerifyingKey)> {
+        self.active_keys(now_ms)
+            .into_iter()
+            .filter_map(|e| {
+                verifiable_log::verifying_key_from_hex(&e.public_key)
+                    .ok()
+                    .map(|vk| (e.key_id, vk))
+            })
+            .collect()
+    }
+
+    /// The entries a **verification-side** [`Bundle`] carries in
+    /// [`Bundle::retired_keys`]: every published key other than the active one.
+    ///
+    /// A served document lists the active key inside `keys` as well as in
+    /// `public_key`; a bundle splits the two, so the active entry is filtered out
+    /// here to keep [`Bundle::public_key_doc`] a faithful round trip. Expiry is
+    /// deliberately NOT applied — that belongs at verification time, against the
+    /// clock of whoever is verifying, not to whoever parsed the document.
+    pub fn overlap_keys(&self) -> Vec<PublicKeyEntry> {
+        self.keys
+            .iter()
+            .filter(|k| !k.public_key.eq_ignore_ascii_case(&self.public_key))
             .cloned()
             .collect()
     }

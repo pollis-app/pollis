@@ -4,7 +4,7 @@
 --
 -- IMPORTANT: COMMIT-LOG-DB migration (mls_commit_log lives on the SEPARATE log
 -- DB post-#420). Applied by desktop-release.yml's second db-apply step
--- (MIGRATIONS_DIR=pollis-core/src/db/migrations-log). It must NOT go in the
+-- (MIGRATIONS_DIR=pollis-schema/migrations-log). It must NOT go in the
 -- main-DB dir. This is migration 000005 of the log DB's OWN sequence (the log DB
 -- started its numbering at 000001; do not confuse it with the main DB, whose
 -- 000007 is a permanent hole — see docs/goal-a-deploy-runbook.md).

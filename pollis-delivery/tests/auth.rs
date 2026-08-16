@@ -36,107 +36,6 @@ fn pq_pub(vk: &VerifyingKey<MlDsa44>) -> Vec<u8> {
     vk.encode().to_vec()
 }
 
-// Minimal schema: the commit-log table the DS writes, plus the `user_device`
-// table the auth path reads. Columns match the real Turso baseline
-// (mls_signature_pub BLOB, revoked_at TEXT).
-const SCHEMA: &str = "\
-CREATE TABLE mls_commit_log (\
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,\
-  conversation_id TEXT NOT NULL,\
-  epoch INTEGER NOT NULL,\
-  sender_id TEXT NOT NULL,\
-  commit_data BLOB NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  added_user_id TEXT,\
-  added_device_ids TEXT,\
-  generation INTEGER NOT NULL DEFAULT 0\
-);\
-CREATE UNIQUE INDEX idx_mls_commit_conv_gen_epoch ON mls_commit_log (conversation_id, generation, epoch);\
-CREATE TABLE mls_commit_since (\
-  conversation_id TEXT NOT NULL,\
-  user_id TEXT NOT NULL,\
-  device_id TEXT NOT NULL,\
-  since_epoch INTEGER NOT NULL,\
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  generation INTEGER NOT NULL DEFAULT 0,\
-  PRIMARY KEY (conversation_id, user_id, device_id)\
-);\
-CREATE TABLE mls_group_info (\
-  conversation_id TEXT PRIMARY KEY,\
-  epoch INTEGER NOT NULL,\
-  group_info BLOB NOT NULL,\
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  updated_by_device_id TEXT NOT NULL,\
-  generation INTEGER NOT NULL DEFAULT 0\
-);\
-CREATE TABLE mls_welcome (\
-  id TEXT PRIMARY KEY,\
-  conversation_id TEXT NOT NULL,\
-  recipient_id TEXT NOT NULL,\
-  welcome_data BLOB NOT NULL,\
-  delivered INTEGER NOT NULL DEFAULT 0,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  recipient_device_id TEXT,\
-  generation INTEGER NOT NULL DEFAULT 0\
-);\
-CREATE UNIQUE INDEX idx_mls_welcome_recipient ON mls_welcome (conversation_id, recipient_id, recipient_device_id);\
-CREATE TABLE group_member (\
-  group_id TEXT NOT NULL,\
-  user_id  TEXT NOT NULL,\
-  role     TEXT NOT NULL DEFAULT 'member',\
-  joined_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  PRIMARY KEY (group_id, user_id)\
-);\
-CREATE TABLE dm_channel_member (\
-  dm_channel_id TEXT NOT NULL,\
-  user_id       TEXT NOT NULL,\
-  added_by      TEXT NOT NULL DEFAULT '',\
-  added_at      TEXT NOT NULL DEFAULT (datetime('now')),\
-  accepted_at   TEXT,\
-  PRIMARY KEY (dm_channel_id, user_id)\
-);\
-CREATE TABLE channels (\
-  id       TEXT PRIMARY KEY,\
-  group_id TEXT NOT NULL,\
-  name     TEXT NOT NULL DEFAULT '',\
-  channel_type TEXT NOT NULL DEFAULT 'text',\
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
-);\
-CREATE TABLE user_device (\
-  device_id   TEXT PRIMARY KEY,\
-  user_id     TEXT NOT NULL,\
-  device_name TEXT,\
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),\
-  last_seen   TEXT NOT NULL DEFAULT (datetime('now')),\
-  device_cert BLOB,\
-  cert_issued_at TEXT,\
-  cert_identity_version INTEGER,\
-  mls_signature_pub BLOB,\
-  mls_signature_pub_pq BLOB,\
-  revoked_at TEXT\
-);\
-CREATE TABLE users (\
-  id TEXT PRIMARY KEY,\
-  email TEXT NOT NULL,\
-  username TEXT NOT NULL,\
-  account_id_pub BLOB,\
-  identity_version INTEGER NOT NULL DEFAULT 1\
-);\
-CREATE TABLE mls_key_package (\
-  ref_hash TEXT PRIMARY KEY,\
-  user_id  TEXT NOT NULL,\
-  device_id TEXT NOT NULL,\
-  key_package BLOB NOT NULL,\
-  claimed_at TEXT\
-);\
-CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL,\
-  user_id TEXT NOT NULL,\
-  device_id TEXT NOT NULL,\
-  last_fetched_at TEXT NOT NULL,\
-  reported_at TEXT,\
-  PRIMARY KEY (conversation_id, user_id, device_id)\
-);";
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -147,13 +46,28 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("delivery.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
+}
+
+/// Make sure `user_id` exists. `user_device.user_id` and `group_member.user_id`
+/// are real foreign keys in the shipped schema, and libsql's local backend
+/// enforces them on any connection that has not been told otherwise — so a
+/// fixture that invents a user id is only valid because nothing was looking.
+async fn seed_user(db: &Db, user_id: &str) {
+    let conn = db.conn().unwrap();
+    conn.execute(
+        "INSERT OR IGNORE INTO users (id, email, username) VALUES (?1, ?1 || '@x', ?1)",
+        libsql::params![user_id],
+    )
+    .await
+    .unwrap();
 }
 
 /// Seed a live (non-revoked) device row with the given raw 1312-byte pubkey —
 /// exactly the bytes openmls `to_public_vec()` yields for ML-DSA-44.
 async fn seed_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
+    seed_user(db, user_id).await;
     let conn = db.conn().unwrap();
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, mls_signature_pub_pq) VALUES (?1, ?2, ?3)",
@@ -167,6 +81,7 @@ async fn seed_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey<
 /// submit path's `is_member` authz gate passes (a group id is a valid MLS
 /// conversation id — a group's text channels share one MLS group keyed by it).
 async fn seed_group_membership(db: &Db, conversation_id: &str, user_id: &str) {
+    seed_user(db, user_id).await;
     let conn = db.conn().unwrap();
     conn.execute(
         "INSERT INTO group_member (group_id, user_id) VALUES (?1, ?2)",
@@ -178,6 +93,7 @@ async fn seed_group_membership(db: &Db, conversation_id: &str, user_id: &str) {
 
 /// Seed a *revoked* device (revoked_at set) — auth must reject it.
 async fn seed_revoked_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
+    seed_user(db, user_id).await;
     let conn = db.conn().unwrap();
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, mls_signature_pub_pq, revoked_at) \

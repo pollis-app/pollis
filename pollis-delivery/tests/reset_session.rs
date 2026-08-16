@@ -25,92 +25,13 @@ use pollis_delivery::otp::OtpConfig;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
 
-// Self-contained schema (foreign_keys=OFF in Db::connect_local): the tables the
-// rotate / reset-recover / purge handlers touch, columns matching the Turso
-// baseline.
-const SCHEMA: &str = "\
-CREATE TABLE users (\
-  id TEXT PRIMARY KEY,\
-  email TEXT NOT NULL UNIQUE,\
-  username TEXT NOT NULL UNIQUE,\
-  phone TEXT,\
-  avatar_url TEXT,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  account_id_pub BLOB,\
-  identity_version INTEGER NOT NULL DEFAULT 1\
-);\
-CREATE TABLE account_key_log (\
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,\
-  user_id TEXT NOT NULL,\
-  account_id_pub BLOB NOT NULL,\
-  identity_version INTEGER NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
-);\
-CREATE UNIQUE INDEX idx_account_key_log_user_version \
-  ON account_key_log (user_id, identity_version);\
-CREATE TABLE account_recovery (\
-  user_id TEXT PRIMARY KEY,\
-  identity_version INTEGER NOT NULL,\
-  salt BLOB NOT NULL,\
-  nonce BLOB NOT NULL,\
-  wrapped_key BLOB NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))\
-);\
-CREATE TABLE user_device (\
-  device_id TEXT PRIMARY KEY,\
-  user_id TEXT NOT NULL,\
-  device_name TEXT,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  last_seen TEXT NOT NULL DEFAULT (datetime('now')),\
-  device_cert BLOB,\
-  cert_issued_at TEXT,\
-  cert_identity_version INTEGER,\
-  mls_signature_pub BLOB,\
-  mls_signature_pub_pq BLOB,\
-  revoked_at TEXT\
-);\
-CREATE TABLE groups (\
-  id TEXT PRIMARY KEY,\
-  name TEXT NOT NULL,\
-  description TEXT,\
-  owner_id TEXT NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
-);\
-CREATE TABLE group_member (\
-  group_id TEXT NOT NULL,\
-  user_id TEXT NOT NULL,\
-  role TEXT NOT NULL DEFAULT 'member',\
-  joined_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  PRIMARY KEY (group_id, user_id)\
-);\
-CREATE TABLE dm_channel_member (\
-  dm_channel_id TEXT NOT NULL,\
-  user_id TEXT NOT NULL,\
-  accepted INTEGER NOT NULL DEFAULT 0,\
-  PRIMARY KEY (dm_channel_id, user_id)\
-);\
-CREATE TABLE mls_key_package (\
-  id INTEGER PRIMARY KEY AUTOINCREMENT,\
-  user_id TEXT NOT NULL,\
-  device_id TEXT,\
-  key_package BLOB NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
-);\
-CREATE TABLE mls_welcome (\
-  id INTEGER PRIMARY KEY AUTOINCREMENT,\
-  recipient_id TEXT NOT NULL,\
-  conversation_id TEXT,\
-  welcome BLOB,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
-);";
 
 async fn fresh_db() -> Arc<Db> {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("ds.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -326,10 +247,10 @@ async fn reset_recover_accepts_session_and_cleans_up() {
             format!("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', '{user_id}', 'admin')"),
             "INSERT INTO users (id, email, username) VALUES ('other', 'o@x.com', 'other')".to_string(),
             "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'other', 'admin')".to_string(),
-            format!("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('dm1', '{user_id}')"),
-            format!("INSERT INTO mls_key_package (user_id, key_package) VALUES ('{user_id}', x'00')"),
+            format!("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', '{user_id}', 'creator')"),
+            format!("INSERT INTO mls_key_package (ref_hash, user_id, key_package) VALUES ('kp1', '{user_id}', x'00')"),
             format!("INSERT INTO user_device (device_id, user_id) VALUES ('dev-old', '{user_id}')"),
-            format!("INSERT INTO mls_welcome (recipient_id) VALUES ('{user_id}')"),
+            format!("INSERT INTO mls_welcome (id, conversation_id, recipient_id, welcome_data) VALUES ('w1', 'g1', '{user_id}', x'00')"),
         ] {
             conn.execute(&sql, ()).await.expect("seed");
         }

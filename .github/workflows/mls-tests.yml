@@ -206,8 +206,18 @@ jobs:
           TURSO_TOKEN=placeholder
           EOF
 
-      # Cheap and media-free — fast signal that the DS serializer holds.
-      - name: DS serializer unit tests (pollis-delivery)
+      # The client/server wire contract (#875). Runs FIRST because it is the
+      # cheapest signal and the most load-bearing: its `compile_fail` doctests ARE
+      # the guarantee that a client body missing or misspelling a field cannot
+      # compile, so a contract that CI never exercises would be worth nothing.
+      - name: DS write-API contract (pollis-api)
+        run: cargo test -p pollis-api
+
+      # Cheap and media-free — fast signal that the DS serializer holds. Includes
+      # the route-coverage test: every endpoint declared in `pollis-api` must be
+      # served by the real router (#918).
+      - name: DS serializer + route coverage (pollis-delivery)
+        if: ${{ !cancelled() }}
         run: cargo test -p pollis-delivery
 
       # openmls-level MLS state-machine tests (mls/tests.rs, reconcile, etc.).

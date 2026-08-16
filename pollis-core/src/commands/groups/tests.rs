@@ -1,30 +1,15 @@
 use rusqlite::Connection;
 
-use crate::db::BASELINE_SQL as BASELINE;
-
-/// Extra tables from numbered migrations that the base schema doesn't include.
-const EXTRA_TABLES: &str = "
-    CREATE TABLE IF NOT EXISTS conversation_watermark (
-        conversation_id TEXT NOT NULL,
-        user_id         TEXT NOT NULL,
-        device_id       TEXT NOT NULL,
-        last_fetched_at TEXT NOT NULL,
-        PRIMARY KEY (conversation_id, user_id, device_id)
-    );
-    CREATE TABLE IF NOT EXISTS user_device (
-        device_id   TEXT PRIMARY KEY,
-        user_id     TEXT NOT NULL,
-        device_name TEXT,
-        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-        last_seen   TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-";
-
+/// The SHIPPED remote schema — baseline plus every numbered migration, in the
+/// order `scripts/db-apply.sh` applies them. #875: this used to be `BASELINE`
+/// plus a hand-written `EXTRA_TABLES` block standing in for the later
+/// migrations, which is how a fixture ends up laxer than production.
 fn db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    conn.execute_batch(BASELINE).unwrap();
-    conn.execute_batch(EXTRA_TABLES).unwrap();
+    for sql in pollis_schema::main_scripts() {
+        conn.execute_batch(sql).unwrap();
+    }
     conn
 }
 

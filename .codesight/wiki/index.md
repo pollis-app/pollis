@@ -32,7 +32,8 @@ Start here. Navigate to the article you need.
 | Desktop shell | Tauri 2 (Rust host + system WebView renderer) | `src-tauri/src/` |
 | Backend (logic) | Rust workspace crate `pollis-core` | `pollis-core/src/` |
 | Backend (host binding) | Tauri host — `#[tauri::command]` shims, plugins, `invoke_handler!`, lifecycle | `src-tauri/src/` |
-| Remote DB | Turso (libSQL) | `pollis-core/src/db/migrations/000000_baseline.sql` + `000*.sql` |
+| Remote DB | Turso (libSQL) | `pollis-schema/migrations/000000_baseline.sql` + `000*.sql` |
+| DS write API | One typed struct per `POST /v1/…`, shared by client and server | `pollis-api/src/` |
 | Local DB | SQLite (rusqlite) | `pollis-core/src/db/local_schema.sql` |
 | Encryption | OpenMLS (RFC 9420) | `pollis-core/src/commands/mls.rs` |
 | Media | LiveKit (Rust crate) | `pollis-core/src/commands/voice/`, `livekit/` |

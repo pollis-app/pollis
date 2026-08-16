@@ -67,14 +67,14 @@ pub async fn publish_group_info(
     // W4 seam: route the GroupInfo republish through the Delivery Service (the
     // sole writer of the log DB). Mirrors `submit_commit`.
     use base64::Engine as _;
-    let body = serde_json::json!({
-        "conversation_id": conversation_id,
-        "generation": generation,
-        "epoch": epoch as i64,
-        "group_info": base64::engine::general_purpose::STANDARD.encode(&bytes),
-        "updated_by_device_id": device_id,
-    });
-    let resp = super::ds_client::ds_post(state, "/v1/group-info", &body).await?;
+    let body = pollis_api::writes::GroupInfoBody {
+        conversation_id: conversation_id.to_string(),
+        generation,
+        epoch: epoch as i64,
+        group_info: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        updated_by_device_id: device_id,
+    };
+    let resp = super::ds_client::ds_post(state, &body).await?;
     if !resp.status().is_success() {
         let s = resp.status();
         let txt = resp.text().await.unwrap_or_default();
@@ -2009,29 +2009,79 @@ pub fn try_mls_decrypt(
     conversation_id: &str,
     ciphertext: &[u8],
 ) -> Option<(Vec<u8>, String)> {
-    let provider = PollisProvider::new(conn);
-    let mut group = load_stored_group(conn, conversation_id)?;
+    MlsDecryptor::open(conn, conversation_id)?.decrypt(ciphertext)
+}
 
-    let mut reader: &[u8] = ciphertext;
-    let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
-    let protocol_msg = msg_in.try_into_protocol_message().ok()?;
-    // Envelopes from a RETIRED lineage cannot be decrypted by the successor,
-    // and their predecessor group is gone. Fail fast rather than handing a
-    // foreign-group message to `process_message`, whose error would be
-    // indistinguishable from a genuine decrypt failure.
-    if protocol_msg.group_id() != group.group_id() {
-        return None;
+/// A group loaded **once** for a RUN of envelopes that are all sealed at the
+/// epoch it currently sits at.
+///
+/// [`try_mls_decrypt`] is this type used for a run of length one, and that was
+/// the whole decrypt path until #875: every envelope re-read the join config,
+/// group context, ratchet tree, transcript hash, confirmation tag, leaf index,
+/// group state, message secrets, resumption PSKs and proposal queue out of
+/// `mls_kv` and re-parsed them, to decrypt one message and throw the lot away.
+/// Measured at 12 `mls_kv` SELECTs + 1 UPDATE per message, so a 200-message
+/// catch-up was 2400 statements where 12 would do.
+///
+/// **Why holding the group is not a shortcut.** Decrypting an application
+/// message mutates exactly one piece of group state — the secret tree inside
+/// `message_secrets_store`, which ratchets forward so a consumed key cannot be
+/// reused — and openmls persists that itself, inside `process_message`, before
+/// it returns (`will_modify_secret_tree` → `write_message_secrets`), precisely
+/// so forward secrecy survives a crash mid-batch. Nothing else about the group
+/// changes. So the reload this replaces was reading back the bytes the previous
+/// decrypt had just written: an in-memory group carried across a run is
+/// byte-identical to a group reloaded before each envelope, and a crash
+/// half-way through a run leaves exactly the state a crash half-way through the
+/// old loop left.
+///
+/// **What it must NOT span.** A commit changes the group out from under a held
+/// copy, so a decryptor must not outlive the epoch it was opened at. The ingest
+/// interleave (`messages::ingest`) opens one per `on_epoch` firing and drops it
+/// before the replay applies the next commit, which is the only correct
+/// lifetime — anything longer would decrypt against a superseded key schedule.
+pub struct MlsDecryptor<'a> {
+    provider: PollisProvider<'a>,
+    group: MlsGroup,
+}
+
+impl<'a> MlsDecryptor<'a> {
+    /// Load the conversation's live group, or `None` when this device has none
+    /// (never joined, or forgotten) — the same "cannot decrypt" answer
+    /// [`try_mls_decrypt`] gives, so callers need no new branch.
+    pub fn open(conn: &'a rusqlite::Connection, conversation_id: &str) -> Option<Self> {
+        let group = load_stored_group(conn, conversation_id)?;
+        Some(Self {
+            provider: PollisProvider::new(conn),
+            group,
+        })
     }
-    let processed = group.process_message(&provider, protocol_msg).ok()?;
 
-    // Grab the authenticated sender credential BEFORE `into_content` consumes it.
-    let sender_user_id = parse_credential_user_id(processed.credential());
-
-    match processed.into_content() {
-        ProcessedMessageContent::ApplicationMessage(app_msg) => {
-            Some((app_msg.into_bytes(), sender_user_id))
+    /// Decrypt one envelope. See [`try_mls_decrypt`] for the contract — this is
+    /// that function's body, and the `(plaintext, MLS-authenticated sender)`
+    /// pair it returns is load-bearing for sealed sender.
+    pub fn decrypt(&mut self, ciphertext: &[u8]) -> Option<(Vec<u8>, String)> {
+        let mut reader: &[u8] = ciphertext;
+        let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
+        let protocol_msg = msg_in.try_into_protocol_message().ok()?;
+        // Envelopes from a RETIRED lineage cannot be decrypted by the successor,
+        // and their predecessor group is gone. Fail fast rather than handing a
+        // foreign-group message to `process_message`, whose error would be
+        // indistinguishable from a genuine decrypt failure.
+        if protocol_msg.group_id() != self.group.group_id() {
+            return None;
         }
-        _ => None,
+        let processed = self.group.process_message(&self.provider, protocol_msg).ok()?;
+
+        // Grab the authenticated sender credential BEFORE `into_content` consumes it.
+        let sender_user_id = parse_credential_user_id(processed.credential());
+
+        match processed.into_content() {
+            ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                Some((app_msg.into_bytes(), sender_user_id))
+            }
+            _ => None,
+        }
     }
 }
 

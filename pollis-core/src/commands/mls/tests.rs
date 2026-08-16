@@ -2896,3 +2896,124 @@ fn assert_rejoin_then_next_commit_works(
     let (pt, _) = try_mls_decrypt(joiner_db, conv, &ct).expect("rejoined member decrypts");
     assert_eq!(pt, b"after recovery", "the rejoined group must apply the next commit");
 }
+
+// ── #875: the shape of the decrypt hot path ──────────────────────────────────
+
+/// Build a two-member group and hand back both members' DBs.
+fn alice_and_bob(conv_id: &str) -> (rusqlite::Connection, rusqlite::Connection) {
+    let alice_db = make_db();
+    let bob_db = make_db();
+    create_group(&alice_db, conv_id, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_commit, welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
+    join_via_welcome(&bob_db, &welcome);
+    (alice_db, bob_db)
+}
+
+/// #875 regression guard: a run of envelopes sealed at one epoch must cost ONE
+/// group load, not one per message.
+///
+/// This is a GUARD, not a proof of correctness — `MlsDecryptor` is a pure
+/// optimisation and the tests that prove it decrypts the right bytes are the
+/// roundtrip tests above. What this pins is the SHAPE: before #875 every
+/// envelope re-read the entire group out of `mls_kv` (measured: 12 SELECTs + 1
+/// UPDATE per message), so a 200-message catch-up ran 2400 statements. The
+/// per-message floor is the one UPDATE openmls itself makes to persist the
+/// ratcheted secret tree — that write is forward secrecy and must never be
+/// optimised away, so it is asserted to still be there.
+#[test]
+fn a_run_of_envelopes_loads_the_group_once() {
+    let conv_id = "01JTEST0000000000000000BAT";
+    let (alice_db, bob_db) = alice_and_bob(conv_id);
+
+    const N: usize = 10;
+    let cts: Vec<Vec<u8>> = (0..N)
+        .map(|i| try_mls_encrypt(&alice_db, conv_id, format!("m{i}").as_bytes()).unwrap())
+        .collect();
+
+    let before = crate::signal::mls_storage::counters::snapshot();
+    {
+        let mut decryptor = MlsDecryptor::open(&bob_db, conv_id).expect("group is stored");
+        for (i, ct) in cts.iter().enumerate() {
+            let (pt, sender) = decryptor.decrypt(ct).expect("decrypt");
+            assert_eq!(pt, format!("m{i}").as_bytes(), "batched decrypt must return the same plaintext");
+            assert_eq!(sender, "alice");
+        }
+    }
+    let (reads, writes) = crate::signal::mls_storage::counters::since(before);
+
+    // One group load, whatever its internal read count, amortised over N
+    // messages — so reads must be far below the old 12-per-message. The bound is
+    // deliberately loose (openmls may add or drop a stored field); what it
+    // forbids is the per-message reload coming back.
+    assert!(
+        reads < 2 * N as u64,
+        "expected roughly one group load for the whole run, got {reads} reads for {N} messages \
+         — the per-envelope group reload is back"
+    );
+    // Exactly one secret-tree persist per message. Fewer would mean a consumed
+    // ratchet key survived a crash; more would mean redundant writes.
+    assert_eq!(writes, N as u64, "one message_secrets write per decrypt, no more and no fewer");
+}
+
+/// The same run driven one envelope at a time through the public
+/// [`try_mls_decrypt`] entry point still works — that path opens a decryptor per
+/// call, which is what every non-batched caller does.
+#[test]
+fn single_shot_decrypt_still_works_and_costs_a_full_load() {
+    let conv_id = "01JTEST0000000000000000SIN";
+    let (alice_db, bob_db) = alice_and_bob(conv_id);
+
+    let ct = try_mls_encrypt(&alice_db, conv_id, b"solo").unwrap();
+    let before = crate::signal::mls_storage::counters::snapshot();
+    let (pt, sender) = try_mls_decrypt(&bob_db, conv_id, &ct).expect("decrypt");
+    let (reads, _writes) = crate::signal::mls_storage::counters::since(before);
+    assert_eq!(pt, b"solo");
+    assert_eq!(sender, "alice");
+    // The cost of ONE load — the figure the batched test amortises away.
+    assert!(reads >= 8, "a cold decrypt loads the whole group; got {reads} reads");
+}
+
+/// Prints the before/after figures behind #875 rather than asserting them, so
+/// the numbers in `.codesight/wiki/mls.md` can be re-derived on any machine:
+/// `cargo test -p pollis-core --no-default-features --features test-harness
+/// --lib measure_decrypt -- --nocapture`.
+///
+/// The statement counts are exact and machine-independent; the timings are a
+/// DEBUG build against in-memory SQLite, so they understate the real gain — a
+/// production build reads through SQLCipher on disk, where a `mls_kv` SELECT
+/// costs far more relative to the crypto.
+#[test]
+fn measure_decrypt_statement_count() {
+    let conv_id = "01JTEST0000000000000000MEA";
+    let (alice_db, bob_db) = alice_and_bob(conv_id);
+
+    const N: usize = 50;
+    let cts: Vec<Vec<u8>> = (0..N)
+        .map(|i| try_mls_encrypt(&alice_db, conv_id, format!("m{i}").as_bytes()).unwrap())
+        .collect();
+
+    let before = crate::signal::mls_storage::counters::snapshot();
+    let t0 = std::time::Instant::now();
+    {
+        let mut d = MlsDecryptor::open(&bob_db, conv_id).unwrap();
+        for ct in &cts {
+            d.decrypt(ct).expect("decrypt");
+        }
+    }
+    let batched_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let (reads, writes) = crate::signal::mls_storage::counters::since(before);
+    println!("BATCHED  : reads={reads} writes={writes} => per-message reads={:.1} time={batched_ms:.2}ms", reads as f64 / N as f64);
+
+    let cts2: Vec<Vec<u8>> = (0..N)
+        .map(|i| try_mls_encrypt(&alice_db, conv_id, format!("n{i}").as_bytes()).unwrap())
+        .collect();
+    let before = crate::signal::mls_storage::counters::snapshot();
+    let t1 = std::time::Instant::now();
+    for ct in &cts2 {
+        try_mls_decrypt(&bob_db, conv_id, ct).expect("decrypt");
+    }
+    let percall_ms = t1.elapsed().as_secs_f64() * 1000.0;
+    let (reads2, writes2) = crate::signal::mls_storage::counters::since(before);
+    println!("PER-CALL : reads={reads2} writes={writes2} => per-message reads={:.1} time={percall_ms:.2}ms", reads2 as f64 / N as f64);
+}

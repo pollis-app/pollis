@@ -36,6 +36,7 @@
 //! the relay makes no metadata-plane query per connection (§11.1).
 
 pub mod anchor;
+pub mod backoff;
 pub mod circuit;
 pub mod client;
 pub mod config;
@@ -57,6 +58,7 @@ pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory, StaticPathFact
 pub use client::{ClientIdentity, RelayClient, RelayLink};
 pub use anchor::{AccountAnchor, AccountKeyLeaf, AnchorError, AnchorPolicy, AnchorVerifier};
 pub use config::{RateLimitFileConfig, RelayFileConfig};
+pub use backoff::{jittered, jittered_down};
 pub use http::{http_client, http_client_builder};
 pub use policy::{
     verify_revocations, Admission, FinalAction, OverlayMode, PlannedRoute, RelayIdentity,

@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::State,
@@ -24,7 +23,6 @@ use axum::{
 };
 use rand::rngs::OsRng;
 use rand::{Rng, RngCore};
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use ulid::Ulid;
 
@@ -32,6 +30,13 @@ use crate::redact::mask_email;
 use crate::session::SessionStore;
 use crate::writes::bad_request;
 use crate::AppState;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::otp::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::otp::*;
 
 /// Tunables for the OTP + session machinery, read from DS env in
 /// [`OtpConfig::from_env`].
@@ -229,19 +234,7 @@ impl OtpStore {
     }
 }
 
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 // ── POST /v1/auth/request-otp ────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct RequestOtpBody {
-    pub email: String,
-}
 
 /// POST /v1/auth/request-otp — generate + store a 6-digit OTP and email it via
 /// Resend. **Always 200** regardless of whether the email maps to an account
@@ -271,7 +264,7 @@ pub async fn process_request_otp(otp: &OtpStore, cfg: &OtpConfig, email: &str) {
         None => format!("{:06}", OsRng.gen_range(0..1_000_000u32)),
     };
 
-    let outcome = otp.prepare(email, &code, cfg.ttl_secs, cfg.resend_throttle_secs, now_unix());
+    let outcome = otp.prepare(email, &code, cfg.ttl_secs, cfg.resend_throttle_secs, crate::util::now_unix());
 
     match outcome {
         PrepareOutcome::Throttled => {}
@@ -295,7 +288,7 @@ pub async fn process_request_otp(otp: &OtpStore, cfg: &OtpConfig, email: &str) {
 }
 
 async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Result<()> {
-    let client = reqwest::Client::new();
+    let client = crate::util::http_client();
     let body = serde_json::json!({
         "from": "Pollis <noreply@mail.pollis.com>",
         "to": [email],
@@ -316,18 +309,6 @@ async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Resul
 }
 
 // ── POST /v1/auth/verify-otp ─────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct VerifyOtpBody {
-    pub email: String,
-    pub code: String,
-    pub device_id: String,
-    /// Informational only — verify-otp NEVER writes `account_id_pub` (identity is
-    /// established by the separate, CAS-guarded `establish-identity`). Accepted
-    /// for forward-compat with the client and deliberately ignored here.
-    #[serde(default)]
-    pub account_id_pub: Option<String>,
-}
 
 /// POST /v1/auth/verify-otp — constant-time, attempt-limited code check; then
 /// create-or-load the account and mint an OTP-session token. On success returns
@@ -401,7 +382,7 @@ pub async fn apply_verify_otp(
     // clean 5xx and the *same* code still works on retry, instead of being burned
     // and disguised as "invalid code" (#518). Wrong/expired/locked codes are
     // rejected here and their attempt accounting stands.
-    match otp.check(email, code, cfg.max_attempts, now_unix()) {
+    match otp.check(email, code, cfg.max_attempts, crate::util::now_unix()) {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => return Ok(VerifyOtpResult::LockedOut),
         VerifyOutcome::Invalid | VerifyOutcome::Expired | VerifyOutcome::NotFound => {
@@ -409,10 +390,23 @@ pub async fn apply_verify_otp(
         }
     }
 
-    // Code is good: create or load the account. Mirrors pollis-core
-    // `auth::verify_otp` — server-gen ULID id + a default username from the email
-    // prefix plus a 4-char ULID suffix for uniqueness. Any error here
-    // `?`-propagates to a 5xx WITHOUT consuming the code (the retry then heals).
+    // Code is good: create or load the account — server-gen ULID id + a default
+    // username from the email prefix plus a 4-char ULID suffix for uniqueness.
+    // Any error here `?`-propagates to a 5xx WITHOUT consuming the code (the
+    // retry then heals).
+    //
+    // `pollis-core`'s `auth::resolve_or_create_user_by_email` is the client twin
+    // of this block (its dev-only, no-DS login shortcut). The two crates cannot
+    // depend on each other, so they are kept deliberately identical instead —
+    // diff them if you change either.
+    //
+    // Canonicalize here rather than relying on the handler having done it:
+    // `users.email` is `NOT NULL UNIQUE`, so the string IS the account identity,
+    // and the only place that can guarantee "one address, one row" is the
+    // function holding the INSERT. `apply_verify_otp` is also called directly by
+    // the in-process test harnesses, which do not go through the handler's trim.
+    let email = email.trim();
+
     let mut rows = conn
         .query(
             "SELECT id, username, account_id_pub FROM users WHERE email = ?1",
@@ -445,7 +439,7 @@ pub async fn apply_verify_otp(
         }
     };
 
-    let now = now_unix();
+    let now = crate::util::now_unix();
     let session_token = sessions.mint(&user_id, email, device_id, cfg.session_ttl_secs, now);
 
     // Single-use: consume ONLY now that the account exists and the session is
@@ -519,10 +513,6 @@ mod tests {
     use crate::db::Db;
     use crate::session::SessionStore;
 
-    // Minimal `users` schema the account-write path reads/writes (id, email UNIQUE,
-    // username, account_id_pub). Matches the columns `apply_verify_otp` touches.
-    const USERS_SCHEMA: &str = "CREATE TABLE users (\
-        id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, username TEXT, account_id_pub BLOB);";
 
     // A local libsql connection for the account-write path. `with_users` toggles
     // whether the `users` table exists — omitting it makes the write fail, which is
@@ -534,7 +524,11 @@ mod tests {
         let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
         let conn = db.conn().unwrap();
         if with_users {
-            conn.execute_batch(USERS_SCHEMA).await.unwrap();
+            // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
         }
         (db, conn)
     }
@@ -600,6 +594,111 @@ mod tests {
         ));
     }
 
+    /// Count the `users` rows, so "did this create a second account?" is a
+    /// direct observation rather than an inference.
+    async fn user_count(conn: &crate::db::ConnGuard) -> i64 {
+        let mut rows = conn.query("SELECT COUNT(*) FROM users", ()).await.unwrap();
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    }
+
+    async fn verify(
+        conn: &crate::db::ConnGuard,
+        otp: &OtpStore,
+        sessions: &SessionStore,
+        cfg: &OtpConfig,
+        email: &str,
+    ) -> VerifyOtpResult {
+        otp.prepare(email, "123456", cfg.ttl_secs, 0, crate::util::now_unix());
+        apply_verify_otp(conn, otp, sessions, cfg, email, "123456", "dev-1")
+            .await
+            .expect("verify-otp must succeed")
+    }
+
+    /// `users.email` is `NOT NULL UNIQUE`, so the address string IS the account's
+    /// identity: two spellings of one address must land on one row. The handler
+    /// trims, but `apply_verify_otp` is also called directly (the desktop and TUI
+    /// in-process harnesses do), so the guarantee has to live here — at the
+    /// function that holds the INSERT.
+    #[tokio::test]
+    async fn the_same_address_spelled_two_ways_resolves_to_one_account() {
+        let (_db, conn) = conn_with(true).await;
+        let (otp, sessions, cfg) = (OtpStore::default(), SessionStore::default(), OtpConfig::default());
+
+        let first = verify(&conn, &otp, &sessions, &cfg, "alice@x.com").await;
+        let padded = verify(&conn, &otp, &sessions, &cfg, "  alice@x.com \n").await;
+
+        let (id_a, new_a) = match first {
+            VerifyOtpResult::Ok { user_id, is_new_account, .. } => (user_id, is_new_account),
+            _ => panic!("expected Ok"),
+        };
+        let (id_b, new_b) = match padded {
+            VerifyOtpResult::Ok { user_id, is_new_account, .. } => (user_id, is_new_account),
+            _ => panic!("expected Ok"),
+        };
+
+        assert!(new_a, "the first sign-in creates the account");
+        assert!(!new_b, "the padded spelling must find the account, not make one");
+        assert_eq!(id_a, id_b);
+        assert_eq!(user_count(&conn).await, 1, "one address must never own two accounts");
+    }
+
+    /// The default username contract the client mirrors: the email's local part,
+    /// an underscore, and the last four characters of the account's ULID. An
+    /// address with no local part yields `"_<suffix>"` — `split('@')` returns an
+    /// empty first segment, never `None`.
+    #[tokio::test]
+    async fn the_default_username_is_the_email_prefix_and_a_ulid_suffix() {
+        let (_db, conn) = conn_with(true).await;
+        let (otp, sessions, cfg) = (OtpStore::default(), SessionStore::default(), OtpConfig::default());
+
+        match verify(&conn, &otp, &sessions, &cfg, "alice@x.com").await {
+            VerifyOtpResult::Ok { user_id, username, .. } => {
+                assert_eq!(username, format!("alice_{}", &user_id[user_id.len() - 4..]));
+            }
+            _ => panic!("expected Ok"),
+        }
+
+        match verify(&conn, &otp, &sessions, &cfg, "@x.com").await {
+            VerifyOtpResult::Ok { user_id, username, .. } => {
+                assert_eq!(username, format!("_{}", &user_id[user_id.len() - 4..]));
+            }
+            _ => panic!("expected Ok"),
+        }
+    }
+
+    /// A returning account reports whether it has published an identity key —
+    /// the flag the client's enrollment gate turns on. A NULL column is "not
+    /// yet", never an error.
+    #[tokio::test]
+    async fn has_identity_reflects_the_stored_key_and_null_reads_as_absent() {
+        let (_db, conn) = conn_with(true).await;
+        let (otp, sessions, cfg) = (OtpStore::default(), SessionStore::default(), OtpConfig::default());
+
+        // No key yet.
+        match verify(&conn, &otp, &sessions, &cfg, "bob@x.com").await {
+            VerifyOtpResult::Ok { has_identity, is_new_account, .. } => {
+                assert!(is_new_account);
+                assert!(!has_identity);
+            }
+            _ => panic!("expected Ok"),
+        }
+
+        conn.execute(
+            "UPDATE users SET account_id_pub = ?1 WHERE email = 'bob@x.com'",
+            libsql::params![vec![7u8; 32]],
+        )
+        .await
+        .unwrap();
+
+        match verify(&conn, &otp, &sessions, &cfg, "bob@x.com").await {
+            VerifyOtpResult::Ok { has_identity, is_new_account, .. } => {
+                assert!(!is_new_account);
+                assert!(has_identity);
+            }
+            _ => panic!("expected Ok"),
+        }
+    }
+
     // #518: a correct code + a failing account-write must surface as an error (5xx),
     // NOT "invalid code", and must leave the code usable so an immediate retry
     // succeeds once the DB is healthy.
@@ -609,7 +708,7 @@ mod tests {
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();
-        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, now_unix());
+        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, crate::util::now_unix());
 
         let first =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
@@ -619,7 +718,11 @@ mod tests {
         );
 
         // Heal the DB and retry the SAME code — it must succeed (was not burned).
-        conn.execute_batch(USERS_SCHEMA).await.unwrap();
+        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
         let second =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
         assert!(
@@ -635,7 +738,7 @@ mod tests {
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();
-        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, now_unix());
+        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, crate::util::now_unix());
 
         let first =
             apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
@@ -654,7 +757,7 @@ mod tests {
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();
-        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, now_unix());
+        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, crate::util::now_unix());
 
         for _ in 0..cfg.max_attempts {
             let r =

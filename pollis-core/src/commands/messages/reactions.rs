@@ -23,12 +23,12 @@ pub async fn add_reaction(
 ) -> Result<()> {
     // DS seam: the server generates the row id + timestamp and binds the
     // reacting user to the authenticated identity.
-    let body = serde_json::json!({
-        "message_id": message_id,
-        "emoji": emoji,
-        "user_id": user_id,
+    let body = pollis_api::messages::AddReaction(pollis_api::messages::ReactionBody {
+        message_id,
+        emoji,
+        user_id: Some(user_id),
     });
-    crate::commands::mls::ds_post_ok(state, "/v1/reactions/add", &body).await?;
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(())
 }
@@ -41,12 +41,12 @@ pub async fn remove_reaction(
     emoji: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let body = serde_json::json!({
-        "message_id": message_id,
-        "emoji": emoji,
-        "user_id": user_id,
+    let body = pollis_api::messages::RemoveReaction(pollis_api::messages::ReactionBody {
+        message_id,
+        emoji,
+        user_id: Some(user_id),
     });
-    crate::commands::mls::ds_post_ok(state, "/v1/reactions/remove", &body).await?;
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(())
 }

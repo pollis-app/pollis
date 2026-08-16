@@ -141,7 +141,7 @@ These are enforced in review; a PR that ignores them will be sent back.
   test that proves the invalid state can't be created — "happy path works" is not
   coverage. See [`docs/backend-core-invariants.md`](docs/backend-core-invariants.md).
 - **Remote schema changes are numbered, additive migrations** in
-  `pollis-core/src/db/migrations/` — never edit the baseline, never hand-insert
+  `pollis-schema/migrations/` — never edit the baseline, never hand-insert
   into `schema_migrations`, and keep every migration backward-compatible with the
   shipped app.
 - **Keep the TypeScript types in sync with the Rust structs** across the `invoke`

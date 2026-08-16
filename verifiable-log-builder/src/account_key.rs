@@ -26,8 +26,12 @@ pub const TENANT: &str = "account-key";
 /// `:account-keys` suffix. The commit-log context must NOT change (continuity of
 /// already-published STHs); this distinct context guarantees an STH signed for
 /// one tree fails verification against the other even though both use the same
-/// Ed25519 key. Verified via [`verifiable_log::Sth::verify_with_context`].
-pub const STH_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v2:account-keys";
+/// key. Verified via [`verifiable_log::Sth::verify_with_context`].
+///
+/// Re-exported from the core rather than restated: the bytes are the tree's
+/// identity, and a context spelled out in several crates is one that can drift
+/// into two trees that silently do not verify each other's heads.
+pub use verifiable_log::STH_CONTEXT_ACCOUNT_KEYS as STH_CONTEXT;
 
 /// The canonical, frozen leaf payload committing to a single account
 /// identity-key version: which public key was authoritative for `user_id` at

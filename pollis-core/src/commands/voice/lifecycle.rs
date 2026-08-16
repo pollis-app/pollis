@@ -194,17 +194,16 @@ pub async fn prepare_voice_connection(
             warm_url.clone()
         };
         let probe = format!("{twirp}/rtc/validate");
-        // Short timeout — if the server is slow there's nothing to gain by
-        // hanging on. The handshake is what we care about, not the response.
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-        {
-            Ok(c) => c,
-            Err(_) => return,
-        };
+        // The SHARED direct client (`None` = direct: LiveKit is deliberately not
+        // overlaid, §14.4). Building one here defeated the point of the probe —
+        // a fresh client's connection pool and TLS session cache die with the
+        // client, so the handshake this paid for was thrown away before the user
+        // could ever reach it. Short timeout, per-request so the shared client
+        // keeps its own defaults: if the server is slow there is nothing to gain
+        // by hanging on.
+        let client = crate::net::overlay::http_client(None);
         let started = Instant::now();
-        match client.get(&probe).send().await {
+        match client.get(&probe).timeout(Duration::from_secs(5)).send().await {
             Ok(_resp) => {
                 eprintln!(
                     "[voice] warmup probe to {twirp} completed in {:.0}ms",

@@ -362,7 +362,7 @@ async fn ds_auth(
         method.as_str(),
         uri.path(),
         body,
-        pollis_delivery::auth::now_unix(),
+        pollis_delivery::util::now_unix() as i64,
     )
     .await
     .map_err(|rej| rej.into_response())

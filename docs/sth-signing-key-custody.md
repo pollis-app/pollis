@@ -137,6 +137,7 @@ real one.
 | Pinned key set | `pollis-core/src/commands/transparency.rs` | `PINNED_LOG_PUBLIC_KEYS: &[PinnedKey]`, each with `key_id`, `public_key`, `not_after` |
 | Served key list | `verifiable-log-serve/src/bundle.rs` | `PublicKeyDoc.keys: Vec<PublicKeyEntry>`; the single `public_key` field is still populated for verifiers that predate the list |
 | STH key selection | `verifiable-log/src/sth.rs` | `Sth.key_id: Option<String>` plus `verify_any[_with_context]` |
+| Candidate-key derivation | `verifiable-log-serve/src/bundle.rs` | `PublicKeyDoc::verifying_candidates(now_ms)` / `Bundle::key_candidates(now_ms)` — the one place a document becomes verifying keys |
 | Overlap publishing | `builder --retired-key <hex>:<not_after_ms>` | repeatable; emits `retired_keys` into the bundle |
 | Rebuilder | `.github/workflows/rebuild-verify.yml` | `PINNED_LOG_KEY` accepts a comma/space-separated list |
 | Website | `website/artifacts.js` | `PINNED_KEYS` + `livePinnedKeys()` |
@@ -167,6 +168,25 @@ build pinned anything at the time.
 retired key stops being accepted on schedule even on a client that never updates again. A
 wholly expired set withholds trust (*Unavailable*) rather than alarming — "my pins aged
 out" is not evidence of a hostile host.
+
+**Every verify path applies the overlap set — #875.** As shipped, only
+`remote::verify_remote` did. `group`, `account` and `release` each rebuilt a
+verification-side bundle with `retired_keys: Vec::new()` and verified heads against the
+single active key, so an honest log inside its own overlap window — including the two-pass
+window in §7 step 5, where `public_key.json` and `sth/latest.json` legitimately move at
+different moments — passed `pollis-verify verify` while making the shipped client raise a
+hard ALARM on all three of `self_audit_account_key`, `audit_peer_account_key` and
+`verify_own_build`. Fixed by routing all four through `Bundle::key_candidates` +
+`Sth::verify_any[_with_context]`; regression-covered by
+`verifiable-log-serve/tests/key_rotation.rs`, one test per path, with the closed-window and
+never-published-key negatives asserted alongside.
+
+**The pin stays anchored to the ACTIVE served key.** `check_pin` compares against
+`public_key`, not against the served `keys` array. Widening it to the set looks tempting and
+is a downgrade: a hostile host could publish the genuine pinned key as a retired entry, sign
+every head with its own key, and pass a pin check on a key it never used. The pin is *this
+build's* claim about what it will trust; the overlap set is the *log's* claim about what it
+will accept. They are different questions and must not be merged.
 
 ## 6. Split the anchor from the signer
 

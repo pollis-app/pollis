@@ -6,6 +6,11 @@
 //! inclusion proofs, and consistency between STHs. Exits non-zero with a clear
 //! report if anything fails.
 //!
+//! The bundle shape and the check loop both live in the library
+//! ([`verifiable_log::bundle`], [`verifiable_log::monitor`]) so this binary is a
+//! thin argument-parsing shell over the same code the builder's gate suites
+//! verify against — the three used to be three separate transcriptions.
+//!
 //! A `gen-example` subcommand emits a known-good fixture so the verifier is
 //! easy to try (and so the test-suite has a round-trip target).
 
@@ -15,53 +20,12 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use ml_dsa::Keypair;
 use verifiable_log::SigningKey;
-use serde::{Deserialize, Serialize};
 
+use verifiable_log::bundle::{Bundle, ConsistencyCheck, InclusionCheck};
+use verifiable_log::monitor::{unique_invariants, verify_bundle, VerifyOptions};
 use verifiable_log::{
-    is_equivocation, proof, verifying_key_from_hex, ConsistencyProof, Entry, InclusionProof, Sth,
-    UniqueDataInvariant, VerifiableLog,
+    sth_context_for_tree, Entry, Sth, UniqueDataInvariant, VerifiableLog, STH_CONTEXTS,
 };
-
-/// Top-level fixture / wire bundle the monitor consumes and `gen-example`
-/// produces. Every section except `public_key` is optional, so a fixture can
-/// exercise just the checks it cares about.
-#[derive(Debug, Serialize, Deserialize)]
-struct Bundle {
-    /// Ed25519 log public key, hex (32 bytes).
-    public_key: String,
-    /// Signed Tree Heads, oldest first.
-    #[serde(default)]
-    sths: Vec<Sth>,
-    /// Full ordered log contents. When present, replayed to confirm each STH's
-    /// root and to run tenant invariants.
-    #[serde(default)]
-    entries: Vec<Entry>,
-    /// Tenants for which the example uniqueness invariant is enforced during
-    /// replay.
-    #[serde(default)]
-    enforce_unique: Vec<String>,
-    /// Inclusion proofs to verify.
-    #[serde(default)]
-    inclusion: Vec<InclusionCheck>,
-    /// Consistency proofs to verify (indices reference `sths`).
-    #[serde(default)]
-    consistency: Vec<ConsistencyCheck>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct InclusionCheck {
-    entry: Entry,
-    proof: InclusionProof,
-    /// Index into `sths` whose root the proof is checked against.
-    sth_index: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ConsistencyCheck {
-    old_index: usize,
-    new_index: usize,
-    proof: ConsistencyProof,
-}
 
 #[derive(Parser)]
 #[command(
@@ -79,6 +43,20 @@ enum Command {
     Verify {
         /// Path to the JSON fixture.
         fixture: PathBuf,
+        /// Which tree the bundle belongs to. Selects the STH domain-separation
+        /// context: one key signs all three trees, and a head minted for one
+        /// tree deliberately does not verify under another's context, so a
+        /// bundle checked under the wrong tree reports FAIL for an honest log.
+        /// There is no auto-detection — the bundle does not name its own tree,
+        /// and guessing would turn "which tree?" into an answer the log gets to
+        /// choose.
+        #[arg(long, default_value = "commit-log", value_parser = tree_names())]
+        tree: String,
+        /// Wall-clock milliseconds used to expire rotation-overlap keys.
+        /// Defaults to the system clock; pass it explicitly for a reproducible
+        /// verdict (tests, or checking what a bundle looked like at a date).
+        #[arg(long)]
+        now_ms: Option<u64>,
     },
     /// Write a known-good example fixture to a path.
     GenExample {
@@ -87,10 +65,20 @@ enum Command {
     },
 }
 
+/// The accepted `--tree` values, derived from the one context table so a fourth
+/// tree cannot be added to the library and missed here.
+fn tree_names() -> clap::builder::PossibleValuesParser {
+    clap::builder::PossibleValuesParser::new(STH_CONTEXTS.iter().map(|(n, _)| *n))
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        Command::Verify { fixture } => match run_verify(&fixture) {
+        Command::Verify {
+            fixture,
+            tree,
+            now_ms,
+        } => match run_verify(&fixture, &tree, now_ms) {
             Ok(true) => ExitCode::SUCCESS,
             Ok(false) => ExitCode::FAILURE,
             Err(e) => {
@@ -111,124 +99,49 @@ fn main() -> ExitCode {
     }
 }
 
-/// Accumulates a human-readable pass/fail report and an overall verdict.
-struct Report {
-    ok: bool,
+/// Wall-clock milliseconds. A verifier is allowed a clock; the log core is not.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
-impl Report {
-    fn new() -> Self {
-        Self { ok: true }
-    }
-
-    fn check(&mut self, passed: bool, label: &str) {
-        if passed {
-            println!("PASS  {label}");
-        } else {
-            println!("FAIL  {label}");
-            self.ok = false;
-        }
-    }
-}
-
-fn run_verify(path: &PathBuf) -> Result<bool, Box<dyn std::error::Error>> {
+fn run_verify(
+    path: &PathBuf,
+    tree: &str,
+    now_override: Option<u64>,
+) -> Result<bool, Box<dyn std::error::Error>> {
     let raw = std::fs::read_to_string(path)?;
     let bundle: Bundle = serde_json::from_str(&raw)?;
-    let verifying_key = verifying_key_from_hex(&bundle.public_key)?;
+    let context =
+        sth_context_for_tree(tree).ok_or_else(|| format!("unknown tree `{tree}`"))?;
 
-    let mut report = Report::new();
+    let opts = VerifyOptions {
+        context,
+        now_ms: now_override.unwrap_or_else(now_ms),
+    };
+    println!("verifying against tree `{tree}`");
 
-    // 1. STH signatures.
-    for (i, sth) in bundle.sths.iter().enumerate() {
-        report.check(
-            sth.verify(&verifying_key),
-            &format!("STH[{i}] signature (tree_size={})", sth.tree_size),
-        );
-    }
-
-    // 2. Equivocation: any two STHs at the same size with different roots.
-    for i in 0..bundle.sths.len() {
-        for j in (i + 1)..bundle.sths.len() {
-            let equivocates = is_equivocation(&bundle.sths[i], &bundle.sths[j]);
-            report.check(
-                !equivocates,
-                &format!(
-                    "no equivocation between STH[{i}] and STH[{j}] (tree_size={})",
-                    bundle.sths[i].tree_size
-                ),
-            );
-        }
-    }
-
-    // 3. Replay entries: run tenant invariants and confirm every STH root.
-    if !bundle.entries.is_empty() {
-        let mut log = VerifiableLog::new();
-        for tenant in &bundle.enforce_unique {
-            log.register_invariant(tenant.clone(), Box::new(UniqueDataInvariant));
-        }
-        let mut replay_ok = true;
-        for (i, entry) in bundle.entries.iter().enumerate() {
-            if let Err(e) = log.append(entry.clone()) {
-                println!("FAIL  entry[{i}] rejected by tenant invariant: {e}");
-                replay_ok = false;
-                report.ok = false;
+    let ok = verify_bundle(
+        &bundle,
+        &opts,
+        unique_invariants(&bundle.enforce_unique),
+        &mut |passed, label| {
+            if passed {
+                println!("PASS  {label}");
+            } else {
+                println!("FAIL  {label}");
             }
-        }
-        report.check(replay_ok, "all entries satisfy tenant invariants");
+        },
+    );
 
-        if replay_ok {
-            for (i, sth) in bundle.sths.iter().enumerate() {
-                let size = sth.tree_size as usize;
-                let matches = match log.root_at(size) {
-                    Ok(root) => sth
-                        .root_bytes()
-                        .map(|r| r == root)
-                        .unwrap_or(false),
-                    Err(_) => false,
-                };
-                report.check(matches, &format!("STH[{i}] root matches replayed entries"));
-            }
-        }
-    }
-
-    // 4. Inclusion proofs.
-    for (i, check) in bundle.inclusion.iter().enumerate() {
-        let sth = bundle.sths.get(check.sth_index);
-        let passed = sth
-            .map(|s| proof::verify_inclusion_proof(&check.entry, &check.proof, s))
-            .unwrap_or(false);
-        report.check(
-            passed,
-            &format!(
-                "inclusion[{i}] leaf {} in STH[{}]",
-                check.proof.leaf_index, check.sth_index
-            ),
-        );
-    }
-
-    // 5. Consistency proofs.
-    for (i, check) in bundle.consistency.iter().enumerate() {
-        let old = bundle.sths.get(check.old_index);
-        let new = bundle.sths.get(check.new_index);
-        let passed = match (old, new) {
-            (Some(o), Some(n)) => proof::verify_consistency_proof(o, n, &check.proof),
-            _ => false,
-        };
-        report.check(
-            passed,
-            &format!(
-                "consistency[{i}] STH[{}] -> STH[{}]",
-                check.old_index, check.new_index
-            ),
-        );
-    }
-
-    if report.ok {
+    if ok {
         println!("\nOK: all checks passed");
     } else {
         println!("\nFAILED: one or more checks did not pass");
     }
-    Ok(report.ok)
+    Ok(ok)
 }
 
 /// Build a small multi-tenant log and serialize a known-good fixture.
@@ -274,6 +187,7 @@ fn gen_example(out: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
 
     let bundle = Bundle {
         public_key,
+        retired_keys: Vec::new(),
         sths: vec![sth_mid, sth_full],
         entries,
         enforce_unique: vec!["commits".to_string()],

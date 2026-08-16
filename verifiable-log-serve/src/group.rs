@@ -6,7 +6,9 @@
 //! whether the group's commit chain is trustworthy:
 //!
 //! 1. **Trust anchor.** Fetch `public_key.json` + `sth/latest.json` and verify
-//!    the STH signature *first*. Everything downstream is checked against that
+//!    the STH signature *first*, against the *set* of keys that document
+//!    publishes as currently acceptable (active signer + any key still inside its
+//!    rotation-overlap window). Everything downstream is checked against that
 //!    signed root — an unsigned/forged head is worth nothing.
 //! 2. **Membership.** Select the entries whose [`CommitLeaf`] decodes and whose
 //!    windowed pseudonym matches the one re-derived for the real
@@ -28,14 +30,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use verifiable_log::{
-    proof, verifying_key_from_hex, Entry, InclusionProof, Sth, VerifiableLog,
-};
+use verifiable_log::{proof, Entry, InclusionProof, Sth, VerifiableLog};
 use verifiable_log_builder::{
     derive_conversation_pseudonym, window_for_seq, CommitLeaf, CommitLogInvariant, TENANT,
 };
 
-use crate::bundle::{Bundle, InclusionCheck, PublicKeyDoc};
+use crate::bundle::{now_ms, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json, fetch_text, gate_leaf_format_version};
 
@@ -168,10 +168,15 @@ pub fn verify_group_via(
     }
 
     let bundle = Bundle {
+        // Verification-side reconstruction, never re-published. The served key
+        // document's rotation-overlap set is carried through so the verdict core
+        // accepts a head signed by a key that is retiring but still inside its
+        // window — during a changeover `public_key.json` and `sth/latest.json` are
+        // separate artifacts on separate cache policies and legitimately move at
+        // different moments. Dropping the set here (#875) made an honest log
+        // mid-rotation report `chain_valid = false`.
+        retired_keys: pk_doc.overlap_keys(),
         public_key: pk_doc.public_key,
-        // Verification-side reconstruction, never re-published: the overlap set
-        // is applied when selecting the verifying key, not carried in here.
-        retired_keys: Vec::new(),
         sths: vec![sth],
         entries,
         enforce_unique: vec![TENANT.to_string()],
@@ -213,15 +218,37 @@ pub fn verify_group_via(
 /// Never panics; a tampered/forked/regressed group yields `chain_valid == false`
 /// with populated `violations` rather than an error.
 pub fn verify_group_in_bundle(bundle: &Bundle, conversation_id: &str) -> GroupReport {
+    verify_group_in_bundle_at(bundle, conversation_id, now_ms())
+}
+
+/// [`verify_group_in_bundle`] against an explicit `now_ms`, which decides which
+/// rotation-overlap keys have expired.
+///
+/// The clock is a parameter so the overlap window is testable without waiting for
+/// one, and so a caller that needs a deterministic verdict can supply its own
+/// instant. [`verify_group_in_bundle`] is exactly this against the wall clock.
+pub fn verify_group_in_bundle_at(
+    bundle: &Bundle,
+    conversation_id: &str,
+    now_ms: u64,
+) -> GroupReport {
     let mut violations: Vec<String> = Vec::new();
 
-    // 1. Trust anchor: the newest published head, verified under the log key.
-    let verifying_key = verifying_key_from_hex(&bundle.public_key).ok();
+    // 1. Trust anchor: the newest published head, verified under ANY key the log
+    //    publishes as acceptable right now — the active signer plus any key still
+    //    inside its rotation-overlap window. A head is honest if it verifies under
+    //    one of them; only verifying under none is evidence of a problem. Expiry is
+    //    applied here (not trusted from the server), so a retired key stops being
+    //    accepted on schedule.
+    let candidates = bundle.key_candidates(now_ms);
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
-    let (sth_tree_size, root_hex, sth_sig_ok) = match (latest, &verifying_key) {
-        (Some(sth), Some(vk)) => (sth.tree_size, sth.root_hash.clone(), sth.verify(vk)),
-        (Some(sth), None) => (sth.tree_size, sth.root_hash.clone(), false),
-        (None, _) => (0, String::new(), false),
+    let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
+        Some(sth) => (
+            sth.tree_size,
+            sth.root_hash.clone(),
+            sth.verify_any(&candidates).is_some(),
+        ),
+        None => (0, String::new(), false),
     };
     if !sth_sig_ok {
         violations.push("STH signature is invalid — published head is not trustworthy".to_string());

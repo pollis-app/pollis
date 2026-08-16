@@ -34,48 +34,6 @@ use pollis_delivery::invite_token;
 use pollis_delivery::writes::WriteOutcome;
 use std::sync::Arc;
 
-// The domain-B tables the invite-link path touches. `channels` and `user_device`
-// are present because `add_member_rows` seeds `conversation_watermark` from
-// their join — the watermark seeding is part of what "the normal membership
-// path" MEANS, so the fixture must be able to observe it.
-const SCHEMA: &str = "\
-CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT);\
-CREATE TABLE groups (id TEXT PRIMARY KEY, name TEXT NOT NULL);\
-CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
-CREATE TABLE user_device (\
-  device_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, revoked_at TEXT);\
-CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL,\
-  last_fetched_at TEXT, reported_at TEXT,\
-  PRIMARY KEY (conversation_id, user_id, device_id));\
-CREATE TABLE group_member (\
-  group_id TEXT NOT NULL, user_id TEXT NOT NULL,\
-  role TEXT NOT NULL DEFAULT 'member',\
-  joined_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  PRIMARY KEY (group_id, user_id));\
-CREATE TABLE group_invite (\
-  id TEXT PRIMARY KEY, group_id TEXT NOT NULL,\
-  inviter_id TEXT NOT NULL, invitee_id TEXT NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  status TEXT NOT NULL DEFAULT 'pending');\
-CREATE TABLE group_invite_link (\
-  id TEXT PRIMARY KEY,\
-  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,\
-  created_by TEXT NOT NULL,\
-  selector TEXT NOT NULL UNIQUE,\
-  secret_hash TEXT NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  expires_at TEXT, max_uses INTEGER, uses INTEGER NOT NULL DEFAULT 0,\
-  revoked_at TEXT,\
-  CHECK (uses >= 0),\
-  CHECK (max_uses IS NULL OR max_uses > 0),\
-  CHECK (max_uses IS NULL OR uses <= max_uses));\
-CREATE TABLE group_invite_link_redemption (\
-  id TEXT PRIMARY KEY, link_id TEXT, user_id TEXT NOT NULL,\
-  attempted_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  succeeded INTEGER NOT NULL DEFAULT 0 CHECK (succeeded IN (0, 1)));\
-CREATE UNIQUE INDEX idx_invite_redemption_once ON \
-group_invite_link_redemption(link_id, user_id) WHERE succeeded = 1;";
 
 const GROUP: &str = "grp-1";
 const ADMIN: &str = "admin-1";
@@ -89,11 +47,17 @@ async fn fresh() -> Arc<Db> {
         .await
         .expect("local db");
     let conn = db.conn().unwrap();
-    conn.execute_batch(SCHEMA).await.expect("schema");
+    // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+    // backend turns it ON by default, so say so explicitly rather than inherit a
+    // constraint no deploy has (`Db::connect_local` makes the same call).
+    conn.execute_batch("PRAGMA foreign_keys=OFF;").await.expect("schema");
+    pollis_schema::apply::single_db(&conn).await.expect("schema");
     conn.execute_batch(
-        "INSERT INTO users (id, username) VALUES ('admin-1','admin'),('joiner-1','joiner'),('other-1','other');\
-         INSERT INTO groups (id, name) VALUES ('grp-1','Group One'),('grp-2','Group Two');\
-         INSERT INTO channels (id, group_id) VALUES ('chan-1','grp-1');\
+        "INSERT INTO users (id, email, username) VALUES \
+           ('admin-1','admin@x','admin'),('joiner-1','joiner@x','joiner'),('other-1','other@x','other');\
+         INSERT INTO groups (id, name, owner_id) VALUES \
+           ('grp-1','Group One','admin-1'),('grp-2','Group Two','other-1');\
+         INSERT INTO channels (id, group_id, name) VALUES ('chan-1','grp-1', 'chan');\
          INSERT INTO user_device (device_id, user_id) VALUES ('dev-joiner','joiner-1');\
          INSERT INTO group_member (group_id, user_id, role) VALUES ('grp-1','admin-1','admin');\
          INSERT INTO group_member (group_id, user_id, role) VALUES ('grp-2','other-1','admin');",

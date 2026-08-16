@@ -269,16 +269,15 @@ pub async fn start_device_enrollment(
         Some(token) => {
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD;
-            let body = serde_json::json!({
-                "request_id": request_id,
-                "new_device_ephemeral_pub": b64.encode(ephemeral_public.as_bytes()),
-                "verification_code": verification_code,
-                "created_at": now.to_rfc3339(),
-                "expires_at": expires_at_str,
-            });
+            let body = pollis_api::bootstrap::EnrollmentRequestBody {
+                request_id: request_id.clone(),
+                new_device_ephemeral_pub: b64.encode(ephemeral_public.as_bytes()),
+                verification_code: verification_code.clone(),
+                created_at: now.to_rfc3339(),
+                expires_at: expires_at_str.clone(),
+            };
             crate::commands::mls::ds_post_session_ok(
                 state,
-                "/v1/auth/enrollment-request",
                 &token,
                 &body,
             )
@@ -643,20 +642,32 @@ pub async fn approve_device_enrollment(
     {
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD;
-        let body = serde_json::json!({
-            "request_id": request_id,
-            "wrapped_account_key": b64.encode(&wrapped),
-            "approved_by_device_id": approver_device_id,
-        });
-        crate::commands::mls::ds_post_ok(state, "/v1/enrollment/approve", &body).await?;
+        let body = pollis_api::account::ApproveEnrollmentBody {
+            request_id: request_id.clone(),
+            wrapped_account_key: b64.encode(&wrapped),
+            approved_by_device_id: approver_device_id,
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
+            user_id: Some(user_id.clone()),
+        };
+        crate::commands::mls::ds_post_ok(state, &body).await?;
 
         // 6. Record a security event (best-effort).
-        let ev = serde_json::json!({
-            "kind": "device_enrolled",
-            "device_id": new_device_id,
-            "metadata": metadata,
-        });
-        if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/security-events", &ev).await {
+        let ev = pollis_api::account::SecurityEventBody {
+            kind: "device_enrolled".to_string(),
+            device_id: Some(new_device_id.clone()),
+            metadata: Some(metadata),
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
+            user_id: Some(user_id.clone()),
+        };
+        if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
             eprintln!("[enrollment] DS security-event failed (non-fatal): {e}");
         }
     }
@@ -806,16 +817,31 @@ pub async fn reset_identity_and_recover(
         // caller — a PRE-ENROLLMENT device on the login gate, which has no
         // signing key and no open local DB — authenticates with the
         // verified-OTP bootstrap session instead (the DS's `gate_or_session`).
-        let body = serde_json::json!({ "current_device_id": current_device_id });
-        crate::commands::mls::ds_post_signed_or_session_ok(state, "/v1/account/reset-recover", &body)
+        let body = pollis_api::account::ResetRecoverBody {
+            current_device_id,
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
+            user_id: Some(user_id.clone()),
+        };
+        crate::commands::mls::ds_post_signed_or_session_ok(state, &body)
             .await?;
 
         // Delete pending MLS welcomes (W8 seam). Route through the Delivery
         // Service (sole writer of the log DB), with the same signed-or-session
         // credential as the reset-recover write above.
         {
-            let body = serde_json::json!({});
-            match crate::commands::mls::ds_post_signed_or_session(state, "/v1/welcomes/purge", &body).await {
+            let body = pollis_api::writes::PurgeBody {
+                // The DS's no-auth fallback for the acting user
+                // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+                // user and this must EQUAL it; auth off → this IS the actor, and a
+                // body without it is refused outright. Sending it never widens what
+                // the caller may do.
+                user_id: Some(user_id.clone()),
+            };
+            match crate::commands::mls::ds_post_signed_or_session(state, &body).await {
                 Ok(resp) if resp.status().is_success() => {}
                 Ok(resp) => {
                     let s = resp.status();
@@ -927,18 +953,30 @@ pub async fn reject_device_enrollment(
     // Flip the request to 'rejected'. Routed through the DS (#419 domains E+G) —
     // the rejecting device is a fully-enrolled sibling, so it can sign; the DS
     // binds the request to the signer (`WHERE id = ? AND user_id = actor`).
-    let body = serde_json::json!({
-        "request_id": request_id,
-        "approved_by_device_id": approver_device_id,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/enrollment/reject", &body).await?;
+    let body = pollis_api::account::RejectEnrollmentBody {
+        request_id,
+        approved_by_device_id: approver_device_id,
+        // The DS's no-auth fallback for the acting user
+        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+        // user and this must EQUAL it; auth off → this IS the actor, and a
+        // body without it is refused outright. Sending it never widens what
+        // the caller may do.
+        user_id: Some(_user_id.clone()),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    let ev = serde_json::json!({
-        "kind": "device_rejected",
-        "device_id": new_device_id,
-        "metadata": serde_json::Value::Null,
-    });
-    if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/security-events", &ev).await {
+    let ev = pollis_api::account::SecurityEventBody {
+        kind: "device_rejected".to_string(),
+        device_id: Some(new_device_id),
+        metadata: None,
+        // The DS's no-auth fallback for the acting user
+        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+        // user and this must EQUAL it; auth off → this IS the actor, and a
+        // body without it is refused outright. Sending it never widens what
+        // the caller may do.
+        user_id: Some(_user_id.clone()),
+    };
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
         eprintln!("[enrollment] DS security-event (reject) failed (non-fatal): {e}");
     }
 

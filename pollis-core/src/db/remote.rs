@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::error::Result;
 
 #[cfg(test)]
-const BASELINE: &str = include_str!("migrations/000000_baseline.sql");
+const BASELINE: &str = pollis_schema::BASELINE_SQL;
 
 #[derive(Clone)]
 enum Backend {
@@ -19,7 +19,13 @@ pub struct RemoteDb {
     /// exact same underlying libsql `Database` — two independent `Database`s on
     /// one local file don't share WAL writes promptly, so the view must wrap the
     /// same handle to see the writer's committed rows with no lag.
-    db: Arc<RwLock<Database>>,
+    ///
+    /// The INNER `Arc` exists for the same reason across a crate boundary: the
+    /// `flows` harness hands this exact handle to `pollis-delivery` so the
+    /// in-process DS writes through the very `Database` the clients read from
+    /// (see [`shared_database`](RemoteDb::shared_database)). `reconnect` swaps
+    /// the inner `Arc`, which the local test backend never does.
+    db: Arc<RwLock<Arc<Database>>>,
     backend: Backend,
     /// When set, every connection returned by [`conn`](RemoteDb::conn) issues
     /// `PRAGMA query_only=ON`, which rejects INSERT/UPDATE/DELETE — exactly like
@@ -93,7 +99,7 @@ impl RemoteDb {
     ) -> Result<Self> {
         let db = build_remote_database(url, token, overlay_shim).await?;
         Ok(Self {
-            db: Arc::new(RwLock::new(db)),
+            db: Arc::new(RwLock::new(Arc::new(db))),
             backend: Backend::Remote {
                 url: url.to_string(),
                 token: token.to_string(),
@@ -122,7 +128,7 @@ impl RemoteDb {
         conn.query("PRAGMA journal_mode=WAL", ()).await?;
         conn.query("PRAGMA synchronous=NORMAL", ()).await?;
         Ok(Self {
-            db: Arc::new(RwLock::new(db)),
+            db: Arc::new(RwLock::new(Arc::new(db))),
             backend: Backend::Local { path },
             query_only: false,
             token_override: Arc::new(RwLock::new(None)),
@@ -158,6 +164,24 @@ impl RemoteDb {
             // sibling; it never mutates or reconnects independently).
             overlay_shim: std::sync::Mutex::new(*self.overlay_shim.lock().unwrap()),
         }
+    }
+
+    /// The underlying libsql `Database`, shared rather than reopened.
+    ///
+    /// Integration-test harness only, and it exists for one reason: the `flows`
+    /// suite runs the REAL `pollis-delivery` router in-process, and the DS must
+    /// write through the SAME `Database` the clients read from. Opening a second
+    /// `Builder::new_local` on one file gives two independent handles whose WAL
+    /// writes are not promptly visible to each other, which is exactly the class
+    /// of ghost failure this harness exists to rule out.
+    ///
+    /// Never call this from production code: it hands out a handle whose
+    /// `query_only` and overlay policy are NOT applied (both are per-connection,
+    /// set in [`conn`](RemoteDb::conn)), so a writer could be minted from a
+    /// read-only view.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub async fn shared_database(&self) -> Arc<Database> {
+        Arc::clone(&*self.db.read().await)
     }
 
     pub async fn conn(&self) -> Result<Connection> {
@@ -205,7 +229,7 @@ impl RemoteDb {
             Backend::Local { path } => Builder::new_local(path).build().await?,
         };
         let mut db = self.db.write().await;
-        *db = new_db;
+        *db = Arc::new(new_db);
         Ok(())
     }
 

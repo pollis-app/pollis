@@ -369,7 +369,7 @@ impl DeviceKeyCache {
     /// tombstone even when nothing was cached, so a concurrent read that already
     /// captured the old generation cannot resurrect the key it read (#721).
     pub fn invalidate_device(&self, user_id: &str, device_id: &str) {
-        let now = now_unix();
+        let now = crate::util::now_unix() as i64;
         let mut guard = self.inner.lock().expect("device key cache mutex poisoned");
         let slot = guard
             .map
@@ -461,20 +461,8 @@ pub fn canonical_message(method: &str, path: &str, timestamp: i64, body: &[u8]) 
     let mut hasher = Sha256::new();
     hasher.update(body);
     let body_hash = hasher.finalize();
-    let body_hash_hex = hex_lower(&body_hash);
+    let body_hash_hex = hex::encode(body_hash);
     format!("{method}\n{path}\n{timestamp}\n{body_hash_hex}").into_bytes()
-}
-
-/// Lowercase hex with no separators. Avoids pulling in the `hex` crate for one
-/// 32-byte digest.
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
 }
 
 /// Parse and validate the four auth headers (presence + timestamp window +
@@ -700,14 +688,6 @@ async fn verify_request_inner(
     Ok((creds.user_id, creds.device_id))
 }
 
-/// Current unix time in seconds.
-pub fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod bench {
     use super::*;
@@ -734,7 +714,7 @@ mod bench {
         const OPS_PER_THREAD: usize = 200_000;
 
         let cache = DeviceKeyCache::default();
-        let now = now_unix();
+        let now = crate::util::now_unix() as i64;
         let key = dummy_key();
         let devs: Vec<String> = (0..DEVICES).map(|i| format!("dev-{i}")).collect();
         // Warm a realistic working set: one live key per active device.

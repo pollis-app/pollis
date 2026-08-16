@@ -6,6 +6,7 @@ use crate::state::AppState;
 
 use super::derive_slug;
 use super::types::{Channel, Group, GroupWithChannels};
+use super::authz;
 
 pub async fn list_user_groups_with_channels(
     user_id: String,
@@ -117,16 +118,16 @@ pub async fn create_group(
 
     // Route the group + admin-member + default-channel inserts through the
     // Delivery Service (one transactional, server-authorized write).
-    let body = serde_json::json!({
-        "id": id,
-        "name": name,
-        "description": description,
-        "owner_id": owner_id,
-        "default_text_channel_id": text_channel_id,
-        "default_voice_channel_id": voice_channel_id,
-        "created_at": now,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/groups/create", &body).await?;
+    let body = pollis_api::groups::CreateGroupBody {
+        id: id.clone(),
+        name: name.clone(),
+        description: description.clone(),
+        owner_id: Some(owner_id.clone()),
+        default_text_channel_id: text_channel_id,
+        default_voice_channel_id: voice_channel_id,
+        created_at: now.clone(),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // Create the per-group MLS group — all channels in this group share it.
     match crate::commands::mls::init_mls_group(state, &id, &owner_id).await {
@@ -154,32 +155,18 @@ pub async fn update_group(
 ) -> Result<Group> {
     let conn = state.remote_db.conn().await?;
 
-    // Only admins can update group settings
-    let mut rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id.clone()],
-    ).await?;
-
-    let role: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
-    };
-
-    if role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only group admins can update group settings")));
-    }
+    authz::require_admin(&conn, &group_id, &requester_id, "update group settings").await?;
 
     // Route the column updates through the Delivery Service (which re-derives the
     // admin role server-side).
-    let body = serde_json::json!({
-        "group_id": group_id,
-        "requester_id": requester_id,
-        "name": name,
-        "description": description,
-        "icon_url": icon_url,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/groups/update", &body).await?;
+    let body = pollis_api::groups::UpdateGroupBody {
+        group_id: group_id.clone(),
+        requester_id: Some(requester_id),
+        name,
+        description,
+        icon_url,
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     let mut rows = conn.query(
         "SELECT id, name, description, owner_id, created_at FROM groups WHERE id = ?1",
@@ -206,29 +193,15 @@ pub async fn delete_group(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Only admins can delete the group
-    let mut rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id.clone()],
-    ).await?;
-
-    let role: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
-    };
-
-    if role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only group admins can delete the group")));
-    }
+    authz::require_admin(&conn, &group_id, &requester_id, "delete the group").await?;
 
     // CASCADE deletes group_member and channels entries. Route the delete through
     // the Delivery Service (admin re-checked server-side).
-    let body = serde_json::json!({
-        "group_id": group_id,
-        "requester_id": requester_id,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/groups/delete", &body).await?;
+    let body = pollis_api::groups::DeleteGroupBody {
+        group_id,
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(())
 }

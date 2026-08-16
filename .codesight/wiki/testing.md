@@ -165,17 +165,79 @@ binary gets its own process and never loads rusqlite. See
 `pollis-core/tests/revoked_device_reconcile.rs`. This is why pollis-core had no
 `user_device` query coverage before #679.
 
+## Performance guards (#875)
+
+Four tests pin the SHAPE of hot paths rather than their wall clock, because a
+statement count is identical on every machine and a timing is not. All four are
+**guards, not proofs**: they cannot tell a fast path from a slow one, only that
+the structure that made it slow has not come back.
+
+| Guard | Where | What it forbids |
+|---|---|---|
+| `a_run_of_envelopes_loads_the_group_once` | `mls/tests.rs` | Reloading the whole MLS group per decrypted envelope (was 12 `mls_kv` SELECTs + 1 UPDATE per message; now 12 for the run). Also asserts the per-message secret-tree UPDATE is still there — that write IS forward secrecy. |
+| `no_crate_builds_its_own_reqwest_client_outside_the_seam` | `pollis-relay/src/http.rs` | Any crate calling `reqwest::Client::new()`/`::builder()` outside the three sanctioned factories. A fresh client has an empty connection pool, so each call re-handshakes. |
+| `no_lock_guard_in_a_scrutinee_spans_an_await` | `pollis-core/src/state.rs` | The edition-2021 footgun where a guard taken in an `if let`/`match` scrutinee stays alive for the whole body, so `.clone()` only *looks* like it released the lock. |
+| `envelope_fetch_sql_tests` | `messages/ingest.rs` | The batched envelope fetch degenerating back to one query per conversation, and the per-conversation watermark correlation being lost. |
+
+`MlsStore` counts its own statements under `test-harness`
+(`signal::mls_storage::counters`). The counters are **thread-local**, not
+process-global: `cargo test` runs tests concurrently in one process, so a global
+counter would have every test's storage traffic bleeding into every other test's
+measurement. That means a measured section must not contain an `.await` that can
+hop threads — every MLS storage call site is a synchronous block, which is what
+makes the numbers reproducible.
+
+`measure_decrypt_statement_count` prints (rather than asserts) the before/after
+figures behind the wiki's MLS numbers:
+
+```bash
+cargo test -p pollis-core --no-default-features --features test-harness \
+  --lib measure_decrypt -- --nocapture
+```
+
 ## Extending the harness
 
 - **Add a helper to `TestClient`** when a command is used from more than one scenario, so assertions stay readable.
 - **Register new commands in `build_client_app`.** The `tauri::generate_handler![...]` macro call in `src-tauri/src/test_harness.rs` must include every command invoked by a test.
 - **Add FK-safe wipes.** If you introduce a new table referenced by tests, add it to `wipe_remote` in the correct order (child tables before parent).
 
+## The in-process Delivery Service — the REAL router (#918)
+
+`spawn_in_process_delivery` (in `harness.rs`) boots **`pollis_delivery::
+build_router_with_state`** — the production router, verbatim — on a loopback port,
+against the harness's own libsql handles. Every DS call a flows test makes lands
+on the shipped handler.
+
+It did not always. The harness used to re-declare the route table and wrap all ~60
+handlers itself, because its DB handle was a `pollis-core` `RemoteDb` and the DS
+wanted a `pollis_delivery::db::Db`. `RemoteDb::shared_database()` (test-harness
+feature) and `Db::from_shared()` remove that: both now wrap the SAME libsql
+`Database`, so the DS writes through the very handle the clients read from —
+which was the whole reason for the copy. Opening a second `Builder::new_local` on
+one file is NOT equivalent: two independent handles do not share WAL writes
+promptly, and a client reading rows the DS "already wrote" is exactly the ghost
+failure this suite exists to rule out.
+
+The copy was not free while it lasted. It silently omitted ten routes:
+`/v1/invite-links/redeem` 404'd under test while working in production, and
+custom emoji (#848) had no integration coverage at all. Two tests keep the mirror
+from coming back — `flows/ds_surface.rs::every_declared_endpoint_is_reachable`
+and `pollis-delivery/tests/endpoint_coverage.rs::every_declared_endpoint_is_routed`
+— both walking `pollis_api::ENDPOINTS`, the single table the client and both
+routers are built from.
+
+**Auth is ENFORCED** in the harness DS (`require_auth = true`), so the suite drives
+the signed write path end to end. Per-IP rate limits are raised (every request in
+the run comes from 127.0.0.1, which the production limits read as one abusive
+client); `ratelimit.rs`'s own unit tests pin the real numbers.
+
 ## The `DsFault` seam — injecting DS-side faults
 
-The flows harness routes every commit submit through an **in-process
-`pollis-delivery`** instance (`spawn_in_process_delivery` in `harness.rs`). That
-seam is the only place a fault can be injected *without* touching production code:
+`/v1/commits` is the ONE path the harness serves itself, mounted on an outer
+router whose `fallback_service` is the real one — so the override is an
+*addition*, not a re-declaration, and every other endpoint (today's and
+tomorrow's) reaches production code with no edit to the harness. That seam is the
+only place a fault can be injected *without* touching production code:
 the client's `SubmitResult` is lossy (it discards the DS's `Rejected` detail) and
 `http_submit` is hardwired, so there is no client-side network seam to mock. All
 faults therefore live **DS/harness-side**, and the real client code path runs
@@ -496,6 +558,8 @@ Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
 - **`envelope_cleanup_is_watermark_gated_and_never_ttl_gated`** proves the `message_envelope` cleanup gate in `get_channel_messages` is the all-member-devices-caught-up watermark and *only* that. Its third leg is the **F3 regression test**: an envelope backdated 400 days while a member device has not collected it must SURVIVE (the deleted 30-day TTL arm destroyed such rows outright — see [database.md](./database.md#conversation_watermark)), and is reclaimed only once that device catches up. It uses two free functions in the tests file (`backdate_envelopes`, `clear_watermarks`) that poke the shared remote DB directly via `TestClient.state.remote_db` — that's the cleanest way to construct states (old envelopes, missing watermark rows) that can't be produced by production commands alone. Do not add Tauri commands just to enable these manipulations.
 - Server-side, the same invariant is pinned twice in `pollis-delivery` without needing Turso: the `messages::gc_sql_tests` unit module drives the raw `CLEANUP_*` SQL, and `tests/envelope_retention.rs` (Part E) drives `apply_envelope_gc`. Both encode "an envelope a member device has not collected survives regardless of age", plus the conservative empty-roster / never-reported edges and the positive leg proving GC still deletes once everyone has collected.
 - **`messages::roster_parity_tests`** (`pollis-delivery`, #722) guards the *other* half of that invariant: the member-device roster is implemented three times — inside `CLEANUP_CHANNEL_ENVELOPES`, inside `CLEANUP_DM_ENVELOPES`, and in `commit::current_member_devices` — and they must resolve the same set (I5). Because a DELETE's roster cannot be read back, the join chain is factored into a macro that the DELETE `concat!`s in and the test SELECTs from, so there is exactly one copy of the roster SQL in the crate rather than a hand-written "equivalent" that could drift unnoticed; `the_extraction_did_not_change_the_cleanup_sql` pins the executed statements byte-for-byte, and `the_roster_is_what_the_delete_actually_gates_on` shows the DELETE's outcome pivots on exactly the devices the fragment reports. The fixture covers a plain single-device member, a member with a revoked device alongside live ones, an all-revoked member, a member device with no watermark row, a non-member (with a stray watermark row), a sibling conversation, and both the channel and DM shapes. Expected rosters are also spelled out literally, so a change applied symmetrically to both implementations still fails instead of silently redefining the rule.
+- **DS tests run against the SHIPPED schema** (#875). `pollis-delivery` does not depend on `pollis-core`, and until #875 it paid for that with 22 hand-rolled `const SCHEMA` blocks (111 `CREATE TABLE` statements, 27 tables, 60 distinct definitions of them — 7 different `message_envelope`s, 6 different `group_member`s, 4 different `user_device`s). They had drifted past cosmetics: `tests/retention.rs` and `tests/envelope_retention.rs` declared `group_member` with **no primary key**, so the fixture could hold the same member twice and the Tier-1 floor's "MIN over member devices" was proved over a roster production forbids; `tests/key_packages.rs` keyed `user_device` on `(user_id, device_id)` where the baseline keys it on `device_id` alone; `tests/auth.rs` gave `mls_key_package` a `claimed_at` column that does not exist (the shipped column is `claimed INTEGER`); `tests/reset_session.rs` gave `mls_key_package` and `mls_welcome` INTEGER `id` primary keys where both ship as TEXT, and `dm_channel_member` an `accepted` column (the shipped one is `accepted_at`). Every fixture now calls `pollis_schema::apply::{main_db, log_db, single_db}`, and `tests/schema_is_not_reinvented.rs` fails the build if any DS source grows a `CREATE TABLE` again. Two things this immediately caught: `serialize.rs::welcome_failure_rolls_back_commit_and_group_info` was rolling back because its hand-rolled replacement `mls_welcome` had no `generation` column, not because of the poison CHECK it claims to inject (it now installs a trigger instead of replacing the table); and `attachment_refs.rs` seeded envelopes with `INSERT OR IGNORE INTO message_envelope (id)`, which against the real NOT NULL columns inserts nothing at all. `retention.rs`'s `a_duplicate_membership_row_is_rejected` / `a_device_id_cannot_belong_to_two_users` / `a_device_cannot_report_two_high_waters_for_one_conversation` pin the constraints the old fixtures lacked.
+  - Note for fixture authors: libsql's LOCAL backend enables `PRAGMA foreign_keys` by default, while production (Turso) does not, and `Db::connect_local`'s `foreign_keys=OFF` only reaches the ONE connection it primes — a *nested* `db.conn()` gets a fresh connection with FKs ON. So either say `PRAGMA foreign_keys=OFF` explicitly on the connection you use, or (better) seed the parent rows. Both patterns are in the tree.
 - **`tests/conn_pool.rs`** (`pollis-delivery`, #777) is the only DS test that runs the **remote** (hrana/HTTP) path — every other one uses `Db::connect_local` and never speaks hrana at all, which is why the per-request-`hyper::Client` defect went unnoticed and why a connection-reuse change could not be landed on faith. It stands up a hrana-speaking test double (an axum `/v3/pipeline` route built on the `libsql-hrana` wire types, tracking batons → streams and per-stream autocommit so `transaction()` behaves) and points `Db::connect_remote` at it. Because each libsql `Connection` owns its own `hyper::Client` and therefore its own TCP pool, *distinct client socket addresses* is an exact count of connections built — i.e. of TLS handshakes in prod. Asserted: 20 sequential requests use ONE connection (was 20); 8 concurrent holders get 8 distinct connections and 8 distinct hrana streams, then release them for reuse (exclusive checkout — the pool can never hand one connection to two callers); a connection parked past the idle window is discarded rather than reused (so a server-expired stream can't surface as a failed request later); and 6 concurrent transactions each own a stream carrying exactly their `BEGIN`/`INSERT`/`COMMIT` and nothing else. The first three fail against the old per-request-connect code; the last one guards the property reuse must not break.
 - **`messages::admin_delete_visibility_tests`** (`pollis-delivery`, #693/#661 WS1) isolates the flaky `sealed_admin_delete_of_other_member_works` and RULES OUT candidate 1 (a read-after-write / `sent_at`-ordering visibility gap between the DS write and the recipient read). Driving the real DS `apply_send_message` / `apply_advance_watermark` / `apply_delete_message` across TWO connections of one shared libsql `Database` (the faithful model of the flows harness, where every `TestClient.remote_db` is a `query_only_view` sharing the DS's handle), it proves the admin tombstone is ALWAYS written and ALWAYS returned by the recipient's next `sent_at > watermark` fetch — across every client `sent_at` fraction width (whole-second included) and a clock-ahead stamp. `read_your_writes_holds_across_connections_of_one_shared_database` pins the underlying primitive. Conclusion: #661's residual flake is NOT delivery — it lives in the client's *application* of the fetched tombstone (candidate 2). The flows test itself now carries a read-only `diagnose_admin_delete_failure` that, on a live failure, classifies it as tombstone-never-written / never-fetched / fetched-but-not-applied.
 - **`admin_delete_redacts_the_authors_own_copy`** (#790, flows harness — `src-tauri/tests/flows/messages.rs`, not the `pollis-delivery` `messages` module its neighbours refer to) closes the last hole in the delete matrix: every other delete test re-reads a THIRD PARTY, so nothing pinned what the message's own author sees after somebody else removes it — the case a real user notices first, since their post is gone for everyone else and they are the only one still looking at it. It is a distinct path from a self-delete: the author neither initiates the delete nor authors the tombstone, so they must apply a redaction authored by someone else to a row they wrote themselves. That is the same *application* half that #693/#661 identified as the defect-prone one (delivery was ruled out), which is why it gets its own test rather than another assertion bolted onto the flaky `sealed_admin_delete_of_other_member_works`. Proven non-vacuous by mutation: making the ingest redaction `UPDATE` skip rows the applying device authored fails it with the author still holding plaintext.

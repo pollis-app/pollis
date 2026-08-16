@@ -460,7 +460,7 @@ impl CircuitFactory for RealRelayFactory {
 
         // Revocation gate first: an inadmissible pool is an EMPTY pool, never the
         // unfiltered one.
-        let now_secs = now_unix_secs() as i64;
+        let now_secs = crate::util::now_unix() as i64;
         let admitted = self.admissible_order(now_secs);
         if admitted.is_empty() {
             anyhow::bail!(
@@ -569,7 +569,7 @@ async fn build_client_identity(state: &Arc<AppState>) -> anyhow::Result<ClientId
         .try_into()
         .map_err(|_| anyhow::anyhow!("overlay: device Ed25519 signing pub is not 32 bytes"))?;
 
-    let issued_at = now_unix_secs();
+    let issued_at = crate::util::now_unix();
     let cert = DeviceCertMaterial::mint(
         &account_key,
         &device_id,
@@ -603,13 +603,6 @@ async fn overlay_signing_user(state: &Arc<AppState>) -> anyhow::Result<String> {
         .last_active_user
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow::anyhow!("overlay: no active user to sign relay handshake"))
-}
-
-fn now_unix_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// Load the configured relay endpoint(s) + the pinned QUIC leaf. Empty when the
@@ -759,11 +752,24 @@ fn directory_to_peer_endpoints(
 }
 
 /// Seconds to sleep before the next scheduled refresh, derived from the current
-/// directory's `expires_at` minus the skew, clamped to a sane window.
+/// directory's `expires_at` minus the skew, clamped to a sane window — then
+/// JITTERED (#875).
+///
+/// The clamped value is a function of `expires_at`, which is a property of the
+/// signed artifact and therefore IDENTICAL for every client in the fleet. Slept
+/// verbatim it put the whole fleet on one wake-up instant, permanently: not an
+/// outage-recovery herd but a structural one, re-synchronised by every refresh.
+/// `park.rs` and `revocation_sync.rs` both jitter for exactly this reason and
+/// say so; this loop was the odd one out. Jitter is applied AFTER the clamp so
+/// the floor still prevents a tight loop (±12.5% of 30s cannot reach zero).
 fn until_refresh(expires_at: i64) -> Duration {
-    let now = now_unix_secs() as i64;
+    let now = crate::util::now_unix() as i64;
     let secs = (expires_at - now).saturating_sub(DIRECTORY_REFRESH_SKEW.as_secs() as i64);
-    Duration::from_secs(secs.max(0) as u64).clamp(DIRECTORY_MIN_REFRESH, DIRECTORY_MAX_REFRESH)
+    let clamped =
+        Duration::from_secs(secs.max(0) as u64).clamp(DIRECTORY_MIN_REFRESH, DIRECTORY_MAX_REFRESH);
+    // Downward only, then re-floored: shortening can never overshoot the
+    // directory's own expiry, which is the thing the skew was reserved for.
+    pollis_relay::backoff::jittered_down(clamped).max(DIRECTORY_MIN_REFRESH)
 }
 
 /// Owns the directory refresh task and aborts it when the factory drops (overlay
@@ -845,7 +851,7 @@ async fn fetch_and_build_pool(
     guards: &Arc<GuardBook>,
 ) -> anyhow::Result<(Arc<dyn CircuitFactory>, i64)> {
     let bytes = directory::fetch_directory(url).await?;
-    let now = now_unix_secs() as i64;
+    let now = crate::util::now_unix() as i64;
     let dir = directory::verify_directory(&bytes, key, now)?;
     // Adopt the anchor BEFORE fetching the list, so the seq floor the install
     // checks against is the one this directory commits to.
@@ -926,7 +932,10 @@ async fn directory_refresh_loop(
             },
             Err(e) => {
                 eprintln!("[overlay] directory refresh failed, keeping current pool: {e}");
-                next_sleep = DIRECTORY_RETRY_BACKOFF;
+                // Jittered: a directory outage fails every client at once, so a
+                // flat retry marches the whole fleet back onto the host in
+                // lockstep the moment it returns (#875).
+                next_sleep = pollis_relay::backoff::jittered(DIRECTORY_RETRY_BACKOFF);
             }
         }
     }
@@ -2450,7 +2459,7 @@ mod tests {
         let seized = spawn_pool_relay();
         let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
 
-        let now = now_unix_secs() as i64;
+        let now = crate::util::now_unix() as i64;
         let gate = enforcing_gate(&[&seized.addr.to_string()], now, now + 3_600);
         let endpoints = vec![
             endpoint(seized.addr.to_string(), seized.cert.clone()),
@@ -2518,7 +2527,7 @@ mod tests {
         let relay = spawn_pool_relay();
         let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
 
-        let now = now_unix_secs() as i64;
+        let now = crate::util::now_unix() as i64;
         // A list that revokes something (so the anchor requires evidence) and is
         // already expired as far as `now` is concerned.
         let gate = enforcing_gate(&["198.51.100.9:9444"], now - 100, now - 1);
@@ -2733,7 +2742,7 @@ mod tests {
                 "parked_at": [a.addr.to_string(), b.addr.to_string(), c.addr.to_string()],
             }]),
         );
-        let now = now_unix_secs() as i64;
+        let now = crate::util::now_unix() as i64;
         let gate = enforcing_gate_for(
             vec![serde_json::json!({ "cert_sha256_b64": cert_digest_b64_of(&peer.cert) })],
             now,

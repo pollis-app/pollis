@@ -279,6 +279,8 @@ impl RelayServingManager {
     /// should be up, make that true, then report what is actually the case.
     async fn reconcile(&self, config: RelayServingConfig) -> RelayServingStatus {
         let link = platform::probe().await;
+        // An engine taken out for shutdown, drained after the lock is released.
+        let mut draining = None;
         let mut inner = self.inner.lock().await;
         inner.config = config;
 
@@ -323,13 +325,26 @@ impl RelayServingManager {
             // Dropping this closes every parked connection, so the device stops
             // being reachable at the same moment it stops being willing.
             inner.reachability = None;
-            if let Some(mut engine) = inner.engine.take() {
-                // Let someone else's in-flight message finish.
-                engine.shutdown().await;
-            }
+            // Take it out here, drain it below — see `draining`.
+            draining = inner.engine.take();
         }
 
         let running = inner.engine.is_some();
+        drop(inner);
+
+        // The drain happens OUTSIDE the manager mutex. `PeerEngine::shutdown`
+        // deliberately waits for someone else's in-flight message to finish, and
+        // `attach_link` — the path EVERY inbound circuit takes, driven by the
+        // parking supervisor — wants this same mutex. Draining under the lock
+        // therefore blocked every new inbound link for the whole wait, for no
+        // reason: the engine has already been moved out, so nothing else can
+        // reach it. The observable order is unchanged (drain, then evaluate,
+        // then emit) so the reported link count still reflects the post-drain
+        // state.
+        if let Some(mut engine) = draining {
+            engine.shutdown().await;
+        }
+
         let signals = ServingSignals {
             link,
             inbound_path: running && self.inbound_path.load(Ordering::Relaxed),
@@ -341,7 +356,6 @@ impl RelayServingManager {
             self.counters.active_links(),
             self.counters.bytes_forwarded(),
         );
-        drop(inner);
 
         self.emit_if_changed(status);
         status

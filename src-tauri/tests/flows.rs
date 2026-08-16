@@ -17,6 +17,8 @@ mod adversarial;
 mod auth;
 #[path = "flows/dms.rs"]
 mod dms;
+#[path = "flows/ds_surface.rs"]
+mod ds_surface;
 #[path = "flows/groups.rs"]
 mod groups;
 #[path = "flows/heavy_churn.rs"]

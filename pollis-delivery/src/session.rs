@@ -61,16 +61,6 @@ fn hash_token(token: &str) -> [u8; 32] {
     h.finalize().into()
 }
 
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
-}
-
 impl SessionStore {
     /// Mint a fresh session for `(user_id, email, device_id)` valid for
     /// `ttl_secs` from `now`. Returns the raw token to hand the client exactly
@@ -85,7 +75,7 @@ impl SessionStore {
     ) -> String {
         let mut raw = [0u8; 32];
         OsRng.fill_bytes(&mut raw);
-        let token = hex_lower(&raw);
+        let token = hex::encode(raw);
         let record = SessionRecord {
             user_id: user_id.to_string(),
             email: email.to_string(),

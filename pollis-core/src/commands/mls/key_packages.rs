@@ -33,17 +33,18 @@ use super::provider::{
 /// only one suite to narrow to, but the field is still sent: it is what makes a
 /// future code-point change (see [`CS_PQ`](super::provider::CS_PQ)) a query rather than a guess, and it
 /// keeps a stale package from a retired suite distinguishable from a current one.
-fn kp_packages_json(pairs: &[(String, Vec<u8>)], ciphersuite: Ciphersuite) -> Vec<serde_json::Value> {
+fn kp_packages_json(
+    pairs: &[(String, Vec<u8>)],
+    ciphersuite: Ciphersuite,
+) -> Vec<pollis_api::devices::KeyPackageEntry> {
     use base64::Engine as _;
-    let code_point = u16::from(ciphersuite);
+    let code_point = i64::from(u16::from(ciphersuite));
     pairs
         .iter()
-        .map(|(ref_hex, kp)| {
-            serde_json::json!({
-                "ref_hash": ref_hex,
-                "key_package": base64::engine::general_purpose::STANDARD.encode(kp),
-                "ciphersuite": code_point,
-            })
+        .map(|(ref_hex, kp)| pollis_api::devices::KeyPackageEntry {
+            ref_hash: ref_hex.clone(),
+            key_package: base64::engine::general_purpose::STANDARD.encode(kp),
+            ciphersuite: Some(code_point),
         })
         .collect()
 }
@@ -137,12 +138,12 @@ pub async fn ensure_mls_key_package(
     // the signer); else do the equivalent delete-then-insert directly.
     match state.config.pollis_delivery_url.as_deref() {
         Some(_) => {
-            let body = serde_json::json!({
-                "device_id": device_id,
-                "packages": all_packages,
-                "user_id": user_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/key-packages/replenish", &body).await?;
+            let body = pollis_api::devices::ReplenishKeyPackagesBody {
+                device_id: device_id.to_string(),
+                packages: all_packages,
+                user_id: Some(user_id.to_string()),
+            };
+            crate::commands::mls::ds_post_ok(state, &body).await?;
         }
         None => {
             let conn = state.remote_db.conn().await?;
@@ -171,16 +172,16 @@ async fn insert_packages_direct(
     conn: &libsql::Connection,
     user_id: &str,
     device_id: &str,
-    packages: &[serde_json::Value],
+    packages: &[pollis_api::devices::KeyPackageEntry],
 ) -> Result<()> {
     use base64::Engine as _;
     for pkg in packages {
-        let ref_hex = pkg["ref_hash"].as_str().unwrap_or_default().to_string();
+        let ref_hex = pkg.ref_hash.clone();
         let kp_bytes = base64::engine::general_purpose::STANDARD
-            .decode(pkg["key_package"].as_str().unwrap_or_default())
+            .decode(&pkg.key_package)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp b64: {e}")))?;
-        let suite = pkg["ciphersuite"]
-            .as_i64()
+        let suite = pkg
+            .ciphersuite
             .unwrap_or(i64::from(u16::from(current_suite())));
         conn.execute(
             "INSERT OR IGNORE INTO mls_key_package \
@@ -243,12 +244,12 @@ pub(super) async fn replenish_key_packages(
     // owner-scoped publish endpoint; else INSERT OR IGNORE directly.
     match state.config.pollis_delivery_url.as_deref() {
         Some(_) => {
-            let body = serde_json::json!({
-                "device_id": device_id,
-                "packages": all_packages,
-                "user_id": user_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/key-packages", &body).await?;
+            let body = pollis_api::devices::PublishKeyPackagesBody {
+                device_id: device_id.to_string(),
+                packages: all_packages,
+                user_id: Some(user_id.to_string()),
+            };
+            crate::commands::mls::ds_post_ok(state, &body).await?;
         }
         None => {
             let conn = state.remote_db.conn().await?;

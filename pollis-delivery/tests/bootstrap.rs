@@ -21,81 +21,6 @@ use pollis_delivery::{build_router_with_state, AppState};
 use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
 
-// Self-contained schema (foreign_keys=OFF in Db::connect_local, so no FK
-// targets needed). Columns match the Turso baseline + migration 5.
-const SCHEMA: &str = "\
-CREATE TABLE users (\
-  id TEXT PRIMARY KEY,\
-  email TEXT NOT NULL UNIQUE,\
-  username TEXT NOT NULL UNIQUE,\
-  phone TEXT,\
-  avatar_url TEXT,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  account_id_pub BLOB,\
-  identity_version INTEGER NOT NULL DEFAULT 1\
-);\
-CREATE TABLE account_key_log (\
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,\
-  user_id TEXT NOT NULL,\
-  account_id_pub BLOB NOT NULL,\
-  identity_version INTEGER NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
-);\
-CREATE UNIQUE INDEX idx_account_key_log_user_version \
-  ON account_key_log (user_id, identity_version);\
-CREATE TABLE account_recovery (\
-  user_id TEXT PRIMARY KEY,\
-  identity_version INTEGER NOT NULL,\
-  salt BLOB NOT NULL,\
-  nonce BLOB NOT NULL,\
-  wrapped_key BLOB NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))\
-);\
-CREATE TABLE user_device (\
-  device_id TEXT PRIMARY KEY,\
-  user_id TEXT NOT NULL,\
-  device_name TEXT,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  last_seen TEXT NOT NULL DEFAULT (datetime('now')),\
-  device_cert BLOB,\
-  cert_issued_at TEXT,\
-  cert_identity_version INTEGER,\
-  mls_signature_pub BLOB,\
-  mls_signature_pub_pq BLOB,\
-  revoked_at TEXT\
-);\
-CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL,\
-  user_id TEXT NOT NULL,\
-  device_id TEXT NOT NULL,\
-  last_fetched_at TEXT NOT NULL,\
-  reported_at TEXT,\
-  PRIMARY KEY (conversation_id, user_id, device_id)\
-);\
-CREATE TABLE channels (\
-  id TEXT PRIMARY KEY, group_id TEXT NOT NULL, name TEXT NOT NULL\
-);\
-CREATE TABLE group_member (\
-  group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member',\
-  PRIMARY KEY (group_id, user_id)\
-);\
-CREATE TABLE dm_channel_member (\
-  dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL,\
-  PRIMARY KEY (dm_channel_id, user_id)\
-);\
-CREATE TABLE device_enrollment_request (\
-  id TEXT PRIMARY KEY,\
-  user_id TEXT NOT NULL,\
-  new_device_id TEXT NOT NULL,\
-  new_device_ephemeral_pub BLOB NOT NULL,\
-  verification_code TEXT NOT NULL,\
-  wrapped_account_key BLOB,\
-  status TEXT NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  expires_at TEXT NOT NULL,\
-  approved_by_device_id TEXT\
-);";
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -140,7 +65,7 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("ds.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
 }
 

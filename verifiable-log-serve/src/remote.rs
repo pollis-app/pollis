@@ -13,15 +13,15 @@
 use std::collections::BTreeMap;
 
 use verifiable_log::{
-    is_equivocation, proof, verifying_key_from_hex, ConsistencyProof, Entry, InclusionProof, Sth,
-    UniqueDataInvariant, VerifiableLog, VerifyingKey,
+    is_equivocation, proof, ConsistencyProof, Entry, InclusionProof, Sth, UniqueDataInvariant,
+    VerifiableLog,
 };
 use verifiable_log_builder::account_key::{self, AccountKeyInvariant};
 use verifiable_log_builder::binaries::{self, BinaryInvariant};
 
 use crate::account::ACCOUNT_TENANT;
 use crate::bundle::{
-    AccountManifest, BinaryManifest, Manifest, PublicKeyDoc, FORMAT_VERSION,
+    now_ms, AccountManifest, BinaryManifest, Manifest, PublicKeyDoc, FORMAT_VERSION,
     MIN_LEAF_FORMAT_VERSION,
 };
 use crate::error::{Result, ServeError};
@@ -145,33 +145,6 @@ impl Report {
 /// recorded as a failed check and folded into [`Report::ok`], so a tampered
 /// artifact yields `Ok(Report { ok: false, .. })` rather than an error.
 
-/// Turn a served `public_key.json` into the set of keys a head may verify under
-/// at `now_ms`, dropping any whose overlap window has closed.
-///
-/// Accepting a *set* is what makes a rotation invisible: during the overlap both
-/// the new and the retiring key are published, so heads signed by either verify.
-/// Expired entries are dropped here rather than at the call sites, so a retired
-/// key stops being accepted on schedule everywhere at once.
-fn key_candidates(doc: &PublicKeyDoc, now_ms: u64) -> Vec<(String, VerifyingKey)> {
-    doc.active_keys(now_ms)
-        .into_iter()
-        .filter_map(|e| {
-            verifying_key_from_hex(&e.public_key)
-                .ok()
-                .map(|vk| (e.key_id, vk))
-        })
-        .collect()
-}
-
-/// Wall-clock milliseconds, for overlap-window expiry. The verifier is allowed a
-/// clock (unlike the builder, whose output must be deterministic).
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 pub fn verify_remote(base_url: &str) -> Result<Report> {
     let base = base_url.trim_end_matches('/');
     let agent = build_agent(None)?;
@@ -201,7 +174,7 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
     // an overlap window both the new and the retiring key are published, so a head
     // signed by either verifies and a rotation stays invisible. Only reached once
     // the format gate has accepted the served version.
-    let candidates = key_candidates(&pk_doc, now_ms());
+    let candidates = pk_doc.verifying_candidates(now_ms());
     if candidates.is_empty() {
         return Err(ServeError::BadBundle(
             "public_key.json has no usable key (all expired or malformed)".to_string(),
@@ -399,7 +372,7 @@ fn verify_account_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     // contained subtree). Anchor trust in it before any signature check.
     let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
     {
-        Ok(pk) => match Some(key_candidates(&pk, now_ms())).filter(|c| !c.is_empty()) {
+        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
             Some(vk) => vk,
             None => {
                 report.check(
@@ -593,7 +566,7 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     // contained subtree). Anchor trust in it before any signature check.
     let candidates = match fetch_json::<PublicKeyDoc>(agent, &format!("{prefix}/public_key.json"))
     {
-        Ok(pk) => match Some(key_candidates(&pk, now_ms())).filter(|c| !c.is_empty()) {
+        Ok(pk) => match Some(pk.verifying_candidates(now_ms())).filter(|c| !c.is_empty()) {
             Some(vk) => vk,
             None => {
                 report.check(

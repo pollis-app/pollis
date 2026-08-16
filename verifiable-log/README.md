@@ -134,9 +134,19 @@ The CLI reads a single bundle file aggregating the above. Every section except
 `public_key` is optional. See `fixtures/example.json` for a complete, known-good
 instance.
 
+`retired_keys` carries the **rotation overlap**: keys that no longer sign but must
+still be accepted until their `not_after` (ms since epoch). A verifier accepts a head
+that verifies under the active key *or* any unexpired retired key. Dropping this
+section — which the monitor's own stand-in struct did before #875 — makes every head
+minted during a rotation look forged.
+
 ```json
 {
-  "public_key": "<ML-DSA-44 public key, 1312 bytes hex>",
+  "public_key": "<ML-DSA-44 public key, 1312 bytes hex>",   // the ACTIVE signing key
+  "retired_keys": [                              // omitted outside a rotation
+    { "key_id": "…", "algorithm": "ML-DSA-44",
+      "public_key": "…", "not_after": 1700000000000 }
+  ],
   "sths": [ STH, ... ],                          // oldest first
   "entries": [ Entry, ... ],                     // full ordered log (optional)
   "enforce_unique": ["commits"],                 // tenants the example invariant applies to
@@ -171,10 +181,15 @@ assert!(proof::verify_inclusion_proof(&entry, &incl, &sth));
 ## CLI ("monitor")
 
 The `monitor` binary verifies a fixture with no network and no DB. It checks STH
-signatures against the provided public key, flags equivocation (two STHs of the same
-`tree_size` with different roots), replays `entries` through the tenant invariants and
-confirms each STH root, and verifies inclusion and consistency proofs. It prints a
-per-check report and **exits non-zero** if anything fails.
+signatures against every key the bundle publishes as currently acceptable, flags
+equivocation (two STHs of the same `tree_size` with different roots), replays `entries`
+through the tenant invariants and confirms each STH root, and verifies inclusion and
+consistency proofs. It prints a per-check report and **exits non-zero** if anything
+fails.
+
+The check loop itself is a library function (`verifiable_log::monitor::verify_bundle`);
+this binary is a thin argument shell over it, so a test can run the *same* verifier
+rather than transcribing it.
 
 ```bash
 # Build
@@ -186,9 +201,22 @@ cargo build -p verifiable-log
 # Verify it (exit 0, prints PASS lines)
 ./target/debug/monitor verify fixture.json
 
+# Other trees: one key signs three domain-separated trees, so the monitor has to
+# be told which one it is checking. `--tree` defaults to `commit-log`.
+./target/debug/monitor verify --tree account-keys account-bundle.json
+./target/debug/monitor verify --tree binaries    binaries-bundle.json
+
+# Pin the clock used to expire rotation-overlap keys (default: system clock).
+./target/debug/monitor verify --now-ms 1700000000000 fixture.json
+
 # A tampered leaf, forged proof, broken consistency, bad signature, or
 # equivocation makes verify exit non-zero with a FAIL report.
 ```
+
+There is deliberately **no** tree auto-detection: the bundle does not name its own
+tree, and inferring it would let the log choose which question it is asked. Checking a
+bundle under the wrong `--tree` produces a FAIL that means "wrong question", not
+"tampering" — which is why the wrong tree has to be an explicit mistake.
 
 ## Tests
 

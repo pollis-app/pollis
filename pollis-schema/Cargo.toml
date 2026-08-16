@@ -1,0 +1,22 @@
+[package]
+name = "pollis-schema"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "The remote (Turso) schema, as data: the numbered migration scripts for the main DB and the commit-log DB, in apply order. Zero required dependencies, so pollis-core (which stamps test databases) and pollis-delivery (which must NOT depend on pollis-core) share ONE definition of every table instead of hand-rolling partial ones — no drift, no crate cycle."
+
+[lib]
+name = "pollis_schema"
+path = "src/lib.rs"
+
+[dependencies]
+# Optional, and only ever pulled in by a test target: the `libsql` feature adds
+# the three `apply_*` helpers so a test can stamp a real connection with the
+# real schema in one call. The schema constants themselves are plain `&str` and
+# need nothing.
+libsql = { version = "0.9", optional = true }
+
+[features]
+default = []
+libsql = ["dep:libsql"]

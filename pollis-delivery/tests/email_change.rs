@@ -25,27 +25,6 @@ use tower::ServiceExt as _;
 
 const DEV_CODE: &str = "424242";
 
-const SCHEMA: &str = "\
-CREATE TABLE users (\
-  id TEXT PRIMARY KEY,\
-  email TEXT NOT NULL UNIQUE,\
-  username TEXT NOT NULL UNIQUE,\
-  account_id_pub BLOB,\
-  identity_version INTEGER NOT NULL DEFAULT 1\
-);\
-CREATE TABLE user_device (\
-  device_id   TEXT PRIMARY KEY,\
-  user_id     TEXT NOT NULL,\
-  device_name TEXT,\
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),\
-  last_seen   TEXT NOT NULL DEFAULT (datetime('now')),\
-  device_cert BLOB,\
-  cert_issued_at TEXT,\
-  cert_identity_version INTEGER,\
-  mls_signature_pub BLOB,\
-  mls_signature_pub_pq BLOB,\
-  revoked_at TEXT\
-);";
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -62,7 +41,7 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("ec.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
 }
 

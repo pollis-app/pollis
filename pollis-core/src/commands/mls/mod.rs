@@ -40,9 +40,9 @@ pub use device::{
 
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────
 pub(crate) use ds_client::{
-    ds_claim_key_package, ds_livekit_send_data, ds_livekit_token, ds_post, ds_post_ok,
-    ds_post_plain, ds_post_session_ok, ds_post_signed_or_session, ds_post_signed_or_session_ok,
-    ds_turso_token,
+    current_user_id, ds_claim_key_package, ds_livekit_send_data, ds_livekit_token, ds_post,
+    ds_post_ok, ds_post_plain, ds_post_session_ok, ds_post_signed_or_session,
+    ds_post_signed_or_session_ok, ds_turso_token,
 };
 // Desktop-only (voice roster); mobile has no Rust-side participants path.
 #[cfg(feature = "media")]
@@ -60,7 +60,7 @@ pub use welcomes::{
 pub use group_state::{
     envelope_lineage, external_join_group, forget_local_mls_group, has_local_group, init_mls_group,
     process_pending_commits, process_pending_commits_inner, process_pending_commits_inner_with_hook,
-    publish_group_info, try_mls_decrypt, try_mls_encrypt,
+    publish_group_info, try_mls_decrypt, try_mls_encrypt, MlsDecryptor,
 };
 
 // ── Cold-launch / post-reconnect sweep ──────────────────────────────────────

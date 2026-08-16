@@ -44,9 +44,9 @@ resolved in #420 and is retained below only as history.
 
 > **Obsolete.** The fix below was applied: the log-DB schema no longer sits in the
 > shared migration directory. It lives in its own series at
-> `pollis-core/src/db/migrations-log/`, starting at `000001_commit_log_db.sql`, with
+> `pollis-schema/migrations-log/`, starting at `000001_commit_log_db.sql`, with
 > its own `schema_migrations` table in the log DB. There is no `000007` in
-> `pollis-core/src/db/migrations/` and no way for a log-DB migration to be applied
+> `pollis-schema/migrations/` and no way for a log-DB migration to be applied
 > to the main DB. Nothing here is actionable; it is preserved because it explains
 > why the two migration series exist.
 
@@ -57,7 +57,7 @@ resolved in #420 and is retained below only as history.
 `scripts/db-apply.sh` applies **every** `*.sql` in `MIGRATIONS_DIR` that the
 target DB has not already recorded, then records each version into **that DB's
 own** `schema_migrations`. `000007_commit_log_db.sql` currently sits in the
-shared dir `pollis-core/src/db/migrations/` alongside the whole main schema
+shared dir `pollis-schema/migrations/` alongside the whole main schema
 (`000000_baseline` + `000001..000006`). That creates a two-way problem:
 
 - **Log DB (empty) pointed at the shared dir → gets the ENTIRE main schema.**
@@ -76,7 +76,7 @@ shared dir `pollis-core/src/db/migrations/` alongside the whole main schema
 log-DB migrations dir, renumbered as its own fresh sequence, e.g.:
 
 ```
-pollis-core/src/db/migrations-log/000001_commit_log_db.sql
+pollis-schema/migrations-log/000001_commit_log_db.sql
 ```
 
 This keeps the main schema out of the log DB (the log DB's dir contains *only*
@@ -85,7 +85,7 @@ pending set (the main apply never sees it again → no misleading v7 on main).
 The log DB gets its own independent `schema_migrations` sequence starting at 1.
 
 The release workflow's commit-log apply step already points `MIGRATIONS_DIR` at
-`pollis-core/src/db/migrations-log`. **Until that dir exists the step safely
+`pollis-schema/migrations-log`. **Until that dir exists the step safely
 no-ops** ("No pending migrations") — so the workflow is correct now and becomes
 functional the moment S2 lands the move. **Do not push a release tag expecting
 the log DB to be provisioned until that move has merged.**
@@ -133,7 +133,7 @@ dev/test, apply by hand against the dedicated dir:
 ```bash
 TURSO_URL='libsql://pollis-log-dev-….turso.io' \
 TURSO_TOKEN='<LOG_DB_ADMIN_TOKEN for dev>' \
-MIGRATIONS_DIR='pollis-core/src/db/migrations-log' \
+MIGRATIONS_DIR='pollis-schema/migrations-log' \
   ./scripts/db-apply.sh
 ```
 

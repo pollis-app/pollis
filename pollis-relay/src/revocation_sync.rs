@@ -36,6 +36,7 @@
 use std::future::Future;
 use std::time::Duration;
 
+use crate::backoff::jittered;
 use crate::policy::RevocationStore;
 use crate::proto;
 
@@ -54,20 +55,6 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 /// Cap on the artifact size we will read. The published list is a few KB; this
 /// stops a hostile or misconfigured origin from feeding a node an unbounded body.
 const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
-
-/// Deterministic ±12.5% jitter around `base`, derived from the process's own
-/// randomness so two nodes started together do not stay in lockstep.
-fn jittered(base: Duration) -> Duration {
-    let mut byte = [0u8; 1];
-    if getrandom::getrandom(&mut byte).is_err() {
-        return base;
-    }
-    // byte/255 maps to [0, 1]; shift to [-0.125, +0.125] of the base.
-    let spread = base.as_millis() as i64 / 4;
-    let offset = (i64::from(byte[0]) * spread / 255) - (spread / 2);
-    let millis = (base.as_millis() as i64 + offset).max(1) as u64;
-    Duration::from_millis(millis)
-}
 
 /// The next delay after `failures` consecutive failures: exponential from
 /// [`MIN_BACKOFF`], clamped at [`MAX_BACKOFF`]. Pure, so the schedule is testable

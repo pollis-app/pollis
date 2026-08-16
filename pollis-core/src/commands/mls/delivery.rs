@@ -89,32 +89,30 @@ async fn http_submit(
 ) -> Result<SubmitResult> {
     use base64::Engine as _;
     let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
-    let welcomes_json: Vec<serde_json::Value> = welcomes
+    let welcomes_json: Vec<pollis_api::commit::WelcomeBody> = welcomes
         .iter()
-        .map(|w| {
-            serde_json::json!({
-                "recipient_id": w.recipient_id,
-                "recipient_device_id": w.recipient_device_id,
-                "welcome": b64(&w.welcome),
-            })
+        .map(|w| pollis_api::commit::WelcomeBody {
+            recipient_id: w.recipient_id.clone(),
+            recipient_device_id: w.recipient_device_id.clone(),
+            welcome: b64(&w.welcome),
         })
         .collect();
-    let body = serde_json::json!({
-        "conversation_id": conversation_id,
-        "generation": generation,
-        "based_on_epoch": epoch,
-        "closes_epoch": closes_epoch,
-        "sender_id": sender_id,
-        "commit": b64(commit),
-        "added_user_id": added_user_id,
-        "added_device_ids": added_device_ids,
-        "group_info": group_info.map(b64),
-        "welcomes": welcomes_json,
-    });
+    let body = pollis_api::commit::SubmitBody {
+        conversation_id: conversation_id.to_string(),
+        generation,
+        based_on_epoch: epoch,
+        closes_epoch,
+        sender_id: sender_id.to_string(),
+        commit: b64(commit),
+        added_user_id: added_user_id.map(str::to_string),
+        added_device_ids: added_device_ids.map(str::to_string),
+        group_info: group_info.map(b64),
+        welcomes: welcomes_json,
+    };
     // Signed POST: attaches the four `X-Pollis-*` auth headers. When the DS has
     // auth disabled the headers are ignored, so behavior is identical to the
     // previous unsigned submit.
-    let resp = super::ds_client::ds_post(state, "/v1/commits", &body).await?;
+    let resp = super::ds_client::ds_post(state, &body).await?;
     match resp.status() {
         s if s.is_success() => Ok(SubmitResult::Committed),
         reqwest::StatusCode::CONFLICT => Ok(SubmitResult::LostRace),

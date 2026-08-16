@@ -52,7 +52,6 @@
 //! removed (that client cutover is the follow-up to #393). See
 //! `docs/secrets-broker.md`.
 
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     body::Bytes,
@@ -68,6 +67,13 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AuthRejection};
 use crate::writes::{bad_request, gate, is_member, ok_json, Authed};
 use crate::AppState;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::broker::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::broker::*;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -176,13 +182,6 @@ fn resolve_user(authed: &Authed, body_user_id: Option<&str>) -> Result<String, R
     }
 }
 
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 fn not_configured(what: &str) -> Response {
     (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -193,32 +192,10 @@ fn not_configured(what: &str) -> Response {
 
 // ── 1. POST /v1/livekit/token ──────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct LivekitTokenBody {
-    /// The LiveKit room to mint a token for.
-    pub room: String,
-    /// Identity scheme (default `realtime`). The user + device halves are ALWAYS
-    /// taken from the verified signer — `kind` only picks the prefix/suffix so a
-    /// single endpoint serves every on-device scheme:
-    ///   - `realtime` → `{user}:{device}`        (data-only realtime/inbox)
-    ///   - `voice`    → `voice-{user}:{device}`   (voice participant)
-    ///   - `view`     → `{user}:{device}:view`    (screenshare receive; no data)
-    #[serde(default)]
-    pub kind: Option<String>,
-    /// No-auth path only: the user to mint for. IGNORED when auth is enforced
-    /// (the user comes from the verified signer there).
-    #[serde(default)]
-    pub user_id: Option<String>,
-    /// No-auth path only: the device id half of the identity. IGNORED when auth
-    /// is enforced (the device comes from the signature-verified `X-Pollis-Device`
-    /// header there — a client cannot claim another device's identity).
-    #[serde(default)]
-    pub device_id: Option<String>,
-}
-
-/// LiveKit JWT claims — byte-identical to pollis-core's `livekit_jwt::make_token`
-/// so a token minted here is indistinguishable from the (soon-removed) on-device
-/// one to the LiveKit SFU.
+/// LiveKit JWT claims. This is the only minter left: the on-device
+/// `livekit_jwt::make_token` it was written to match was removed once #393
+/// landed, and clients now ask `ds_livekit_*` for a token. The shape is still
+/// frozen by the LiveKit SFU, which is what it has to satisfy.
 #[derive(Serialize)]
 struct LiveKitClaims {
     iss: String,
@@ -344,7 +321,7 @@ pub async fn livekit_token(
         &identity,
         &display_name,
         can_publish_data,
-        now_unix(),
+        crate::util::now_unix(),
     )?;
 
     Ok(ok_json(serde_json::json!({ "token": token, "url": url })))
@@ -481,18 +458,6 @@ fn bad_gateway(what: impl std::fmt::Display) -> Response {
 // secret — requiring a signed device is strictly stronger. Per-room authz
 // (membership / inbox-target) is possible future hardening.
 
-#[derive(Deserialize)]
-pub struct LivekitSendDataBody {
-    /// The room to publish into (`inbox-<user>`, a group id, `call-<ulid>`, …).
-    pub room: String,
-    /// The JSON control payload — serialized + base64'd server-side into the
-    /// Twirp `data` field. The client never touches the admin token or wire form.
-    pub payload: serde_json::Value,
-    /// No-auth path only; ignored when auth is enforced.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 /// POST /v1/livekit/send-data — fan out a control payload to a LiveKit room via
 /// server-side `RoomService/SendData`. A 404 (room currently has no
 /// participants) is success, mirroring the client's fire-and-forget semantics.
@@ -564,11 +529,11 @@ pub async fn room_send_data(
     // room and none of them can forget. The pseudonym is the only form that ever
     // reaches LiveKit.
     let wire_room = crate::room_id::room_pseudonym(api_secret, room);
-    let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, now_unix())
+    let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())
         .map_err(|e| format!("sign admin token: {e}"))?;
     let endpoint = format!("{}/twirp/livekit.RoomService/SendData", twirp_base(url));
 
-    let sent = reqwest::Client::new()
+    let sent = crate::util::http_client()
         .post(&endpoint)
         .bearer_auth(&token)
         .json(&serde_json::json!({ "room": wire_room, "data": data_b64, "kind": "RELIABLE" }))
@@ -587,15 +552,6 @@ pub async fn room_send_data(
 }
 
 // ── POST /v1/livekit/participants ─────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct LivekitParticipantsBody {
-    /// The room whose voice roster to list (a group id).
-    pub room: String,
-    /// No-auth path only; ignored when auth is enforced.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
 
 /// POST /v1/livekit/participants — return the voice roster for `room` via
 /// server-side `RoomService/ListParticipants`. Same room authz as the token
@@ -645,10 +601,10 @@ pub async fn livekit_participants(
 
     // #828: authorize the logical room, address LiveKit by its pseudonym.
     let wire_room = crate::room_id::room_pseudonym(api_secret, &parsed.room);
-    let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, now_unix())?;
+    let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())?;
     let endpoint = format!("{}/twirp/livekit.RoomService/ListParticipants", twirp_base(url));
 
-    let listed = reqwest::Client::new()
+    let listed = crate::util::http_client()
         .post(&endpoint)
         .bearer_auth(&token)
         .json(&serde_json::json!({ "room": wire_room }))
@@ -741,7 +697,7 @@ pub async fn turso_token(
         "https://api.turso.tech/v1/organizations/{org}/databases/{db}/auth/tokens\
 ?expiration={TURSO_TOKEN_EXPIRATION}&authorization=read-only"
     );
-    let minted = reqwest::Client::new()
+    let minted = crate::util::http_client()
         .post(&endpoint)
         .bearer_auth(platform_token)
         .send()
@@ -772,35 +728,6 @@ pub async fn turso_token(
 }
 
 // ── 2. POST /v1/r2/presign ───────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct R2PresignBody {
-    /// `"get"` → presign a GET (download); `"put"` → presign a PUT (upload);
-    /// `"delete"` → presign a DELETE (attachment cleanup).
-    pub operation: String,
-    /// The R2 object key (within the bucket), e.g. `media/<hash>/<file>.enc`.
-    pub key: String,
-    /// Optional content type — accepted for forward-compat; the presigned URL
-    /// signs only `host`, so the client sets Content-Type at upload time.
-    #[serde(default)]
-    pub content_type: Option<String>,
-    /// The EXACT byte count the client will PUT. When present, `content-length`
-    /// is added to the signed headers, so R2 rejects a body of any other size —
-    /// the presign stops being "here is permission to write, of any size".
-    ///
-    /// REQUIRED for `put` on an `emoji/…` key (#848): those objects are
-    /// unencrypted, publicly fetchable, and bounded by
-    /// [`crate::emoji::EMOJI_MAX_BYTES`], and a size the server merely *believes*
-    /// is not a bound at all. Optional everywhere else, so every existing
-    /// media/avatar presign is byte-identical to before.
-    #[serde(default)]
-    pub content_length: Option<u64>,
-    /// No-auth path only — see [`resolve_user`]. Unused beyond the auth gate
-    /// (presign has no per-object authz), kept for shape-symmetry with the other
-    /// broker endpoint.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
 
 /// Default presigned-URL lifetime, in seconds.
 const PRESIGN_EXPIRES_SECS: u64 = 900;
@@ -1080,7 +1007,7 @@ pub fn presign_r2_url_bounded(
     );
 
     let signing_key = derive_signing_key(secret_key, date, region, "s3");
-    let signature = hex_lower(&hmac_sha256(&signing_key, string_to_sign.as_bytes()));
+    let signature = hex::encode(hmac_sha256(&signing_key, string_to_sign.as_bytes()));
 
     format!(
         "{}{canonical_uri}?{canonical_query}&X-Amz-Signature={signature}",
@@ -1128,7 +1055,7 @@ fn uri_encode(s: &str, encode_slash: bool) -> String {
 
 fn sha256_hex(data: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    hex_lower(&Sha256::digest(data))
+    hex::encode(Sha256::digest(data))
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
@@ -1145,16 +1072,4 @@ fn derive_signing_key(secret: &str, date: &str, region: &str, service: &str) -> 
     let k_region = hmac_sha256(&k_date, region.as_bytes());
     let k_service = hmac_sha256(&k_region, service.as_bytes());
     hmac_sha256(&k_service, b"aws4_request")
-}
-
-/// Lowercase hex, no separators. (pollis-delivery deliberately avoids the `hex`
-/// crate — `auth.rs` has the same helper.)
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
 }

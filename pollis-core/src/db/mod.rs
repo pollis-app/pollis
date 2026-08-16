@@ -1,124 +1,16 @@
 pub mod local;
 pub mod remote;
 
-/// Frozen baseline schema for the remote Turso DB. Embedded at compile time
-/// so the integration test harness can stamp a fresh database without an
-/// out-of-band migration step.
-pub const BASELINE_SQL: &str = include_str!("migrations/000000_baseline.sql");
-
-/// Schema for the SEPARATE commit-log DB (`LOG_DB_URL`): the three MLS
-/// control-plane tables (`mls_commit_log` / `mls_welcome` / `mls_group_info`)
-/// and their indexes, no FKs to the main DB. Embedded so the integration test
-/// harness can bootstrap a genuinely separate log DB — mirroring the #420
-/// production split — and so a misrouted query (a main-DB read on the log
-/// connection, or vice versa) fails loudly instead of silently finding every
-/// table on one shared file.
-pub const LOG_DB_SCHEMA: &str = include_str!("migrations-log/000001_commit_log_db.sql");
-
-/// Migrations applied on top of the commit-log DB schema, in version order.
-/// Mirrors CI's `db-apply.sh` second apply (MIGRATIONS_DIR=migrations-log) so
-/// the integration-test harness's log DB ends up with the same schema as prod.
-pub const POST_BASELINE_LOG_MIGRATIONS: &[(u32, &str, &str)] = &[
-    (
-        2,
-        "mls_welcome_unique_recipient",
-        include_str!("migrations-log/000002_mls_welcome_unique_recipient.sql"),
-    ),
-    (
-        3,
-        "mls_commit_since",
-        include_str!("migrations-log/000003_mls_commit_since.sql"),
-    ),
-    (
-        4,
-        "commit_generation",
-        include_str!("migrations-log/000004_commit_generation.sql"),
-    ),
-    (
-        5,
-        "mls_commit_log_triggers",
-        include_str!("migrations-log/000005_mls_commit_log_triggers.sql"),
-    ),
-];
-
-/// Migrations applied on top of the baseline, in version order. CI's
-/// `db-apply.sh` is the production source of truth; this list mirrors it so
-/// the integration-test harness ends up with the same schema.
-pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
-    (
-        1,
-        "user_preferred_name",
-        include_str!("migrations/000001_user_preferred_name.sql"),
-    ),
-    (
-        2,
-        "index_gm_user_and_channels_group",
-        include_str!("migrations/000002_index_gm_user_and_channels_group.sql"),
-    ),
-    (
-        3,
-        "mls_commit_log_unique_epoch",
-        include_str!("migrations/000003_mls_commit_log_unique_epoch.sql"),
-    ),
-    (
-        4,
-        "user_device_revoked_at",
-        include_str!("migrations/000004_user_device_revoked_at.sql"),
-    ),
-    (
-        5,
-        "account_key_log",
-        include_str!("migrations/000005_account_key_log.sql"),
-    ),
-    (
-        6,
-        "push_token",
-        include_str!("migrations/000006_push_token.sql"),
-    ),
-    // Note: version 7 (000007) is intentionally skipped — it was a
-    // previously-reverted DS-trigger / commit-log-DB migration (see
-    // docs/goal-a-deploy-runbook.md "000007 hazard"). Reusing it would collide.
-    (
-        8,
-        "message_envelope_sealed_sender",
-        include_str!("migrations/000008_message_envelope_sealed_sender.sql"),
-    ),
-    (
-        9,
-        "directory_index",
-        include_str!("migrations/000009_directory_index.sql"),
-    ),
-    (
-        10,
-        "key_package_ciphersuite",
-        include_str!("migrations/000010_key_package_ciphersuite.sql"),
-    ),
-    (
-        11,
-        "device_pq_signature_pub",
-        include_str!("migrations/000011_device_pq_signature_pub.sql"),
-    ),
-    (
-        12,
-        "attachment_ref",
-        include_str!("migrations/000012_attachment_ref.sql"),
-    ),
-    (
-        13,
-        "conversation_watermark_reported_at",
-        include_str!("migrations/000013_conversation_watermark_reported_at.sql"),
-    ),
-    (
-        14,
-        "group_invite_link",
-        include_str!("migrations/000014_group_invite_link.sql"),
-    ),
-    (
-        15,
-        "custom_emoji",
-        include_str!("migrations/000015_custom_emoji.sql"),
-    ),
-];
+// The remote schema lives in `pollis-schema` (its `migrations/` and
+// `migrations-log/` directories are the production source of truth that
+// `scripts/db-apply.sh` applies). It is its own crate so `pollis-delivery` —
+// which must not depend on `pollis-core` — can build its test databases from
+// the SAME definitions instead of hand-rolling partial ones. Re-exported here
+// so every existing caller (`src-tauri/src/test_harness.rs`,
+// `pollis-tui/tests/common`) keeps its import path.
+pub use pollis_schema::{
+    BASELINE_SQL, LOG_DB_SCHEMA, POST_BASELINE_LOG_MIGRATIONS, POST_BASELINE_MIGRATIONS,
+};
 
 pub mod queries {
     pub const MESSAGES_BY_SENDER: &str = include_str!("queries/messages_by_sender.sql");

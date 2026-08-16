@@ -14,8 +14,9 @@
 //! **Fail closed.** Every rejection ([`DirectoryError`]) leaves the caller with no
 //! usable relays, which in `Prefer` means direct fallback and in `Strict` a
 //! surfaced degrade — never a silent send over an unverified path. The reject set
-//! matches the reference exactly: bad signature, `version != 1`, `now >=
-//! expires_at`, malformed JSON (envelope or payload), or empty `relays`.
+//! matches the reference exactly: bad signature, `version != 1`, a `type` that is
+//! not [`DIRECTORY_TYPE`], `now >= expires_at`, malformed JSON (envelope or
+//! payload), or empty `relays`.
 //!
 //! **Bootstrap is direct, by necessity.** The fetch uses a plain (non-overlay)
 //! HTTP client: the directory is what BUILDS the relay pool, so it cannot itself
@@ -57,7 +58,38 @@ pub enum DirectoryError {
     Expired { now: i64, expires_at: i64 },
     #[error("directory lists no relays")]
     EmptyRelays,
+    #[error("wrong artifact type {0:?} (expected {DIRECTORY_TYPE:?} or none)")]
+    WrongType(String),
 }
+
+/// The artifact name a directory payload identifies itself by, mirroring
+/// `pollis_relay::REVOCATION_TYPE` for the revocation list.
+///
+/// **The cross-artifact confusion guard.** The pool signs more than one artifact
+/// with the SAME pinned Ed25519 key (`POLLIS_OVERLAY_DIRECTORY_KEY`): the
+/// directory here and the `revocations.json` `pollis_relay::verify_revocations`
+/// consumes. A valid signature therefore proves only "this key signed these
+/// bytes", never "these bytes are the artifact I asked for" — so an on-path
+/// attacker can serve one where the other is expected and both signatures check
+/// out. The revocation verifier has always rejected a payload whose `type` is not
+/// its own; this is the directory's half of the same rule.
+///
+/// **The guard is deliberately ONE-SIDED, and that is not a weakening.** A
+/// present-and-wrong `type` is rejected; an ABSENT one is accepted — which is
+/// what the reconciler publishes today and what it must be free to keep
+/// publishing. Requiring the field would couple this release to a reconciler
+/// release with no safe ordering between them: ship the client first and every
+/// directory is rejected until the Lambda catches up, i.e. a fleet-wide outage
+/// waiting on a deploy race. (Same reason `version` stayed `1` for the
+/// `revocation` and `peers` fields.)
+///
+/// It costs nothing, because absence is unambiguous in the direction that
+/// matters: every OTHER artifact this key signs DOES carry a `type`, so a payload
+/// with none cannot be one of them. What the guard buys is that the rejection is
+/// a DECISION rather than a side effect of [`Directory`]'s required fields
+/// (`issued_at`, `relays`) happening to be absent from the other artifacts — a
+/// rejection one future `#[serde(default)]` away from silently disappearing.
+pub const DIRECTORY_TYPE: &str = "pollis-relay-directory";
 
 /// The signed envelope as published: base64 (STANDARD) of the payload bytes plus
 /// base64 of the 64-byte Ed25519 signature over those exact bytes.
@@ -71,6 +103,12 @@ struct Envelope {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Directory {
     pub version: u32,
+    /// The artifact self-identifier, `None` for a directory published before
+    /// [`DIRECTORY_TYPE`] existed. Read as the JSON key `type` to match the
+    /// revocation list's field of the same name (`type` is a Rust keyword).
+    /// See [`DIRECTORY_TYPE`] for what it guards and why absence is allowed.
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
     pub issued_at: i64,
     pub expires_at: i64,
     pub relays: Vec<DirectoryRelay>,
@@ -190,12 +228,17 @@ pub async fn fetch_directory(url: &str) -> Result<Vec<u8>, DirectoryError> {
 /// Ed25519-signed, so their integrity does not depend on the transport, and both
 /// must bootstrap without the pool they describe.
 pub async fn fetch_signed(url: &str) -> Result<Vec<u8>, DirectoryError> {
-    let client = reqwest::Client::builder()
-        .timeout(FETCH_TIMEOUT)
-        .build()
-        .map_err(|e| DirectoryError::Fetch(e.to_string()))?;
-    let resp = client
+    // The SHARED direct client (`pollis_relay::http`), not a fresh build. A
+    // freshly-built client starts with an empty connection pool, so building one
+    // per fetch paid a full DNS + TCP + TLS handshake every time — and this path
+    // fetches two artifacts (the directory and the `revocations.json` its anchor
+    // names) from the same host, back to back, on a schedule. `None` = direct: an
+    // artifact that describes the relay pool cannot bootstrap through it.
+    // The timeout moves onto the request so it stays identical while the pool is
+    // shared (a client-wide timeout would leak onto every other direct caller).
+    let resp = pollis_relay::http::http_client(None)
         .get(url)
+        .timeout(FETCH_TIMEOUT)
         .send()
         .await
         .map_err(|e| DirectoryError::Fetch(e.to_string()))?
@@ -243,6 +286,14 @@ pub fn verify_directory(
 
     if directory.version != 1 {
         return Err(DirectoryError::UnsupportedVersion(directory.version));
+    }
+    // Cross-artifact confusion guard — see DIRECTORY_TYPE. Checked BEFORE the
+    // range checks so a foreign artifact is rejected as what it is rather than
+    // as "expired" or "no relays".
+    if let Some(kind) = directory.kind.as_deref() {
+        if kind != DIRECTORY_TYPE {
+            return Err(DirectoryError::WrongType(kind.to_string()));
+        }
     }
     if now_secs >= directory.expires_at {
         return Err(DirectoryError::Expired {
@@ -371,6 +422,93 @@ mod tests {
             verify_directory(&env, &pinned_b64(&sk), 1500),
             Err(DirectoryError::EmptyRelays)
         ));
+    }
+
+    /// **Cross-artifact confusion, the positive case.** A directory that names
+    /// itself is accepted, and the name it must carry is exactly the one the
+    /// reconciler publishes.
+    #[test]
+    fn accepts_a_directory_that_names_its_own_artifact_type() {
+        let sk = signing_key();
+        let payload = format!(
+            r#"{{"version":1,"type":"{DIRECTORY_TYPE}","issued_at":1000,"expires_at":2000,"relays":[{{"addr":"203.0.113.7:9444","cert_b64":"QUJD"}}]}}"#
+        );
+        let dir =
+            verify_directory(&envelope_for(&sk, &payload), &pinned_b64(&sk), 1500).expect("valid");
+        assert_eq!(dir.kind.as_deref(), Some(DIRECTORY_TYPE));
+        assert_eq!(dir.relays.len(), 1);
+    }
+
+    /// ...and a directory published before the field existed still verifies, so
+    /// shipping this guard cannot strand the fleet.
+    #[test]
+    fn accepts_a_directory_that_predates_the_artifact_type() {
+        let sk = signing_key();
+        let dir = verify_directory(&envelope_for(&sk, &valid_payload(2000)), &pinned_b64(&sk), 1500)
+            .expect("valid");
+        assert!(dir.kind.is_none());
+    }
+
+    /// **Cross-artifact confusion, the attack.** The pool signs the directory and
+    /// `revocations.json` with the SAME key, so a genuinely-signed revocation
+    /// list served where the directory is expected has a signature that verifies.
+    /// It must still be rejected — and rejected as the WRONG ARTIFACT, not as a
+    /// coincidence of which fields serde happened to require. The payload below
+    /// therefore also carries every field `Directory` needs, so nothing but the
+    /// `type` check can reject it.
+    #[test]
+    fn rejects_a_revocation_list_signed_by_the_same_key() {
+        let sk = signing_key();
+        let payload = format!(
+            r#"{{"version":1,"type":"{}","seq":4,"issued_at":1000,"expires_at":2000,"revoked":[{{"addr":"203.0.113.7:9444"}}],"relays":[{{"addr":"203.0.113.7:9444","cert_b64":"QUJD"}}]}}"#,
+            pollis_relay::REVOCATION_TYPE
+        );
+        match verify_directory(&envelope_for(&sk, &payload), &pinned_b64(&sk), 1500) {
+            Err(DirectoryError::WrongType(k)) => {
+                assert_eq!(k, pollis_relay::REVOCATION_TYPE);
+            }
+            other => panic!("a same-key revocation list must be rejected as the wrong artifact, got {other:?}"),
+        }
+    }
+
+    /// Any other artifact name is rejected too — the guard is an allowlist of
+    /// one, not a denylist of the revocation list.
+    #[test]
+    fn rejects_an_unknown_artifact_type() {
+        let sk = signing_key();
+        let payload = r#"{"version":1,"type":"pollis-something-else","issued_at":1000,"expires_at":2000,"relays":[{"addr":"x:1","cert_b64":"QUJD"}]}"#;
+        assert!(matches!(
+            verify_directory(&envelope_for(&sk, payload), &pinned_b64(&sk), 1500),
+            Err(DirectoryError::WrongType(_))
+        ));
+    }
+
+    /// The mirror of [`rejects_a_revocation_list_signed_by_the_same_key`]: the
+    /// OTHER verifier must reject a directory for the same reason. Both halves
+    /// live here so the pair cannot drift apart silently — one crate away, only
+    /// one of them had the guard.
+    #[test]
+    fn the_revocation_verifier_rejects_a_directory_signed_by_the_same_key() {
+        let sk = signing_key();
+        let payload = format!(
+            r#"{{"version":1,"type":"{DIRECTORY_TYPE}","seq":4,"issued_at":1000,"expires_at":2000,"revoked":[],"relays":[{{"addr":"x:1","cert_b64":"QUJD"}}]}}"#
+        );
+        let env = envelope_for(&sk, &payload);
+        assert!(
+            matches!(
+                pollis_relay::verify_revocations(&env, &pinned_b64(&sk), 1500, 0),
+                Err(pollis_relay::RevocationError::WrongType(_))
+            ),
+            "a same-key directory must be rejected by the revocation verifier"
+        );
+
+        // ...and the artifact it IS for still verifies through the same call.
+        let ok = format!(
+            r#"{{"version":1,"type":"{}","seq":4,"issued_at":1000,"expires_at":2000,"revoked":[]}}"#,
+            pollis_relay::REVOCATION_TYPE
+        );
+        pollis_relay::verify_revocations(&envelope_for(&sk, &ok), &pinned_b64(&sk), 1500, 0)
+            .expect("a well-formed revocation list must still verify");
     }
 
     /// The #813 anchor is additive: a directory WITHOUT it still verifies (this

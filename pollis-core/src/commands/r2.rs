@@ -389,11 +389,15 @@ pub async fn upload_media(
 
         // Register in Turso so future uploads of the same file skip R2 — route the
         // dedup-row write through the Delivery Service.
-        let body = serde_json::json!({
-            "content_hash": content_hash,
-            "r2_key": r2_key,
-        });
-        crate::commands::mls::ds_post_ok(state, "/v1/attachments/register", &body).await?;
+        let body = pollis_api::messages::AttachmentRegisterBody {
+            content_hash: content_hash.clone(),
+            r2_key: r2_key.clone(),
+            // Upload-time dedup registration: no message carries this object
+            // yet, so there is no reference to count. The send path registers
+            // the `(content_hash, message_id)` reference separately (#690).
+            message_id: None,
+        };
+        crate::commands::mls::ds_post_ok(state, &body).await?;
     }
 
     Ok(MediaUploadResult {
@@ -784,11 +788,19 @@ pub(crate) async fn presign_r2_with_length(
     key: &str,
     content_length: Option<u64>,
 ) -> Result<String> {
-    let mut body = serde_json::json!({ "operation": operation, "key": key });
-    if let Some(n) = content_length {
-        body["content_length"] = serde_json::json!(n);
-    }
-    let resp = crate::commands::mls::ds_post(state, "/v1/r2/presign", &body).await?;
+    let body = pollis_api::broker::R2PresignBody {
+        operation: operation.to_string(),
+        key: key.to_string(),
+        // The DS signs only `host`; the client sets Content-Type at upload time.
+        content_type: None,
+        content_length,
+        // No-auth fallback for the acting user (`broker::resolve_user`): auth on
+        // → taken from the verified signature and ignored here; auth off → this
+        // IS the identity and a body without it is a 400. Presign has no
+        // per-object authz, so this only ever satisfies the gate.
+        user_id: Some(crate::commands::mls::current_user_id(state).await?),
+    };
+    let resp = crate::commands::mls::ds_post(state, &body).await?;
     let status = resp.status();
     if !status.is_success() {
         let txt = resp.text().await.unwrap_or_default();

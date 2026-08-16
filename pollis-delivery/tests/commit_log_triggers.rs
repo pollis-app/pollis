@@ -6,7 +6,7 @@
 //! would only re-prove the CAS.
 //!
 //! The schema under test is the REAL one: the log-DB migrations are `include_str!`
-//! d straight from `pollis-core/src/db/migrations-log/` and applied with libsql's
+//! d straight from `pollis-schema/migrations-log/` and applied with libsql's
 //! native `execute_batch` (which parses `CREATE TRIGGER ... BEGIN ...; END`
 //! correctly), so what these tests exercise is byte-for-byte what ships.
 //!
@@ -25,11 +25,11 @@ use pollis_delivery::db::Db;
 // The real log-DB schema, in version order (mirrors POST_BASELINE_LOG_MIGRATIONS
 // + LOG_DB_SCHEMA). 000005 is the trigger migration under test.
 const LOG_MIGRATIONS: &[&str] = &[
-    include_str!("../../pollis-core/src/db/migrations-log/000001_commit_log_db.sql"),
-    include_str!("../../pollis-core/src/db/migrations-log/000002_mls_welcome_unique_recipient.sql"),
-    include_str!("../../pollis-core/src/db/migrations-log/000003_mls_commit_since.sql"),
-    include_str!("../../pollis-core/src/db/migrations-log/000004_commit_generation.sql"),
-    include_str!("../../pollis-core/src/db/migrations-log/000005_mls_commit_log_triggers.sql"),
+    include_str!("../../pollis-schema/migrations-log/000001_commit_log_db.sql"),
+    include_str!("../../pollis-schema/migrations-log/000002_mls_welcome_unique_recipient.sql"),
+    include_str!("../../pollis-schema/migrations-log/000003_mls_commit_since.sql"),
+    include_str!("../../pollis-schema/migrations-log/000004_commit_generation.sql"),
+    include_str!("../../pollis-schema/migrations-log/000005_mls_commit_log_triggers.sql"),
 ];
 
 /// A fresh local log DB with the real migrations (triggers included) applied.

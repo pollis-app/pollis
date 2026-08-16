@@ -85,7 +85,7 @@ log "libsql server up"
 # --- 2. schema via the real migration runner --------------------------------
 # scripts/db-apply.sh reads TURSO_URL/TURSO_TOKEN, rewrites libsql:// -> https://
 # (a plain http:// URL is left as-is), and POSTs the migrations in
-# pollis-core/src/db/migrations to /v2/pipeline. It's idempotent. Its stdout is
+# pollis-schema/migrations to /v2/pipeline. It's idempotent. Its stdout is
 # redirected to stderr so our stdout stays pure `export` lines.
 log "applying migrations via scripts/db-apply.sh"
 TURSO_URL="$TURSO_URL" TURSO_TOKEN="$TURSO_TOKEN" bash "$ROOT/scripts/db-apply.sh" >&2

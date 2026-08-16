@@ -2,9 +2,35 @@
 
 Two databases. Remote schema starts from `000000_baseline.sql` (a full canonical dump) plus additive migrations (`000NNN_*.sql`). Local schema is in `local_schema.sql`.
 
+## Where the remote schema lives (#875)
+
+`pollis-schema/` — its own dependency-free crate, holding `migrations/` (main DB)
+and `migrations-log/` (commit-log DB) plus the Rust constants that embed them:
+`BASELINE_SQL`, `LOG_DB_SCHEMA`, `POST_BASELINE_MIGRATIONS`,
+`POST_BASELINE_LOG_MIGRATIONS`, and the ordered `main_scripts()` /
+`log_scripts()` / `single_db_scripts()`. `pollis-core::db` re-exports the four
+constants, so existing import paths are unchanged.
+
+It is a separate crate because `pollis-delivery` must not depend on
+`pollis-core` (see `.codesight/wiki/mls.md` — the DS is the sole writer to the
+MLS control plane and does not take the client core into its build). Before the
+split, that independence was paid for with ~22 hand-rolled `const SCHEMA` blocks
+across the DS's tests, which had drifted into eleven different `user_device`
+definitions and several `group_member` tables with no primary key — so those
+tests could create duplicate membership rows production rejects. DS tests now
+call `pollis_schema::apply::{main_db, log_db, single_db}` (the `libsql` feature,
+a dev-dependency) and run against exactly what ships. `pollis-device-cert` is
+the same pattern for the device-cert wire format.
+
+Adding a migration: drop the numbered file in `pollis-schema/migrations/` (or
+`migrations-log/`) **and** add it to the matching list in
+`pollis-schema/src/lib.rs`. `every_migration_file_is_listed` fails the build if
+you add the file and forget the list — which would otherwise mean prod applies
+the migration and no test harness does.
+
 ## How schema changes ship
 
-1. Write a new migration file: `pollis-core/src/db/migrations/000NNN_description.sql`. Version number must be the next integer.
+1. Write a new migration file: `pollis-schema/migrations/000NNN_description.sql`. Version number must be the next integer.
 2. Run it by hand against your dev Turso DB to test.
 3. Merge to main. When a release tag is pushed, `.github/workflows/desktop-release.yml` runs `scripts/db-apply.sh` against **production** after all builds succeed and before the release job uploads artifacts. A migration failure aborts the release.
 
@@ -35,14 +61,14 @@ If you genuinely need to remove something, the pattern is: (1) ship an app versi
 > **A note on migration numbers.** Numbers below the baseline (`000000_baseline.sql`)
 > refer to a **pre-baseline** series that no longer exists as files — the baseline
 > collapsed them. Where this doc says e.g. "migration 13" or "migration 18" it means
-> that historical series, not `pollis-core/src/db/migrations/`. Post-baseline
+> that historical series, not `pollis-schema/migrations/`. Post-baseline
 > migrations are cited with their full six-digit name. The commit-log DB has its own
 > independent series under `migrations-log/`, starting again at `000001`; do not
 > confuse the two. Main-DB `000007` is a permanent hole — never reuse it.
 
 ## Remote Database (Turso)
 
-Source: `pollis-core/src/db/migrations/000000_baseline.sql` + numbered migrations `000001`+.
+Source: `pollis-schema/migrations/000000_baseline.sql` + numbered migrations `000001`+.
 
 ### How the DS connects to it (#777)
 
@@ -88,6 +114,25 @@ now reused rather than rebuilt.
 - `identity_version` INTEGER NOT NULL DEFAULT 1 _(increments on identity reset. Folded into the baseline)_
 - `preferred_name` TEXT _(migration `000001`)_
 - There is **no** `identity_key` column. This doc used to list one as "legacy, unused"; it does not exist in the schema (#804). The local DB has an unrelated table of that name — see below.
+
+**`email` is the account's identity, so it must be canonicalized before it reaches
+this table** — `NOT NULL UNIQUE` cannot merge `" a@x.com "` with `"a@x.com"`, it just
+lets both exist as two accounts for one person. Canonical form is **trim only**
+(deliberately *not* lowercased: only the OTP store key is lowercased, in
+`pollis_delivery::otp::normalize_email`). Both writers apply it at the function
+holding the INSERT, not at their handlers, because both are also called directly by
+in-process harnesses:
+
+| writer | function | when |
+|---|---|---|
+| DS (authoritative) | `pollis_delivery::otp::apply_verify_otp` | every real sign-in |
+| client (dev only) | `auth::resolve_or_create_user_by_email` + `canonical_login_email` | `#[cfg(debug_assertions)]` no-DS `dev_login` shortcut |
+
+The two are deliberate twins — same query, same server-generated ULID id, same default
+username `<email-prefix>_<last 4 of the ULID>`. `pollis-core` and `pollis-delivery` do
+not depend on each other, so this is kept identical by hand and by matching tests on
+both sides; diff them if you change either. (Before #875 they had drifted: the client
+copy did not trim.)
 
 ### groups
 - `id` TEXT PK
@@ -143,6 +188,38 @@ recipient ever applied it. The DS additionally stamps a tombstone strictly above
 the conversation's **floor** (`sent_at_after` / `TOMBSTONE_FLOOR` in
 `pollis-delivery/src/messages.rs`), so client/DS clock skew cannot reintroduce
 the same burial.
+
+**The CLIENT side is correct as it stands, and must not be "fixed" to match
+(#875).** `chrono::Utc::now().to_rfc3339()` is `SecondsFormat::AutoSi`, which
+emits 0, 3, 6 or 9 fraction digits — it **omits** the fraction only when the
+instant's nanoseconds are genuinely zero, and it never **truncates** a real one.
+A fraction-less client stamp therefore denotes `.000000000`, the earliest instant
+of its second, so sorting below every fractional stamp in that second is the
+*correct* answer and `'+' < '.'` is what produces it. The #692 bug was a
+hand-rolled DS formatter that threw a real fraction away; that is a different
+thing, and only the DS needed `SecondsFormat::Nanos`. Switching the ~25
+`to_rfc3339()` call sites in `pollis-core` to `Nanos` would change no ordering
+and buy nothing.
+
+What #875 *did* change is where the client's format is decided: the five sites
+that write a `message_envelope.sent_at` now all go through
+`pollis_core::commands::messages::envelope_sent_at`, so the format is one
+function with `sent_at_format_tests` around it rather than five independent
+`now()` calls. The sites that write LOCAL-only timestamps (`message.deleted_at`,
+`message.edited_at`, `mls_self_update.last_at`, profile/group `created_at`, …)
+deliberately do **not** use it — those columns are never compared against a
+cursor, and routing them through an envelope-specific helper would imply a
+constraint they do not have.
+
+Four tests pin the ordering: `sent_at_format_tests::
+sent_at_never_truncates_a_real_fraction` (pollis-core), `timestamp_tests::
+lexical_order_matches_chronological_order_across_precisions`,
+`admin_delete_visibility_tests::admin_tombstone_always_reaches_a_caught_up_recipient`
+(which runs the zero-nanosecond shape through the real delete path) and
+`…::a_zero_nanosecond_client_message_still_outsorts_the_preceding_tombstone`
+(the reverse direction — a message sent on a second boundary after a tombstone
+still clears the recipient's watermark). Any change to timestamp formatting on
+either side must keep all four green.
 
 That floor is the greater of `MAX(sent_at)` over `message_envelope` **and**
 `MAX(last_fetched_at)` over `conversation_watermark`, both scoped to the
@@ -434,7 +511,7 @@ branches:
 `mls_welcome`, `mls_commit_log`, and `mls_group_info` live on the **separate
 commit-log Turso DB** (`LOG_DB_URL`) post-#420, where the Delivery Service holds
 the only read-write token and clients hold a read-only token. Their migrations are
-numbered independently in `pollis-core/src/db/migrations-log/` and applied by the
+numbered independently in `pollis-schema/migrations-log/` and applied by the
 desktop-release workflow's second `db-apply` step (`MIGRATIONS_DIR=…/migrations-log`).
 
 ### mls_group_info _(migration 13)_

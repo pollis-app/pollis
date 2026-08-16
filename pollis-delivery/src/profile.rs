@@ -43,13 +43,19 @@ use axum::{
     response::Response,
 };
 use libsql::Connection;
-use serde::Deserialize;
 
 use crate::error::AppError;
 use crate::writes::{
     bad_request, conversation_id_taken, gate, outcome_response, resolve_actor, WriteOutcome,
 };
 use crate::AppState;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::profile::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::profile::*;
 
 // ── Shared block helper ──────────────────────────────────────────────────────
 
@@ -74,21 +80,6 @@ async fn is_blocked_either_way(
 }
 
 // ── POST /v1/profile/update ──────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct UpdateProfileBody {
-    /// The profile being edited; when signed it must equal the authenticated
-    /// user (you can only edit your OWN profile).
-    pub user_id: String,
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub preferred_name: Option<String>,
-    #[serde(default)]
-    pub phone: Option<String>,
-    #[serde(default)]
-    pub avatar_url: Option<String>,
-}
 
 pub async fn update_profile(
     State(state): State<AppState>,
@@ -141,14 +132,6 @@ pub async fn apply_update_profile(
 
 // ── POST /v1/profile/preferences ─────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct SavePreferencesBody {
-    /// The owner of the preferences; when signed it must equal the authenticated
-    /// user (you can only edit your OWN preferences).
-    pub user_id: String,
-    pub preferences: String,
-}
-
 pub async fn save_preferences(
     State(state): State<AppState>,
     method: Method,
@@ -192,14 +175,6 @@ pub async fn apply_save_preferences(
 
 // ── POST /v1/blocks/add ──────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct BlockBody {
-    /// The user doing the blocking; when signed it must equal the authenticated
-    /// user (you manage only your OWN block list).
-    pub blocker_id: String,
-    pub blocked_id: String,
-}
-
 pub async fn block_user(
     State(state): State<AppState>,
     method: Method,
@@ -211,12 +186,12 @@ pub async fn block_user(
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
-    let parsed: BlockBody = match serde_json::from_slice(&body) {
+    let parsed: AddBlock = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_block_user(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response(apply_block_user(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
 /// Insert a block row and reset the blocker's `accepted_at` for every DM shared
@@ -268,12 +243,12 @@ pub async fn unblock_user(
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
-    let parsed: BlockBody = match serde_json::from_slice(&body) {
+    let parsed: RemoveBlock = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_unblock_user(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response(apply_unblock_user(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
 /// Delete a block row. Authz: the blocker is the authenticated user — the DELETE
@@ -296,18 +271,6 @@ pub async fn apply_unblock_user(
 }
 
 // ── POST /v1/dm/create ───────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct CreateDmBody {
-    /// The new channel id (a ULID the client generated).
-    pub id: String,
-    /// The creator; when signed it must equal the authenticated user.
-    pub creator_id: String,
-    /// Every participant (may or may not include the creator — the creator is
-    /// always inserted as auto-accepted regardless).
-    pub member_ids: Vec<String>,
-    pub created_at: String,
-}
 
 pub async fn create_dm(
     State(state): State<AppState>,
@@ -422,15 +385,6 @@ pub async fn apply_create_dm(
 
 // ── POST /v1/dm/accept ───────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct AcceptDmBody {
-    pub dm_channel_id: String,
-    /// The accepting member; when signed it must equal the authenticated user
-    /// (you accept your OWN pending request, never someone else's).
-    pub user_id: String,
-    pub accepted_at: String,
-}
-
 pub async fn accept_dm(
     State(state): State<AppState>,
     method: Method,
@@ -497,17 +451,6 @@ async fn is_dm_member(
 }
 
 // ── POST /v1/dm/add ──────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct AddDmMemberBody {
-    pub dm_channel_id: String,
-    /// The user being added.
-    pub user_id: String,
-    /// The actor performing the add; when signed it must equal the authenticated
-    /// user, and that user must already be a member of the DM.
-    pub added_by: String,
-    pub added_at: String,
-}
 
 pub async fn add_dm_member(
     State(state): State<AppState>,
@@ -578,17 +521,6 @@ pub async fn apply_add_dm_member(
 
 // ── POST /v1/dm/remove ───────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct RemoveDmMemberBody {
-    pub dm_channel_id: String,
-    /// The user being removed.
-    pub user_id: String,
-    /// The actor performing the removal; when signed it must equal the
-    /// authenticated user. Authz: the actor may remove only themselves OR (as the
-    /// channel creator) another member.
-    pub requester_id: String,
-}
-
 pub async fn remove_dm_member(
     State(state): State<AppState>,
     method: Method,
@@ -651,14 +583,6 @@ pub async fn apply_remove_dm_member(
 }
 
 // ── POST /v1/dm/leave ────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct LeaveDmBody {
-    pub dm_channel_id: String,
-    /// The leaving member; when signed it must equal the authenticated user
-    /// (you may only remove your OWN membership).
-    pub user_id: String,
-}
 
 pub async fn leave_dm(
     State(state): State<AppState>,

@@ -61,11 +61,17 @@ use axum::{
     Json,
 };
 use libsql::Connection;
-use serde::Deserialize;
 
 use crate::error::{AppError, AuthRejection};
 use crate::writes::{bad_request, gate, ok_json, resolve_actor, WriteOutcome};
 use crate::AppState;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::emoji::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::emoji::*;
 
 // ── Bounds ───────────────────────────────────────────────────────────────────
 
@@ -273,60 +279,13 @@ async fn creator_row_count(conn: &Connection, user_id: &str) -> anyhow::Result<i
     })
 }
 
-/// Is `user_id` a current member of `group_id`?
-async fn is_group_member(
-    conn: &Connection,
-    group_id: &str,
-    user_id: &str,
-) -> anyhow::Result<bool> {
-    let mut rows = conn
-        .query(
-            "SELECT EXISTS (SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2)",
-            libsql::params![group_id.to_string(), user_id.to_string()],
-        )
-        .await?;
-    Ok(match rows.next().await? {
-        Some(row) => row.get::<i64>(0)? != 0,
-        None => false,
-    })
-}
-
-/// Is `user_id` an ADMIN of `group_id`? Re-derived server-side from
-/// `group_member`, never trusted from the body — same discipline as
-/// [`crate::groups`].
-async fn is_group_admin(conn: &Connection, group_id: &str, user_id: &str) -> anyhow::Result<bool> {
-    let mut rows = conn
-        .query(
-            "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-            libsql::params![group_id.to_string(), user_id.to_string()],
-        )
-        .await?;
-    Ok(match rows.next().await? {
-        Some(row) => row.get::<String>(0).ok().as_deref() == Some("admin"),
-        None => false,
-    })
-}
+// Membership / admin come from [`crate::groups`] — this module used to keep its
+// own pair, and the copy's `row.get::<String>(0).ok()` turned a decode error on
+// the `role` column into `false` (a silent deny) where the original propagates
+// it. #875 deleted the copy rather than fixing it twice.
+use crate::groups::{is_admin as is_group_admin, is_member as is_group_member};
 
 // ── POST /v1/emoji/create ────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct CreateEmojiBody {
-    pub group_id: String,
-    pub shortcode: String,
-    /// SHA-256 (lowercase hex) of the RE-ENCODED bytes.
-    pub content_hash: String,
-    /// `image/webp` or `image/gif`. Allowlisted, not sniffed and not trusted as
-    /// "whatever the file said it was".
-    pub content_type: String,
-    /// Size of the stored object. Bounded by [`EMOJI_MAX_BYTES`] and bound into
-    /// the presign signature, so a lie here cannot become a large R2 object.
-    pub size_bytes: u64,
-    #[serde(default)]
-    pub animated: bool,
-    /// No-auth path only; ignored when auth is enforced.
-    #[serde(default)]
-    pub created_by: Option<String>,
-}
 
 pub async fn create_emoji(
     State(state): State<AppState>,
@@ -445,15 +404,6 @@ pub async fn apply_create_emoji(
 }
 
 // ── POST /v1/emoji/remove ────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct RemoveEmojiBody {
-    pub group_id: String,
-    pub shortcode: String,
-    /// No-auth path only; ignored when auth is enforced.
-    #[serde(default)]
-    pub actor_id: Option<String>,
-}
 
 pub async fn remove_emoji(
     State(state): State<AppState>,

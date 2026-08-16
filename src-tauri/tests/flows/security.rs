@@ -12,7 +12,9 @@
 //! Welcome-ack it drives is a *correctly signed* DS write, and the suite only
 //! passes because those succeed. This file proves the negative.
 
-use crate::harness::{delivery_url, raw_post_status, signed_post_status, wipe, TestClient};
+use crate::harness::{
+    delivery_url, raw_post_status, signed_post_status, wipe, writable_remote, TestClient,
+};
 use serde_json::json;
 use serial_test::serial;
 
@@ -28,7 +30,7 @@ async fn ds_rejects_unsigned_or_invalid_writes() {
     let profile = alice.sign_up("alice@test.local").await;
     let base = delivery_url().await;
 
-    let now = pollis_delivery::auth::now_unix().to_string();
+    let now = (pollis_delivery::util::now_unix() as i64).to_string();
     let empty_body = serde_json::to_vec(&serde_json::json!({})).expect("serialize body");
 
     // 1. W8 purge with NO auth headers → 401. Without a signature the DS cannot
@@ -683,4 +685,129 @@ async fn ds_logout_only_removes_own_device() {
 
     drop(alice);
     drop(mallory);
+}
+
+/// #875 — `/v1/messages/delete` on a deployment with DS request signing OFF.
+///
+/// Every write endpoint resolves its actor through
+/// `pollis_delivery::writes::resolve_actor`: with auth ON the signed user, with
+/// auth OFF the actor id the body names, and with NEITHER present a flat
+/// `Forbidden`. `/v1/messages/delete` reads that fallback from `actor_id` — and
+/// both pollis-core call sites used to omit it, so on a `require_auth = false`
+/// deployment message deletion returned 403 for everyone while the signed
+/// deployments this suite normally exercises looked perfectly healthy. That is a
+/// gap the flows suite structurally cannot see (its harness always signs), so the
+/// test drives the DS handler directly with `authed = None` — the shape a no-auth
+/// deployment produces — over the body the CLIENT builds, not a hand-written one.
+/// Using `pollis_core::commands::messages::delete_message_body` is the whole
+/// point: a hand-written body would pass while the shipped client still 403'd.
+///
+/// The second half re-asserts the #878 conversation scoping on the AUTHENTICATED
+/// path, because "always send an actor id" and "never delete across
+/// conversations" are one endpoint's two invariants and a fix to either must not
+/// quietly undo the other.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn message_delete_works_when_ds_auth_is_disabled() {
+    use pollis_core::commands::messages::delete_message_body;
+        use pollis_delivery::writes::WriteOutcome;
+
+    wipe().await;
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("writable main-db conn");
+
+    // A DM `mallory` is genuinely a member of, holding one envelope she authored,
+    // plus a second envelope in a conversation she has nothing to do with. Seeded
+    // server-side (this is the DS's own view of the world, not a client write).
+    conn.execute(
+        "INSERT INTO users (id, email, username) \
+         VALUES ('mallory', 'mallory-875@test.local', 'mallory-875')",
+        (),
+    )
+    .await
+    .expect("seed user");
+    conn.execute(
+        "INSERT INTO dm_channel (id, created_by) VALUES ('conv-mine', 'mallory')",
+        (),
+    )
+    .await
+    .expect("seed dm_channel");
+    conn.execute(
+        "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) \
+         VALUES ('conv-mine', 'mallory', 'mallory')",
+        (),
+    )
+    .await
+    .expect("seed dm_channel_member");
+    for (id, conv) in [("env-mine", "conv-mine"), ("env-theirs", "conv-theirs")] {
+        conn.execute(
+            "INSERT INTO message_envelope \
+                 (id, conversation_id, sender_id, ciphertext, sent_at, type) \
+             VALUES (?1, ?2, 'sealed', 'mls:00', '2027-01-15T08:00:00.5+00:00', 'message')",
+            libsql::params![id.to_string(), conv.to_string()],
+        )
+        .await
+        .expect("seed envelope");
+    }
+
+    async fn envelope_exists(conn: &libsql::Connection, id: &str) -> bool {
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM message_envelope WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .expect("envelope lookup");
+        rows.next().await.expect("row").is_some()
+    }
+
+    // The exact body the shipped client sends for a self-delete. Since #875 the
+    // client BUILDS this type rather than a `json!` that merely resembles it, so
+    // "does the client body parse as the DS body" is no longer a question a test
+    // can meaningfully ask — it is the same struct. What remains testable, and is
+    // what actually broke, is the DS's behaviour on that body.
+    let parsed = delete_message_body("env-mine", "conv-mine", "mallory", "mallory");
+
+    // With auth OFF there is no signed identity, so `actor_id` is the ONLY thing
+    // that can name the actor. Before #875 this returned Forbidden.
+    let outcome = pollis_delivery::messages::apply_delete_message(&conn, None, &parsed)
+        .await
+        .expect("delete must not error");
+    assert!(
+        matches!(outcome, WriteOutcome::Ok),
+        "the client's delete body must be accepted on a no-auth deployment, got {outcome:?}"
+    );
+    assert!(
+        !envelope_exists(&conn, "env-mine").await,
+        "the no-auth delete must actually remove the envelope, not merely return 200"
+    );
+
+    // #878, still enforced: the authenticated self-branch authorizes against
+    // `conversation_id` and must delete against the SAME one, so membership of
+    // 'conv-mine' cannot reach an envelope in 'conv-theirs' — even though the
+    // client now always names an actor.
+    let parsed = delete_message_body("env-theirs", "conv-mine", "mallory", "mallory");
+    let outcome = pollis_delivery::messages::apply_delete_message(&conn, Some("mallory"), &parsed)
+        .await
+        .expect("delete must not error");
+    assert!(
+        envelope_exists(&conn, "env-theirs").await,
+        "a member of 'conv-mine' must not be able to delete an envelope in another \
+         conversation (#878); outcome was {outcome:?}"
+    );
+
+    // ...and `actor_id` is never a permission grant on the signed path: naming
+    // someone else is refused outright rather than honoured.
+    let parsed = delete_message_body("env-theirs", "conv-theirs", "alice", "alice");
+    let outcome = pollis_delivery::messages::apply_delete_message(&conn, Some("mallory"), &parsed)
+        .await
+        .expect("delete must not error");
+    assert!(
+        matches!(outcome, WriteOutcome::Forbidden),
+        "a signed request whose actor_id names a DIFFERENT user must be forbidden, got {outcome:?}"
+    );
+    assert!(
+        envelope_exists(&conn, "env-theirs").await,
+        "the impersonating delete must not have removed anything"
+    );
 }

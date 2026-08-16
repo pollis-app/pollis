@@ -8,7 +8,7 @@
 --
 -- This is a COMMIT-LOG-DB migration (mls_welcome lives on the log DB post-#420),
 -- applied by desktop-release.yml's second db-apply step (MIGRATIONS_DIR=
--- pollis-core/src/db/migrations-log). It must NOT go in the main-DB dir.
+-- pollis-schema/migrations-log). It must NOT go in the main-DB dir.
 --
 -- Additive/backward-compatible (CLAUDE.md migration constraint): a dedupe DELETE
 -- + a new UNIQUE INDEX, no DROP of the table, no column/nullability change. The

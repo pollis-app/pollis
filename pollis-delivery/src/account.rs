@@ -94,11 +94,17 @@ use axum::{
     Json,
 };
 use libsql::Connection;
-use serde::Deserialize;
 
 use crate::error::{AppError, AuthRejection};
 use crate::writes::{bad_request, gate, gate_or_session, ok_json, outcome_response, resolve_actor, WriteOutcome};
 use crate::AppState;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::account::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::account::*;
 
 fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine as _;
@@ -106,24 +112,6 @@ fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 // ── POST /v1/account/rotate-identity ─────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct RotateIdentityBody {
-    /// The `identity_version` the client read BEFORE rotating — i.e. the head of
-    /// `account_key_log` it believes it is appending onto. The new version is
-    /// `based_on_version + 1`. This is the CAS expectation, the exact analogue of
-    /// a commit's `based_on_epoch`.
-    pub based_on_version: i64,
-    /// New account identity public key, base64 (STANDARD).
-    pub account_id_pub: String,
-    /// New `account_recovery` blob, all base64 (STANDARD).
-    pub salt: String,
-    pub nonce: String,
-    pub wrapped_key: String,
-    /// Self-scope: when signed it must equal the authenticated user.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
 
 /// The outcome of an identity rotation. Distinct from [`WriteOutcome`] because a
 /// rotation has a THIRD terminal state — a CAS loss — that maps to 409 (not 200
@@ -291,18 +279,6 @@ async fn current_key_log_head(conn: &Connection, user_id: &str) -> anyhow::Resul
 
 // ── POST /v1/security-events ─────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct SecurityEventBody {
-    pub kind: String,
-    #[serde(default)]
-    pub device_id: Option<String>,
-    #[serde(default)]
-    pub metadata: Option<String>,
-    /// Self-scope: when signed it must equal the authenticated user.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 /// POST /v1/security-events — append a row to the actor's own security-audit
 /// log (`security_event`). Self-scoped: the row's `user_id` is the signer.
 pub async fn record_security_event(
@@ -352,17 +328,6 @@ pub async fn apply_record_security_event(
 }
 
 // ── POST /v1/enrollment/approve ──────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct ApproveEnrollmentBody {
-    pub request_id: String,
-    /// base64 (STANDARD) of `approver_pub || nonce || ciphertext`.
-    pub wrapped_account_key: String,
-    pub approved_by_device_id: String,
-    /// Self-scope: when signed it must equal the authenticated user.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
 
 /// POST /v1/enrollment/approve — flip a pending enrollment request the actor
 /// OWNS to `approved`, attaching the wrapped account key. The approving device
@@ -423,14 +388,6 @@ pub async fn apply_approve_enrollment(
 
 // ── POST /v1/enrollment/reject ───────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct RejectEnrollmentBody {
-    pub request_id: String,
-    pub approved_by_device_id: String,
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 /// POST /v1/enrollment/reject — flip a pending enrollment request the actor OWNS
 /// to `rejected`. Self-scoped like [`approve_enrollment`].
 pub async fn reject_enrollment(
@@ -478,14 +435,6 @@ pub async fn apply_reject_enrollment(
 }
 
 // ── POST /v1/devices/revoke ──────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct RevokeDeviceBody {
-    /// The device being revoked (one of the actor's OWN devices, not the caller).
-    pub device_id: String,
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
 
 /// POST /v1/devices/revoke — drop the revoked device's unclaimed key packages
 /// and tombstone its `user_device` row (`revoked_at`). Self-scoped: both writes
@@ -562,17 +511,6 @@ pub async fn apply_revoke_device(
 
 // ── POST /v1/auth/logout ─────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct LogoutDeviceBody {
-    /// The device logging out — in practice the signing device itself. Bound
-    /// `WHERE user_id = actor`, so a caller can only remove a device on THEIR OWN
-    /// account.
-    pub device_id: String,
-    /// Self-scope: when signed it must equal the authenticated user.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 /// POST /v1/auth/logout — DELETE the logging-out device's `user_device` row.
 /// DEVICE-SIGNED and self-scoped: the signer can only remove a device on their
 /// OWN account (`WHERE user_id = actor`).
@@ -631,17 +569,6 @@ pub async fn apply_logout_device(
 }
 
 // ── POST /v1/account/reset-recover ───────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct ResetRecoverBody {
-    /// The device performing the reset — its `user_device` row is KEPT (it stays
-    /// enrolled under the new identity); every OTHER device of the actor is
-    /// dropped. `None` → drop ALL of the actor's devices.
-    #[serde(default)]
-    pub current_device_id: Option<String>,
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
 
 /// POST /v1/account/reset-recover — the membership/device wipe that follows an
 /// identity reset, as ONE transaction. Removes the actor from all groups/DMs
@@ -731,12 +658,6 @@ pub async fn apply_reset_recover(
 }
 
 // ── POST /v1/account/delete ──────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct DeleteAccountBody {
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
 
 /// POST /v1/account/delete — permanently delete the actor's account, as ONE
 /// transaction. Handles group ownership (delete empty groups / promote a sole

@@ -31,21 +31,6 @@ use pollis_delivery::writes::WriteOutcome;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
 
-/// Mirrors the live `message_envelope` shape, including the `sealed` column the
-/// send handler writes. No FK `REFERENCES` — `connect_local` runs with
-/// `foreign_keys=OFF` (same convention as `envelope_retention.rs`).
-const SCHEMA: &str = "\
-CREATE TABLE message_envelope (\
-  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL, \
-  sender_id TEXT NOT NULL DEFAULT '', ciphertext TEXT NOT NULL DEFAULT '', \
-  reply_to_id TEXT, type TEXT NOT NULL DEFAULT 'message', target_message_id TEXT, \
-  sealed INTEGER NOT NULL DEFAULT 0);\
-CREATE TABLE dm_channel (id TEXT PRIMARY KEY, created_by TEXT NOT NULL, created_at TEXT NOT NULL);\
-CREATE TABLE dm_channel_member (\
-  dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL, added_by TEXT NOT NULL, \
-  added_at TEXT NOT NULL, accepted_at TEXT, PRIMARY KEY (dm_channel_id, user_id));\
-CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
-CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member');";
 
 /// The blinded sender every send writes under unconditional sealed sender
 /// (#607) — receipts included.
@@ -66,7 +51,7 @@ async fn fresh() -> Arc<Db> {
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     let db = Arc::new(db);
     db.conn()
         .unwrap()

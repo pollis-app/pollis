@@ -226,6 +226,16 @@ name = "pollis-delivery"
 expression = "LicenseRef-proprietary"
 license-files = []
 
+[[licenses.clarify]]
+name = "pollis-api"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-schema"
+expression = "LicenseRef-proprietary"
+license-files = []
+
 [licenses.private]
 # Defense-in-depth: the clarify blocks above already mark every current
 # workspace crate proprietary. This additionally skips license checks for any

@@ -208,17 +208,43 @@ pub async fn list_peer_verifications(
         return Ok(Vec::new());
     }
 
+    // ONE Turso SELECT for every pinned peer (#875). This is what the struct
+    // docs above always claimed — "without N round-trips for an N-DM sidebar" —
+    // and what the function did not do: it called `fetch_account_key` per peer,
+    // so a user with 80 pinned contacts opened the sidebar on 80 sequential
+    // Turso queries. Bound by position, deliberately, for the reason
+    // `batch_check_and_pin_account_keys` gives: `account_id_pub` is the
+    // cryptographic root of trust, so its lookup does not go near string-built
+    // SQL.
     let conn = state.remote_db.conn().await?;
+    let placeholders = (1..=pinned.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let query = format!("SELECT id, account_id_pub FROM users WHERE id IN ({placeholders})");
+    let params: Vec<libsql::Value> = pinned
+        .iter()
+        .map(|(id, _, _)| libsql::Value::Text(id.clone()))
+        .collect();
+    let mut server_keys: std::collections::HashMap<String, Vec<u8>> =
+        std::collections::HashMap::new();
+    let mut rows = conn.query(&query, params).await?;
+    while let Some(row) = rows.next().await? {
+        let id: String = row.get(0)?;
+        if let Some(p) = row.get::<Option<Vec<u8>>>(1).ok().flatten() {
+            server_keys.insert(id, p);
+        }
+    }
+
     let mut out = Vec::with_capacity(pinned.len());
     for (peer_id, pinned_pub, verified) in pinned {
-        let current_pub = match fetch_account_key(&conn, &peer_id).await {
-            Ok((p, _)) => Some(p),
-            // Peer no longer resolves (deleted, network blip) — keep them
-            // in the list with the local pin as the only truth. Don't mark
-            // them as `key_changed` since we don't actually know.
-            Err(_) => None,
-        };
-        let key_changed = matches!(current_pub, Some(p) if p != pinned_pub);
+        // Absent from the result set = the peer no longer resolves (deleted, or
+        // a NULL `account_id_pub`). Keep them in the list with the local pin as
+        // the only truth and do NOT mark them `key_changed` — we don't actually
+        // know. Identical to the old per-peer `Err(_) => None` arm, except that
+        // a whole-query failure now surfaces as one error instead of silently
+        // reporting every peer as unchanged.
+        let key_changed = matches!(server_keys.get(&peer_id), Some(p) if *p != pinned_pub);
         out.push(PeerVerificationEntry {
             peer_user_id: peer_id,
             verified: verified != 0,

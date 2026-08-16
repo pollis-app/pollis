@@ -35,6 +35,8 @@ on:
   pull_request:
     paths:
       - 'pollis-core/**'
+      # pollis-core re-exports the schema from here now.
+      - 'pollis-schema/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'mobile/**'

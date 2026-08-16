@@ -16,25 +16,29 @@
 
 use pollis_core::commands::mls::stale_cert_candidates;
 
-/// The subset of `user_device` columns the candidate query reads/filters on.
+/// The SHIPPED remote schema. #875: this used to declare its own four-column
+/// `user_device`, which is a different table from the one the candidate query
+/// runs against in production (no `pq_capable`, no cert columns, no
+/// `idx_user_device_user`).
 async fn db() -> libsql::Connection {
     let db = libsql::Builder::new_local(":memory:")
         .build()
         .await
         .expect("in-memory libsql");
     let conn = db.connect().expect("connect");
+    for sql in pollis_schema::main_scripts() {
+        conn.execute_batch(sql).await.expect("schema");
+    }
+    // The `Database` must outlive the `Connection` (libsql's local backend
+    // panics otherwise); this is a one-per-test in-memory file, so leak it.
+    std::mem::forget(db);
+    // `user_device.user_id` is a real foreign key; libsql's local backend
+    // enforces it. Give the devices an owner.
     conn.execute_batch(
-        "CREATE TABLE user_device (
-             device_id             TEXT PRIMARY KEY,
-             user_id               TEXT NOT NULL,
-             revoked_at            TEXT,
-             cert_identity_version INTEGER,
-             mls_signature_pub     BLOB,
-             mls_signature_pub_pq  BLOB
-         );",
+        "INSERT INTO users (id, email, username) VALUES ('alice', 'alice@x.com', 'alice');",
     )
     .await
-    .expect("create user_device");
+    .expect("seed user");
     conn
 }
 

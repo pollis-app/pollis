@@ -47,26 +47,13 @@ use pollis_delivery::{build_router_with_state, AppState};
 use std::sync::Arc;
 use tower::ServiceExt as _;
 
-// `message_envelope` is minimal — only `id` is joined against — but present,
-// because the reference count is `attachment_ref ⋈ message_envelope`.
-const SCHEMA: &str = "\
-CREATE TABLE message_envelope (\
-  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL DEFAULT 'c', \
-  sent_at TEXT NOT NULL DEFAULT 't');\
-CREATE TABLE attachment_object (\
-  content_hash TEXT PRIMARY KEY, r2_key TEXT NOT NULL, \
-  created_at TEXT NOT NULL DEFAULT (datetime('now')));\
-CREATE TABLE attachment_ref (\
-  content_hash TEXT NOT NULL, message_id TEXT NOT NULL, \
-  created_at TEXT NOT NULL DEFAULT (datetime('now')), \
-  PRIMARY KEY (content_hash, message_id));";
 
 async fn fresh() -> Arc<Db> {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -75,7 +62,14 @@ async fn add_envelope(db: &Db, msg: &str) {
     db.conn()
         .unwrap()
         .execute(
-            "INSERT OR IGNORE INTO message_envelope (id) VALUES (?1)",
+            // Every NOT NULL column is supplied. The old fixture inserted `id`
+            // alone under `OR IGNORE`, which against the real schema is not an
+            // insert at all — the constraint violation is swallowed and the
+            // envelope never exists, so the reference the test is about would
+            // never be held.
+            "INSERT OR IGNORE INTO message_envelope \
+               (id, conversation_id, sender_id, ciphertext, sent_at) \
+             VALUES (?1, 'conv', 'sender', 'ct', '2026-01-01T00:00:00Z')",
             libsql::params![msg.to_string()],
         )
         .await

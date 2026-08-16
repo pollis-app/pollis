@@ -29,8 +29,10 @@
 //!
 //! The parse/hash half of this file is mirrored in `pollis-delivery`
 //! (`invite_token.rs`). The two crates share no code by design — the same
-//! arrangement the repo already uses for the device-cert and livekit_jwt
-//! contracts — so any change to the format must land in both.
+//! arrangement the repo uses for the device-cert wire format and for
+//! account-creation-from-email (`auth::resolve_or_create_user_by_email` ↔
+//! `pollis_delivery::otp::apply_verify_otp`) — so any change to the format must
+//! land in both.
 
 use base64::Engine as _;
 use rand::RngCore;

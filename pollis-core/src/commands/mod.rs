@@ -30,7 +30,8 @@ pub mod livekit;
 // signer remains. Token/SendData/roster requests go through the DS client
 // helpers in `commands::mls` (`ds_livekit_*`).
 // LiveKit realtime signalling (wake-up) payload builders — pure serde_json,
-// no native deps, always compiled (same rationale as `livekit_jwt`). Both the
+// no native deps, always compiled (the same split the deleted `livekit_jwt`
+// module used: pure code lives outside the media gate). Both the
 // media `livekit::publish` and the headless `livekit_stub` build their wire
 // payloads here so the metadata-minimized shape (§5) has one source of truth
 // and unit-tests on every target.

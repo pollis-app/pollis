@@ -376,3 +376,140 @@ impl AppState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod guard_lifetime_tests {
+    use std::path::{Path, PathBuf};
+
+    /// The edition-2021 temporary-lifetime footgun, made unrepresentable.
+    ///
+    /// In edition 2021 a temporary created in the SCRUTINEE of `if let` /
+    /// `match` / `while let` — or on the right-hand side of a `let` — lives
+    /// until the end of the whole statement, body included. So
+    ///
+    /// ```ignore
+    /// if let Some(id) = state.device_id.lock().await.clone() {
+    ///     some_network_round_trip(id).await;   // <- lock STILL HELD
+    /// }
+    /// ```
+    ///
+    /// holds the mutex across the await even though `.clone()` reads as though
+    /// it released it. #875 found this on both `pin::set_pin` and `pin::unlock`,
+    /// pinning `state.device_id` — one of the hottest shared mutexes in the
+    /// crate — across a Turso read, an OS-keystore signature and a DS POST.
+    /// Nothing deadlocked, because the callee happened to use the sign-free
+    /// bootstrap posts; the signed `ds_client::ds_post` takes that same
+    /// non-reentrant `tokio::sync::Mutex`, so the shape was one ordinary
+    /// refactor away from a self-deadlock with no compiler diagnostic.
+    ///
+    /// The correct shape is a `let` STATEMENT — `let id = ...lock().await.clone();`
+    /// — whose guard drops at the `;`. Every other lock read in the crate
+    /// already uses it. This test is the invariant: the scrutinee form is
+    /// allowed only when nothing in the body awaits.
+    ///
+    /// A guard, not a proof: it is a source-shape check, so it cannot see a
+    /// guard bound to a `let` and then held deliberately. It closes the one
+    /// case where the source LOOKS correct and is not.
+    #[test]
+    fn no_lock_guard_in_a_scrutinee_spans_an_await() {
+        let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        collect_rs(&src_root, &mut files);
+        assert!(
+            files.len() > 50,
+            "walked only {} files under {} — the walk is broken, not clean",
+            files.len(),
+            src_root.display()
+        );
+
+        let mut offenders = Vec::new();
+        for file in &files {
+            let Ok(src) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            let lines: Vec<&str> = src.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let t = line.trim_start();
+                if t.starts_with("//") || !line.contains(".lock().await") {
+                    continue;
+                }
+                if !is_scrutinee(t) {
+                    continue;
+                }
+                if body_awaits(&lines, i) {
+                    offenders.push(format!(
+                        "{}:{}\n      {}",
+                        file.strip_prefix(&src_root).unwrap_or(file).display(),
+                        i + 1,
+                        t
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "a lock guard taken in a `if let`/`match`/`while let` scrutinee lives until the end \
+             of the statement in edition 2021, so these hold it across an await. Bind it to a \
+             `let` statement first:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// Does this line open an `if let` / `match` / `while let` whose scrutinee is
+    /// the locking expression? Also matches the `let x = match …` form, whose
+    /// temporary lives just as long.
+    fn is_scrutinee(trimmed: &str) -> bool {
+        let rest = trimmed
+            .strip_prefix('}')
+            .map(str::trim_start)
+            .unwrap_or(trimmed);
+        let rest = match rest.find('=') {
+            // `let x = match …` / `let x = if let …`
+            Some(eq) if rest.starts_with("let ") => rest[eq + 1..].trim_start(),
+            _ => rest,
+        };
+        rest.starts_with("if let ") || rest.starts_with("match ") || rest.starts_with("while let ")
+    }
+
+    /// Whether the braced body opened at or after `start` contains an `.await`.
+    /// Brace-counted rather than parsed — good enough because the only thing it
+    /// has to get right is "where does this statement end".
+    fn body_awaits(lines: &[&str], start: usize) -> bool {
+        let mut depth: i32 = 0;
+        let mut opened = false;
+        for (n, line) in lines.iter().enumerate().skip(start).take(400) {
+            for ch in line.chars() {
+                match ch {
+                    '{' => {
+                        depth += 1;
+                        opened = true;
+                    }
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if opened && n > start && line.contains(".await") {
+                return true;
+            }
+            if opened && depth <= 0 {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+}

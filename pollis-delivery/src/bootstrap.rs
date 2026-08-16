@@ -20,7 +20,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use serde::Deserialize;
 
 use crate::cert::verify_device_cert;
 use crate::error::AuthRejection;
@@ -28,16 +27,16 @@ use crate::session::verify_session;
 use crate::writes::bad_request;
 use crate::AppState;
 
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::bootstrap::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::bootstrap::*;
+
 fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine as _;
     Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
-}
-
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 fn ok_status() -> Response {
@@ -63,16 +62,6 @@ fn internal(e: anyhow::Error) -> Response {
 
 // ── POST /v1/auth/establish-identity ─────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct EstablishIdentityBody {
-    /// New account identity public key, base64 (STANDARD).
-    pub account_id_pub: String,
-    /// `account_recovery` blob, all base64 (STANDARD).
-    pub salt: String,
-    pub nonce: String,
-    pub wrapped_key: String,
-}
-
 /// POST /v1/auth/establish-identity — version-1 account-identity establishment,
 /// session-gated, signup-only. ONE transaction: a CAS `UPDATE users … WHERE id =
 /// :session AND account_id_pub IS NULL` (0 rows ⇒ 409, an existing identity is
@@ -84,7 +73,7 @@ pub async fn establish_identity(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let claims = match verify_session(&headers, &state.sessions, now_unix()) {
+    let claims = match verify_session(&headers, &state.sessions, crate::util::now_unix()) {
         Ok(c) => c,
         Err(rej) => return rej.into_response(),
     };
@@ -174,15 +163,6 @@ pub async fn apply_establish_identity(
 
 // ── POST /v1/auth/register-device ────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct RegisterDeviceBody {
-    /// Must equal the session's device. Bound from the session regardless; a
-    /// mismatch is rejected so a token can't register some other device.
-    pub device_id: String,
-    #[serde(default)]
-    pub device_name: Option<String>,
-}
-
 /// POST /v1/auth/register-device — INSERT the device row (COALESCE-preserving any
 /// existing name) + seed conversation watermarks, all bound to the session's
 /// `user_id`. Mirrors pollis-core `auth::register_device`'s remote writes.
@@ -191,7 +171,7 @@ pub async fn register_device(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let claims = match verify_session(&headers, &state.sessions, now_unix()) {
+    let claims = match verify_session(&headers, &state.sessions, crate::util::now_unix()) {
         Ok(c) => c,
         Err(rej) => return rej.into_response(),
     };
@@ -280,30 +260,6 @@ pub async fn apply_register_device(
 
 // ── POST /v1/auth/publish-device-cert ────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct PublishCertBody {
-    pub device_id: String,
-    /// ML-DSA-44 device cert, base64 (STANDARD).
-    pub device_cert: String,
-    /// Unix seconds the cert was issued at (stored as TEXT — lossless u64 round
-    /// trip for later verification, mirroring `device.rs`).
-    pub cert_issued_at: i64,
-    pub cert_identity_version: u32,
-    /// Raw 32-byte Ed25519 MLS signing pubkey, base64 (STANDARD) — the column the
-    /// device-signature gate verifies against.
-    pub mls_signature_pub: String,
-    /// Raw ML-DSA-44 MLS signing pubkey, base64 (STANDARD). Bound by cert v2
-    /// alongside the classic key, so both must be presented to re-derive the
-    /// signed payload here.
-    pub mls_signature_pub_pq: String,
-    /// The publishing user. IGNORED when a session is present (bound from the
-    /// session instead). REQUIRED on the cert-validity-alone (subsequent-device)
-    /// path, where there is no session to bind the user from — the cert
-    /// verification against this user's `account_id_pub` is the load-bearing proof.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 /// POST /v1/auth/publish-device-cert — the PIVOT write. DUAL gate, in both cases
 /// the cert's ML-DSA-44 signature is re-verified against the account's stored
 /// `account_id_pub` (a 409 if no identity is established yet) before the
@@ -326,7 +282,7 @@ pub async fn publish_device_cert(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let now = now_unix();
+    let now = crate::util::now_unix();
 
     let parsed: PublishCertBody = match serde_json::from_slice(&body) {
         Ok(b) => b,
@@ -506,17 +462,6 @@ pub async fn apply_publish_device_cert(
 
 // ── POST /v1/auth/enrollment-request ─────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct EnrollmentRequestBody {
-    pub request_id: String,
-    /// New device's ephemeral X25519 public key, base64 (STANDARD). The private
-    /// half never leaves the requesting device.
-    pub new_device_ephemeral_pub: String,
-    pub verification_code: String,
-    pub created_at: String,
-    pub expires_at: String,
-}
-
 /// POST /v1/auth/enrollment-request — INSERT a pending `device_enrollment_request`
 /// for the session's user + device. SESSION-gated because the requesting device
 /// is pre-credential (its `mls_signature_pub` is still NULL, so it cannot
@@ -529,7 +474,7 @@ pub async fn enrollment_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let claims = match verify_session(&headers, &state.sessions, now_unix()) {
+    let claims = match verify_session(&headers, &state.sessions, crate::util::now_unix()) {
         Ok(c) => c,
         Err(rej) => return rej.into_response(),
     };

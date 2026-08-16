@@ -69,15 +69,15 @@ skipping this leaves you with an empty database and an app that fails on first
 query. Apply the baseline and then every numbered migration, in order:
 
 ```bash
-turso db shell pollis-selfhost < pollis-core/src/db/migrations/000000_baseline.sql
-for f in pollis-core/src/db/migrations/0000[1-9]*.sql; do
+turso db shell pollis-selfhost < pollis-schema/migrations/000000_baseline.sql
+for f in pollis-schema/migrations/0000[1-9]*.sql; do
   echo "applying $f"
   turso db shell pollis-selfhost < "$f"
 done
 ```
 
 If you also run a separate commit-log DB (optional — see `LOG_DB_URL` in step 6),
-apply `pollis-core/src/db/migrations-log/*.sql` to *that* database the same way.
+apply `pollis-schema/migrations-log/*.sql` to *that* database the same way.
 Skip it and the MLS control-plane tables live in the main DB instead, which works
 fine for a single-operator deployment.
 

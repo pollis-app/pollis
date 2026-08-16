@@ -319,21 +319,20 @@ pub async fn ensure_device_cert(
     let bootstrap_session = state.bootstrap_session.lock().await.clone();
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD;
-    let body = serde_json::json!({
-        "user_id": user_id,
-        "device_id": device_id,
-        "device_cert": b64.encode(&cert),
-        "cert_issued_at": issued_at as i64,
-        "cert_identity_version": identity_version,
-        "mls_signature_pub": b64.encode(&sig_pub_bytes),
-        "mls_signature_pub_pq": b64.encode(&pq_sig_pub_bytes),
-    });
+    let body = pollis_api::bootstrap::PublishCertBody {
+        device_id: device_id.to_string(),
+        device_cert: b64.encode(&cert),
+        cert_issued_at: issued_at as i64,
+        cert_identity_version: identity_version,
+        mls_signature_pub: b64.encode(&sig_pub_bytes),
+        mls_signature_pub_pq: b64.encode(&pq_sig_pub_bytes),
+        user_id: Some(user_id.to_string()),
+    };
     match bootstrap_session {
         Some(token) => {
             // First-device signup: session + cert-validity, single-use.
             crate::commands::mls::ds_post_session_ok(
                 state,
-                "/v1/auth/publish-device-cert",
                 &token,
                 &body,
             )
@@ -347,7 +346,6 @@ pub async fn ensure_device_cert(
             // Subsequent device: cert-validity ALONE — no session header.
             let resp = crate::commands::mls::ds_post_plain(
                 state,
-                "/v1/auth/publish-device-cert",
                 &body,
             )
             .await?;
@@ -495,19 +493,20 @@ pub async fn resign_stale_device_certs(
     // never another user's.
     if !signed.is_empty() {
         use base64::Engine as _;
-        let certs: Vec<serde_json::Value> = signed
+        let certs: Vec<pollis_api::devices::ResignedCert> = signed
             .iter()
-            .map(|(device_id, cert, issued_at_str)| {
-                serde_json::json!({
-                    "device_id": device_id,
-                    "device_cert": base64::engine::general_purpose::STANDARD.encode(cert),
-                    "cert_issued_at": issued_at_str,
-                    "cert_identity_version": identity_version as i64,
-                })
+            .map(|(device_id, cert, issued_at_str)| pollis_api::devices::ResignedCert {
+                device_id: device_id.clone(),
+                device_cert: base64::engine::general_purpose::STANDARD.encode(cert),
+                cert_issued_at: issued_at_str.clone(),
+                cert_identity_version: identity_version as i64,
             })
             .collect();
-        let body = serde_json::json!({ "certs": certs, "user_id": user_id });
-        crate::commands::mls::ds_post_ok(state, "/v1/devices/resign", &body).await?;
+        let body = pollis_api::devices::ResignDeviceCertsBody {
+            certs,
+            user_id: Some(user_id.to_string()),
+        };
+        crate::commands::mls::ds_post_ok(state, &body).await?;
     }
 
     eprintln!(
@@ -601,17 +600,73 @@ pub(super) async fn verify_added_devices(
         }
     };
 
-    for did in device_ids {
+    // ONE query for the whole added-device list (#875). This runs inside the
+    // commit replay, once per add-carrying commit, so a cold-launch catch-up
+    // over K commits was paying K × (1 + devices) SEQUENTIAL Turso round trips
+    // interleaved with MLS work.
+    //
+    // The verification LOOP below is unchanged and still short-circuits in
+    // `device_ids` order, so the outcome and the log line for any given input
+    // are byte-identical. The only difference is that devices after the first
+    // failure are now fetched-but-not-examined instead of never fetched — no
+    // decision depends on that.
+    //
+    // The map is READ, never drained: `added_device_ids` is a CSV column the DS
+    // writes, so a repeated id in it is a shape this function has to survive.
+    // Taking rows out would make the second mention of a device look absent,
+    // turn a legitimate commit into a permanent `AbsentRetry`, and wedge the
+    // replay — where the per-device query it replaces would simply have
+    // returned the same row twice.
+    struct DeviceRow {
+        cert: Option<Vec<u8>>,
+        issued_at_str: Option<String>,
+        cert_identity_version: Option<i64>,
+        mls_sig_pub: Option<Vec<u8>>,
+        revoked_at: Option<String>,
+        mls_sig_pub_pq: Option<Vec<u8>>,
+    }
+    // `?1` is the user; devices occupy `?2..`. Bound by position — a device id
+    // is attacker-influenced and never goes near string-built SQL.
+    let placeholders = (0..device_ids.len())
+        .map(|i| format!("?{}", i + 2))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut by_device: std::collections::HashMap<String, DeviceRow> =
+        std::collections::HashMap::with_capacity(device_ids.len());
+    {
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(device_ids.len() + 1);
+        params.push(target_user_id.to_string().into());
+        for did in device_ids {
+            params.push(did.clone().into());
+        }
         let mut rows = conn
             .query(
-                "SELECT device_cert, cert_issued_at, cert_identity_version, \
-                        mls_signature_pub, revoked_at, mls_signature_pub_pq \
-                 FROM user_device WHERE device_id = ?1 AND user_id = ?2",
-                libsql::params![did.as_str(), target_user_id],
+                &format!(
+                    "SELECT device_id, device_cert, cert_issued_at, cert_identity_version, \
+                            mls_signature_pub, revoked_at, mls_signature_pub_pq \
+                     FROM user_device WHERE user_id = ?1 AND device_id IN ({placeholders})"
+                ),
+                params,
             )
             .await?;
+        while let Some(row) = rows.next().await? {
+            let did: String = row.get(0)?;
+            by_device.insert(
+                did,
+                DeviceRow {
+                    cert: row.get::<Option<Vec<u8>>>(1).ok().flatten(),
+                    issued_at_str: row.get::<Option<String>>(2).ok().flatten(),
+                    cert_identity_version: row.get::<Option<i64>>(3).ok().flatten(),
+                    mls_sig_pub: row.get::<Option<Vec<u8>>>(4).ok().flatten(),
+                    revoked_at: row.get::<Option<String>>(5).ok().flatten(),
+                    mls_sig_pub_pq: row.get::<Option<Vec<u8>>>(6).ok().flatten(),
+                },
+            );
+        }
+    }
 
-        let row = match rows.next().await? {
+    for did in device_ids {
+        let row = match by_device.get(did.as_str()) {
             Some(r) => r,
             None => {
                 // Row absent. Could be (a) revoked + hard-deleted by an
@@ -625,13 +680,22 @@ pub(super) async fn verify_added_devices(
             }
         };
 
-        let cert: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(0).ok().flatten();
-        let issued_at_str: Option<String> = row.get::<Option<String>>(1).ok().flatten();
-        let cert_identity_version: Option<i64> = row.get::<Option<i64>>(2).ok().flatten();
-        let mls_sig_pub: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(3).ok().flatten();
-        let revoked_at: Option<String> = row.get::<Option<String>>(4).ok().flatten();
-        let mls_sig_pub_pq: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(5).ok().flatten();
-        drop(rows);
+        let DeviceRow {
+            cert,
+            issued_at_str,
+            cert_identity_version,
+            mls_sig_pub,
+            revoked_at,
+            mls_sig_pub_pq,
+        } = row;
+        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, revoked_at, mls_sig_pub_pq) = (
+            cert.clone(),
+            issued_at_str.clone(),
+            *cert_identity_version,
+            mls_sig_pub.clone(),
+            revoked_at.clone(),
+            mls_sig_pub_pq.clone(),
+        );
 
         // Tombstone wins — a revoked device is unambiguously not allowed
         // to add itself, regardless of cert column state.

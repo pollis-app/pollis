@@ -775,7 +775,7 @@ jobs:
       #
       # HAZARD — db-apply.sh applies EVERY *.sql in MIGRATIONS_DIR that the
       # target DB hasn't recorded yet, then records each into that DB's own
-      # schema_migrations. The default dir (pollis-core/src/db/migrations) holds
+      # schema_migrations. The default dir (pollis-schema/migrations) holds
       # the whole MAIN schema (000000_baseline + 000001..000007). Pointing the
       # *empty* log DB at that default dir would apply the ENTIRE main schema to
       # the log DB — baseline would create users/groups/channels AND an
@@ -789,7 +789,7 @@ jobs:
       # FIX (owned by the migrations stream, S2 — not changed here): MOVE
       # 000007_commit_log_db.sql out of the shared dir into a dedicated log-DB
       # migrations dir, renumbered as its own fresh sequence
-      # (e.g. pollis-core/src/db/migrations-log/000001_commit_log_db.sql). That
+      # (e.g. pollis-schema/migrations-log/000001_commit_log_db.sql). That
       # keeps the main schema out of the log DB AND keeps the log schema out of
       # the main DB's pending set. This step points MIGRATIONS_DIR at that
       # dedicated dir; until S2 creates it the step safely no-ops
@@ -798,7 +798,7 @@ jobs:
         env:
           TURSO_URL: ${{ secrets.LOG_DB_URL }}
           TURSO_TOKEN: ${{ secrets.LOG_DB_ADMIN_TOKEN }}
-          MIGRATIONS_DIR: pollis-core/src/db/migrations-log
+          MIGRATIONS_DIR: pollis-schema/migrations-log
         run: ./scripts/db-apply.sh
 
   release:

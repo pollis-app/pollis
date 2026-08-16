@@ -21,6 +21,8 @@ on:
     # workflow itself re-runs the proofs; unrelated surfaces are exempt.
     paths:
       - 'pollis-core/**'
+      # pollis-core re-exports the schema from here now.
+      - 'pollis-schema/**'
       - '.github/workflows/kani.yml'
   push:
     branches: [main]

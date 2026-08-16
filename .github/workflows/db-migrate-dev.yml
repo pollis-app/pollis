@@ -34,8 +34,8 @@ on:
   push:
     branches: [main]
     paths:
-      - pollis-core/src/db/migrations/**
-      - pollis-core/src/db/migrations-log/**
+      - pollis-schema/migrations/**
+      - pollis-schema/migrations-log/**
       - scripts/db-apply.sh
 
 permissions:
@@ -92,5 +92,5 @@ jobs:
         env:
           TURSO_URL: ${{ secrets.LOG_DB_URL }}
           TURSO_TOKEN: ${{ secrets.LOG_DB_ADMIN_TOKEN }}
-          MIGRATIONS_DIR: pollis-core/src/db/migrations-log
+          MIGRATIONS_DIR: pollis-schema/migrations-log
         run: ./scripts/db-apply.sh

@@ -4,7 +4,7 @@
 -- IMPORTANT: COMMIT-LOG-DB migration (mls_commit_log / mls_welcome /
 -- mls_group_info live on the separate log DB post-#420). Applied by
 -- desktop-release.yml's second db-apply step (MIGRATIONS_DIR=
--- pollis-core/src/db/migrations-log). It must NOT go in the main-DB dir.
+-- pollis-schema/migrations-log). It must NOT go in the main-DB dir.
 --
 -- WHY THIS TABLE. The Delivery Service prunes `mls_commit_log` below a retention
 -- FLOOR so storage stays bounded per conversation (it grows with

@@ -107,7 +107,7 @@ against a permanently-absent device) but keys the envelope bound on liveness, no
 
 ## 2. What the Delivery Service database retains
 
-Schema: `pollis-core/src/db/migrations/` (main DB) and `pollis-core/src/db/migrations-log/` (commit-log
+Schema: `pollis-schema/migrations/` (main DB) and `pollis-schema/migrations-log/` (commit-log
 DB, split out in #420 Goal A).
 
 | Data | Table | Retention | Enforced by |

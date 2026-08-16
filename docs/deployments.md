@@ -155,7 +155,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 
 ## Managed data / storage
 
-- **Turso** (libSQL) — two databases: the **main** DB (users, groups, membership, public keys, encrypted envelopes) and the **commit-log** DB (`mls_commit_log` / `mls_group_info` / `mls_welcome`). Schema is applied **migrate-then-ship** by whichever deploy touches prod first: the `apply-migrations` job in `desktop-release.yml` (client releases) **and** the `delivery-deploy-{dev,prod}.yml` deploys (DS releases) both run `db-apply.sh` before shipping. It's idempotent (tracks `schema_migrations`), so overlap is harmless, and additive-only migrations make early application safe for the still-running old code. Nobody applies to prod by hand. Numbered migrations in `pollis-core/src/db/migrations/`; dev also auto-applies on merge via `db-migrate-dev.yml`.
+- **Turso** (libSQL) — two databases: the **main** DB (users, groups, membership, public keys, encrypted envelopes) and the **commit-log** DB (`mls_commit_log` / `mls_group_info` / `mls_welcome`). Schema is applied **migrate-then-ship** by whichever deploy touches prod first: the `apply-migrations` job in `desktop-release.yml` (client releases) **and** the `delivery-deploy-{dev,prod}.yml` deploys (DS releases) both run `db-apply.sh` before shipping. It's idempotent (tracks `schema_migrations`), so overlap is harmless, and additive-only migrations make early application safe for the still-running old code. Nobody applies to prod by hand. Numbered migrations in `pollis-schema/migrations/`; dev also auto-applies on merge via `db-migrate-dev.yml`.
 - **Cloudflare R2** — object storage behind **cdn.pollis.com**: desktop + CLI releases, install scripts, and the transparency-log static tree.
 
 ---
@@ -193,7 +193,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 | `livekit/` config | `livekit-deploy.yml` |
 | `pollis-core` / `src-tauri` / `frontend` (desktop-facing, user-visible) | tag a new `v*` → `desktop-release.yml` (also releases the DB migrations) |
 | `pollis-tui` / `pollis-core` (CLI-facing) | `cli-release.yml` |
-| a DB migration in `pollis-core/src/db/migrations/` | applied by whichever runs first: a DS deploy (`delivery-deploy-{dev,prod}.yml`) or `desktop-release.yml` (`apply-migrations`) — both migrate-then-ship, idempotent; dev also auto-applies on merge via `db-migrate-dev.yml` |
+| a DB migration in `pollis-schema/migrations/` | applied by whichever runs first: a DS deploy (`delivery-deploy-{dev,prod}.yml`) or `desktop-release.yml` (`apply-migrations`) — both migrate-then-ship, idempotent; dev also auto-applies on merge via `db-migrate-dev.yml` |
 | `verifiable-log*` (published-tree behavior) | `transparency-publish.yml` (also runs daily) |
 | `verifiable-log-serve` (`pollis-verify` CLI) | `verifier-release.yml` |
 
@@ -223,7 +223,7 @@ you edited. Use this, not intuition:
 | `pollis-relay/` / `pollis-device-cert/` | **Relay pool** only — rebuild the GHCR image (`relay-image.yml`), then roll the pool nodes. `pollis-device-cert` is shared with `pollis-core` (it mints the certs the relay verifies), so a change there also fans out to every **client** — keep the mint/verify halves in lockstep (golden vector). |
 | `frontend/` / `src-tauri/` | **Desktop** only. |
 | `pollis-tui/` | **CLI** only. |
-| a DB migration in `pollis-core/src/db/migrations/` | Applied by whichever prod deploy runs first (a DS deploy **or** `desktop-release.yml`) — migrate-then-ship, idempotent. If the merge ships **neither** a client release nor a DS deploy, prod has **not** run the migration yet; note it as pending. Dev auto-applies via `db-migrate-dev.yml`. |
+| a DB migration in `pollis-schema/migrations/` | Applied by whichever prod deploy runs first (a DS deploy **or** `desktop-release.yml`) — migrate-then-ship, idempotent. If the merge ships **neither** a client release nor a DS deploy, prod has **not** run the migration yet; note it as pending. Dev auto-applies via `db-migrate-dev.yml`. |
 | `website/` / `livekit/` | **Website** / **LiveKit stack** only. |
 
 ### Step 2 — for each output in the blast radius, decide and record

@@ -12,22 +12,6 @@ use pollis_delivery::db::Db;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
 
-// The commit-log table the resubmit path writes, plus the UNIQUE recipient index
-// migration 000002 (commit-log DB) adds (the ON CONFLICT target the upsert keys
-// on) and the `generation` column migration 000004 adds (#454 P4 — which suite
-// lineage this Welcome admits the recipient to).
-const SCHEMA: &str = "\
-CREATE TABLE mls_welcome (\
-  id TEXT PRIMARY KEY,\
-  conversation_id TEXT NOT NULL,\
-  recipient_id TEXT NOT NULL,\
-  welcome_data BLOB NOT NULL,\
-  delivered INTEGER NOT NULL DEFAULT 0,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  recipient_device_id TEXT,\
-  generation INTEGER NOT NULL DEFAULT 0\
-);\
-CREATE UNIQUE INDEX idx_mls_welcome_recipient ON mls_welcome (conversation_id, recipient_id, recipient_device_id);";
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -38,7 +22,7 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("delivery.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
 }
 

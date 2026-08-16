@@ -54,32 +54,6 @@ use pollis_delivery::profile::{apply_add_dm_member, apply_create_dm, AddDmMember
 use pollis_delivery::groups::{apply_approve_join_request, ApproveJoinRequestBody};
 use pollis_delivery::writes::WriteOutcome;
 
-/// Every table the handlers under test touch. No FK `REFERENCES` (mirrors
-/// `retention.rs`) — `connect_local` runs with `foreign_keys=OFF`, so standalone
-/// tables suffice and keep the fixtures minimal.
-const SCHEMA: &str = "\
-CREATE TABLE message_envelope (\
-  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL, \
-  sender_id TEXT NOT NULL DEFAULT '', ciphertext TEXT NOT NULL DEFAULT '', \
-  reply_to_id TEXT, type TEXT NOT NULL DEFAULT 'message', target_message_id TEXT);\
-CREATE TABLE user_device (user_id TEXT NOT NULL, device_id TEXT NOT NULL, revoked_at TEXT);\
-CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member');\
-CREATE TABLE groups (id TEXT PRIMARY KEY);\
-CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
-CREATE TABLE dm_channel (id TEXT PRIMARY KEY, created_by TEXT NOT NULL, created_at TEXT NOT NULL);\
-CREATE TABLE dm_channel_member (\
-  dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL, added_by TEXT NOT NULL, \
-  added_at TEXT NOT NULL, accepted_at TEXT, PRIMARY KEY (dm_channel_id, user_id));\
-CREATE TABLE group_join_request (\
-  id TEXT PRIMARY KEY, group_id TEXT NOT NULL, requester_id TEXT NOT NULL, \
-  reviewed_by TEXT, reviewed_at TEXT, status TEXT NOT NULL DEFAULT 'pending');\
-CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, reported_at TEXT, \
-  PRIMARY KEY (conversation_id, user_id, device_id));\
-CREATE TABLE mls_key_package (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL);\
-CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NULL, \
-  PRIMARY KEY (content_hash, message_id));";
 
 /// The device-liveness staleness window these tests drive GC with (#720). Wide
 /// enough that legacy fixtures (which seed `reported_at = NULL`, treated as live)
@@ -91,7 +65,7 @@ async fn fresh() -> Db {
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     db
 }
 
@@ -152,8 +126,8 @@ async fn add_envelope(db: &Db, id: &str, conv: &str, offset: &str) {
     db.conn()
         .unwrap()
         .execute(
-            "INSERT INTO message_envelope (id, conversation_id, sent_at) \
-             VALUES (?1, ?2, datetime('now', ?3))",
+            "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) \
+             VALUES (?1, ?2, datetime('now', ?3), 'sender', 'ct')",
             libsql::params![id.to_string(), conv.to_string(), offset.to_string()],
         )
         .await
@@ -200,7 +174,7 @@ async fn channel_gc_ignores_revoked_device_with_no_watermark() {
         .unwrap()
         .execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
-             INSERT INTO channels (id, group_id) VALUES ('c1', 'g1');",
+             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
         )
         .await
         .unwrap();
@@ -321,7 +295,7 @@ async fn approve_join_request_skips_revoked_devices() {
     db.conn()
         .unwrap()
         .execute_batch(
-            "INSERT INTO channels (id, group_id) VALUES ('c1', 'g1');\
+            "INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');\
              INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin');\
              INSERT INTO group_join_request (id, group_id, requester_id, status) \
                  VALUES ('jr1', 'g1', 'bob', 'pending');",
@@ -428,7 +402,7 @@ async fn revoke_device_cannot_delete_another_users_watermarks() {
 /// Seed a channel `c1` in group `g1` with the given members.
 async fn channel_with_members(db: &Db, members: &[&str]) {
     let conn = db.conn().unwrap();
-    conn.execute("INSERT INTO channels (id, group_id) VALUES ('c1', 'g1')", ())
+    conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan')", ())
         .await
         .unwrap();
     for m in members {
@@ -851,11 +825,11 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
         .execute_batch(
             // A channel every member device has caught up on.
             "INSERT INTO group_member (group_id, user_id) VALUES ('gA', 'alice');\
-             INSERT INTO channels (id, group_id) VALUES ('cA', 'gA');\
+             INSERT INTO channels (id, group_id, name) VALUES ('cA', 'gA', 'chan');\
              INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) \
                VALUES ('dB', 'bob', 'bob', datetime('now'));\
              INSERT INTO group_member (group_id, user_id) VALUES ('gC', 'carol');\
-             INSERT INTO channels (id, group_id) VALUES ('cC', 'gC');",
+             INSERT INTO channels (id, group_id, name) VALUES ('cC', 'gC', 'chan');",
         )
         .await
         .unwrap();
@@ -915,7 +889,7 @@ async fn dormant_device_stops_pinning_via_endpoint() {
         .execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO channels (id, group_id) VALUES ('c1', 'g1');",
+             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
         )
         .await
         .unwrap();
@@ -948,7 +922,7 @@ async fn a_returning_device_reports_and_pins_again() {
         db.conn().unwrap().execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO channels (id, group_id) VALUES ('c1', 'g1');",
+             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
         ).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
@@ -967,7 +941,7 @@ async fn a_returning_device_reports_and_pins_again() {
         db.conn().unwrap().execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO channels (id, group_id) VALUES ('c1', 'g1');",
+             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
         ).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
@@ -1010,7 +984,7 @@ async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
         db.conn().unwrap().execute_batch(&format!(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO channels (id, group_id) VALUES ('{conv}', 'g1');",
+             INSERT INTO channels (id, group_id, name) VALUES ('{conv}', 'g1', 'chan');",
         )).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
@@ -1042,8 +1016,8 @@ async fn sweep_reports_identity_free_growth_metrics() {
     let db = fresh().await;
     db.conn().unwrap().execute_batch(
         "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
-         INSERT INTO channels (id, group_id) VALUES ('big', 'g1');\
-         INSERT INTO channels (id, group_id) VALUES ('small', 'g1');",
+         INSERT INTO channels (id, group_id, name) VALUES ('big', 'g1', 'chan');\
+         INSERT INTO channels (id, group_id, name) VALUES ('small', 'g1', 'chan');",
     ).await.unwrap();
     // Alice never reported anywhere → COUNT(ud) != COUNT(cw) → nothing collected,
     // so every envelope survives and the snapshot sees them all.

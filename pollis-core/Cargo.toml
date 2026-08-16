@@ -53,6 +53,10 @@ media = [
 uniffi = { version = "0.31", features = ["tokio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The DS write API as types (#875). Every `ds_post*` body is one of these
+# structs, declared once and parsed by `pollis-delivery` from the same crate —
+# so a field this client forgets is a compile error, not an absent JSON key.
+pollis-api = { path = "../pollis-api" }
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 async-trait = "0.1"
 # NOTE: rusqlite is declared *per target* below — desktop links the system
@@ -111,6 +115,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # them. Kept in its own tiny crate to avoid a cycle (pollis-relay must not depend
 # on pollis-core) — see the crate's module docs and §11.1.
 pollis-device-cert = { path = "../pollis-device-cert" }
+# The remote schema (migrations/ + migrations-log/) as data. Its own crate so
+# pollis-delivery — which must not depend on pollis-core — builds its test
+# databases from the same definitions rather than hand-rolled partial ones.
+pollis-schema = { path = "../pollis-schema" }
 # The libsql connector that routes Turso's Hrana/TLS through the overlay shim.
 # hyper 0.14 + hyper-rustls 0.25 are ALREADY in this crate's graph via libsql's
 # default (tls) features; naming them directly lets `net::overlay::overlay_connector`

@@ -10,7 +10,11 @@
 //! 1. **Trust anchor.** Verify the latest account STH's signature *first* —
 //!    crucially under the account tree's domain-separated
 //!    [`account_key::STH_CONTEXT`], so a commit-log head can never stand in for
-//!    an account head even though the same key signs both.
+//!    an account head even though the same key signs both. The signature is
+//!    checked against the *set* of keys the log publishes as currently
+//!    acceptable (active signer + any key still inside its rotation-overlap
+//!    window), so a key changeover is invisible rather than a fleet-wide false
+//!    alarm.
 //! 2. **Membership.** Select the entries whose [`AccountKeyLeaf`] decodes and
 //!    whose `user_id` matches, in `seq` order.
 //! 3. **Inclusion.** Each selected entry's inclusion proof must verify against
@@ -30,14 +34,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use verifiable_log::{
-    proof, verifying_key_from_hex, Entry, InclusionProof, Sth, VerifiableLog,
-};
+use verifiable_log::{proof, Entry, InclusionProof, Sth, VerifiableLog};
 use verifiable_log_builder::account_key::{
     self, AccountKeyInvariant, AccountKeyLeaf,
 };
 
-use crate::bundle::{Bundle, InclusionCheck, PublicKeyDoc};
+use crate::bundle::{now_ms, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json};
 
@@ -54,7 +56,7 @@ pub struct AccountKeyVersion {
     pub identity_version: u64,
     /// Global insertion order (`account_key_log.seq`).
     pub seq: i64,
-    /// The Ed25519 account identity public key authoritative at this version,
+    /// The ML-DSA-44 account identity public key authoritative at this version,
     /// lowercase hex.
     pub account_id_pub: String,
     /// Did this entry's inclusion proof verify against the latest account STH?
@@ -145,10 +147,15 @@ pub fn verify_account_via(
     }
 
     let bundle = Bundle {
+        // Verification-side reconstruction, never re-published. The served key
+        // document's rotation-overlap set is carried through so the verdict core
+        // accepts a head signed by a key that is retiring but still inside its
+        // window — during a changeover `public_key.json` and `sth/latest.json` are
+        // separate artifacts on separate cache policies and legitimately move at
+        // different moments. Dropping the set here (#875) made an honest log
+        // mid-rotation raise a hard ALARM in the shipped client.
+        retired_keys: pk_doc.overlap_keys(),
         public_key: pk_doc.public_key,
-        // Verification-side reconstruction, never re-published: the overlap set
-        // is applied when selecting the verifying key, not carried in here.
-        retired_keys: Vec::new(),
         sths: vec![sth],
         entries,
         enforce_unique: vec![ACCOUNT_TENANT.to_string()],
@@ -169,21 +176,38 @@ pub fn verify_account_via(
 /// Never panics; a tampered/duplicated/regressed chain yields
 /// `chain_valid == false` with populated `violations` rather than an error.
 pub fn verify_account_in_bundle(bundle: &Bundle, user_id: &str) -> AccountReport {
+    verify_account_in_bundle_at(bundle, user_id, now_ms())
+}
+
+/// [`verify_account_in_bundle`] against an explicit `now_ms`, which decides which
+/// rotation-overlap keys have expired.
+///
+/// The clock is a parameter so the overlap window is testable without waiting for
+/// one, and so a caller that needs a deterministic verdict can supply its own
+/// instant. [`verify_account_in_bundle`] is exactly this against the wall clock.
+pub fn verify_account_in_bundle_at(
+    bundle: &Bundle,
+    user_id: &str,
+    now_ms: u64,
+) -> AccountReport {
     let mut violations: Vec<String> = Vec::new();
 
-    // 1. Trust anchor: the newest account head, verified under the log key AND
-    //    the account-keys domain context. An STH minted for the commit-log tree
-    //    fails here even though the same key signed it.
-    let verifying_key = verifying_key_from_hex(&bundle.public_key).ok();
+    // 1. Trust anchor: the newest account head, verified under the account-keys
+    //    domain context and under ANY key the log publishes as acceptable right
+    //    now — the active signer plus any key still inside its rotation-overlap
+    //    window. An STH minted for the commit-log tree still fails here even
+    //    though the same key signed it: the context, not the key, separates the
+    //    trees. Expiry is applied here, not trusted from the server.
+    let candidates = bundle.key_candidates(now_ms);
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
-    let (sth_tree_size, root_hex, sth_sig_ok) = match (latest, &verifying_key) {
-        (Some(sth), Some(vk)) => (
+    let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
+        Some(sth) => (
             sth.tree_size,
             sth.root_hash.clone(),
-            sth.verify_with_context(vk, account_key::STH_CONTEXT),
+            sth.verify_any_with_context(&candidates, account_key::STH_CONTEXT)
+                .is_some(),
         ),
-        (Some(sth), None) => (sth.tree_size, sth.root_hash.clone(), false),
-        (None, _) => (0, String::new(), false),
+        None => (0, String::new(), false),
     };
     if !sth_sig_ok {
         violations

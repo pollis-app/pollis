@@ -23,16 +23,20 @@ async fn db_with_devices(rows: &[(&str, &str, Option<&str>)]) -> libsql::Connect
         .await
         .expect("in-memory libsql");
     let conn = db.connect().expect("connect");
-    conn.execute_batch(
-        "CREATE TABLE user_device (
-             device_id   TEXT PRIMARY KEY,
-             user_id     TEXT NOT NULL,
-             device_name TEXT,
-             revoked_at  TEXT
-         );",
-    )
-    .await
-    .expect("create user_device");
+    // The SHIPPED remote schema (#875) rather than a hand-rolled `user_device`.
+    for sql in pollis_schema::main_scripts() {
+        conn.execute_batch(sql).await.expect("schema");
+    }
+    for (user_id, _, _) in rows {
+        // `user_device.user_id` is a real foreign key; libsql's local backend
+        // enforces it. Give each device an owner.
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, email, username) VALUES (?1, ?1 || '@x', ?1)",
+            libsql::params![user_id.to_string()],
+        )
+        .await
+        .expect("seed user");
+    }
     for (user_id, device_id, revoked_at) in rows {
         conn.execute(
             "INSERT INTO user_device (device_id, user_id, revoked_at) VALUES (?1, ?2, ?3)",

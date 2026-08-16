@@ -15,6 +15,7 @@ pub mod realtime;
 pub mod signal;
 pub mod sink;
 pub mod state;
+pub mod util;
 
 // Re-export so downstream crates (pollis-node, src-tauri shims) can name
 // types like `Selection`/`SourceList` that appear in screenshare command

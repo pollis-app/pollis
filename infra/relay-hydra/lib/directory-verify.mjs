@@ -22,9 +22,30 @@ export function publicKeyFromRaw(raw32) {
 
 export class DirectoryRejected extends Error {}
 
-// Mirrors the client: REJECT (fail closed) on bad signature, version != 1,
-// now >= expires_at, malformed JSON, or empty relays. Returns the Directory on
-// success. `nowSeconds` is injectable so tests can exercise expiry.
+// The artifact name a directory identifies itself by — the mirror of
+// REVOCATION_TYPE in revocation-verify.mjs, and of DIRECTORY_TYPE in
+// pollis-core's net::directory.
+//
+// One key signs both artifacts, so a signature proves only who signed, never
+// WHICH artifact was signed: an on-path attacker can serve the revocation list
+// where the directory is expected and both signatures verify.
+//
+// The guard is deliberately ONE-SIDED: a present-and-wrong `type` is rejected, an
+// ABSENT one is accepted. The reconciler does not (yet) emit `type` on the
+// directory, and it must not have to — making the field REQUIRED would mean a
+// verifier release and a reconciler release that can never be out of order, i.e.
+// a fleet-wide outage waiting on a deploy race, for no security gain. Absence is
+// already unambiguous: every other artifact this key signs DOES carry a `type`,
+// so "no type" cannot be one of them. What the guard buys is that the rejection
+// is a DECISION rather than a side effect of which required fields the other
+// artifacts happen to lack — a distinction one `#[serde(default)]` away from
+// disappearing on the Rust side.
+export const DIRECTORY_TYPE = "pollis-relay-directory";
+
+// Mirrors the client: REJECT (fail closed) on bad signature, version != 1, a
+// `type` that is present and not DIRECTORY_TYPE, now >= expires_at, malformed
+// JSON, or empty relays. Returns the Directory on success. `nowSeconds` is
+// injectable so tests can exercise expiry.
 export function verifyDirectory(envelopeText, pinnedPublicKeyB64, nowSeconds = Math.floor(Date.now() / 1000)) {
   let envelope;
   try {
@@ -54,6 +75,11 @@ export function verifyDirectory(envelopeText, pinnedPublicKeyB64, nowSeconds = M
 
   if (directory.version !== 1) {
     throw new DirectoryRejected(`unsupported version ${directory.version}`);
+  }
+  // Cross-artifact confusion guard — see DIRECTORY_TYPE. Before the range checks
+  // so a foreign artifact is rejected as what it is, not as "expired".
+  if (directory.type !== undefined && directory.type !== null && directory.type !== DIRECTORY_TYPE) {
+    throw new DirectoryRejected(`wrong artifact type ${JSON.stringify(directory.type)}`);
   }
   if (typeof directory.expires_at !== "number" || nowSeconds >= directory.expires_at) {
     throw new DirectoryRejected("expired");

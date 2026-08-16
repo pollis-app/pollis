@@ -41,11 +41,44 @@ pub const STH_SIG_LEN: usize = 2420;
 /// A second (or third) tenant that wants its **own** tree must sign with a
 /// *different* context via [`Sth::create_with_context`] /
 /// [`Sth::verify_with_context`], so an STH minted for one log can never be
-/// replayed as another's. The concrete context strings live next to their
-/// tenants in the builder: the account-key directory signs under
-/// `…:sth:v2:account-keys`, and the released-binaries tree (binary transparency)
-/// under `…:sth:v2:binaries`. One key, three trees, three contexts.
-const STH_DOMAIN: &[u8] = b"pollis-verifiable-log:sth:v2";
+/// replayed as another's. One key, three trees, three contexts — all three live
+/// here, next to the default, because a context string that is spelled out in
+/// several crates is a context string that can drift, and a drifted context is
+/// indistinguishable from a forged head. The tenant modules in
+/// `verifiable-log-builder` re-export these rather than restating the bytes.
+pub const STH_CONTEXT_COMMIT_LOG: &[u8] = b"pollis-verifiable-log:sth:v2";
+
+/// Domain separation for the **account-key directory** tree. See
+/// [`STH_CONTEXT_COMMIT_LOG`].
+pub const STH_CONTEXT_ACCOUNT_KEYS: &[u8] = b"pollis-verifiable-log:sth:v2:account-keys";
+
+/// Domain separation for the **released-binaries** tree (binary transparency).
+/// See [`STH_CONTEXT_COMMIT_LOG`].
+pub const STH_CONTEXT_BINARIES: &[u8] = b"pollis-verifiable-log:sth:v2:binaries";
+
+/// Every published tree, as `(cli-name, context)`. The single list a verifier
+/// walks when it has to turn a human-supplied tree name into a signing context,
+/// so adding a fourth tree cannot leave one entry point behind.
+pub const STH_CONTEXTS: [(&str, &[u8]); 3] = [
+    ("commit-log", STH_CONTEXT_COMMIT_LOG),
+    ("account-keys", STH_CONTEXT_ACCOUNT_KEYS),
+    ("binaries", STH_CONTEXT_BINARIES),
+];
+
+/// The signing context for a tree name from [`STH_CONTEXTS`], or `None` for a
+/// name this build does not know — never a silent fallback to the commit log,
+/// which would verify an account-key head under the wrong domain and report a
+/// confident FAIL for an honest log.
+pub fn sth_context_for_tree(name: &str) -> Option<&'static [u8]> {
+    STH_CONTEXTS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, ctx)| *ctx)
+}
+
+/// Internal alias for the frozen commit-log context, kept so the default-path
+/// code below reads as "the default" rather than naming one tenant.
+const STH_DOMAIN: &[u8] = STH_CONTEXT_COMMIT_LOG;
 
 /// Length in hex characters of a [`key_id_for`] identifier.
 pub const KEY_ID_HEX_LEN: usize = 16;

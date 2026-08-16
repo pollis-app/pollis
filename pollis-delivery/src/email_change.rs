@@ -18,7 +18,6 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     body::Bytes,
@@ -27,12 +26,18 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use serde::Deserialize;
 
 use crate::error::{AppError, AuthRejection};
 use crate::otp::{normalize_email, process_request_otp, OtpConfig, OtpStore, VerifyOutcome};
 use crate::writes::{bad_request, gate};
 use crate::AppState;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::email_change::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::email_change::*;
 
 /// The email-change machinery: a dedicated OTP store plus the requester binding.
 ///
@@ -85,13 +90,6 @@ impl EmailChangeStore {
     }
 }
 
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 fn ok_status() -> Response {
     (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
 }
@@ -106,11 +104,6 @@ fn internal(e: anyhow::Error) -> Response {
 }
 
 // ── POST /v1/auth/request-email-change-otp ───────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct RequestEmailChangeBody {
-    pub new_email: String,
-}
 
 /// POST /v1/auth/request-email-change-otp — DEVICE-SIGNED. Record the
 /// authenticated requester for `new_email`, generate + store + email an OTP keyed
@@ -151,12 +144,6 @@ pub async fn request_email_change_otp(
 }
 
 // ── POST /v1/auth/verify-email-change ────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct VerifyEmailChangeBody {
-    pub new_email: String,
-    pub code: String,
-}
 
 /// The outcome of [`apply_verify_email_change`] — the handler maps it to the wire
 /// response (the in-process harness maps it the same way).
@@ -240,7 +227,7 @@ pub async fn apply_verify_email_change(
     // the `users.email` write below succeeds, so a transient/config DB failure
     // returns a clean 5xx and the same code still works on retry instead of being
     // burned and disguised as "invalid code" (#518). Wrong-guess accounting stands.
-    match store.otp.check(trimmed, code, cfg.max_attempts, now_unix()) {
+    match store.otp.check(trimmed, code, cfg.max_attempts, crate::util::now_unix()) {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => {
             // check() already deleted the code on lockout; drop the binding too so a

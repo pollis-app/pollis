@@ -1,7 +1,8 @@
 //! Pure builders for the LiveKit realtime signalling (wake-up) payloads.
 //!
-//! Kept out of the media-gated `livekit` module (mirroring `livekit_jwt`,
-//! `commands/mod.rs`) so the exact JSON shape compiles — and unit-tests —
+//! Kept out of the media-gated `livekit` module (the same split the since-
+//! deleted `livekit_jwt` module used — see `commands/mod.rs`) so the exact JSON
+//! shape compiles — and unit-tests —
 //! on every target, including the headless `--no-default-features` build
 //! that swaps in `livekit_stub`. Both the real publisher (`livekit/publish.rs`)
 //! and the mobile/headless stub (`livekit_stub.rs`) build their payloads here,

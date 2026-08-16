@@ -24,7 +24,6 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::{Request, State},
@@ -209,13 +208,6 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         .filter(|s| !s.is_empty())
 }
 
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// The 429 body for the per-IP throttle — distinct from the per-email lockout's
 /// "too many attempts" so the two limits are tellable apart in logs/clients.
 pub fn too_many_requests() -> Response {
@@ -268,7 +260,7 @@ pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next)
         let ip = client_ip(req.headers());
         if state
             .ratelimit
-            .check(&format!("{tier}:{ip}"), max, window, now_unix())
+            .check(&format!("{tier}:{ip}"), max, window, crate::util::now_unix())
             == RateLimitOutcome::Limited
         {
             return too_many_requests();

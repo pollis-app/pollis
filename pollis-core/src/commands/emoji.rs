@@ -715,17 +715,22 @@ pub async fn upload_group_emoji(
         .await?;
     }
 
+    // `created_by` is the DS's no-auth fallback for the acting user
+    // (`resolve_actor`): with request signing off, a body without it resolves to
+    // no actor and the endpoint 403s outright. On the signed path it is bound to
+    // — and must equal — the authenticated user, so naming it grants nothing.
+    let actor_id = crate::commands::mls::current_user_id(state).await?;
     crate::commands::mls::ds_post_ok(
         state,
-        "/v1/emoji/create",
-        &serde_json::json!({
-            "group_id": group_id,
-            "shortcode": shortcode,
-            "content_hash": content_hash,
-            "content_type": encoded.content_type,
-            "size_bytes": encoded.bytes.len(),
-            "animated": encoded.animated,
-        }),
+        &pollis_api::emoji::CreateEmojiBody {
+            group_id: group_id.clone(),
+            shortcode: shortcode.clone(),
+            content_hash: content_hash.clone(),
+            content_type: encoded.content_type.to_string(),
+            size_bytes: encoded.bytes.len() as u64,
+            animated: encoded.animated,
+            created_by: Some(actor_id),
+        },
     )
     .await?;
 
@@ -754,10 +759,15 @@ pub async fn remove_group_emoji(
     shortcode: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
+    // `actor_id`: same no-auth fallback contract as `/v1/emoji/create` above.
+    let actor_id = crate::commands::mls::current_user_id(state).await?;
     crate::commands::mls::ds_post_ok(
         state,
-        "/v1/emoji/remove",
-        &serde_json::json!({ "group_id": group_id, "shortcode": shortcode }),
+        &pollis_api::emoji::RemoveEmojiBody {
+            group_id,
+            shortcode,
+            actor_id: Some(actor_id),
+        },
     )
     .await?;
     collect_orphaned_emoji(state).await
@@ -767,7 +777,7 @@ pub async fn remove_group_emoji(
 /// blobs it collected. Safe to call at any time: it is idempotent and can only
 /// touch objects no group references.
 pub async fn collect_orphaned_emoji(state: &Arc<AppState>) -> Result<()> {
-    let resp = crate::commands::mls::ds_post(state, "/v1/emoji/gc", &serde_json::json!({})).await?;
+    let resp = crate::commands::mls::ds_post(state, &pollis_api::emoji::EmojiGcBody {}).await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();

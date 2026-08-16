@@ -2,12 +2,12 @@
 
 Slice 2 of the Key Transparency work (issue #330). Reads real MLS commit data
 from a Turso/libSQL database and turns it into the signed **monitor bundle** that
-slice 1's [`verifiable-log`](../verifiable-log) `monitor` CLI already verifies —
-with **no changes to the monitor**.
+slice 1's [`verifiable-log`](../verifiable-log) `monitor` CLI verifies.
 
-This crate depends on `verifiable-log` for all Merkle / STH / proof logic; it does
-not reimplement any of it. It adds only: a DB reader, the commit-log tenant
-(canonical leaf encoding + invariant), and the bundle builder/signer.
+This crate depends on `verifiable-log` for all Merkle / STH / proof logic — and,
+since #875, for the bundle *type* and the per-tree STH contexts too; it does not
+restate any of them. It adds only: a DB reader, the tenant leaf encodings and
+invariants, and the bundle builder/signer.
 
 ## What it does
 
@@ -127,8 +127,11 @@ VLOG_SIGNING_KEY=<32-byte hex> \
   build-binaries --binaries-in records.json --out binaries-bundle.json \
   --timestamp 1700000000000
 
-# Verify with the UNCHANGED slice-1 monitor.
+# Verify with the slice-1 monitor. Each tree is domain-separated, so tell the
+# monitor which one it is checking (`--tree` defaults to `commit-log`).
 cargo run -p verifiable-log --bin monitor -- verify bundle.json
+cargo run -p verifiable-log --bin monitor -- verify --tree account-keys account-bundle.json
+cargo run -p verifiable-log --bin monitor -- verify --tree binaries binaries-bundle.json
 ```
 
 `--db` may be omitted to fall back to `TURSO_DATABASE_URL`. The signing key comes
@@ -154,7 +157,9 @@ use a local fixture file only and never connect to a real/production database.
 cargo test -p verifiable-log-builder
 ```
 
-The gate suite seeds a local libSQL fixture, builds a bundle, and verifies it
-through the slice-1 monitor path; injects a fork row and an epoch regression and
-asserts both are rejected; tampers with an emitted entry and asserts the monitor
-fails; and round-trips the keygen output.
+The gate suite seeds a local libSQL fixture, builds a bundle, and verifies it by
+calling the monitor's own `verify_bundle` (the account and binaries suites used to
+carry hand-written copies of that loop, because the CLI could not check their trees);
+injects a fork row and an epoch regression and asserts both are rejected; asserts each
+tree's bundle fails under a sibling tree's context; tampers with an emitted entry and
+asserts the monitor fails; and round-trips the keygen output.

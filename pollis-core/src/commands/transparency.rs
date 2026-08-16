@@ -9,7 +9,7 @@
 //! so a client can never reach a different verdict than a third-party auditor.
 //! No proof, Merkle, or signature logic is reimplemented here.
 //!
-//! **Pinned trust root.** The log's Ed25519 public key is pinned as a constant
+//! **Pinned trust root.** The log's ML-DSA-44 public key is pinned as a constant
 //! ([`PINNED_LOG_PUBLIC_KEYS`]). The served `public_key.json` MUST equal it; a
 //! mismatch is a hard [`AuditStatus::Alarm`], never a warning — without the pin
 //! a hostile host could serve its own key over its own self-consistent (but
@@ -31,7 +31,11 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use verifiable_log_serve::release::{verify_release_via, Layer, ReleaseReport};
-use verifiable_log_serve::{AccountKeyVersion, AccountReport};
+// The real served-document type, not a local stand-in. A hand-rolled struct
+// keeping only `public_key` silently drops the log's rotation-overlap `keys`
+// array, which is how a key changeover became invisible to the client half of
+// this feature (#875).
+use verifiable_log_serve::{AccountKeyVersion, AccountReport, PublicKeyDoc};
 
 use crate::error::{Error, Result};
 use crate::state::AppState;
@@ -550,10 +554,6 @@ async fn fetch_served_public_key(
     overlay: Option<&pollis_relay::OverlayHandle>,
     base: &str,
 ) -> Result<String> {
-    #[derive(serde::Deserialize)]
-    struct PublicKeyDoc {
-        public_key: String,
-    }
     let url = format!(
         "{}/v1/account-keys/public_key.json",
         base.trim_end_matches('/')
@@ -566,21 +566,38 @@ async fn fetch_served_public_key(
         .error_for_status()?
         .json()
         .await?;
-    Ok(doc.public_key.to_lowercase())
+    Ok(active_served_key(&doc))
 }
 
-/// Fetch `/v1/binaries/public_key.json` and return its key (lowercase hex). The
-/// binaries tree's key is the same pinned Ed25519 key as the account tree, but
-/// served under the binaries subtree; the caller pin-checks it before trusting
-/// any release verdict. Returns `Err(detail)` on transport/parse failure.
+/// The key a served [`PublicKeyDoc`] says is signing **right now**, lowercase hex
+/// — the single value [`check_pin`] compares against this build's pin.
+///
+/// The document also carries the log's rotation-overlap set (`keys`, each with a
+/// `not_after`), and it is deliberately NOT folded in here. The overlap set is the
+/// *log's* claim about which keys it will accept, and the shared verifier applies
+/// it when checking a head's signature; the pin is *this build's* claim about
+/// which key it is willing to trust at all. Matching the pin against the served
+/// set would collapse the second into the first: a hostile host could publish the
+/// genuine pinned key as a retired entry, sign every head with its own key, and
+/// pass the pin check on a key it never used. So the pin is checked against the
+/// active signer only — the key that actually mints the heads being verified.
+///
+/// (Consequence, by design: an old build that pins only a key the log has since
+/// retired reports a pin *mismatch* rather than trusting the successor. The
+/// rotation ordering in `docs/sth-signing-key-custody.md` §5 — ship the pin set
+/// first, move the log second — is what keeps that from happening to a fleet.)
+fn active_served_key(doc: &PublicKeyDoc) -> String {
+    doc.public_key.to_lowercase()
+}
+
+/// Fetch `/v1/binaries/public_key.json` and return its active key (lowercase
+/// hex). The binaries tree's key is the same pinned ML-DSA-44 key as the account
+/// tree, but served under the binaries subtree; the caller pin-checks it before
+/// trusting any release verdict. Returns `Err(detail)` on transport/parse failure.
 async fn fetch_served_binaries_public_key(
     overlay: Option<&pollis_relay::OverlayHandle>,
     base: &str,
 ) -> std::result::Result<String, String> {
-    #[derive(serde::Deserialize)]
-    struct PublicKeyDoc {
-        public_key: String,
-    }
     let url = format!("{}/v1/binaries/public_key.json", base.trim_end_matches('/'));
     let client = crate::net::overlay::http_client(overlay);
     let doc: PublicKeyDoc = client
@@ -592,7 +609,7 @@ async fn fetch_served_binaries_public_key(
         .json()
         .await
         .map_err(|e| format!("could not parse the binaries log's public key: {e}"))?;
-    Ok(doc.public_key.to_lowercase())
+    Ok(active_served_key(&doc))
 }
 
 /// This build's own hash, paired with the leaf layer it is comparable against.
@@ -1337,6 +1354,96 @@ mod tests {
             .filter(|p| p.not_after.is_none())
             .count();
         assert!(open <= 1, "{open} pins have no not_after; at most one may");
+    }
+
+    // ── the served key document (#875) ────────────────────────────────────
+    //
+    // These parse the REAL `verifiable_log_serve::PublicKeyDoc`, not a local
+    // stand-in. A hand-rolled struct keeping only `public_key` deserializes a
+    // rotation key set without complaint and silently discards it, which is
+    // exactly how the client half of the rotation contract went missing.
+
+    /// A served document mid-rotation, as `public_key.json` really carries it.
+    fn served_doc(active: &str, retiring: &str, not_after: u64) -> String {
+        format!(
+            r#"{{"public_key":"{active}","keys":[
+                 {{"key_id":"new","algorithm":"ML-DSA-44","public_key":"{active}"}},
+                 {{"key_id":"old","algorithm":"ML-DSA-44","public_key":"{retiring}","not_after":{not_after}}}
+               ]}}"#
+        )
+    }
+
+    /// The overlap set must survive deserialization — entries, order and
+    /// `not_after` intact — and the active key must be the one with no expiry.
+    #[test]
+    fn a_served_key_set_is_parsed_not_discarded() {
+        let doc: PublicKeyDoc =
+            serde_json::from_str(&served_doc(NEW_KEY, OLD_KEY, WINDOW_CLOSES)).unwrap();
+
+        assert_eq!(doc.keys.len(), 2, "the rotation key set must survive parsing");
+        assert_eq!(doc.public_key, NEW_KEY);
+        assert!(doc.keys[0].not_after.is_none());
+        assert_eq!(doc.keys[1].public_key, OLD_KEY);
+        assert_eq!(doc.keys[1].not_after, Some(WINDOW_CLOSES));
+
+        // Inside the window both keys are live; past it only the active one is.
+        assert_eq!(doc.active_keys(WINDOW_CLOSES).len(), 2);
+        assert_eq!(doc.active_keys(WINDOW_CLOSES + 1).len(), 1);
+    }
+
+    /// A document written before the key set existed still parses, and still
+    /// yields its single key — every shipped verifier depends on that.
+    #[test]
+    fn a_legacy_served_document_without_a_key_set_still_parses() {
+        let doc: PublicKeyDoc =
+            serde_json::from_str(&format!(r#"{{"public_key":"{NEW_KEY}"}}"#)).unwrap();
+
+        assert!(doc.keys.is_empty());
+        assert_eq!(active_served_key(&doc), NEW_KEY);
+    }
+
+    /// The pin is checked against the key that is signing NOW, never against the
+    /// served set. Widening it to the set would let a hostile host publish the
+    /// genuine pinned key as a retired entry, sign every head with its own key,
+    /// and pass a pin check on a key it never used — the pin would be laundered
+    /// into nothing.
+    #[test]
+    fn publishing_the_pinned_key_as_retired_does_not_launder_a_hostile_active_key() {
+        // Hostile host: active = a key we do not pin; the key we DO pin is
+        // published as retiring-but-live to make the document look honest.
+        let doc: PublicKeyDoc =
+            serde_json::from_str(&served_doc(LOG_PIN, NEW_KEY, WINDOW_CLOSES)).unwrap();
+
+        // The pinned key is right there in the served set...
+        assert!(doc.keys.iter().any(|k| k.public_key == NEW_KEY));
+        // ...and it changes nothing: the verdict is still a hard mismatch.
+        assert_eq!(active_served_key(&doc), LOG_PIN);
+        assert_eq!(
+            check_pin_at(&active_served_key(&doc), OVERLAP, 1_000),
+            PinCheck::Mismatch
+        );
+    }
+
+    /// The honest counterpart: once the log's ACTIVE key is one this build pins,
+    /// the pin matches — with or without a key set in the document.
+    #[test]
+    fn an_active_key_this_build_pins_matches() {
+        let doc: PublicKeyDoc =
+            serde_json::from_str(&served_doc(NEW_KEY, OLD_KEY, WINDOW_CLOSES)).unwrap();
+        assert_eq!(
+            check_pin_at(&active_served_key(&doc), OVERLAP, 1_000),
+            PinCheck::Match
+        );
+    }
+
+    /// Hex case in the served document must not decide trust; the fetch paths
+    /// normalise through this one function.
+    #[test]
+    fn the_active_served_key_is_lowercased() {
+        let doc: PublicKeyDoc =
+            serde_json::from_str(&format!(r#"{{"public_key":"{}"}}"#, NEW_KEY.to_uppercase()))
+                .unwrap();
+        assert_eq!(active_served_key(&doc), NEW_KEY);
     }
 
     // ── peer-audit ────────────────────────────────────────────────────────

@@ -27,6 +27,64 @@ The path in each section header below points at the implementation in `pollis-co
 >
 > When you add or change a command, update the relevant section here **and** Appendix A in the same PR (per `CLAUDE.md`: update the wiki alongside the code).
 
+### Every DS write body must NAME ITS ACTOR (#875)
+
+`pollis-delivery` resolves the acting user for every `POST /v1/…` write through one
+helper, `writes::resolve_actor`:
+
+| DS `require_auth` | actor comes from | body's actor field |
+| --- | --- | --- |
+| **on** (production) | the device-signed `X-Pollis-User` | must EQUAL the signer, else `403` |
+| **off** | the body's actor field | **required** — missing/empty is `403` |
+
+So a client body that omits the field works perfectly against a signed deployment
+and hard-`403`s against an unsigned one. The field's NAME varies per endpoint —
+`actor_id`, `user_id`, `sender_id`, `requester_id`, `created_by`, `owner_id`,
+`approver_id`, `blocker_id`, `inviter_id` — so there is no single global check;
+the rule is per call site. Sending it is never a privilege escalation (auth-on
+binds it to the signer), and omitting it is always a latent outage.
+
+`current_user_id` (`commands/mls/ds_client.rs`) is the value to send when the
+command has no `user_id` parameter of its own — it is the same identity `ds_post`
+signs as, so the two cannot disagree.
+
+**You can no longer omit it by accident.** Each body is now a Rust struct in
+`pollis-api`, the crate `pollis-delivery` parses the request into, and a struct
+literal must name every field — so a forgotten actor is a compile error rather
+than an absent JSON key. What the type still cannot check is the *value*: writing
+`user_id: None` compiles fine and reintroduces the same outage, so `None` on an
+actor field needs a comment saying why.
+
+## The DS write API is one declaration (`pollis-api`)
+
+`pollis-api` holds one `#[derive(Serialize, Deserialize)]` struct per
+`POST /v1/…` endpoint plus the path it is addressed at, and BOTH ends are built
+from it:
+
+- `pollis-core`'s `ds_post(&state, &body)` takes **no path argument** — the path is
+  `DsRequest::PATH`, a property of the body type, so a body cannot be sent to the
+  wrong endpoint and a route cannot be misspelled.
+- `pollis-delivery` re-exports each module (`pollis_delivery::messages::
+  SendMessageBody` still resolves) and routes on `<Body as DsRequest>::PATH`.
+- `pollis_api::ENDPOINTS` is the table both route-coverage tests walk
+  (`pollis-delivery/tests/endpoint_coverage.rs`, `flows/ds_surface.rs`), so a
+  declared endpoint that no router serves fails the build rather than 404ing at
+  runtime.
+
+**Adding an endpoint:** add the struct to the matching `pollis-api` module, add one
+line to the `endpoints!` table in `pollis-api/src/lib.rs`, bump the count in
+`endpoint_coverage.rs::the_endpoint_table_covers_the_whole_write_surface`, and
+route it in `pollis-delivery` as `.route(<Body as DsRequest>::PATH, post(handler))`.
+The flows harness needs no edit — it mounts the real router.
+
+**What the contract does not cover:** response bodies (callers still derive their
+own local structs), field *values*, and version skew against an
+already-deployed DS — additive/optional/defaulted wire rules still apply.
+
+The `pollis-api` crate is dependency-light (serde only) on purpose, mirroring
+`pollis-schema` and `pollis-device-cert`: sharing it does not make the DS depend
+on `pollis-core`.
+
 ## auth (`commands/auth.rs`)
 - `initialize_identity(user_id)` — ensure MLS credentials + KPs, poll welcomes. Requires the local DB to be open (post-`set_pin` / `unlock`).
 - `get_identity()` — check if MLS identity exists locally
@@ -77,7 +135,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 - `accept_group_invite(invite_id, user_id)`
 - `decline_group_invite(invite_id, user_id)`
 - `create_group_invite_link(group_id, creator_id, expires_in_hours?, max_uses?)` → `CreatedInviteLink` — #847. Admin-only. The token is minted **client-side**; only the selector and `sha256(secret)` reach the DS. `token`/`url` are returned **once** and are unrecoverable afterwards — the server stores no secret, so there is no "re-copy" for an existing link. Both bounds `null` = unlimited.
-- `list_group_invite_links(group_id, user_id)` → `InviteLinkSummary[]` — admin-only (non-admins get `[]`, mirroring `get_group_join_requests`). Carries **no token field** by construction. `isLive` is computed server-side with the same `datetime()` normalisation redemption uses.
+- `list_group_invite_links(group_id, user_id)` → `InviteLinkSummary[]` — admin-only. **#875:** a non-member now errors with "you are not a member of this group" and a non-admin member with "only group admins can view invite links"; both used to return `[]`, which is the same value as "this group has no links". `get_group_join_requests` changed identically. Carries **no token field** by construction. `isLive` is computed server-side with the same `datetime()` normalisation redemption uses.
 - `revoke_group_invite_link(link_id, user_id)` — one-way; keeps the first revocation timestamp. Admin of the link's own group, re-derived from the link row.
 - `redeem_group_invite_link(token, user_id)` → `RedeemedInvite` — accepts a bare code, an `https://pollis.com/invite/…` URL, or `pollis://invite/…`. Adds the caller via the **same** `add_member_rows` path as invite-accept and join-request-approve, then self-heals into the MLS tree by external commit (a redeemer has no inviter to graft them). Every failure — wrong, malformed, revoked, expired, exhausted — returns the identical `INVITE_LINK_ERR`; only rate-limiting (429) is distinguishable, and only because it describes the caller, not the token.
 - `request_group_access(group_id, requester_id)` — creates a pending join request. (Documented here as `request_to_join_group` until #714; that name has never existed in the tree.)
@@ -89,6 +147,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 - `get_group_members(group_id)` → `GroupMember[]` — (was documented as `list_group_members`; corrected in #714.)
 - `search_group_by_slug(slug)` → `Group` — finds the group whose name derives to `slug`; **errors** if there is no match (it is not a list-returning search). (Was documented as `search_groups(query)` → `Group[]`; corrected in #714.)
 - Also registered but undocumented here: `update_group`, `delete_group`, `update_channel`, `delete_channel`, `get_group_join_requests`, `get_my_join_request`. See Appendix A.
+- **Authorization preflight (#875):** every group-scoped command routes its membership/role check through `pollis-core/src/commands/groups/authz.rs` (`group_role` / `require_member` / `require_admin` / `require_target_member` / `channel_group_role`). One wording for "not a member" (`you are not a member of this group`), one shape for "not an admin" (`only group admins can {action}`). It is a preflight for the error message, not the enforcement point — the DS re-derives the same role from `group_member` and answers 403 (`pollis_delivery::groups::{group_role, is_admin}`, now also used by `emoji.rs`, which previously kept a copy that swallowed a decode error into a silent deny).
 
 ## messages (`commands/messages.rs`)
 - `send_message(conversation_id, sender_id, content, reply_to_id?, thread_id?, sender_username?)` → `Message`
@@ -97,7 +156,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 - `get_channel_messages(user_id, channel_id, limit, cursor?)` → `MessagePage`
 - `get_dm_messages(user_id, dm_channel_id, limit, cursor?)` → `MessagePage`
 - `edit_message(message_id, conversation_id, sender_id, new_content)`
-- `delete_message(message_id, user_id)` — hard-deletes the envelope on Turso + the sender's local row. If the message had attachments (`_att` in the plaintext JSON payload), each `content_hash` is reference-counted against the sender's other non-deleted local messages; unreferenced ones have their `attachment_object` row + R2 object removed (best-effort, logged on failure). Cross-user references are invisible because attachment metadata lives inside the MLS-encrypted payload — convergent encryption means another member re-uploading the same file simply re-registers the dedup row.
+- `delete_message(message_id, user_id)` — hard-deletes the envelope on Turso + the sender's local row. Both branches (self and admin) build the `POST /v1/messages/delete` body through the one `delete_message_body(...)` helper so `actor_id` cannot be forgotten on either — see "Every DS write body must NAME ITS ACTOR" above; it was missing on both before #875, which made deletion 403 on any `require_auth = false` deployment. If the message had attachments (`_att` in the plaintext JSON payload), each `content_hash` is reference-counted against the sender's other non-deleted local messages; unreferenced ones have their `attachment_object` row + R2 object removed (best-effort, logged on failure). Cross-user references are invisible because attachment metadata lives inside the MLS-encrypted payload — convergent encryption means another member re-uploading the same file simply re-registers the dedup row.
 - `search_messages(user_id, query, conversation_id?)` → `Message[]`
 
 ## dm (`commands/dm.rs`)
@@ -219,7 +278,7 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) used by `delete_message` to purge orphaned attachments. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 
 ## emoji (`commands/emoji.rs`)
-Custom per-group emoji (#848). Remote metadata lives in `custom_emoji_object` (content-addressed, one row per stored image) + `group_emoji` (one row per group that uses it); writes go through the DS (`POST /v1/emoji/{create,remove,gc}`). The objects are **unencrypted** in R2, deliberately — see the module docs and migration `000015_custom_emoji.sql`.
+Custom per-group emoji (#848). Remote metadata lives in `custom_emoji_object` (content-addressed, one row per stored image) + `group_emoji` (one row per group that uses it); writes go through the DS (`POST /v1/emoji/{create,remove,gc}`). The objects are **unencrypted** in R2, deliberately — see the module docs and migration `000015_custom_emoji.sql`. `create` names its actor as `created_by` and `remove` as `actor_id` (both filled from `current_user_id`) — neither did before #875, so both 403'd on an unsigned deployment; see "Every DS write body must NAME ITS ACTOR" at the top of this page.
 - `list_usable_emoji(user_id)` → `CustomEmoji[]` — every custom emoji the user may SEND, i.e. every emoji registered to any group they are a current member of. Discord's rule: usable in ANY conversation, not just the registering group. This is both the picker's source and the permission predicate — deliberately one query, so the set offered and the set permitted cannot drift.
 - `list_group_emoji(group_id)` → `CustomEmoji[]` — one group's emoji (the management page).
 - `upload_group_emoji(group_id, shortcode, path)` → `CustomEmoji` — reads the file from disk (no bytes over IPC), **re-encodes** it to WebP/GIF under 48 KiB (`encode_emoji`), content-hashes the *re-encoded* bytes, skips the R2 PUT on a dedup hit, uploads under a length-bound presign, then registers via the DS. `shortcode` must be `[a-z0-9_]{2,32}`.

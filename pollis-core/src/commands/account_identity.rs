@@ -528,15 +528,21 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     let new_version: i64 = {
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD;
-        let body = serde_json::json!({
-            "based_on_version": based_on_version,
-            "account_id_pub": b64.encode(&public_bytes),
-            "salt": b64.encode(salt),
-            "nonce": b64.encode(nonce),
-            "wrapped_key": b64.encode(&wrapped),
-        });
+        let body = pollis_api::account::RotateIdentityBody {
+            based_on_version,
+            account_id_pub: b64.encode(&public_bytes),
+            salt: b64.encode(salt),
+            nonce: b64.encode(nonce),
+            wrapped_key: b64.encode(&wrapped),
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
+            user_id: Some(user_id.to_string()),
+        };
         let resp =
-            crate::commands::mls::ds_post_signed_or_session(state, "/v1/account/rotate-identity", &body)
+            crate::commands::mls::ds_post_signed_or_session(state, &body)
                 .await?;
         let status = resp.status();
         if status.as_u16() == 409 {
@@ -581,12 +587,18 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     // 6. Record the reset in the security log. Best-effort only. Routed through
     //    the DS (sole writer; #419 domains E+G).
     let metadata = format!("new_identity_version={new_version}");
-    let body = serde_json::json!({
-        "kind": "identity_reset",
-        "device_id": serde_json::Value::Null,
-        "metadata": metadata,
-    });
-    if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/security-events", &body).await {
+    let body = pollis_api::account::SecurityEventBody {
+        kind: "identity_reset".to_string(),
+        device_id: None,
+        metadata: Some(metadata),
+        // The DS's no-auth fallback for the acting user
+        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+        // user and this must EQUAL it; auth off → this IS the actor, and a
+        // body without it is refused outright. Sending it never widens what
+        // the caller may do.
+        user_id: Some(user_id.to_string()),
+    };
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
         eprintln!("[reset] DS security-event failed (non-fatal): {e}");
     }
 

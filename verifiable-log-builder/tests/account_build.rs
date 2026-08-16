@@ -7,10 +7,9 @@
 //! account tree is domain-separated from the commit log. Also exercises
 //! duplicate/regression rejection and tamper detection.
 
+use verifiable_log::monitor::{verify_bundle, VerifyOptions};
 use verifiable_log::SigningKey;
-use verifiable_log::{
-    verify_consistency_proof, verify_inclusion_proof, verifying_key_from_hex, VerifiableLog,
-};
+use verifiable_log::{TenantInvariant, STH_CONTEXT_BINARIES, STH_CONTEXT_COMMIT_LOG};
 use verifiable_log_builder::account_key::{AccountKeyInvariant, STH_CONTEXT, TENANT};
 use verifiable_log_builder::builder::Bundle;
 use verifiable_log_builder::{build_account_bundle, build_bundle, source};
@@ -64,70 +63,31 @@ async fn seed_db(path: &std::path::Path, rows: &[Row]) {
     }
 }
 
-/// Faithful in-process re-implementation of `monitor verify` for the account
-/// tree: built ONLY on the public slice-1 verifiers, but with STH signatures
-/// checked under [`STH_CONTEXT`] (the account tree's domain separation) and the
-/// account invariant enforced on replay.
+/// Run the **real** monitor pass (the one the `monitor` CLI runs) over a bundle,
+/// under `context` and with the account tenant's own invariant enforced on
+/// replay.
+///
+/// This used to be a hand-written transcription of the monitor's loop, because
+/// the CLI could only ever check the commit-log context — so a test that wanted
+/// to verify an account bundle had to rebuild the verifier to do it. The
+/// re-implementation then froze that limitation as expected behaviour. There is
+/// one verifier now, and the tree it checks is an argument (#875).
+fn verify_account(bundle: &Bundle, context: &[u8]) -> bool {
+    let invariant: Box<dyn TenantInvariant> = Box::new(AccountKeyInvariant);
+    verify_bundle(
+        bundle,
+        &VerifyOptions {
+            context,
+            now_ms: TS,
+        },
+        vec![(TENANT.to_string(), invariant)],
+        &mut |_, _| {},
+    )
+}
+
+/// The account tree's own context — how an auditor checks this bundle.
 fn monitor_verify_account(bundle: &Bundle) -> bool {
-    let vk = match verifying_key_from_hex(&bundle.public_key) {
-        Ok(k) => k,
-        Err(_) => return false,
-    };
-
-    // STHs must verify under the ACCOUNT context — and must NOT verify under the
-    // default commit-log context (proving the domain separation holds).
-    for sth in &bundle.sths {
-        if !sth.verify_with_context(&vk, STH_CONTEXT) {
-            return false;
-        }
-        if sth.verify(&vk) {
-            return false;
-        }
-    }
-
-    if !bundle.entries.is_empty() {
-        let mut log = VerifiableLog::new();
-        log.register_invariant(TENANT, Box::new(AccountKeyInvariant));
-        for entry in &bundle.entries {
-            if log.append(entry.clone()).is_err() {
-                return false;
-            }
-        }
-        for sth in &bundle.sths {
-            let size = sth.tree_size as usize;
-            let root = match log.root_at(size) {
-                Ok(r) => r,
-                Err(_) => return false,
-            };
-            match sth.root_bytes() {
-                Ok(r) if r == root => {}
-                _ => return false,
-            }
-        }
-    }
-    for check in &bundle.inclusion {
-        let sth = match bundle.sths.get(check.sth_index) {
-            Some(s) => s,
-            None => return false,
-        };
-        if !verify_inclusion_proof(&check.entry, &check.proof, sth) {
-            return false;
-        }
-    }
-    for check in &bundle.consistency {
-        match (
-            bundle.sths.get(check.old_index),
-            bundle.sths.get(check.new_index),
-        ) {
-            (Some(o), Some(n)) => {
-                if !verify_consistency_proof(o, n, &check.proof) {
-                    return false;
-                }
-            }
-            _ => return false,
-        }
-    }
-    true
+    verify_account(bundle, STH_CONTEXT)
 }
 
 fn signing_key() -> SigningKey {
@@ -163,6 +123,19 @@ async fn valid_account_bundle_verifies_under_account_context() {
     assert_eq!(bundle.enforce_unique, vec!["account-key".to_string()]);
 
     assert!(monitor_verify_account(&bundle), "account bundle must verify");
+
+    // Domain separation, asserted where it can be read rather than buried inside
+    // the verifier: the SAME bundle checked as another tree must fail. That is
+    // what stops an account-key head being presented as a commit-log head, and
+    // it is exactly why the monitor has to be told which tree it is checking.
+    assert!(
+        !verify_account(&bundle, STH_CONTEXT_COMMIT_LOG),
+        "an account-key head must NOT verify as a commit-log head"
+    );
+    assert!(
+        !verify_account(&bundle, STH_CONTEXT_BINARIES),
+        "an account-key head must NOT verify as a binaries head"
+    );
 
     // Round-trips through the on-disk JSON shape and still verifies.
     let json = serde_json::to_string_pretty(&bundle).unwrap();

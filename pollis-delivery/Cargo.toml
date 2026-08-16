@@ -27,6 +27,12 @@ ulid = "1"
 # publish-time re-verification checks the exact chain pollis-core mints — one
 # source of truth for the wire format, no drift, no crate cycle.
 pollis-device-cert = { path = "../pollis-device-cert" }
+# The write API as types, shared verbatim with pollis-core: every `*Body` this
+# crate parses is DECLARED there and CONSTRUCTED there, so the client cannot
+# omit, misspell or invent a field without failing to compile. Like
+# pollis-device-cert and pollis-schema it is a leaf crate (serde only), so
+# sharing it does not breach the DS-does-not-depend-on-pollis-core rule.
+pollis-api = { path = "../pollis-api" }
 # Request-signature auth (#668): verify the client's ML-DSA-44 signature over a
 # canonical message that binds sha256(body). The DS request credential is
 # `user_device.mls_signature_pub_pq`. Also the device-cert signature scheme.
@@ -39,8 +45,10 @@ sha2 = "0.10"
 subtle = "2.6"
 hex = "0.4"
 # Authorized-secrets broker (#393): mint LiveKit JWTs server-side (pure HS256,
-# no native dep) and HMAC for the R2 SigV4 query-string presign. Same crates as
-# pollis-core's livekit_jwt / r2 so the contract stays byte-identical.
+# no native dep) and HMAC for the R2 SigV4 query-string presign. The DS is the
+# SOLE minter of both now — pollis-core's `livekit_jwt` module is gone and its
+# `r2` module asks `/v1/r2/presign` rather than signing locally — so these are
+# the only copies of either scheme in the workspace, not a mirror of one.
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 hmac = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -65,3 +73,11 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 # hrana-speaking double and exercise the REMOTE path (every other DS test uses a
 # local file and never touches hrana at all). Same version libsql itself pulls.
 libsql-hrana = "0.9"
+# The REAL remote schema, so DS tests stamp their local DBs with exactly what
+# ships instead of a hand-rolled slice per module. A dev-dependency on purpose:
+# the DS binary carries no schema, and the crate is dependency-free anyway, so
+# this does not breach the DS-does-not-depend-on-pollis-core rule.
+pollis-schema = { path = "../pollis-schema", features = ["libsql"] }
+# The endpoint table, so the route-coverage test walks the same list the client
+# posts to rather than a copy of it.
+pollis-api = { path = "../pollis-api" }

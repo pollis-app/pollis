@@ -72,3 +72,109 @@ pub fn http_client(overlay: Option<&OverlayHandle>) -> reqwest::Client {
         }
     }
 }
+
+#[cfg(test)]
+mod seam_tests {
+    use std::path::{Path, PathBuf};
+
+    /// Every crate's sanctioned client factory. A construction inside one of
+    /// these files IS the seam; anywhere else is the anti-pattern this module
+    /// exists to retire.
+    const SEAM_FILES: &[&str] = &[
+        // this module — the shared builder + cache
+        "pollis-relay/src/http.rs",
+        // the thin re-export the desktop/mobile core calls
+        "pollis-core/src/net/overlay.rs",
+        // the DS's own `OnceLock` client (the server has no overlay to route
+        // through, so it cannot share `pollis-relay`'s)
+        "pollis-delivery/src/util.rs",
+    ];
+
+    fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("pollis-relay sits one level under the workspace root")
+            .to_path_buf()
+    }
+
+    fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if path.is_dir() {
+                // Build output, VCS metadata and node deps are not our source.
+                if matches!(name.as_ref(), "target" | ".git" | "node_modules") {
+                    continue;
+                }
+                rust_sources(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// A fresh `reqwest::Client` starts with an EMPTY connection pool, so
+    /// building one per call pays a full DNS + TCP + TLS handshake every
+    /// request — the cost this module's docs put at 3-4.5s per DS POST on a
+    /// mobile dev build. #875 found four such sites still live in the DS and
+    /// three in `pollis-core`, all on request paths.
+    ///
+    /// This is a GUARD, not a proof that any particular call got faster: it
+    /// cannot tell a warm pool from a cold one. What it makes impossible is the
+    /// *shape* coming back — a new outbound caller that quietly builds its own
+    /// client. If a caller genuinely needs bespoke TLS roots or a proxy, it adds
+    /// itself to `SEAM_FILES` deliberately, which is a review conversation
+    /// rather than a silent regression.
+    #[test]
+    fn no_crate_builds_its_own_reqwest_client_outside_the_seam() {
+        let root = workspace_root();
+        let mut files = Vec::new();
+        rust_sources(&root, &mut files);
+        assert!(
+            files.len() > 100,
+            "walked only {} files from {} — the workspace walk is broken, not clean",
+            files.len(),
+            root.display()
+        );
+
+        let mut offenders: Vec<String> = Vec::new();
+        for file in &files {
+            let rel = file
+                .strip_prefix(&root)
+                .unwrap_or(file)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if SEAM_FILES.contains(&rel.as_str()) {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            for (n, line) in src.lines().enumerate() {
+                let t = line.trim_start();
+                // Comments and doc comments name the anti-pattern constantly;
+                // only real code counts.
+                if t.starts_with("//") {
+                    continue;
+                }
+                if line.contains("reqwest::Client::new()")
+                    || line.contains("reqwest::Client::builder()")
+                {
+                    offenders.push(format!("{rel}:{}", n + 1));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "these build a fresh reqwest::Client instead of going through the shared seam \
+             ({SEAM_FILES:?}); a fresh client has an empty connection pool, so each call \
+             re-handshakes:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+}

@@ -4,6 +4,7 @@ use crate::error::{Error, Result};
 use crate::state::AppState;
 
 use super::types::GroupMember;
+use super::authz;
 
 pub async fn get_group_members(
     group_id: String,
@@ -42,33 +43,23 @@ pub async fn remove_member_from_group(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Check requester's role
-    let mut rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id.clone()],
-    ).await?;
-
-    let requester_role: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("requester is not a group member")));
-    };
-
-    // Admins can remove others; anyone can remove themselves (leave)
-    if requester_id != user_id && requester_role != "admin" {
+    // Admins can remove others; anyone can remove themselves (leave). Both
+    // branches need membership first, so take the role once.
+    let requester_role = authz::require_member(&conn, &group_id, &requester_id).await?;
+    if requester_id != user_id && !requester_role.is_admin() {
         return Err(Error::Other(anyhow::anyhow!(
-            "only an admin can remove other members"
+            "only group admins can remove other members"
         )));
     }
 
     // Route the member-row delete through the Delivery Service (which re-derives
     // the admin/self rule server-side).
-    let body = serde_json::json!({
-        "group_id": group_id,
-        "user_id": user_id,
-        "requester_id": requester_id,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/members/remove", &body).await?;
+    let body = pollis_api::groups::RemoveMemberBody {
+        group_id: group_id.clone(),
+        user_id,
+        requester_id: Some(requester_id.clone()),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // Ingest-before-advance (issue #440, committer strand): catch this device up
     // to head with the INTERLEAVED ingesting catch-up — decrypting every bound
@@ -112,35 +103,19 @@ pub async fn leave_group(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Check if user is the owner
-    let mut rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), user_id.clone()],
-    ).await?;
-
-    let _role: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("user is not a member of this group")));
-    };
-
-    // Owners can leave thegroup, there's no requirement for ownership atm so I am commenting this out.
-    // Might change when we introduce rolls, give them the option to require transfer, etc.
-
-    // if role == "owner" && member_count > 1 {
-    //     return Err(Error::Other(anyhow::anyhow!(
-    //         "owner must transfer ownership before leaving the group"
-    //     )));
-    // }
+    // Membership is the only bar: any member may leave, admins included. There
+    // is no ownership to transfer — migration 000008 renamed the 'owner' role to
+    // 'admin' and `groups.owner_id` is a display field, not an authz input.
+    authz::require_member(&conn, &group_id, &user_id).await?;
 
     // Route the leaver's member-row delete (and, when the group empties, the group
     // delete) through the Delivery Service — one server-authorized write scoped to
     // the signer's own row.
-    let body = serde_json::json!({
-        "group_id": group_id,
-        "user_id": user_id,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/groups/leave", &body).await?;
+    let body = pollis_api::groups::LeaveGroupBody {
+        group_id: group_id.clone(),
+        user_id: Some(user_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // A user cannot commit their own removal in MLS ("remove_members with self
     // as target" is rejected by the spec).  Instead, wipe the local group state
@@ -184,41 +159,18 @@ pub async fn set_member_role(
 
     let conn = state.remote_db.conn().await?;
 
-    // Requester must be admin
-    let mut rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id.clone()],
-    ).await?;
-
-    let requester_role: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
-    };
-
-    if requester_role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only admins can change member roles")));
-    }
-
-    // Verify target is a member
-    let mut target_rows = conn.query(
-        "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), user_id.clone()],
-    ).await?;
-
-    if target_rows.next().await?.is_none() {
-        return Err(Error::Other(anyhow::anyhow!("user is not a member of this group")));
-    }
+    authz::require_admin(&conn, &group_id, &requester_id, "change member roles").await?;
+    authz::require_target_member(&conn, &group_id, &user_id).await?;
 
     // Route the role update through the Delivery Service (admin re-derived
     // server-side, target-membership re-checked).
-    let body = serde_json::json!({
-        "group_id": group_id,
-        "user_id": user_id,
-        "role": role,
-        "requester_id": requester_id,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/members/role", &body).await?;
+    let body = pollis_api::groups::SetMemberRoleBody {
+        group_id: group_id.clone(),
+        user_id,
+        role,
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     // Notify other online group members so their members list refreshes.
     // Best-effort realtime push; routed through the livekit boundary so this

@@ -23,41 +23,27 @@ use pollis_delivery::commit::{
 };
 use pollis_delivery::db::Db;
 
-const MAIN_SCHEMA: &str = "\
-CREATE TABLE user_device (user_id TEXT NOT NULL, device_id TEXT NOT NULL, revoked_at TEXT);\
-CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL);\
-CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
-CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);";
+/// Which half of the #420 split a handle is. Passing the wrong one is now a
+/// type error rather than a silently-wider schema: the MAIN db has no
+/// `mls_commit_log`-with-`generation` and the LOG db has no `group_member`, so a
+/// misrouted query fails loudly instead of finding a table that only exists in
+/// a test fixture.
+#[derive(Clone, Copy)]
+enum Half {
+    Main,
+    Log,
+}
 
-const LOG_SCHEMA: &str = "\
-CREATE TABLE mls_commit_log (\
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,\
-  conversation_id TEXT NOT NULL,\
-  epoch INTEGER NOT NULL,\
-  sender_id TEXT NOT NULL,\
-  commit_data BLOB NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  added_user_id TEXT,\
-  added_device_ids TEXT,\
-  generation INTEGER NOT NULL DEFAULT 0\
-);\
-CREATE UNIQUE INDEX idx_mls_commit_conv_gen_epoch ON mls_commit_log (conversation_id, generation, epoch);\
-CREATE TABLE mls_commit_since (\
-  conversation_id TEXT NOT NULL,\
-  user_id TEXT NOT NULL,\
-  device_id TEXT NOT NULL,\
-  since_epoch INTEGER NOT NULL,\
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  generation INTEGER NOT NULL DEFAULT 0,\
-  PRIMARY KEY (conversation_id, user_id, device_id)\
-);";
-
-async fn fresh(schema: &str) -> Db {
+async fn fresh(half: Half) -> Db {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(schema).await.expect("schema");
+    let conn = db.conn().unwrap();
+    match half {
+        Half::Main => pollis_schema::apply::main_db(&conn).await.expect("schema"),
+        Half::Log => pollis_schema::apply::log_db(&conn).await.expect("schema"),
+    }
     db
 }
 
@@ -135,8 +121,8 @@ async fn epochs(log: &Db, conv: &str) -> Vec<i64> {
 /// (`epoch >= min_since`) are never pruned, but stale prefix epochs are.
 #[tokio::test]
 async fn tier1_prunes_prefix_but_keeps_slowest_member() {
-    let main = fresh(MAIN_SCHEMA).await;
-    let log = fresh(LOG_SCHEMA).await;
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
 
     add_member(&main, conv, "alice", "a-dev").await;
@@ -165,8 +151,8 @@ async fn tier1_prunes_prefix_but_keeps_slowest_member() {
 /// over the whole roster, nothing is pruned (Tier 2 does not bind on a short log).
 #[tokio::test]
 async fn unreported_member_blocks_tier1_pruning() {
-    let main = fresh(MAIN_SCHEMA).await;
-    let log = fresh(LOG_SCHEMA).await;
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
 
     add_member(&main, conv, "alice", "a-dev").await;
@@ -191,8 +177,8 @@ async fn unreported_member_blocks_tier1_pruning() {
 /// 20) counts, so the floor advances.
 #[tokio::test]
 async fn revoked_device_does_not_pin_the_floor() {
-    let main = fresh(MAIN_SCHEMA).await;
-    let log = fresh(LOG_SCHEMA).await;
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
 
     add_member(&main, conv, "alice", "a-old").await;
@@ -227,8 +213,8 @@ async fn revoked_device_does_not_pin_the_floor() {
 /// `delete_commits_below` take every epoch, resetting the head to 0 (the wipe).
 #[tokio::test]
 async fn bogus_high_water_above_head_cannot_wipe_the_live_log() {
-    let main = fresh(MAIN_SCHEMA).await;
-    let log = fresh(LOG_SCHEMA).await;
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
 
     // A single-member conversation, so the bogus report IS the roster minimum and
@@ -267,8 +253,8 @@ async fn bogus_high_water_above_head_cannot_wipe_the_live_log() {
 /// a real slowest-member floor well below head is untouched by it.
 #[tokio::test]
 async fn clamp_does_not_disturb_an_honest_prune() {
-    let main = fresh(MAIN_SCHEMA).await;
-    let log = fresh(LOG_SCHEMA).await;
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
 
     add_member(&main, conv, "alice", "a-dev").await;
@@ -292,7 +278,7 @@ async fn clamp_does_not_disturb_an_honest_prune() {
 /// pruned epoch is genuinely free.
 #[tokio::test]
 async fn prune_preserves_unique_epoch_index() {
-    let log = fresh(LOG_SCHEMA).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
     seed_commits(&log, conv, 10).await;
 
@@ -318,7 +304,7 @@ async fn prune_preserves_unique_epoch_index() {
 /// lowers the recorded high-water (which would raise the floor unsafely).
 #[tokio::test]
 async fn record_commit_since_is_monotone() {
-    let log = fresh(LOG_SCHEMA).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
     let conn = log.conn().unwrap();
 
@@ -347,8 +333,8 @@ async fn record_commit_since_is_monotone() {
 /// as unreported there instead, which disables Tier 1 outright.
 #[tokio::test]
 async fn a_device_on_the_old_lineage_disables_tier1_on_the_new_one() {
-    let main = fresh(MAIN_SCHEMA).await;
-    let log = fresh(LOG_SCHEMA).await;
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
 
     add_member(&main, conv, "alice", "a-dev").await;
@@ -387,8 +373,8 @@ async fn a_device_on_the_old_lineage_disables_tier1_on_the_new_one() {
 /// generation's floor.
 #[tokio::test]
 async fn a_fully_vacated_lineage_is_retired() {
-    let main = fresh(MAIN_SCHEMA).await;
-    let log = fresh(LOG_SCHEMA).await;
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
 
     add_member(&main, conv, "alice", "a-dev").await;
@@ -425,8 +411,8 @@ async fn a_fully_vacated_lineage_is_retired() {
 /// external join. The LIVE lineage is never retired, whatever the reports say.
 #[tokio::test]
 async fn tier2_retires_a_lineage_a_stranded_device_still_occupies() {
-    let main = fresh(MAIN_SCHEMA).await;
-    let log = fresh(LOG_SCHEMA).await;
+    let main = fresh(Half::Main).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
 
     add_member(&main, conv, "alice", "a-dev").await;
@@ -460,7 +446,7 @@ async fn tier2_retires_a_lineage_a_stranded_device_still_occupies() {
 /// from the retired lineage at a higher epoch must not drag the device back.
 #[tokio::test]
 async fn record_commit_since_is_lexicographically_monotone() {
-    let log = fresh(LOG_SCHEMA).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
     let conn = log.conn().unwrap();
 
@@ -505,7 +491,7 @@ async fn record_commit_since_is_lexicographically_monotone() {
 /// same numeric bound would have taken).
 #[tokio::test]
 async fn delete_generations_below_only_touches_closed_lineages() {
-    let log = fresh(LOG_SCHEMA).await;
+    let log = fresh(Half::Log).await;
     let conv = "grp1";
     seed_commits_in(&log, conv, 0, 4).await;
     seed_commits_in(&log, conv, 1, 4).await;
@@ -519,5 +505,105 @@ async fn delete_generations_below_only_touches_closed_lineages() {
     assert_eq!(
         delete_generations_below(&log.conn().unwrap(), conv, 0).await.unwrap(),
         0
+    );
+}
+
+// ── #875: the fixture used to be laxer than production ───────────────────────
+//
+// Until #875 this file declared its own `group_member (group_id, user_id)` with
+// NO primary key and its own `user_device (user_id, device_id, revoked_at)`
+// likewise. Every property above — "the floor is the MIN over member devices",
+// "a revoked device never pins the floor" — was therefore proved against a
+// membership table that production forbids and this one allowed: the same
+// member twice, the same device id under two users.
+//
+// These tests are the receipt. They assert the real schema rejects what the
+// fixture used to permit, and that the retention floor is computed over a
+// roster that cannot contain a duplicate in the first place.
+
+/// The exact row the old fixture allowed: a second `group_member` row for a
+/// member who is already in the group.
+#[tokio::test]
+async fn a_duplicate_membership_row_is_rejected() {
+    let main = fresh(Half::Main).await;
+    add_member(&main, "g", "alice", "a1").await;
+
+    let err = main
+        .conn()
+        .unwrap()
+        .execute(
+            "INSERT INTO group_member (group_id, user_id) VALUES ('g', 'alice')",
+            (),
+        )
+        .await
+        .expect_err("PRIMARY KEY (group_id, user_id) must reject a second row");
+    assert!(
+        err.to_string().to_lowercase().contains("unique"),
+        "expected a uniqueness failure, got: {err}"
+    );
+
+    // And the roster the floor is computed over is still exactly one device.
+    let conn = main.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM group_member WHERE group_id = 'g' AND user_id = 'alice'",
+            (),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 1);
+}
+
+/// `user_device.device_id` is the primary key on its own — a device belongs to
+/// exactly one user. The old fixture had no key at all, so the same device id
+/// could sit under two users and be counted twice in the member-device set the
+/// Tier-1 floor minimises over.
+#[tokio::test]
+async fn a_device_id_cannot_belong_to_two_users() {
+    let main = fresh(Half::Main).await;
+    add_member(&main, "g", "alice", "shared-device").await;
+
+    let err = main
+        .conn()
+        .unwrap()
+        .execute(
+            "INSERT INTO user_device (user_id, device_id) VALUES ('mallory', 'shared-device')",
+            (),
+        )
+        .await
+        .expect_err("device_id is the primary key — one device, one user");
+    assert!(
+        err.to_string().to_lowercase().contains("unique"),
+        "expected a uniqueness failure, got: {err}"
+    );
+}
+
+/// The high-water table the Tier-1 floor reads. Two rows for one
+/// (conversation, user, device) would let a stale report sit alongside a fresh
+/// one and the MIN would silently pick the stale one — pinning retention
+/// forever. `retention.rs`'s old MAIN_SCHEMA did not carry this table at all;
+/// the LOG half's `mls_commit_since` did, and now both are the shipped ones.
+#[tokio::test]
+async fn a_device_cannot_report_two_high_waters_for_one_conversation() {
+    let log = fresh(Half::Log).await;
+    let conn = log.conn().unwrap();
+    conn.execute(
+        "INSERT INTO mls_commit_since (conversation_id, user_id, device_id, since_epoch) \
+         VALUES ('c', 'alice', 'a1', 7)",
+        (),
+    )
+    .await
+    .unwrap();
+    let err = conn
+        .execute(
+            "INSERT INTO mls_commit_since (conversation_id, user_id, device_id, since_epoch) \
+             VALUES ('c', 'alice', 'a1', 1)",
+            (),
+        )
+        .await
+        .expect_err("PRIMARY KEY (conversation_id, user_id, device_id) must reject a second row");
+    assert!(
+        err.to_string().to_lowercase().contains("unique"),
+        "expected a uniqueness failure, got: {err}"
     );
 }

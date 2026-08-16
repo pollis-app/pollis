@@ -70,6 +70,68 @@ fn epoch_key_pairs_id<const V: u16>(
     Ok(key)
 }
 
+// ── Storage-op instrumentation ───────────────────────────────────────────────
+
+/// A process-global count of the `mls_kv` statements this store has executed,
+/// so tests can assert on the SHAPE of a hot path rather than its wall clock.
+///
+/// Every MLS operation is a chain of small key-value hits, and the cost of the
+/// decrypt path is dominated by how many of them there are — a figure that is
+/// identical on every machine, unlike a timing, which is not. `#875` added this
+/// because "decrypt got faster" is unverifiable and "decrypt does 3 statements
+/// per message instead of 15" is a regression test.
+///
+/// Test-harness only: the increment is cheap but not free, and production has
+/// no reader for it.
+///
+/// **Per-thread, not process-global.** `cargo test` runs tests concurrently in
+/// one process, so a global counter would have every test's storage traffic
+/// bleeding into every other test's measurement. MLS storage ops are synchronous
+/// on the calling thread, so a thread-local counts exactly the work the
+/// measuring test caused — provided the measured section does not hop threads
+/// (i.e. contains no `.await` that can yield). Every call site here is a
+/// synchronous block, which is what makes the numbers reproducible.
+#[cfg(any(test, feature = "test-harness"))]
+pub mod counters {
+    use std::cell::Cell;
+
+    thread_local! {
+        pub(super) static READS: Cell<u64> = const { Cell::new(0) };
+        pub(super) static WRITES: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// `(reads, writes)` executed against `mls_kv` on THIS thread so far.
+    pub fn snapshot() -> (u64, u64) {
+        (READS.with(|c| c.get()), WRITES.with(|c| c.get()))
+    }
+
+    /// `(reads, writes)` executed since `before`, as returned by [`snapshot`].
+    pub fn since(before: (u64, u64)) -> (u64, u64) {
+        let (r, w) = snapshot();
+        (r - before.0, w - before.1)
+    }
+}
+
+#[cfg(any(test, feature = "test-harness"))]
+#[inline]
+fn count_read() {
+    counters::READS.with(|c| c.set(c.get() + 1));
+}
+
+#[cfg(not(any(test, feature = "test-harness")))]
+#[inline(always)]
+fn count_read() {}
+
+#[cfg(any(test, feature = "test-harness"))]
+#[inline]
+fn count_write() {
+    counters::WRITES.with(|c| c.set(c.get() + 1));
+}
+
+#[cfg(not(any(test, feature = "test-harness")))]
+#[inline(always)]
+fn count_write() {}
+
 // ── MlsStore ─────────────────────────────────────────────────────────────────
 
 /// Thin wrapper around a `rusqlite::Connection` that maps all MLS storage
@@ -95,20 +157,27 @@ impl<'a> MlsStore<'a> {
 
     // ── primitive KV ops ─────────────────────────────────────────────────────
 
+    // Every op goes through `prepare_cached` rather than `Connection::execute` /
+    // `query_row`, which compile a fresh statement and throw it away. There are
+    // exactly three statements here and they are executed a dozen-plus times per
+    // MLS message, so the SQL parse/plan was being redone thousands of times for
+    // three query plans that never change.
     fn raw_write(&self, storage_key: Vec<u8>, value: Vec<u8>) -> Result<(), MlsStorageError> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
-            rusqlite::params![b"" as &[u8], storage_key, value],
-        )?;
+        count_write();
+        self.conn
+            .prepare_cached("INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)")?
+            .execute(rusqlite::params![b"" as &[u8], storage_key, value])?;
         Ok(())
     }
 
     fn raw_read(&self, storage_key: &[u8]) -> Result<Option<Vec<u8>>, MlsStorageError> {
-        match self.conn.query_row(
-            "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
-            rusqlite::params![b"" as &[u8], storage_key],
-            |row| row.get::<_, Vec<u8>>(0),
-        ) {
+        count_read();
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2")?;
+        match stmt.query_row(rusqlite::params![b"" as &[u8], storage_key], |row| {
+            row.get::<_, Vec<u8>>(0)
+        }) {
             Ok(v) => Ok(Some(v)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -116,10 +185,10 @@ impl<'a> MlsStore<'a> {
     }
 
     fn raw_delete(&self, storage_key: &[u8]) -> Result<(), MlsStorageError> {
-        self.conn.execute(
-            "DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2",
-            rusqlite::params![b"" as &[u8], storage_key],
-        )?;
+        count_write();
+        self.conn
+            .prepare_cached("DELETE FROM mls_kv WHERE scope = ?1 AND key = ?2")?
+            .execute(rusqlite::params![b"" as &[u8], storage_key])?;
         Ok(())
     }
 

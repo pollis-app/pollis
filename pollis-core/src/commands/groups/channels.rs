@@ -5,6 +5,7 @@ use crate::error::{Error, Result};
 use crate::state::AppState;
 
 use super::types::Channel;
+use super::authz;
 
 pub async fn list_group_channels(
     group_id: String,
@@ -46,15 +47,15 @@ pub async fn create_channel(
 
     // DS seam: route the channel insert through the Delivery Service (which
     // re-derives group membership server-side).
-    let body = serde_json::json!({
-        "id": id,
-        "group_id": group_id,
-        "name": name,
-        "description": description,
-        "channel_type": channel_type,
-        "creator_id": _creator_id,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/channels/create", &body).await?;
+    let body = pollis_api::groups::CreateChannelBody {
+        id: id.clone(),
+        group_id: group_id.clone(),
+        name: name.clone(),
+        description: description.clone(),
+        channel_type: channel_type.clone(),
+        creator_id: Some(_creator_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(Channel { id, group_id, name, description, channel_type })
 }
@@ -80,30 +81,17 @@ pub async fn update_channel(
         return Err(Error::Other(anyhow::anyhow!("channel not found")));
     };
 
-    let mut role_rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id.clone()],
-    ).await?;
-
-    let role: String = if let Some(row) = role_rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("requester is not a group member")));
-    };
-
-    if role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only group admins can update channels")));
-    }
+    authz::require_admin(&conn, &group_id, &requester_id, "update channels").await?;
 
     // DS seam: route the column updates through the Delivery Service (admin
     // re-derived server-side).
-    let body = serde_json::json!({
-        "channel_id": channel_id,
-        "requester_id": requester_id,
-        "name": name,
-        "description": description,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/channels/update", &body).await?;
+    let body = pollis_api::groups::UpdateChannelBody {
+        channel_id: channel_id.clone(),
+        requester_id: Some(requester_id),
+        name,
+        description,
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     let mut rows = conn.query(
         "SELECT id, group_id, name, description, channel_type FROM channels WHERE id = ?1",
@@ -141,28 +129,15 @@ pub async fn delete_channel(
         return Err(Error::Other(anyhow::anyhow!("channel not found")));
     };
 
-    let mut role_rows = conn.query(
-        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id.clone()],
-    ).await?;
-
-    let role: String = if let Some(row) = role_rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("requester is not a group member")));
-    };
-
-    if role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only group admins can delete channels")));
-    }
+    authz::require_admin(&conn, &group_id, &requester_id, "delete channels").await?;
 
     // DS seam: route the envelope/watermark/channel deletes through the Delivery
     // Service (one transactional, admin-gated write).
-    let body = serde_json::json!({
-        "channel_id": channel_id,
-        "requester_id": requester_id,
-    });
-    crate::commands::mls::ds_post_ok(state, "/v1/channels/delete", &body).await?;
+    let body = pollis_api::groups::DeleteChannelBody {
+        channel_id,
+        requester_id: Some(requester_id),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
         &state.livekit,

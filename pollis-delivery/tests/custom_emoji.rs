@@ -37,36 +37,13 @@ use pollis_delivery::{build_router_with_state, AppState};
 use std::sync::Arc;
 use tower::ServiceExt as _;
 
-/// Only the tables this domain reads or writes. `group_member` carries `role`
-/// because removal authz re-derives admin from it.
-const SCHEMA: &str = "\
-CREATE TABLE groups (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'g');\
-CREATE TABLE group_member (\
-  group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member', \
-  PRIMARY KEY (group_id, user_id));\
-/* `message_envelope` + `attachment_ref` are here only so the MEDIA presign path \
-   (which consults the attachment reference count) can be exercised alongside \
-   the emoji one — the point being that the media presign is UNCHANGED. */\
-CREATE TABLE custom_emoji_object (\
-  content_hash TEXT PRIMARY KEY, r2_key TEXT NOT NULL, content_type TEXT NOT NULL, \
-  size_bytes INTEGER NOT NULL, animated INTEGER NOT NULL DEFAULT 0, \
-  created_at TEXT NOT NULL DEFAULT (datetime('now')));\
-CREATE TABLE group_emoji (\
-  group_id TEXT NOT NULL, shortcode TEXT NOT NULL, content_hash TEXT NOT NULL, \
-  created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), \
-  PRIMARY KEY (group_id, shortcode));\
-CREATE INDEX idx_group_emoji_content_hash ON group_emoji(content_hash);\
-CREATE INDEX idx_group_emoji_created_by ON group_emoji(created_by);\
-CREATE TABLE message_envelope (id TEXT PRIMARY KEY);\
-CREATE TABLE attachment_ref (\
-  content_hash TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY (content_hash, message_id));";
 
 async fn fresh() -> Arc<Db> {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
 }
 

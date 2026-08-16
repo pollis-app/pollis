@@ -49,11 +49,11 @@ pub async fn block_user(
     // accepted_at in shared DMs) through the Delivery Service. Server-side authz
     // binds the block to the authenticated user's own list and runs both writes
     // in one transaction.
-    let body = serde_json::json!({
-        "blocker_id": blocker_id,
-        "blocked_id": blocked_id,
+    let body = pollis_api::profile::AddBlock(pollis_api::profile::BlockBody {
+        blocker_id,
+        blocked_id,
     });
-    crate::commands::mls::ds_post_ok(state, "/v1/blocks/add", &body).await?;
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(())
 }
@@ -65,11 +65,11 @@ pub async fn unblock_user(
 ) -> Result<()> {
     // DS seam: route the unblock (delete block row) through the Delivery
     // Service.
-    let body = serde_json::json!({
-        "blocker_id": blocker_id,
-        "blocked_id": blocked_id,
+    let body = pollis_api::profile::RemoveBlock(pollis_api::profile::BlockBody {
+        blocker_id,
+        blocked_id,
     });
-    crate::commands::mls::ds_post_ok(state, "/v1/blocks/remove", &body).await?;
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(())
 }
@@ -107,12 +107,16 @@ pub async fn list_blocked_users(
 mod tests {
     use rusqlite::Connection;
 
-    use crate::db::BASELINE_SQL as BASELINE;
 
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        conn.execute_batch(BASELINE).unwrap();
+        // The SHIPPED schema: baseline plus every numbered migration, in the order
+        // `scripts/db-apply.sh` applies them. #875 — applying the baseline alone left
+        // the fixture on a pre-migration schema no deploy has run for months.
+        for sql in pollis_schema::main_scripts() {
+            conn.execute_batch(sql).unwrap();
+        }
         conn
     }
 

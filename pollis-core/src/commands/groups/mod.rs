@@ -3,6 +3,7 @@
 //! external caller (Tauri shims, sibling `commands::*` modules, integration
 //! tests) keeps resolving names at `pollis_core::commands::groups::*`.
 
+pub mod authz;
 mod channels;
 mod groups;
 mod invite_token;
@@ -34,6 +35,9 @@ pub(super) fn derive_slug(name: &str) -> String {
     }
     result.trim_matches('-').to_string()
 }
+
+// ── Authorization preflight ───────────────────────────────────────────────────
+pub use authz::{channel_group_role, group_role, GroupRole, NOT_A_MEMBER};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{

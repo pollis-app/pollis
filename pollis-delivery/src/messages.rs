@@ -72,7 +72,6 @@ use axum::{
     response::Response,
 };
 use libsql::Connection;
-use serde::Deserialize;
 use ulid::Ulid;
 
 use crate::error::AppError;
@@ -80,6 +79,13 @@ use crate::writes::{
     bad_request, gate, is_member, outcome_response, resolve_actor, WriteOutcome,
 };
 use crate::AppState;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::messages::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::messages::*;
 
 // ── Envelope GC SQL ──────────────────────────────────────────────────────────
 //
@@ -494,29 +500,6 @@ fn sent_at_after(now: String, floor: Option<String>) -> String {
 
 // ── POST /v1/messages/send ───────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct SendMessageBody {
-    pub id: String,
-    pub conversation_id: String,
-    /// Unsealed: bound to the authenticated user when signed (the no-auth
-    /// fallback only). Sealed (issue #331): a non-identifying sentinel the client
-    /// chose (e.g. the string `"sealed"`) — persisted as-is, NOT bound to the
-    /// auth user (see `apply_send_message`).
-    #[serde(default)]
-    pub sender_id: Option<String>,
-    /// The `"mls:<hex>"` ciphertext string the client persists — plain text, not
-    /// binary, so no base64.
-    pub ciphertext: String,
-    #[serde(default)]
-    pub reply_to_id: Option<String>,
-    pub sent_at: String,
-    /// Sealed sender flag (issue #331, `docs/metadata-minimization-design.md`
-    /// §2). `1` → `sender_id` is a blinded sentinel; the true sender lives in the
-    /// MLS credential. Absent (old clients / unsealed sends) → `0`.
-    #[serde(default)]
-    pub sealed: i64,
-}
-
 pub async fn send_message(
     State(state): State<AppState>,
     method: Method,
@@ -600,17 +583,6 @@ pub async fn apply_send_message(
 
 // ── POST /v1/messages/edit ───────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct EditMessageBody {
-    pub envelope_id: String,
-    pub conversation_id: String,
-    pub target_message_id: String,
-    #[serde(default)]
-    pub sender_id: Option<String>,
-    pub ciphertext: String,
-    pub sent_at: String,
-}
-
 pub async fn edit_message(
     State(state): State<AppState>,
     method: Method,
@@ -680,23 +652,6 @@ pub async fn apply_edit_message(
 }
 
 // ── POST /v1/messages/delete ─────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct DeleteMessageBody {
-    pub message_id: String,
-    pub conversation_id: String,
-    /// The original author the client resolved (from its local cache). Selects
-    /// the self-vs-admin branch (Solution A, #607): the DS can no longer re-derive
-    /// authorship from the sealed envelope, so it trusts this hint for BRANCHING
-    /// only. It is never trusted for a permission grant — the admin branch
-    /// re-derives the admin role independently, and the self branch grants nothing
-    /// beyond envelope removal that membership doesn't already permit.
-    #[serde(default)]
-    pub msg_sender_id: Option<String>,
-    /// No-auth fallback for the acting user.
-    #[serde(default)]
-    pub actor_id: Option<String>,
-}
 
 pub async fn delete_message(
     State(state): State<AppState>,
@@ -828,15 +783,6 @@ pub async fn apply_delete_message(
 
 // ── POST /v1/reactions/add  &  /v1/reactions/remove ──────────────────────────
 
-#[derive(Deserialize)]
-pub struct ReactionBody {
-    pub message_id: String,
-    pub emoji: String,
-    /// No-auth fallback for the reacting user.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 pub async fn add_reaction(
     State(state): State<AppState>,
     method: Method,
@@ -848,12 +794,12 @@ pub async fn add_reaction(
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
-    let parsed: ReactionBody = match serde_json::from_slice(&body) {
+    let parsed: AddReaction = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_add_reaction(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response(apply_add_reaction(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
 pub async fn remove_reaction(
@@ -867,12 +813,12 @@ pub async fn remove_reaction(
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
-    let parsed: ReactionBody = match serde_json::from_slice(&body) {
+    let parsed: RemoveReaction = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn()?;
-    outcome_response(apply_remove_reaction(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response(apply_remove_reaction(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
 /// A reaction is membership-gated through the reacted-to message's envelope.
@@ -935,16 +881,6 @@ pub async fn apply_remove_reaction(
 
 // ── POST /v1/watermarks/advance ──────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct WatermarkBody {
-    pub conversation_id: String,
-    /// No-auth fallback; when signed it must equal the authenticated user.
-    #[serde(default)]
-    pub user_id: Option<String>,
-    pub device_id: String,
-    pub last_fetched_at: String,
-}
-
 pub async fn advance_watermark(
     State(state): State<AppState>,
     method: Method,
@@ -1006,16 +942,6 @@ pub async fn apply_advance_watermark(
 }
 
 // ── POST /v1/envelopes/gc ────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub struct EnvelopeGcBody {
-    pub conversation_id: String,
-    /// `true` → DM cleanup query; `false` → group-channel cleanup query.
-    pub is_dm: bool,
-    /// No-auth fallback for the acting user.
-    #[serde(default)]
-    pub actor_id: Option<String>,
-}
 
 pub async fn envelope_gc(
     State(state): State<AppState>,
@@ -1287,31 +1213,6 @@ fn min_opt(a: Option<String>, b: Option<String>) -> Option<String> {
 }
 
 // ── POST /v1/attachments/register  &  /v1/attachments/delete ─────────────────
-
-#[derive(Deserialize)]
-pub struct AttachmentRegisterBody {
-    pub content_hash: String,
-    pub r2_key: String,
-    /// The id of the message that carries this attachment (#690). Present on the
-    /// send path — it registers a `(content_hash, message_id)` reference so the
-    /// shared, convergent `attachment_object` row is reference-counted. Absent on
-    /// the upload-time dedup registration (no message exists yet) and on
-    /// pre-#690 clients, which register the object row only.
-    #[serde(default)]
-    pub message_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct AttachmentDeleteBody {
-    pub content_hash: String,
-    /// The id of the message being deleted (#690). Present → release that
-    /// message's `(content_hash, message_id)` reference before the (now
-    /// conditional) object collection. Absent (pre-#690 client) → release
-    /// nothing; the object is still only collected when NO reference remains, so
-    /// an old client can no longer strand a hash a newer client references.
-    #[serde(default)]
-    pub message_id: Option<String>,
-}
 
 // ── The reference count is DERIVED, not maintained (#690) ─────────────────────
 //
@@ -1634,23 +1535,15 @@ mod tombstone_floor_tests {
 
     use super::*;
 
-    // `reported_at` mirrors migration 000013 (#720). Without it this fixture
-    // diverges from the real schema and every test that writes a watermark
-    // through the production INSERT fails with "no column named reported_at" —
-    // which is exactly what `admin_tombstone_always_reaches_a_caught_up_recipient`
-    // did on main. Nullable, as in the migration: NULL reads as "report time
-    // unknown" and is treated as live, so a legacy row keeps pinning.
-    const SCHEMA: &str = "\
-CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
-CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, reported_at TEXT, \
-  PRIMARY KEY (conversation_id, user_id, device_id));";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
-        conn.execute_batch(SCHEMA).await.unwrap();
+        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
         conn
     }
 
@@ -1663,7 +1556,7 @@ CREATE TABLE conversation_watermark (\
 
     async fn add_envelope(conn: &Connection, id: &str, conv: &str, sent_at: &str) {
         conn.execute(
-            "INSERT INTO message_envelope (id, conversation_id, sent_at) VALUES (?1, ?2, ?3)",
+            "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) VALUES (?1, ?2, ?3, 'sender', 'ct')",
             libsql::params![id.to_string(), conv.to_string(), sent_at.to_string()],
         )
         .await
@@ -1839,18 +1732,6 @@ mod gc_sql_tests {
 
     use super::*;
 
-    const SCHEMA: &str = "\
-CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
-CREATE TABLE user_device (user_id TEXT NOT NULL, device_id TEXT NOT NULL, revoked_at TEXT);\
-CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL);\
-CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
-CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);\
-CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, reported_at TEXT);\
-CREATE TABLE attachment_object (content_hash TEXT PRIMARY KEY, r2_key TEXT NOT NULL);\
-CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NULL, \
-  PRIMARY KEY (content_hash, message_id));";
 
     /// A staleness window wide enough that none of the legacy fixtures (which seed
     /// `reported_at = NULL`, i.e. "report time unknown" → treated as live) are ever
@@ -1861,7 +1742,11 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
-        conn.execute_batch(SCHEMA).await.unwrap();
+        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
         conn
     }
 
@@ -1927,8 +1812,8 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
     /// Insert one envelope at `datetime('now', offset)`.
     async fn add_envelope(conn: &Connection, id: &str, conv: &str, offset: &str) {
         conn.execute(
-            "INSERT INTO message_envelope (id, conversation_id, sent_at) \
-             VALUES (?1, ?2, datetime('now', ?3))",
+            "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) \
+             VALUES (?1, ?2, datetime('now', ?3), 'sender', 'ct')",
             libsql::params![id.to_string(), conv.to_string(), offset.to_string()],
         )
         .await
@@ -1952,7 +1837,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice')", ())
             .await
             .unwrap();
-        conn.execute("INSERT INTO channels (id, group_id) VALUES ('c1', 'g1')", ())
+        conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan')", ())
             .await
             .unwrap();
     }
@@ -2006,7 +1891,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
     // ── DM ───────────────────────────────────────────────────────────────────
 
     async fn dm_fixture(conn: &Connection) {
-        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'alice')", ())
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('d1', 'alice', 'creator')", ())
             .await
             .unwrap();
     }
@@ -2114,7 +1999,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
     async fn no_ttl_dm_uncollected_ancient_envelope_survives() {
         let conn = conn().await;
         dm_fixture(&conn).await;
-        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'bob')", ())
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('d1', 'bob', 'creator')", ())
             .await
             .unwrap();
         add_device(&conn, "alice", "a1", false).await;
@@ -2279,7 +2164,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         add_envelope(&conn, "eA", "c1", "-5 days").await;
 
         // A DM whose one member device has caught up (exercises the DM predicate).
-        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'dave')", ())
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('d1', 'dave', 'creator')", ())
             .await
             .unwrap();
         add_device(&conn, "dave", "d-dev", false).await;
@@ -2290,7 +2175,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g2', 'bob')", ())
             .await
             .unwrap();
-        conn.execute("INSERT INTO channels (id, group_id) VALUES ('c2', 'g2')", ())
+        conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c2', 'g2', 'chan')", ())
             .await
             .unwrap();
         add_device(&conn, "bob", "b1", false).await;
@@ -2469,7 +2354,7 @@ CREATE TABLE attachment_ref (content_hash TEXT NOT NULL, message_id TEXT NOT NUL
     async fn dm_dormant_device_stops_pinning_after_the_bound() {
         let conn = conn().await;
         dm_fixture(&conn).await;
-        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('d1', 'bob')", ())
+        conn.execute("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('d1', 'bob', 'creator')", ())
             .await
             .unwrap();
         add_device(&conn, "alice", "a1", false).await;
@@ -2642,27 +2527,15 @@ mod roster_parity_tests {
         dm_member_device_rows!()
     );
 
-    /// Production shapes, keys included — the PKs matter here. `user_device`'s
-    /// PK is what makes a device id globally unique (so the Rust side's
-    /// `DISTINCT` and the SQL side's raw rows are comparable), and
-    /// `conversation_watermark`'s is what stops the LEFT JOIN fanning a roster
-    /// row out into several.
-    const SCHEMA: &str = "\
-CREATE TABLE message_envelope (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sent_at TEXT NOT NULL);\
-CREATE TABLE user_device (device_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, revoked_at TEXT);\
-CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (group_id, user_id));\
-CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
-CREATE TABLE dm_channel_member (\
-  dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (dm_channel_id, user_id));\
-CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, reported_at TEXT, \
-  PRIMARY KEY (conversation_id, user_id, device_id));";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
-        conn.execute_batch(SCHEMA).await.unwrap();
+        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
         conn
     }
 
@@ -2697,8 +2570,8 @@ CREATE TABLE conversation_watermark (\
 
     async fn envelope(conn: &Connection, id: &str, conv: &str, offset: &str) {
         conn.execute(
-            "INSERT INTO message_envelope (id, conversation_id, sent_at) \
-             VALUES (?1, ?2, datetime('now', ?3))",
+            "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) \
+             VALUES (?1, ?2, datetime('now', ?3), 'sender', 'ct')",
             libsql::params![id.to_string(), conv.to_string(), offset.to_string()],
         )
         .await
@@ -2756,8 +2629,8 @@ CREATE TABLE conversation_watermark (\
     /// Watermarks are seeded only where a test needs them; membership and
     /// devices are the shared part.
     async fn fixture(conn: &Connection) {
-        exec(conn, "INSERT INTO channels (id, group_id) VALUES ('c-main', 'g-main')").await;
-        exec(conn, "INSERT INTO channels (id, group_id) VALUES ('c-other', 'g-other')").await;
+        exec(conn, "INSERT INTO channels (id, group_id, name) VALUES ('c-main', 'g-main', 'chan')").await;
+        exec(conn, "INSERT INTO channels (id, group_id, name) VALUES ('c-other', 'g-other', 'chan')").await;
         for user in ["alice", "bob", "carol", "dave"] {
             conn.execute(
                 "INSERT INTO group_member (group_id, user_id) VALUES ('g-main', ?1)",
@@ -2766,7 +2639,7 @@ CREATE TABLE conversation_watermark (\
             .await
             .unwrap();
             conn.execute(
-                "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('dm-main', ?1)",
+                "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm-main', ?1, 'creator')",
                 libsql::params![user.to_string()],
             )
             .await
@@ -2775,7 +2648,7 @@ CREATE TABLE conversation_watermark (\
         exec(conn, "INSERT INTO group_member (group_id, user_id) VALUES ('g-other', 'eve')").await;
         exec(
             conn,
-            "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('dm-other', 'eve')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm-other', 'eve', 'creator')",
         )
         .await;
 
@@ -2891,11 +2764,11 @@ CREATE TABLE conversation_watermark (\
     #[tokio::test]
     async fn an_all_revoked_member_yields_the_empty_roster_on_both_paths() {
         let conn = conn().await;
-        exec(&conn, "INSERT INTO channels (id, group_id) VALUES ('c-dead', 'g-dead')").await;
+        exec(&conn, "INSERT INTO channels (id, group_id, name) VALUES ('c-dead', 'g-dead', 'chan')").await;
         exec(&conn, "INSERT INTO group_member (group_id, user_id) VALUES ('g-dead', 'carol')").await;
         exec(
             &conn,
-            "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('dm-dead', 'carol')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm-dead', 'carol', 'creator')",
         )
         .await;
         device(&conn, "carol", "carol-old-1", true).await;
@@ -3102,19 +2975,6 @@ mod admin_delete_visibility_tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// message_envelope + conversation_watermark, matching the baseline columns
-    /// `apply_send_message` / `apply_delete_message` / `apply_advance_watermark`
-    /// write and the ingest fetch reads.
-    const SCHEMA: &str = "\
-CREATE TABLE message_envelope (\
-  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sender_id TEXT NOT NULL, \
-  ciphertext TEXT NOT NULL, reply_to_id TEXT, sent_at TEXT NOT NULL, \
-  delivered INTEGER NOT NULL DEFAULT 0, type TEXT NOT NULL DEFAULT 'message', \
-  target_message_id TEXT, sealed INTEGER NOT NULL DEFAULT 0);\
-CREATE TABLE conversation_watermark (\
-  conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL, \
-  last_fetched_at TEXT NOT NULL, reported_at TEXT, \
-  PRIMARY KEY (conversation_id, user_id, device_id));";
 
     /// The exact shape a CLIENT writes for `sent_at`
     /// (`chrono::Utc::now().to_rfc3339()`, i.e. `SecondsFormat::AutoSi`), at a
@@ -3137,7 +2997,11 @@ CREATE TABLE conversation_watermark (\
         {
             let conn = db.connect().expect("connect");
             conn.query("PRAGMA journal_mode=WAL", ()).await.expect("wal");
-            conn.execute_batch(SCHEMA).await.expect("schema");
+            // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
         }
         (dir, db)
     }
@@ -3309,6 +3173,176 @@ CREATE TABLE conversation_watermark (\
         assert_tombstone_reaches_carol(&ahead).await;
     }
 
+    /// The other direction of the same ordering question, and the one the
+    /// tombstone tests above do not reach: after a DS tombstone lands, does a
+    /// message the CLIENT stamps next still get fetched?
+    ///
+    /// It is the case a "whole-second stamps sort below fractional ones" reading
+    /// predicts will break. `chrono::Utc::now().to_rfc3339()` (AutoSi) emits NO
+    /// fraction when the instant's nanoseconds are exactly zero, so a client that
+    /// sends on a second boundary writes `…T08:00:01+00:00` while the DS tombstone
+    /// one nanosecond earlier is `…T08:00:00.999999999+00:00`. If those sorted the
+    /// wrong way round the message would land UNDER the recipient's watermark
+    /// (advanced to the tombstone) and `sent_at > last_fetched_at` would skip it
+    /// permanently — a silently dropped message, which is not one of the three
+    /// losses `CLAUDE.md` permits.
+    ///
+    /// They sort the right way round, and for a reason worth stating: AutoSi never
+    /// TRUNCATES, it only omits a fraction that is genuinely zero. A stamp with no
+    /// fraction therefore denotes `.000000000` — the EARLIEST instant of its
+    /// second — so sorting below every fractional stamp in that same second is
+    /// correct, and `'+' < '.'` is what produces it. (The #692 bug was a
+    /// hand-rolled formatter that truncated a real fraction away; that is a
+    /// different thing, and `now_rfc3339` is what fixed it.)
+    ///
+    /// What this test pins is the DS half: `sent_at_after`'s floor, and the
+    /// mixed-format comparison between a Nanos tombstone and a fraction-less
+    /// client stamp. The client half — that pollis-core never starts truncating —
+    /// is pinned in `pollis_core::commands::messages::sent_at_format_tests`,
+    /// which this crate cannot reach.
+    #[tokio::test]
+    async fn a_zero_nanosecond_client_message_still_outsorts_the_preceding_tombstone() {
+        let (_dir, db) = shared_db().await;
+        let w = db.connect().expect("write conn");
+        let carol = db.connect().expect("carol read conn");
+
+        let base = 1_800_000_000;
+        let conv = "chan-general";
+
+        // An existing message at `…:00.999999999` — the highest fraction there
+        // is, so `sent_at_after` must roll the tombstone into the NEXT second.
+        apply_send_message(
+            &w,
+            None,
+            &SendMessageBody {
+                id: "msg-bobs-post".to_string(),
+                conversation_id: conv.to_string(),
+                sender_id: Some("sealed".to_string()),
+                ciphertext: "mls:00".to_string(),
+                reply_to_id: None,
+                sent_at: client_stamp(base, 999_999_999),
+                sealed: 1,
+            },
+        )
+        .await
+        .expect("send");
+
+        // Carol catches up and reports her watermark, then alice admin-deletes.
+        // Both stamps are in 2027, i.e. ahead of any real DS clock, so the delete
+        // takes `sent_at_after`'s floor branch and the tombstone is stamped
+        // exactly one nanosecond past the highest thing in the conversation.
+        assert_eq!(ingest_fetch(&carol, conv, "carol", "carol-dev").await.len(), 1);
+        apply_advance_watermark(
+            &w,
+            None,
+            &WatermarkBody {
+                conversation_id: conv.to_string(),
+                user_id: Some("carol".to_string()),
+                device_id: "carol-dev".to_string(),
+                last_fetched_at: client_stamp(base, 999_999_999),
+            },
+        )
+        .await
+        .expect("carol watermark");
+        apply_delete_message(
+            &w,
+            None,
+            &DeleteMessageBody {
+                message_id: "msg-bobs-post".to_string(),
+                conversation_id: conv.to_string(),
+                msg_sender_id: Some("bob".to_string()),
+                actor_id: Some("alice".to_string()),
+            },
+        )
+        .await
+        .expect("admin delete");
+
+        // Carol fetches the tombstone and advances onto it — the cursor is now a
+        // DS-shaped, nanosecond-precision stamp.
+        let fetched = ingest_fetch(&carol, conv, "carol", "carol-dev").await;
+        let tombstone = fetched
+            .iter()
+            .find(|(_, ty, _)| ty == "delete")
+            .expect("carol must fetch the tombstone");
+        let cursor: String = {
+            let mut rows = w
+                .query(
+                    "SELECT sent_at FROM message_envelope WHERE id = ?1",
+                    libsql::params![tombstone.0.clone()],
+                )
+                .await
+                .expect("tombstone sent_at");
+            rows.next().await.expect("row").expect("row").get(0).expect("sent_at")
+        };
+        assert!(
+            cursor.starts_with("2027-01-15T08:00:01"),
+            "the floor guard must roll the tombstone into the next second, got {cursor}"
+        );
+        apply_advance_watermark(
+            &w,
+            None,
+            &WatermarkBody {
+                conversation_id: conv.to_string(),
+                user_id: Some("carol".to_string()),
+                device_id: "carol-dev".to_string(),
+                last_fetched_at: cursor.clone(),
+            },
+        )
+        .await
+        .expect("carol watermark 2");
+
+        // Now the client sends on the second boundary: AutoSi gives it NO
+        // fraction, and it must still sort above the tombstone's `.000000000`…
+        let boundary = client_stamp(base + 2, 0);
+        assert!(
+            !boundary.contains('.'),
+            "the premise of this test is a fraction-less stamp; got {boundary}"
+        );
+        apply_send_message(
+            &w,
+            None,
+            &SendMessageBody {
+                id: "msg-after-tombstone".to_string(),
+                conversation_id: conv.to_string(),
+                sender_id: Some("sealed".to_string()),
+                ciphertext: "mls:01".to_string(),
+                reply_to_id: None,
+                sent_at: boundary.clone(),
+                sealed: 1,
+            },
+        )
+        .await
+        .expect("send after tombstone");
+        assert!(
+            boundary > cursor,
+            "a fraction-less client stamp ({boundary}) must sort above the DS \
+             tombstone that precedes it ({cursor}) — otherwise it lands under \
+             every recipient's watermark and is lost"
+        );
+
+        // The negative control, so this test is about the ORDERING RULE and not
+        // about two strings happening to differ: what a TRUNCATING client
+        // formatter (`SecondsFormat::Secs`) would have written for an instant
+        // inside the tombstone's own second. It sorts UNDER the cursor, which is
+        // the burial this whole scheme exists to prevent — and the reason
+        // `pollis_core::commands::messages::envelope_sent_at` is a chokepoint
+        // with `sent_at_never_truncates_a_real_fraction` guarding it.
+        let truncated = "2027-01-15T08:00:01+00:00";
+        assert!(
+            truncated < cursor.as_str(),
+            "premise of the guard: a truncated stamp ({truncated}) sorts below the \
+             tombstone ({cursor}) and would be lost"
+        );
+
+        // …which is what makes carol actually receive it.
+        let after = ingest_fetch(&carol, conv, "carol", "carol-dev").await;
+        assert!(
+            after.iter().any(|(id, _, _)| id == "msg-after-tombstone"),
+            "a message sent after an admin delete must reach a caught-up recipient; \
+             fetched: {after:?} against watermark {cursor}"
+        );
+    }
+
     /// The candidate-1 primitive in isolation: a row written on one connection of
     /// a shared libsql `Database` is IMMEDIATELY visible on another connection of
     /// the same handle — the read-your-writes guarantee the flows harness leans on
@@ -3325,7 +3359,11 @@ CREATE TABLE conversation_watermark (\
         {
             let c = db.connect().expect("connect");
             c.query("PRAGMA journal_mode=WAL", ()).await.expect("wal");
-            c.execute_batch(SCHEMA).await.expect("schema");
+            // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&c).await.expect("schema");
         }
 
         let writer = db.connect().expect("writer");
@@ -3381,25 +3419,15 @@ mod delete_scope_tests {
     use super::*;
     use libsql::Connection;
 
-    const SCHEMA: &str = "\
-        CREATE TABLE message_envelope (\
-            id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, sender_id TEXT NOT NULL,\
-            ciphertext TEXT NOT NULL, sent_at TEXT NOT NULL, type TEXT,\
-            target_message_id TEXT, delivered INTEGER NOT NULL DEFAULT 0);\
-        CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);\
-        CREATE TABLE dm_channel (id TEXT PRIMARY KEY);\
-        CREATE TABLE groups (id TEXT PRIMARY KEY);\
-        CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);\
-        CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT);\
-        CREATE TABLE conversation_watermark (\
-            conversation_id TEXT NOT NULL, user_id TEXT NOT NULL, device_id TEXT NOT NULL,\
-            last_fetched_at TEXT NOT NULL,\
-            PRIMARY KEY (conversation_id, user_id, device_id));";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let c = db.connect().unwrap();
-        c.execute_batch(SCHEMA).await.unwrap();
+        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&c).await.expect("schema");
         c
     }
 
@@ -3431,12 +3459,12 @@ mod delete_scope_tests {
         let c = conn().await;
         // The attacker is a legitimate member of exactly one conversation.
         c.execute(
-            "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('mine', 'mallory')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('mine', 'mallory', 'creator')",
             (),
         )
         .await
         .unwrap();
-        c.execute("INSERT INTO dm_channel (id) VALUES ('mine')", ())
+        c.execute("INSERT INTO dm_channel (id, created_by) VALUES ('mine', 'creator')", ())
             .await
             .unwrap();
         seed_envelope(&c, "victim-envelope", "someone-elses-conversation", "alice").await;
@@ -3463,11 +3491,11 @@ mod delete_scope_tests {
     #[tokio::test]
     async fn admin_delete_cannot_reach_another_conversation() {
         let c = conn().await;
-        c.execute("INSERT INTO groups (id) VALUES ('g1')", ())
+        c.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'grp', 'owner')", ())
             .await
             .unwrap();
         c.execute(
-            "INSERT INTO channels (id, group_id) VALUES ('my-channel', 'g1')",
+            "INSERT INTO channels (id, group_id, name) VALUES ('my-channel', 'g1', 'chan')",
             (),
         )
         .await
@@ -3502,12 +3530,12 @@ mod delete_scope_tests {
     async fn self_delete_still_removes_your_own_envelope() {
         let c = conn().await;
         c.execute(
-            "INSERT INTO dm_channel_member (dm_channel_id, user_id) VALUES ('mine', 'mallory')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('mine', 'mallory', 'creator')",
             (),
         )
         .await
         .unwrap();
-        c.execute("INSERT INTO dm_channel (id) VALUES ('mine')", ())
+        c.execute("INSERT INTO dm_channel (id, created_by) VALUES ('mine', 'creator')", ())
             .await
             .unwrap();
         seed_envelope(&c, "my-envelope", "mine", "mallory").await;

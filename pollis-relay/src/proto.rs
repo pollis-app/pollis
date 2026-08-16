@@ -539,23 +539,12 @@ pub fn account_fingerprint(account_id_pub: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// Lowercase hex, no separators (avoids a `hex` dependency for one digest).
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
-}
-
 /// Build the canonical signed message. Public so client, relay, and tests all
 /// produce byte-for-byte the same bytes.
 pub fn handshake_canonical_bytes(user_id: &str, device_id: &str, timestamp: i64, nonce: &[u8]) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(nonce);
-    let nonce_hash = hex_lower(&hasher.finalize());
+    let nonce_hash = hex::encode(hasher.finalize());
     format!("{HANDSHAKE_DOMAIN}\n{user_id}\n{device_id}\n{timestamp}\n{nonce_hash}").into_bytes()
 }
 

@@ -40,6 +40,7 @@ pub mod ratelimit;
 pub mod redact;
 pub mod room_id;
 pub mod session;
+pub mod util;
 pub mod writes;
 
 use std::sync::Arc;
@@ -53,9 +54,10 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use pollis_api::DsRequest;
 use serde::Deserialize;
 
-use crate::commit::{CommitsResponse, SubmitBody, SubmitResponse};
+use crate::commit::{CommitSinceReport, CommitsResponse, SubmitBody, SubmitResponse};
 use crate::db::Db;
 use crate::error::{AppError, AuthRejection};
 
@@ -249,114 +251,114 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/version", get(version))
         .route("/v1/retention/metrics", get(retention_metrics))
         .route("/v1/config", get(effective_config))
-        .route("/v1/commits", post(submit))
-        .route("/v1/commits/since", post(report_commit_since))
+        .route(<SubmitBody as DsRequest>::PATH, post(submit))
+        .route(<CommitSinceReport as DsRequest>::PATH, post(report_commit_since))
         .route("/v1/commits/:conversation_id", get(commits))
-        .route("/v1/group-info", post(writes::group_info))
-        .route("/v1/welcomes/ack", post(writes::welcomes_ack))
-        .route("/v1/welcomes/reset", post(writes::welcomes_reset))
-        .route("/v1/welcomes/purge", post(writes::welcomes_purge))
-        .route("/v1/welcomes/resubmit", post(writes::welcomes_resubmit))
+        .route(<writes::GroupInfoBody as DsRequest>::PATH, post(writes::group_info))
+        .route(<writes::AckBody as DsRequest>::PATH, post(writes::welcomes_ack))
+        .route(<writes::ResetBody as DsRequest>::PATH, post(writes::welcomes_reset))
+        .route(<writes::PurgeBody as DsRequest>::PATH, post(writes::welcomes_purge))
+        .route(<writes::ResubmitBody as DsRequest>::PATH, post(writes::welcomes_resubmit))
         // Domain A (#419) — messages / envelopes / watermarks / reactions /
         // attachments. All land on the MAIN DB.
-        .route("/v1/messages/send", post(messages::send_message))
-        .route("/v1/messages/edit", post(messages::edit_message))
-        .route("/v1/messages/delete", post(messages::delete_message))
-        .route("/v1/reactions/add", post(messages::add_reaction))
-        .route("/v1/reactions/remove", post(messages::remove_reaction))
-        .route("/v1/watermarks/advance", post(messages::advance_watermark))
-        .route("/v1/envelopes/gc", post(messages::envelope_gc))
-        .route("/v1/attachments/register", post(messages::register_attachment))
-        .route("/v1/attachments/delete", post(messages::delete_attachment))
+        .route(<messages::SendMessageBody as DsRequest>::PATH, post(messages::send_message))
+        .route(<messages::EditMessageBody as DsRequest>::PATH, post(messages::edit_message))
+        .route(<messages::DeleteMessageBody as DsRequest>::PATH, post(messages::delete_message))
+        .route(<messages::AddReaction as DsRequest>::PATH, post(messages::add_reaction))
+        .route(<messages::RemoveReaction as DsRequest>::PATH, post(messages::remove_reaction))
+        .route(<messages::WatermarkBody as DsRequest>::PATH, post(messages::advance_watermark))
+        .route(<messages::EnvelopeGcBody as DsRequest>::PATH, post(messages::envelope_gc))
+        .route(<messages::AttachmentRegisterBody as DsRequest>::PATH, post(messages::register_attachment))
+        .route(<messages::AttachmentDeleteBody as DsRequest>::PATH, post(messages::delete_attachment))
         // Domain B (#419) — groups / channels / membership / invites /
         // join-requests. All land on the MAIN DB.
-        .route("/v1/groups/create", post(groups::create_group))
-        .route("/v1/groups/update", post(groups::update_group))
-        .route("/v1/groups/delete", post(groups::delete_group))
-        .route("/v1/groups/leave", post(groups::leave_group))
-        .route("/v1/channels/create", post(groups::create_channel))
-        .route("/v1/channels/update", post(groups::update_channel))
-        .route("/v1/channels/delete", post(groups::delete_channel))
-        .route("/v1/members/remove", post(groups::remove_member))
-        .route("/v1/members/role", post(groups::set_member_role))
-        .route("/v1/invites/create", post(groups::create_invite))
-        .route("/v1/invites/accept", post(groups::accept_invite))
-        .route("/v1/invites/decline", post(groups::decline_invite))
-        .route("/v1/invite-links/create", post(groups::create_invite_link))
-        .route("/v1/invite-links/revoke", post(groups::revoke_invite_link))
-        .route("/v1/invite-links/redeem", post(groups::redeem_invite_link))
-        .route("/v1/join-requests/create", post(groups::create_join_request))
-        .route("/v1/join-requests/approve", post(groups::approve_join_request))
-        .route("/v1/join-requests/reject", post(groups::reject_join_request))
+        .route(<groups::CreateGroupBody as DsRequest>::PATH, post(groups::create_group))
+        .route(<groups::UpdateGroupBody as DsRequest>::PATH, post(groups::update_group))
+        .route(<groups::DeleteGroupBody as DsRequest>::PATH, post(groups::delete_group))
+        .route(<groups::LeaveGroupBody as DsRequest>::PATH, post(groups::leave_group))
+        .route(<groups::CreateChannelBody as DsRequest>::PATH, post(groups::create_channel))
+        .route(<groups::UpdateChannelBody as DsRequest>::PATH, post(groups::update_channel))
+        .route(<groups::DeleteChannelBody as DsRequest>::PATH, post(groups::delete_channel))
+        .route(<groups::RemoveMemberBody as DsRequest>::PATH, post(groups::remove_member))
+        .route(<groups::SetMemberRoleBody as DsRequest>::PATH, post(groups::set_member_role))
+        .route(<groups::CreateInviteBody as DsRequest>::PATH, post(groups::create_invite))
+        .route(<groups::AcceptInviteBody as DsRequest>::PATH, post(groups::accept_invite))
+        .route(<groups::DeclineInviteBody as DsRequest>::PATH, post(groups::decline_invite))
+        .route(<groups::CreateInviteLinkBody as DsRequest>::PATH, post(groups::create_invite_link))
+        .route(<groups::RevokeInviteLinkBody as DsRequest>::PATH, post(groups::revoke_invite_link))
+        .route(<groups::RedeemInviteLinkBody as DsRequest>::PATH, post(groups::redeem_invite_link))
+        .route(<groups::CreateJoinRequestBody as DsRequest>::PATH, post(groups::create_join_request))
+        .route(<groups::ApproveJoinRequestBody as DsRequest>::PATH, post(groups::approve_join_request))
+        .route(<groups::RejectJoinRequestBody as DsRequest>::PATH, post(groups::reject_join_request))
         // Domain F (#848) — custom per-group emoji. Lands on the MAIN DB.
         // `create` binds a content-addressed object to a (group, shortcode);
         // `remove` releases it and collects the object if that was the last
         // reference; `gc` sweeps objects whose references vanished with their
         // group. See the `emoji` module docs for the storage + permission model.
-        .route("/v1/emoji/create", post(emoji::create_emoji))
-        .route("/v1/emoji/remove", post(emoji::remove_emoji))
-        .route("/v1/emoji/gc", post(emoji::emoji_gc))
+        .route(<emoji::CreateEmojiBody as DsRequest>::PATH, post(emoji::create_emoji))
+        .route(<emoji::RemoveEmojiBody as DsRequest>::PATH, post(emoji::remove_emoji))
+        .route(<emoji::EmojiGcBody as DsRequest>::PATH, post(emoji::emoji_gc))
         // Domain C (#419) — profile / preferences / blocks / DMs. All land on
         // the MAIN DB.
-        .route("/v1/profile/update", post(profile::update_profile))
-        .route("/v1/profile/preferences", post(profile::save_preferences))
-        .route("/v1/blocks/add", post(profile::block_user))
-        .route("/v1/blocks/remove", post(profile::unblock_user))
-        .route("/v1/dm/create", post(profile::create_dm))
-        .route("/v1/dm/accept", post(profile::accept_dm))
-        .route("/v1/dm/add", post(profile::add_dm_member))
-        .route("/v1/dm/remove", post(profile::remove_dm_member))
-        .route("/v1/dm/leave", post(profile::leave_dm))
+        .route(<profile::UpdateProfileBody as DsRequest>::PATH, post(profile::update_profile))
+        .route(<profile::SavePreferencesBody as DsRequest>::PATH, post(profile::save_preferences))
+        .route(<profile::AddBlock as DsRequest>::PATH, post(profile::block_user))
+        .route(<profile::RemoveBlock as DsRequest>::PATH, post(profile::unblock_user))
+        .route(<profile::CreateDmBody as DsRequest>::PATH, post(profile::create_dm))
+        .route(<profile::AcceptDmBody as DsRequest>::PATH, post(profile::accept_dm))
+        .route(<profile::AddDmMemberBody as DsRequest>::PATH, post(profile::add_dm_member))
+        .route(<profile::RemoveDmMemberBody as DsRequest>::PATH, post(profile::remove_dm_member))
+        .route(<profile::LeaveDmBody as DsRequest>::PATH, post(profile::leave_dm))
         // Domain D (#419) — key-packages / device-cert re-sign / push tokens.
         // All land on the MAIN DB. Device registration + the FIRST cert publish
         // are bootstrap writes that stay on the client's direct path (see
         // `devices` module docs).
-        .route("/v1/key-packages", post(devices::publish_key_packages))
-        .route("/v1/key-packages/claim", post(devices::claim_key_package))
-        .route("/v1/key-packages/replenish", post(devices::replenish_key_packages))
-        .route("/v1/devices/resign", post(devices::resign_device_certs))
-        .route("/v1/push-tokens", post(devices::register_push_token))
+        .route(<devices::PublishKeyPackagesBody as DsRequest>::PATH, post(devices::publish_key_packages))
+        .route(<devices::ClaimKeyPackageBody as DsRequest>::PATH, post(devices::claim_key_package))
+        .route(<devices::ReplenishKeyPackagesBody as DsRequest>::PATH, post(devices::replenish_key_packages))
+        .route(<devices::ResignDeviceCertsBody as DsRequest>::PATH, post(devices::resign_device_certs))
+        .route(<devices::PushTokenBody as DsRequest>::PATH, post(devices::register_push_token))
         // Domains E + G (#419) — account lifecycle / identity rotation /
         // recovery / device-enrollment / security audit. All land on the MAIN
         // DB. The account-identity bootstrap (signup version-1 establishment),
         // device registration, and the enrollment *request* stay on the client's
         // direct path (see `account` module docs).
-        .route("/v1/account/rotate-identity", post(account::rotate_identity))
-        .route("/v1/account/delete", post(account::delete_account))
-        .route("/v1/account/reset-recover", post(account::reset_recover))
-        .route("/v1/security-events", post(account::record_security_event))
-        .route("/v1/enrollment/approve", post(account::approve_enrollment))
-        .route("/v1/enrollment/reject", post(account::reject_enrollment))
-        .route("/v1/devices/revoke", post(account::revoke_device))
+        .route(<account::RotateIdentityBody as DsRequest>::PATH, post(account::rotate_identity))
+        .route(<account::DeleteAccountBody as DsRequest>::PATH, post(account::delete_account))
+        .route(<account::ResetRecoverBody as DsRequest>::PATH, post(account::reset_recover))
+        .route(<account::SecurityEventBody as DsRequest>::PATH, post(account::record_security_event))
+        .route(<account::ApproveEnrollmentBody as DsRequest>::PATH, post(account::approve_enrollment))
+        .route(<account::RejectEnrollmentBody as DsRequest>::PATH, post(account::reject_enrollment))
+        .route(<account::RevokeDeviceBody as DsRequest>::PATH, post(account::revoke_device))
         // Logout device removal (bucket-C C4) — DEVICE-SIGNED DELETE of the
         // signer's OWN `user_device` row. Distinct from `/v1/devices/revoke`
         // (which tombstones): logout must re-register cleanly on next sign-in.
-        .route("/v1/auth/logout", post(account::logout_device))
+        .route(<account::LogoutDeviceBody as DsRequest>::PATH, post(account::logout_device))
         // Server-side OTP + bootstrap (Goal B #419). request/verify-otp generate,
         // validate, and email the OTP server-side and mint an OTP-session token;
         // the three session-gated bootstrap writes establish the device's signing
         // credential (which therefore cannot itself be device-signed). See
         // `docs/otp-server-bootstrap-design.md`.
-        .route("/v1/auth/request-otp", post(otp::request_otp))
-        .route("/v1/auth/verify-otp", post(otp::verify_otp))
-        .route("/v1/auth/establish-identity", post(bootstrap::establish_identity))
-        .route("/v1/auth/register-device", post(bootstrap::register_device))
-        .route("/v1/auth/publish-device-cert", post(bootstrap::publish_device_cert))
+        .route(<otp::RequestOtpBody as DsRequest>::PATH, post(otp::request_otp))
+        .route(<otp::VerifyOtpBody as DsRequest>::PATH, post(otp::verify_otp))
+        .route(<bootstrap::EstablishIdentityBody as DsRequest>::PATH, post(bootstrap::establish_identity))
+        .route(<bootstrap::RegisterDeviceBody as DsRequest>::PATH, post(bootstrap::register_device))
+        .route(<bootstrap::PublishCertBody as DsRequest>::PATH, post(bootstrap::publish_device_cert))
         // Subsequent-device (re-login) bootstrap: the session-gated enrollment
         // REQUEST write (the requesting device is still pre-credential). The
         // subsequent-device cert publish reuses publish-device-cert above, gated
         // by cert-validity ALONE (no session). See docs §5.
-        .route("/v1/auth/enrollment-request", post(bootstrap::enrollment_request))
+        .route(<bootstrap::EnrollmentRequestBody as DsRequest>::PATH, post(bootstrap::enrollment_request))
         // Email change (Goal B #419 final piece) — DEVICE-SIGNED (the user is
         // already authenticated; the OTP only proves control of the NEW mailbox).
         // request records (authed → new_email); verify requires the signed caller
         // to match and swaps `users.email`. See `email_change` module docs.
         .route(
-            "/v1/auth/request-email-change-otp",
+            <email_change::RequestEmailChangeBody as DsRequest>::PATH,
             post(email_change::request_email_change_otp),
         )
         .route(
-            "/v1/auth/verify-email-change",
+            <email_change::VerifyEmailChangeBody as DsRequest>::PATH,
             post(email_change::verify_email_change),
         )
         // Authorized-secrets broker (#393) — DEVICE-SIGNED. Move the two
@@ -364,11 +366,11 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // (identity derived from the verified signer, never the client) and
         // presign an R2 GET/PUT. Secrets live in DS env, never the client
         // bundle. See `broker` module docs + `docs/secrets-broker.md`.
-        .route("/v1/livekit/token", post(broker::livekit_token))
-        .route("/v1/livekit/send-data", post(broker::livekit_send_data))
-        .route("/v1/livekit/participants", post(broker::livekit_participants))
-        .route("/v1/turso/token", post(broker::turso_token))
-        .route("/v1/r2/presign", post(broker::r2_presign))
+        .route(<broker::LivekitTokenBody as DsRequest>::PATH, post(broker::livekit_token))
+        .route(<broker::LivekitSendDataBody as DsRequest>::PATH, post(broker::livekit_send_data))
+        .route(<broker::LivekitParticipantsBody as DsRequest>::PATH, post(broker::livekit_participants))
+        .route(<broker::TursoTokenBody as DsRequest>::PATH, post(broker::turso_token))
+        .route(<broker::R2PresignBody as DsRequest>::PATH, post(broker::r2_presign))
         // Hardening middleware (#345). Rate limiting runs first (inner); security
         // headers are added last so they wrap every response, including the
         // rate-limiter's own 429s and any error replies.
@@ -553,7 +555,7 @@ async fn submit(
             method.as_str(),
             uri.path(),
             &body,
-            auth::now_unix(),
+            util::now_unix() as i64,
         )
         .await
         {
@@ -661,23 +663,6 @@ async fn commits(
     }))
 }
 
-/// Body of `POST /v1/commits/since` — a device's catch-up high-water report.
-/// `(generation, since)` is the position it is caught up FROM; it still needs
-/// every commit `>= since` in that lineage. `user_id`/`device_id` are consulted
-/// ONLY on the no-auth (dev/test) path; when auth is enforced the identity comes
-/// from the verified signature and these are ignored.
-#[derive(Deserialize)]
-struct CommitSinceReport {
-    conversation_id: String,
-    #[serde(default)]
-    generation: i64,
-    since: i64,
-    #[serde(default)]
-    user_id: Option<String>,
-    #[serde(default)]
-    device_id: Option<String>,
-}
-
 /// POST /v1/commits/since — record the signing device's catch-up high-water and
 /// run the EVENT-DRIVEN retention prune (#539, I4). This is a WRITE: it raises
 /// the retention floor, so it is AUTHENTICATED as the device it claims to be,
@@ -714,7 +699,7 @@ async fn report_commit_since(
             method.as_str(),
             uri.path(),
             &body,
-            auth::now_unix(),
+            util::now_unix() as i64,
         )
         .await
         {

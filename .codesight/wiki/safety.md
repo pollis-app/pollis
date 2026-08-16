@@ -286,6 +286,61 @@ the report's reason). The **peer** audit shows on the user profile page
 **self** audit shows in its own "Account key" section on the security page
 (`pages/SecurityPage.tsx`).
 
+### Which key verifies a head (rotation overlap, #875)
+
+A signed head is checked against the **set** of keys the log publishes as
+acceptable right now, never against a single key. `public_key.json` carries
+`public_key` (the active signer) plus a `keys` array; each entry has a
+`not_after`, and a retiring key stays acceptable until its window closes. The set
+is turned into verifying keys in exactly one place —
+`Bundle::key_candidates(now_ms)` → `PublicKeyDoc::verifying_candidates` in
+`verifiable-log-serve/src/bundle.rs` — and every head check goes through
+`Sth::verify_any[_with_context]`.
+
+**All five verify paths apply it**, and that uniformity is the contract:
+
+| path | entry point | context |
+|---|---|---|
+| whole-log audit | `remote::verify_remote` | default + account + binaries |
+| per-group | `group::verify_group[_in_bundle]` | default (`sth:v2`) |
+| per-account | `account::verify_account[_in_bundle]` | account |
+| per-release | `release::verify_release[_in_bundle]` | binaries |
+| offline CLI | `monitor::verify_bundle` (`monitor verify --tree …`) | whichever `--tree` names |
+
+Before #875 only the first did. Three of the others rebuilt a verification-side
+`Bundle` with `retired_keys: Vec::new()` and verified against `public_key` alone,
+so during a rotation overlap — `public_key.json` and `sth/latest.json` are
+separate artifacts on separate cache policies and legitimately move at different
+moments (custody doc §7 step 5) — `pollis-verify verify` passed while
+`self_audit_account_key`, `audit_peer_account_key` and `verify_own_build` all
+raised a hard `alarm` against an honest log. A client crying tampering at an
+honest server is worse than the bug it guards against.
+
+Rules that keep it honest:
+
+- **Expiry is enforced client-side**, at verification time, from the verifier's
+  own clock — never trusted from the server. The window is a deadline.
+- `verify_*_in_bundle_at(bundle, id, now_ms)` takes the clock explicitly;
+  `verify_*_in_bundle` is that against the wall clock. Tests drive the window.
+- `key_id` on an STH only reorders which candidate is tried first. It is derived,
+  outside the signed preimage, and can never make a bad head verify.
+- The pin is a **separate** gate and stays anchored to the served *active* key
+  (`active_served_key` in `pollis-core/src/commands/transparency.rs`). Matching
+  the pin against the served key *set* would let a hostile host publish the
+  genuine pinned key as a retired entry, sign every head with its own key, and
+  pass the pin check on a key it never used.
+- The **offline monitor** (`cargo run -p verifiable-log --bin monitor -- verify`)
+  had the same class of bug from the other end: its private stand-in `Bundle`
+  had no `retired_keys` field at all, so serde dropped the overlap set and every
+  head signed by a retiring key reported FAIL. The bundle shape is now declared
+  once, in `verifiable_log::bundle`, and the builder re-exports it. It also
+  hard-coded the commit-log STH context, so an account-keys or binaries bundle —
+  which the builder README tells you to check with that exact command — always
+  failed; `--tree {commit-log|account-keys|binaries}` selects the context, with
+  no auto-detection (the bundle does not name its own tree, and guessing would
+  let the log pick which question it is asked). `--now-ms` pins the clock the
+  overlap window is measured against, so a verdict is reproducible.
+
 ### Auditing infrastructure
 
 `pollis-verify account <user_id>` (released CLI), precomputed

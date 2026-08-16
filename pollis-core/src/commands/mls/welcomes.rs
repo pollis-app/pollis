@@ -166,8 +166,16 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
 
     // W5 seam: mark delivered=1 through the Delivery Service (sole writer).
     if !processed_ids.is_empty() {
-        let body = serde_json::json!({ "welcome_ids": processed_ids });
-        match super::ds_client::ds_post(state, "/v1/welcomes/ack", &body).await {
+        let body = pollis_api::writes::AckBody {
+            welcome_ids: processed_ids,
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor, and a
+            // body without it is refused outright. Sending it never widens what
+            // the caller may do.
+            user_id: Some(user_id.to_string()),
+        };
+        match super::ds_client::ds_post(state, &body).await {
             Ok(resp) if resp.status().is_success() => {}
             Ok(resp) => {
                 let s = resp.status();
@@ -319,8 +327,16 @@ pub async fn reset_welcome_delivery(state: &Arc<AppState>, user_id: &str) -> Res
 
     // The DS derives the recipient from the authenticated user; the body
     // only carries the device scope (null ⇒ all of this user's welcomes).
-    let body = serde_json::json!({ "device_id": maybe_device_id });
-    match super::ds_client::ds_post(state, "/v1/welcomes/reset", &body).await {
+    let body = pollis_api::writes::ResetBody {
+        device_id: maybe_device_id,
+        // The DS's no-auth fallback for the acting user
+        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+        // user and this must EQUAL it; auth off → this IS the actor, and a
+        // body without it is refused outright. Sending it never widens what
+        // the caller may do.
+        user_id: Some(user_id.to_string()),
+    };
+    match super::ds_client::ds_post(state, &body).await {
         Ok(resp) if resp.status().is_success() => {}
         Ok(resp) => {
             let s = resp.status();

@@ -10,7 +10,11 @@
 //! 1. **Trust anchor.** Verify the latest binaries STH's signature *first* —
 //!    crucially under the binaries tree's domain-separated
 //!    [`binaries::STH_CONTEXT`], so a commit-log or account-key head can never
-//!    stand in for a binaries head even though the same key signs all three.
+//!    stand in for a binaries head even though the same key signs all three. The
+//!    signature is checked against the *set* of keys the log publishes as
+//!    currently acceptable (active signer + any key still inside its
+//!    rotation-overlap window), so a key changeover never tells a user their
+//!    genuine binary is unattested.
 //! 2. **Inclusion.** Each of the tag's entries must have an inclusion proof that
 //!    verifies against that binaries STH (reusing slice 1's
 //!    [`verifiable_log::proof::verify_inclusion_proof`]).
@@ -31,10 +35,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use verifiable_log::{proof, verifying_key_from_hex, Entry, InclusionProof, Sth, VerifiableLog};
+use verifiable_log::{proof, Entry, InclusionProof, Sth, VerifiableLog};
 use verifiable_log_builder::binaries::{self, BinaryInvariant, BinaryRecord};
 
-use crate::bundle::{Bundle, InclusionCheck, PublicKeyDoc};
+use crate::bundle::{now_ms, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json};
 
@@ -156,10 +160,15 @@ pub fn verify_release_via(
     }
 
     let bundle = Bundle {
+        // Verification-side reconstruction, never re-published. The served key
+        // document's rotation-overlap set is carried through so the verdict core
+        // accepts a head signed by a key that is retiring but still inside its
+        // window — during a changeover `public_key.json` and `sth/latest.json` are
+        // separate artifacts on separate cache policies and legitimately move at
+        // different moments. Dropping the set here (#875) made an honest log
+        // mid-rotation tell a user their genuine binary was unattested.
+        retired_keys: pk_doc.overlap_keys(),
         public_key: pk_doc.public_key,
-        // Verification-side reconstruction, never re-published: the overlap set
-        // is applied when selecting the verifying key, not carried in here.
-        retired_keys: Vec::new(),
         sths: vec![sth],
         entries,
         enforce_unique: vec![BINARIES_TENANT.to_string()],
@@ -178,21 +187,38 @@ pub fn verify_release_via(
 /// Never panics; a tampered/forked tree yields `chain_valid == false` with
 /// populated `violations` rather than an error.
 pub fn verify_release_in_bundle(bundle: &Bundle, release_tag: &str) -> ReleaseReport {
+    verify_release_in_bundle_at(bundle, release_tag, now_ms())
+}
+
+/// [`verify_release_in_bundle`] against an explicit `now_ms`, which decides which
+/// rotation-overlap keys have expired.
+///
+/// The clock is a parameter so the overlap window is testable without waiting for
+/// one, and so a caller that needs a deterministic verdict can supply its own
+/// instant. [`verify_release_in_bundle`] is exactly this against the wall clock.
+pub fn verify_release_in_bundle_at(
+    bundle: &Bundle,
+    release_tag: &str,
+    now_ms: u64,
+) -> ReleaseReport {
     let mut violations: Vec<String> = Vec::new();
 
-    // 1. Trust anchor: the newest binaries head, verified under the log key AND
-    //    the binaries domain context. An STH minted for the commit-log or
-    //    account-key tree fails here even though the same key signed it.
-    let verifying_key = verifying_key_from_hex(&bundle.public_key).ok();
+    // 1. Trust anchor: the newest binaries head, verified under the binaries
+    //    domain context and under ANY key the log publishes as acceptable right
+    //    now — the active signer plus any key still inside its rotation-overlap
+    //    window. An STH minted for the commit-log or account-key tree still fails
+    //    here even though the same key signed it: the context, not the key,
+    //    separates the trees. Expiry is applied here, not trusted from the server.
+    let candidates = bundle.key_candidates(now_ms);
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
-    let (sth_tree_size, root_hex, sth_sig_ok) = match (latest, &verifying_key) {
-        (Some(sth), Some(vk)) => (
+    let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
+        Some(sth) => (
             sth.tree_size,
             sth.root_hash.clone(),
-            sth.verify_with_context(vk, binaries::STH_CONTEXT),
+            sth.verify_any_with_context(&candidates, binaries::STH_CONTEXT)
+                .is_some(),
         ),
-        (Some(sth), None) => (sth.tree_size, sth.root_hash.clone(), false),
-        (None, _) => (0, String::new(), false),
+        None => (0, String::new(), false),
     };
     if !sth_sig_ok {
         violations.push(

@@ -185,8 +185,19 @@ async fn group_join_request_approve_flow() {
     assert_eq!(requests[0]["requester_id"], carol_profile.id);
     let request_id = requests[0]["id"].as_str().expect("request id").to_string();
 
-    // Non-admins get an empty list (role gate in get_group_join_requests).
-    assert!(carol.list_join_requests(&group_id).await.is_empty());
+    // #875: a non-member used to receive `[]` here — the same answer as "nobody
+    // has asked to join". It now reports the real condition.
+    let err = carol
+        .invoke_try(
+            "get_group_join_requests",
+            json!({ "groupId": group_id, "requesterId": carol.user_id() }),
+        )
+        .await
+        .expect_err("a non-member must not receive a join-request list");
+    assert!(
+        err.contains("not a member of this group"),
+        "non-member should be told why, got: {err}"
+    );
 
     alice.approve_join_request(&request_id).await;
     carol.poll().await;
@@ -266,4 +277,101 @@ async fn removed_member_loses_access() {
 
     drop(alice);
     drop(bob);
+}
+
+/// #875 — the two admin-gated group READS used to answer `Ok(vec![])` for a
+/// non-member and for a plain member alike, which is byte-identical to "there
+/// is nothing here". A caller could not tell a permission boundary from an
+/// empty page, and neither could the UI.
+///
+/// Both cases are exercised separately on purpose: "not a member at all" and
+/// "a member without the role" are different conditions and must say so.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn join_requests_and_invite_links_are_admin_only() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Admin Only").await;
+
+    // Bob joins as a plain member; Carol stays outside the group entirely.
+    alice.invite(&group_id, &bob_profile.username).await;
+    bob.poll().await;
+    let invite = bob.first_pending_invite().await.expect("bob was invited");
+    bob.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    bob.poll().await;
+    assert!(
+        bob.list_group_ids().await.contains(&group_id),
+        "bob should be a member before the role gate is tested"
+    );
+
+    // The admin can create and see an invite link.
+    let created: serde_json::Value = alice
+        .invoke_json(
+            "create_group_invite_link",
+            json!({ "groupId": group_id, "creatorId": alice.user_id(),
+                    "expiresInHours": null, "maxUses": null }),
+        )
+        .await;
+    assert!(created["token"].as_str().is_some(), "admin should get a link token");
+    let links = alice
+        .invoke_json(
+            "list_group_invite_links",
+            json!({ "groupId": group_id, "userId": alice.user_id() }),
+        )
+        .await;
+    assert_eq!(
+        links.as_array().expect("links array").len(),
+        1,
+        "the admin must still see the link — the fix must not deny the allowed case"
+    );
+
+    // A member without the role is told which role is missing …
+    let bob_links = bob
+        .invoke_try(
+            "list_group_invite_links",
+            json!({ "groupId": group_id, "userId": bob.user_id() }),
+        )
+        .await
+        .expect_err("a non-admin member must not receive an invite-link list");
+    assert!(
+        bob_links.contains("only group admins can view invite links"),
+        "a member should be told which role is missing, got: {bob_links}"
+    );
+    let bob_reqs = bob
+        .invoke_try(
+            "get_group_join_requests",
+            json!({ "groupId": group_id, "requesterId": bob.user_id() }),
+        )
+        .await
+        .expect_err("a non-admin member must not receive a join-request list");
+    assert!(
+        bob_reqs.contains("only group admins can view join requests"),
+        "a member should be told which role is missing, got: {bob_reqs}"
+    );
+
+    // … and a non-member is told they are not in the group at all, which is a
+    // different condition and used to be the same empty vec.
+    let carol_links = carol
+        .invoke_try(
+            "list_group_invite_links",
+            json!({ "groupId": group_id, "userId": carol.user_id() }),
+        )
+        .await
+        .expect_err("a non-member must not receive an invite-link list");
+    assert!(
+        carol_links.contains("not a member of this group"),
+        "a non-member should be told they are outside the group, got: {carol_links}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
 }

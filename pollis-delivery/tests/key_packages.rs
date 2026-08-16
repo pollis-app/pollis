@@ -33,28 +33,6 @@ use pollis_delivery::writes::WriteOutcome;
 /// it any more; the tests do, as a concrete "not the current suite".
 const CIPHERSUITE_LEGACY: i64 = 0x0001;
 
-// Minimal slices of `mls_key_package` + `user_device` — the columns these writes
-// read/touch. No `users` FK (foreign_keys=OFF in the local test DB) so the test
-// is self-contained. `user_device.pq_capable` mirrors migration `000010`: NOT
-// NULL DEFAULT 0. #669 retired that flag in place — nothing reads or writes it
-// any more — but the column is still in the shipped schema (a DROP needs a
-// multi-release dance), so it stays here and is asserted to stay 0.
-const SCHEMA: &str = "\
-CREATE TABLE mls_key_package (\
-  ref_hash    TEXT PRIMARY KEY,\
-  user_id     TEXT NOT NULL,\
-  key_package BLOB NOT NULL,\
-  claimed     INTEGER NOT NULL DEFAULT 0,\
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),\
-  device_id   TEXT,\
-  ciphersuite INTEGER NOT NULL DEFAULT 1\
-);\
-CREATE TABLE user_device (\
-  user_id    TEXT NOT NULL,\
-  device_id  TEXT NOT NULL,\
-  pq_capable INTEGER NOT NULL DEFAULT 0,\
-  PRIMARY KEY (user_id, device_id)\
-);";
 
 async fn fresh_db() -> Arc<Db> {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -62,7 +40,7 @@ async fn fresh_db() -> Arc<Db> {
     // Keep the tempdir alive for the process.
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
 }
 

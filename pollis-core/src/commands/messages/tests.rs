@@ -1,6 +1,5 @@
 use rusqlite::Connection;
 
-use crate::db::BASELINE_SQL as BASELINE;
 
 use crate::db::queries::MESSAGES_BY_SENDER as QUERY_MESSAGES_BY_SENDER;
 use crate::db::queries::CHANNEL_PREVIEWS as QUERY_CHANNEL_PREVIEWS;
@@ -10,7 +9,12 @@ use crate::db::queries::CHANNEL_PREVIEWS as QUERY_CHANNEL_PREVIEWS;
 fn db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    conn.execute_batch(BASELINE).unwrap();
+    // The SHIPPED schema: baseline plus every numbered migration, in the order
+    // `scripts/db-apply.sh` applies them. #875 — applying the baseline alone left
+    // the fixture on a pre-migration schema no deploy has run for months.
+    for sql in pollis_schema::main_scripts() {
+        conn.execute_batch(sql).unwrap();
+    }
     conn
 }
 

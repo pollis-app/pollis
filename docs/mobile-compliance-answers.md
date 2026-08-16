@@ -19,7 +19,7 @@ accounts and a legal declaration that only the owner holds (WS4/PL-17 registers 
 ## 0. What data Pollis actually collects (the source of truth for every form)
 
 This section was derived directly from the remote schema
-(`pollis-core/src/db/migrations/000000_baseline.sql`, the `users` table) and the mobile sign-in /
+(`pollis-schema/migrations/000000_baseline.sql`, the `users` table) and the mobile sign-in /
 profile code, then reconciled against **`docs/metadata-retention-policy.md`** (PL-14, #702), which
 landed while this ticket was in flight. That policy is the authoritative account of *what is kept
 and for how long*; this section is the mobile-collection view of the same facts. Where the two ever

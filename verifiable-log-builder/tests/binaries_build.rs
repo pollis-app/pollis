@@ -18,10 +18,9 @@ use std::path::Path;
 use std::process::Command;
 
 use ml_dsa::Keypair;
+use verifiable_log::monitor::{verify_bundle, VerifyOptions};
 use verifiable_log::SigningKey;
-use verifiable_log::{
-    verify_consistency_proof, verify_inclusion_proof, verifying_key_from_hex, VerifiableLog,
-};
+use verifiable_log::{TenantInvariant, STH_CONTEXT_COMMIT_LOG};
 use verifiable_log_builder::account_key::STH_CONTEXT as ACCOUNT_STH_CONTEXT;
 use verifiable_log_builder::binaries::{
     BinaryInvariant, BinaryRecord, Layer, Toolchain, STH_CONTEXT, TENANT,
@@ -86,74 +85,27 @@ fn fixture_records() -> Vec<BinaryRecord> {
     ]
 }
 
-/// Faithful in-process re-implementation of `monitor verify` for the binaries
-/// tree: built ONLY on the public slice-1 verifiers, but with STH signatures
-/// checked under [`STH_CONTEXT`] (the binaries tree's domain separation) and the
-/// [`BinaryInvariant`] enforced on replay.
+/// Run the **real** monitor pass over a bundle under `context`, with the
+/// binaries tenant's own invariant enforced on replay.
+///
+/// Was a hand-written copy of the monitor's loop — see the note on
+/// `account_build.rs`'s equivalent. One verifier, tree as an argument (#875).
+fn verify_binaries(bundle: &Bundle, context: &[u8]) -> bool {
+    let invariant: Box<dyn TenantInvariant> = Box::new(BinaryInvariant);
+    verify_bundle(
+        bundle,
+        &VerifyOptions {
+            context,
+            now_ms: TS,
+        },
+        vec![(TENANT.to_string(), invariant)],
+        &mut |_, _| {},
+    )
+}
+
+/// The binaries tree's own context — how an auditor checks this bundle.
 fn monitor_verify_binaries(bundle: &Bundle) -> bool {
-    let vk = match verifying_key_from_hex(&bundle.public_key) {
-        Ok(k) => k,
-        Err(_) => return false,
-    };
-
-    // STHs must verify under the BINARIES context — and must NOT verify under the
-    // default commit-log context or the account-key context (proving the domain
-    // separation holds against BOTH sibling trees).
-    for sth in &bundle.sths {
-        if !sth.verify_with_context(&vk, STH_CONTEXT) {
-            return false;
-        }
-        if sth.verify(&vk) {
-            return false;
-        }
-        if sth.verify_with_context(&vk, ACCOUNT_STH_CONTEXT) {
-            return false;
-        }
-    }
-
-    if !bundle.entries.is_empty() {
-        let mut log = VerifiableLog::new();
-        log.register_invariant(TENANT, Box::new(BinaryInvariant));
-        for entry in &bundle.entries {
-            if log.append(entry.clone()).is_err() {
-                return false;
-            }
-        }
-        for sth in &bundle.sths {
-            let size = sth.tree_size as usize;
-            let root = match log.root_at(size) {
-                Ok(r) => r,
-                Err(_) => return false,
-            };
-            match sth.root_bytes() {
-                Ok(r) if r == root => {}
-                _ => return false,
-            }
-        }
-    }
-    for check in &bundle.inclusion {
-        let sth = match bundle.sths.get(check.sth_index) {
-            Some(s) => s,
-            None => return false,
-        };
-        if !verify_inclusion_proof(&check.entry, &check.proof, sth) {
-            return false;
-        }
-    }
-    for check in &bundle.consistency {
-        match (
-            bundle.sths.get(check.old_index),
-            bundle.sths.get(check.new_index),
-        ) {
-            (Some(o), Some(n)) => {
-                if !verify_consistency_proof(o, n, &check.proof) {
-                    return false;
-                }
-            }
-            _ => return false,
-        }
-    }
-    true
+    verify_binaries(bundle, STH_CONTEXT)
 }
 
 /// Drive the real `builder build-binaries` subcommand over a fixture
@@ -206,6 +158,19 @@ fn build_binaries_mode_emits_wellformed_signed_bundle() {
     assert!(
         monitor_verify_binaries(&bundle),
         "binaries bundle must verify under the binaries domain context"
+    );
+
+    // Domain separation against BOTH sibling trees, asserted in the open rather
+    // than hidden inside the verifier: the same bundle checked as another tree
+    // must fail, which is what stops a binaries head standing in for a
+    // commit-log or account-key head.
+    assert!(
+        !verify_binaries(&bundle, STH_CONTEXT_COMMIT_LOG),
+        "a binaries head must NOT verify as a commit-log head"
+    );
+    assert!(
+        !verify_binaries(&bundle, ACCOUNT_STH_CONTEXT),
+        "a binaries head must NOT verify as an account-key head"
     );
 
     // Round-trips through the on-disk JSON shape and still verifies.

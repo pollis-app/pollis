@@ -7,7 +7,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { verifyDirectory, DirectoryRejected, directoryPeers, admitPeers } from "../lib/directory-verify.mjs";
+import { verifyDirectory, DirectoryRejected, directoryPeers, admitPeers, DIRECTORY_TYPE } from "../lib/directory-verify.mjs";
+import { REVOCATION_TYPE } from "../lib/revocation-verify.mjs";
 import { createHash } from "node:crypto";
 
 // A fresh signing keypair, and its raw 32-byte public key as base64 — exactly
@@ -69,6 +70,37 @@ test("rejects a signature from the wrong key", () => {
 test("rejects an expired directory", () => {
   const env = signEnvelope(freshDirectory({ expires_at: now - 1 }));
   assert.throws(() => verifyDirectory(env, pubRawB64, now), /expired/);
+});
+
+// ── Cross-artifact confusion (the directory's half of REVOCATION_TYPE) ───────
+//
+// One key signs the directory AND revocations.json, so a signature proves who
+// signed, never WHICH artifact. The Rust twins are
+// net::directory::tests::{accepts_a_directory_that_names_its_own_artifact_type,
+// rejects_a_revocation_list_signed_by_the_same_key}.
+
+test("a directory that names its own artifact type verifies", () => {
+  const dir = verifyDirectory(signEnvelope(freshDirectory({ type: DIRECTORY_TYPE })), pubRawB64, now);
+  assert.equal(dir.type, DIRECTORY_TYPE);
+  assert.equal(dir.relays.length, 1);
+});
+
+test("a directory published before `type` existed still verifies", () => {
+  const dir = verifyDirectory(signEnvelope(freshDirectory()), pubRawB64, now);
+  assert.equal(dir.type, undefined);
+});
+
+test("rejects a genuinely-signed revocation list served as the directory", () => {
+  // Carries every field the directory needs, so ONLY the type check can reject.
+  const env = signEnvelope(
+    freshDirectory({ type: REVOCATION_TYPE, seq: 4, revoked: [{ addr: "203.0.113.7:9444" }] }),
+  );
+  assert.throws(() => verifyDirectory(env, pubRawB64, now), /wrong artifact type/);
+});
+
+test("rejects any other artifact type", () => {
+  const env = signEnvelope(freshDirectory({ type: "pollis-something-else" }));
+  assert.throws(() => verifyDirectory(env, pubRawB64, now), /wrong artifact type/);
 });
 
 test("rejects version != 1", () => {

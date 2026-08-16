@@ -120,7 +120,7 @@ Turso is two databases, not one. The main DB holds user/device metadata and mess
 envelopes; a separate **commit-log DB** (`LOG_DB_URL`) holds the MLS control plane —
 `mls_commit_log`, `mls_group_info`, `mls_welcome` — with the Delivery Service as its sole
 writer. Splitting them means the tables whose ordering the whole protocol depends on have
-exactly one writer and their own migration series (`pollis-core/src/db/migrations-log/`).
+exactly one writer and their own migration series (`pollis-schema/migrations-log/`).
 
 The local DB file is encrypted under a 32-byte random key sourced from the OS keystore, which itself only exists on disk as ciphertext under a key derived from the user's PIN via Argon2id.
 
@@ -231,6 +231,7 @@ TUI, and mobile-via-uniffi share one copy of the command/state/db/MLS code.
 | `verifiable-log`, `verifiable-log-builder`, `verifiable-log-serve` | The transparency log: tree/statement types, the CI-side builder, and the read path |
 | `pollis-relay` | Overlay relay node (see `docs/relay-overlay-design.md`) |
 | `pollis-device-cert` | Device cross-signing certificate types |
+| `pollis-schema` | The remote schema as data: `migrations/` (main DB) + `migrations-log/` (commit-log DB) and the constants that embed them. Dependency-free, so `pollis-delivery` — which must not depend on `pollis-core` — builds its test databases from the same definitions (#875) |
 
 Outside the Rust workspace: `frontend/` (React renderer — the renderer reaches the host only
 through `frontend/src/bridge`, never `@tauri-apps/*` directly) and `website/` (static
@@ -272,6 +273,6 @@ Voice traffic is end-to-end encrypted at the frame level: each audio frame is AE
 - `docs/security-whitepaper.md` — auditor-facing protocol/threat model and standards references.
 - `CLAUDE.md` — operating principles and constraints (what to build, what not to build).
 - `docs/deployments.md` — what ships where, and the CI pipelines that put it there.
-- `src-tauri/src/lib.rs` (`invoke_handler!`) and `pollis-core/src/db/migrations/` — the two
+- `src-tauri/src/lib.rs` (`invoke_handler!`) and `pollis-schema/migrations/` — the two
   authoritative inventories. This document deliberately links to them rather than copying
   them, because copies go stale silently and a stale architecture doc is worse than none.

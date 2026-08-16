@@ -13,6 +13,8 @@ members = [
     "pollis-delivery",
     "pollis-relay",
     "pollis-device-cert",
+    "pollis-api",
+    "pollis-schema",
 ]
 # Detached from this workspace on purpose: `fuzz/` is the Track-B cargo-fuzz crate
 # (#481). cargo-fuzz needs nightly, but this repo pins Rust 1.96.0 STABLE for

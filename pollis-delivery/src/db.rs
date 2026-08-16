@@ -126,7 +126,7 @@ impl Drop for ConnGuard {
 }
 
 pub struct Db {
-    db: Database,
+    db: Arc<Database>,
     pool: Arc<Pool>,
     max_idle: Duration,
 }
@@ -158,6 +158,17 @@ impl Db {
     }
 
     fn new(db: Database) -> Self {
+        Self::from_shared(Arc::new(db))
+    }
+
+    /// Wrap an ALREADY-OPEN libsql `Database` instead of opening one.
+    ///
+    /// For the `flows` integration harness (#918), which runs this crate's real
+    /// router in-process against the same file its clients read: two independent
+    /// `Database` handles on one local file do not share WAL writes promptly, so
+    /// the DS must be given the client's handle rather than a second one. The
+    /// pool below is per-`Db` and stays exclusive either way.
+    pub fn from_shared(db: Arc<Database>) -> Self {
         Self {
             db,
             pool: Arc::new(Pool::default()),

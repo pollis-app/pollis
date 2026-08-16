@@ -79,13 +79,15 @@ pub const ACCOUNT_KEY_TENANT: &str = "account-key";
 
 /// The STH domain-separation context for the **account-keys** tree.
 ///
-/// Mirrors `verifiable_log_builder::account_key::STH_CONTEXT`. One log key signs
-/// three trees (commit log, account keys, binaries) and only the context tells
-/// them apart, so verifying in the wrong context would let a genuinely-signed
-/// head from a *different* tree anchor an account proof. This is the same
-/// cross-artifact confusion guard `REVOCATION_TYPE` provides for the directory
-/// and revocation list.
-pub const ACCOUNT_KEYS_STH_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v2:account-keys";
+/// One log key signs three trees (commit log, account keys, binaries) and only
+/// the context tells them apart, so verifying in the wrong context would let a
+/// genuinely-signed head from a *different* tree anchor an account proof. This
+/// is the same cross-artifact confusion guard `REVOCATION_TYPE` provides for the
+/// directory and revocation list.
+///
+/// Re-exported from `verifiable-log` rather than restated: a copy of these bytes
+/// that drifts does not fail loudly, it just stops agreeing with the tree.
+pub use verifiable_log::STH_CONTEXT_ACCOUNT_KEYS as ACCOUNT_KEYS_STH_CONTEXT;
 
 /// Default bound on how old a presented signed tree head may be, in seconds.
 ///

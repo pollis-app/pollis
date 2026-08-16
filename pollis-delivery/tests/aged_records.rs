@@ -12,18 +12,15 @@
 use libsql::Connection;
 use pollis_delivery::messages::sweep_aged_records;
 
-const SCHEMA: &str = "\
-CREATE TABLE security_event (\
-  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, \
-  device_id TEXT, created_at TEXT NOT NULL, metadata TEXT);\
-CREATE TABLE push_token (\
-  token TEXT PRIMARY KEY, user_id TEXT NOT NULL, platform TEXT NOT NULL, \
-  updated_at TEXT NOT NULL);";
 
 async fn conn() -> Connection {
     let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
     let c = db.connect().unwrap();
-    c.execute_batch(SCHEMA).await.unwrap();
+    // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+    // backend turns it ON by default, so say so explicitly rather than inherit a
+    // constraint no deploy has (`Db::connect_local` makes the same call).
+    c.execute_batch("PRAGMA foreign_keys=OFF;").await.expect("schema");
+    pollis_schema::apply::single_db(&c).await.expect("schema");
     c
 }
 

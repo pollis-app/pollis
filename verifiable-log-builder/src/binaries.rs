@@ -30,8 +30,11 @@ pub const TENANT: &str = "binaries";
 /// commit-log and account-key contexts must NOT change (continuity of
 /// already-published STHs); this distinct context guarantees an STH signed for
 /// one tree fails verification against the others even though all three use the
-/// same Ed25519 key. Verified via [`verifiable_log::Sth::verify_with_context`].
-pub const STH_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v2:binaries";
+/// same key. Verified via [`verifiable_log::Sth::verify_with_context`].
+///
+/// Re-exported from the core rather than restated — see
+/// [`crate::account_key::STH_CONTEXT`].
+pub use verifiable_log::STH_CONTEXT_BINARIES as STH_CONTEXT;
 
 /// Which layer of a shipped file a [`BinaryRecord`] commits to.
 ///

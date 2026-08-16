@@ -17,10 +17,7 @@
 
 use ml_dsa::Keypair;
 use verifiable_log::SigningKey;
-use serde::{Deserialize, Serialize};
-use verifiable_log::{
-    ConsistencyProof, Entry, InclusionProof, Sth, VerifiableLog,
-};
+use verifiable_log::{Entry, Sth, VerifiableLog};
 
 use crate::account_key::{self, AccountKeyInvariant};
 use crate::binaries::{self, BinaryInvariant, BinaryRecord};
@@ -28,55 +25,16 @@ use crate::commit_log::{CommitLogInvariant, TENANT};
 use crate::error::Result;
 use crate::source::{AccountKeyRow, CommitRow};
 
-/// Top-level monitor bundle. Field names and shapes match the frozen wire
-/// contract in `verifiable-log/README.md`.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Bundle {
-    /// ML-DSA-44 log public key, lowercase hex (1312 bytes).
-    pub public_key: String,
-    /// Keys that no longer sign but must still be accepted until their
-    /// `not_after` (ms since epoch) — the rotation overlap window that keeps a
-    /// key change from being a flag day. Empty outside a rotation; serialized
-    /// only when non-empty so bundles are byte-identical to before otherwise.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub retired_keys: Vec<RetiredKey>,
-    /// Signed Tree Heads, oldest first.
-    pub sths: Vec<Sth>,
-    /// Full ordered log contents.
-    pub entries: Vec<Entry>,
-    /// Tenants the monitor's uniqueness invariant is enforced for on replay.
-    pub enforce_unique: Vec<String>,
-    /// Inclusion proofs (one per entry).
-    pub inclusion: Vec<InclusionCheck>,
-    /// Consistency proofs between successive STHs.
-    pub consistency: Vec<ConsistencyCheck>,
-}
+/// The monitor bundle this crate emits. Defined once, in [`verifiable_log`], and
+/// re-exported here: the builder writes it and the `monitor` CLI reads it, so a
+/// second declaration of "the same" shape is exactly where a field goes missing
+/// on one side and gets dropped in silence on the other.
+pub use verifiable_log::bundle::{Bundle, ConsistencyCheck, InclusionCheck};
 
-/// A key inside its overlap window. Mirrors `PublicKeyEntry` in
-/// `verifiable-log-serve`; the two are joined by the bundle JSON, not a shared
-/// type, so the builder does not depend on the serve crate.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RetiredKey {
-    pub key_id: String,
-    pub algorithm: String,
-    pub public_key: String,
-    pub not_after: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InclusionCheck {
-    pub entry: Entry,
-    pub proof: InclusionProof,
-    /// Index into `sths` whose root the proof is checked against.
-    pub sth_index: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ConsistencyCheck {
-    pub old_index: usize,
-    pub new_index: usize,
-    pub proof: ConsistencyProof,
-}
+/// A key inside its rotation-overlap window. Named `RetiredKey` here because
+/// that is what `--retired-key` produces; it is the same type the served
+/// `public_key.json` publishes.
+pub use verifiable_log::bundle::PublicKeyEntry as RetiredKey;
 
 /// Build a signed bundle from commit rows (assumed already in `seq` order).
 ///

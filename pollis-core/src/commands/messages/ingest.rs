@@ -46,6 +46,37 @@ struct ConvIngest {
     newly_delivered: Vec<String>,
 }
 
+/// The un-ingested-envelope fetch for `n` conversations at once (#875).
+///
+/// Bound by POSITION, never by string interpolation of the ids: `?1` is the
+/// user, `?2` the device, and the conversations occupy `?3..?{n+2}` in the order
+/// the caller pushes them. Pure and separately tested (`envelope_fetch_sql_*`)
+/// because an off-by-one between the placeholders emitted here and the params
+/// pushed at the call site is a runtime SQL error on the receive path, and that
+/// arithmetic is exactly the kind that is wrong once and never again.
+///
+/// The watermark subquery correlates on `message_envelope.conversation_id`
+/// rather than a bound id, which is what keeps "strictly past THAT
+/// conversation's own watermark" true now that one query serves all of them.
+fn envelope_fetch_sql(n: usize) -> String {
+    let placeholders = (0..n)
+        .map(|i| format!("?{}", i + 3))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
+         FROM message_envelope
+         WHERE conversation_id IN ({placeholders})
+           AND sent_at > COALESCE(
+               (SELECT last_fetched_at FROM conversation_watermark
+                WHERE conversation_id = message_envelope.conversation_id
+                  AND user_id = ?1 AND device_id = ?2),
+               ''
+           )
+         ORDER BY conversation_id ASC, sent_at ASC, id ASC"
+    )
+}
+
 /// Decide a delete tombstone's fate from its redaction outcome. Pure so the
 /// edge-case matrix is unit-testable offline (`delete_resolution_tests`) without
 /// a DB:
@@ -217,37 +248,57 @@ pub async fn catch_up_mls_group_interleaved(
     let device_id = state.device_id.lock().await.clone();
     let did_param = device_id.clone().unwrap_or_default();
 
-    // Pull un-ingested envelopes for each bound conversation (strictly past THAT
-    // conversation's own watermark), grouped per conversation so each watermark
-    // advances independently. Steady state returns zero rows across the board.
-    let mut per_conv: Vec<(String, Vec<EnvelopeRow>)> =
-        Vec::with_capacity(conversation_ids.len());
-    for cid in &conversation_ids {
-        let mut envs: Vec<EnvelopeRow> = Vec::new();
-        let mut rows = conn.query(
-            "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
-             FROM message_envelope
-             WHERE conversation_id = ?1
-               AND sent_at > COALESCE(
-                   (SELECT last_fetched_at FROM conversation_watermark
-                    WHERE conversation_id = ?1 AND user_id = ?2 AND device_id = ?3),
-                   ''
-               )
-             ORDER BY sent_at ASC, id ASC",
-            libsql::params![cid.clone(), user_id.to_string(), did_param.clone()],
-        ).await?;
+    // Pull un-ingested envelopes for every bound conversation in ONE query
+    // (strictly past THAT conversation's own watermark), then group per
+    // conversation so each watermark still advances independently. Steady state
+    // returns zero rows across the board.
+    //
+    // #875: this was a query PER CHANNEL. `conversation_ids` is every channel of
+    // the group, and this function is the central receive path — every outbound
+    // message, every realtime hint, every sweep and every welcome runs it — so
+    // sending one message in a 20-channel group cost 20 sequential Turso round
+    // trips before anything else could happen. The correlated watermark subquery
+    // is unchanged: it keys off the row's own `conversation_id`, so it still
+    // resolves per conversation rather than group-wide.
+    //
+    // The composite `ORDER BY conversation_id, sent_at ASC, id ASC` is what lets
+    // one result set be partitioned into the same per-conversation lists the old
+    // loop built: within a conversation the order is byte-for-byte what it was.
+    let mut per_conv: Vec<(String, Vec<EnvelopeRow>)> = conversation_ids
+        .iter()
+        .map(|cid| (cid.clone(), Vec::new()))
+        .collect();
+    if !conversation_ids.is_empty() {
+        let sql = envelope_fetch_sql(conversation_ids.len());
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(conversation_ids.len() + 2);
+        params.push(user_id.to_string().into());
+        params.push(did_param.clone().into());
+        for cid in &conversation_ids {
+            params.push(cid.clone().into());
+        }
+        let mut rows = conn.query(&sql, params).await?;
+        // Index by conversation id so a row lands in the right bucket regardless
+        // of the order the ids were listed in.
+        let slot: HashMap<&str, usize> = conversation_ids
+            .iter()
+            .enumerate()
+            .map(|(i, cid)| (cid.as_str(), i))
+            .collect();
         while let Some(row) = rows.next().await? {
-            envs.push((
-                row.get::<String>(0)?,
+            let cid: String = row.get::<String>(0)?;
+            let Some(&i) = slot.get(cid.as_str()) else {
+                continue;
+            };
+            per_conv[i].1.push((
                 row.get::<String>(1)?,
                 row.get::<String>(2)?,
-                row.get::<Option<String>>(3)?,
+                row.get::<String>(3)?,
                 row.get::<Option<String>>(4)?,
-                row.get::<String>(5)?,
+                row.get::<Option<String>>(5)?,
                 row.get::<String>(6)?,
+                row.get::<String>(7)?,
             ));
         }
-        per_conv.push((cid.clone(), envs));
     }
 
     // Drive the shared group's replay once, decrypting each conversation's
@@ -266,14 +317,14 @@ pub async fn catch_up_mls_group_interleaved(
     for res in &results {
         let cid = &res.conversation_id;
         if let (Some(ts), Some(did)) = (res.watermark.as_ref(), device_id.as_ref()) {
-            let body = serde_json::json!({
-                "conversation_id": cid,
-                "user_id": user_id,
-                "device_id": did,
-                "last_fetched_at": ts,
-            });
+            let body = pollis_api::messages::WatermarkBody {
+                conversation_id: cid.clone(),
+                user_id: Some(user_id.to_string()),
+                device_id: did.clone(),
+                last_fetched_at: ts.clone(),
+            };
             if let Err(e) =
-                crate::commands::mls::ds_post_ok(state, "/v1/watermarks/advance", &body).await
+                crate::commands::mls::ds_post_ok(state, &body).await
             {
                 eprintln!("[watermark] catch_up_group: DS advance failed for {cid}: {e}");
             }
@@ -358,20 +409,35 @@ async fn ingest_group_envelopes_interleaved(
     let mut by_epoch: HashMap<(i64, u64), Vec<(usize, usize)>> = HashMap::new();
     // epoch_of[ci][ei] mirrors per_conv[ci].1[ei]'s parsed position.
     let mut epoch_of: Vec<Vec<Option<(i64, u64)>>> = Vec::with_capacity(per_conv.len());
+    // The hex-decoded ciphertext of every envelope that HAS a position, kept
+    // from this pass rather than decoded a second time in the hook (#875). The
+    // decode is a per-envelope allocation and parse of an ~1KB hex string, and
+    // it used to happen twice for every message and edit on every pass — once
+    // here to read the lineage, then again inside `decrypt_and_persist_one` on
+    // the identical string. Keying on `(ci, ei)` means only envelopes that
+    // actually reached this map are held, and they are dropped with it.
+    let mut decoded: HashMap<(usize, usize), Vec<u8>> = HashMap::new();
     for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
         let mut this: Vec<Option<(i64, u64)>> = Vec::with_capacity(envs.len());
         for (ei, env) in envs.iter().enumerate() {
             let (_, _, ciphertext, _, _, _, env_type) = env;
-            let epoch = match env_type.as_str() {
+            let bytes = match env_type.as_str() {
                 "message" | "edit" => ciphertext
                     .strip_prefix("mls:")
-                    .and_then(|h| hex::decode(h).ok())
-                    .and_then(|b| crate::commands::mls::envelope_lineage(&b)),
+                    .and_then(|h| hex::decode(h).ok()),
                 _ => None,
             };
+            let epoch = bytes
+                .as_deref()
+                .and_then(crate::commands::mls::envelope_lineage);
             this.push(epoch);
             if let Some(e) = epoch {
                 by_epoch.entry(e).or_default().push((ci, ei));
+                // Only reachable when `bytes` is `Some` — `envelope_lineage`
+                // parses those very bytes.
+                if let Some(b) = bytes {
+                    decoded.insert((ci, ei), b);
+                }
             }
         }
         epoch_of.push(this);
@@ -395,12 +461,31 @@ async fn ingest_group_envelopes_interleaved(
             let key = (generation, epoch);
             max_fired_epoch = Some(max_fired_epoch.map_or(key, |m| m.max(key)));
             if let Some(indices) = by_epoch.get(&key) {
+                // One group load for the whole epoch's run (#875). Every
+                // envelope in `indices` is sealed at the epoch the replay has
+                // just reached, so they all decrypt against the same key
+                // schedule — the reason a single `MlsDecryptor` is valid here
+                // and only here. It is dropped at the end of this hook, before
+                // the replay applies the commit that moves the group on.
+                let Some(mut decryptor) =
+                    crate::commands::mls::MlsDecryptor::open(conn, mls_group_id)
+                else {
+                    // No local group: nothing at this epoch is decryptable.
+                    // The envelopes stay put for a later pass, exactly as a
+                    // per-envelope decrypt failure would leave them.
+                    return;
+                };
                 for &(ci, ei) in indices {
+                    // Present for every index in `by_epoch` by construction.
+                    let Some(bytes) = decoded.get(&(ci, ei)) else {
+                        continue;
+                    };
                     if let Some(delivered_id) = decrypt_and_persist_one(
                         conn,
+                        &mut decryptor,
                         &per_conv[ci].0,
-                        mls_group_id,
                         &per_conv[ci].1[ei],
+                        bytes,
                         user_id,
                         is_dm,
                     ) {
@@ -554,16 +639,22 @@ async fn ingest_group_envelopes_interleaved(
 /// so a receipt can never trigger a receipt).
 fn decrypt_and_persist_one(
     conn: &rusqlite::Connection,
+    // The epoch's already-loaded group (#875). Taken rather than re-derived so
+    // a run of envelopes at one epoch costs one group load, not one per message.
+    decryptor: &mut crate::commands::mls::MlsDecryptor<'_>,
     conversation_id: &str,
-    mls_group_id: &str,
     env: &EnvelopeRow,
+    // The envelope's already-hex-decoded ciphertext (#875). Decoded once by the
+    // caller's lineage pre-parse; decoding it again here was ~1KB of hex parsed
+    // twice for every message and edit on every ingest pass.
+    bytes: &[u8],
     user_id: &str,
     is_dm: bool,
 ) -> Option<String> {
     // `sender_id` (the server-writable envelope column) is intentionally NOT
     // read for attribution — the sender is taken from the MLS credential inside
     // the ciphertext (sealed sender, `docs/metadata-minimization-design.md` §2).
-    let (id, _sender_id, ciphertext, reply_to_id, target_id, sent_at, env_type) = env;
+    let (id, _sender_id, _ciphertext, reply_to_id, target_id, sent_at, env_type) = env;
     match env_type.as_str() {
         "message" => {
             let exists: bool = conn
@@ -579,19 +670,11 @@ fn decrypt_and_persist_one(
             if exists {
                 return None;
             }
-            let Some(bytes) = ciphertext
-                .strip_prefix("mls:")
-                .and_then(|h| hex::decode(h).ok())
-            else {
-                return None;
-            };
             // Attribute from the MLS-authenticated credential inside the
             // ciphertext, NOT the server-writable `message_envelope.sender_id`
             // tuple field (which may be a blinded sentinel under sealed sender).
             // See `docs/metadata-minimization-design.md` §2.
-            let Some((plain, cred_sender)) =
-                crate::commands::mls::try_mls_decrypt(conn, mls_group_id, &bytes)
-            else {
+            let Some((plain, cred_sender)) = decryptor.decrypt(bytes) else {
                 // Decrypt failed — leave the envelope in message_envelope for a
                 // future retry; the watermark is computed to not skip past it.
                 return None;
@@ -697,11 +780,7 @@ fn decrypt_and_persist_one(
                 // authorship is proven here, cryptographically — neither the
                 // server nor another member can edit a message they did not write.
                 // A mismatched or unknown-target edit is silently dropped.
-                let Some((plain, cred_sender)) = ciphertext
-                    .strip_prefix("mls:")
-                    .and_then(|h| hex::decode(h).ok())
-                    .and_then(|b| crate::commands::mls::try_mls_decrypt(conn, mls_group_id, &b))
-                else {
+                let Some((plain, cred_sender)) = decryptor.decrypt(bytes) else {
                     return None;
                 };
                 let author: Option<String> = conn
@@ -792,10 +871,15 @@ pub async fn ingest_dm_envelopes_inner(
         }
         out
     };
-    for peer_id in &peer_ids {
-        if let Err(e) = crate::commands::safety::check_and_pin_account_key(state, peer_id).await {
-            eprintln!("[ingest] check_and_pin_account_key for {peer_id}: {e}");
-        }
+    // Batched (#875): one Turso query for the whole peer set instead of one per
+    // peer. Identical semantics — `batch_check_and_pin_account_keys` pins new
+    // peers, updates and un-verifies a changed pin, and emits the same
+    // `KeyChanged` event — and it is what `mls::reconcile` already uses. This
+    // runs on EVERY ingest pass, so for a multi-party DM it was a round trip per
+    // peer per realtime hint.
+    if let Err(e) = crate::commands::safety::batch_check_and_pin_account_keys(state, &peer_ids).await
+    {
+        eprintln!("[ingest] batch_check_and_pin_account_keys for {dm_channel_id}: {e}");
     }
 
     // A DM's MLS group backs exactly one conversation (mls_group_id ==
@@ -872,5 +956,63 @@ mod delete_resolution_tests {
     fn transient_db_error_is_pending() {
         assert_eq!(resolve_delete(None, false, false), DeleteResolution::Pending);
         assert_eq!(resolve_delete(None, true, false), DeleteResolution::Pending);
+    }
+}
+
+#[cfg(test)]
+mod envelope_fetch_sql_tests {
+    use super::envelope_fetch_sql;
+
+    /// The invariant the call site depends on: exactly `n` conversation
+    /// placeholders, numbered `?3..?{n+2}`, leaving `?1`/`?2` for the user and
+    /// device. Off by one and the receive path takes a runtime SQL error.
+    #[test]
+    fn placeholders_start_at_three_and_are_contiguous() {
+        for n in 1..=25usize {
+            let sql = envelope_fetch_sql(n);
+            let list = sql
+                .split_once("conversation_id IN (")
+                .and_then(|(_, rest)| rest.split_once(')'))
+                .map(|(inner, _)| inner.to_string())
+                .expect("the IN list is present");
+            let got: Vec<&str> = list.split(',').collect();
+            let want: Vec<String> = (0..n).map(|i| format!("?{}", i + 3)).collect();
+            assert_eq!(got, want, "placeholder list wrong for n={n}");
+            assert!(sql.contains("user_id = ?1"), "?1 must stay the user");
+            assert!(sql.contains("device_id = ?2"), "?2 must stay the device");
+        }
+    }
+
+    /// One query, not one per conversation: the whole point of #875 here. A
+    /// re-introduced per-conversation loop would bind exactly one id, so a
+    /// 20-channel group producing a single-placeholder statement is the shape
+    /// this forbids.
+    #[test]
+    fn one_statement_covers_every_conversation() {
+        let sql = envelope_fetch_sql(20);
+        assert!(sql.contains("?22"), "all 20 conversations must be in ONE statement");
+        assert_eq!(sql.matches("FROM message_envelope").count(), 1);
+    }
+
+    /// The watermark must stay PER CONVERSATION. Correlating on the outer row's
+    /// own `conversation_id` is what preserves "strictly past THAT
+    /// conversation's watermark" — a bound id here would apply one
+    /// conversation's watermark to all of them and silently skip messages.
+    #[test]
+    fn the_watermark_subquery_correlates_per_conversation() {
+        let sql = envelope_fetch_sql(3);
+        assert!(
+            sql.contains("conversation_id = message_envelope.conversation_id"),
+            "the watermark must be resolved per row, not once for the batch:\n{sql}"
+        );
+    }
+
+    /// Rows come back grouped by conversation and, within one, in the exact
+    /// order the per-conversation query returned them — that ordering is what
+    /// the epoch interleave and the watermark advance both assume.
+    #[test]
+    fn ordering_groups_by_conversation_then_preserves_the_old_order() {
+        let sql = envelope_fetch_sql(2);
+        assert!(sql.contains("ORDER BY conversation_id ASC, sent_at ASC, id ASC"), "{sql}");
     }
 }

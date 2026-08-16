@@ -48,52 +48,16 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use libsql::Connection;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::commit::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::commit::*;
 
 // ── Wire types (blobs are base64 over the wire) ─────────────────────────────
-
-#[derive(Debug, Deserialize)]
-pub struct SubmitBody {
-    pub conversation_id: String,
-    /// The suite generation this commit belongs to. Absent (pre-hybrid client) →
-    /// `0`, which is exactly the lineage such a client is in.
-    #[serde(default)]
-    pub generation: i64,
-    /// The epoch this commit was built from = the head the client believes it's at.
-    pub based_on_epoch: i64,
-    /// Migration only (`generation = N + 1`, `based_on_epoch = 0`): the head the
-    /// submitter observed on generation `N`, which this migration CLOSES. Making
-    /// the migrator name it turns "open the next lineage" into a compare-and-swap
-    /// on the old one, so a commit that lands in generation `N` after the
-    /// migrator read the roster invalidates the migration instead of being
-    /// silently orphaned by it. Ignored (and must be absent) for a same-generation
-    /// commit.
-    #[serde(default)]
-    pub closes_epoch: Option<i64>,
-    pub sender_id: String,
-    /// TLS-serialized MLS Commit, base64.
-    pub commit: String,
-    #[serde(default)]
-    pub added_user_id: Option<String>,
-    /// CSV of device ids added by this commit, if any.
-    #[serde(default)]
-    pub added_device_ids: Option<String>,
-    /// New published GroupInfo at the *resulting* epoch (`based_on_epoch + 1`),
-    /// base64. Lets a future joiner external-join. Optional.
-    #[serde(default)]
-    pub group_info: Option<String>,
-    /// Welcomes for devices added by this commit. Optional.
-    #[serde(default)]
-    pub welcomes: Vec<WelcomeBody>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct WelcomeBody {
-    pub recipient_id: String,
-    pub recipient_device_id: String,
-    /// TLS-serialized MLS Welcome, base64.
-    pub welcome: String,
-}
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
@@ -394,7 +358,11 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
     // future joiner / newly-added device can come online. All part of the same
     // transaction as the commit above, so a failure here rolls the commit back
     // too — the recipient never sees a commit with no matching Welcome.
-    if let Some(gi) = &group_info {
+    // Moved, not borrowed (#875): the GroupInfo carries the whole ratchet tree —
+    // KBs for a small roster, hundreds of KBs for a large one — and neither it
+    // nor the Welcomes are read after this block, so the `.clone()` into
+    // `params!` was a full copy of every blob for nothing.
+    if let Some(gi) = group_info {
         // Lexicographic (generation, epoch)-monotone guard (matches the standalone
         // /v1/group-info upsert in `writes::upsert_group_info`): older GroupInfo
         // can never clobber newer, so both writers of `mls_group_info` obey one
@@ -418,13 +386,13 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
                 body.conversation_id.clone(),
                 body.generation,
                 body.based_on_epoch + 1,
-                gi.clone(),
+                gi,
                 body.sender_id.clone(),
             ],
         )
         .await?;
     }
-    for (w, welcome) in &welcomes {
+    for (w, welcome) in welcomes {
         // Idempotent on the UNIQUE (conversation_id, recipient_id,
         // recipient_device_id) tuple (migration 000002 (commit-log DB)): a re-sent Welcome for
         // the same recipient/device refreshes the blob and re-arms delivery
@@ -450,7 +418,7 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
                 body.conversation_id.clone(),
                 body.generation,
                 w.recipient_id.clone(),
-                welcome.clone(),
+                welcome,
                 w.recipient_device_id.clone(),
             ],
         )

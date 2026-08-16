@@ -4,7 +4,7 @@
 -- IMPORTANT: COMMIT-LOG-DB migration (mls_commit_log / mls_group_info /
 -- mls_welcome / mls_commit_since live on the separate log DB post-#420). Applied
 -- by desktop-release.yml's second db-apply step (MIGRATIONS_DIR=
--- pollis-core/src/db/migrations-log). It must NOT go in the main-DB dir.
+-- pollis-schema/migrations-log). It must NOT go in the main-DB dir.
 --
 -- WHY. MLS binds the ciphersuite into the group, so a classic group cannot be
 -- switched to hybrid in place: the migration stands up a *successor* group for

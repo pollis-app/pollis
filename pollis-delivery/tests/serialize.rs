@@ -16,38 +16,6 @@ use pollis_delivery::commit::{
 };
 use pollis_delivery::db::Db;
 
-const SCHEMA: &str = "\
-CREATE TABLE mls_commit_log (\
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,\
-  conversation_id TEXT NOT NULL,\
-  epoch INTEGER NOT NULL,\
-  sender_id TEXT NOT NULL,\
-  commit_data BLOB NOT NULL,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  added_user_id TEXT,\
-  added_device_ids TEXT,\
-  generation INTEGER NOT NULL DEFAULT 0\
-);\
-CREATE UNIQUE INDEX idx_mls_commit_conv_gen_epoch ON mls_commit_log (conversation_id, generation, epoch);\
-CREATE TABLE mls_group_info (\
-  conversation_id TEXT PRIMARY KEY,\
-  epoch INTEGER NOT NULL,\
-  group_info BLOB NOT NULL,\
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  updated_by_device_id TEXT NOT NULL,\
-  generation INTEGER NOT NULL DEFAULT 0\
-);\
-CREATE TABLE mls_welcome (\
-  id TEXT PRIMARY KEY,\
-  conversation_id TEXT NOT NULL,\
-  recipient_id TEXT NOT NULL,\
-  welcome_data BLOB NOT NULL,\
-  delivered INTEGER NOT NULL DEFAULT 0,\
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  recipient_device_id TEXT,\
-  generation INTEGER NOT NULL DEFAULT 0\
-);\
-CREATE UNIQUE INDEX idx_mls_welcome_recipient ON mls_welcome (conversation_id, recipient_id, recipient_device_id);";
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -107,7 +75,7 @@ async fn fresh_db() -> Arc<Db> {
     // Keep the tempdir alive for the process.
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    db.conn().unwrap().execute_batch(SCHEMA).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -212,25 +180,23 @@ async fn welcome_failure_rolls_back_commit_and_group_info() {
     let conn = db.conn().unwrap();
     let c = "atomic";
 
-    // Recreate mls_welcome with a poison-pill CHECK so a Welcome to 'BOOM' fails
-    // its INSERT — the last write in the submit bundle. This injects the
-    // "commit lands, Welcome fails" partial-write scenario.
+    // Poison the LAST write of the submit bundle so a Welcome to 'BOOM' aborts.
+    //
+    // #875: this used to `DROP TABLE mls_welcome` and recreate it with a CHECK.
+    // The replacement was copied from a pre-#454 shape and had no `generation`
+    // column — but `submit_commit`'s Welcome INSERT writes `generation`, so what
+    // actually failed was "no such column", not the poison CHECK. The rollback
+    // was real; the reason was not the one the test names, and any change to the
+    // CHECK would have gone unnoticed. A trigger injects the failure without
+    // replacing the shipped table, so the abort is the one we asked for.
     conn.execute_batch(
-        "DROP TABLE mls_welcome;\
-         CREATE TABLE mls_welcome (\
-           id TEXT PRIMARY KEY,\
-           conversation_id TEXT NOT NULL,\
-           recipient_id TEXT NOT NULL,\
-           welcome_data BLOB NOT NULL,\
-           delivered INTEGER NOT NULL DEFAULT 0,\
-           created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-           recipient_device_id TEXT,\
-           CHECK (recipient_id <> 'BOOM')\
-         );\
-         CREATE UNIQUE INDEX idx_mls_welcome_recipient ON mls_welcome (conversation_id, recipient_id, recipient_device_id);",
+        "CREATE TRIGGER poison_welcome_to_boom \
+           BEFORE INSERT ON mls_welcome \
+           FOR EACH ROW WHEN NEW.recipient_id = 'BOOM' \
+         BEGIN SELECT RAISE(ABORT, 'poisoned welcome'); END;",
     )
     .await
-    .expect("recreate mls_welcome with poison check");
+    .expect("install the poison trigger");
 
     // The commit would win epoch 0 and the GroupInfo would be published — but the
     // poisoned Welcome insert fails, so the whole bundle must roll back.

@@ -99,7 +99,7 @@ jobs:
           echo "── commit-log DB ──"
           TURSO_URL="$(get LOG_DB_URL)" \
           TURSO_TOKEN="$(admin LOG_DB_ADMIN_TOKEN LOG_DB_TOKEN)" \
-          MIGRATIONS_DIR=pollis-core/src/db/migrations-log \
+          MIGRATIONS_DIR=pollis-schema/migrations-log \
             ./scripts/db-apply.sh
 
       # DOPPLER_TOKEN is a service token scoped to pollis/prd_prod (set in the

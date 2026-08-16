@@ -23,11 +23,17 @@ use axum::{
     Json,
 };
 use libsql::Connection;
-use serde::Deserialize;
 
 use crate::auth;
 use crate::error::{AppError, AuthRejection};
 use crate::AppState;
+
+// The request bodies for this module's endpoints live in `pollis-api`, the
+// crate pollis-core builds its requests from — one declaration, both ends, so
+// a client field that does not exist here is a compile error rather than a
+// silently-absent JSON key. Re-exported so `pollis_delivery::writes::*Body`
+// keeps resolving for handlers, tests and the flows harness.
+pub use pollis_api::writes::*;
 
 // ── Shared auth gate ─────────────────────────────────────────────────────────
 
@@ -70,7 +76,7 @@ pub(crate) async fn gate(
         method.as_str(),
         uri.path(),
         body,
-        auth::now_unix(),
+        crate::util::now_unix() as i64,
     )
     .await
     {
@@ -269,19 +275,6 @@ pub async fn is_member(
 
 // ── W4 — POST /v1/group-info ─────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct GroupInfoBody {
-    pub conversation_id: String,
-    /// The suite generation this GroupInfo belongs to (#454 P4). Absent (a
-    /// pre-hybrid client) → 0, the lineage such a client is in.
-    #[serde(default)]
-    pub generation: i64,
-    pub epoch: i64,
-    /// TLS-serialized MLS GroupInfo, base64 (STANDARD).
-    pub group_info: String,
-    pub updated_by_device_id: String,
-}
-
 /// POST /v1/group-info — republish GroupInfo for a conversation, epoch-monotone
 /// (an older epoch can never clobber a newer one). When auth is enforced, the
 /// authenticated user must be a current member of `conversation_id`.
@@ -391,15 +384,6 @@ pub async fn upsert_group_info(
 
 // ── W5 — POST /v1/welcomes/ack ───────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct AckBody {
-    pub welcome_ids: Vec<String>,
-    /// Recipient, used ONLY on the no-auth path; when auth is on it must equal
-    /// the authenticated user (or be absent).
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 /// POST /v1/welcomes/ack — mark the given Welcomes delivered, scoped to the
 /// authenticated recipient so a user can only ack their own Welcomes.
 pub async fn welcomes_ack(
@@ -462,17 +446,6 @@ pub async fn ack_welcomes(
 
 // ── W6/W7 — POST /v1/welcomes/reset ──────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct ResetBody {
-    /// `Some` → reset only this device's (and device-agnostic) Welcomes (W6);
-    /// `None` → reset all of the recipient's Welcomes (W7).
-    #[serde(default)]
-    pub device_id: Option<String>,
-    /// Recipient, used ONLY on the no-auth path (see [`resolve_recipient`]).
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 /// POST /v1/welcomes/reset — re-arm Welcomes for redelivery (set `delivered=0`),
 /// scoped to the authenticated recipient.
 pub async fn welcomes_reset(
@@ -523,13 +496,6 @@ pub async fn reset_welcomes(
 
 // ── W8 — POST /v1/welcomes/purge ─────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct PurgeBody {
-    /// Recipient, used ONLY on the no-auth path (see [`resolve_recipient`]).
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
 /// POST /v1/welcomes/purge — delete all of the authenticated user's Welcomes
 /// (identity-reset cleanup). Recipient is derived from auth; the body carries an
 /// explicit `user_id` only on the no-auth path.
@@ -578,19 +544,6 @@ pub async fn purge_welcomes(log_conn: &Connection, recipient: &str) -> anyhow::R
 }
 
 // ── POST /v1/welcomes/resubmit (issue #430 P2) ───────────────────────────────
-
-#[derive(Deserialize)]
-pub struct ResubmitBody {
-    pub conversation_id: String,
-    /// The suite generation of the group this Welcome admits the recipient to
-    /// (#454 P4). Absent → 0, the lineage every pre-hybrid group is in.
-    #[serde(default)]
-    pub generation: i64,
-    pub recipient_id: String,
-    pub recipient_device_id: String,
-    /// TLS-serialized MLS Welcome, base64 (STANDARD).
-    pub welcome: String,
-}
 
 /// POST /v1/welcomes/resubmit — idempotently (re)insert a single Welcome for
 /// `(conversation_id, recipient_id, recipient_device_id)`, so a recipient whose
@@ -700,17 +653,15 @@ mod conversation_namespace_tests {
     use super::*;
     use libsql::Connection;
 
-    const SCHEMA: &str = "\
-        CREATE TABLE dm_channel (id TEXT PRIMARY KEY);\
-        CREATE TABLE dm_channel_member (dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL);\
-        CREATE TABLE groups (id TEXT PRIMARY KEY);\
-        CREATE TABLE group_member (group_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT);\
-        CREATE TABLE channels (id TEXT PRIMARY KEY, group_id TEXT NOT NULL);";
 
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let c = db.connect().unwrap();
-        c.execute_batch(SCHEMA).await.unwrap();
+        // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
+        // backend turns it ON by default, so say so explicitly rather than
+        // inherit a constraint no deploy has (`Db::connect_local` does the same).
+        c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&c).await.expect("schema");
         c
     }
 
@@ -718,7 +669,7 @@ mod conversation_namespace_tests {
     #[tokio::test]
     async fn an_existing_group_id_is_taken_for_every_conversation_kind() {
         let c = conn().await;
-        c.execute("INSERT INTO groups (id) VALUES ('victim-group')", ())
+        c.execute("INSERT INTO groups (id, name, owner_id) VALUES ('victim-group', 'grp', 'owner')", ())
             .await
             .unwrap();
 
@@ -732,11 +683,11 @@ mod conversation_namespace_tests {
     #[tokio::test]
     async fn dm_and_channel_ids_are_taken_too() {
         let c = conn().await;
-        c.execute("INSERT INTO dm_channel (id) VALUES ('a-dm')", ())
+        c.execute("INSERT INTO dm_channel (id, created_by) VALUES ('a-dm', 'creator')", ())
             .await
             .unwrap();
         c.execute(
-            "INSERT INTO channels (id, group_id) VALUES ('a-channel', 'g')",
+            "INSERT INTO channels (id, group_id, name) VALUES ('a-channel', 'g', 'chan')",
             (),
         )
         .await
@@ -751,7 +702,7 @@ mod conversation_namespace_tests {
     #[tokio::test]
     async fn an_unused_id_is_free() {
         let c = conn().await;
-        c.execute("INSERT INTO groups (id) VALUES ('some-group')", ())
+        c.execute("INSERT INTO groups (id, name, owner_id) VALUES ('some-group', 'grp', 'owner')", ())
             .await
             .unwrap();
 
@@ -767,16 +718,16 @@ mod conversation_namespace_tests {
     async fn a_shared_id_would_grant_membership_of_the_other_conversation() {
         let c = conn().await;
         // The victim's group — mallory is NOT a member.
-        c.execute("INSERT INTO groups (id) VALUES ('victim-group')", ())
+        c.execute("INSERT INTO groups (id, name, owner_id) VALUES ('victim-group', 'grp', 'owner')", ())
             .await
             .unwrap();
         // What the attack inserts if the guard is absent.
-        c.execute("INSERT INTO dm_channel (id) VALUES ('victim-group')", ())
+        c.execute("INSERT INTO dm_channel (id, created_by) VALUES ('victim-group', 'creator')", ())
             .await
             .unwrap();
         c.execute(
-            "INSERT INTO dm_channel_member (dm_channel_id, user_id) \
-             VALUES ('victim-group', 'mallory')",
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) \
+             VALUES ('victim-group', 'mallory', 'creator')",
             (),
         )
         .await
