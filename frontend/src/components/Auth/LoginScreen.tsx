@@ -90,7 +90,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <div className="flex flex-col gap-5">
               <div>
 
-                <p className="text-xs mt-1 font-mono" style={{ color: "var(--c-text-accent)" }}>
+                <p className="text-xs mt-1 font-mono text-accent">
                   {t("login.prompt")}
                 </p>
               </div>

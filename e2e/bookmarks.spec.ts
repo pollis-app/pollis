@@ -366,6 +366,54 @@ for (const skin of SKINS) {
       expect(clipboard).not.toContain("bob");
     });
 
+    test("the copied state is actually painted, not just labelled", async ({
+      page,
+    }) => {
+      // `--c-text-accent` was referenced by every hover, focus-visible and
+      // "copied" state on the message actions and defined NOWHERE, so the
+      // colour half of the affordance silently painted nothing. The glyph and
+      // the accessible name still changed, which is exactly why the existing
+      // tests passed throughout. This asserts the RESOLVED colour moves.
+      //
+      // Only the refined skin fails on the unfixed code: terminal defines
+      // `--c-text` as the same HSL as `--c-accent`, so an element falling back
+      // to inherited text colour lands on the accent by coincidence. That is
+      // why this went unnoticed — in terminal it looked correct. Keep both
+      // skins: in terminal this is a guard, in refined it proves the fix.
+      await boot(page, skin);
+      await gotoChannel(page);
+
+      const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      await message.getByTestId("message-actions-more").click();
+      const copyButton = message.getByTestId("copy-link-button");
+
+      const colourOf = () =>
+        copyButton.evaluate((el) => getComputedStyle(el).color);
+      const idle = await colourOf();
+
+      await copyButton.click();
+      await expect(copyButton).toHaveAttribute("data-copy-state", "copied");
+      const copied = await colourOf();
+
+      expect(copied).not.toBe(idle);
+      // And it is the accent, not some arbitrary third colour.
+      const accent = await page.evaluate(() =>
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--c-accent")
+          .trim(),
+      );
+      expect(accent).not.toBe("");
+      const asRgb = await page.evaluate((c) => {
+        const probe = document.createElement("span");
+        probe.style.color = c;
+        document.body.appendChild(probe);
+        const resolved = getComputedStyle(probe).color;
+        probe.remove();
+        return resolved;
+      }, accent);
+      expect(copied).toBe(asRgb);
+    });
+
     test("a successful copy confirms itself on the button", async ({ page }) => {
       await boot(page, skin);
       await gotoChannel(page);

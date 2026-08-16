@@ -107,7 +107,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
         : t("actions.copyLink");
   const copyLinkTone =
     copyLinkState === "copied"
-      ? "text-[var(--c-text-accent)]"
+      ? "text-accent"
       : copyLinkState === "failed"
         ? "text-danger"
         : "text-dim hover:text-fg";
@@ -125,8 +125,8 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   // navigation shows the same affordance the pointer would.
   const barBtnClass =
     variant === "refined"
-      ? "p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)] focus-visible:text-[var(--c-text-accent)] outline-none"
-      : "text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)] focus-visible:text-[var(--c-text-accent)] outline-none";
+      ? "p-1 text-muted hover:text-accent focus-visible:text-accent outline-none"
+      : "text-muted hover:text-accent focus-visible:text-accent outline-none";
 
   // The container owns hover-reveal for both skins; while the menu is open it
   // stays fully visible even if the pointer leaves the row — otherwise the
@@ -183,8 +183,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
             aria-label={t("actions.more")}
             aria-expanded={menuOpen}
             aria-haspopup="menu"
-            className={barBtnClass}
-            style={{ color: menuOpen ? "var(--c-text-accent)" : undefined }}
+            className={`${barBtnClass}${menuOpen ? " text-accent" : ""}`}
           >
             <MoreHorizontal size={iconSize} />
           </button>
