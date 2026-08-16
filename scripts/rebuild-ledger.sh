@@ -134,16 +134,42 @@ done < <(printf '%s' "$runs" | jq -r '.[] | [
   (.databaseId|tostring), .createdAt, .conclusion, .event, .headSha, (.displayTitle // "")
 ] | @tsv')
 
+# Per-run classification of the pre-fix reds, established by reading the run
+# logs rather than inferred from the date. "Before the fix" is necessary but not
+# sufficient to call a red false — v1.9.3 was red before the fix AND genuinely
+# did not reproduce. Publishing a blanket "reds before this date may be false"
+# would quietly launder a real finding, so each one is classified individually
+# and the evidence is recorded next to it.
+CLASSIFIED='{
+  "31753766171": {
+    "class": "real",
+    "evidence": "The tag was published and the log verified (found: true); the rebuilt AppImage differed from the shipped one in 105,863,272 bytes, across the main binary and several bundled libraries. Still unexplained."
+  },
+  "31866040326": {
+    "class": "false_red",
+    "evidence": "The tag was not yet in the binaries tree (found: false) and 0 bytes differed. v1.9.4 reproduced byte-identically; the red was the wait-loop bug."
+  },
+  "31903478733": {
+    "class": "false_red",
+    "evidence": "The tag was not yet in the binaries tree (found: false) and 0 bytes differed. v1.9.5 reproduced byte-identically; the red was the wait-loop bug."
+  }
+}'
+
 jq -n \
   --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg fix_commit "$FALSE_RED_FIX_COMMIT" \
   --arg fix_date "$FALSE_RED_FIX_DATE" \
+  --argjson classified "$CLASSIFIED" \
   --argjson resolved "$resolved" '
   {
     generated_at: $generated,
     workflow: "rebuild-verify.yml",
     false_red_fix: { commit: $fix_commit, date: $fix_date },
-    runs: ($resolved | sort_by(.created_at) | reverse)
+    runs: (
+      $resolved
+      | map(. + (($classified[.run_id] // {}) | {classification: .class, evidence: .evidence}))
+      | sort_by(.created_at) | reverse
+    )
   }' > "${OUT}.tmp"
 
 if [ "${1:-}" = "--check" ]; then

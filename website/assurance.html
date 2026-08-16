@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Assurance</title>
+  <meta name="description"
+    content="What Pollis checks about its own code and what those checks found: every release's independent rebuild verdict, the machine-checked proofs, the dependency policy, and the keys that sign it all." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Assurance" />
+  <meta property="og:description"
+    content="Rebuild verdicts, machine-checked proofs, supply-chain policy and signing-key custody — with the limits stated." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="doc-main reading-surface">
+      <a href="index.html" class="doc-back">&larr; Back to Pollis</a>
+
+      <div class="doc-header">
+        <h1 class="doc-title">Assurance</h1>
+        <p class="doc-subtitle">
+          What Pollis checks about its own code, and what those checks actually found — including the times
+          they found something.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        Four independent things run on this codebase: an <strong>independent rebuild</strong> of every release,
+        <strong>machine-checked proofs</strong> of the parts where a bug loses messages, a
+        <strong>dependency policy</strong> enforced on every pull request, and a set of
+        <strong>signing keys</strong> whose custody is written down. All four have run for months. None of them
+        was published, which meant you had to take our word for results we were already producing.
+        <br /><br />
+        Everything below is a link to a machine-generated record, not a summary you have to trust.
+        The <a href="artifacts.html">artifacts page</a> is the companion: it covers the transparency log and the
+        commands that check a download.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">1 · Independent rebuild of every release</h2>
+        <p>
+          After each release, a workflow rebuilds the Linux AppImage payload from the public source at that tag,
+          on a clean runner, and asserts that the hash it gets is the hash already recorded in the public
+          transparency log. It uses <strong>no Pollis secrets</strong> — that is deliberate and load-bearing, so
+          that anyone can fork it and run the identical check with no credentials from us. It trusts exactly one
+          pinned ML-DSA-44 key.
+        </p>
+        <p>
+          Until now that verdict went to a job log and a CI artifact that expires after 90 days. Below is the
+          durable record.
+        </p>
+
+        <div class="doc-card">
+          <div id="ledger-summary"><p class="doc-loading">Loading rebuild verdicts…</p></div>
+          <div class="doc-table-wrap">
+            <table class="doc-table" id="ledger-table"></table>
+          </div>
+        </div>
+
+        <div class="doc-limit">
+          <span class="doc-limit-title">Where this guarantee ends</span>
+          <p>
+            <strong>It covers the Linux AppImage payload only.</strong> Not the <code>.deb</code>, not the
+            <code>.rpm</code>, not macOS, not Windows. Those platforms have published-bytes-match and build
+            provenance, but nothing yet re-derives them from source.
+          </p>
+          <p>
+            <strong>Reproduction needs the published build recipe, not source alone</strong>, because one
+            build-time value is compiled in. A third party with no recipe can still prove log inclusion — that
+            half needs no build inputs at all — but not bit-for-bit reproduction.
+          </p>
+          <p>
+            <strong>Two releases were never checked.</strong> The rebuild only runs when the release workflow
+            concludes successfully, so v1.9.0 and v1.9.1 were skipped entirely and no verdict exists for them.
+            They are in the table, marked as such, rather than quietly omitted.
+          </p>
+          <p>
+            <strong>Some historical red runs were not real failures.</strong> Before commit
+            <code>564353ae</code> (16 August 2026) the workflow could report "did not reproduce" for a release
+            that was merely not yet published into the log — the underlying check exits cleanly over an empty
+            artifact set, so the wait loop gave up immediately and compared the rebuild against nothing. Two runs
+            failed exactly that way (v1.9.4 and v1.9.5) and both in fact reproduced byte-identically. The
+            <strong>v1.9.3 failure was real</strong>, is still unexplained, and is not being reclassified.
+            The reds are left in the table rather than deleted.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">2 · Machine-checked correctness</h2>
+        <p>
+          Pollis's hard promise is <em>messages must work</em>: delivery to every current member, decryption,
+          offline and online cycles, reconnects. The places where that promise can break are small, pure decision
+          functions — when a delivery cursor may advance, when a commit may be accepted at an epoch, when old data
+          may be deleted. Those are checked by machine, not by testing a happy path.
+        </p>
+
+        <h3 class="doc-sub-title">TLA+ — the design</h3>
+        <p>
+          Two specifications are checked exhaustively by TLC on every relevant pull request. Exhaustive means
+          every reachable state of the model is enumerated, not sampled.
+        </p>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <caption>Measured on a run of <code>scripts/tlc-check.sh</code> against TLC v1.8.0.</caption>
+            <thead>
+              <tr><th>Spec</th><th>Checks</th><th>Model bound</th><th>States</th><th>Result</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>CommitLog</code></td>
+                <td class="doc-td-dim">
+                  <code>OnePerEpoch</code>, <code>Gapless</code>, <code>OpeningClosesTheHead</code>,
+                  <code>NoForeignAdopt</code>, <code>LineageMonotone</code>
+                </td>
+                <td class="doc-td-dim">3 clients, max 2 commits, max epoch 3</td>
+                <td class="doc-td-dim">72,228 distinct<br />depth 13</td>
+                <td><span class="doc-badge doc-badge--pass">all hold</span></td>
+              </tr>
+              <tr>
+                <td><code>Delivery</code></td>
+                <td class="doc-td-dim">
+                  <code>NoLossForCurrentMember</code>, <code>CursorMonotone</code>,
+                  <code>AcceptedLossesOnly</code>, <code>CursorLeqClock</code>
+                </td>
+                <td class="doc-td-dim">2 devices, max 3 messages, max epoch 2</td>
+                <td class="doc-td-dim">130,484 distinct<br />depth 19</td>
+                <td><span class="doc-badge doc-badge--pass">all hold</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          A passing check is worthless if the invariant has quietly stopped being able to fail, so three
+          deliberately broken variants run alongside and each <strong>must</strong> produce a counterexample.
+          Dropping the commit-log head guard violates <code>OnePerEpoch</code>; dropping the migration
+          compare-and-swap violates <code>OpeningClosesTheHead</code>; guarding retention on the
+          <em>fastest</em> member rather than the slowest violates <code>NoLossForCurrentMember</code>. If any of
+          those ever passes cleanly, the gate fails.
+        </p>
+
+        <h3 class="doc-sub-title">Kani — the actual Rust</h3>
+        <p>
+          TLA+ checks the design; the design is not the shipped code. <strong>35 Kani harnesses</strong> —
+          19 proofs and 16 teeth — run bounded model checking over the real functions, not a model of them:
+          the delivery watermark, the rejoin gate that keeps a revoked device out of the tree, own-commit
+          canonicalization, gap detection, the Delivery Service's head arithmetic, and the retention floor.
+        </p>
+        <p>
+          The same teeth discipline applies. Each proof is paired with a mutant — an off-by-one in the watermark,
+          a fail-open rejoin gate, a retention floor that adds slack instead of subtracting it — that Kani is
+          required to refute.
+        </p>
+        <p>
+          Both results are now published as a run summary and a downloadable artifact on every run:
+          <a href="https://github.com/actuallydan/pollis/actions/workflows/tla.yml" target="_blank"
+            rel="noopener noreferrer">TLA+ runs</a> ·
+          <a href="https://github.com/actuallydan/pollis/actions/workflows/kani.yml" target="_blank"
+            rel="noopener noreferrer">Kani runs</a> ·
+          <a href="https://github.com/actuallydan/pollis/blob/main/docs/machine-checked-correctness-design.md"
+            target="_blank" rel="noopener noreferrer">design doc</a> ·
+          <a href="https://github.com/actuallydan/pollis/tree/main/specs/tla" target="_blank"
+            rel="noopener noreferrer">the specs themselves</a>.
+        </p>
+
+        <div class="doc-limit">
+          <span class="doc-limit-title">Where this guarantee ends</span>
+          <p>
+            <strong>Both are bounded.</strong> TLC checks a small model — three clients, a handful of epochs — not
+            an unbounded network, and Kani checks small input domains, not all inputs. A bug that only appears at
+            larger scale is outside both. This is the standard trade: exhaustive over a small space beats sampled
+            over a large one, but it is not a proof about the running system.
+          </p>
+          <p>
+            <strong>They cover the decision functions, not the program.</strong> The proofs range over pure
+            functions deliberately extracted for the purpose. The database calls, the network, the MLS library and
+            the UI around them are not verified — they are covered by ordinary tests and a nightly fuzzing soak.
+          </p>
+          <p>
+            <strong>One invariant has no machine-checked defence at all</strong> — that the test schema equals the
+            production schema. It is enforced by a mechanical equality check instead, and the design doc says so.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">3 · Supply chain</h2>
+        <p>
+          Pollis's Rust lockfile resolves to <strong>1,094 crates</strong>. Two gates run on every pull request
+          and every push to <code>main</code>, both against pinned tool versions
+          (<code>cargo-deny 0.19.9</code>, <code>cargo-vet 0.10.2</code>) so the gate itself cannot drift.
+        </p>
+
+        <h3 class="doc-sub-title">cargo-deny — advisories, licences, sources</h3>
+        <ul>
+          <li>
+            <strong>Advisories.</strong> Every RustSec advisory against the graph fails the build unless it has a
+            named exemption with a written reason. There are <strong>28</strong> exemptions and
+            <strong>no blanket suppression</strong> — each names a specific <code>RUSTSEC-</code> id. Twenty-one
+            are unmaintained-crate notices with no vulnerability (ten of them the GTK3 bindings Tauri's WebKit
+            backend requires, for which no GTK4 Tauri backend exists). Seven are real vulnerabilities with no
+            reachable fix; those are listed individually below.
+          </li>
+          <li>
+            <strong>Licences.</strong> An allow-list of 17 identifiers, each one verified as actually present in
+            the graph rather than allowed speculatively. MPL-2.0 is permitted with the reasoning written down
+            (file-level copyleft, no reach across a module boundary).
+          </li>
+          <li>
+            <strong>Sources.</strong> <code>crates.io</code> only, plus exactly one git dependency: an
+            <code>openmls</code> commit pinned by revision, needed for the post-quantum MLS ciphersuite that no
+            published release carries yet. The entry matches a repository URL, and the revision is pinned in
+            <code>Cargo.toml</code>, so it cannot silently follow upstream <code>main</code>.
+          </li>
+        </ul>
+
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <caption>The seven exempted advisories that are actual vulnerabilities, with the reason recorded in
+              <code>deny.toml</code>.</caption>
+            <thead><tr><th>Advisory</th><th>Crate</th><th>Why it is exempt</th></tr></thead>
+            <tbody>
+              <tr><td><code>RUSTSEC-2023-0071</code></td><td class="doc-td-dim"><code>rsa</code></td>
+                <td class="doc-td-dim">No upstream fix. Transitive via LiveKit's JWT library; the decryption-timing
+                  oracle is not reachable on the signing path we use.</td></tr>
+              <tr><td><code>RUSTSEC-2026-0049</code><br /><code>RUSTSEC-2026-0098</code><br />
+                <code>RUSTSEC-2026-0099</code><br /><code>RUSTSEC-2026-0104</code></td>
+                <td class="doc-td-dim"><code>rustls-webpki</code> 0.101 / 0.102</td>
+                <td class="doc-td-dim">Certificate-validation issues fixed only on the 0.103 line, which our own
+                  direct TLS already uses. The old lines are pinned by LiveKit and libSQL upstream; waiting on
+                  their rustls bump.</td></tr>
+              <tr><td><code>RUSTSEC-2026-0194</code><br /><code>RUSTSEC-2026-0195</code></td>
+                <td class="doc-td-dim"><code>quick-xml</code></td>
+                <td class="doc-td-dim">Every vulnerable instance is build-time code generation or dev-only. No
+                  runtime path parses untrusted XML.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="doc-sub-title">cargo-vet — review provenance</h3>
+        <p>
+          <code>cargo-vet</code> records, per crate version, who has reviewed it. Pollis imports
+          <strong>517 audits</strong> from six organisations that publish theirs — Mozilla (206), Google (117),
+          Bytecode Alliance (84), ISRG (52), Zcash (42) and Embark (16) — plus 35 crates trusted by publisher
+          identity. The remainder sit in an exemption baseline.
+        </p>
+
+        <div class="doc-limit">
+          <span class="doc-limit-title">Where this guarantee ends</span>
+          <p>
+            <strong>Pollis has audited zero crates itself.</strong> <code>supply-chain/audits.toml</code> is
+            empty. 858 exemption entries cover 716 crates, which is the dependency graph as it stood when the
+            gate was switched on. What the gate actually enforces is a <em>ratchet</em>: no new or bumped crate
+            can enter without a deliberate, reviewable change to that file. It is not, and should not be read as,
+            "every dependency has been reviewed".
+          </p>
+          <p>
+            <strong>Duplicate-version and wildcard checks warn rather than fail.</strong> A large native tree
+            carries transitive duplicates we do not control, so those are visible in the job log but do not block.
+          </p>
+          <p>
+            <strong>There is no scheduled re-scan and no automated dependency-update bot.</strong> Advisories are
+            checked when a pull request runs or on a push to <code>main</code>. A newly published advisory against
+            an unchanged dependency is not caught until the next such run.
+          </p>
+          <p>
+            <strong>Neither gate covers the JavaScript half or vendored C/C++.</strong> The renderer's
+            <code>pnpm</code> tree appears in the per-release SBOM but is not vetted by these tools, and the C and
+            C++ compiled inside build scripts (notably the WebRTC crates) is in neither.
+          </p>
+        </div>
+        <p style="margin-top: 1rem;">
+          Read the policy directly:
+          <a href="https://github.com/actuallydan/pollis/blob/main/deny.toml" target="_blank"
+            rel="noopener noreferrer"><code>deny.toml</code></a> ·
+          <a href="https://github.com/actuallydan/pollis/tree/main/supply-chain" target="_blank"
+            rel="noopener noreferrer"><code>supply-chain/</code></a> ·
+          <a href="https://github.com/actuallydan/pollis/actions/workflows/supply-chain.yml" target="_blank"
+            rel="noopener noreferrer">gate runs</a>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">4 · Signing keys, custody and rotation</h2>
+        <p>
+          Every claim on the <a href="artifacts.html">artifacts page</a> reduces to one pinned
+          <strong>ML-DSA-44</strong> key, key id <code>6cbd4b2aed5c4bf1</code>. This section is about who holds
+          it, what happens if it is stolen, and what has already been done to it.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>Key</th><th>Signs</th><th>Custody</th></tr></thead>
+            <tbody>
+              <tr><td>Transparency-log signing key<br /><span class="doc-td-dim">ML-DSA-44</span></td>
+                <td class="doc-td-dim">Signed tree heads for all three logs</td>
+                <td class="doc-td-dim">A GitHub Actions secret, backed up in a secrets manager</td></tr>
+              <tr><td>Offline root key<br /><span class="doc-td-dim">ML-DSA-44</span></td>
+                <td class="doc-td-dim">Nothing but key-set statements: "these keys may sign these logs, until
+                  this date"</td>
+                <td class="doc-td-dim">Offline. Deliberately absent from CI, from the secrets manager and from
+                  the repository</td></tr>
+              <tr><td>Release code-signing</td>
+                <td class="doc-td-dim">macOS (Apple Developer ID) and Windows (Azure Trusted Signing) installers</td>
+                <td class="doc-td-dim">GitHub Actions secrets</td></tr>
+              <tr><td>Sigstore identity</td>
+                <td class="doc-td-dim">cosign signatures and SLSA provenance</td>
+                <td class="doc-td-dim"><strong>No held key at all</strong> — a short-lived certificate bound to
+                  the release workflow's OIDC identity</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          <strong>A real rotation has been executed.</strong> In August 2026 the log signing key was replaced
+          with fresh material and all three trees were republished from source data under new domain-separation
+          contexts. It was not a formality: the previous key had been derived from the same 32-byte seed as its
+          Ed25519 predecessor, so the earlier post-quantum migration had changed the format without changing the
+          secret. The rotation was rehearsed against production with the old key still installed first, which
+          caught two bugs that would each have made it a silent no-op. The result was verified independently, from
+          a machine that had not performed the rotation.
+        </p>
+        <p>
+          <strong>A compromise does not require shipping a new build.</strong> Because clients pin a key
+          <em>set</em> authorised by the offline root, the response to a stolen signing key is to sign a new key
+          set that omits the compromised key entirely and republish — no client update, no flag day. The runbook
+          is explicit that a compromised key is dropped rather than given a short expiry, because an attacker who
+          can delay a client's fetch keeps it alive for exactly that long. It is equally explicit that you act on
+          suspicion: you do not need proof.
+        </p>
+
+        <div class="doc-limit">
+          <span class="doc-limit-title">Where this guarantee ends</span>
+          <p>
+            <strong>GitHub Actions is inside the publishing trust boundary, and the whitepaper says so.</strong>
+            The log signing key lives in Actions secrets and the trees are built and signed in CI, so a compromise
+            of that environment could sign a tree. The post-publish self-audit and the equivocation tripwire
+            <em>detect</em> that after the fact; they cannot prevent it. The same is true of the release-signing
+            keys. Pollis operates the only log, which is why the independent verifier is released — so a third
+            party can audit without asking us for anything.
+          </p>
+          <p>
+            <strong>The rotation shipped without an overlap window.</strong> The custody design calls for a
+            minimum 90-day period in which both keys are pinned; the rotation that was actually performed did not
+            have one. An auditor holding cached pre-rotation tree heads sees the change as equivocation and has to
+            re-pin from the announcement rather than verify the transition.
+          </p>
+          <p>
+            <strong>Root compromise has no in-band recovery.</strong> If the offline root is lost or stolen, the
+            fix does require a client release: mint a new root, ship a build pinning both, wait out the overlap,
+            then publish under the new root alone.
+          </p>
+          <p>
+            <strong>The pinned key is copied by hand into eight places</strong> — the Rust core, this website, two
+            workflows, the key-set statement, and three documents — with no check that they agree. One deployed
+            copy going stale has already shown a false tamper alarm to every visitor once.
+          </p>
+        </div>
+        <p style="margin-top: 1rem;">
+          <a href="https://github.com/actuallydan/pollis/blob/main/docs/signing-key-compromise-runbook.md"
+            target="_blank" rel="noopener noreferrer">Compromise runbook</a> ·
+          <a href="https://github.com/actuallydan/pollis/blob/main/docs/sth-signing-key-custody.md"
+            target="_blank" rel="noopener noreferrer">Custody &amp; rotation design</a> ·
+          <a href="https://github.com/actuallydan/pollis/blob/main/key-set.json" target="_blank"
+            rel="noopener noreferrer">The signed key set</a>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Reporting a vulnerability</h2>
+        <p>
+          Report privately through a
+          <a href="https://github.com/actuallydan/pollis/security/advisories/new" target="_blank"
+            rel="noopener noreferrer">GitHub security advisory</a>, not a public issue. The machine-readable
+          policy is at <a href="/.well-known/security.txt"><code>/.well-known/security.txt</code></a> and the
+          terms are in the
+          <a href="https://github.com/actuallydan/pollis/security/policy" target="_blank"
+            rel="noopener noreferrer">disclosure policy</a>.
+        </p>
+        <p>
+          Pollis is <strong>source-available, not open source</strong>: PolyForm Noncommercial 1.0.0. You may
+          read, build, audit and modify it for noncommercial purposes; commercial use needs a separate licence.
+          Auditing the code and publishing what you find is explicitly permitted.
+        </p>
+      </section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="device-security.html" class="footer-link">Lost device</a>
+        <a href="faq.html" class="footer-link">FAQ</a>
+        <a href="transparency.html" class="footer-link">Transparency</a>
+        <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <!-- TODO(#877): retention — uncomment once docs/metadata-retention-policy.md
+             is signed off by the owner and docs/retention-public-draft.html is moved
+             to website/retention.html. Owner sign-off is the ONLY blocker.
+        <a href="retention.html" class="footer-link">Retention</a>
+        -->
+        <a href="learn.html" class="footer-link">Learn</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script src="assurance.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-16T22:27:05Z",
+  "generated_at": "2026-08-16T22:35:26Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "564353ae",
@@ -12,7 +12,9 @@
       "created_at": "2026-08-16T08:38:44Z",
       "event": "workflow_run",
       "run_id": "31936974636",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31936974636"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31936974636",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.9.6",
@@ -20,7 +22,9 @@
       "created_at": "2026-08-15T22:47:50Z",
       "event": "workflow_run",
       "run_id": "31913067561",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31913067561"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31913067561",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.9.5",
@@ -28,7 +32,9 @@
       "created_at": "2026-08-15T19:17:08Z",
       "event": "workflow_run",
       "run_id": "31903478733",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31903478733"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31903478733",
+      "classification": "false_red",
+      "evidence": "The tag was not yet in the binaries tree (found: false) and 0 bytes differed. v1.9.5 reproduced byte-identically; the red was the wait-loop bug."
     },
     {
       "tag": "v1.9.4",
@@ -36,7 +42,9 @@
       "created_at": "2026-08-15T05:04:37Z",
       "event": "workflow_run",
       "run_id": "31866040326",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31866040326"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31866040326",
+      "classification": "false_red",
+      "evidence": "The tag was not yet in the binaries tree (found: false) and 0 bytes differed. v1.9.4 reproduced byte-identically; the red was the wait-loop bug."
     },
     {
       "tag": "v1.9.3",
@@ -44,7 +52,9 @@
       "created_at": "2026-08-13T23:25:34Z",
       "event": "workflow_run",
       "run_id": "31753766171",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31753766171"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31753766171",
+      "classification": "real",
+      "evidence": "The tag was published and the log verified (found: true); the rebuilt AppImage differed from the shipped one in 105,863,272 bytes, across the main binary and several bundled libraries. Still unexplained."
     },
     {
       "tag": "v1.9.2",
@@ -52,7 +62,9 @@
       "created_at": "2026-08-13T16:05:41Z",
       "event": "workflow_run",
       "run_id": "31718909914",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31718909914"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31718909914",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.9.1",
@@ -60,7 +72,9 @@
       "created_at": "2026-08-13T07:02:45Z",
       "event": "workflow_run",
       "run_id": "31676165075",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31676165075"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31676165075",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.9.0",
@@ -68,7 +82,9 @@
       "created_at": "2026-08-12T19:07:58Z",
       "event": "workflow_run",
       "run_id": "31631140154",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31631140154"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31631140154",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.9.0",
@@ -76,7 +92,9 @@
       "created_at": "2026-08-12T19:06:01Z",
       "event": "workflow_run",
       "run_id": "31630974720",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31630974720"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31630974720",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.8.5",
@@ -84,7 +102,9 @@
       "created_at": "2026-08-11T05:03:20Z",
       "event": "workflow_run",
       "run_id": "31460411482",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31460411482"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31460411482",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.8.5",
@@ -92,7 +112,9 @@
       "created_at": "2026-08-10T13:16:27Z",
       "event": "workflow_run",
       "run_id": "31392058335",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31392058335"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31392058335",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.8.4",
@@ -100,7 +122,9 @@
       "created_at": "2026-08-10T06:18:25Z",
       "event": "workflow_dispatch",
       "run_id": "31361471279",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31361471279"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31361471279",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.8.4",
@@ -108,7 +132,9 @@
       "created_at": "2026-08-10T05:48:18Z",
       "event": "workflow_dispatch",
       "run_id": "31359760127",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31359760127"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31359760127",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.8.4",
@@ -116,7 +142,9 @@
       "created_at": "2026-08-10T05:21:40Z",
       "event": "workflow_dispatch",
       "run_id": "31358349776",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31358349776"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31358349776",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.8.4",
@@ -124,7 +152,9 @@
       "created_at": "2026-08-10T04:54:00Z",
       "event": "workflow_dispatch",
       "run_id": "31356925574",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31356925574"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31356925574",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.8.4",
@@ -132,7 +162,9 @@
       "created_at": "2026-08-09T21:03:22Z",
       "event": "push",
       "run_id": "31335833629",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335833629"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335833629",
+      "classification": null,
+      "evidence": null
     },
     {
       "tag": "v1.8.4",
@@ -140,7 +172,9 @@
       "created_at": "2026-08-09T21:02:50Z",
       "event": "push",
       "run_id": "31335810940",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335810940"
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335810940",
+      "classification": null,
+      "evidence": null
     }
   ]
 }

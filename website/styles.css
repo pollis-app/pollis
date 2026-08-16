@@ -309,10 +309,14 @@ a:hover {
 }
 
 /* ── Footer links (GitHub etc.) ──────────────────────────────── */
+/* `flex-wrap` is required, not cosmetic: #877 took the footer from six links to
+   nine, and without it the row overflows its container on a narrow viewport and
+   drags the whole page into a horizontal scroll. */
 .footer-links {
   display: flex;
   justify-content: center;
-  gap: 1.5rem;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
   padding: 2rem 0 1rem;
 }
 

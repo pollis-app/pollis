@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  NOT PUBLISHED. DO NOT MOVE THIS FILE INTO website/ WITHOUT OWNER SIGN-OFF.
+  ═══════════════════════════════════════════════════════════════════════════
+
+  This is the finished public rendering of docs/metadata-retention-policy.md,
+  prepared under #877. It is complete and every claim in it is traceable to
+  that document, which in turn cites the enforcing code or migration for each
+  retention period.
+
+  It lives in docs/ rather than website/ FOR ONE REASON ONLY: Cloudflare Pages
+  serves the whole of website/, so a file placed there is publicly reachable
+  whether or not anything links to it. "Unlinked" is not "unpublished". Putting
+  the finished page here is the only way to have it ready without shipping it.
+
+  THE SOLE BLOCKER IS OWNER SIGN-OFF.
+  docs/metadata-retention-policy.md §10 reserves three decisions to the owner:
+    1. whether the retention periods described are the intended policy;
+    2. the public wording derived from the document — which is this file;
+    3. the App Store / Play privacy-form answers that depend on §2, §3 and §4.
+  Its status line still reads "Engineering draft — owner sign-off required
+  before publication", and #877 deliberately did not flip it. A retention
+  policy is a statement a regulator or an app store holds you to, so it is
+  signed by a person, not merged by a contributor.
+
+  TO PUBLISH, once signed off:
+    1. Flip the status line in docs/metadata-retention-policy.md.
+    2. `git mv docs/retention-public-draft.html website/retention.html`
+    3. Uncomment the "Retention" footer links — grep the website/ directory for
+       "TODO(#877): retention" to find all of them.
+    4. Deploy the site (website-deploy.yml is manual by design).
+
+  Nothing else is outstanding. No code change is required.
+-->
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — What We Keep</title>
+  <meta name="description"
+    content="What Pollis's servers retain, for how long, what deletion actually removes, and what cannot be deleted." />
+  <meta name="theme-color" content="#0f1117" />
+  <meta name="robots" content="noindex" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="doc-main reading-surface">
+      <a href="index.html" class="doc-back">&larr; Back to Pollis</a>
+
+      <div class="doc-header">
+        <h1 class="doc-title">What we keep</h1>
+        <p class="doc-subtitle">
+          What Pollis's servers retain, for how long, what deleting removes — and what cannot be deleted at all.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        Pollis stores <strong>no message text anywhere</strong>. What the servers hold is routing metadata: which
+        conversations exist, who belongs to them, when envelopes were written, and how the encryption state
+        evolved.
+        <br /><br />
+        The important thing to understand is that <strong>the main rule is not a timer</strong>. An encrypted
+        message envelope is deleted when every current member device has actually collected it — bounded by the
+        slowest device, not by a clock. That is a deliberate choice: a time limit would delete mail belonging to
+        someone who was simply away, and messages must work.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Undelivered messages: bounded by devices, not by time</h2>
+        <p>
+          An encrypted envelope sits on the server only until every current member device of that conversation has
+          reported collecting it. Then it is deleted. There is <strong>no maximum age</strong> — a message does not
+          expire because it got old.
+        </p>
+        <p>
+          There is one bound on that, and it is on devices rather than messages. A member device that has not
+          checked in for <strong>twelve months</strong> stops holding envelopes back for itself. This is not a
+          time limit on messages: a device that checked in yesterday still pins every envelope below its cursor,
+          however old those messages are. And it reverses the moment the device comes back — the device is not
+          revoked or removed from anything.
+        </p>
+        <p>
+          The consequence, stated plainly because it is a real cost: a device left dormant for more than a year
+          may find gaps when it returns. This is one of exactly three kinds of message loss Pollis accepts, and it
+          is disclosed rather than discovered.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Everything else, and how long it lasts</h2>
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead><tr><th>What</th><th>How long</th></tr></thead>
+            <tbody>
+              <tr><td>Encrypted message envelopes</td>
+                <td class="doc-td-dim">Until every current member device has collected them. No age limit.
+                  Removed immediately if you delete the message.</td></tr>
+              <tr><td>Reactions</td>
+                <td class="doc-td-dim">Life of the account; removed when the account is deleted</td></tr>
+              <tr><td>Accounts, group and DM membership, blocks</td>
+                <td class="doc-td-dim">Life of the account; removed when the account is deleted</td></tr>
+              <tr><td>Security events<br /><span class="doc-td-dim">device added, device rejected, identity
+                    reset</span></td>
+                <td class="doc-td-dim"><strong>90 days.</strong> Long enough to investigate something you noticed
+                  late; short enough that it is not a standing record of when you change devices</td></tr>
+              <tr><td>Push notification tokens</td>
+                <td class="doc-td-dim"><strong>180 days</strong> since the device last refreshed, or until the
+                  account is deleted. Apps re-register on launch, so a device in use refreshes long before
+                  this</td></tr>
+              <tr><td>Per-device delivery cursors</td>
+                <td class="doc-td-dim"><strong>Kept, deliberately.</strong> These are what stop undelivered mail
+                  being collected early, so removing them to save space would risk deleting messages. Removed with
+                  the device</td></tr>
+              <tr><td>Attachments</td>
+                <td class="doc-td-dim">Reference-counted: an encrypted file is collected once no surviving message
+                  refers to it. No timer</td></tr>
+              <tr><td>Encryption group state and commit history</td>
+                <td class="doc-td-dim">Pruned to what the slowest member still needs, with a per-conversation cap
+                  so one permanently absent device cannot grow it without limit</td></tr>
+              <tr><td>Your published identity-key history</td>
+                <td class="doc-td-dim"><strong>Never deleted.</strong> This is the record that lets your contacts
+                  prove your key did not change behind their back — deleting it would remove a protection, not
+                  restore privacy</td></tr>
+              <tr><td>Downloaded media on your own device</td>
+                <td class="doc-td-dim">Encrypted, capped at 500 MB, oldest evicted first</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">IP addresses</h2>
+        <p>
+          <strong>No client IP address is written to any database, log or table.</strong> IPs are read to enforce
+          rate limits and held in memory only — a counter that does not survive a restart. The relay reads a peer
+          address for the same reason and stores nothing.
+        </p>
+        <p>
+          Stated honestly rather than buried: our edge provider necessarily sees your IP, as does any network
+          between you and us. The optional <a href="subprocessors.html">relay overlay</a> exists precisely to hide
+          your IP from our own services, and it is off unless you turn it on. This section describes what
+          <em>we</em> retain; it does not claim our providers see nothing.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What deleting your account removes</h2>
+        <p>
+          Deleting your account removes your user record, your devices, your membership of every group and DM,
+          your reactions, your push tokens, your security events and your undelivered envelopes.
+        </p>
+
+        <div class="doc-limit">
+          <span class="doc-limit-title">What deletion cannot reach</span>
+          <p>
+            <strong>Entries in the public transparency ledger.</strong> Pollis publishes append-only Merkle logs
+            so that nobody — including us — can rewrite history behind your back. That property only exists
+            because entries are permanent, so deleting an account cannot remove past entries. The tension is real
+            and the resolution is to publish less rather than to promise deletion we cannot perform: the
+            conversation and sender identifiers in the commit log are replaced with rotating pseudonyms, so an
+            outside observer cannot build a long-term map of who talks to whom. Your identity-key history remains
+            deliberately identifiable, because looking a person up by name is the entire point of key
+            transparency.
+          </p>
+          <p>
+            <strong>Messages already delivered to other people's devices.</strong> They are in recipients' local
+            encrypted databases. There is no mechanism to reach them and no backup of history anywhere.
+          </p>
+          <p>
+            <strong>Our providers' own operational records.</strong> Edge logs, platform logs and notification
+            delivery records are governed by those companies' policies. See
+            <a href="subprocessors.html">subprocessors</a>.
+          </p>
+        </div>
+      </section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="device-security.html" class="footer-link">Lost device</a>
+        <a href="faq.html" class="footer-link">FAQ</a>
+        <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <a href="learn.html" class="footer-link">Learn</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>
