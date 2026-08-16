@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect } from "react";
+import React, { useCallback, useRef, useMemo, useState, useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -216,7 +216,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     [allMessages],
   );
 
-  const loadMore = async () => {
+  const loadMore = useCallback(async () => {
     if (!pageCursor || loadingMore || !currentUser) {
       return;
     }
@@ -250,7 +250,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     } finally {
       setLoadingMore(false);
     }
-  };
+  }, [pageCursor, loadingMore, currentUser, selectedChannelId, selectedConversationId]);
 
   const handleConfirmDelete = async () => {
     if (!pendingDeleteId) {
@@ -281,8 +281,16 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     }
   };
 
-  const handleEdit = (messageId: string) => {
-    const message = allMessages.find((m) => m.id === messageId);
+  // The four callbacks below reach `MessageList` and, through it, every row.
+  // They are `useCallback`-pinned because this component re-renders on every
+  // keystroke in the edit bar (`editDraftValue` is local state) — with fresh
+  // identities that keystroke re-rendered the entire message log (#874).
+  // `allMessagesRef` keeps `handleEdit` stable across message arrivals too.
+  const allMessagesRef = useRef(allMessages);
+  allMessagesRef.current = allMessages;
+
+  const handleEdit = useCallback((messageId: string) => {
+    const message = allMessagesRef.current.find((m) => m.id === messageId);
     if (!message) {
       return;
     }
@@ -290,17 +298,36 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     setReplyToMessageId(null);
     setEditDraftValue(message.content_decrypted ?? '');
     setEditingMessage(message);
-  };
+  }, [setReplyToMessageId]);
 
   const handleCancelEdit = () => {
     setEditingMessage(null);
   };
 
-  const handleDelete = (messageId: string) => {
+  const handleDelete = useCallback((messageId: string) => {
     setEditingMessage(null);
     setReplyToMessageId(null);
     setPendingDeleteId(messageId);
-  };
+  }, [setReplyToMessageId]);
+
+  const handleReply = useCallback((id: string) => {
+    setEditingMessage(null);
+    setPendingDeleteId(null);
+    setReplyToMessageId(id);
+    chatInputRef.current?.focus();
+  }, [setReplyToMessageId]);
+
+  const focusComposer = useCallback(() => {
+    chatInputRef.current?.focus();
+  }, []);
+
+  // Depends on `currentUser` only — the per-message branch reads its argument.
+  const getAuthorUsername = useCallback(
+    (authorId: string, message?: Message) =>
+      message?.sender_username ||
+      (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId),
+    [currentUser?.id, currentUser?.username],
+  );
 
   const handleSaveEdit = async () => {
     const trimmed = editDraftValue.trim();
@@ -474,22 +501,15 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             viewerIsAdmin={viewerIsAdmin}
             onOpenThread={openThread}
             threadReplyCounts={threadReplyCounts}
-            onReply={(id) => {
-              setEditingMessage(null);
-              setPendingDeleteId(null);
-              setReplyToMessageId(id);
-              chatInputRef.current?.focus();
-            }}
+            onReply={handleReply}
             onEdit={handleEdit}
             onDelete={handleDelete}
             // TODO: scroll-to-message not yet implemented; prop left unwired
-            getAuthorUsername={(authorId, message) =>
-              message?.sender_username || (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId)
-            }
+            getAuthorUsername={getAuthorUsername}
             hasMore={!!pageCursor}
             isFetchingMore={loadingMore}
             onLoadMore={loadMore}
-            focusComposer={() => chatInputRef.current?.focus()}
+            focusComposer={focusComposer}
           />
         )}
       </div>

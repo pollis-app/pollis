@@ -16,6 +16,10 @@ import { useMessagePermalink } from "../../hooks/useMessagePermalink";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { useConversationReceipts } from "../../hooks/queries/useReceipts";
 import { useDMConversations } from "../../hooks/queries/useMessages";
+import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
+import { useBackgroundIsLight } from "../../utils/usernameColor";
+import { probeRender } from "../../utils/renderProbe";
+import type { MessageRenderContext } from "./messageRenderContext";
 import { appStore } from "../../stores/appStore";
 import { messageNavStore } from "../../stores/messageNavStore";
 import type { MessageNavAction } from "../../utils/messageNav";
@@ -34,7 +38,9 @@ const startOfLocalDay = (d: Date): number =>
 // Time gap (ms) beyond which a same-author message still starts a new group.
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
-const DayDivider: React.FC<{ label: string; refined: boolean }> = ({ label, refined }) => {
+// Memoised for the same reason the rows are: there is one of these per day in
+// the log and their inputs are two primitives that almost never change.
+const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ label, refined }) => {
   if (refined) {
     // Centered mono label between two hairline rules, with density-driven
     // breathing room above and below.
@@ -70,12 +76,13 @@ const DayDivider: React.FC<{ label: string; refined: boolean }> = ({ label, refi
       <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
     </div>
   );
-};
+});
+DayDivider.displayName = "DayDivider";
 
 const RosterChangeBanner: React.FC<{
   banner: RosterBanner;
   resolveName: (userId: string) => string;
-}> = ({ banner, resolveName }) => {
+}> = React.memo(({ banner, resolveName }) => {
   const { t } = useTranslation("chat");
   const name = resolveName(banner.payload.user_id);
   let label: string;
@@ -108,7 +115,8 @@ const RosterChangeBanner: React.FC<{
       <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
     </div>
   );
-};
+});
+RosterChangeBanner.displayName = "RosterChangeBanner";
 
 interface MessageListProps {
   messages: Message[];
@@ -131,7 +139,6 @@ interface MessageListProps {
   threadReplyCounts?: Map<string, number>;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
-  onPin?: (messageId: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   getAuthorUsername?: (authorId: string, message?: Message) => string;
   hasMore?: boolean;
@@ -161,6 +168,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   onLoadMore,
   focusComposer,
 }) => {
+  probeRender("MessageList");
   const { t } = useTranslation("chat");
   const skin = useSkin();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -228,7 +236,64 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     }
     return map;
   }, [groupMembers]);
-  const resolveName = (userId: string) => usernameByUserId.get(userId) ?? userId;
+  const resolveName = useCallback(
+    (userId: string) => usernameByUserId.get(userId) ?? userId,
+    [usernameByUserId],
+  );
+
+  // ── List-wide render inputs, subscribed ONCE (#874) ─────────────────────
+  // Every one of these used to be resolved per row: `useSkin()` and
+  // `useMentionCandidates()` inside each `MessageItem`/`MessageBody` meant a
+  // React Query observer and up to five MobX reactions PER MESSAGE, all
+  // answering the same list-wide question. Subscribing here and passing one
+  // memoised object down is not just cheaper — it is what makes the row memo
+  // meaningful, because a fresh object per render would defeat it.
+  const isLightBg = useBackgroundIsLight();
+  const currentUser = appStore.currentUser;
+  const mentionCandidates = useMentionCandidates();
+  const selfName = currentUser?.username?.toLowerCase();
+  const mentionNames = useMemo(() => {
+    const set = new Set<string>(["all"]);
+    for (const c of mentionCandidates) {
+      set.add(c.username.toLowerCase());
+    }
+    if (selfName) {
+      set.add(selfName);
+    }
+    return set;
+  }, [mentionCandidates, selfName]);
+  const renderCtx = useMemo<MessageRenderContext>(
+    () => ({
+      skin,
+      isLightBg,
+      currentUserId: currentUser?.id,
+      mentionNames,
+      selfName,
+    }),
+    [skin, isLightBg, currentUser?.id, mentionNames, selfName],
+  );
+
+  // Reply targets resolved in ONE pass. Each row used to run
+  // `allMessages.find()`, which is O(N^2) across the log (#874). Only messages
+  // that are actually replied to are indexed, so this stays small.
+  const replyTargets = useMemo(() => {
+    const wanted = new Set<string>();
+    for (const m of sortedMessages) {
+      if (m.reply_to_message_id) {
+        wanted.add(m.reply_to_message_id);
+      }
+    }
+    if (wanted.size === 0) {
+      return new Map<string, Message>();
+    }
+    const map = new Map<string, Message>();
+    for (const m of sortedMessages) {
+      if (wanted.has(m.id)) {
+        map.set(m.id, m);
+      }
+    }
+    return map;
+  }, [sortedMessages]);
 
   // Interleave messages + roster banners by timestamp. Messages use
   // `created_at` (Rust unix seconds or ms — `toMs` normalizes); banners
@@ -308,13 +373,19 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return () => container.removeEventListener("scroll", handleScroll);
   }, [hasMore, isFetchingMore, onLoadMore]);
 
-  const scrollToMessage = (messageId: string) => {
+  // `useCallback` is load-bearing, not tidiness: this is handed to every row as
+  // `onScrollToReply`, so a fresh identity per render re-rendered the entire log
+  // on any parent state change — one keystroke in the edit bar was N row
+  // renders (#874). Reads the DOM and a ref only, so it has no dependencies.
+  const onScrollToMessageRef = useRef(onScrollToMessage);
+  onScrollToMessageRef.current = onScrollToMessage;
+  const scrollToMessage = useCallback((messageId: string) => {
     const el = containerRef.current?.querySelector(`[data-testid="message-${messageId}"]`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    onScrollToMessage?.(messageId);
-  };
+    onScrollToMessageRef.current?.(messageId);
+  }, []);
 
   // ── Saved messages + permalinks (#854) ──────────────────────────────────
   const savedMessageIds = useSavedMessageIds();
@@ -338,16 +409,26 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return () => window.clearTimeout(timer);
   }, [copyLinkState]);
 
-  const handleToggleSave = useCallback(
-    (messageId: string) => {
-      toggleSavedMutation.mutate(messageId);
-    },
-    [toggleSavedMutation],
-  );
+  // Both row callbacks below are pinned to a stable identity via refs rather
+  // than dependency arrays (#874). `useMutation` returns a NEW result object
+  // every render, and `sortedMessages` changes whenever any message arrives —
+  // either as a dependency would hand all N rows a new prop and re-render the
+  // whole log. Refs are read at call time, so the behaviour is identical while
+  // the identity never changes.
+  const toggleSavedRef = useRef(toggleSavedMutation);
+  toggleSavedRef.current = toggleSavedMutation;
+  const handleToggleSave = useCallback((messageId: string) => {
+    toggleSavedRef.current.mutate(messageId);
+  }, []);
+
+  const sortedMessagesRef = useRef(sortedMessages);
+  sortedMessagesRef.current = sortedMessages;
+  const copyPermalinkRef = useRef(copyPermalink);
+  copyPermalinkRef.current = copyPermalink;
 
   const handleCopyLink = useCallback(
     async (messageId: string) => {
-      const message = sortedMessages.find((m) => m.id === messageId);
+      const message = sortedMessagesRef.current.find((m) => m.id === messageId);
       // The message's OWN conversation, never the list's `conversationId` prop
       // — that prop is the MLS group id for channels, which would produce a
       // permalink that resolves nowhere.
@@ -358,10 +439,10 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         setCopyLinkState({ messageId, state: "failed" });
         return;
       }
-      const ok = await copyPermalink(targetConversationId, messageId);
+      const ok = await copyPermalinkRef.current(targetConversationId, messageId);
       setCopyLinkState({ messageId, state: ok ? "copied" : "failed" });
     },
-    [sortedMessages, copyPermalink],
+    [],
   );
 
   // Read the pending jump during RENDER, not only inside the effect below.
@@ -623,7 +704,12 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           <MessageItem
             key={message.id}
             message={message}
-            allMessages={sortedMessages}
+            ctx={renderCtx}
+            replyToMessage={
+              message.reply_to_message_id
+                ? (replyTargets.get(message.reply_to_message_id) ?? null)
+                : undefined
+            }
             authorUsername={
               getAuthorUsername
                 ? getAuthorUsername(message.sender_id, message)
@@ -646,7 +732,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
                 ? copyLinkState.state
                 : "idle"
             }
-            receipts={receipts}
+            receipt={receipts?.get(message.id)}
             peerCount={peerCount}
             isDm={isDm}
           />

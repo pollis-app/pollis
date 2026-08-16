@@ -34,6 +34,7 @@ interface MockMessage {
   content?: string;
   reply_to_id?: string;
   sent_at: string;
+  edited_at?: string;
 }
 
 interface MockProfile {
@@ -580,6 +581,23 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       store.messages[conversationId].push(message);
       return message;
+    }
+
+    // `useEditMessage` applies an optimistic cache update and then invalidates,
+    // so without this case the refetch served the ORIGINAL text back and the
+    // edit appeared to silently revert. Mutating the store keeps the mock
+    // honest about what a real `edit_message` does (#874).
+    case 'edit_message': {
+      const { messageId, newContent } = args as {
+        messageId: string;
+        newContent: string;
+      };
+      const message = findMessage(messageId);
+      if (message) {
+        message.content = newContent;
+        message.edited_at = nowIso();
+      }
+      return null;
     }
 
     // ── Saved messages + permalinks (#854) ───────────────────────────────

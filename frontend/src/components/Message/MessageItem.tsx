@@ -4,20 +4,26 @@ import { Reply, CornerUpLeft } from "lucide-react";
 import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
 import { observer } from "mobx-react-lite";
-import { appStore } from "../../stores/appStore";
 import { MessageBody } from "./MessageBody";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
-import { getUsernameColor, useBackgroundIsLight } from "../../utils/usernameColor";
-import { useSkin } from "../../hooks/queries/usePreferences";
+import { getUsernameColor } from "../../utils/usernameColor";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
 import { MessageActions } from "./MessageActions";
 import { ReceiptIndicator } from "./ReceiptIndicator";
+import { probeRender } from "../../utils/renderProbe";
+import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
 
 interface MessageItemProps {
   message: Message;
-  allMessages?: Message[];
+  /** List-wide render inputs (skin, viewer, mention roster). One memoised
+   *  object from `MessageList` — see `messageRenderContext.ts`. */
+  ctx: MessageRenderContext;
+  /** The message this one replies to, already resolved by the list. Was a
+   *  `allMessages.find()` per row, i.e. O(N^2) over the whole log (#874).
+   *  `undefined` = no reply; `null` = replied to something not loaded. */
+  replyToMessage?: Message | null;
   authorUsername?: string;
   isAuthorAdmin?: boolean;
   /** True when the viewer is an admin in this message's group — enables
@@ -44,12 +50,13 @@ interface MessageItemProps {
    *  `idle` for every message but the one just acted on. */
   copyLinkState?: "idle" | "copied" | "failed";
   isSaved?: boolean;
-  onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
-  /** Delivery / read receipts (#857). All optional — when the parent doesn't
-   * pass them no indicator renders. Wired from `MessageList`; receipts exist
-   * for DMs only, so `isDm` gates the whole affordance. */
-  receipts?: Map<string, MessageReceipts>;
+  /** Delivery / read receipts for THIS message (#857). Optional — when the
+   * parent doesn't pass it no indicator renders. Wired from `MessageList`;
+   * receipts exist for DMs only, so `isDm` gates the whole affordance.
+   * #874: this used to be the list's whole `Map`, whose identity changes on
+   * any peer's receipt — which re-rendered every row in the log to update one. */
+  receipt?: MessageReceipts;
   /** DM members excluding the viewer — drives the "2/4" multi-reader summary. */
   peerCount?: number;
   isDm?: boolean;
@@ -62,7 +69,8 @@ const toMs = (timestamp: number): number =>
 
 export const MessageItem: React.FC<MessageItemProps> = observer(({
   message,
-  allMessages = [],
+  ctx,
+  replyToMessage,
   authorUsername,
   isAuthorAdmin = false,
   canModerate = false,
@@ -77,15 +85,14 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   copyLinkState = "idle",
   isSaved = false,
   onScrollToReply,
-  receipts,
+  receipt,
   peerCount = 0,
   isDm = false,
 }) => {
+  probeRender("MessageItem");
   const { t } = useTranslation("chat");
-  const { currentUser } = appStore;
-  const isOwn = message.sender_id === currentUser?.id;
-  const isLightBg = useBackgroundIsLight();
-  const skin = useSkin();
+  const { skin, isLightBg, currentUserId } = ctx;
+  const isOwn = message.sender_id === currentUserId;
   // Falls back to the same placeholder the default prop used to supply, but
   // resolved at render so it follows the active language.
   const displayName = authorUsername ?? t("message.unknownAuthor");
@@ -95,9 +102,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const authorColorKey = message.sender_username ?? message.sender_id;
   const authorColor = getUsernameColor(authorColorKey, isLightBg);
 
-  const replyTo = message.reply_to_message_id
-    ? allMessages.find((m) => m.id === message.reply_to_message_id)
-    : null;
+  const replyTo = replyToMessage ?? null;
 
   const replyToAuthor = replyTo
     ? (replyTo.sender_username ?? replyTo.sender_id)
@@ -259,7 +264,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               lineHeight: "var(--lh)",
             }}
           >
-            <MessageBody text={content} />
+            <MessageBody text={content} ctx={ctx} />
             {message.edited_at && !isDeleted && (
               <span className="ms-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
                 {t("message.edited")}
@@ -271,7 +276,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               </span>
             )}
             <ReceiptIndicator
-              receipts={receipts?.get(message.id)}
+              receipts={receipt}
               peerCount={peerCount}
               visible={isOwn && isDm}
             />
@@ -282,8 +287,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
           {attachmentBlocks}
 
-          {/* Reactions row — disabled, needs more thought */}
-          {/* <MessageReactions messageId={message.id} /> */}
           <ThreadReplyCount
             count={threadReplyCount}
             onOpen={onOpenThread ? () => onOpenThread(message.id) : undefined}
@@ -398,7 +401,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             whiteSpace: "pre-wrap",
           }}
         >
-          <MessageBody text={content} />
+          <MessageBody text={content} ctx={ctx} />
           {message.edited_at && !isDeleted && (
             <span className="ms-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
               {t("message.edited")}
@@ -410,7 +413,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             </span>
           )}
           <ReceiptIndicator
-            receipts={receipts?.get(message.id)}
+            receipts={receipt}
             peerCount={peerCount}
             visible={isOwn && isDm}
           />
@@ -455,9 +458,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           ))}
         </div>
       )}
-
-      {/* Reactions row — disabled, needs more thought */}
-      {/* <MessageReactions messageId={message.id} /> */}
     </div>
   );
 });
