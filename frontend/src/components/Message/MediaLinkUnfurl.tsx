@@ -1,13 +1,13 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { shellOpen } from "../../bridge";
+import { ensureProtocol, findUrls } from "../../utils/links";
 
 // Known limitation (low priority): inline previews only fire when the URL ends in
 // a recognised image/video extension. Sites like Giphy/Tenor/Imgur that serve media
 // behind extension-less share URLs (e.g. giphy.com/gifs/...) won't unfurl. Pasting
 // the direct .gif/.mp4 URL works, and copy-pasting the actual media into the input
 // also works, so we accept the gap rather than building an OG/oEmbed unfurl service.
-const URL_REGEX = /(https?:\/\/[^\s<>"')\]]+|www\.[^\s<>"')\]]+\.[^\s<>"')\]]+)/gi;
 
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "avif", "bmp", "svg"];
 const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v", "ogv"];
@@ -17,13 +17,6 @@ type MediaKind = "image" | "video";
 interface MediaLink {
   url: string;
   kind: MediaKind;
-}
-
-function ensureProtocol(url: string): string {
-  if (/^https?:\/\//i.test(url)) {
-    return url;
-  }
-  return `https://${url}`;
 }
 
 function classify(url: string): MediaKind | null {
@@ -50,10 +43,7 @@ function classify(url: string): MediaKind | null {
 function extractMediaLinks(text: string): MediaLink[] {
   const out: MediaLink[] = [];
   const seen = new Set<string>();
-  URL_REGEX.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = URL_REGEX.exec(text)) !== null) {
-    const url = match[0];
+  for (const { url } of findUrls(text) ?? []) {
     if (seen.has(url)) {
       continue;
     }
