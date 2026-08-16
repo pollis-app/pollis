@@ -193,6 +193,26 @@ async function openDMs(page: Page) {
   await expect(page.getByTestId(`dm-option-${DM_IDS[0]}`)).toBeVisible();
 }
 
+/** Drive a real visibility transition — what "the user came back" means. */
+async function setVisibility(page: Page, state: "hidden" | "visible") {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => value,
+    });
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => value === "hidden",
+    });
+    // `bubbles: true` is load-bearing: React Query's focus manager listens on
+    // WINDOW, and a real `visibilitychange` reaches it only by bubbling up from
+    // document. A default non-bubbling Event is delivered to nobody, which
+    // makes a focus-refetch test pass on any setting at all.
+    document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+    window.dispatchEvent(new Event(value === "hidden" ? "blur" : "focus"));
+  }, state);
+}
+
 async function openSearch(page: Page) {
   await page.keyboard.press(process.platform === "darwin" ? "Meta+KeyK" : "Control+KeyK");
   await expect(page.getByTestId("search-panel")).toBeVisible();
@@ -256,17 +276,28 @@ test("returning to the window refetches nothing (guard)", async ({ page }) => {
   await openGroupA(page);
   await expect(page.getByText("channel 0 newest line")).toBeVisible();
 
-  await resetCounts(page);
+  // Mark every cached query STALE without refetching. Focus-refetch only ever
+  // fires for stale queries, so without this the test would pass on nothing but
+  // the staleTime window and prove nothing about the setting.
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __pollisQueryClient: {
+          invalidateQueries: (f: { refetchType: string }) => Promise<void>;
+        };
+      }
+    ).__pollisQueryClient.invalidateQueries({ refetchType: "none" }),
+  );
 
-  // React Query listens on `visibilitychange` + `focus`. Drive both, twice, so
-  // a single missed listener can't make this pass by accident.
-  for (let i = 0; i < 2; i++) {
-    await page.evaluate(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-      window.dispatchEvent(new Event("focus"));
-    });
-    await page.waitForTimeout(150);
-  }
+  // A real away-and-back. React Query's focus manager reads
+  // `document.visibilityState` and only reacts to a TRANSITION, so dispatching
+  // `visibilitychange` while the page was never hidden is a no-op that would
+  // make this pass on any setting at all.
+  await setVisibility(page, "hidden");
+  await page.waitForTimeout(100);
+  await resetCounts(page);
+  await setVisibility(page, "visible");
+  await page.waitForTimeout(400);
 
   const c = await counts(page);
   for (const command of [
