@@ -5,7 +5,7 @@ import { appStore } from "../../../stores/appStore";
 import { presenceStore } from "../../../stores/presenceStore";
 import { useSkin } from "../../../hooks/queries/usePreferences";
 import { useGroupMembers } from "../../../hooks/queries/useGroups";
-import { useMessages } from "../../../hooks/queries/useMessages";
+import { useMessages, useDMConversations } from "../../../hooks/queries/useMessages";
 import { MemberRow } from "./MemberRow";
 import { MediaGrid } from "./MediaGrid";
 import type { MessageAttachment } from "../../../types";
@@ -50,7 +50,11 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
     const { messages } = useMessages(channelId, conversationId);
     const isTerminal = useSkin() === "terminal";
     const currentUser = appStore.currentUser;
-    const dmConversations = appStore.dmConversations;
+    // React Query, not the MobX store: `appStore.dmConversations` was never
+    // written — its two setters had no call sites — so this panel saw an empty
+    // list in every DM and reported "Members — 0" (#906). The query hook is
+    // the source of truth for remote data everywhere else in the app.
+    const { data: dmConversations = [] } = useDMConversations();
     const hasContext = Boolean(groupId || channelId || conversationId);
 
     // Online first, then alphabetical. Reading `presenceStore.isOnline` here

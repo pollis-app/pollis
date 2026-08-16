@@ -378,10 +378,9 @@ export interface AppState {
   selectedChannelId: string | null;
   selectedConversationId: string | null; // For DMs
 
-  // Data (messages managed by React Query, not Zustand)
+  // Data (messages and DM conversations managed by React Query, not the store)
   groups: Group[];
   channels: Record<string, Channel[]>; // group_id -> channels
-  dmConversations: DMConversation[];
 
   // Message queue
   messageQueue: MessageQueueItem[];

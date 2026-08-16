@@ -29,7 +29,6 @@ class AppStore implements AppState {
   // ── Data (messages managed by React Query, not here) ───────────────────
   groups: Group[] = [];
   channels: Record<string, Channel[]> = {};
-  dmConversations: DMConversation[] = [];
   messageQueue: MessageQueueItem[] = [];
 
   // ── UI state ───────────────────────────────────────────────────────────
@@ -168,13 +167,7 @@ class AppStore implements AppState {
     };
   }
 
-  setDMConversations(conversations: DMConversation[]) {
-    this.dmConversations = conversations;
-  }
 
-  addDMConversation(conversation: DMConversation) {
-    this.dmConversations = [...this.dmConversations, conversation];
-  }
 
   setMessageQueue(queue: MessageQueueItem[]) {
     this.messageQueue = queue;
@@ -542,7 +535,6 @@ class AppStore implements AppState {
     this.selectedConversationId = null;
     this.groups = [];
     this.channels = {};
-    this.dmConversations = [];
     this.messageQueue = [];
     this.replyToMessageId = null;
     this.showThreadId = null;

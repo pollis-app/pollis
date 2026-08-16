@@ -373,5 +373,27 @@ for (const skin of SKINS) {
       await expect(panel(page).getByRole("heading", { name: "Members — 3" })).toBeVisible();
       await expect(panel(page).getByRole("button", { name: /carol$/ })).toBeVisible();
     });
+
+    test("a DM's panel names its members instead of reporting none", async ({
+      page,
+    }) => {
+      // #906. `MembersPanel` read `appStore.dmConversations`, which nothing
+      // ever wrote — its two setters had zero call sites — so every DM showed
+      // "Members — 0" and the roster was empty. The channel case above passed
+      // throughout, because that path reads a React Query hook; only the DM
+      // branch touched the dead store.
+      await boot(page, skin, { rightPanelOpenByDefault: true });
+
+      await navigateTo(page, DM_PEER);
+      await expectOpen(page, "the preference asked for an open panel");
+
+      // Two people in this DM: alice (the viewer) and dave.
+      await expect(
+        panel(page).getByRole("heading", { name: "Members — 2" }),
+      ).toBeVisible();
+      await expect(
+        panel(page).getByRole("button", { name: new RegExp(`${DM_PEER}$`) }),
+      ).toBeVisible();
+    });
   });
 }
