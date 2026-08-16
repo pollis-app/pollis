@@ -54,25 +54,88 @@ Concretely, in the message log:
   keystroke in the edit bar; unstable identities there re-render the entire log.
 - Reply targets are resolved once into a `Map` by `MessageList`, not with a
   `find()` per row.
-**The log is still not virtualised, and two obvious approaches are already ruled out.**
-`loadMore` grows the timeline without limit, so layout/paint cost still scales with
-history length (render cost no longer does). Before attempting this again:
+### The windowed log (#874)
 
-- **Windowed virtualisation** breaks three subsystems that locate rows by
-  `querySelector` on the live DOM: permalink jumps (`messageJumpStore`), arrow-key
-  focus projection (`messageNavStore`), and reply-quote scrolling
-  (`scrollToMessage`). A row outside the window is not in the document at all.
-  Any windowing must first teach all three to expand the window and await a render.
-- **`content-visibility: auto` on the row does not work** — tried and reverted in
-  #874. It implies *paint containment*, which clips the row's `absolute` hover
-  action bar (`end-4 top-0 -translate-y-1/2`) and its dropdown menu, both of which
-  deliberately overflow the row box. It fails 8 `bookmarks.spec.ts` cases. It could
-  only work if the action bar were hoisted out of the row into a single shared
-  overlay tracking the hovered row (the way Slack does it).
-- **Truncating retained history** is the wrong trade here: "history is bounded, not
-  flaky" bounds what the *server* retains, not what a scrolled-back user can see.
+**The log is virtualised.** `MessageList` keeps only the visible slice of the
+timeline in the DOM, so layout and paint stopped scaling with history length the
+way render cost already had. Measured on a 400-message channel in the terminal
+skin: **7,415 elements inside the scroll container before, 538 after** — 400
+rendered rows down to 27.
 
-Guards live in `e2e/render-cost.spec.ts`, backed by `utils/renderProbe.ts`.
+`@tanstack/react-virtual` does the windowing. Three things decided it over
+`react-virtuoso` and `react-window`:
+
+- It is **headless**. Day dividers, roster banners, sender grouping and both
+  skins' row shapes stay in our own markup, unchanged, inside the window; the
+  library only supplies a range and a set of offsets. A library that owns the
+  row wrapper would have had to be taught all of that.
+- 3.14 has **first-class chat anchoring**: `anchorTo: "end"` re-pins the row the
+  reader is looking at across any count change, and `itemSizeCache` is keyed by
+  item key rather than index, so prepending 50 older messages does not throw
+  away 50 real measurements. That deleted the hand-rolled
+  save-scrollTop/restore-by-scrollHeight-delta pair that used to bracket a
+  load-more — which windowing would have broken anyway, since the prepended
+  rows are off-window and only estimated.
+- Same maintainers as `@tanstack/react-query` and `@tanstack/react-router`,
+  both already load-bearing here.
+
+Things worth knowing before touching it:
+
+- **Rows are `position: absolute` inside `[data-testid="message-window"]`**,
+  which is what makes each row's position independent of its neighbours and
+  contains the refined day divider's margins (an escaping margin would leave
+  every measurement short and the window drifting). It changes nothing about
+  how the hover action bar and its `z-40` menu paint: both are still positioned
+  against the row's own `relative` box, and nothing clips.
+- **Grouping and day dividers are computed from the full timeline by index**,
+  never from the rendered slice. Computing from the slice would put a spurious
+  divider and a spurious sender header on the top row of every window.
+- **The initial "open at the newest message" anchor is an effect that re-runs**,
+  not a one-shot latched on a ref. `followOnAppend` only reacts to the message
+  count changing while a scroll container exists, so a conversation whose first
+  page arrives in one go has nothing for it to react to; and React's dev-mode
+  double mount re-attaches the scroll element, which rewinds the virtualizer to
+  the offset it still believes in. A one-shot anchor loses that race silently.
+- `followOnAppend: "smooth"` follows new messages down **only from the bottom**.
+  Scrolled back through history, an arriving message no longer yanks the
+  viewport away — the Slack/Discord behaviour, and a deliberate change from the
+  unconditional scroll-to-bottom that came before.
+- While a load-more is in flight the "loading" line sits in the scroll container
+  above the window, so the virtualizer's offsets are out by that line's height
+  for the duration. It is under one row and the overscan absorbs it; do not
+  "fix" it by moving the line inside the window container without also setting
+  `paddingStart`.
+
+**The three DOM-locating subsystems now ask before they look.** Permalink jumps
+(`messageJumpStore`), arrow-key focus projection (`messageNavStore`) and
+reply-quote scrolling (`scrollToMessage`) all used to `querySelector` a row that
+was guaranteed to exist. `components/Message/messageWindow.ts` owns the
+replacement: `findRow` for the synchronous common case (the overscan means an
+ordinary one-step move finds its target already rendered) and `revealRow` to
+move the window to a target's index and await the commit, with a cancellation
+hook so an effect that re-runs abandons an in-flight reveal. Nothing else in the
+list may reach into the DOM for a row.
+
+**`olderMessages` is deliberately still uncapped.** Truncating it would be the
+wrong trade — "history is bounded, not flaky" bounds what the *server* retains,
+not what a scrolled-back user can see — and windowing removes the reason to
+want to: an off-window message costs one array entry and one cached height, no
+DOM node, no layout, no paint.
+
+**`content-visibility: auto` on the row does not work** — tried and reverted in
+#874, and not worth retrying. It implies *paint containment*, which clips the
+row's `absolute` hover action bar (`end-4 top-0 -translate-y-1/2`) and its
+dropdown menu, both of which deliberately overflow the row box. It failed 8
+`bookmarks.spec.ts` cases. It could only work if the action bar were hoisted out
+of the row into a single shared overlay tracking the hovered row (the way Slack
+does it).
+
+Guards live in `e2e/render-cost.spec.ts` (render cost, backed by
+`utils/renderProbe.ts`) and `e2e/message-window.spec.ts` (the window itself, and
+every DOM-locating path aimed at a target far outside it). Both run in both
+skins. Seeding a paginated conversation in the specs needs `paginate: true` in
+the preload — `frontend/src/__mocks__/tauri-core.ts` otherwise hands back the
+whole seeded conversation in one page, which is what every other spec wants.
 
 ### Presence
 
@@ -174,7 +237,8 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
 - **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, copyLinkState, isSaved, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed.
-- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`.
+- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `messageWindow.ts` is the only door from a message id to a live row.
+- **messageWindow** (not a component) — `frontend/src/components/Message/messageWindow.ts`. Row-height estimates in rem, the overscan, and `findRow`/`revealRow`, the only sanctioned way to get from a message id to a rendered row now that the log is windowed.
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`
 
