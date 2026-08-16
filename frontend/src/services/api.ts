@@ -329,8 +329,12 @@ export async function listUserGroups(userId: string): Promise<Group[]> {
   return (groups || []).map(toGroup);
 }
 
-export async function listChannels(groupId: string): Promise<Channel[]> {
-  const channels = await invoke<RawChannel[]>('list_group_channels', { groupId });
+// #917: members-only on the Rust side, so the caller's id is now part of the
+// request rather than implied. It is passed explicitly instead of being read
+// from a store in here, because this module is a thin transport layer and the
+// hooks already hold the current user.
+export async function listChannels(groupId: string, requesterId: string): Promise<Channel[]> {
+  const channels = await invoke<RawChannel[]>('list_group_channels', { groupId, requesterId });
   return (channels || []).map(toChannel);
 }
 

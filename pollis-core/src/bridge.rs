@@ -417,7 +417,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
         "list_group_channels" => {
             let group_id: String = arg(&args, "groupId")?;
-            ok(groups::list_group_channels(group_id, &state()?).await?)
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(groups::list_group_channels(group_id, requester_id, &state()?).await?)
         }
         "create_group" => {
             let name: String = arg(&args, "name")?;
@@ -528,7 +529,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         }
         "get_group_members" => {
             let group_id: String = arg(&args, "groupId")?;
-            ok(groups::get_group_members(group_id, &state()?).await?)
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(groups::get_group_members(group_id, requester_id, &state()?).await?)
         }
         "leave_group" => {
             let group_id: String = arg(&args, "groupId")?;

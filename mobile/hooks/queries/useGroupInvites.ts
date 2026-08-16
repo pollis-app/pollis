@@ -116,15 +116,20 @@ export function useSendGroupInvite(groupId: string | null) {
 }
 
 export function useGroupMembers(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
   return useQuery({
     queryKey: groupInviteQueryKeys.members(groupId),
     queryFn: async (): Promise<GroupMember[]> => {
-      if (!groupId) {
+      if (!groupId || !currentUser) {
         return [];
       }
-      return await invoke<GroupMember[]>("get_group_members", { groupId });
+      return await invoke<GroupMember[]>("get_group_members", {
+        groupId,
+        requesterId: currentUser.id,
+      });
     },
-    enabled: !!groupId,
+    enabled: !!groupId && !!currentUser,
     staleTime: 1000 * 60,
   });
 }
@@ -408,9 +413,11 @@ export function useGroupBySlug(slug: string | null) {
       if (!slug) {
         return null;
       }
+      // Mirrors the Rust `GroupPreview` (#917) — the deliberately minimal
+      // public projection, and nothing more. The previously declared `slug`
+      // field was never returned by the command; the caller derives it.
       return await invoke<{
         id: string;
-        slug: string;
         name: string;
         description?: string;
       } | null>("search_group_by_slug", { slug });

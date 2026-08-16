@@ -127,21 +127,24 @@ export function useCreateChannel(groupId: string | null) {
 }
 
 export function useGroupChannels(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
   return useQuery({
     queryKey: groupQueryKeys.channels(groupId),
     queryFn: async (): Promise<Channel[]> => {
-      if (!groupId) {
+      if (!groupId || !currentUser) {
         throw new Error("No group ID provided");
       }
       const channels = await invoke<Channel[]>("list_group_channels", {
         groupId,
+        requesterId: currentUser.id,
       });
       // VOICE-CHANNEL FILTER: mobile has no voice UI yet (#185) — never surface
       // voice channels in the list. Mirrors the filter in
       // useUserGroupsWithChannels.
       return channels.filter((c) => c.channel_type !== "voice");
     },
-    enabled: !!groupId,
+    enabled: !!groupId && !!currentUser,
     staleTime: 1000 * 60,
   });
 }

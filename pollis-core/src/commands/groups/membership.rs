@@ -6,11 +6,23 @@ use crate::state::AppState;
 use super::types::GroupMember;
 use super::authz;
 
+/// Every member of a group, with the profile fields the member list renders.
+///
+/// #917: members-only. This took no caller at all, so any signed-in user who
+/// named a group id got its full roster — usernames and avatars included — and
+/// ids are enumerable because every client holds a whole-DB read-only Turso
+/// token. A roster is precisely the social-graph metadata this product exists
+/// to protect, so the answer for an outsider is the error, not an empty list:
+/// #875 established that a silence a caller cannot distinguish from "there is
+/// nothing here" is not an authorization outcome.
 pub async fn get_group_members(
     group_id: String,
+    requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<GroupMember>> {
     let conn = state.remote_db.conn().await?;
+
+    authz::require_member(&conn, &group_id, &requester_id).await?;
 
     let mut rows = conn.query(
         "SELECT gm.user_id, u.username, u.avatar_url, gm.role, gm.joined_at

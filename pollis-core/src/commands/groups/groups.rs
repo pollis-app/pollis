@@ -5,7 +5,7 @@ use crate::error::{Error, Result};
 use crate::state::AppState;
 
 use super::derive_slug;
-use super::types::{Channel, Group, GroupWithChannels};
+use super::types::{Channel, Group, GroupPreview, GroupWithChannels};
 use super::authz;
 
 pub async fn list_user_groups_with_channels(
@@ -218,27 +218,56 @@ pub async fn delete_group(
 
 /// Find a group whose name derives to the given slug.
 /// Returns an error if no match is found.
+///
+/// #917: deliberately NOT membership-gated, and deliberately narrowed instead.
+///
+/// This is the discovery step of the join flow — `SearchGroupPage` calls it,
+/// then offers `request_group_access` on what it finds. A `require_member`
+/// guard here would mean you could only find groups you were already in, which
+/// is not a stricter version of the feature, it is the removal of the feature.
+/// Discord's vanity-invite lookup and Slack's workspace-URL lookup make the
+/// same trade: the existence of a group at a guessed name is public, its
+/// contents are not.
+///
+/// So the fix is the projection. This used to hand back the whole [`Group`] row
+/// — including `owner_id`, a named user — to anyone who guessed a slug. It now
+/// returns [`GroupPreview`], which carries exactly what the join prompt
+/// renders. See that type for the field-by-field reasoning.
+///
+/// What this endpoint still discloses, unavoidably, is whether a group with a
+/// given slug exists; that is inherent to slug lookup and is the same bet the
+/// products above take.
+///
+/// The scan below is O(rows) per query — `derive_slug` is Rust, not SQL, so it
+/// cannot be an indexed lookup. That is a cost worth knowing about, but it is
+/// deliberately NOT described here as "wants a rate limit": this query runs on
+/// the client, against Turso, under the caller's own read token, so a limit
+/// applied at this function is one the caller can decline to apply. Rate
+/// limiting slug lookup would mean moving the lookup behind the DS. See the
+/// bound documented in `authz.rs` — it applies to this projection exactly as it
+/// applies to the `require_member` guards.
 pub async fn search_group_by_slug(
     slug: String,
     state: &Arc<AppState>,
-) -> Result<Group> {
+) -> Result<GroupPreview> {
     let conn = state.remote_db.conn().await?;
     let target = slug.trim().to_lowercase();
 
+    // Only the three columns `GroupPreview` carries are SELECTed. Narrowing the
+    // query as well as the struct means a future edit to the mapping cannot
+    // reach a sensitive column without also editing the SQL.
     let mut rows = conn.query(
-        "SELECT id, name, description, owner_id, created_at FROM groups",
+        "SELECT id, name, description FROM groups",
         libsql::params![],
     ).await?;
 
     while let Some(row) = rows.next().await? {
         let name: String = row.get(1)?;
         if derive_slug(&name) == target {
-            return Ok(Group {
+            return Ok(GroupPreview {
                 id: row.get(0)?,
                 name,
                 description: row.get(2)?,
-                owner_id: row.get(3)?,
-                created_at: row.get(4)?,
             });
         }
     }

@@ -375,3 +375,277 @@ async fn join_requests_and_invite_links_are_admin_only() {
     drop(bob);
     drop(carol);
 }
+
+// ─── #917 — group reads take a caller ────────────────────────────────────────
+
+/// The roster, the channel list and the emoji list used to take a group id and
+/// NO caller, so any signed-in user who named a group id got all three. Group
+/// ids are enumerable (every client holds a whole-DB read-only Turso token, and
+/// `search_group_by_slug` maps guessable names onto ids), so this was reachable
+/// rather than theoretical.
+///
+/// All three are exercised in one scenario on purpose: they share a chokepoint
+/// (`authz::require_member`), and a fix that guards two of three is the bug
+/// again. Both sides of each are asserted — a guard that denied everyone would
+/// pass a deny-only test while breaking the product.
+///
+/// Mallory is signed up and authenticated; she is simply outside the group. So
+/// a denial here is "not a member", never "unknown user".
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn group_reads_are_members_only() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut mallory = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    mallory.sign_up("mallory@test.local").await;
+
+    let group_id = alice.create_group("Private Group").await;
+
+    // Bob joins as a plain member — the roster guard is about membership, not
+    // about the admin role, so the allowed case must include a non-admin.
+    alice.invite(&group_id, &bob_profile.username).await;
+    bob.poll().await;
+    let invite = bob.first_pending_invite().await.expect("bob was invited");
+    bob.accept_invite(invite["id"].as_str().expect("invite id")).await;
+    bob.poll().await;
+
+    crate::harness::seed_group_emoji(
+        &group_id,
+        "party_parrot",
+        &"a".repeat(64),
+        &alice_profile.id,
+    )
+    .await;
+
+    // ── The allowed cases still work ────────────────────────────────────────
+    let alice_members = alice.group_member_ids(&group_id).await;
+    assert_eq!(alice_members.len(), 2, "the admin must still see the roster");
+    let bob_members = bob.group_member_ids(&group_id).await;
+    assert_eq!(bob_members.len(), 2, "a plain member must still see the roster");
+    assert!(
+        !alice.list_group_channels(&group_id).await.is_empty(),
+        "the admin must still see the channel list"
+    );
+    assert!(
+        !bob.list_group_channels(&group_id).await.is_empty(),
+        "a plain member must still see the channel list"
+    );
+    let bob_emoji = bob
+        .invoke_json(
+            "list_group_emoji",
+            json!({ "groupId": group_id, "requesterId": bob.user_id() }),
+        )
+        .await;
+    assert_eq!(
+        bob_emoji.as_array().expect("emoji array").len(),
+        1,
+        "a member must still see the group's emoji list"
+    );
+
+    // ── The roster ─────────────────────────────────────────────────────────
+    // The headline exposure: usernames and avatar URLs for everyone in a group
+    // the caller has no relationship to.
+    let err = mallory
+        .invoke_try(
+            "get_group_members",
+            json!({ "groupId": group_id, "requesterId": mallory.user_id() }),
+        )
+        .await
+        .expect_err("a non-member must not receive a group's roster");
+    assert!(
+        err.contains("not a member of this group"),
+        "a non-member should be told they are outside the group, got: {err}"
+    );
+
+    // ── The channel list ───────────────────────────────────────────────────
+    let err = mallory
+        .invoke_try(
+            "list_group_channels",
+            json!({ "groupId": group_id, "requesterId": mallory.user_id() }),
+        )
+        .await
+        .expect_err("a non-member must not receive a group's channel list");
+    assert!(
+        err.contains("not a member of this group"),
+        "a non-member should be told they are outside the group, got: {err}"
+    );
+
+    // ── The emoji list ─────────────────────────────────────────────────────
+    // Listing a group's emoji is group metadata (shortcodes name things, and
+    // `created_by` names members). Distinct from RESOLVING one hash, which
+    // stays open — see `emoji_rendering_ignores_group_membership`.
+    let err = mallory
+        .invoke_try(
+            "list_group_emoji",
+            json!({ "groupId": group_id, "requesterId": mallory.user_id() }),
+        )
+        .await
+        .expect_err("a non-member must not receive a group's emoji list");
+    assert!(
+        err.contains("not a member of this group"),
+        "a non-member should be told they are outside the group, got: {err}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(mallory);
+}
+
+/// GUARD, not a proof of the fix: #848 requires that an emoji from a group you
+/// are in NONE of still RENDERS when someone sends it, because the content hash
+/// resolves without a membership check by design. #917 closes the emoji
+/// *listing*, and the risk is that the guard is put one layer too low and takes
+/// rendering with it.
+///
+/// The assertion is that a non-member and a member reach the SAME outcome —
+/// membership is not an input to this path at all. The shared outcome is the
+/// object-key mismatch `seed_group_emoji` arms deliberately, which is reached
+/// after the object lookup and before any network call, so the test is hermetic
+/// and its failure mode is a wrong error rather than a flake.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn emoji_rendering_ignores_group_membership() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut mallory = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    mallory.sign_up("mallory@test.local").await;
+
+    let group_id = alice.create_group("Emoji Owners").await;
+    let content_hash = "b".repeat(64);
+    crate::harness::seed_group_emoji(&group_id, "shipit", &content_hash, &alice_profile.id).await;
+
+    alice.arm_media_server().await;
+    mallory.arm_media_server().await;
+
+    let member_err = alice
+        .invoke_try("get_emoji_url", json!({ "contentHash": content_hash }))
+        .await
+        .expect_err("the seeded object key is deliberately wrong");
+    let outsider_err = mallory
+        .invoke_try("get_emoji_url", json!({ "contentHash": content_hash }))
+        .await
+        .expect_err("the seeded object key is deliberately wrong");
+
+    assert!(
+        !outsider_err.contains("not a member of this group"),
+        "#848: resolving an emoji hash must never consult group membership, got: {outsider_err}"
+    );
+    assert_eq!(
+        member_err, outsider_err,
+        "#848: a member and a non-member must reach the identical outcome — membership \
+         is not an input to the render path. member: {member_err}, outsider: {outsider_err}"
+    );
+    assert!(
+        outsider_err.contains("unexpected object key"),
+        "the render path should have reached the object-key check, meaning it got past \
+         the lookup with no membership gate in the way, got: {outsider_err}"
+    );
+
+    drop(alice);
+    drop(mallory);
+}
+
+/// GUARD for the regression this fix is most likely to cause: `search_group_by_slug`
+/// is how a stranger FINDS a group to join, so it deliberately keeps taking no
+/// membership check. What changed is the SHAPE — it now answers with the minimal
+/// public projection instead of the whole `groups` row.
+///
+/// Asserts the full join path end to end from OUTSIDE the group (search →
+/// request → approve → member), and that the projection carries what the join
+/// prompt renders and nothing more.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_non_member_can_still_find_and_join_a_group() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Joinable Group").await;
+
+    // ── Discovery works for someone with no relationship to the group ──────
+    let found = carol
+        .invoke_json("search_group_by_slug", json!({ "slug": "joinable-group" }))
+        .await;
+    assert_eq!(found["id"].as_str(), Some(group_id.as_str()));
+    assert_eq!(found["name"].as_str(), Some("Joinable Group"));
+
+    // ── …and discloses only the join prompt's fields ───────────────────────
+    // `owner_id` names a specific user and is the #917 roster leak in
+    // miniature; `created_at` has no consumer. Asserted as absent KEYS, so
+    // re-adding either to the returned struct fails here.
+    assert!(
+        found.get("owner_id").is_none(),
+        "the public projection must not name the group's owner, got: {found}"
+    );
+    assert!(
+        found.get("created_at").is_none(),
+        "the public projection must not carry the group's creation time, got: {found}"
+    );
+    // Sorted before comparing: `serde_json`'s `Map` is a `BTreeMap` here (the
+    // `preserve_order` feature is not enabled anywhere in the tree), so the
+    // wire order is alphabetical, not declaration order. The property under
+    // test is the SET of disclosed fields, so compare it as a set and leave
+    // field ordering — which nothing depends on — unpinned.
+    let mut keys: Vec<&str> = found
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["description", "id", "name"],
+        "the public projection is exactly the join prompt's fields"
+    );
+
+    // ── The roster is NOT reachable from a search hit ───────────────────────
+    // Finding a group must not become a second door onto the thing #917 closed.
+    let err = carol
+        .invoke_try(
+            "get_group_members",
+            json!({ "groupId": group_id, "requesterId": carol.user_id() }),
+        )
+        .await
+        .expect_err("finding a group must not confer its roster");
+    assert!(err.contains("not a member of this group"), "got: {err}");
+
+    // ── The rest of the join flow still completes ──────────────────────────
+    carol.request_group_access(&group_id).await;
+    let requests = alice.list_join_requests(&group_id).await;
+    assert_eq!(requests.len(), 1, "the admin must see the pending request");
+    let request_id = requests[0]["id"].as_str().expect("request id").to_string();
+
+    alice.approve_join_request(&request_id).await;
+    carol.poll().await;
+
+    let ids = alice.group_member_ids(&group_id).await;
+    assert!(ids.contains(&carol_profile.id), "carol should have joined");
+    assert!(ids.contains(&alice_profile.id));
+
+    // And now that she is inside, the guarded reads open up for her.
+    assert!(
+        !carol.list_group_channels(&group_id).await.is_empty(),
+        "a newly approved member must be able to read the channel list"
+    );
+    assert_eq!(
+        carol.group_member_ids(&group_id).await.len(),
+        2,
+        "a newly approved member must be able to read the roster"
+    );
+
+    drop(alice);
+    drop(carol);
+}

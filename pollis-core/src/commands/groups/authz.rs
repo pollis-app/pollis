@@ -20,6 +20,28 @@
 //! trusts a client-supplied role. Reads go direct to Turso, where this *is* the
 //! only check; that is exactly why it must be honest rather than silently empty.
 //!
+//! ## The bound on every read guard here (#917)
+//!
+//! State it plainly, because the read guards added by #917 (`get_group_members`,
+//! `list_group_channels`, `list_group_emoji`, and the `GroupPreview` projection
+//! on `search_group_by_slug`) are easy to over-read as a fix for the underlying
+//! exposure. They are not.
+//!
+//! The client's Turso token is short-TTL and read-only, but it is **whole-DB**
+//! — it is not scoped to the signed-in user's rows (`commands/turso_token.rs`).
+//! So a user who ignores these commands and issues their own
+//! `SELECT * FROM group_member` still reads any group's roster. What #917
+//! closed is the *application-level* exposure: the app itself no longer hands a
+//! stranger a roster, a channel list or an emoji set for a group they named,
+//! and the rule is now stated once at a chokepoint instead of being absent.
+//! That is the shape the issue asked for, and it matches #875.
+//!
+//! Closing the residual needs a **row-scoped Turso token** so the database
+//! refuses the read regardless of which client asks. That is a separate,
+//! larger piece of work and is not attempted here. Until it lands, do not add
+//! a comment anywhere claiming a `require_member` call makes group metadata
+//! unreadable — it makes it un-served, which is a different and weaker claim.
+//!
 //! Every entry point takes the caller's existing `&Connection` rather than
 //! `&AppState`: for a REMOTE database `Database::connect()` builds a whole new
 //! `hyper::Client` with a cold pool, so a helper that opened its own would turn

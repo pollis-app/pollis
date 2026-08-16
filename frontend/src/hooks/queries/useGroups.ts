@@ -54,15 +54,17 @@ export function useUserGroups() {
 }
 
 export function useGroupChannels(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
   return useQuery({
     queryKey: groupQueryKeys.channels(groupId ?? ""),
     queryFn: async (): Promise<Channel[]> => {
-      if (!groupId) {
+      if (!groupId || !currentUser) {
         throw new Error("No group ID provided");
       }
-      return await api.listChannels(groupId);
+      return await api.listChannels(groupId, currentUser.id);
     },
-    enabled: !!groupId,
+    enabled: !!groupId && !!currentUser,
     staleTime: 1000 * 60,
   });
 }
@@ -438,11 +440,18 @@ export interface GroupMemberWithGroup extends GroupMember {
  */
 export function useAllGroupMembers(enabled: boolean): { members: GroupMemberWithGroup[] } {
   const { data: groups = [] } = useUserGroupsWithChannels();
+  const currentUser = useObserver(() => appStore.currentUser);
 
+  // #917: every group here comes from `useUserGroupsWithChannels`, which is
+  // already scoped to the current user's memberships — so the roster guard can
+  // never deny one of these. The id is threaded through because the command
+  // requires it, not because the set being fetched has changed.
   const queries = useQueries({
     queries: (enabled ? groups : []).map((g) => ({
       queryKey: groupQueryKeys.members(g.id),
-      queryFn: async (): Promise<GroupMember[]> => invoke<GroupMember[]>('get_group_members', { groupId: g.id }),
+      queryFn: async (): Promise<GroupMember[]> =>
+        invoke<GroupMember[]>('get_group_members', { groupId: g.id, requesterId: currentUser?.id }),
+      enabled: !!currentUser,
       staleTime: 1000 * 30,
       })),
   });
@@ -471,15 +480,17 @@ export function useAllGroupMembers(enabled: boolean): { members: GroupMemberWith
 }
 
 export function useGroupMembers(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
   return useQuery({
     queryKey: groupQueryKeys.members(groupId ?? ''),
     queryFn: async (): Promise<GroupMember[]> => {
-      if (!groupId) {
+      if (!groupId || !currentUser) {
         return [];
       }
-      return await invoke<GroupMember[]>('get_group_members', { groupId });
+      return await invoke<GroupMember[]>('get_group_members', { groupId, requesterId: currentUser.id });
     },
-    enabled: !!groupId,
+    enabled: !!groupId && !!currentUser,
     staleTime: 1000 * 30,
   });
 }
