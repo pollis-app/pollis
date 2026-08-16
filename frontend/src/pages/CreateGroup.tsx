@@ -88,8 +88,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
   return (
     <div
       data-testid="create-group-page"
-      className="flex-1 flex flex-col overflow-auto"
-      style={{ background: 'var(--c-bg)' }}
+      className="flex-1 flex flex-col overflow-auto bg-bg"
     >
       <div data-testid="create-group-content" className="flex-1 flex justify-center overflow-auto px-6 py-8">
         <form
@@ -152,7 +151,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           />
 
           {error && (
-            <p data-testid="create-group-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+            <p data-testid="create-group-error" className="text-xs font-mono text-danger">
               {error}
             </p>
           )}

@@ -211,20 +211,19 @@ export const SettingsPage: React.FC = observer(() => {
     <PageShell title={t("user.title")} scrollable>
       <div
         data-testid="settings-page"
-        className="flex-1 flex flex-col overflow-auto"
-        style={{ background: 'var(--c-bg)' }}
+        className="flex-1 flex flex-col overflow-auto bg-bg"
       >
         <div data-testid="settings-content" className="flex-1 flex justify-center overflow-auto px-6 py-8">
           <div className="w-full max-w-md flex flex-col gap-8">
 
             {/* Account */}
             <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
+              <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.accountHeading")}
               </h2>
 
               {isLoading ? (
-                <span data-testid="settings-loading" className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
+                <span data-testid="settings-loading" className="text-xs font-mono text-muted">
                   {t("common:states.loading")}
                 </span>
               ) : (
@@ -263,7 +262,7 @@ export const SettingsPage: React.FC = observer(() => {
               )}
 
               {updateProfileMutation.error && (
-                <p data-testid="settings-save-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+                <p data-testid="settings-save-error" className="text-xs font-mono text-danger">
                   {updateProfileMutation.error instanceof Error
                     ? updateProfileMutation.error.message
                     : t("user.saveFailed")}
@@ -271,7 +270,7 @@ export const SettingsPage: React.FC = observer(() => {
               )}
 
               {saveSuccess && (
-                <p data-testid="settings-save-success" className="text-xs font-mono" style={{ color: 'var(--c-accent-dim)' }}>
+                <p data-testid="settings-save-success" className="text-xs font-mono text-accent-dim">
                   {t("user.saved")}
                 </p>
               )}
@@ -291,12 +290,12 @@ export const SettingsPage: React.FC = observer(() => {
                 something the "Save Changes" button covers — email only mutates
                 via the OTP-verified flow below. */}
             <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
+              <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.emailHeading")}
               </h2>
 
               {isLoading ? (
-                <span className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
+                <span className="text-xs font-mono text-muted">
                   {t("common:states.loading")}
                 </span>
               ) : emailChangeStep === "idle" ? (
@@ -339,7 +338,7 @@ export const SettingsPage: React.FC = observer(() => {
                   />
                   <input data-testid="settings-email-new-input" type="hidden" value={pendingNewEmail} readOnly />
                   {emailChangeError && (
-                    <p data-testid="settings-email-change-error" className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
+                    <p data-testid="settings-email-change-error" className="text-xs font-mono text-danger">
                       {emailChangeError}
                     </p>
                   )}
@@ -366,12 +365,12 @@ export const SettingsPage: React.FC = observer(() => {
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                  <p className="text-xs font-mono text-muted">
                     <Trans
                       t={t}
                       i18nKey="user.codeSent"
                       values={{ email: pendingNewEmail }}
-                      components={{ addr: <span style={{ color: "var(--c-text)" }} /> }}
+                      components={{ addr: <span className="text-fg" /> }}
                     />
                   </p>
                   <TextInput
@@ -384,7 +383,7 @@ export const SettingsPage: React.FC = observer(() => {
                   />
                   <input data-testid="settings-email-otp-input" type="hidden" value={emailOtpCode} readOnly />
                   {emailChangeError && (
-                    <p data-testid="settings-email-change-error" className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
+                    <p data-testid="settings-email-change-error" className="text-xs font-mono text-danger">
                       {emailChangeError}
                     </p>
                   )}
@@ -418,15 +417,14 @@ export const SettingsPage: React.FC = observer(() => {
 
             {/* Avatar */}
             <section className="flex flex-col gap-4 mb-12">
-              <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
+              <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line">
                 {t("user.avatarHeading")}
               </h2>
 
               <div className="flex items-center gap-4">
                 <div
                   data-testid="avatar-preview-container"
-                  className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer rounded-panel"
-                  style={{ border: '2px solid var(--c-border)', background: 'var(--c-surface-high)' }}
+                  className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer rounded-panel border-2 border-line bg-surface-high"
                   onClick={() => fileInputRef.current?.click()}
                   title={t("user.avatarPickTitle")}
                 >
@@ -441,15 +439,14 @@ export const SettingsPage: React.FC = observer(() => {
                       onError={() => setCurrentAvatarUrl(null)}
                     />
                   ) : (
-                    <User data-testid="avatar-placeholder" size={22} aria-hidden="true" style={{ color: 'var(--c-text-muted)' }} />
+                    <User data-testid="avatar-placeholder" size={22} aria-hidden="true" className="text-muted" />
                   )}
                 </div>
 
                 <div className="flex flex-col gap-2">
                   <label
                     htmlFor="settings-avatar-input"
-                    className="inline-flex items-center gap-1.5 text-xs font-mono cursor-pointer transition-colors"
-                    style={{ color: 'var(--c-accent)' }}
+                    className="inline-flex items-center gap-1.5 text-xs font-mono cursor-pointer transition-colors text-accent"
                   >
                     <Upload size={14} aria-hidden="true" />
                     {t("user.chooseImage")}
@@ -466,20 +463,20 @@ export const SettingsPage: React.FC = observer(() => {
                     aria-label={t("user.avatarInputLabel")}
                     className="sr-only"
                   />
-                  <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
+                  <p className="text-xs font-mono text-muted">
                     {t("user.avatarHint")}
                   </p>
                 </div>
               </div>
 
               {uploadError && (
-                <p data-testid="avatar-upload-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+                <p data-testid="avatar-upload-error" className="text-xs font-mono text-danger">
                   {uploadError}
                 </p>
               )}
 
               {saveSuccess && !selectedFile && (
-                <p data-testid="avatar-upload-success" className="text-xs font-mono" style={{ color: 'var(--c-accent-dim)' }}>
+                <p data-testid="avatar-upload-success" className="text-xs font-mono text-accent-dim">
                   {t("user.avatarUpdated")}
                 </p>
               )}

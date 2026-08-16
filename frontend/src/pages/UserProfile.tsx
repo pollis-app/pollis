@@ -106,11 +106,11 @@ export const UserProfilePage: React.FC = observer(() => {
       <div data-testid="user-profile-page" className="flex justify-center px-6 py-10">
         <div className="w-full max-w-md flex flex-col gap-6">
           {isLoading ? (
-            <span className="text-xs font-mono self-center" style={{ color: "var(--c-text-muted)" }}>
+            <span className="text-xs font-mono self-center text-muted">
               {t("common:states.loading")}
             </span>
           ) : !profile ? (
-            <span className="text-xs font-mono self-center" style={{ color: "var(--c-text-muted)" }}>
+            <span className="text-xs font-mono self-center text-muted">
               {t("profile.notFound")}
             </span>
           ) : (
@@ -123,16 +123,14 @@ export const UserProfilePage: React.FC = observer(() => {
                 <div className="flex flex-col min-w-0">
                   <div
                     data-testid="user-profile-headline"
-                    className="font-mono text-2xl truncate"
-                    style={{ color: "var(--c-accent)" }}
+                    className="font-mono text-2xl truncate text-accent"
                   >
                     {headlineName}
                   </div>
                   {profile.preferred_name && profile.username && (
                     <div
                       data-testid="user-profile-username"
-                      className="font-mono text-xs truncate"
-                      style={{ color: "var(--c-text-muted)" }}
+                      className="font-mono text-xs truncate text-muted"
                     >
                       <bdi>@{profile.username}</bdi>
                     </div>
@@ -151,27 +149,23 @@ export const UserProfilePage: React.FC = observer(() => {
               {!isSelf && safety && (
                 <div
                   data-testid="safety-number"
-                  className="flex flex-col gap-3 pt-4"
-                  style={{ borderTop: "1px solid var(--c-border)" }}
+                  className="flex flex-col gap-3 pt-4 border-t border-line"
                 >
                   <div className="flex items-center justify-between">
                     <span
-                      className="font-mono text-xs uppercase tracking-wide"
-                      style={{ color: "var(--c-text-muted)" }}
+                      className="font-mono text-xs uppercase tracking-wide text-muted"
                     >
                       {t("profile.safetyNumber")}
                     </span>
                     <span
                       data-testid="safety-status"
-                      className="font-mono text-xs"
-                      style={{
-                        color:
-                          safety.status === "verified"
-                            ? "var(--c-accent)"
-                            : safety.status === "changed"
-                              ? "var(--c-danger)"
-                              : "var(--c-text-muted)",
-                      }}
+                      className={`font-mono text-xs ${
+                        safety.status === "verified"
+                          ? "text-accent"
+                          : safety.status === "changed"
+                            ? "text-danger"
+                            : "text-muted"
+                      }`}
                     >
                       {safety.status === "verified"
                         ? t("profile.statusVerified")
@@ -184,8 +178,7 @@ export const UserProfilePage: React.FC = observer(() => {
                     <code
                       dir="ltr"
                       data-testid="safety-number-digits"
-                      className="font-mono text-sm leading-relaxed break-all flex-1"
-                      style={{ color: "var(--c-text)" }}
+                      className="font-mono text-sm leading-relaxed break-all flex-1 text-fg"
                     >
                       {safety.safety_number}
                     </code>
@@ -219,15 +212,13 @@ export const UserProfilePage: React.FC = observer(() => {
                   </div>
                   {safety.status === "changed" && (
                     <span
-                      className="font-mono text-xs"
-                      style={{ color: "var(--c-danger)" }}
+                      className="font-mono text-xs text-danger"
                     >
                       {t("profile.keyChangedWarning")}
                     </span>
                   )}
                   <p
-                    className="font-mono text-xs"
-                    style={{ color: "var(--c-text-muted)" }}
+                    className="font-mono text-xs text-muted"
                   >
                     {t("profile.compareHint", { name: headlineName })}
                   </p>
@@ -258,7 +249,7 @@ export const UserProfilePage: React.FC = observer(() => {
                 />
               )}
 
-              <div style={{ borderTop: "1px solid var(--c-border)" }}>
+              <div className="border-t border-line">
                 <TerminalMenu items={items} onEsc={() => navigate({ to: "/dms" })} />
               </div>
             </>

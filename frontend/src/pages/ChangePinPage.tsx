@@ -82,13 +82,12 @@ export const ChangePinPage: React.FC = () => {
     <PageShell title={t("changePin.title")} scrollable>
       <div className="flex justify-center px-6 py-8">
       <div
-        className="flex flex-col gap-4 w-full max-w-md font-mono"
+        className="flex flex-col gap-4 w-full max-w-md font-mono text-fg"
         data-testid="change-pin-page"
-        style={{ color: "var(--c-text)" }}
       >
         {done ? (
           <div className="flex flex-col gap-4">
-            <p className="text-xs" style={{ color: "var(--c-accent)" }}>
+            <p className="text-xs text-accent">
               {t("changePin.updated")}
             </p>
             <Button
@@ -101,12 +100,12 @@ export const ChangePinPage: React.FC = () => {
         ) : (
           <div className="flex flex-col gap-5">
             <div>
-              <h2 className="text-sm font-bold" style={{ color: "var(--c-accent)" }}>
+              <h2 className="text-sm font-bold text-accent">
                 {heading}
               </h2>
               <p
-                className="text-xs mt-1"
-                style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
+                className="text-xs mt-1 text-muted"
+                style={{ lineHeight: 1.5 }}
               >
                 {step === "old"
                   ? t("changePin.hintOld")
@@ -119,8 +118,7 @@ export const ChangePinPage: React.FC = () => {
             {error && (
               <p
                 data-testid="change-pin-error"
-                className="text-xs"
-                style={{ color: "var(--c-danger)" }}
+                className="text-xs text-danger"
               >
                 {error}
               </p>

@@ -16,7 +16,7 @@ export const KickMemberPage: React.FC = () => {
   return (
     <PageShell title={t("kickMember.pageTitle")}>
       <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
-        <p className="text-xs font-mono text-center" style={{ color: "var(--c-text-dim)" }}>
+        <p className="text-xs font-mono text-center text-dim">
           <Trans
             i18nKey="channels:kickMember.confirm"
             values={{ name: member?.username ?? userId }}
@@ -26,7 +26,7 @@ export const KickMemberPage: React.FC = () => {
           {t("kickMember.rejoinNotice")}
         </p>
         {kickMutation.isError && (
-          <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
+          <p className="text-xs font-mono text-danger">
             {kickMutation.error instanceof Error
               ? kickMutation.error.message
               : t("kickMember.removeFailed")}

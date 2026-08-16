@@ -65,20 +65,20 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
           <span
             data-testid={`member-verification-verified-${m.user_id}`}
             title={t("members.verified")}
-            style={{ display: "inline-flex", color: "var(--c-accent)", flexShrink: 0 }}
+            className="text-accent"
+            style={{ display: "inline-flex", flexShrink: 0 }}
           >
             <ShieldCheck size={14} />
           </span>
         ) : null;
         return (
           <span
-            className="flex-1 truncate flex items-center gap-2"
-            style={{ color: "var(--c-text)" }}
+            className="flex-1 truncate flex items-center gap-2 text-fg"
           >
             <span className="truncate">{m.username ?? m.user_id}</span>
             {badge}
             {isSelf && (
-              <span className="ms-1" style={{ color: "var(--c-text-muted)" }}>
+              <span className="ms-1 text-muted">
                 {t("members.self")}
               </span>
             )}

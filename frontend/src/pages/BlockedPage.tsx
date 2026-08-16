@@ -25,8 +25,7 @@ export const BlockedPage: React.FC = () => {
     <PageShell title={t("blocked.pageTitle")}>
       <div
         data-testid="blocked-page"
-        className="flex-1 flex flex-col overflow-auto"
-        style={{ background: "var(--c-bg)" }}
+        className="flex-1 flex flex-col overflow-auto bg-bg"
       >
         <NavigableList
           items={blocked}
@@ -36,8 +35,7 @@ export const BlockedPage: React.FC = () => {
           rowTestId={(b) => `blocked-${b.user_id}`}
           renderRow={(b) => (
             <span
-              className="flex-1 truncate text-sm font-mono"
-              style={{ color: "var(--c-text)" }}
+              className="flex-1 truncate text-sm font-mono text-fg"
             >
               {b.username ?? b.user_id}
             </span>

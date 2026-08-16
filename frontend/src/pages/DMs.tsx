@@ -69,7 +69,7 @@ export const DMsPage: React.FC = observer(() => {
             size={14}
             aria-label={t("list.verified")}
             data-testid={`dm-verification-verified-${c.id}`}
-            style={{ color: "var(--c-accent)" }}
+            className="text-accent"
           />
         ) : undefined;
         return {

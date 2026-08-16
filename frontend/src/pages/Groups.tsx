@@ -48,7 +48,7 @@ export const GroupsPage: React.FC = observer(() => {
         let description: React.ReactNode = g.description || undefined;
         if (pendingJoinCount > 0) {
           description = (
-            <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>
+            <span className="status-bar-blink text-accent">
               {t("groups.joinRequestsPending", { count: pendingJoinCount })}
             </span>
           );

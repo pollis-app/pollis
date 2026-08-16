@@ -122,8 +122,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
   return (
     <div
       data-testid="create-channel-page"
-      className="flex-1 flex flex-col overflow-auto"
-      style={{ background: 'var(--c-bg)' }}
+      className="flex-1 flex flex-col overflow-auto bg-bg"
     >
       <div data-testid="create-channel-content" className="flex-1 flex justify-center overflow-auto px-6 py-8">
         <form
@@ -178,7 +177,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <input data-testid="create-channel-type-input" type="hidden" value={channelType} readOnly />
 
           {error && (
-            <p data-testid="create-channel-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+            <p data-testid="create-channel-error" className="text-xs font-mono text-danger">
               {error}
             </p>
           )}

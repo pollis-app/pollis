@@ -147,8 +147,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
           emptyLabel={t("shortcuts.empty")}
           renderRow={(r) => (
             <span
-              className="flex-1 truncate"
-              style={{ color: "var(--c-text)" }}
+              className="flex-1 truncate text-fg"
             >
               {r.title}
             </span>
@@ -163,15 +162,13 @@ export const KeyboardShortcutsPage: React.FC = () => {
                 onClick={() => setCapturingId(r.id)}
                 aria-label={t("shortcuts.rebindLabel", { name: r.title })}
                 data-testid={`shortcut-${r.id}-edit`}
-                className="font-mono text-xs"
+                className={`font-mono text-xs bg-bg border ${
+                  isCapturing ? "border-accent" : "border-line"
+                }`}
                 style={{
                   color: "inherit",
-                  background: "var(--c-bg)",
                   padding: "1px 6px",
                   borderRadius: 3,
-                  border: `1px solid ${
-                    isCapturing ? "var(--c-accent)" : "var(--c-border)"
-                  }`,
                   lineHeight: 1.2,
                   cursor: dataLoaded ? "pointer" : "default",
                   opacity: dataLoaded ? 1 : 0.6,

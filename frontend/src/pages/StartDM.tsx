@@ -46,8 +46,7 @@ export const StartDM: React.FC<StartDMProps> = observer(({ onSuccess }) => {
   return (
     <div
       data-testid="start-dm-page"
-      className="flex-1 flex flex-col overflow-auto"
-      style={{ background: 'var(--c-bg)' }}
+      className="flex-1 flex flex-col overflow-auto bg-bg"
     >
       <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
         <form
@@ -67,7 +66,7 @@ export const StartDM: React.FC<StartDMProps> = observer(({ onSuccess }) => {
           <input data-testid="dm-identifier-input" type="hidden" value={identifier} readOnly />
 
           {(error || createDMMutation.error) && (
-            <p data-testid="start-dm-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+            <p data-testid="start-dm-error" className="text-xs font-mono text-danger">
               {error ||
                 (createDMMutation.error instanceof Error
                   ? createDMMutation.error.message
