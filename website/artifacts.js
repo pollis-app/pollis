@@ -271,9 +271,9 @@ function renderReleaseProofs(report, tag) {
   html +=
     '<p class="art-note" style="margin-top:1rem;">This verdict is server-computed. Re-run it trustlessly with ' +
     "<code>pollis-verify release " +
-    esc(tag) +
-    " --base " +
     esc(BACKEND_BASE) +
+    " " +
+    esc(tag) +
     "</code>.</p>";
 
   byId("art-release-proofs").innerHTML = html;
@@ -290,9 +290,9 @@ function renderReleaseProofsUnavailable(tag) {
     '<p class="art-note">Could not reach the verifier at <code>' +
     esc(BACKEND_BASE) +
     "</code> for this release's proofs. Try again later, or verify directly with " +
-    "<code>pollis-verify release &lt;tag&gt; --base " +
+    "<code>pollis-verify release " +
     esc(BACKEND_BASE) +
-    "</code>.</p>";
+    " &lt;tag&gt;</code>.</p>";
 }
 
 function loadReleaseProofs(version) {
