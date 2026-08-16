@@ -8,12 +8,85 @@ Please do not open public issues for security problems.
 A useful report names the affected component, the impact, and steps to
 reproduce. You'll get a response through the advisory thread.
 
+This file is what `https://pollis.com/.well-known/security.txt` names in its
+`Policy` field, so it has to answer the questions a researcher asks *before*
+touching anything: am I allowed to test, how long until someone replies, and
+what is out of bounds.
+
+## Safe harbour
+
+If you are acting in good faith under this policy, Pollis will not pursue or
+support legal action against you, and will not report you to law enforcement,
+for your research. Concretely, we consider the following to be authorised
+testing of our production hosts:
+
+- probing `api.pollis.com`, `verify.pollis.com`, `cdn.pollis.com` and
+  `pollis.com` for vulnerabilities,
+- using accounts you control, and
+- retaining only the minimum data needed to demonstrate a finding.
+
+Good faith means: you stop as soon as you have demonstrated the problem; you do
+not access, modify or exfiltrate data belonging to anyone else; you do not
+degrade the service for other users (no DoS, no volumetric or brute-force
+testing); you do not use social engineering, phishing, or physical attacks
+against Pollis or its providers; and you give us the time below before
+disclosing publicly.
+
+If a third party brings action against you for research that stayed within this
+policy, we will make clear that it was authorised.
+
+We cannot grant safe harbour on infrastructure we do not own. Testing that would
+hit Cloudflare, Turso, AWS, LiveKit, Resend or GitHub as such is out of scope
+here and is governed by their own policies.
+
+## Response times
+
+These are commitments, not aspirations. They are measured in business days from
+when the advisory is filed.
+
+| Stage | Target |
+| --- | --- |
+| First human acknowledgement | 3 business days |
+| Initial assessment (severity, whether we can reproduce) | 10 business days |
+| Fix or a dated remediation plan | 90 calendar days |
+| Public disclosure | coordinated, by default at fix release or 90 days, whichever is first |
+
+Pollis is a small project. If a deadline is going to slip, you will be told
+before it slips rather than after, with the reason.
+
 ## Scope
 
 - This repository — desktop app, `pollis-core`, `pollis-delivery`, the
   transparency-log toolchain (`verifiable-log*`)
 - The delivery service at `api.pollis.com`
 - The public transparency log at `verify.pollis.com`
+- The release/update path: `cdn.pollis.com`, the installer scripts, the
+  updater manifests, and the signing/attestation pipeline
+
+## Out of scope
+
+Reports on these will be closed without a fix, so please do not spend time on
+them:
+
+- Denial of service, volumetric testing, and rate-limit exhaustion.
+- Social engineering, phishing, or physical access against Pollis, its
+  contributors, or any provider.
+- Findings that require an already-compromised device or OS. The device, its
+  local database, the signed binary and the OS keystore are inside the trust
+  boundary by design (see the security model in `CLAUDE.md`); "malware on the
+  machine can read the plaintext" is a documented property, not a bug.
+- Metadata that Pollis states it exposes to the server. Servers see who talks to
+  whom at the envelope level; that is written down in
+  `docs/metadata-retention-policy.md` and the whitepaper, and reporting it as a
+  leak is a scope disagreement rather than a vulnerability.
+- Missing hardening headers or TLS configuration nits on the static site with no
+  demonstrated impact.
+- Vulnerabilities in third-party services, reported to us rather than to them.
+- The three documented accepted message losses (see `CLAUDE.md`).
+
+Anything touching key handling, MLS state, the delivery service's authorisation
+checks, or the release/attestation pipeline is emphatically in scope, however
+small it looks.
 
 ## Verifying Pollis yourself
 

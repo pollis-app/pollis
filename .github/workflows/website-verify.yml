@@ -116,7 +116,62 @@ jobs:
           fi
           echo "✓ /learn states $want accepted losses, matching CLAUDE.md"
 
-      # 4. Staleness. Not a claim being wrong, but the condition that produces it.
+      # 4. security.txt stays RFC 9116 valid (#877).
+      #
+      # `Expires` is the one MANDATORY field, and the file shipped without it for
+      # its whole life — so every conforming parser treated the file as invalid
+      # and a researcher's tooling reported "no security.txt" for a host that had
+      # one. Adding the field fixes it exactly once; an expiry date is a claim
+      # with a built-in decay, so it needs a check or it becomes the same defect
+      # again on a date nobody has in their calendar. Fails inside 30 days, which
+      # is enough warning to bump it deliberately.
+      #
+      # Checked against the DEPLOYED file, not the repo copy: an un-deployed fix
+      # is not a fix, and this workflow exists precisely because the site can lag
+      # main (#406).
+      - name: Deployed security.txt is RFC 9116 valid and not expiring
+        run: |
+          set -euo pipefail
+          txt="$(curl -fsSL -m 30 "$SITE/.well-known/security.txt")"
+          expires="$(printf '%s' "$txt" | grep -i '^Expires:' | head -1 | sed 's/^[Ee]xpires:[[:space:]]*//' | tr -d '\r')"
+          if [ -z "$expires" ]; then
+            echo "::error::the deployed security.txt has no Expires field. RFC 9116 §2.5.5"
+            echo "::error::  makes it mandatory, so conforming parsers reject the entire file"
+            echo "::error::  and report that pollis.com publishes no security policy at all."
+            exit 1
+          fi
+          # Exactly one, per §2.5.5 — a second one makes the file invalid again.
+          n="$(printf '%s\n' "$txt" | grep -ci '^Expires:' || true)"
+          if [ "$n" -ne 1 ]; then
+            echo "::error::security.txt has ${n} Expires fields; RFC 9116 allows exactly one."
+            exit 1
+          fi
+          if ! printf '%s' "$txt" | grep -qi '^Contact:'; then
+            echo "::error::security.txt has no Contact field (RFC 9116 §2.5.3, mandatory)."
+            exit 1
+          fi
+          exp_epoch="$(date -u -d "$expires" +%s 2>/dev/null || true)"
+          if [ -z "$exp_epoch" ]; then
+            echo "::error::could not parse the Expires value '${expires}' as a date."
+            echo "::error::  RFC 9116 requires an ISO 8601 / RFC 3339 timestamp."
+            exit 1
+          fi
+          now="$(date -u +%s)"
+          days=$(( (exp_epoch - now) / 86400 ))
+          if [ "$days" -lt 0 ]; then
+            echo "::error::the deployed security.txt EXPIRED ${days#-} days ago — conforming"
+            echo "::error::  parsers now reject it. Bump Expires in website/.well-known/security.txt"
+            echo "::error::  and deploy the site."
+            exit 1
+          fi
+          if [ "$days" -lt 30 ]; then
+            echo "::error::the deployed security.txt expires in ${days} days. Bump Expires in"
+            echo "::error::  website/.well-known/security.txt and deploy, before it goes invalid."
+            exit 1
+          fi
+          echo "✓ security.txt is valid and expires in ${days} days (${expires})"
+
+      # 5. Staleness. Not a claim being wrong, but the condition that produces it.
       #    Warn rather than fail: a deliberate hold on publishing is legitimate
       #    (#406), a *forgotten* one is what we are surfacing.
       - name: Warn if the deployed site lags main
