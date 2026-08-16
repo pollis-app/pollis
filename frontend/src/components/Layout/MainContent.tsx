@@ -21,6 +21,7 @@ import { buildMessageContent } from "../../utils/attachmentEnvelope";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { messageNavStore } from "../../stores/messageNavStore";
 import { TypingIndicator } from "../TypingIndicator";
+import { EmptyState } from "../ui/EmptyState";
 
 // Passed from DM page when the current user has not yet accepted the DM.
 // Replaces the chat input with an accept/block bar.
@@ -463,19 +464,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
   if (!selectedChannelId && !selectedConversationId) {
     return (
-      <div
-        data-testid="main-content"
-        className="flex-1 flex items-center justify-center"
-        style={{ background: 'var(--c-bg)' }}
-      >
-        <p
-          data-testid="empty-channel-message"
-          className="text-xs font-mono"
-          style={{ color: 'var(--c-text-muted)' }}
-        >
-          {t("chat.noSelection")}
-        </p>
-      </div>
+      <EmptyState testId="main-content" messageTestId="empty-channel-message">
+        {t("chat.noSelection")}
+      </EmptyState>
     );
   }
 

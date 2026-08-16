@@ -12,6 +12,7 @@ import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
 import { Switch } from "../components/ui/Switch";
 import type { Group } from "../types";
+import { EmptyState } from "../components/ui/EmptyState";
 
 interface CreateGroupProps {
   onSuccess?: (groupId: string) => void;
@@ -80,9 +81,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
 
   if (!currentUser) {
     return (
-      <div data-testid="create-group-no-user" className="flex items-center justify-center flex-1" style={{ background: 'var(--c-bg)' }}>
-        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>{t("errors.signInRequired")}</p>
-      </div>
+      <EmptyState testId="create-group-no-user">{t("errors.signInRequired")}</EmptyState>
     );
   }
 

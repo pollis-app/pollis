@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { horizontalArrowStep, isHorizontalArrow } from "../../utils/direction";
+import { EmptyState } from "./EmptyState";
 
 // Reusable keyboard-navigable list.
 //
@@ -218,11 +219,7 @@ export function NavigableList<T>({
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-          {resolvedLoadingLabel}
-        </p>
-      </div>
+      <EmptyState background={false}>{resolvedLoadingLabel}</EmptyState>
     );
   }
 

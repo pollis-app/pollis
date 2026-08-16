@@ -33,6 +33,7 @@ import { messageNavStore } from "../../stores/messageNavStore";
 import type { MessageNavAction } from "../../utils/messageNav";
 import { arrowStep, isHorizontalArrow, isRtlElement } from "../../utils/direction";
 import type { Message } from "../../types";
+import { EmptyState } from "../ui/EmptyState";
 
 // How long the permalink jump highlight stays on the target row.
 const HIGHLIGHT_MS = 1800;
@@ -823,15 +824,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
 
   if (timeline.length === 0) {
     return (
-      <div
-        data-testid="empty-messages"
-        className="flex-1 flex items-center justify-center"
-        style={{ background: "var(--c-bg)" }}
-      >
-        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-          {t("list.empty")}
-        </p>
-      </div>
+      <EmptyState testId="empty-messages">{t("list.empty")}</EmptyState>
     );
   }
 

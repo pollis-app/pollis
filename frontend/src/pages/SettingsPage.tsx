@@ -12,6 +12,7 @@ import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar, userQ
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { convertFileSrc, invoke } from "../bridge";
+import { EmptyState } from "../components/ui/EmptyState";
 
 export const SettingsPage: React.FC = observer(() => {
   const { t } = useTranslation("settings");
@@ -201,9 +202,7 @@ export const SettingsPage: React.FC = observer(() => {
   if (!currentUser) {
     return (
       <PageShell title={t("user.title")} scrollable>
-        <div data-testid="settings-no-user" className="flex items-center justify-center flex-1" style={{ background: 'var(--c-bg)' }}>
-          <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>{t("user.signInPrompt")}</p>
-        </div>
+        <EmptyState testId="settings-no-user">{t("user.signInPrompt")}</EmptyState>
       </PageShell>
     );
   }

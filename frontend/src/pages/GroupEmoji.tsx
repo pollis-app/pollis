@@ -14,6 +14,7 @@ import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { CustomEmojiImage } from "../components/Emoji/CustomEmojiImage";
+import { EmptyState } from "../components/ui/EmptyState";
 
 interface GroupEmojiProps {
   groupId: string;
@@ -106,9 +107,7 @@ export const GroupEmoji: React.FC<GroupEmojiProps> = observer(({ groupId }) => {
 
   if (!currentUser) {
     return (
-      <div data-testid="group-emoji-no-user" className="flex items-center justify-center flex-1 bg-bg">
-        <p className="text-xs font-mono text-muted">{t("manage.signInRequired")}</p>
-      </div>
+      <EmptyState testId="group-emoji-no-user">{t("manage.signInRequired")}</EmptyState>
     );
   }
 
