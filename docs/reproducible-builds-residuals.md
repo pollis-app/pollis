@@ -317,10 +317,21 @@ Jobs pin `ubuntu-22.04` / `ubuntu-24.04` / `macos-latest` / `windows-latest` by
 **label**. GitHub periodically re-images these labels, so the underlying system
 libraries and toolchains behind a label can shift between builds. True
 reproducibility wants a **digest-pinned** image; GitHub-hosted runners do not
-expose a stable content digest for their images, so we pin by label and record
-the label in each leaf's `toolchain.runner_image`. Reproducing across a runner
-re-image is best-effort until Pollis moves the release to a digest-pinned
-container or self-hosted image.
+expose a stable content digest for their images.
+
+Since #877 the leaf no longer records the *label*. It records
+`$ImageOS@$ImageVersion` — e.g. `ubuntu22@20250804.1.0` — which names one
+immutable, dated `actions/runner-images` build whose package manifest is
+published, rather than a moving pointer that says nothing about which image ran.
+That converts this residual from "we recorded something meaningless" into "we
+recorded exactly which image, and you still cannot pin a digest". The Linux leaf
+records both images (`…+helper:ubuntu24@…`), since the AppImage embeds a helper
+compiled on the other one.
+
+Reproducing across a runner re-image remains best-effort until Pollis moves the
+release to a digest-pinned container or self-hosted image — but a rebuilder can
+now at least *tell* whether the image moved, which was impossible while the field
+held a floating label.
 
 ### 7. Native C/C++ dependencies (`webrtc-sys` / `libwebrtc`, `webrtc-audio-processing-sys`) — best-effort
 These vendored C/C++ builds (clang, meson, ninja, VAAPI wrappers) are the

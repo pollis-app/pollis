@@ -71,6 +71,100 @@ esac
 check "succeeds for a tool that exists" "$?" "0"
 
 echo
+echo "toolchain recipe — real values, never 'unknown' (#877)"
+
+# 258 permanent leaves across v1.3.4 → v1.9.7 recorded
+# `{"rustc":"unknown","node":"unknown","pnpm":"unknown"}` because the attest
+# script DEFAULTED the recipe when nothing set it. The defect survived 26
+# releases precisely because a wrong recipe and a right one produced identical
+# green runs. These assertions encode the rule that replaced it: a recipe is read
+# from the build job's manifest or the release fails — there is no third outcome.
+
+printf '{"rustc":"1.96.0","node":"20.19.5","pnpm":"10.14.0","runner_image":"ubuntu22@20250804.1.0"}\n' \
+  > "$work/tc-ok.json"
+check "reads rustc"        "$(read_toolchain_field "$work/tc-ok.json" rustc)"        "1.96.0"
+check "reads node"         "$(read_toolchain_field "$work/tc-ok.json" node)"         "20.19.5"
+check "reads pnpm"         "$(read_toolchain_field "$work/tc-ok.json" pnpm)"         "10.14.0"
+check "reads runner_image" "$(read_toolchain_field "$work/tc-ok.json" runner_image)" "ubuntu22@20250804.1.0"
+
+# The Linux payload embeds a helper compiled on a DIFFERENT runner image, so the
+# recipe has to be able to name both or it sends a rebuilder to the wrong image.
+printf '{"rustc":"1.96.0","node":"20.19.5","pnpm":"10.14.0","runner_image":"ubuntu22@20250804.1.0+helper:ubuntu24@20250804.1.0"}\n' \
+  > "$work/tc-helper.json"
+check "accepts the two-image Linux recipe" \
+  "$(read_toolchain_field "$work/tc-helper.json" runner_image)" \
+  "ubuntu22@20250804.1.0+helper:ubuntu24@20250804.1.0"
+
+# THE regression guard. The exact string 26 releases published must never be
+# accepted, even if a manifest is hand-written containing it.
+printf '{"rustc":"unknown","node":"unknown","pnpm":"unknown","runner_image":"ubuntu-22.04"}\n' \
+  > "$work/tc-unknown.json"
+( read_toolchain_field "$work/tc-unknown.json" rustc ) >/dev/null 2>&1
+check "rejects the literal 'unknown' rustc" "$?" "1"
+( read_toolchain_field "$work/tc-unknown.json" runner_image ) >/dev/null 2>&1
+check "rejects a bare floating runner label" "$?" "1"
+
+# A partially-written manifest must fail per field, not silently yield empty —
+# attest-binaries.sh treats an empty read as a hard failure.
+printf '{"rustc":"1.96.0","node":"20.19.5"}\n' > "$work/tc-partial.json"
+( read_toolchain_field "$work/tc-partial.json" pnpm ) >/dev/null 2>&1
+check "rejects a manifest missing a field" "$?" "1"
+
+printf '{"rustc":"stable","node":"20.19.5","pnpm":"10.14.0","runner_image":"ubuntu22@1"}\n' \
+  > "$work/tc-floating.json"
+( read_toolchain_field "$work/tc-floating.json" rustc ) >/dev/null 2>&1
+check "rejects a non-version rustc ('stable' installs no particular compiler)" "$?" "1"
+
+( read_toolchain_field "$work/tc-does-not-exist.json" rustc ) >/dev/null 2>&1
+check "returns non-zero for a missing manifest" "$?" "1"
+( read_toolchain_field "" rustc ) >/dev/null 2>&1
+check "returns non-zero for an empty path argument" "$?" "1"
+
+# runner_image_id: the field the audit called out as "a floating label, not a
+# pinned digest". It must refuse to invent one off a hosted runner.
+( unset ImageOS ImageVersion; runner_image_id ) >/dev/null 2>&1
+check "runner_image_id fails when the runner does not identify itself" "$?" "1"
+got="$( ImageOS=ubuntu22 ImageVersion=20250804.1.0 runner_image_id )"
+check "runner_image_id names one dated image build" "$got" "ubuntu22@20250804.1.0"
+
+# tool_version: parse and validate, never guess.
+if command -v bash >/dev/null 2>&1; then
+  fakebin="$work/faketools"; mkdir -p "$fakebin"
+  printf '#!/bin/sh\necho "rustc 1.96.0 (abc123 2026-01-01)"\n' > "$fakebin/rustc"
+  printf '#!/bin/sh\necho "v20.19.5"\n' > "$fakebin/node"
+  printf '#!/bin/sh\necho "10.14.0"\n' > "$fakebin/pnpm"
+  printf '#!/bin/sh\necho "some tool, stable channel"\n' > "$fakebin/weird"
+  chmod +x "$fakebin"/*
+  check "parses rustc's version line" "$(PATH="$fakebin:$PATH" tool_version rustc)" "1.96.0"
+  check "strips node's leading v"     "$(PATH="$fakebin:$PATH" tool_version node)"  "20.19.5"
+  check "takes pnpm's bare version"   "$(PATH="$fakebin:$PATH" tool_version pnpm)"  "10.14.0"
+  ( PATH="$fakebin:$PATH" tool_version weird ) >/dev/null 2>&1
+  check "fails when no version can be parsed" "$?" "1"
+  out="$( tool_version definitely-not-a-real-compiler 2>&1 )"; rc=$?
+  check "fails for a tool that is not installed" "$rc" "1"
+  case "$out" in
+    *"::error::"*) ok "annotates the missing-tool failure for CI" ;;
+    *) bad "missing-tool failure is not annotated: $out" ;;
+  esac
+
+  # End-to-end: the manifest the build job writes must be readable by the attest
+  # job. Producer and consumer are the pair that actually has to agree.
+  ( PATH="$fakebin:$PATH" ImageOS=ubuntu22 ImageVersion=20250804.1.0 \
+      write_toolchain_manifest "$work/tc-written.json" "ubuntu24@20250804.1.0" ) >/dev/null 2>&1
+  check "write_toolchain_manifest round-trips rustc" \
+    "$(read_toolchain_field "$work/tc-written.json" rustc)" "1.96.0"
+  check "write_toolchain_manifest round-trips the two-image runner id" \
+    "$(read_toolchain_field "$work/tc-written.json" runner_image)" \
+    "ubuntu22@20250804.1.0+helper:ubuntu24@20250804.1.0"
+
+  # A build job missing a tool must not produce a manifest at all — a
+  # half-written one would be read as a valid recipe for the fields it does have.
+  ( PATH="$fakebin:$PATH" ImageOS= ImageVersion= \
+      write_toolchain_manifest "$work/tc-nope.json" ) >/dev/null 2>&1
+  check "write_toolchain_manifest fails without a runner identity" "$?" "1"
+fi
+
+echo
 echo "payload-hash — the contract the independent rebuilder recomputes"
 
 # `sha_file` shells out to sha256sum, which does not exist on macOS (it has

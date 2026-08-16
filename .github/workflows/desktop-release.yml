@@ -219,6 +219,19 @@ jobs:
           sha_macos_payload "$app" > "pollis-${GITHUB_REF_NAME}-macos.payload-sha256"
           echo "macOS payload_sha256: $(cat "pollis-${GITHUB_REF_NAME}-macos.payload-sha256")"
 
+      # #877: record the toolchain that ACTUALLY built this payload, in the only
+      # job that knows it. Until now every binary-transparency leaf carried
+      # `rustc/node/pnpm: "unknown"` and a floating runner label — 258 permanent,
+      # signed leaves across v1.3.4 → v1.9.7 — because the attest job (a different
+      # runner with none of these tools installed) filled the field with defaults.
+      # Emitted as a sidecar next to the payload digest, and hard-required by
+      # scripts/attest-binaries.sh, so a release can no longer log a false recipe.
+      - name: Record the build toolchain (#877)
+        run: |
+          set -euo pipefail
+          . scripts/lib/attest-helpers.sh
+          write_toolchain_manifest "pollis-${GITHUB_REF_NAME}-macos.toolchain.json"
+
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
@@ -229,6 +242,7 @@ jobs:
             target/aarch64-apple-darwin/release/bundle/macos/*.tar.gz
             target/aarch64-apple-darwin/release/bundle/macos/*.sig
             pollis-*-macos.payload-sha256
+            pollis-*-macos.toolchain.json
 
   build-windows:
     needs: preflight
@@ -448,6 +462,15 @@ jobs:
           sha_windows_payload "$exe" > "pollis-${GITHUB_REF_NAME}-windows.payload-sha256"
           echo "Windows payload_sha256: $(cat "pollis-${GITHUB_REF_NAME}-windows.payload-sha256")"
 
+      # #877 — see the note on the macOS job. Runs under Git-for-Windows bash,
+      # where `rustc`/`node`/`pnpm --version` behave identically.
+      - name: Record the build toolchain (#877)
+        shell: bash
+        run: |
+          set -euo pipefail
+          . scripts/lib/attest-helpers.sh
+          write_toolchain_manifest "pollis-${GITHUB_REF_NAME}-windows.toolchain.json"
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
@@ -458,6 +481,7 @@ jobs:
             target/x86_64-pc-windows-msvc/release/bundle/nsis/*.zip
             target/x86_64-pc-windows-msvc/release/bundle/nsis/*.sig
             pollis-*-windows.payload-sha256
+            pollis-*-windows.toolchain.json
 
   build-capture-helper:
     needs: preflight
@@ -556,6 +580,30 @@ jobs:
           name: pollis-capture-linux
           if-no-files-found: error
           path: src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
+
+      # #877: this job's runner image is part of the Linux payload's build recipe
+      # — the helper it compiles is embedded in the AppImage, and it deliberately
+      # runs on a DIFFERENT image (ubuntu-24.04, PipeWire 1.0) from the app job.
+      # A recipe naming only the app runner would send a rebuilder to the wrong
+      # image for part of the payload, so build-linux folds this id into its
+      # manifest. Carried in its own artifact rather than alongside the binary:
+      # src-tauri/binaries is an externalBin staging directory the bundler reads,
+      # and a release path is the wrong place to find out what it does with a
+      # stray file.
+      - name: Record the capture-helper runner image (#877)
+        run: |
+          set -euo pipefail
+          . scripts/lib/attest-helpers.sh
+          mkdir -p helper-recipe
+          runner_image_id > helper-recipe/capture-helper-runner.txt
+          echo "capture helper built on $(cat helper-recipe/capture-helper-runner.txt)"
+
+      - name: Upload capture-helper runner image
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-capture-linux-recipe
+          if-no-files-found: error
+          path: helper-recipe/capture-helper-runner.txt
 
   build-linux:
     needs: build-capture-helper
@@ -675,6 +723,13 @@ jobs:
       - name: Mark screen-capture helper executable
         run: chmod +x src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
 
+      # #877: the helper job's runner image, folded into this job's recipe below.
+      - name: Download capture-helper runner image
+        uses: actions/download-artifact@v4
+        with:
+          name: pollis-capture-linux-recipe
+          path: helper-recipe
+
       # Determinism inputs for the reproducible Linux payload (P5, #484):
       #   * SOURCE_DATE_EPOCH — the tag commit's unix seconds. Deterministic and
       #     independently recoverable from `git` by any rebuilder (NOT `now`), so
@@ -745,6 +800,17 @@ jobs:
           fi
           echo "no build paths embedded; remapped prefixes present"
 
+      # #877: the Linux payload is the reproducible unit, so its recipe is the one
+      # that most needs to be true. It names BOTH images — this job's and the
+      # capture-helper job's — because the AppImage embeds a binary compiled on
+      # the other one, exactly as rebuild-verify.yml already mirrors.
+      - name: Record the build toolchain (#877)
+        run: |
+          set -euo pipefail
+          . scripts/lib/attest-helpers.sh
+          helper="$(cat helper-recipe/capture-helper-runner.txt)"
+          write_toolchain_manifest "pollis-${GITHUB_REF_NAME}-linux.toolchain.json" "$helper"
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
@@ -756,6 +822,68 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.sig
             target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
             target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            pollis-*-linux.toolchain.json
+
+  # Software Bill of Materials, one per release (#877).
+  #
+  # Nothing in the repo produced an SBOM before this: a reader asking "what is
+  # actually inside the binary I just installed" had no answer, and neither did we
+  # when a CVE lands in a transitive crate. Syft catalogues BOTH ecosystems in one
+  # pass — `Cargo.lock` for the Rust half, `pnpm-lock.yaml` for the renderer — and
+  # emits CycloneDX 1.6 JSON.
+  #
+  # It reads the LOCKFILES at the tag commit, not a built artifact, and that is
+  # the honest scope: every release job builds `--locked` / `--frozen-lockfile`,
+  # so the lockfiles at this commit ARE the dependency set that got compiled. What
+  # it does not capture is the vendored C/C++ inside build scripts (webrtc-sys,
+  # webrtc-audio-processing-sys) — that is stated in docs/verifiable-builds-design.md
+  # rather than silently implied away.
+  #
+  # This job deliberately has no `needs:` on the build jobs — it depends only on
+  # the source tree, so it runs in parallel and cannot delay a release.
+  sbom:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to an exact version, not a floating major: an SBOM is a claim about
+      # what shipped, so the tool that generates it is part of the recipe. (The
+      # v1.9.1 provenance loss came from assuming a floating tag existed.)
+      - name: Generate CycloneDX SBOM (Rust + JS)
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: pollis-${{ github.ref_name }}.cdx.json
+          # This job publishes the SBOM itself (release asset + R2 + provenance
+          # subject); the action's own release-upload path would race the
+          # `release` job for the same asset name.
+          upload-artifact: false
+          upload-release-assets: false
+
+      # An empty or component-less SBOM is worse than none — it looks like a
+      # published dependency graph and asserts nothing. Fail rather than ship it.
+      - name: Assert the SBOM has real contents
+        run: |
+          set -euo pipefail
+          f="pollis-${GITHUB_REF_NAME}.cdx.json"
+          n="$(jq '.components | length' "$f")"
+          echo "SBOM components: ${n}"
+          if [ "${n:-0}" -lt 100 ]; then
+            echo "::error::SBOM lists only ${n} components — the Rust and JS lockfiles"
+            echo "::error::  together resolve to far more than that, so the catalogers"
+            echo "::error::  did not run over the tree. Publishing it would be a false claim."
+            exit 1
+          fi
+          jq -e '.bomFormat == "CycloneDX"' "$f" >/dev/null
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-sbom
+          if-no-files-found: error
+          path: pollis-*.cdx.json
 
   apply-migrations:
     needs: [build-macos, build-windows, build-linux]
@@ -802,7 +930,7 @@ jobs:
         run: ./scripts/db-apply.sh
 
   release:
-    needs: [build-macos, build-windows, build-linux, apply-migrations]
+    needs: [build-macos, build-windows, build-linux, apply-migrations, sbom]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -868,6 +996,14 @@ jobs:
           aws s3 cp "$APPIMAGE" "s3://pollis/releases/latest/pollis-latest-linux.AppImage" --endpoint-url "${ENDPOINT}" --cache-control "no-cache"
           aws s3 cp "$DEB"      "s3://pollis/releases/latest/pollis-latest-linux.deb"       --endpoint-url "${ENDPOINT}" --cache-control "no-cache"
           aws s3 cp "$RPM"      "s3://pollis/releases/latest/pollis-latest-linux.rpm"       --endpoint-url "${ENDPOINT}" --cache-control "no-cache"
+          # #877: the SBOM and the per-platform build-recipe sidecars, published
+          # next to the installers they describe. install.sh and any auditor
+          # resolve them by the same version-pinned path as the installer.
+          SBOM=$(find artifacts/pollis-sbom -name "*.cdx.json" | head -1)
+          aws s3 cp "$SBOM" "s3://pollis/releases/${VERSION}/pollis-${VERSION}.cdx.json" --endpoint-url "${ENDPOINT}" --content-type "application/json"
+          for tc in $(find artifacts -name "*.toolchain.json"); do
+            aws s3 cp "$tc" "s3://pollis/releases/${VERSION}/$(basename "$tc")" --endpoint-url "${ENDPOINT}" --content-type "application/json"
+          done
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
@@ -1023,11 +1159,36 @@ jobs:
           KEEP_SET=$(printf '%s\n' "${VERSIONS[@]:0:$KEEP}" "$CURRENT" | sort -u)
           echo "Keeping:"; echo "$KEEP_SET" | sed 's/^/  /'
 
+          # Prune the INSTALLERS, keep the EVIDENCE (#877).
+          #
+          # Every binary-transparency leaf is permanent and records a
+          # `provenance_uri` under `releases/<tag>/`. A blanket `rm --recursive`
+          # therefore guaranteed that each leaf's provenance link would 404 three
+          # releases after it was written — a permanent record pointing at
+          # something the pipeline was scheduled to delete. Same for the cosign
+          # signature and certificate that make `cosign verify-blob` possible, the
+          # SBOM, and the build-recipe sidecars: those are the artifacts an
+          # auditor needs LONGEST, and they were the ones with the shortest life.
+          #
+          # The size argument that motivates pruning does not apply to them: the
+          # installers are 100MB+ each, while an attestation, signature,
+          # certificate, SBOM and recipe together are a few hundred KB per
+          # release. Keeping them forever is free; deleting them silently
+          # falsified a claim already written into an append-only log.
+          KEEP_SUFFIXES='\.intoto\.jsonl$|\.sig$|\.pem$|\.cdx\.json$|\.toolchain\.json$|\.payload-sha256$'
           for v in "${VERSIONS[@]}"; do
             if ! grep -qxF "$v" <<< "$KEEP_SET"; then
-              echo "Pruning s3://pollis/releases/$v/"
-              aws s3 rm "s3://pollis/releases/$v/" --recursive --endpoint-url "${ENDPOINT}" \
-                || echo "::warning::failed to prune $v — leaving it in place"
+              echo "Pruning installers from s3://pollis/releases/$v/ (evidence retained)"
+              # Delete per key rather than --recursive, so the evidence files can
+              # be excluded. `aws s3 ls --recursive` prints `date time size key`.
+              aws s3 ls "s3://pollis/releases/$v/" --recursive --endpoint-url "${ENDPOINT}" \
+                | awk '{ $1=""; $2=""; $3=""; sub(/^ +/, ""); print }' \
+                | grep -Ev "$KEEP_SUFFIXES" \
+                | while IFS= read -r key; do
+                    [ -n "$key" ] || continue
+                    aws s3 rm "s3://pollis/${key}" --endpoint-url "${ENDPOINT}" >/dev/null \
+                      || echo "::warning::failed to prune ${key} — leaving it in place"
+                  done
             fi
           done
         env:
@@ -1041,6 +1202,13 @@ jobs:
       # the signed installers otherwise, from which the pre-signature payload is
       # unrecoverable). They also make each build's claimed pre-signature payload
       # hash publicly downloadable next to the installer it corresponds to.
+      #
+      # The `*.toolchain.json` recipe sidecars ship for the same two reasons
+      # (#877): the backfill path needs them to re-attest a tag without a rebuild,
+      # and publishing them puts the exact rustc/node/pnpm/runner-image claim next
+      # to the installer, where anyone can check it against the logged leaf. The
+      # `*.cdx.json` SBOM ships here so the dependency graph of the build you
+      # installed is a downloadable release asset, not a CI-only artifact.
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -1052,6 +1220,8 @@ jobs:
             artifacts/pollis-linux/**/*.rpm
             artifacts/pollis-macos/**/*.payload-sha256
             artifacts/pollis-windows/**/*.payload-sha256
+            artifacts/pollis-*/**/*.toolchain.json
+            artifacts/pollis-sbom/*.cdx.json
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
@@ -1156,6 +1326,16 @@ jobs:
           if [ -n "${MAC_TAR:-}" ]; then
             cp "$MAC_TAR" "prov/$(basename "$MAC_TAR")"
           fi
+          # #877: the SBOM is a provenance subject too, which is what makes the
+          # dependency graph PERMANENTLY auditable rather than merely published:
+          # its digest goes into the SLSA attestation and is recorded in the
+          # public Rekor log, an append-only anchor Pollis does not control. So a
+          # later, quieter SBOM cannot replace this one without the substitution
+          # being provable. (Hashing it into a binary-transparency leaf as well
+          # would need a new `Layer::Sbom` in the frozen BinaryRecord contract and
+          # a `pollis-verify` release ahead of it — see the follow-up note in
+          # docs/verifiable-builds-design.md.)
+          cp "$(find artifacts/pollis-sbom -name '*.cdx.json' | head -1)" "prov/pollis-${VERSION}.cdx.json"
           echo "staged provenance subjects:"
           ls -1 prov
 
@@ -1257,8 +1437,24 @@ jobs:
   # already out. A failure here therefore CANNOT corrupt a shipped release — it
   # only means the binaries tree lags one release until the next successful run.
   # It is logged loudly, never silently swallowed, and the release stands.
+  #
+  # It ALSO `needs: [provenance]` (#877). Every leaf this job writes stamps a
+  # `provenance_uri` pointing at the artifact's SLSA attestation on the CDN, and
+  # that leaf is permanent and append-only. When the provenance job failed —
+  # v1.9.0 (a stale cosign-installer key digest) and v1.9.1 (an unresolvable
+  # action tag) — this job ran anyway and baked a URI that 404s forever into the
+  # public log. Two releases' worth of leaves now point at nothing, and no
+  # amount of later repair changes them.
+  #
+  # Gating here costs nothing a release cares about: `release` has already
+  # published everything users install, so the only consequence of provenance
+  # failing is that the tag is not attested YET. That is fully recoverable —
+  # re-run provenance, then attest-release.yml backfills the tag without a
+  # rebuild. A lagging leaf is repairable; a wrong one is not. This deliberately
+  # does NOT make provenance a gate on the release itself, which would be a
+  # policy change about shipping and is not what this fixes.
   attest-and-log:
-    needs: [release]
+    needs: [release, provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1304,6 +1500,44 @@ jobs:
           ./scripts/attest-binaries.sh
           echo "per-tag BinaryRecord leaves:"
           jq '.' tag-records.json
+
+      # Prove every provenance_uri actually resolves BEFORE the leaves are
+      # merged (#877).
+      #
+      # The job dependency above orders provenance ahead of attestation, but
+      # ordering is not the invariant — the invariant is "no leaf names a URI
+      # that does not exist". A provenance job that goes green while publishing
+      # to a different key, or an R2 write that silently no-ops, would satisfy
+      # the ordering and still bake a dead link into an append-only log. So the
+      # actual claim is checked at the chokepoint, on the real URLs, with the
+      # leaves still discardable.
+      #
+      # Failing here leaves the tag unattested and fully recoverable via
+      # attest-release.yml once provenance is republished — the same trade as
+      # the `needs:` above, and the right one: a lagging leaf can be fixed, a
+      # permanently wrong one cannot.
+      - name: Assert every provenance_uri resolves
+        run: |
+          set -euo pipefail
+          rc=0
+          while IFS= read -r uri; do
+            if curl -fsIL --max-time 20 "https://${uri}" >/dev/null 2>&1; then
+              echo "  ok   ${uri}"
+            else
+              echo "::error::provenance_uri does not resolve: https://${uri}"
+              rc=1
+            fi
+          done < <(jq -r '[.[].provenance_uri] | unique | .[]' tag-records.json)
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::"
+            echo "::error::Refusing to append leaves whose provenance_uri is a 404. Each leaf is"
+            echo "::error::permanent and append-only — v1.9.0 and v1.9.1 shipped leaves pointing"
+            echo "::error::at attestations that were never published, and those cannot be repaired."
+            echo "::error::Fix the provenance job, re-run it for this tag, then run"
+            echo "::error::attest-release.yml to attest ${GITHUB_REF_NAME} without a rebuild."
+            exit 1
+          fi
+          echo "every provenance_uri in ${GITHUB_REF_NAME}'s leaves resolves."
 
       # Merge into the accumulating records JSON transparency-publish.yml reads.
       # Producer (here) and consumer (transparency-publish.yml) reference the

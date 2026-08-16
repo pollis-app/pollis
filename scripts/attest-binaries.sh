@@ -42,8 +42,10 @@
 # in the build job with the signing material normalized out, so the `payload` leaf
 # is no longer unreproducible by construction — and since #750 it is derived from
 # the SHIPPED artifact, so an outsider holding the public .dmg/.exe can recompute
-# it. It remains best-effort as a *rebuild-from-source* claim: the toolchain recipe
-# is recorded from labels, not digest-pinned, and macOS/Windows have no
+# it. It remains best-effort as a *rebuild-from-source* claim: since #877 the
+# toolchain recipe records the real rustc/node/pnpm and a DATED runner image
+# version rather than "unknown" and a floating label, but GitHub publishes no
+# image digest to pin, and macOS/Windows have no
 # `--remap-path-prefix` / matching-runner reproducer yet
 # (docs/reproducible-builds-residuals.md §1–§2, docs/verifiable-builds-design.md
 # §1.5, §6). What this delivers is the correct LEAF STRUCTURE and — for every
@@ -56,9 +58,13 @@ set -euo pipefail
 : "${ARTIFACTS_DIR:?ARTIFACTS_DIR required (downloaded artifact root)}"
 : "${OUT:?OUT required (output records JSON path)}"
 
-RUSTC_VERSION="${RUSTC_VERSION:-unknown}"
-NODE_VERSION="${NODE_VERSION:-unknown}"
-PNPM_VERSION="${PNPM_VERSION:-unknown}"
+# The toolchain recipe is NOT defaulted here (#877). It is read per-platform from
+# the sidecar the build job published — see load_toolchain below — and a missing
+# one fails the release. These are set by load_toolchain, never by the caller.
+RUSTC_VERSION=""
+NODE_VERSION=""
+PNPM_VERSION=""
+RUNNER_IMAGE=""
 PROVENANCE_BASE="${PROVENANCE_BASE:-cdn.pollis.com/releases/${RELEASE_TAG}}"
 
 work="$(mktemp -d)"
@@ -75,9 +81,17 @@ records="[]"
 # shellcheck source=scripts/lib/payload-hash.sh
 . "$(dirname "$0")/lib/payload-hash.sh"
 
-# emit <platform> <arch> <bundle> <artifact_name> <layer> <payload_sha> <artifact_sha> <runner_image>
+# emit <platform> <arch> <bundle> <artifact_name> <layer> <payload_sha> <artifact_sha>
+#
+# The toolchain recipe comes from the globals load_toolchain set for the platform
+# currently being processed — deliberately NOT a per-call argument. Passing the
+# runner image per call is how the old code came to hardcode `macos-latest` /
+# `ubuntu-22.04` string literals at every call site, floating labels that named
+# no particular image; reading one loaded manifest makes a wrong recipe
+# impossible to introduce one call site at a time.
 emit() {
   local rec
+  [ -n "$RUSTC_VERSION" ] || { echo "::error::attest: emit called before load_toolchain"; exit 1; }
   rec="$(jq -n \
     --arg release_tag "$RELEASE_TAG" \
     --arg commit "$COMMIT" \
@@ -85,7 +99,7 @@ emit() {
     --arg artifact_name "$4" --arg layer "$5" \
     --arg payload_sha256 "$6" --arg artifact_sha256 "$7" \
     --arg rustc "$RUSTC_VERSION" --arg node "$NODE_VERSION" --arg pnpm "$PNPM_VERSION" \
-    --arg runner_image "$8" \
+    --arg runner_image "$RUNNER_IMAGE" \
     --argjson source_date_epoch "$SOURCE_DATE_EPOCH" \
     --arg provenance_uri "${PROVENANCE_BASE}/${4}.intoto.jsonl" \
     '{release_tag:$release_tag, commit:$commit, platform:$platform, arch:$arch,
@@ -141,7 +155,46 @@ require_payload_digest() {
   printf '%s' "$sha"
 }
 
-# emit_exe <platform> <arch> <bundle> <artifact_name> <payload_sha> <runner_image> <path-to-exe>
+# load_toolchain <label> <manifest-glob> — populate the recipe globals for the
+# platform about to be emitted, or hard-fail.
+#
+# The build job for each platform writes `pollis-<tag>-<platform>.toolchain.json`
+# recording the rustc/node/pnpm it actually used and the dated runner image it
+# ran on (scripts/lib/attest-helpers.sh :: write_toolchain_manifest). This job
+# has none of those tools — it only downloads artifacts — so the values MUST come
+# from there.
+#
+# A missing or malformed manifest is a HARD FAILURE, exactly like the payload
+# digest sidecar. Emitting a leaf with a defaulted recipe is what produced 258
+# leaves reading `rustc: "unknown"` across v1.3.4 → v1.9.7 (#877): permanent,
+# signed, append-only, and wrong. Tags released before this landed published no
+# manifest and legitimately cannot be re-attested with a true recipe — that is
+# the correct outcome, not a reason to default.
+load_toolchain() {
+  local label="$1" glob="$2" file
+  file="$(find_one "$glob" || true)"
+  RUSTC_VERSION=""; NODE_VERSION=""; PNPM_VERSION=""; RUNNER_IMAGE=""
+  if [ -n "${file:-}" ]; then
+    RUSTC_VERSION="$(read_toolchain_field "$file" rustc || true)"
+    NODE_VERSION="$(read_toolchain_field "$file" node || true)"
+    PNPM_VERSION="$(read_toolchain_field "$file" pnpm || true)"
+    RUNNER_IMAGE="$(read_toolchain_field "$file" runner_image || true)"
+  fi
+  if [ -z "$RUSTC_VERSION" ] || [ -z "$NODE_VERSION" ] || [ -z "$PNPM_VERSION" ] || [ -z "$RUNNER_IMAGE" ]; then
+    echo "::error::attest: build-recipe manifest for ${label} not found or invalid —"
+    echo "::error::  looked for '${glob}' under ${ARTIFACTS_DIR}, got '${file:-<no match>}'."
+    echo "::error::  Every BinaryRecord leaf embeds this recipe permanently in an"
+    echo "::error::  append-only tree, so a leaf is NOT emitted with defaults (#877)."
+    echo "::error::  The build job must call write_toolchain_manifest and upload the"
+    echo "::error::  '${glob}' sidecar (desktop-release.yml). A tag released before"
+    echo "::error::  #877 published none and cannot be attested with a true recipe."
+    exit 1
+  fi
+  echo "attest: ${label} recipe — rustc ${RUSTC_VERSION}, node ${NODE_VERSION}," \
+       "pnpm ${PNPM_VERSION}, image ${RUNNER_IMAGE}"
+}
+
+# emit_exe <platform> <arch> <bundle> <artifact_name> <payload_sha> <path-to-exe>
 #
 # The `exe` leaf: the main executable as installed, hashed alone. This is the
 # ONLY leaf a *running* app can reproduce — `payload` leaves are a sha_tree of an
@@ -154,7 +207,7 @@ require_payload_digest() {
 # that cannot verify itself, which is precisely the bug this layer exists to fix.
 # Better to break the release job loudly than to publish an unverifiable build.
 emit_exe() {
-  local platform="$1" arch="$2" bundle="$3" name="$4" pay_sha="$5" runner="$6" exe="$7"
+  local platform="$1" arch="$2" bundle="$3" name="$4" pay_sha="$5" exe="$6"
   if [ -z "${exe:-}" ] || [ ! -f "$exe" ]; then
     echo "::error::attest: main executable not found for ${bundle} (looked for ${MAIN_BIN}" \
          "at '${exe:-<no match>}') — the in-app build check cannot work for this platform"
@@ -162,7 +215,7 @@ emit_exe() {
     echo "::error::  extraction for this bundle in scripts/attest-binaries.sh."
     exit 1
   fi
-  emit "$platform" "$arch" "$bundle" "$name" exe "$pay_sha" "$(sha_file "$exe")" "$runner"
+  emit "$platform" "$arch" "$bundle" "$name" exe "$pay_sha" "$(sha_file "$exe")"
 }
 
 
@@ -181,6 +234,7 @@ if [ -n "${dmg:-}" ]; then
   # a stranger holding the public .dmg, and drops the release's dependence on rustc
   # compiling one source tree to identical bytes twice.
   pay_sha="$(require_payload_digest "macOS .dmg" '*macos.payload-sha256')"
+  load_toolchain "macOS .dmg" '*macos.toolchain.json'
   need 7z "extract the .app payload from the .dmg"
   ex="$work/dmg"; mkdir -p "$ex"
   # We still open the SIGNED .dmg — but only to reach the installed Mach-O for the
@@ -192,11 +246,11 @@ if [ -n "${dmg:-}" ]; then
   7z x -y -o"$ex" "$dmg" >/dev/null 2>&1 || true
   app="$(find "$ex" -maxdepth 4 -name '*.app' -type d | head -1 || true)"
   [ -n "${app:-}" ] || { echo "::error::attest: no .app payload found inside ${dmg}"; exit 1; }
-  emit darwin aarch64 dmg "$name" payload "$pay_sha" "$pay_sha" "macos-latest"
-  emit darwin aarch64 dmg "$name" signed  "$pay_sha" "$art_sha" "macos-latest"
+  emit darwin aarch64 dmg "$name" payload "$pay_sha" "$pay_sha"
+  emit darwin aarch64 dmg "$name" signed  "$pay_sha" "$art_sha"
   # The Mach-O the user actually runs, inside the signed bundle — bound to the
   # normalized payload via the shared pay_sha.
-  emit_exe darwin aarch64 dmg "$name" "$pay_sha" "macos-latest" "$app/Contents/MacOS/$MAIN_BIN"
+  emit_exe darwin aarch64 dmg "$name" "$pay_sha" "$app/Contents/MacOS/$MAIN_BIN"
 fi
 
 # ── Windows: NSIS .exe wraps a normalized exe+resources payload (payload + signed) ──
@@ -215,6 +269,7 @@ if [ -n "${exe:-}" ]; then
   # release's dependence on rustc compiling one source tree to identical bytes
   # twice (which failed the v1.8.3 release twice in a row).
   pay_sha="$(require_payload_digest "Windows NSIS .exe" '*windows.payload-sha256')"
+  load_toolchain "Windows NSIS .exe" '*windows.toolchain.json'
   need 7z "extract the file tree from the NSIS installer"
   ex="$work/nsis"; mkdir -p "$ex"
   # We unpack the SIGNED installer here only to reach the installed exe for the
@@ -224,38 +279,46 @@ if [ -n "${exe:-}" ]; then
   7z x -y -o"$ex" "$exe" >/dev/null
   # Drop installer scaffolding that is not part of the payload.
   rm -rf "$ex/\$PLUGINSDIR" "$ex/Uninstall.exe" 2>/dev/null || true
-  emit windows x86_64 nsis "$name" payload "$pay_sha" "$pay_sha" "windows-latest"
-  emit windows x86_64 nsis "$name" signed  "$pay_sha" "$art_sha" "windows-latest"
+  emit windows x86_64 nsis "$name" payload "$pay_sha" "$pay_sha"
+  emit windows x86_64 nsis "$name" signed  "$pay_sha" "$art_sha"
   # NSIS lays the install tree out flat, so the exe sits at the extraction root —
   # bound to the normalized payload via the shared pay_sha.
-  emit_exe windows x86_64 nsis "$name" "$pay_sha" "windows-latest" "$ex/${MAIN_BIN}.exe"
+  emit_exe windows x86_64 nsis "$name" "$pay_sha" "$ex/${MAIN_BIN}.exe"
 fi
 
 # ── Linux: the shipped bytes ARE the reproducible payload (payload-only) ──
+#
+# All three Linux bundles come out of the same build-linux job, so they share one
+# recipe manifest — loaded once here rather than per bundle.
+# `find_one` echoes an empty string and still exits 0 when nothing matches (it
+# ends in `head -1`), so presence is tested on the VALUE, never the exit status.
+if [ -n "$(find_one '*.AppImage')$(find_one '*.deb')$(find_one '*.rpm')" ]; then
+  load_toolchain "Linux bundles" '*linux.toolchain.json'
+fi
 appimage="$(find_one '*.AppImage' || true)"
 if [ -n "${appimage:-}" ]; then
   name="pollis-${RELEASE_TAG}-linux.AppImage"
   sha="$(sha_file "$appimage")"
-  emit linux x86_64 appimage "$name" payload "$sha" "$sha" "ubuntu-22.04"
+  emit linux x86_64 appimage "$name" payload "$sha" "$sha"
 fi
 deb="$(find_one '*.deb' || true)"
 if [ -n "${deb:-}" ]; then
   name="pollis-${RELEASE_TAG}-linux.deb"
   sha="$(sha_file "$deb")"
-  emit linux x86_64 deb "$name" payload "$sha" "$sha" "ubuntu-22.04"
+  emit linux x86_64 deb "$name" payload "$sha" "$sha"
   # Unpack the package filesystem to reach the installed executable — a running
   # deb install's `current_exe()` IS `/usr/bin/pollis`, so that file's hash is
   # what the app will present.
   need dpkg-deb "unpack the .deb to reach its installed executable"
   ex="$work/deb"; mkdir -p "$ex"
   dpkg-deb --fsys-tarfile "$deb" | tar -xf - -C "$ex"
-  emit_exe linux x86_64 deb "$name" "$sha" "ubuntu-22.04" "$(find_installed_bin "$ex")"
+  emit_exe linux x86_64 deb "$name" "$sha" "$(find_installed_bin "$ex")"
 fi
 rpm="$(find_one '*.rpm' || true)"
 if [ -n "${rpm:-}" ]; then
   name="pollis-${RELEASE_TAG}-linux.rpm"
   sha="$(sha_file "$rpm")"
-  emit linux x86_64 rpm "$name" payload "$sha" "$sha" "ubuntu-22.04"
+  emit linux x86_64 rpm "$name" payload "$sha" "$sha"
   # bsdtar (libarchive) reads the .rpm directly. The obvious `rpm2cpio | cpio`
   # was tried first and failed in CI with a bare exit 1 and no diagnostic: cpio
   # was run `--quiet`, and the two-process pipeline under `set -o pipefail` gives
@@ -264,7 +327,7 @@ if [ -n "${rpm:-}" ]; then
   need bsdtar "unpack the .rpm to reach its installed executable"
   ex="$work/rpm"; mkdir -p "$ex"
   bsdtar -xf "$rpm" -C "$ex"
-  emit_exe linux x86_64 rpm "$name" "$sha" "ubuntu-22.04" "$(find_installed_bin "$ex")"
+  emit_exe linux x86_64 rpm "$name" "$sha" "$(find_installed_bin "$ex")"
 fi
 
 count="$(jq 'length' <<<"$records")"
