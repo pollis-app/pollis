@@ -52,6 +52,7 @@ import { observer } from "mobx-react-lite";
 import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
 import { isMac } from "../utils/platform";
 import { useShortcutLabel } from "../keyboard";
+import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -78,6 +79,9 @@ export const PreferencesPage: React.FC = observer(() => {
   const currentUser = appStore.currentUser;
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
+  // The panel's live state, so the switch below reports what is actually on
+  // screen rather than a synced default the device may have moved past.
+  const { isOpen: isRightPanelOpen, setPanel: setRightPanel } = useRightPanel();
   const [skin, setSkin] = useState<Skin>("terminal");
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
@@ -90,8 +94,11 @@ export const PreferencesPage: React.FC = observer(() => {
   const [sendReadReceipts, setSendReadReceipts] = useState<boolean>(true);
   const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
-  // `undefined` until the user touches it — that state means "follow the
-  // skin" (open in refined, closed in terminal), which no boolean can encode.
+  // `undefined` until the user touches it — that state means "this account has
+  // never expressed a preference", which is what lets a brand-new device seed
+  // itself from the skin instead of from a boolean nobody chose (#904). The
+  // SWITCH does not render this; it renders the panel's live state, because
+  // that is the thing the user is looking at while they flip it.
   const [rightPanelOpenByDefault, setRightPanelOpenByDefault] = useState<
     boolean | undefined
   >(undefined);
@@ -410,8 +417,13 @@ export const PreferencesPage: React.FC = observer(() => {
     save({ sidebarOpenByDefault: val });
   };
 
+  // Two writes, deliberately. The device-local one is what actually opens or
+  // shuts the panel here and now; the synced one is the seed a NEW device
+  // picks up. Without the first the switch would be inert on any device that
+  // has already made up its mind, which is every device after its first launch.
   const handleRightPanelOpenByDefault = (val: boolean) => {
     setRightPanelOpenByDefault(val);
+    setRightPanel(val ? "members" : "none");
     save({ rightPanelOpenByDefault: val });
   };
 
@@ -766,7 +778,7 @@ export const PreferencesPage: React.FC = observer(() => {
                 <Switch
                   id="pref-right-panel-default"
                   label={t("layout.rightPanelLabel")}
-                  checked={rightPanelOpenByDefault ?? skin === "refined"}
+                  checked={isRightPanelOpen}
                   onChange={handleRightPanelOpenByDefault}
                 />
                 <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>

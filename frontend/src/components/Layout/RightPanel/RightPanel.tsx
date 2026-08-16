@@ -11,8 +11,12 @@ import { ThreadPanel } from "./ThreadPanel";
  * The right-hand context panel slot (#824).
  *
  * Deliberately a generic slot rather than a members-only sidebar: it switches
- * on the `panel` search param, so the thread panel (#825) lands as another
- * branch here instead of a second competing sidebar.
+ * on the panel kind, so the thread panel (#825) lands as another branch here
+ * instead of a second competing sidebar.
+ *
+ * Whether this renders at all is device-local state that navigation must not
+ * disturb (#904); everything below the `isOpen` guard is the part that IS
+ * route-reactive. See `useRightPanel`.
  *
  * Rendered as a flex sibling of `<Outlet />`, never a fixed overlay — the
  * project bans modals and backdrops, and a real column also means the message
@@ -35,7 +39,7 @@ export const RightPanel: React.FC = observer(() => {
   // "media shared in this conversation" is not.
   const hasContext = Boolean(channelId || conversationId || groupId);
   // A thread is meaningless without the conversation it hangs off, so a
-  // stale `?panel=thread` on a context-free route falls back to the roster
+  // stale `?thread=` on a context-free route falls back to the roster
   // rather than rendering an empty thread.
   const shownThreadId = kind === "thread" && hasContext ? threadId : null;
 
