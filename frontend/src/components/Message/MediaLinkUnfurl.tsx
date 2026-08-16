@@ -107,7 +107,6 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
     height: 96,
     objectFit: "cover",
     display: "block",
-    border: "none",
     borderRadius: "0.5rem",
     background: "transparent",
   };
@@ -128,7 +127,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
               }
               title={t("unfurl.loadTitle", { url: href })}
               aria-label={t("unfurl.loadDescription", { url: href })}
-              className="flex h-24 w-24 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-line bg-surface-raised px-2 text-center text-2xs text-muted hover:bg-hover hover:text-fg"
+              className="flex h-24 w-24 shrink-0 items-center justify-center rounded-control border border-line bg-surface-raised px-2 text-center text-2xs text-muted hover:bg-hover hover:text-fg"
             >
               {link.kind === "image"
                 ? t("unfurl.loadImage")
@@ -152,7 +151,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
               title={href}
               aria-label={t("unfurl.openLabel", { url: href })}
             >
-              <img src={href} alt="" onError={onError} style={thumbStyle} />
+              <img src={href} alt="" onError={onError} className="border-0" style={thumbStyle} />
             </button>
           );
         }
@@ -163,6 +162,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
             controls
             preload="metadata"
             onError={onError}
+            className="border-0"
             style={{ ...thumbStyle, objectFit: "cover" }}
           />
         );

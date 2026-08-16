@@ -31,11 +31,10 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
   return (
     <div
       data-testid="reply-preview"
-      className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-      style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+      className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
     >
       <div className="flex-1 min-w-0">
-        <span className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+        <span className="text-2xs font-mono uppercase tracking-widest text-muted">
           <Trans
             t={t}
             i18nKey="replyBar.replyingTo"
@@ -53,7 +52,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
           aria-label={t('replyBar.scrollToMessage')}
           className="block w-full text-start"
         >
-          <p className="text-xs font-mono truncate" style={{ color: 'var(--c-accent-dim)' }}>{snippet}</p>
+          <p className="text-xs font-mono truncate text-accent-dim">{snippet}</p>
         </button>
       </div>
       <button

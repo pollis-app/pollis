@@ -53,13 +53,11 @@ const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ 
     return (
       <div
         data-testid="day-divider"
-        className="flex items-center gap-3 px-4 select-none"
-        style={{ marginTop: "var(--msg-divider-gap)", marginBottom: "var(--msg-divider-gap)" }}
+        className="flex items-center gap-3 px-4 select-none mt-msg-divider mb-msg-divider"
       >
         <div className="flex-1 border-t border-line" />
         <span
-          className="font-machine text-2xs tabular-nums"
-          style={{ color: "var(--c-text-muted)" }}
+          className="font-machine text-2xs tabular-nums text-muted"
         >
           {label}
         </span>
@@ -72,14 +70,13 @@ const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ 
       data-testid="day-divider"
       className="flex items-center gap-3 py-2 select-none"
     >
-      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <div className="flex-1 h-px bg-line" />
       <span
-        className="text-xs font-mono"
-        style={{ color: "var(--c-text-muted)" }}
+        className="text-xs font-mono text-muted"
       >
         {label}
       </span>
-      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <div className="flex-1 h-px bg-line" />
     </div>
   );
 });
@@ -111,14 +108,13 @@ const RosterChangeBanner: React.FC<{
       data-testid={`roster-banner-${banner.id}`}
       className="flex items-center gap-3 py-2 select-none"
     >
-      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <div className="flex-1 h-px bg-line" />
       <span
-        className="text-xs font-mono"
-        style={{ color: "var(--c-text-muted)" }}
+        className="text-xs font-mono text-muted"
       >
         {label}
       </span>
-      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <div className="flex-1 h-px bg-line" />
     </div>
   );
 });
@@ -761,14 +757,12 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       <div data-testid={`message-blocked-${message.id}`} className="px-4 py-1">
         <div className="flex items-start gap-2 min-w-0">
           <span
-            className="flex-shrink-0 font-mono text-sm"
-            style={{ color: "var(--c-text-dim)" }}
+            className="flex-shrink-0 font-mono text-sm text-dim"
           >
             {t("list.blockedAuthor")}
           </span>
           <span
-            className="font-mono text-sm"
-            style={{ color: "var(--c-text-muted)" }}
+            className="font-mono text-sm text-muted"
           >
             {t("list.blockedBody")}
           </span>
@@ -834,15 +828,13 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     <div
       data-testid="message-list"
       ref={containerRef}
-      className="flex-1 overflow-y-auto min-h-0"
-      style={{ background: "var(--c-bg)" }}
+      className="flex-1 overflow-y-auto min-h-0 bg-bg"
       onKeyDown={handleNavKeyDown}
       onBlur={handleNavBlur}
     >
       {isFetchingMore && (
         <p
-          className="text-xs font-mono text-center py-2"
-          style={{ color: "var(--c-text-muted)" }}
+          className="text-xs font-mono text-center py-2 text-muted"
         >
           {t("common:states.loading")}
         </p>

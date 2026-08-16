@@ -168,11 +168,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         // keyboard-focused row (or its action bar) reads exactly like a
         // hovered one, with zero per-keystroke re-render.
         tabIndex={-1}
-        className="group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75"
-        style={{
-          paddingTop: isGroupStart ? "var(--msg-header-gap)" : "var(--msg-group-gap)",
-          paddingBottom: "var(--msg-row-pad-y)",
-        }}
+        className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header" : "pt-msg-group"} pb-msg-row hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75`}
       >
         {/* Left gutter: avatar on a group start, hover-only timestamp otherwise */}
         <div className="flex justify-center pt-0.5 select-none">
@@ -182,8 +178,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             <bdi
               dir="ltr"
               title={formatFullTimestamp(toMs(message.created_at))}
-              className="font-machine text-2xs tabular-nums whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{ color: "var(--c-text-muted)" }}
+              className="font-machine text-2xs tabular-nums whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity text-muted"
             >
               {formatTimeOfDay(toMs(message.created_at))}
             </bdi>
@@ -198,8 +193,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               <button
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
                 onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-                className="flex items-center gap-1 text-xs mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0"
-                style={{ color: "var(--c-text-muted)" }}
+                className="flex items-center gap-1 text-xs mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0 text-muted"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
                 {replyToAuthor && (
@@ -217,8 +211,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             ) : (
               <div
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
-                className="flex items-center gap-1 text-xs mb-0.5"
-                style={{ color: "var(--c-text-dim)" }}
+                className="flex items-center gap-1 text-xs mb-0.5 text-dim"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
                 <span>{t("message.redacted")}</span>
@@ -240,8 +233,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 data-testid="message-timestamp"
                 dir="ltr"
                 title={formatFullTimestamp(toMs(message.created_at))}
-                className="font-machine text-2xs tabular-nums select-none flex-shrink-0"
-                style={{ color: "var(--c-text-muted)" }}
+                className="font-machine text-2xs tabular-nums select-none flex-shrink-0 text-muted"
               >
                 {formatTimeOfDay(toMs(message.created_at))}
               </bdi>
@@ -252,21 +244,19 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <div
             data-testid="message-content"
             dir="auto"
-            className="text-sm break-words"
+            className={`text-sm break-words leading-msg ${isDeleted ? "text-muted" : "text-fg"}`}
             style={{
-              color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
               whiteSpace: "pre-wrap",
-              lineHeight: "var(--lh)",
             }}
           >
             <MessageBody text={content} ctx={ctx} />
             {message.edited_at && !isDeleted && (
-              <span className="ms-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+              <span className="ms-1 text-xs text-muted">
                 {t("message.edited")}
               </span>
             )}
             {message.status && message.status !== "sent" && (
-              <span className="ms-1 text-xs font-machine" style={{ color: "var(--c-text-muted)" }}>
+              <span className="ms-1 text-xs font-machine text-muted">
                 [{t(`status.${message.status}`)}]
               </span>
             )}
@@ -315,7 +305,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       aria-label={t("message.fromLabel", { name: displayName })}
       // tabIndex -1 + focus-within: see the refined row above.
       tabIndex={-1}
-      className="group relative px-4 py-1 hover:bg-[var(--c-hover)] focus-within:bg-[var(--c-hover)] outline-none transition-colors duration-75"
+      className="group relative px-4 py-1 hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75"
     >
       {/* Reply thread indicator */}
       {message.reply_to_message_id && (
@@ -323,8 +313,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <button
             data-testid={`reply-preview-${message.reply_to_message_id}`}
             onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity"
-            style={{ color: "var(--c-text-muted)" }}
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity text-muted"
           >
             <Reply size={10} className="rtl-unmirror" />
             {replyToAuthor && (
@@ -342,8 +331,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
-            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14"
-            style={{ color: "var(--c-text-dim)" }}
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 text-dim"
           >
             <Reply size={10} className="rtl-unmirror" />
             <span>{t("message.redacted")}</span>
@@ -357,8 +345,8 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           data-testid="message-timestamp"
           dir="ltr"
           title={formatFullTimestamp(toMs(message.created_at))}
-          className="flex-shrink-0 text-xs font-mono tabular-nums select-none w-20"
-          style={{ color: "var(--c-text-muted)", lineHeight: "1.5rem" }}
+          className="flex-shrink-0 text-xs font-mono tabular-nums select-none w-20 text-muted"
+          style={{ lineHeight: "1.5rem" }}
         >
           {formatTimeOfDay(toMs(message.created_at))}
         </bdi>
@@ -380,8 +368,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         </bdi>
 
         <span
-          className="font-mono text-sm select-none me-1 flex-shrink-0"
-          style={{ color: "var(--c-text-muted)" }}
+          className="font-mono text-sm select-none me-1 flex-shrink-0 text-muted"
           aria-hidden="true"
         >
           {":"}
@@ -390,20 +377,19 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         <span
           data-testid="message-content"
           dir="auto"
-          className="font-mono text-sm break-words flex-1 min-w-0"
+          className={`font-mono text-sm break-words flex-1 min-w-0 ${isDeleted ? "text-muted" : "text-fg"}`}
           style={{
-            color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
             whiteSpace: "pre-wrap",
           }}
         >
           <MessageBody text={content} ctx={ctx} />
           {message.edited_at && !isDeleted && (
-            <span className="ms-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+            <span className="ms-1 text-xs text-muted">
               {t("message.edited")}
             </span>
           )}
           {message.status && message.status !== "sent" && (
-            <span className="ms-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+            <span className="ms-1 text-xs text-muted">
               [{t(`status.${message.status}`)}]
             </span>
           )}

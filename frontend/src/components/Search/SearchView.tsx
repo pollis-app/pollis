@@ -23,9 +23,8 @@ function HighlightedSnippet({ text, term }: { text: string; term: string }) {
           return (
             <mark
               key={i}
+              className="bg-accent-muted text-accent-bright"
               style={{
-                background: "var(--c-accent-muted)",
-                color: "var(--c-accent-bright)",
                 borderRadius: "2px",
                 padding: "0 2px",
               }}
@@ -88,8 +87,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
       return (
         <p
           data-testid="search-empty-hint"
-          className="text-xs font-mono text-center"
-          style={{ color: "var(--c-text-muted)", paddingTop: "2rem" }}
+          className="text-xs font-mono text-center text-muted"
+          style={{ paddingTop: "2rem" }}
         >
           {t("view.emptyHint")}
         </p>
@@ -99,8 +98,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
     if (isFetching) {
       return (
         <p
-          className="text-xs font-mono text-center"
-          style={{ color: "var(--c-text-muted)", paddingTop: "2rem" }}
+          className="text-xs font-mono text-center text-muted"
+          style={{ paddingTop: "2rem" }}
         >
           {t("view.searching")}
         </p>
@@ -110,8 +109,8 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
     return (
       <p
         data-testid="search-no-results"
-        className="text-xs font-mono text-center"
-        style={{ color: "var(--c-text-muted)", paddingTop: "2rem" }}
+        className="text-xs font-mono text-center text-muted"
+        style={{ paddingTop: "2rem" }}
       >
         {t("view.noResults")}
       </p>
@@ -123,13 +122,11 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
   return (
     <div
       data-testid="search-view"
-      className="flex flex-col h-full"
-      style={{ background: "var(--c-bg)" }}
+      className="flex flex-col h-full bg-bg"
     >
       {/* Search input */}
       <div
-        className="px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: "1px solid var(--c-border)" }}
+        className="px-4 py-3 flex-shrink-0 border-b border-line"
       >
         <input
           data-testid="search-input"
@@ -144,8 +141,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
         />
         {inputValue.trim().length > 0 && inputValue.trim().length < 2 && (
           <p
-            className="text-xs font-mono mt-1"
-            style={{ color: "var(--c-text-muted)" }}
+            className="text-xs font-mono mt-1 text-muted"
           >
             {t("view.minLength")}
           </p>
@@ -161,20 +157,17 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
                 <button
                   data-testid="search-result-item"
                   onClick={() => handleResultClick(result)}
-                  className="w-full text-start px-4 py-3 transition-colors bg-transparent hover:bg-[var(--c-hover)]"
-                  style={{ borderBottom: "1px solid var(--c-border)" }}
+                  className="w-full text-start px-4 py-3 transition-colors bg-transparent hover:bg-hover border-b border-line"
                 >
                   {/* Sender and timestamp row */}
                   <div className="flex items-baseline justify-between gap-2 mb-1">
                     <span
-                      className="text-xs font-mono font-medium truncate"
-                      style={{ color: "var(--c-accent)" }}
+                      className="text-xs font-mono font-medium truncate text-accent"
                     >
                       {result.sender_id}
                     </span>
                     <span
-                      className="text-xs font-mono flex-shrink-0"
-                      style={{ color: "var(--c-text-muted)" }}
+                      className="text-xs font-mono flex-shrink-0 text-muted"
                     >
                       {formatShortDateTime(result.sent_at)}
                     </span>
@@ -182,16 +175,14 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
 
                   {/* Conversation ID (conversation context) */}
                   <div
-                    className="text-xs font-mono mb-1 truncate"
-                    style={{ color: "var(--c-text-muted)" }}
+                    className="text-xs font-mono mb-1 truncate text-muted"
                   >
                     {result.conversation_id}
                   </div>
 
                   {/* Message snippet with highlight */}
                   <div
-                    className="text-xs font-mono"
-                    style={{ color: "var(--c-text-dim)" }}
+                    className="text-xs font-mono text-dim"
                   >
                     <HighlightedSnippet text={result.snippet} term={debouncedQuery.trim()} />
                   </div>

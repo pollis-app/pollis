@@ -125,8 +125,8 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   // navigation shows the same affordance the pointer would.
   const barBtnClass =
     variant === "refined"
-      ? "p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)] focus-visible:text-[var(--c-text-accent)] outline-none"
-      : "text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)] focus-visible:text-[var(--c-text-accent)] outline-none";
+      ? "p-1 text-muted hover:text-[var(--c-text-accent)] focus-visible:text-[var(--c-text-accent)] outline-none"
+      : "text-muted hover:text-[var(--c-text-accent)] focus-visible:text-[var(--c-text-accent)] outline-none";
 
   // The container owns hover-reveal for both skins; while the menu is open it
   // stays fully visible even if the pointer leaves the row — otherwise the
@@ -138,7 +138,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
     : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
   const containerClass =
     variant === "refined"
-      ? `absolute end-4 top-0 -translate-y-1/2 flex items-center gap-1 rounded-[var(--radius-control)] border border-line bg-surface-raised px-1 py-0.5 transition-opacity ${visibilityClass}`
+      ? `absolute end-4 top-0 -translate-y-1/2 flex items-center gap-1 rounded-control border border-line bg-surface-raised px-1 py-0.5 transition-opacity ${visibilityClass}`
       : `flex-shrink-0 ms-2 flex items-center gap-4 h-6 ${visibilityClass}`;
 
   const menuRowClass =
@@ -193,7 +193,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
             <div
               data-testid="message-actions-menu"
               role="menu"
-              className={`absolute end-0 z-40 min-w-[11rem] rounded-[var(--radius-control)] border border-line bg-surface-raised py-1 ${
+              className={`absolute end-0 z-40 min-w-[11rem] rounded-control border border-line bg-surface-raised py-1 ${
                 opensUp ? "bottom-full mb-1" : "top-full mt-1"
               }`}
             >
