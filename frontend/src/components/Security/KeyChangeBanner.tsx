@@ -39,9 +39,8 @@ export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = observer(({
     <div
       data-testid="key-change-banner"
       role="alert"
-      className="flex items-start gap-2 px-4 py-2 text-xs font-mono"
+      className="flex items-start gap-2 px-4 py-2 text-xs font-mono border-b border-line"
       style={{
-        borderBottom: "1px solid var(--c-border)",
         background: "rgba(240, 180, 41, 0.08)",
         color: "#f0b429",
       }}
@@ -51,7 +50,7 @@ export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = observer(({
         <span style={{ color: "#f0b429", fontWeight: 600 }}>
           {t("keyChange.heading")}
         </span>
-        <span style={{ color: "var(--c-text-muted)" }}>
+        <span className="text-muted">
           {" "}
           {t("keyChange.body", { name })}
         </span>

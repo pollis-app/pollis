@@ -480,14 +480,13 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     >
       <div
         data-testid="search-panel"
+        className="bg-surface border border-line"
         style={{
           width: "100%",
           maxWidth: 560,
           maxHeight: "70vh",
           display: "flex",
           flexDirection: "column",
-          background: "var(--c-surface)",
-          border: "1px solid var(--c-border)",
           borderRadius: "0.75rem",
           overflow: "hidden",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
@@ -496,18 +495,17 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
       >
         {/* Search input */}
         <div
+          className="border-b border-line"
           style={{
             display: "flex",
             alignItems: "center",
             gap: "0.75rem",
             padding: "0.875rem 1rem",
-            borderBottom: "1px solid var(--c-border)",
           }}
         >
           <Search
-            className="flex-shrink-0"
+            className="flex-shrink-0 text-muted"
             size={16}
-            style={{ color: "var(--c-text-muted)" }}
           />
           <input
             ref={inputRef}
@@ -520,22 +518,17 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            className="flex-1 font-mono text-sm"
+            className="flex-1 font-mono text-sm text-fg border-0"
             style={{
               background: "transparent",
-              color: "var(--c-text)",
-              border: "none",
               outline: "none",
             }}
           />
           <kbd
-            className="font-mono font-machine text-xs"
+            className="font-mono font-machine text-xs text-muted bg-bg border border-line"
             style={{
-              color: "var(--c-text-muted)",
-              background: "var(--c-bg)",
               padding: "2px 6px",
               borderRadius: "4px",
-              border: "1px solid var(--c-border)",
             }}
           >
             esc
@@ -544,20 +537,16 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
 
         {/* Keyboard hints */}
         <div
-          className="flex items-center gap-1 px-4 py-1.5 text-xs font-mono flex-shrink-0"
-          style={{
-            borderBottom: "1px solid var(--c-border)",
-            color: "var(--c-text-muted)",
-          }}
+          className="flex items-center gap-1 px-4 py-1.5 text-xs font-mono flex-shrink-0 border-b border-line text-muted"
         >
           <ArrowUp className="w-3 h-3" />
           <ArrowDown className="w-3 h-3" />
           <span>{t("panel.hintNavigate")}</span>
-          <span className="mx-1" style={{ color: "var(--c-border-active)" }}>
+          <span className="mx-1 text-line-strong">
             &bull;
           </span>
           <span>{t("panel.hintSelect")}</span>
-          <span className="mx-1" style={{ color: "var(--c-border-active)" }}>
+          <span className="mx-1 text-line-strong">
             &bull;
           </span>
           <span>{t("panel.hintClose")}</span>
@@ -576,8 +565,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
             // hint at whether the message exists, who sent it, or what it says.
             <div
               data-testid="search-panel-permalink"
-              className="flex items-center gap-3 px-4 py-3 font-mono text-xs"
-              style={{ color: "var(--c-text-muted)" }}
+              className="flex items-center gap-3 px-4 py-3 font-mono text-xs text-muted"
             >
               <LinkIcon size={14} className="flex-shrink-0" />
               {permalinkStatus === "missing" ? (
@@ -591,8 +579,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
           ) : filteredItems.length === 0 ? (
             <div
               data-testid="search-panel-empty"
-              className="text-center py-8 font-mono text-xs"
-              style={{ color: "var(--c-text-muted)" }}
+              className="text-center py-8 font-mono text-xs text-muted"
             >
               {query.trim()
                 ? t("panel.noMatches")
@@ -608,20 +595,16 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                     itemRefs.current[index] = el;
                   }}
                   data-testid="search-panel-result-item"
-                  className="flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors"
+                  className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? "bg-active" : ""}`}
                   style={{
                     borderInlineStart: `3px solid ${isSelected ? "var(--c-accent)" : "transparent"}`,
-                    background: isSelected ? "var(--c-active)" : undefined,
                   }}
                   onClick={() => handleSelect(item)}
                   onMouseEnter={() => setSelectedIndex(index)}
                 >
                   {/* Icon */}
                   <div
-                    className="flex-shrink-0 w-5 h-5 flex items-center justify-center"
-                    style={{
-                      color: isSelected ? "var(--c-accent)" : "var(--c-text-dim)",
-                    }}
+                    className={`flex-shrink-0 w-5 h-5 flex items-center justify-center ${isSelected ? "text-accent" : "text-dim"}`}
                   >
                     {item.type === "channel" ? (
                       <Hash size={14} />
@@ -642,19 +625,15 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                   {/* Name and breadcrumb */}
                   <div className="flex-1 min-w-0">
                     <div
-                      className="font-sans text-sm truncate flex items-center gap-2"
-                      style={{
-                        color: isSelected ? "var(--c-accent)" : "var(--c-text)",
-                      }}
+                      className={`font-sans text-sm truncate flex items-center gap-2 ${isSelected ? "text-accent" : "text-fg"}`}
                     >
                       <span>{item.name}</span>
                       {item.type === "voice" && item.channelId === activeVoiceChannelId && (
-                        <span className="font-mono text-xs" style={{ color: "var(--c-accent)" }}>{t("panel.live")}</span>
+                        <span className="font-mono text-xs text-accent">{t("panel.live")}</span>
                       )}
                     </div>
                     <div
-                      className="font-mono text-xs truncate"
-                      style={{ color: "var(--c-text-muted)" }}
+                      className="font-mono text-xs truncate text-muted"
                     >
                       {item.breadcrumb}
                     </div>

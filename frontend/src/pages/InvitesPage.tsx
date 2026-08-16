@@ -31,8 +31,7 @@ export const InvitesPage: React.FC = () => {
     <PageShell title={t("invites.pageTitle")}>
       <div
         data-testid="invites-page"
-        className="flex-1 flex flex-col overflow-auto"
-        style={{ background: "var(--c-bg)" }}
+        className="flex-1 flex flex-col overflow-auto bg-bg"
       >
         <NavigableList
           items={invites}
@@ -43,14 +42,12 @@ export const InvitesPage: React.FC = () => {
           renderRow={(invite) => (
             <div className="flex-1 min-w-0 flex flex-col gap-0.5">
               <span
-                className="text-sm font-mono font-medium truncate"
-                style={{ color: "var(--c-text)" }}
+                className="text-sm font-mono font-medium truncate text-fg"
               >
                 {invite.group_name}
               </span>
               <span
-                className="text-xs font-mono truncate"
-                style={{ color: "var(--c-text-muted)" }}
+                className="text-xs font-mono truncate text-muted"
               >
                 {t("invites.invitedBy", { name: invite.inviter_username ?? invite.inviter_id })}
               </span>

@@ -33,7 +33,26 @@ interface MockMessage {
   sender_id: string;
   content?: string;
   reply_to_id?: string;
-  sent_at: string;
+  /**
+   * Normally an ISO-8601 string, exactly as `pollis-core` serializes it.
+   *
+   * A NUMBER is allowed as the legacy epoch-**seconds** shape: the renderer
+   * turns `sent_at` into `created_at` with `new Date(sent_at).getTime()`,
+   * which passes a seconds-magnitude number straight through, and every
+   * component that formats a message timestamp is required to run it through
+   * `toMs` before rendering. Only a spec that is testing that normalisation
+   * should use it — see `e2e/thread-panel.spec.ts` (#874).
+   */
+  sent_at: string | number;
+  edited_at?: string;
+  thread_id?: string;
+}
+
+/** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
+interface MockThreadSummary {
+  thread_id: string;
+  reply_count: number;
+  last_reply_at?: string;
 }
 
 interface MockProfile {
@@ -131,6 +150,13 @@ interface MockStore {
   groups: MockGroup[];
   channels: Record<string, MockChannel[]>;
   messages: Record<string, MockMessage[]>;
+  // Thread replies (#825), keyed by the ROOT message's id — local-only in
+  // production too, because `thread_id` lives inside the MLS ciphertext.
+  threadMessages: Record<string, MockMessage[]>;
+  // Per-conversation reply counts, keyed by conversation id. Separate from
+  // `threadMessages` on purpose: the channel row renders the count without
+  // loading the thread, so a preload can seed one without the other.
+  threadSummaries: Record<string, MockThreadSummary[]>;
   dmChannels: MockDmChannel[];
   // Keyed by group id. Drives the @mention candidate list (#843), which is
   // deliberately derived from roster membership only.
@@ -159,6 +185,12 @@ interface MockStore {
   // half of the contract.
   autoLockMinutes: number | null;
   activityReports: number;
+  // Opt-in message pagination (#874). Off by default so every existing spec
+  // keeps getting its whole seeded conversation in one page; a preload sets
+  // `paginate: true` to make `read_*_messages` honour `limit`/`cursor` and
+  // hand back a real `next_cursor`, which is what the load-more path — and
+  // the windowed log's scroll anchoring across a prepend — needs to exercise.
+  paginate: boolean;
 }
 
 // Only `@tauri-apps/api/core` and `/event` are vite-aliased to these mocks.
@@ -208,6 +240,8 @@ const store: MockStore = {
   groups: preload.groups ?? [],
   channels: preload.channels ?? {},
   messages: preload.messages ?? {},
+  threadMessages: preload.threadMessages ?? {},
+  threadSummaries: preload.threadSummaries ?? {},
   dmChannels: preload.dmChannels ?? [],
   groupMembers: preload.groupMembers ?? {},
   bookmarks: preload.bookmarks ?? [],
@@ -226,6 +260,7 @@ const store: MockStore = {
   clipboard: '',
   autoLockMinutes: null,
   activityReports: 0,
+  paginate: preload.paginate === true,
 };
 
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
@@ -237,6 +272,56 @@ function generateId(): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+interface MessageCursor {
+  sent_at: string;
+  id: string;
+}
+
+/**
+ * One page of a conversation, newest-last, the way `read_channel_messages`
+ * and `read_dm_messages` answer.
+ *
+ * With `paginate` off (the default) the whole seeded conversation comes back
+ * in one page and `next_cursor` is null — the historical behaviour every other
+ * spec relies on. With it on, the page is the newest `limit` messages older
+ * than `cursor`, and `next_cursor` points at the oldest message returned so
+ * the next call continues from there.
+ */
+function readMessagePage(
+  conversationId: string,
+  limit?: number,
+  cursor?: MessageCursor | null,
+): { messages: MockMessage[]; next_cursor: MessageCursor | null } {
+  const all = store.messages[conversationId] ?? [];
+  if (!store.paginate) {
+    return { messages: all, next_cursor: null };
+  }
+  // `sent_at` is an ISO string in every paginating spec, but the type also
+  // admits the legacy numeric shape, so order on the string spelling rather
+  // than calling `localeCompare` on something that might be a number.
+  const at = (m: MockMessage) => String(m.sent_at);
+  const chronological = [...all].sort((a, b) =>
+    at(a) === at(b) ? a.id.localeCompare(b.id) : at(a).localeCompare(at(b)),
+  );
+  const older = cursor
+    ? chronological.filter(
+        (m) =>
+          at(m) < cursor.sent_at ||
+          (at(m) === cursor.sent_at && m.id < cursor.id),
+      )
+    : chronological;
+  const size = limit && limit > 0 ? limit : older.length;
+  const page = older.slice(Math.max(older.length - size, 0));
+  const oldestReturned = page[0];
+  const hasMore = oldestReturned !== undefined && older.length > page.length;
+  return {
+    messages: page,
+    next_cursor: hasMore
+      ? { sent_at: at(oldestReturned), id: oldestReturned.id }
+      : null,
+  };
 }
 
 /** Look a message up across every conversation, as the local DB's primary key
@@ -388,9 +473,16 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_group_invites':
     case 'list_security_events':
     case 'get_pinned_messages':
-    case 'read_thread_messages':
-    case 'list_thread_summaries':
       return [];
+
+    // Threads (#825). Keyed by the root message id and by conversation id
+    // respectively, matching the two Rust commands. Empty unless a preload
+    // seeds them, so every spec that predates threads is unaffected.
+    case 'read_thread_messages':
+      return store.threadMessages[args.threadId as string] ?? [];
+
+    case 'list_thread_summaries':
+      return store.threadSummaries[args.conversationId as string] ?? [];
 
     // Realtime / MLS background work the browser build has no backend for.
     case 'connect_rooms':
@@ -530,18 +622,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // aliases so older callers (and this mock's own history) still resolve.
     case 'get_channel_messages':
     case 'read_channel_messages': {
-      const { channelId } = args as { channelId: string };
-      return { messages: store.messages[channelId] ?? [], next_cursor: null };
+      const { channelId, limit, cursor } = args as {
+        channelId: string;
+        limit?: number;
+        cursor?: MessageCursor | null;
+      };
+      return readMessagePage(channelId, limit, cursor);
     }
 
     case 'get_dm_messages':
     case 'read_dm_messages': {
-      const { dmChannelId, conversationId } = args as {
+      const { dmChannelId, conversationId, limit, cursor } = args as {
         dmChannelId?: string;
         conversationId?: string;
+        limit?: number;
+        cursor?: MessageCursor | null;
       };
       const key = dmChannelId ?? conversationId ?? '';
-      return { messages: store.messages[key] ?? [], next_cursor: null };
+      return readMessagePage(key, limit, cursor);
     }
 
     case 'list_dm_channels':
@@ -580,6 +678,23 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       store.messages[conversationId].push(message);
       return message;
+    }
+
+    // `useEditMessage` applies an optimistic cache update and then invalidates,
+    // so without this case the refetch served the ORIGINAL text back and the
+    // edit appeared to silently revert. Mutating the store keeps the mock
+    // honest about what a real `edit_message` does (#874).
+    case 'edit_message': {
+      const { messageId, newContent } = args as {
+        messageId: string;
+        newContent: string;
+      };
+      const message = findMessage(messageId);
+      if (message) {
+        message.content = newContent;
+        message.edited_at = nowIso();
+      }
+      return null;
     }
 
     // ── Saved messages + permalinks (#854) ───────────────────────────────

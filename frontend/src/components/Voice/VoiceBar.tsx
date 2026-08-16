@@ -81,12 +81,9 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   return (
     <div
       data-testid="voice-bar"
-      className="flex items-center ps-1 pe-3 gap-2 font-mono text-xs flex-shrink-0"
+      className="flex items-center ps-1 pe-3 gap-2 font-mono text-xs flex-shrink-0 border-t border-line bg-surface text-muted"
       style={{
         height: 28,
-        borderTop: "1px solid var(--c-border)",
-        background: "var(--c-surface)",
-        color: "var(--c-text-muted)",
       }}
     >
       {/* Channel name */}
@@ -237,18 +234,18 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         <PhoneOff size={12} />
       </PillButton>
 
-      <span style={{ color: "var(--c-border)" }}>|</span>
+      <span className="text-line">|</span>
 
       {/* Participant count */}
-      <span data-testid="voice-bar-participant-count" style={{ color: "var(--c-text-dim)" }}>
+      <span data-testid="voice-bar-participant-count" className="text-dim">
         {t("bar.participants", { count: participantCount })}
       </span>
 
       {/* Security indicator — audio is transport-encrypted (TLS) but not E2EE for v1 */}
       <span
         data-testid="voice-bar-security-indicator"
-        style={{ marginInlineStart: "auto", color: "var(--c-text-dim)" }}
-        className="flex items-center gap-1"
+        style={{ marginInlineStart: "auto" }}
+        className="flex items-center gap-1 text-dim"
       >
         {lastRemoteSpeakerId
           ? <>
@@ -265,12 +262,11 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         onClick={() => navigate({ to: "/voice-settings" })}
         aria-label={t("bar.settings")}
         title={t("bar.settings")}
-        className="flex items-center justify-center transition-colors flex-shrink-0 text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
+        className="flex items-center justify-center transition-colors flex-shrink-0 text-muted hover:text-accent border-0"
         style={{
           width: 20,
           height: 20,
           background: "none",
-          border: "none",
           padding: 0,
           cursor: "pointer",
         }}

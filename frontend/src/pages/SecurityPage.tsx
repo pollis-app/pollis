@@ -116,11 +116,7 @@ function shortId(id: string): string {
 const SECURITY_EVENTS_PAGE_SIZE = 20;
 
 const sectionHeaderClass =
-  "text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b";
-const sectionHeaderStyle: React.CSSProperties = {
-  color: "var(--c-text)",
-  borderColor: "var(--c-border)",
-};
+  "text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line";
 
 // The word the user must type to arm account deletion. Deliberately NOT part
 // of the translatable copy: the label and placeholder are interpolated from
@@ -334,10 +330,10 @@ export const SecurityPage: React.FC = observer(() => {
           {/* Account key — advisory self-audit of your published identity key
               against the public transparency log (#330). */}
           <section className="flex flex-col gap-4 mb-12" data-testid="account-key-section">
-            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+            <h2 className={sectionHeaderClass}>
               {t("security.accountKeyHeading")}
             </h2>
-            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.accountKeyDescription")}
             </p>
             {selfAudit && (
@@ -353,10 +349,10 @@ export const SecurityPage: React.FC = observer(() => {
               fingerprint is published in the public binaries transparency log
               (#484). Never mandatory, never gates launch/update. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="this-build-section">
-            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+            <h2 className={sectionHeaderClass}>
               {t("security.thisBuildHeading")}
             </h2>
-            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.thisBuildDescription")}
             </p>
 
@@ -367,8 +363,7 @@ export const SecurityPage: React.FC = observer(() => {
             <button
               type="button"
               data-testid="build-verify-learn-link"
-              className="text-2xs font-mono underline self-start"
-              style={{ color: "var(--c-text-muted)" }}
+              className="text-2xs font-mono underline self-start text-muted"
               onClick={() => {
                 void shellOpen(LEARN_DASHBOARDS_URL);
               }}
@@ -379,7 +374,7 @@ export const SecurityPage: React.FC = observer(() => {
             {/* Version + commit of the running build. Commit is only shown once
                 the check has run (it's baked into the report), and only if this
                 build actually baked one in. */}
-            <div className="flex flex-col gap-0.5 text-xs" style={{ color: "var(--c-text-dim)" }}>
+            <div className="flex flex-col gap-0.5 text-xs text-dim">
               <span data-testid="build-version">
                 {t("security.buildVersion", {
                   version: buildVerify.data?.version ?? appVersion ?? "—",
@@ -403,8 +398,7 @@ export const SecurityPage: React.FC = observer(() => {
             {buildVerify.isError && (
               <p
                 data-testid="build-verify-error"
-                className="text-xs"
-                style={{ color: "var(--c-danger)" }}
+                className="text-xs text-danger"
               >
                 {t("security.buildVerifyError")}
               </p>
@@ -425,10 +419,10 @@ export const SecurityPage: React.FC = observer(() => {
 
           {/* PIN */}
           <section className="flex flex-col gap-4 mb-12">
-            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+            <h2 className={sectionHeaderClass}>
               {t("security.pinHeading")}
             </h2>
-            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.pinDescription")}
             </p>
             <div className="self-start">
@@ -446,10 +440,10 @@ export const SecurityPage: React.FC = observer(() => {
               depends on where this machine physically sits, so it deliberately
               does not sync to your other devices. */}
           <section className="flex flex-col gap-4 mb-12" data-testid="auto-lock-section">
-            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+            <h2 className={sectionHeaderClass}>
               {t("security.autoLockHeading")}
             </h2>
-            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.autoLockDescription", { shortcut: lockLabel })}
             </p>
             {/* A group of toggle buttons rather than the `role="radiogroup"`
@@ -486,25 +480,24 @@ export const SecurityPage: React.FC = observer(() => {
                 );
               })}
             </div>
-            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.autoLockNote")}
             </p>
           </section>
 
           {/* Devices */}
           <section className="flex flex-col gap-4 mb-12">
-            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+            <h2 className={sectionHeaderClass}>
               {t("security.devicesHeading")}
             </h2>
-            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.devicesDescription")}
             </p>
 
             {devicesError && (
               <p
                 data-testid="devices-error"
-                className="text-xs"
-                style={{ color: "var(--c-danger)" }}
+                className="text-xs text-danger"
               >
                 {devicesError}
               </p>
@@ -512,16 +505,14 @@ export const SecurityPage: React.FC = observer(() => {
 
             {confirmingDevice ? (
               <div
-                className="flex flex-col gap-3"
+                className="flex flex-col gap-3 bg-surface border-2 border-line"
                 data-testid="revoke-confirm"
                 style={{
-                  background: "var(--c-surface)",
-                  border: "2px solid var(--c-border)",
                   borderRadius: "0.5rem",
                   padding: "0.75rem",
                 }}
               >
-                <p className="text-xs" style={{ color: "var(--c-text)" }}>
+                <p className="text-xs text-fg">
                   <Trans
                     t={t}
                     i18nKey="security.revokeConfirmPrompt"
@@ -574,10 +565,10 @@ export const SecurityPage: React.FC = observer(() => {
                 rowTestId={(d) => `device-${d.device_id}`}
                 renderRow={(d) => (
                   <div className="min-w-0 flex flex-col">
-                    <span className="truncate" style={{ color: "var(--c-text)" }}>
+                    <span className="truncate text-fg">
                       {deviceDisplayName(d)}
                     </span>
-                    <span style={{ color: "var(--c-text-dim)" }}>
+                    <span className="text-dim">
                       {t("security.deviceLastSeen", { time: formatDateTime(d.last_seen) })}
                     </span>
                   </div>
@@ -607,18 +598,17 @@ export const SecurityPage: React.FC = observer(() => {
 
           {/* Security events */}
           <section className="flex flex-col gap-4 mb-12">
-            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+            <h2 className={sectionHeaderClass}>
               {t("security.eventsHeading")}
             </h2>
-            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.eventsDescription")}
             </p>
 
             {error && (
               <p
                 data-testid="security-events-error"
-                className="text-xs"
-                style={{ color: "var(--c-danger)" }}
+                className="text-xs text-danger"
               >
                 {error}
               </p>
@@ -682,7 +672,7 @@ export const SecurityPage: React.FC = observer(() => {
               revoke-on-quit, and a manual revoke. An access-control concern,
               so it sits with Devices rather than in Preferences. */}
           <section className="flex flex-col gap-4 mb-12">
-            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+            <h2 className={sectionHeaderClass}>
               {t("security.mediaHeading")}
             </h2>
 
@@ -708,7 +698,7 @@ export const SecurityPage: React.FC = observer(() => {
                 const pill = permissionPill(t, row.state);
                 return (
                   <div key={row.key} className="flex items-center justify-between">
-                    <span className="text-sm" style={{ color: "var(--c-text)" }}>
+                    <span className="text-sm text-fg">
                       {row.label}
                     </span>
                     <span
@@ -729,7 +719,7 @@ export const SecurityPage: React.FC = observer(() => {
                 checked={revokeMediaOnExit}
                 onChange={handleRevokeMediaOnExit}
               />
-              <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+              <p className="text-xs font-mono text-muted">
                 {t("security.revokeMediaOnExitDescription")}
               </p>
             </div>
@@ -739,7 +729,7 @@ export const SecurityPage: React.FC = observer(() => {
             <div className="self-start">
               {confirmingRevoke ? (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
+                  <span className="text-xs font-mono text-dim">
                     {t("security.revokeNowNote")}
                   </span>
                   <Button variant="primary" size="sm" onClick={handleRevokeNow}>
@@ -767,13 +757,13 @@ export const SecurityPage: React.FC = observer(() => {
 
             {/* Result note from the last revoke, when the platform has one. */}
             {revokeMedia.data?.note && (
-              <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+              <p className="text-xs font-mono text-muted">
                 {revokeMedia.data.note}
               </p>
             )}
 
             {/* Honest, per-OS explanation of what "Revoke now" does. */}
-            <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+            <p className="text-xs font-mono text-muted">
               {isMac && t("security.mediaNoteMac")}
               {isLinux && t("security.mediaNoteLinux")}
               {isWindows && t("security.mediaNoteWindows")}
@@ -791,7 +781,7 @@ export const SecurityPage: React.FC = observer(() => {
               {t("security.dangerZoneHeading")}
             </h2>
 
-            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
               {t("security.dangerZoneDescription")}
             </p>
 

@@ -12,6 +12,7 @@ import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
 import { Switch } from "../components/ui/Switch";
 import type { Channel } from "../types";
+import { EmptyState } from "../components/ui/EmptyState";
 
 interface CreateChannelProps {
   onSuccess?: (channelId: string, channelType: "text" | "voice") => void;
@@ -95,32 +96,33 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
 
   if (!currentUser) {
     return (
-      <div data-testid="create-channel-no-user" className="flex items-center justify-center flex-1" style={{ background: 'var(--c-bg)' }}>
-        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>{t("errors.signInRequired")}</p>
-      </div>
+      <EmptyState testId="create-channel-no-user">{t("errors.signInRequired")}</EmptyState>
     );
   }
 
   if (!selectedGroupId || !currentGroup) {
     return (
-      <div data-testid="create-channel-no-group" className="flex flex-col items-center justify-center flex-1 gap-3" style={{ background: 'var(--c-bg)' }}>
-        <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>{t("createChannel.selectGroupFirst")}</p>
-        <button
-          data-testid="create-channel-go-home-button"
-          onClick={() => onSuccess?.("", "text")}
-          className="text-xs font-mono transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
-        >
-          {t("createChannel.goHome")}
-        </button>
-      </div>
+      <EmptyState
+        testId="create-channel-no-group"
+        actions={
+          <button
+            data-testid="create-channel-go-home-button"
+            onClick={() => onSuccess?.("", "text")}
+            className="text-xs font-mono transition-colors text-muted hover:text-accent"
+          >
+            {t("createChannel.goHome")}
+          </button>
+        }
+      >
+        {t("createChannel.selectGroupFirst")}
+      </EmptyState>
     );
   }
 
   return (
     <div
       data-testid="create-channel-page"
-      className="flex-1 flex flex-col overflow-auto"
-      style={{ background: 'var(--c-bg)' }}
+      className="flex-1 flex flex-col overflow-auto bg-bg"
     >
       <div data-testid="create-channel-content" className="flex-1 flex justify-center overflow-auto px-6 py-8">
         <form
@@ -175,7 +177,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <input data-testid="create-channel-type-input" type="hidden" value={channelType} readOnly />
 
           {error && (
-            <p data-testid="create-channel-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+            <p data-testid="create-channel-error" className="text-xs font-mono text-danger">
               {error}
             </p>
           )}

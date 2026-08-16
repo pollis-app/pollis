@@ -103,3 +103,6 @@ db-backups/
 # TLA+ toolchain: scripts/tlc-check.sh downloads the pinned tla2tools.jar here.
 scripts/tla2tools.jar
 __pycache__/
+
+# Ad-hoc sourcemap build used for bundle attribution — never committed.
+frontend/dist-map/

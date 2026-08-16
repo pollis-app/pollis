@@ -62,8 +62,7 @@ export const SearchGroupPage: React.FC = observer(() => {
     <PageShell title={t("group.title")}>
       <div
         data-testid="search-group-page"
-        className="flex-1 flex flex-col overflow-auto"
-        style={{ background: 'var(--c-bg)' }}
+        className="flex-1 flex flex-col overflow-auto bg-bg"
       >
         <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
           <div className="w-full max-w-md flex flex-col gap-6">
@@ -97,14 +96,14 @@ export const SearchGroupPage: React.FC = observer(() => {
                 padding="sm"
               >
                 <div className="flex flex-col gap-0.5">
-                  <h2 className="text-sm font-mono font-medium" style={{ color: 'var(--c-accent)' }}>
+                  <h2 className="text-sm font-mono font-medium text-accent">
                     {foundGroup.name}
                   </h2>
-                  <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
+                  <p className="text-xs font-mono text-muted">
                     /g/{deriveSlug(foundGroup.name)}
                   </p>
                   {foundGroup.description && (
-                    <p className="text-xs font-mono mt-1" style={{ color: 'var(--c-text-dim)' }}>
+                    <p className="text-xs font-mono mt-1 text-dim">
                       {foundGroup.description}
                     </p>
                   )}
@@ -119,8 +118,7 @@ export const SearchGroupPage: React.FC = observer(() => {
                 ) : myJoinRequest?.status === "pending" ? (
                   <p
                     data-testid="request-pending-indicator"
-                    className="text-xs font-mono"
-                    style={{ color: 'var(--c-text-muted)' }}
+                    className="text-xs font-mono text-muted"
                   >
                     {t("group.requestPending")}
                   </p>
@@ -128,8 +126,7 @@ export const SearchGroupPage: React.FC = observer(() => {
                   <div className="flex flex-col gap-2">
                     <p
                       data-testid="request-rejected-indicator"
-                      className="text-xs font-mono"
-                      style={{ color: 'var(--c-danger)' }}
+                      className="text-xs font-mono text-danger"
                     >
                       {t("group.requestRejected")}
                     </p>
@@ -158,7 +155,7 @@ export const SearchGroupPage: React.FC = observer(() => {
             )}
 
             {searchError && (
-              <p data-testid="search-group-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+              <p data-testid="search-group-error" className="text-xs font-mono text-danger">
                 {searchError}
               </p>
             )}

@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 
 const Spinner = () => (
   <span
-    className="inline-block w-3.5 h-3.5 rounded-full border-2 animate-spin flex-shrink-0"
-    style={{ borderColor: "var(--c-accent)", borderTopColor: "transparent" }}
+    className="inline-block w-3.5 h-3.5 rounded-full border-2 border-accent animate-spin flex-shrink-0"
+    style={{ borderTopColor: "transparent" }}
   />
 );
 
@@ -58,10 +58,10 @@ export const Button: React.FC<ButtonProps> = ({
   const variantClass = isDanger
     ? "border-2 border-[hsl(0_70%_50%/0.4)] bg-transparent text-[hsl(0_70%_55%)] enabled:hover:bg-[hsl(0_70%_50%/0.1)]"
     : isPrimary
-      ? "border-2 border-transparent bg-[var(--c-accent)] text-[var(--c-bg)] enabled:hover:opacity-[0.85]"
+      ? "border-2 border-transparent bg-accent text-bg enabled:hover:opacity-[0.85]"
       : isGhost
-        ? "border-none bg-transparent text-[var(--c-text-muted)] enabled:hover:text-[var(--c-text)]"
-        : "border-2 border-[var(--c-border-active)] bg-transparent text-[var(--c-accent)] enabled:hover:bg-[var(--c-hover)]";
+        ? "border-none bg-transparent text-muted enabled:hover:text-fg"
+        : "border-2 border-line-strong bg-transparent text-accent enabled:hover:bg-hover";
 
   return (
     <button
@@ -73,7 +73,7 @@ export const Button: React.FC<ButtonProps> = ({
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
       data-testid={testId}
-      className={`inline-flex items-center justify-center gap-2 font-mono font-medium rounded-[var(--radius-control)] tracking-[0.5px] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${variantClass} ${size === "xs" ? "px-1.5 py-0.5 text-[10px]" : size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 font-mono font-medium rounded-control tracking-[0.5px] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black ${variantClass} ${size === "xs" ? "px-1.5 py-0.5 text-[10px]" : size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}
     >
       {isLoading && <Spinner />}
       {isLoading ? resolvedLoadingText : children}

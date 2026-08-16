@@ -41,18 +41,17 @@ export const TextInput: React.FC<TextInputProps> = ({
     <div className={`relative w-full ${className}`}>
       <label
         htmlFor={inputId}
-        className="block text-xs font-sans font-medium mb-1.5"
-        style={{ color: "var(--c-text)", letterSpacing: "0.5px" }}
+        className="block text-xs font-sans font-medium mb-1.5 text-fg"
+        style={{ letterSpacing: "0.5px" }}
       >
         {label}
-        {required && <span className="ms-1" style={{ color: "var(--c-danger)" }}>*</span>}
+        {required && <span className="ms-1 text-danger">*</span>}
       </label>
 
       <div className="relative">
         {isFocused && !disabled && (
           <ChevronRight
-            className="absolute start-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none rtl-mirror"
-            style={{ color: "var(--c-accent)" }}
+            className="absolute start-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none rtl-mirror text-accent"
           />
         )}
         <input
@@ -72,13 +71,12 @@ export const TextInput: React.FC<TextInputProps> = ({
           spellCheck={false}
           required={required}
           aria-invalid={!!error}
-          className="w-full py-2 placeholder-leading-1 font-mono text-sm focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black transition-all"
+          className={`w-full py-2 placeholder-leading-1 font-mono text-sm focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2 ${
+            error ? "border-danger" : isFocused ? "border-line-strong" : "border-line"
+          }`}
           style={{
             paddingInlineStart: isFocused && !disabled ? "1.5rem" : "0.75rem",
             paddingInlineEnd: "0.75rem",
-            background: "var(--c-surface)",
-            color: "var(--c-text)",
-            border: `2px solid ${error ? "var(--c-danger)" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,
             outline: "none",
             borderRadius: "0.5rem",
             opacity: disabled ? 0.5 : 1,
@@ -88,12 +86,12 @@ export const TextInput: React.FC<TextInputProps> = ({
       </div>
 
       {description && !error && (
-        <p className="mt-1 text-xs font-sans" style={{ color: "var(--c-text-muted)" }}>
+        <p className="mt-1 text-xs font-sans text-muted">
           {description}
         </p>
       )}
       {error && (
-        <p className="mt-1 text-xs font-sans" style={{ color: "var(--c-danger)" }} role="alert">
+        <p className="mt-1 text-xs font-sans text-danger" role="alert">
           {error}
         </p>
       )}

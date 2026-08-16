@@ -32,14 +32,9 @@ export const PageShell: React.FC<PageShellProps> = ({ title, children, scrollabl
   return (
     <div className="flex flex-col h-full">
       <div
-        className="flex items-center px-4 flex-shrink-0 text-xs font-mono"
-        style={{
-          height: "var(--bar-h)",
-          borderBottom: "1px solid var(--c-border)",
-          color: "var(--c-text-muted)",
-        }}
+        className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
       >
-        <span style={{ flex: 1, color: "var(--c-accent)" }}>{title}</span>
+        <span className="text-accent" style={{ flex: 1 }}>{title}</span>
       </div>
       <div ref={contentRef} className={`flex-1 ${scrollable ? "overflow-auto" : "overflow-hidden"}`}>
         {children}

@@ -4,7 +4,7 @@ import { observer } from "mobx-react-lite";
 import { PresenceAvatar } from "../../ui/PresenceAvatar";
 import { AttachmentDisplay } from "../../Message/AttachmentDisplay";
 import { useSkin } from "../../../hooks/queries/usePreferences";
-import { activeLocale } from "../../../utils/format";
+import { formatClockTime, toMs } from "../../../utils/format";
 import type { Message } from "../../../types";
 
 interface ThreadMessageRowProps {
@@ -39,10 +39,10 @@ export const ThreadMessageRow: React.FC<ThreadMessageRowProps> = observer(
     const isTerminal = skin !== "refined";
     const author = message.sender_username ?? message.sender_id;
     // App language, not the OS's — see `activeLocale` in `utils/format.ts`.
-    const time = new Date(message.created_at).toLocaleTimeString(activeLocale(), {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // `toMs` is not optional: without it a seconds-precision `created_at`
+    // renders as 1970 here while the same message reads correctly in the
+    // channel, which is the bug this row shipped with (#874).
+    const time = formatClockTime(toMs(message.created_at));
     const testid = isRoot ? "thread-root" : "thread-reply";
 
     const body = message.deleted_at ? (

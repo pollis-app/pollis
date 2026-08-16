@@ -40,16 +40,14 @@ export const TextArea: React.FC<TextAreaProps> = ({
     <div className={`relative w-full ${className}`}>
       <label
         htmlFor={inputId}
-        className="block text-xs font-mono font-medium mb-1.5"
-        style={{ color: "var(--c-text-dim)" }}
+        className="block text-xs font-mono font-medium mb-1.5 text-dim"
       >
         {label}
       </label>
       <div className="relative">
         {isFocused && !disabled && (
           <ChevronRight
-            className="absolute start-2 top-3 w-3 h-3 pointer-events-none rtl-mirror"
-            style={{ color: "var(--c-accent)" }}
+            className="absolute start-2 top-3 w-3 h-3 pointer-events-none rtl-mirror text-accent"
           />
         )}
         <textarea
@@ -67,13 +65,12 @@ export const TextArea: React.FC<TextAreaProps> = ({
           autoCapitalize="off"
           spellCheck={false}
           aria-invalid={!!error}
-          className="w-full py-2 font-mono text-sm resize-none focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black transition-all"
+          className={`w-full py-2 font-mono text-sm resize-none focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2 ${
+            error ? "border-danger" : isFocused ? "border-line-strong" : "border-line"
+          }`}
           style={{
             paddingInlineStart: isFocused && !disabled ? "1.5rem" : "0.75rem",
             paddingInlineEnd: "0.75rem",
-            background: "var(--c-surface)",
-            color: "var(--c-text)",
-            border: `2px solid ${error ? "var(--c-danger)" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,
             outline: "none",
             borderRadius: "0.5rem",
             opacity: disabled ? 0.5 : 1,
@@ -82,12 +79,12 @@ export const TextArea: React.FC<TextAreaProps> = ({
         />
       </div>
       {description && !error && (
-        <p className="mt-1 text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+        <p className="mt-1 text-xs font-mono text-muted">
           {description}
         </p>
       )}
       {error && (
-        <p className="mt-1 text-xs font-mono" style={{ color: "var(--c-danger)" }} role="alert">
+        <p className="mt-1 text-xs font-mono text-danger" role="alert">
           {error}
         </p>
       )}

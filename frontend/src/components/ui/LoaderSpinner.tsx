@@ -74,8 +74,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
 
   return (
     <span
-      className={`loader-spinner inline-block font-mono ${sizeClasses[size]} ${className}`}
-      style={{ color: "var(--c-accent)" }}
+      className={`loader-spinner inline-block font-mono text-accent ${sizeClasses[size]} ${className}`}
       aria-label={t("a11y.loading")}
     />
   );

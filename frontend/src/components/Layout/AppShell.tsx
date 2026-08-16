@@ -32,6 +32,7 @@ import { AlertTriangle, Download, Mail, Phone, X } from "lucide-react";
 import { startUpdatePolling, stopUpdatePolling } from "../../services/updatePoller";
 import { loadDeviceCallRingtone } from "../../utils/notify";
 import { logIgnored } from "../../utils/log";
+import { probeRender } from "../../utils/renderProbe";
 import { usePreferences } from "../../hooks/queries/usePreferences";
 import { voiceSession } from "../../voice";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
@@ -47,6 +48,7 @@ const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
 
 export const AppShell: React.FC = observer(() => {
   const { t } = useTranslation("nav");
+  probeRender("AppShell");
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -85,7 +87,13 @@ export const AppShell: React.FC = observer(() => {
     setStatusBarAlert,
     voiceError,
     setVoiceError,
-    isLocalSpeaking,
+    // NOTE: do not destructure `isLocalSpeaking` here. It was read but never
+    // used, and because this component is an `observer()` the read alone
+    // subscribed the ENTIRE app shell to it — a field that flips on every
+    // speech onset and release during a call. Every utterance re-rendered the
+    // shell and everything under `<Outlet />` to display nothing new (#874).
+    // The speaking indicator belongs to the components that draw it
+    // (`VoiceBar`, `SidebarProfilePanel`), which read it themselves.
     incomingCall,
     setIncomingCall,
     viewingScreenShareTrackKey,
@@ -281,6 +289,30 @@ export const AppShell: React.FC = observer(() => {
   // Maintain a LiveKit room connection for the active channel/conversation
   useLiveKitRealtime();
 
+  // Warm the lazily-chunked call surfaces once the app is idle (#874).
+  //
+  // `/call/$callId` is reached PROGRAMMATICALLY — answering an incoming call
+  // navigates there (see the incoming-call handler below), so a cold chunk
+  // would put a module fetch between "user hits answer" and the call UI. That
+  // is the one navigation in the app where a spinner is unacceptable.
+  //
+  // Splitting them still pays: the bytes leave the startup parse/eval path,
+  // which is what the initial-load cost actually is. This only moves the fetch
+  // to a moment when nothing is waiting on it. Fire-and-forget by design — if
+  // it fails the route's own lazy import retries on navigation.
+  useEffect(() => {
+    const warm = () => {
+      void import("../../pages/Call").catch(logIgnored);
+      void import("../../pages/VoiceChannel").catch(logIgnored);
+    };
+    if (typeof requestIdleCallback === "function") {
+      const handle = requestIdleCallback(warm, { timeout: 5000 });
+      return () => cancelIdleCallback(handle);
+    }
+    const handle = setTimeout(warm, 2000);
+    return () => clearTimeout(handle);
+  }, []);
+
   // Poll for app updates every 15 minutes once the user reaches the main
   // app. The startup gate in App.tsx already covers the launch-time check;
   // this picks up releases published while the user is signed in. The
@@ -317,6 +349,11 @@ export const AppShell: React.FC = observer(() => {
   }, [groupsWithChannels, setGroups, setChannels]);
 
   const closeSearch = useCallback(() => setIsSearchOpen(false), []);
+  // Pinned identity, like `closeSearch` above. `Sidebar` is an `observer()` and
+  // therefore memoised, but an inline arrow here handed it a new `onToggle` on
+  // every AppShell render — so the sidebar (group tree, DM list, unread badges)
+  // re-rendered for every unrelated shell state change (#874).
+  const toggleSidebar = useCallback(() => setIsSidebarOpen((v) => !v), []);
 
   // The search button in BreadcrumbNav fires this custom event so it can
   // open the panel without lifting AppShell's local state into a store.
@@ -571,13 +608,13 @@ export const AppShell: React.FC = observer(() => {
   return (
     <div
       data-testid="terminal-app"
+      className="bg-bg"
       style={{
         height: "100%",
         width: "100%",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        background: "var(--c-bg)",
         position: "relative",
       }}
     >
@@ -598,7 +635,7 @@ export const AppShell: React.FC = observer(() => {
           BreadcrumbNav, VoiceBar, and bottom status bar all stay visible
           and interactive while a stream is being viewed. */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row", position: "relative" }}>
-        <Sidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen((v) => !v)} />
+        <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
         <div
           style={{
             flex: 1,
@@ -657,7 +694,7 @@ export const AppShell: React.FC = observer(() => {
               padding: "28px 56px",
             }}
           >
-            <span className="text-sm font-mono" style={{ color: "var(--c-accent)" }}>
+            <span className="text-sm font-mono text-accent">
               {t("shell.dropFiles")}
             </span>
           </div>
@@ -667,9 +704,9 @@ export const AppShell: React.FC = observer(() => {
       {/* Bottom bar — unread summary on the left, status alert on the right */}
       {/* On chat screens, invert: dark bg with accent text. Otherwise: accent bg with dark text. */}
       <div
+        className="border-t border-line"
         style={{
           flexShrink: 0,
-          borderTop: "1px solid var(--c-border)",
           background: barBg,
           display: "flex",
           alignItems: "center",
@@ -682,11 +719,10 @@ export const AppShell: React.FC = observer(() => {
         {availableUpdateVersion && (
           <button
             data-testid="status-bar-update-available"
-            className="text-xs font-mono flex items-center gap-1 cursor-pointer"
+            className="text-xs font-mono flex items-center gap-1 cursor-pointer border-0"
             style={{
               color: barInk,
               background: "none",
-              border: "none",
               padding: 0,
               lineHeight: 0,
             }}
@@ -709,8 +745,8 @@ export const AppShell: React.FC = observer(() => {
           >
             <button
               data-testid="status-bar-incoming-call-accept"
-              className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
-              style={{ color: "inherit", background: "none", border: "none", padding: 0 }}
+              className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0 }}
               onClick={() => {
                 // Order matters: route first (so the old voice page unmounts
                 // before activeVoiceChannelId flips and any in-flight Call
@@ -742,8 +778,8 @@ export const AppShell: React.FC = observer(() => {
             </button>
             <button
               data-testid="status-bar-incoming-call-decline"
-              className="cursor-pointer"
-              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              className="cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => {
                 const callerId = incomingCall.callerId;
                 const callId = incomingCall.callId;
@@ -775,8 +811,8 @@ export const AppShell: React.FC = observer(() => {
             </span>
             <button
               data-testid="status-bar-voice-error-dismiss"
-              className="cursor-pointer"
-              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              className="cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => setVoiceError(null)}
               aria-label={t("statusBar.dismissVoiceError")}
             >
@@ -798,8 +834,8 @@ export const AppShell: React.FC = observer(() => {
             </span>
             <button
               data-testid="status-bar-screenshare-error-dismiss"
-              className="cursor-pointer"
-              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              className="cursor-pointer border-0"
+              style={{ color: "inherit", background: "none", padding: 0, lineHeight: 0 }}
               onClick={() => shareStopped()}
               aria-label={t("statusBar.dismissScreenShareError")}
             >
@@ -808,8 +844,8 @@ export const AppShell: React.FC = observer(() => {
           </div>
         ) : statusBarAlert ? (
           <button
-            className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
-            style={{ color: barInk, background: "none", border: "none", padding: 0 }}
+            className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer border-0"
+            style={{ color: barInk, background: "none", padding: 0 }}
             onClick={() => {
               router.navigate({ to: "/dms/$conversationId", params: { conversationId: statusBarAlert.roomId } });
               setStatusBarAlert(null);

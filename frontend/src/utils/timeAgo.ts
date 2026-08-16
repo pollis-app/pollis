@@ -1,11 +1,12 @@
 import i18n from "../i18n";
+import { toMs } from "./format";
 
 // Short, human-readable "time ago" string.
 // Accepts ISO strings, epoch ms, or epoch s.
 export function timeAgo(input: string | number | Date): string {
-  const d = input instanceof Date ? input : new Date(
-    typeof input === "number" && input < 1e12 ? input * 1000 : input,
-  );
+  const d = input instanceof Date
+    ? input
+    : new Date(typeof input === "number" ? toMs(input) : input);
   const ts = d.getTime();
   if (Number.isNaN(ts)) {
     return "";

@@ -162,22 +162,16 @@ export const DMPage: React.FC = observer(() => {
   return (
     <div className="flex flex-col h-full">
       <div
-        className="flex items-center px-4 flex-shrink-0 text-xs font-mono"
-        style={{
-          height: "var(--bar-h)",
-          borderBottom: "1px solid var(--c-border)",
-          color: "var(--c-text-muted)",
-        }}
+        className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
       >
         <span style={{ flex: 1 }}>
           {canShowProfile && username ? (
             <button
               data-testid="dm-header-username"
               onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
-              className="font-mono transition-colors text-inherit hover:text-[var(--c-accent)]"
+              className="font-mono transition-colors text-inherit hover:text-accent border-0"
               style={{
                 background: "none",
-                border: "none",
                 padding: 0,
                 cursor: "pointer",
                 fontSize: "inherit",

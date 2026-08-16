@@ -61,9 +61,8 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
   return (
     <div
       data-testid="enrollment-approval-prompt"
-      className="flex flex-col h-full w-full"
+      className="flex flex-col h-full w-full bg-bg"
       style={{
-        background: "var(--c-bg)",
         position: "fixed",
         top: 0,
         left: 0,
@@ -93,20 +92,17 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
           <div className="flex flex-col gap-5">
             <div>
               <p
-                className="text-xs font-mono uppercase tracking-wider"
-                style={{ color: "var(--c-danger)", letterSpacing: "0.15em" }}
+                className="text-xs font-mono uppercase tracking-wider text-danger"
+                style={{ letterSpacing: "0.15em" }}
               >
                 {t("approval.badge")}
               </p>
-              <h1
-                className="text-base font-mono font-bold mt-1"
-                style={{ color: "var(--c-text)" }}
-              >
+              <h1 className="text-base font-mono font-bold mt-1 text-fg">
                 {t("approval.title")}
               </h1>
               <p
-                className="text-xs mt-2 font-mono"
-                style={{ color: "var(--c-text)", lineHeight: 1.6 }}
+                className="text-xs mt-2 font-mono text-fg"
+                style={{ lineHeight: 1.6 }}
               >
                 <Trans
                   t={t}
@@ -116,8 +112,8 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
                 />
               </p>
               <p
-                className="text-xs mt-2 font-mono"
-                style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
+                className="text-xs mt-2 font-mono text-muted"
+                style={{ lineHeight: 1.6 }}
               >
                 {t("approval.instruction")}
               </p>
@@ -125,13 +121,10 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
 
             <div
               data-testid="approval-verification-code"
-              className="font-mono text-3xl font-bold text-center select-all"
+              className="font-mono text-3xl font-bold text-center select-all bg-surface border-2 border-accent text-accent"
               style={{
-                background: "var(--c-surface)",
-                border: "2px solid var(--c-accent)",
                 borderRadius: "0.5rem",
                 padding: "1.5rem",
-                color: "var(--c-accent)",
                 letterSpacing: "0.4em",
               }}
             >
@@ -141,8 +134,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
             {error && (
               <p
                 data-testid="approval-error"
-                className="text-xs font-mono"
-                style={{ color: "var(--c-danger)" }}
+                className="text-xs font-mono text-danger"
               >
                 {error}
               </p>

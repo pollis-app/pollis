@@ -47,8 +47,7 @@ export const EmojiCell: React.FC<EmojiCellProps> = ({
       onMouseLeave={() => onPreview(null)}
       className="flex items-center justify-center w-8 h-8 text-xl leading-none
                  transition-colors duration-75 hover:bg-hover focus:bg-active
-                 focus:outline-none"
-      style={{ borderRadius: "var(--radius-chip)" }}
+                 focus:outline-none rounded-chip"
     >
       {item.kind === "standard" ? (
         <span>{emojiDisplayChar(item.emoji, toneIndex)}</span>

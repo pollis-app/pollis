@@ -34,10 +34,9 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
   return (
     <div
       data-testid="typing-indicator"
-      className="px-4 text-xs font-mono"
+      className="px-4 text-xs font-mono text-muted"
       style={{
         minHeight: 16,
-        color: "var(--c-text-muted)",
         lineHeight: "16px",
         margin: "0.25rem 0.125rem"
       }}

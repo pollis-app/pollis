@@ -32,8 +32,7 @@ export const LanguageSection: React.FC<LanguageSectionProps> = ({ userId }) => {
     <section className="flex flex-col gap-4 mb-12" data-testid="pref-language">
       <h2
         data-testid="pref-language-heading"
-        className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-        style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+        className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b border-line text-fg"
       >
         {t("language.heading")}
       </h2>
@@ -64,7 +63,7 @@ export const LanguageSection: React.FC<LanguageSectionProps> = ({ userId }) => {
           );
         })}
       </div>
-      <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+      <p className="text-xs font-mono text-muted">
         {t("language.description")}
       </p>
     </section>

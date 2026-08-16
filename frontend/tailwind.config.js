@@ -40,18 +40,38 @@ export default {
         active: 'var(--c-active)',
         // Error / destructive text and borders → `text-danger`, `border-danger`.
         danger: 'var(--c-danger)',
+        // "In a voice room" green. Not re-skinned, like the accents.
+        connected: 'var(--c-voice-connected)',
       },
-      // `--bar-h` is the shared chrome-bar height (rem ⇒ font-scalable).
-      // Exposed via spacing so `h-bar` / `min-h-bar` / `py-bar` all work.
+      // `--bar-h` is the shared chrome-bar height and `--side-w` the sidebar /
+      // right-panel measure (both rem ⇒ font-scalable). Exposed via spacing so
+      // `h-bar` / `min-h-bar` / `py-bar` / `w-side` all work.
+      //
+      // The message-log rhythm tokens sit here too: they are per-skin density
+      // knobs the log applies as padding and margin, and without a utility
+      // every row and divider had to spell them as an inline style.
       spacing: {
         bar: 'var(--bar-h)',
+        side: 'var(--side-w)',
+        'msg-header': 'var(--msg-header-gap)',
+        'msg-group': 'var(--msg-group-gap)',
+        'msg-divider': 'var(--msg-divider-gap)',
+        'msg-row': 'var(--msg-row-pad-y)',
       },
       fontFamily: {
         mono: ['"DM Mono"', 'ui-monospace', 'monospace'],
         sans: ['"Atkinson Hyperlegible Next"', 'system-ui', 'sans-serif'],
       },
+      lineHeight: {
+        // Per-skin body leading. `leading-msg` on the message body.
+        msg: 'var(--lh)',
+      },
       borderRadius: {
         panel: '10px',
+        // The two per-skin radii from index.css — terminal is nearly square
+        // (2px/4px), refined is rounded (6px/8px).
+        chip: 'var(--radius-chip)',
+        control: 'var(--radius-control)',
       },
       fontSize: {
         '2xs': ['0.733rem', { lineHeight: '1.1rem'  }],

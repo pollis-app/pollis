@@ -24,10 +24,8 @@ export const Card: React.FC<CardProps> = ({
 }) => (
   <div
     data-testid={testId}
-    className={className}
+    className={`bg-surface border-2 border-line ${className}`}
     style={{
-      background: "var(--c-surface)",
-      border: "2px solid var(--c-border)",
       borderRadius: "6px",
       padding: paddingMap[padding],
       ...style,

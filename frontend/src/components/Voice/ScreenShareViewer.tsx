@@ -83,12 +83,9 @@ export const ScreenShareViewer: React.FC = observer(() => {
       }}
     >
       <div
-        className="flex items-center justify-between px-3 font-mono text-xs"
+        className="flex items-center justify-between px-3 font-mono text-xs text-muted border-b border-line bg-surface"
         style={{
           height: 28,
-          color: "var(--c-text-muted)",
-          borderBottom: "1px solid var(--c-border)",
-          background: "var(--c-surface)",
         }}
       >
         <span>
@@ -101,11 +98,10 @@ export const ScreenShareViewer: React.FC = observer(() => {
           onClick={close}
           aria-label={t("viewer.closeLabel")}
           title={t("viewer.closeTitle")}
+          className="text-muted border-0"
           style={{
             background: "none",
-            border: "none",
             padding: 0,
-            color: "var(--c-text-muted)",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",

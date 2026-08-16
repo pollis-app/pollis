@@ -1,7 +1,15 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Smile } from "lucide-react";
-import { EmojiPicker } from "./EmojiPicker";
+
+// The picker carries the full standard emoji table (`emojiData.ts`), which is
+// the largest single application module in the bundle, plus the search index
+// built on top of it. The panel is already mounted on demand, so none of that
+// belongs in the startup chunk (#874). The trigger button — the only part
+// always on screen — stays eager.
+const EmojiPicker = lazy(() =>
+  import("./EmojiPicker").then((m) => ({ default: m.EmojiPicker })),
+);
 
 interface EmojiPickerButtonProps {
   /** Receives the text to insert — a character, or a `<:name:hash>` token. */
@@ -86,11 +94,17 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
 
       {open && (
         <div className={`absolute z-40 ${positionClass}`}>
-          <EmojiPicker
-            onSelect={onSelect}
-            onClose={() => setOpen(false)}
-            closeOnSelect={closeOnSelect}
-          />
+          {/* `null` fallback rather than a spinner: the chunk is local and
+              resolves within a frame or two, and a flashing placeholder where
+              the grid is about to appear reads worse than the grid simply
+              arriving. */}
+          <Suspense fallback={null}>
+            <EmojiPicker
+              onSelect={onSelect}
+              onClose={() => setOpen(false)}
+              closeOnSelect={closeOnSelect}
+            />
+          </Suspense>
         </div>
       )}
     </div>

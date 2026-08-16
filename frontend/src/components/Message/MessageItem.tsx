@@ -2,22 +2,28 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Reply, CornerUpLeft } from "lucide-react";
 import { ThreadReplyCount } from "./ThreadReplyCount";
-import { formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
+import { formatTimeOfDay, formatFullTimestamp, toMs } from "../../utils/format";
 import { observer } from "mobx-react-lite";
-import { appStore } from "../../stores/appStore";
 import { MessageBody } from "./MessageBody";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
-import { getUsernameColor, useBackgroundIsLight } from "../../utils/usernameColor";
-import { useSkin } from "../../hooks/queries/usePreferences";
+import { getUsernameColor } from "../../utils/usernameColor";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
 import { MessageActions } from "./MessageActions";
 import { ReceiptIndicator } from "./ReceiptIndicator";
+import { probeRender } from "../../utils/renderProbe";
+import type { MessageRenderContext } from "./messageRenderContext";
 import type { Message, MessageReceipts } from "../../types";
 
 interface MessageItemProps {
   message: Message;
-  allMessages?: Message[];
+  /** List-wide render inputs (skin, viewer, mention roster). One memoised
+   *  object from `MessageList` — see `messageRenderContext.ts`. */
+  ctx: MessageRenderContext;
+  /** The message this one replies to, already resolved by the list. Was a
+   *  `allMessages.find()` per row, i.e. O(N^2) over the whole log (#874).
+   *  `undefined` = no reply; `null` = replied to something not loaded. */
+  replyToMessage?: Message | null;
   authorUsername?: string;
   isAuthorAdmin?: boolean;
   /** True when the viewer is an admin in this message's group — enables
@@ -44,25 +50,22 @@ interface MessageItemProps {
    *  `idle` for every message but the one just acted on. */
   copyLinkState?: "idle" | "copied" | "failed";
   isSaved?: boolean;
-  onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
-  /** Delivery / read receipts (#857). All optional — when the parent doesn't
-   * pass them no indicator renders. Wired from `MessageList`; receipts exist
-   * for DMs only, so `isDm` gates the whole affordance. */
-  receipts?: Map<string, MessageReceipts>;
+  /** Delivery / read receipts for THIS message (#857). Optional — when the
+   * parent doesn't pass it no indicator renders. Wired from `MessageList`;
+   * receipts exist for DMs only, so `isDm` gates the whole affordance.
+   * #874: this used to be the list's whole `Map`, whose identity changes on
+   * any peer's receipt — which re-rendered every row in the log to update one. */
+  receipt?: MessageReceipts;
   /** DM members excluding the viewer — drives the "2/4" multi-reader summary. */
   peerCount?: number;
   isDm?: boolean;
 }
 
-// `created_at` arrives as unix seconds or milliseconds depending on source;
-// normalize to milliseconds before formatting.
-const toMs = (timestamp: number): number =>
-  timestamp < 1e12 ? timestamp * 1000 : timestamp;
-
 export const MessageItem: React.FC<MessageItemProps> = observer(({
   message,
-  allMessages = [],
+  ctx,
+  replyToMessage,
   authorUsername,
   isAuthorAdmin = false,
   canModerate = false,
@@ -77,15 +80,14 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   copyLinkState = "idle",
   isSaved = false,
   onScrollToReply,
-  receipts,
+  receipt,
   peerCount = 0,
   isDm = false,
 }) => {
+  probeRender("MessageItem");
   const { t } = useTranslation("chat");
-  const { currentUser } = appStore;
-  const isOwn = message.sender_id === currentUser?.id;
-  const isLightBg = useBackgroundIsLight();
-  const skin = useSkin();
+  const { skin, isLightBg, currentUserId } = ctx;
+  const isOwn = message.sender_id === currentUserId;
   // Falls back to the same placeholder the default prop used to supply, but
   // resolved at render so it follows the active language.
   const displayName = authorUsername ?? t("message.unknownAuthor");
@@ -95,9 +97,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   const authorColorKey = message.sender_username ?? message.sender_id;
   const authorColor = getUsernameColor(authorColorKey, isLightBg);
 
-  const replyTo = message.reply_to_message_id
-    ? allMessages.find((m) => m.id === message.reply_to_message_id)
-    : null;
+  const replyTo = replyToMessage ?? null;
 
   const replyToAuthor = replyTo
     ? (replyTo.sender_username ?? replyTo.sender_id)
@@ -168,11 +168,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         // keyboard-focused row (or its action bar) reads exactly like a
         // hovered one, with zero per-keystroke re-render.
         tabIndex={-1}
-        className="group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75"
-        style={{
-          paddingTop: isGroupStart ? "var(--msg-header-gap)" : "var(--msg-group-gap)",
-          paddingBottom: "var(--msg-row-pad-y)",
-        }}
+        className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header" : "pt-msg-group"} pb-msg-row hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75`}
       >
         {/* Left gutter: avatar on a group start, hover-only timestamp otherwise */}
         <div className="flex justify-center pt-0.5 select-none">
@@ -182,8 +178,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             <bdi
               dir="ltr"
               title={formatFullTimestamp(toMs(message.created_at))}
-              className="font-machine text-2xs tabular-nums whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{ color: "var(--c-text-muted)" }}
+              className="font-machine text-2xs tabular-nums whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity text-muted"
             >
               {formatTimeOfDay(toMs(message.created_at))}
             </bdi>
@@ -198,8 +193,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               <button
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
                 onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-                className="flex items-center gap-1 text-xs mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0"
-                style={{ color: "var(--c-text-muted)" }}
+                className="flex items-center gap-1 text-xs mb-0.5 opacity-70 hover:opacity-100 transition-opacity min-w-0 text-muted"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
                 {replyToAuthor && (
@@ -217,8 +211,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             ) : (
               <div
                 data-testid={`reply-preview-${message.reply_to_message_id}`}
-                className="flex items-center gap-1 text-xs mb-0.5"
-                style={{ color: "var(--c-text-dim)" }}
+                className="flex items-center gap-1 text-xs mb-0.5 text-dim"
               >
                 <CornerUpLeft size={12} className="flex-shrink-0 rtl-mirror" />
                 <span>{t("message.redacted")}</span>
@@ -240,8 +233,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 data-testid="message-timestamp"
                 dir="ltr"
                 title={formatFullTimestamp(toMs(message.created_at))}
-                className="font-machine text-2xs tabular-nums select-none flex-shrink-0"
-                style={{ color: "var(--c-text-muted)" }}
+                className="font-machine text-2xs tabular-nums select-none flex-shrink-0 text-muted"
               >
                 {formatTimeOfDay(toMs(message.created_at))}
               </bdi>
@@ -252,26 +244,24 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <div
             data-testid="message-content"
             dir="auto"
-            className="text-sm break-words"
+            className={`text-sm break-words leading-msg ${isDeleted ? "text-muted" : "text-fg"}`}
             style={{
-              color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
               whiteSpace: "pre-wrap",
-              lineHeight: "var(--lh)",
             }}
           >
-            <MessageBody text={content} />
+            <MessageBody text={content} ctx={ctx} />
             {message.edited_at && !isDeleted && (
-              <span className="ms-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+              <span className="ms-1 text-xs text-muted">
                 {t("message.edited")}
               </span>
             )}
             {message.status && message.status !== "sent" && (
-              <span className="ms-1 text-xs font-machine" style={{ color: "var(--c-text-muted)" }}>
+              <span className="ms-1 text-xs font-machine text-muted">
                 [{t(`status.${message.status}`)}]
               </span>
             )}
             <ReceiptIndicator
-              receipts={receipts?.get(message.id)}
+              receipts={receipt}
               peerCount={peerCount}
               visible={isOwn && isDm}
             />
@@ -282,8 +272,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
           {attachmentBlocks}
 
-          {/* Reactions row — disabled, needs more thought */}
-          {/* <MessageReactions messageId={message.id} /> */}
           <ThreadReplyCount
             count={threadReplyCount}
             onOpen={onOpenThread ? () => onOpenThread(message.id) : undefined}
@@ -317,7 +305,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       aria-label={t("message.fromLabel", { name: displayName })}
       // tabIndex -1 + focus-within: see the refined row above.
       tabIndex={-1}
-      className="group relative px-4 py-1 hover:bg-[var(--c-hover)] focus-within:bg-[var(--c-hover)] outline-none transition-colors duration-75"
+      className="group relative px-4 py-1 hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75"
     >
       {/* Reply thread indicator */}
       {message.reply_to_message_id && (
@@ -325,8 +313,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           <button
             data-testid={`reply-preview-${message.reply_to_message_id}`}
             onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity"
-            style={{ color: "var(--c-text-muted)" }}
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 opacity-60 hover:opacity-90 transition-opacity text-muted"
           >
             <Reply size={10} className="rtl-unmirror" />
             {replyToAuthor && (
@@ -344,8 +331,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
-            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14"
-            style={{ color: "var(--c-text-dim)" }}
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 ps-14 text-dim"
           >
             <Reply size={10} className="rtl-unmirror" />
             <span>{t("message.redacted")}</span>
@@ -359,8 +345,8 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           data-testid="message-timestamp"
           dir="ltr"
           title={formatFullTimestamp(toMs(message.created_at))}
-          className="flex-shrink-0 text-xs font-mono tabular-nums select-none w-20"
-          style={{ color: "var(--c-text-muted)", lineHeight: "1.5rem" }}
+          className="flex-shrink-0 text-xs font-mono tabular-nums select-none w-20 text-muted"
+          style={{ lineHeight: "1.5rem" }}
         >
           {formatTimeOfDay(toMs(message.created_at))}
         </bdi>
@@ -382,8 +368,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         </bdi>
 
         <span
-          className="font-mono text-sm select-none me-1 flex-shrink-0"
-          style={{ color: "var(--c-text-muted)" }}
+          className="font-mono text-sm select-none me-1 flex-shrink-0 text-muted"
           aria-hidden="true"
         >
           {":"}
@@ -392,25 +377,24 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         <span
           data-testid="message-content"
           dir="auto"
-          className="font-mono text-sm break-words flex-1 min-w-0"
+          className={`font-mono text-sm break-words flex-1 min-w-0 ${isDeleted ? "text-muted" : "text-fg"}`}
           style={{
-            color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
             whiteSpace: "pre-wrap",
           }}
         >
-          <MessageBody text={content} />
+          <MessageBody text={content} ctx={ctx} />
           {message.edited_at && !isDeleted && (
-            <span className="ms-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+            <span className="ms-1 text-xs text-muted">
               {t("message.edited")}
             </span>
           )}
           {message.status && message.status !== "sent" && (
-            <span className="ms-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+            <span className="ms-1 text-xs text-muted">
               [{t(`status.${message.status}`)}]
             </span>
           )}
           <ReceiptIndicator
-            receipts={receipts?.get(message.id)}
+            receipts={receipt}
             peerCount={peerCount}
             visible={isOwn && isDm}
           />
@@ -455,9 +439,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           ))}
         </div>
       )}
-
-      {/* Reactions row — disabled, needs more thought */}
-      {/* <MessageReactions messageId={message.id} /> */}
     </div>
   );
 });

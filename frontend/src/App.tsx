@@ -515,13 +515,11 @@ function MainApp() {
     return (
       <div
         data-testid="loading-screen"
-        className="flex items-center justify-center h-full w-full"
-        style={{ background: "var(--c-bg)" }}
+        className="flex items-center justify-center h-full w-full bg-bg"
       >
         <span
           data-testid="loading-spinner"
-          className="text-xs font-mono"
-          style={{ color: "var(--c-text-muted)" }}
+          className="text-xs font-mono text-muted"
         >
           {t("shell.initializing")}
         </span>
@@ -543,8 +541,8 @@ function MainApp() {
     return (
       <div
         data-testid="logout-confirm-screen"
-        className="flex flex-col h-full w-full"
-        style={{ background: "var(--c-bg)", position: "relative" }}
+        className="flex flex-col h-full w-full bg-bg"
+        style={{ position: "relative" }}
       >
         <div style={{ position: "absolute", inset: 0, opacity: 0.2, pointerEvents: "none" }}>
           <DotMatrix speed={0.2} />
@@ -556,10 +554,10 @@ function MainApp() {
           <Card padding="lg" style={{ width: "100%", maxWidth: 360 }}>
             <div className="flex flex-col gap-5">
               <div>
-                <h2 className="text-sm font-mono font-semibold" style={{ color: "var(--c-text)" }}>
+                <h2 className="text-sm font-mono font-semibold text-fg">
                   {t("shell.signOutTitle")}
                 </h2>
-                <p className="text-xs mt-1 font-mono" style={{ color: "var(--c-text-muted)" }}>
+                <p className="text-xs mt-1 font-mono text-muted">
                   {t("shell.signOutQuestion")}
                 </p>
               </div>
@@ -600,8 +598,8 @@ function MainApp() {
     return (
       <div
         data-testid="identity-setup-screen"
-        className="flex flex-col h-full w-full"
-        style={{ background: "var(--c-bg)", position: "relative" }}
+        className="flex flex-col h-full w-full bg-bg"
+        style={{ position: "relative" }}
       >
         <div style={{ position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none" }}>
           <DotMatrix />
@@ -612,12 +610,11 @@ function MainApp() {
             <div className="flex flex-col gap-3">
               <span
                 data-testid="identity-setup-message"
-                className="font-mono font-semibold"
-                style={{ color: "var(--c-accent)" }}
+                className="font-mono font-semibold text-accent"
               >
                 {t("shell.welcome")}
               </span>
-              <p className="text-xs font-mono flex items-center gap-2" style={{ color: "var(--c-text)" }}>
+              <p className="text-xs font-mono flex items-center gap-2 text-fg">
                 <span>
                   {t("shell.gettingReady")}
                 </span>
@@ -708,13 +705,11 @@ function MainApp() {
   return (
     <div
       data-testid="loading-screen"
-      className="flex items-center justify-center h-full w-full"
-      style={{ background: "var(--c-bg)" }}
+      className="flex items-center justify-center h-full w-full bg-bg"
     >
       <span
         data-testid="loading-spinner"
-        className="text-xs font-mono"
-        style={{ color: "var(--c-text-muted)" }}
+        className="text-xs font-mono text-muted"
       >
         {t("shell.loading")}
       </span>

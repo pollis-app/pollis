@@ -2,7 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
-import { RenameChannel } from "./RenameChannel";
+import { RenameEntity } from "./RenameEntity";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 
 export const RenameChannelPage: React.FC = () => {
@@ -16,7 +16,8 @@ export const RenameChannelPage: React.FC = () => {
 
   return (
     <PageShell title={t("renameChannel.pageTitle")}>
-      <RenameChannel
+      <RenameEntity
+        kind="channel"
         groupId={groupId}
         channelId={channelId}
         onSuccess={() => {

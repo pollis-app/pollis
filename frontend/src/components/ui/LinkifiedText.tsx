@@ -1,20 +1,6 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import { shellOpen } from "../../bridge";
-
-// Matches http://, https://, and www. prefixed URLs
-const URL_REGEX =
-  /(https?:\/\/[^\s<>"')\]]+|www\.[^\s<>"')\]]+\.[^\s<>"')\]]+)/gi;
-
-/**
- * Ensures a URL string has a protocol prefix.
- * Adds https:// to www. URLs that lack a protocol.
- */
-function ensureProtocol(url: string): string {
-  if (/^https?:\/\//i.test(url)) {
-    return url;
-  }
-  return `https://${url}`;
-}
+import { ensureProtocol, findUrls } from "../../utils/links";
 
 interface LinkifiedTextProps {
   text: string;
@@ -23,8 +9,12 @@ interface LinkifiedTextProps {
 /**
  * Renders text with URLs detected and displayed as clickable links.
  * Links open in the system browser via Tauri's shell plugin.
+ *
+ * Memoised on `text`: it is rendered once per message body (and once per
+ * non-mention slice within one), so an unmemoised scan is paid for the whole
+ * visible log every time anything in the list re-renders.
  */
-export const LinkifiedText: React.FC<LinkifiedTextProps> = ({ text }) => {
+export const LinkifiedText: React.FC<LinkifiedTextProps> = React.memo(({ text }) => {
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>, url: string) => {
       e.preventDefault();
@@ -33,26 +23,25 @@ export const LinkifiedText: React.FC<LinkifiedTextProps> = ({ text }) => {
     [],
   );
 
+  const matches = useMemo(() => findUrls(text), [text]);
+
+  // No URLs found, return text as-is
+  if (matches === null) {
+    return <>{text}</>;
+  }
+
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  // Reset regex state
-  URL_REGEX.lastIndex = 0;
-
-  while ((match = URL_REGEX.exec(text)) !== null) {
-    // Add text before this match
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
+  for (const { start, url } of matches) {
+    if (start > lastIndex) {
+      parts.push(text.slice(lastIndex, start));
     }
-
-    const url = match[0];
     parts.push(
       // A URL is an identifier, never prose: it reads left-to-right in every
       // locale, so it is pinned `ltr` and isolated from the surrounding text
       // rather than inheriting the paragraph direction.
       <a
-        key={match.index}
+        key={start}
         dir="ltr"
         href={ensureProtocol(url)}
         onClick={(e) => handleClick(e, url)}
@@ -62,8 +51,7 @@ export const LinkifiedText: React.FC<LinkifiedTextProps> = ({ text }) => {
         {url}
       </a>,
     );
-
-    lastIndex = URL_REGEX.lastIndex;
+    lastIndex = start + url.length;
   }
 
   // Add remaining text after last match
@@ -71,10 +59,7 @@ export const LinkifiedText: React.FC<LinkifiedTextProps> = ({ text }) => {
     parts.push(text.slice(lastIndex));
   }
 
-  // No URLs found, return text as-is
-  if (parts.length === 0) {
-    return <>{text}</>;
-  }
-
   return <>{parts}</>;
-};
+});
+
+LinkifiedText.displayName = "LinkifiedText";

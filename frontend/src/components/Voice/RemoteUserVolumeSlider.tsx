@@ -79,7 +79,7 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
 
   return (
     <div className="flex items-center gap-2">
-      <Volume2 size={12} style={{ color: "var(--c-text-dim)" }} />
+      <Volume2 size={12} className="text-dim" />
       <input
         type="range"
         min={REMOTE_USER_VOLUME_MIN}
@@ -91,7 +91,7 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
         data-testid={`voice-volume-slider-${userId}`}
         className="
           w-20 h-1 rounded-md appearance-none cursor-pointer
-          focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)]
+          focus:outline-none focus:ring-2 focus:ring-accent
           [&::-webkit-slider-thumb]:appearance-none
           [&::-webkit-slider-thumb]:w-3
           [&::-webkit-slider-thumb]:h-3

@@ -107,11 +107,8 @@ export const InputOtp: React.FC<InputOtpProps> = ({
             autoCapitalize="off"
             spellCheck={false}
             aria-label={t("a11y.otpDigit", { index: index + 1 })}
-            className="w-10 h-12 text-center font-mono text-lg font-medium transition-all"
+            className={`w-10 h-12 text-center font-mono text-lg font-medium transition-all border-2 ${isFocused ? "bg-accent text-bg border-accent" : "bg-surface text-fg border-line"}`}
             style={{
-              background: isFocused ? "var(--c-accent)" : "var(--c-surface)",
-              color: isFocused ? "var(--c-bg)" : "var(--c-text)",
-              border: `2px solid ${isFocused ? "var(--c-accent)" : "var(--c-border)"}`,
               outline: "none",
               borderRadius: "0.25rem",
               opacity: disabled ? 0.5 : 1,

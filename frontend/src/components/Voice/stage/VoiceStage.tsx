@@ -284,17 +284,16 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       <div className="vs-stage font-mono text-xs">
         {/* ---------- header (compact, matches the rest of the app) ---------- */}
         <div
-          className="flex items-center px-4 flex-shrink-0 h-[var(--bar-h)]"
-          style={{ borderBottom: "1px solid var(--c-border)", color: "var(--c-text-muted)" }}
+          className="flex items-center px-4 flex-shrink-0 h-bar border-b border-line text-muted"
         >
           <button
             onClick={onBack}
             aria-label={t("common:actions.back")}
-            className="me-3 inline-flex items-center gap-1 leading-none transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
+            className="me-3 inline-flex items-center gap-1 leading-none transition-colors text-muted hover:text-accent"
           >
             <ArrowLeft size={12} className="rtl-mirror" />
           </button>
-          <span style={{ flex: 1, color: "var(--c-accent)" }} className="flex items-center gap-1.5">
+          <span style={{ flex: 1 }} className="flex items-center gap-1.5 text-accent">
             {callMode ? <Phone size={12} /> : <Volume2 size={12} />}
             {channelName}
           </span>
@@ -469,7 +468,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
             </div>
             <div className="vs-foot-side right">
               <button
-                className="flex items-center gap-2 text-xs transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-text)]"
+                className="flex items-center gap-2 text-xs transition-colors text-muted hover:text-fg"
                 data-testid="voice-settings-link"
                 onClick={onOpenSettings}
               >

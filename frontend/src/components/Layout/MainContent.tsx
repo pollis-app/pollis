@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useEffect } from "react";
+import React, { useCallback, useRef, useMemo, useState, useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -21,6 +21,7 @@ import { buildMessageContent } from "../../utils/attachmentEnvelope";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { messageNavStore } from "../../stores/messageNavStore";
 import { TypingIndicator } from "../TypingIndicator";
+import { EmptyState } from "../ui/EmptyState";
 
 // Passed from DM page when the current user has not yet accepted the DM.
 // Replaces the chat input with an accept/block bar.
@@ -209,14 +210,19 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   // is exactly what threads exist to avoid.
   //
   // Filtered here rather than in `allMessages` on purpose: that list still
-  // backs id lookups (delete/edit confirmation, the reply-quote resolver), and
-  // those must keep resolving a reply that is only rendered in the panel.
+  // backs the two id lookups that must resolve a reply which is only rendered
+  // in the thread panel — the edit/delete confirmation (`allMessagesRef`) and
+  // the composer's `ReplyPreview` strip.
+  //
+  // The quote rendered INSIDE a row is not one of them: `MessageList` builds
+  // its own `replyTargets` index from the list it was handed, i.e. this
+  // filtered one. (The comment here used to claim otherwise — #874.)
   const channelMessages = useMemo(
     () => allMessages.filter((m) => !m.thread_id || m.thread_id === m.id),
     [allMessages],
   );
 
-  const loadMore = async () => {
+  const loadMore = useCallback(async () => {
     if (!pageCursor || loadingMore || !currentUser) {
       return;
     }
@@ -250,7 +256,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     } finally {
       setLoadingMore(false);
     }
-  };
+  }, [pageCursor, loadingMore, currentUser, selectedChannelId, selectedConversationId]);
 
   const handleConfirmDelete = async () => {
     if (!pendingDeleteId) {
@@ -281,8 +287,16 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     }
   };
 
-  const handleEdit = (messageId: string) => {
-    const message = allMessages.find((m) => m.id === messageId);
+  // The four callbacks below reach `MessageList` and, through it, every row.
+  // They are `useCallback`-pinned because this component re-renders on every
+  // keystroke in the edit bar (`editDraftValue` is local state) — with fresh
+  // identities that keystroke re-rendered the entire message log (#874).
+  // `allMessagesRef` keeps `handleEdit` stable across message arrivals too.
+  const allMessagesRef = useRef(allMessages);
+  allMessagesRef.current = allMessages;
+
+  const handleEdit = useCallback((messageId: string) => {
+    const message = allMessagesRef.current.find((m) => m.id === messageId);
     if (!message) {
       return;
     }
@@ -290,17 +304,36 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     setReplyToMessageId(null);
     setEditDraftValue(message.content_decrypted ?? '');
     setEditingMessage(message);
-  };
+  }, [setReplyToMessageId]);
 
   const handleCancelEdit = () => {
     setEditingMessage(null);
   };
 
-  const handleDelete = (messageId: string) => {
+  const handleDelete = useCallback((messageId: string) => {
     setEditingMessage(null);
     setReplyToMessageId(null);
     setPendingDeleteId(messageId);
-  };
+  }, [setReplyToMessageId]);
+
+  const handleReply = useCallback((id: string) => {
+    setEditingMessage(null);
+    setPendingDeleteId(null);
+    setReplyToMessageId(id);
+    chatInputRef.current?.focus();
+  }, [setReplyToMessageId]);
+
+  const focusComposer = useCallback(() => {
+    chatInputRef.current?.focus();
+  }, []);
+
+  // Depends on `currentUser` only — the per-message branch reads its argument.
+  const getAuthorUsername = useCallback(
+    (authorId: string, message?: Message) =>
+      message?.sender_username ||
+      (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId),
+    [currentUser?.id, currentUser?.username],
+  );
 
   const handleSaveEdit = async () => {
     const trimmed = editDraftValue.trim();
@@ -431,27 +464,16 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
   if (!selectedChannelId && !selectedConversationId) {
     return (
-      <div
-        data-testid="main-content"
-        className="flex-1 flex items-center justify-center"
-        style={{ background: 'var(--c-bg)' }}
-      >
-        <p
-          data-testid="empty-channel-message"
-          className="text-xs font-mono"
-          style={{ color: 'var(--c-text-muted)' }}
-        >
-          {t("chat.noSelection")}
-        </p>
-      </div>
+      <EmptyState testId="main-content" messageTestId="empty-channel-message">
+        {t("chat.noSelection")}
+      </EmptyState>
     );
   }
 
   return (
     <div
       data-testid="main-content"
-      className="flex-1 flex flex-col overflow-hidden min-w-0"
-      style={{ background: 'var(--c-bg)' }}
+      className="flex-1 flex flex-col overflow-hidden min-w-0 bg-bg"
     >
       <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         {messagesLoading ? (
@@ -474,22 +496,15 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             viewerIsAdmin={viewerIsAdmin}
             onOpenThread={openThread}
             threadReplyCounts={threadReplyCounts}
-            onReply={(id) => {
-              setEditingMessage(null);
-              setPendingDeleteId(null);
-              setReplyToMessageId(id);
-              chatInputRef.current?.focus();
-            }}
+            onReply={handleReply}
             onEdit={handleEdit}
             onDelete={handleDelete}
             // TODO: scroll-to-message not yet implemented; prop left unwired
-            getAuthorUsername={(authorId, message) =>
-              message?.sender_username || (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId)
-            }
+            getAuthorUsername={getAuthorUsername}
             hasMore={!!pageCursor}
             isFetchingMore={loadingMore}
             onLoadMore={loadMore}
-            focusComposer={() => chatInputRef.current?.focus()}
+            focusComposer={focusComposer}
           />
         )}
       </div>
@@ -508,23 +523,21 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       {pendingDmRequest ? (
         <div data-testid="dm-request-bar">
           <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
           >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
               {t("dmRequest.heading")}
             </span>
           </div>
           <div
-            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-            style={{ background: 'var(--c-surface)' }}
+            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
           >
-            <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+            <p className="text-xs font-mono text-dim">
               <Trans
                 ns="nav"
                 i18nKey="dmRequest.body"
                 values={{ name: pendingDmRequest.senderName }}
-                components={{ name: <span style={{ color: 'var(--c-text)' }} /> }}
+                components={{ name: <span className="text-fg" /> }}
               />
             </p>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -555,10 +568,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       ) : editingMessage ? (
         <div data-testid="edit-message-bar">
           <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
           >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
               {t("editBar.heading")}
             </span>
             <button
@@ -570,7 +582,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
               <X size={20} aria-hidden="true" />
             </button>
           </div>
-          <div className="px-4 pb-3 pt-1" style={{ background: 'var(--c-surface)' }}>
+          <div className="px-4 pb-3 pt-1 bg-surface">
             <textarea
               ref={editTextareaRef}
               data-testid="edit-message-bar-input"
@@ -597,7 +609,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
                 opacity: editMessageMutation.isPending ? 0.5 : 1,
               }}
             />
-            <p className="text-2xs font-mono mt-1" style={{ color: 'var(--c-text-muted)' }}>
+            <p className="text-2xs font-mono mt-1 text-muted">
               {t("editBar.hint")}
             </p>
           </div>
@@ -605,10 +617,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       ) : isDeletingThisChannel ? (
         <div data-testid="delete-channel-bar">
           <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
           >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
               {t("deleteChannel.heading")}
             </span>
             <button
@@ -621,10 +632,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             </button>
           </div>
           <div
-            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-            style={{ background: 'var(--c-surface)' }}
+            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
           >
-            <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+            <p className="text-xs font-mono text-dim">
               {t("deleteChannel.body")}
             </p>
             <Button
@@ -651,10 +661,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         return (
           <div data-testid="delete-message-bar">
             <div
-              className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-              style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+              className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
             >
-              <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+              <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
                 {heading}
               </span>
               <button
@@ -667,10 +676,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
               </button>
             </div>
             <div
-              className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-              style={{ background: 'var(--c-surface)' }}
+              className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
             >
-              <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+              <p className="text-xs font-mono text-dim">
                 {body}
               </p>
               <Button

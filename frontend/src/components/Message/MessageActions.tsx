@@ -138,7 +138,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
     : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
   const containerClass =
     variant === "refined"
-      ? `absolute end-4 top-0 -translate-y-1/2 flex items-center gap-1 rounded-[var(--radius-control)] border border-line bg-surface-raised px-1 py-0.5 transition-opacity ${visibilityClass}`
+      ? `absolute end-4 top-0 -translate-y-1/2 flex items-center gap-1 rounded-control border border-line bg-surface-raised px-1 py-0.5 transition-opacity ${visibilityClass}`
       : `flex-shrink-0 ms-2 flex items-center gap-4 h-6 ${visibilityClass}`;
 
   const menuRowClass =
@@ -192,7 +192,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
             <div
               data-testid="message-actions-menu"
               role="menu"
-              className={`absolute end-0 z-40 min-w-[11rem] rounded-[var(--radius-control)] border border-line bg-surface-raised py-1 ${
+              className={`absolute end-0 z-40 min-w-[11rem] rounded-control border border-line bg-surface-raised py-1 ${
                 opensUp ? "bottom-full mb-1" : "top-full mt-1"
               }`}
             >
