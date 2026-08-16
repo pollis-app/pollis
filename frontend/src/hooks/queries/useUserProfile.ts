@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import * as api from "../../services/api";
@@ -78,6 +79,40 @@ export function usePeerVerifications() {
     enabled: !!currentUser,
     staleTime: 1000 * 60,
   });
+}
+
+/** The two flags a shield badge is drawn from. */
+export type PeerVerificationState = Pick<
+  PeerVerificationEntry,
+  "verified" | "key_changed"
+>;
+
+/**
+ * The same snapshot as `usePeerVerifications`, indexed by peer user id.
+ *
+ * Every surface that draws a shield next to a person wants the lookup, not the
+ * list, and three of them (the sidebar's DM rows, the DMs page, the group
+ * member list) each built the identical `useMemo` over it. One shared
+ * derivation also means all three cannot drift apart on what "verified" means
+ * — which is a security-facing badge, so a divergence there is worse than
+ * duplicated code (#874).
+ *
+ * The `useMemo` still belongs here rather than at the query: the query's data
+ * identity is already stable between renders, so memoising on it gives every
+ * caller a stable `Map` for free.
+ */
+export function usePeerVerificationMap(): Map<string, PeerVerificationState> {
+  const { data: peerVerifications = [] } = usePeerVerifications();
+  return useMemo(() => {
+    const map = new Map<string, PeerVerificationState>();
+    for (const entry of peerVerifications) {
+      map.set(entry.peer_user_id, {
+        verified: entry.verified,
+        key_changed: entry.key_changed,
+      });
+    }
+    return map;
+  }, [peerVerifications]);
 }
 
 export const safetyQueryKeys = {

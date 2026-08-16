@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Inbox, Ban, Plus, ShieldCheck, ShieldAlert } from "lucide-react";
@@ -7,7 +7,7 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
-import { usePeerVerifications } from "../hooks/queries/useUserProfile";
+import { usePeerVerificationMap } from "../hooks/queries/useUserProfile";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 
@@ -18,17 +18,7 @@ export const DMsPage: React.FC = observer(() => {
 
   const { data: conversations = [] } = useDMConversations();
   const { data: requests = [] } = useDMRequests();
-  const { data: peerVerifications = [] } = usePeerVerifications();
-  const verificationByPeer = useMemo(() => {
-    const map = new Map<string, { verified: boolean; key_changed: boolean }>();
-    for (const entry of peerVerifications) {
-      map.set(entry.peer_user_id, {
-        verified: entry.verified,
-        key_changed: entry.key_changed,
-      });
-    }
-    return map;
-  }, [peerVerifications]);
+  const verificationByPeer = usePeerVerificationMap();
 
   let items: TerminalMenuItem[] = [];
 

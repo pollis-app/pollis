@@ -20,7 +20,7 @@ import {
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
-import { usePeerVerifications } from "../../hooks/queries/useUserProfile";
+import { usePeerVerificationMap } from "../../hooks/queries/useUserProfile";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { PresenceDot } from "../ui/PresenceDot";
@@ -64,20 +64,10 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
-  const { data: peerVerifications = [] } = usePeerVerifications();
   // peerUserId → { verified, key_changed }. Used to glance-render the
   // shield-check (verified) / shield-alert (changed) icons next to each
   // DM row without an N+1 round-trip.
-  const verificationByPeer = useMemo(() => {
-    const map = new Map<string, { verified: boolean; key_changed: boolean }>();
-    for (const entry of peerVerifications) {
-      map.set(entry.peer_user_id, {
-        verified: entry.verified,
-        key_changed: entry.key_changed,
-      });
-    }
-    return map;
-  }, [peerVerifications]);
+  const verificationByPeer = usePeerVerificationMap();
   const unreadCounts = appStore.unreadCounts;
 
   // Stable list of voice channel ids across all groups; powers the live
