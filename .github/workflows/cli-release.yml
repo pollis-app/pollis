@@ -71,7 +71,8 @@ jobs:
             libssl-dev \
             pkg-config \
             build-essential \
-            perl
+            perl \
+            libdbus-1-dev
 
       - name: Load production secrets
         run: |
