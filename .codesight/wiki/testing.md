@@ -658,10 +658,12 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | `i18n.spec.ts` | The language selector, switching, per-device persistence, OS-locale default and the English fallback — driven through a synthetic locale so it survives the real language list changing, in BOTH skins (#855) |
 | `rtl.spec.ts` | Right-to-left layout, asserted as **measured geometry** (`getBoundingClientRect`, a `Range` over the text, the painted physical border edge) rather than a `dir` attribute — which passes on unmirrored code. Drives the real `ar` locale and pins the LTR case in the same body, in BOTH skins (#855) |
 
-`.spec.ts` is as welcome as `.spec.js`; one config matches both.
-| `bookmarks.spec.ts` | Saved messages + permalink jump/highlight in BOTH skins (#854) |
 | `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
 | `render-cost.spec.ts` | Regression guards on message-log render cost in BOTH skins — typing in the edit bar, opening the reply bar and arrow-key navigation must re-render **zero** rows; a shell re-render must not re-render the sidebar; paired with the other half (skin flip restructures rows, an edit updates its row, day dividers survive) so a memo cannot pass by freezing the UI (#874) |
+| `message-window.spec.ts` | The virtualised log: only the visible slice is in the DOM, and every DOM-locating path still reaches a row outside the window, in BOTH skins (#874) |
+| `thread-panel.spec.ts` | The thread panel's timestamps in BOTH skins — a seconds-precision `created_at` must render the real date rather than 1970, a millisecond one must be left alone, and the thread must agree with the channel about when a message was sent (#874) |
+
+`.spec.ts` is as welcome as `.spec.js`; one config matches both.
 
 Five things to know before writing one:
 
@@ -672,6 +674,11 @@ Five things to know before writing one:
   `createMemoryHistory` (`frontend/src/router.tsx`), so `page.goto('/groups/…')`
   changes the address bar and renders Root anyway. Click
   `menu-item-groups` → `group-option-<id>` → `channel-option-<id>`.
+- **A fixture slice nobody seeds is a coverage hole, not a saving.** `read_thread_messages`
+  and `list_thread_summaries` returned a hard-coded `[]` for as long as threads have
+  existed, so no spec ever rendered a thread row — and a timestamp bug in it survived a
+  wholesale rewrite of that component (#874). They read `threadMessages` (keyed by root
+  message id) and `threadSummaries` (keyed by conversation id) now.
 - **The mock is a real surface — keep it current.** An unhandled command returns
   `null`, and `null` is not `undefined`, so `const { data = [] }` defaults do NOT
   catch it and the page dies in an error boundary. When a Rust command is renamed

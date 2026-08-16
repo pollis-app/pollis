@@ -22,6 +22,43 @@
 - Components read MobX stores inside `observer()` wrappers; remote data comes from
   React Query hooks in `frontend/src/hooks/queries/`.
 
+### Design tokens: utilities, not `var()` (#874)
+
+Tokens are CSS custom properties in `frontend/src/index.css` and are surfaced as
+semantic Tailwind utilities in `frontend/tailwind.config.js`. **Call sites use the
+utilities.** An inline `style={{ color: "var(--c-text-muted)" }}` and a
+`text-[var(--c-text-muted)]` arbitrary class are both the wrong spelling of
+`text-muted`, and the codebase carried ~650 of the first and ~90 of the second before
+this sweep.
+
+| token family | utilities |
+|---|---|
+| `--c-bg` / `--c-surface[-raised|-high]` | `bg-bg`, `bg-surface`, `bg-surface-raised`, `bg-surface-high` |
+| `--c-text` / `-dim` / `-muted` | `text-fg`, `text-dim`, `text-muted` |
+| `--c-accent[-bright|-dim|-muted]` | `text-accent…`, `bg-accent…`, `border-accent…`, `ring-accent` |
+| `--c-border` / `--c-border-active` | `border-line`, `border-line-strong` |
+| `--c-hover` / `--c-active` | `hover:bg-hover`, `bg-active` |
+| `--c-danger` | `text-danger`, `border-danger` |
+| `--c-voice-connected` | `text-connected` |
+| `--bar-h` / `--side-w` | `h-bar`, `min-h-bar`, `w-side` |
+| `--radius-chip` / `--radius-control` | `rounded-chip`, `rounded-control` |
+| `--msg-header-gap` / `-group-gap` / `-divider-gap` / `--msg-row-pad-y` | `pt-msg-header`, `pt-msg-group`, `mt-msg-divider`, `pb-msg-row` |
+| `--lh` | `leading-msg` |
+
+**If a utility is missing, add it to the theme** — that is what the bottom seven rows
+above are: tokens that had no utility, so every call site spelled them inline.
+
+Inline `style` is still correct for a value computed at runtime: a per-author
+username colour, a percentage width, a `transform`, a component-local custom property
+(`--pill-accent`), or a colour handed to a third-party component as a prop rather than
+a class (`PollisLogo`, the QR renderer).
+
+Two token references in the codebase are **broken** and deliberately left alone:
+`--c-text-accent` (7 sites) is defined nowhere, so those elements inherit their colour
+— repainting them with `text-accent` is a design decision, not a rename. And
+`--c-focus-ring` is defined but referenced by nothing; focus rings all use
+`ring-accent`.
+
 ### Render cost (#874)
 
 `observer()` from `mobx-react-lite` **already applies `React.memo`**. There is no
@@ -275,7 +312,8 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **ALL_ALGORITHMS** — props: algorithm, dotSize, spacing, speed, className, style — `frontend/src/components/ui/DotMatrix.tsx`
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick — `frontend/src/components/ui/InlineAudioPlayer.tsx`
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
-- **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`
+- **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The centred "nothing here" line; hand-rolled a dozen times before it existed (#874). Not a loading state.
+- **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874).
 - **LoadingSpinner** — props: size, className — `frontend/src/components/ui/LoaderSpinner.tsx`
 - **NavigableGrid** — `frontend/src/components/ui/NavigableGrid.tsx`
 - **NavigableList** — `frontend/src/components/ui/NavigableList.tsx`
@@ -318,9 +356,8 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **Members** — props: groupId, isAdmin — `frontend/src/pages/Members.tsx`
 - **MembersPage** — `frontend/src/pages/MembersPage.tsx`
 - **PreferencesPage** — `frontend/src/pages/PreferencesPage.tsx`
-- **RenameChannel** — props: groupId, channelId, onSuccess — `frontend/src/pages/RenameChannel.tsx`
 - **RenameChannelPage** — `frontend/src/pages/RenameChannelPage.tsx`
-- **RenameGroup** — props: groupId, onSuccess — `frontend/src/pages/RenameGroup.tsx`
+- **RenameEntity** — props: kind, groupId, channelId, onSuccess — `frontend/src/pages/RenameEntity.tsx`. One form for both routes; `RenameGroup`/`RenameChannel` were eleven normalised lines apart and are gone (#874).
 - **RenameGroupPage** — `frontend/src/pages/RenameGroupPage.tsx`
 - **RequestsPage** — `frontend/src/pages/RequestsPage.tsx`
 - **RootPage** — `frontend/src/pages/Root.tsx`
