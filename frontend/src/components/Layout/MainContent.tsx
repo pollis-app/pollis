@@ -209,8 +209,13 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   // is exactly what threads exist to avoid.
   //
   // Filtered here rather than in `allMessages` on purpose: that list still
-  // backs id lookups (delete/edit confirmation, the reply-quote resolver), and
-  // those must keep resolving a reply that is only rendered in the panel.
+  // backs the two id lookups that must resolve a reply which is only rendered
+  // in the thread panel — the edit/delete confirmation (`allMessagesRef`) and
+  // the composer's `ReplyPreview` strip.
+  //
+  // The quote rendered INSIDE a row is not one of them: `MessageList` builds
+  // its own `replyTargets` index from the list it was handed, i.e. this
+  // filtered one. (The comment here used to claim otherwise — #874.)
   const channelMessages = useMemo(
     () => allMessages.filter((m) => !m.thread_id || m.thread_id === m.id),
     [allMessages],
