@@ -49,6 +49,15 @@ name: Rebuild & Verify (independent reproducer)
 #       which is the correct, non-lying behaviour.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Put the tag in the run title (#877). A `workflow_run`-triggered run reports
+# `headBranch: main` and a `headSha` that is main's tip, so the GitHub API alone
+# cannot say WHICH release a run judged — the tag lives only inside
+# `github.event.workflow_run.head_branch`. That made the public run list
+# unreadable ("Rebuild & Verify" x30, no tags) and forced `scripts/rebuild-ledger.sh`
+# to grep job logs, which expire. Naming the run fixes both, permanently.
+run-name: >-
+  Rebuild & Verify ${{ github.event.inputs.tag || github.event.workflow_run.head_branch }}
+
 on:
   # Runs itself after every successful release (#795). Reproducibility that only
   # gets checked when someone remembers to check it is reproducibility nobody
@@ -553,6 +562,25 @@ jobs:
             echo "   is present in the public transparency log as the Linux"
             echo "   AppImage payload for ${{ env.TAG }}, verified against the"
             echo "   pinned key ${PINNED_LOG_KEY}."
+            # #877: write the verdict to the run summary, not only to a log line
+            # that scrolls past. The summary renders on the run page itself, so
+            # the ledger at pollis.com/assurance can link straight to a legible
+            # verdict instead of asking a reader to scrub 20 minutes of build
+            # output. This writes nothing outside the run — the workflow's
+            # no-secrets, no-external-writes trust-domain property is intact.
+            {
+              echo "### ✅ Reproduced — \`${{ env.TAG }}\`"
+              echo
+              echo "The Linux AppImage payload rebuilt from public source at this tag is"
+              echo "byte-identical to the payload recorded in the public transparency log."
+              echo
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Tag | \`${{ env.TAG }}\` |"
+              echo "| Reproduced payload SHA-256 | \`${HASH}\` |"
+              echo "| Verified against | \`${VERIFY_BASE_URL}\` (binaries tree) |"
+              echo "| Trusting | one pinned ML-DSA-44 key, no Pollis secrets |"
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::error title=Did not reproduce::rebuilt Linux payload does not match the logged one"
             echo "::error::reproduced Linux AppImage payload hash ${HASH} is NOT the"
@@ -627,5 +655,26 @@ jobs:
             fi
             set -e
             echo "::endgroup::"
+
+            # #877: a red verdict gets a summary too. A failure that is only a
+            # log line is exactly how v1.9.3's real non-reproduction sat
+            # unexplained — and a page that publishes verdicts has to be able to
+            # link a reader to the finding, not just to the word "failure".
+            {
+              echo "### ❌ Did not reproduce — \`${{ env.TAG }}\`"
+              echo
+              echo "The Linux AppImage payload rebuilt from public source at this tag does"
+              echo "**not** match the payload recorded in the transparency log. The tag is"
+              echo "published and the log verifies — this is a reproducibility finding, not"
+              echo "a publishing delay."
+              echo
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Tag | \`${{ env.TAG }}\` |"
+              echo "| Reproduced payload SHA-256 | \`${HASH}\` |"
+              echo
+              echo "See the **What actually differs** group in the job log for the"
+              echo "byte offsets, the differing paths and the diffoscope output."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

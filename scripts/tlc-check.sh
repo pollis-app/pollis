@@ -37,10 +37,30 @@ if [[ ! -f "$JAR" ]]; then
 fi
 
 # run_tlc <module> <cfg> [extra TLC flags...]
+#
+# When TLC_LOG_DIR is set, each config's full TLC output is also written to
+# "$TLC_LOG_DIR/<cfg>.log" (#877). Until then the state counts, the search depth
+# and the counterexamples existed only in a CI job log that ages out, so "we
+# model-check the epoch and delivery machines" was a claim with no published
+# evidence behind it. scripts/tlc-summary.sh turns these logs into the run
+# summary and the numbers on pollis.com/assurance.
+#
+# The log dir is deliberately OUTSIDE specs/tla: this function runs after a
+# `cd "$SPEC_DIR"`, and TLC is invoked with `-cleanup`, which wipes its own
+# scratch state under the spec directory.
+#
+# `set -o pipefail` is on (line 16), so tee cannot swallow a TLC failure — the
+# pipeline still reports TLC's non-zero status, which check_teeth depends on.
 run_tlc() {
   local module="$1"; local cfg="$2"; shift 2
-  "$JAVA_BIN" -XX:+UseParallelGC -cp "$JAR" tlc2.TLC \
-    "$@" -config "$cfg" -cleanup "$module"
+  if [[ -n "${TLC_LOG_DIR:-}" ]]; then
+    mkdir -p "$TLC_LOG_DIR"
+    "$JAVA_BIN" -XX:+UseParallelGC -cp "$JAR" tlc2.TLC \
+      "$@" -config "$cfg" -cleanup "$module" 2>&1 | tee "$TLC_LOG_DIR/${cfg}.log"
+  else
+    "$JAVA_BIN" -XX:+UseParallelGC -cp "$JAR" tlc2.TLC \
+      "$@" -config "$cfg" -cleanup "$module"
+  fi
 }
 
 # check_sound <label> <module> <cfg> [extra flags...] — must PASS.

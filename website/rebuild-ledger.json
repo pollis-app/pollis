@@ -1,0 +1,146 @@
+{
+  "generated_at": "2026-08-16T22:27:05Z",
+  "workflow": "rebuild-verify.yml",
+  "false_red_fix": {
+    "commit": "564353ae",
+    "date": "2026-08-16"
+  },
+  "runs": [
+    {
+      "tag": "v1.9.7",
+      "conclusion": "success",
+      "created_at": "2026-08-16T08:38:44Z",
+      "event": "workflow_run",
+      "run_id": "31936974636",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31936974636"
+    },
+    {
+      "tag": "v1.9.6",
+      "conclusion": "success",
+      "created_at": "2026-08-15T22:47:50Z",
+      "event": "workflow_run",
+      "run_id": "31913067561",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31913067561"
+    },
+    {
+      "tag": "v1.9.5",
+      "conclusion": "failure",
+      "created_at": "2026-08-15T19:17:08Z",
+      "event": "workflow_run",
+      "run_id": "31903478733",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31903478733"
+    },
+    {
+      "tag": "v1.9.4",
+      "conclusion": "failure",
+      "created_at": "2026-08-15T05:04:37Z",
+      "event": "workflow_run",
+      "run_id": "31866040326",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31866040326"
+    },
+    {
+      "tag": "v1.9.3",
+      "conclusion": "failure",
+      "created_at": "2026-08-13T23:25:34Z",
+      "event": "workflow_run",
+      "run_id": "31753766171",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31753766171"
+    },
+    {
+      "tag": "v1.9.2",
+      "conclusion": "success",
+      "created_at": "2026-08-13T16:05:41Z",
+      "event": "workflow_run",
+      "run_id": "31718909914",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31718909914"
+    },
+    {
+      "tag": "v1.9.1",
+      "conclusion": "skipped",
+      "created_at": "2026-08-13T07:02:45Z",
+      "event": "workflow_run",
+      "run_id": "31676165075",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31676165075"
+    },
+    {
+      "tag": "v1.9.0",
+      "conclusion": "skipped",
+      "created_at": "2026-08-12T19:07:58Z",
+      "event": "workflow_run",
+      "run_id": "31631140154",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31631140154"
+    },
+    {
+      "tag": "v1.9.0",
+      "conclusion": "skipped",
+      "created_at": "2026-08-12T19:06:01Z",
+      "event": "workflow_run",
+      "run_id": "31630974720",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31630974720"
+    },
+    {
+      "tag": "v1.8.5",
+      "conclusion": "success",
+      "created_at": "2026-08-11T05:03:20Z",
+      "event": "workflow_run",
+      "run_id": "31460411482",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31460411482"
+    },
+    {
+      "tag": "v1.8.5",
+      "conclusion": "success",
+      "created_at": "2026-08-10T13:16:27Z",
+      "event": "workflow_run",
+      "run_id": "31392058335",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31392058335"
+    },
+    {
+      "tag": "v1.8.4",
+      "conclusion": "success",
+      "created_at": "2026-08-10T06:18:25Z",
+      "event": "workflow_dispatch",
+      "run_id": "31361471279",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31361471279"
+    },
+    {
+      "tag": "v1.8.4",
+      "conclusion": "failure",
+      "created_at": "2026-08-10T05:48:18Z",
+      "event": "workflow_dispatch",
+      "run_id": "31359760127",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31359760127"
+    },
+    {
+      "tag": "v1.8.4",
+      "conclusion": "failure",
+      "created_at": "2026-08-10T05:21:40Z",
+      "event": "workflow_dispatch",
+      "run_id": "31358349776",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31358349776"
+    },
+    {
+      "tag": "v1.8.4",
+      "conclusion": "failure",
+      "created_at": "2026-08-10T04:54:00Z",
+      "event": "workflow_dispatch",
+      "run_id": "31356925574",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31356925574"
+    },
+    {
+      "tag": "v1.8.4",
+      "conclusion": "failure",
+      "created_at": "2026-08-09T21:03:22Z",
+      "event": "push",
+      "run_id": "31335833629",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335833629"
+    },
+    {
+      "tag": "v1.8.4",
+      "conclusion": "failure",
+      "created_at": "2026-08-09T21:02:50Z",
+      "event": "push",
+      "run_id": "31335810940",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335810940"
+    }
+  ]
+}

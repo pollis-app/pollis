@@ -23,6 +23,13 @@ on:
       - 'pollis-core/**'
       # pollis-core re-exports the schema from here now.
       - 'pollis-schema/**'
+      # 21 of the 35 harnesses live in pollis-delivery/src/commit.rs (the I1 head
+      # arithmetic and the I4 retention floor), and this path was missing (#877):
+      # a PR touching only commit.rs skipped the gate that proves commit.rs. It
+      # still ran on push-to-main, so nothing landed unproven — but the proofs
+      # were being checked after review rather than during it.
+      - 'pollis-delivery/**'
+      - 'scripts/kani-inventory.sh'
       - '.github/workflows/kani.yml'
   push:
     branches: [main]
@@ -84,3 +91,26 @@ jobs:
         uses: model-checking/kani-github-action@v1
         with:
           args: '--package pollis-delivery --lib'
+
+      # Publish what the two verdicts above actually range over (#877). Before
+      # this the job emitted nothing durable: a green tick said "something was
+      # proven" and never what, and the word "Kani" appeared nowhere outside
+      # this file. The inventory is derived from the source rather than from
+      # Kani's report, because the action owns its own invocation and offers no
+      # hook to capture it — see the script header. `if: always()` so a failing
+      # proof run still publishes the surface it was checking.
+      - name: Publish Kani harness inventory
+        if: always()
+        run: |
+          set -euo pipefail
+          scripts/kani-inventory.sh "${{ runner.temp }}/kani-harnesses.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Kani harness inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kani-harnesses
+          if-no-files-found: warn
+          retention-days: 90
+          path: ${{ runner.temp }}/kani-harnesses.json
