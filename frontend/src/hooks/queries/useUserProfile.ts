@@ -15,12 +15,26 @@ export interface ServiceUserData {
 }
 
 export const userQueryKeys = {
+  /**
+   * The SIGNED-IN user's own profile (`ServiceUserData`: username, email,
+   * phone, avatar).
+   *
+   * Deliberately a different key from [`otherProfile`] even for the same user
+   * id. The two hooks return different SHAPES from the same command — this one
+   * merges in `email` from the session and defaults `username` off the store;
+   * the other returns the raw public row with an `id`. They shared one key
+   * until #874, which meant opening your own profile page could park the
+   * public shape where `useUserProfile` consumers expected the private one and
+   * blank out the settings form. Two shapes, two keys.
+   */
   profile: (userId: string | null) => ["user", "profile", userId] as const,
+  /** Another user's PUBLIC profile row. See [`profile`] for why it is separate. */
+  otherProfile: (userId: string | null) => ["user", "public-profile", userId] as const,
 };
 
 export function useOtherUserProfile(userId: string | null | undefined) {
   return useQuery({
-    queryKey: userQueryKeys.profile(userId ?? null),
+    queryKey: userQueryKeys.otherProfile(userId ?? null),
     queryFn: async (): Promise<{ id: string; username: string; preferred_name?: string; avatar_url?: string } | null> => {
       if (!userId) {
         return null;
@@ -150,7 +164,6 @@ export function useUserProfile() {
     enabled: !!currentUser,
     staleTime: 1000 * 30,
     gcTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
 }
@@ -176,6 +189,12 @@ export function useUpdateProfile() {
       queryClient.invalidateQueries({
         queryKey: userQueryKeys.profile(currentUser?.id ?? null),
       });
+      // The public view of the same person is now a separate cache entry
+      // (#874), so it needs its own invalidation — viewing your own profile
+      // page reads that one.
+      queryClient.invalidateQueries({
+        queryKey: userQueryKeys.otherProfile(currentUser?.id ?? null),
+      });
       queryClient.invalidateQueries({
         queryKey: messageQueryKeys.all,
       });
@@ -189,24 +208,18 @@ export function useUpdateProfile() {
   });
 }
 
+/**
+ * The signed-in user's own avatar URL.
+ *
+ * A thin wrapper over [`useAvatarBlobUrl`] since #874 — it used to be a second
+ * query, under its own key, fetching the SAME object the `Avatar` component
+ * was already fetching. Any screen showing both (the settings page shows the
+ * form preview beside the sidebar avatar) downloaded the image twice and
+ * cached it twice.
+ */
 export function useUserAvatar() {
   const { data: userProfile } = useUserProfile();
-  const currentUser = useObserver(() => appStore.currentUser);
-
-  return useQuery({
-    queryKey: ["user", "avatar", currentUser?.id, userProfile?.avatar_url],
-    queryFn: async (): Promise<string | null> => {
-      if (!userProfile?.avatar_url) {
-        return null;
-      }
-      const { getFileDownloadUrl } = await import("../../services/r2-upload");
-      return await getFileDownloadUrl(userProfile.avatar_url);
-    },
-    enabled: !!currentUser && !!userProfile?.avatar_url,
-    staleTime: 1000 * 60 * 30,
-    gcTime: 1000 * 60 * 60,
-    retry: 1,
-  });
+  return useAvatarBlobUrl(userProfile?.avatar_url ?? null);
 }
 
 export function useAvatarBlobUrl(avatarKey: string | null | undefined) {
@@ -246,14 +259,12 @@ export function useUpdateAvatar() {
         queryKey: userQueryKeys.profile(currentUser?.id ?? null),
       });
       queryClient.invalidateQueries({
-        queryKey: ["user", "avatar", currentUser?.id],
+        queryKey: userQueryKeys.otherProfile(currentUser?.id ?? null),
       });
-      // Because the R2 key is stable per user (`avatars/{userId}`), the
-      // blob-url cache key doesn't change after re-upload — invalidate it
-      // explicitly so a fresh download_file fires and the new bytes render.
-      queryClient.invalidateQueries({
-        queryKey: ["avatar-blob", avatarUrl],
-      });
+      // Avatar keys are content-addressed since #874, so a re-upload produces
+      // a NEW key and therefore a new `["avatar-blob", key]` entry — nothing
+      // to bust. What still has to happen is the profile refetch above, which
+      // is what tells every `Avatar` which key to ask for now.
       queryClient.invalidateQueries({
         queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
       });

@@ -34,7 +34,6 @@ export function useUserGroupsWithChannels() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -51,7 +50,6 @@ export function useUserGroups() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -66,7 +64,6 @@ export function useGroupChannels(groupId: string | null) {
     },
     enabled: !!groupId,
     staleTime: 1000 * 60,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -379,7 +376,6 @@ export function usePendingInvites() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -431,17 +427,24 @@ export interface GroupMemberWithGroup extends GroupMember {
 /**
  * Fetches members for every group the current user is in, returning a flat
  * deduplicated list keyed by user_id. Used by Cmd+K search to surface users.
+ *
+ * `enabled` is not decoration — it is the whole point (#874). The only caller
+ * is the Cmd+K panel, which mounts on every app start and sits CLOSED, and
+ * this hook has to live above that panel's `if (!isOpen) return null` because
+ * hooks cannot be conditional. So it used to issue one `get_group_members`
+ * remote query PER GROUP at every launch and every window focus, for a panel
+ * most sessions never open. The caller passes `isOpen`; the fan-out now
+ * happens when someone actually asks to search.
  */
-export function useAllGroupMembers(): { members: GroupMemberWithGroup[] } {
+export function useAllGroupMembers(enabled: boolean): { members: GroupMemberWithGroup[] } {
   const { data: groups = [] } = useUserGroupsWithChannels();
 
   const queries = useQueries({
-    queries: groups.map((g) => ({
+    queries: (enabled ? groups : []).map((g) => ({
       queryKey: groupQueryKeys.members(g.id),
       queryFn: async (): Promise<GroupMember[]> => invoke<GroupMember[]>('get_group_members', { groupId: g.id }),
       staleTime: 1000 * 30,
-      refetchOnWindowFocus: true,
-    })),
+      })),
   });
 
   return useMemo(() => {
@@ -478,7 +481,6 @@ export function useGroupMembers(groupId: string | null) {
     },
     enabled: !!groupId,
     staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -548,7 +550,6 @@ export function useMyJoinRequest(groupId: string | undefined) {
     },
     enabled: !!currentUser && !!groupId,
     staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -577,8 +578,11 @@ export function useGroupJoinRequests(groupId: string | null) {
       return await invoke<JoinRequest[]>('get_group_join_requests', { groupId, requesterId: currentUser.id });
     },
     enabled: !!currentUser && !!groupId,
-    staleTime: 0,
-    refetchOnWindowFocus: true,
+    // Was `0` — refetch on every mount — back when nothing else kept this
+    // fresh. `join_requests_changed` now invalidates this exact key, and
+    // `useAllPendingJoinRequests` reads the same entries (#874), so opening the
+    // group page is a cache hit rather than a third fetch of the same list.
+    staleTime: 1000 * 30,
   });
 }
 
@@ -595,8 +599,10 @@ export function useApproveJoinRequest() {
       return groupId;
     },
     onSuccess: (groupId) => {
+      // One key now serves both the per-group list and the cross-group
+      // aggregate (#874) — `useAllPendingJoinRequests` reads these very
+      // entries, so there is no second key left to invalidate.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
-      queryClient.invalidateQueries({ queryKey: ["join-requests", "all-admin"] });
     },
   });
 }
@@ -614,12 +620,32 @@ export function useRejectJoinRequest() {
       return groupId;
     },
     onSuccess: (groupId) => {
+      // One key now serves both the per-group list and the cross-group
+      // aggregate (#874) — `useAllPendingJoinRequests` reads these very
+      // entries, so there is no second key left to invalidate.
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
-      queryClient.invalidateQueries({ queryKey: ["join-requests", "all-admin"] });
     },
   });
 }
 
+/**
+ * Every pending join request across the groups the current user admins.
+ *
+ * Two things changed here in #874.
+ *
+ * The cache key used to be `adminGroupIds.LENGTH` — so two entirely different
+ * sets of three groups collided on one entry and the second set silently read
+ * the first set's requests. It is the ids that identify the query, and they are
+ * what the per-group entries below are keyed on now.
+ *
+ * And the fan-out is no longer hidden. This was one `useQuery` wrapping a
+ * `Promise.all` of N `get_group_join_requests` calls, which meant N calls that
+ * no devtool attributed, no per-group caching, and a duplicate fetch whenever
+ * the group page's own `useGroupJoinRequests` was mounted alongside it. As
+ * `useQueries` over the SAME per-group keys, the N calls are visible, each is
+ * cached and invalidated on its own, and the overlap with the group page is a
+ * cache hit instead of a second round trip.
+ */
 export function useAllPendingJoinRequests() {
   const currentUser = useObserver(() => appStore.currentUser);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
@@ -633,23 +659,29 @@ export function useAllPendingJoinRequests() {
       .map((g) => g.id);
   }, [currentUser?.id, groupsWithChannels]);
 
-  return useQuery({
-    queryKey: ["join-requests", "all-admin", currentUser?.id ?? null, adminGroupIds.length],
-    queryFn: async (): Promise<JoinRequest[]> => {
-      if (!currentUser || adminGroupIds.length === 0) {
-        return [];
-      }
-      const results = await Promise.all(
-        adminGroupIds.map((groupId) =>
-          invoke<JoinRequest[]>('get_group_join_requests', { groupId, requesterId: currentUser.id }),
-        ),
-      );
-      return results.flat();
-    },
-    enabled: !!currentUser && adminGroupIds.length > 0,
-    staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
+  const queries = useQueries({
+    queries: adminGroupIds.map((groupId) => ({
+      queryKey: groupQueryKeys.joinRequests(groupId),
+      queryFn: async (): Promise<JoinRequest[]> =>
+        invoke<JoinRequest[]>('get_group_join_requests', {
+          groupId,
+          requesterId: currentUser!.id,
+        }),
+      enabled: !!currentUser,
+      staleTime: 1000 * 30,
+    })),
   });
+
+  const signature = queries.map((q) => q.dataUpdatedAt).join(",");
+  const data = useMemo(
+    () => queries.flatMap((q) => q.data ?? []),
+    // `queries` is a fresh array every render; the update stamps are the
+    // stable signal that the underlying data actually moved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signature],
+  );
+
+  return { data, isLoading: queries.some((q) => q.isLoading) };
 }
 
 // ── #847 shareable invite links ──────────────────────────────────────────────

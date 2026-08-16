@@ -57,6 +57,17 @@ pub async fn create_channel(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
+    // Tell the group's other members a channel appeared (#874). `delete_channel`
+    // already did this; creation did not, so a new channel was invisible to
+    // everyone else until they happened to refocus the window — which is what
+    // the sidebar's blanket `refetchOnWindowFocus` was silently paying for.
+    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
+        &state.livekit,
+        &group_id,
+    ).await {
+        eprintln!("[realtime] create_channel: notify group {group_id}: {e}");
+    }
+
     Ok(Channel { id, group_id, name, description, channel_type })
 }
 
@@ -92,6 +103,15 @@ pub async fn update_channel(
         description,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
+
+    // Same reasoning as `create_channel` (#874): a rename other members can't
+    // see until they refocus is a stale sidebar, not a saved round trip.
+    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
+        &state.livekit,
+        &group_id,
+    ).await {
+        eprintln!("[realtime] update_channel: notify group {group_id}: {e}");
+    }
 
     let mut rows = conn.query(
         "SELECT id, group_id, name, description, channel_type FROM channels WHERE id = ?1",
