@@ -661,8 +661,9 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
 | `bookmarks.spec.ts` | Saved messages + permalink jump/highlight in BOTH skins (#854) |
 | `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
+| `render-cost.spec.ts` | Regression guards on message-log render cost in BOTH skins — typing in the edit bar, opening the reply bar and arrow-key navigation must re-render **zero** rows; a shell re-render must not re-render the sidebar; paired with the other half (skin flip restructures rows, an edit updates its row, day dividers survive) so a memo cannot pass by freezing the UI (#874) |
 
-Four things to know before writing one:
+Five things to know before writing one:
 
 - **Fixtures go in `window.__POLLIS_PRELOAD__`** via `page.addInitScript`, read
   once by the mock on load. Extend `MockStore` in `frontend/src/__mocks__/tauri-core.ts`
@@ -682,3 +683,16 @@ Four things to know before writing one:
   `auto-lock` this way). It used to drop every handler on the floor, which made
   that whole class of behaviour untestable in this tier. `bridge/invoke.ts`
   unwraps `e.payload`, so the registry delivers `{ payload }`, as real Tauri does.
+- **Render cost is measurable here.** `frontend/src/utils/renderProbe.ts` exposes
+  `probeRender(name)`, called at the top of a component body; under
+  `VITE_PLAYWRIGHT=true` it counts render-function entries into
+  `window.__pollisRenders`. A `React.memo` bail-out means the body never runs, so
+  the counter is exactly the signal — no stopwatch, no flake. It compiles to
+  nothing in a real build (`import.meta.env.VITE_PLAYWRIGHT` is statically
+  replaced, so Rollup drops the body).
+  Two rules when asserting on it: counts are **relative only** — StrictMode
+  double-invokes render in dev, so absolute numbers are 2x and must never be
+  hard-coded — and every "must not re-render" assertion needs a companion "must
+  still re-render" case, or a component that has stopped updating entirely will
+  sail through. Assert the probe is non-zero first, or the whole file can pass
+  vacuously against a counter that was never wired up.

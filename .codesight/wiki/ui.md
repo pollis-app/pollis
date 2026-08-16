@@ -9,7 +9,7 @@
 > **regenerate rather than patch** when it disagrees. Prop lists come from each file's
 > `*Props` type and are omitted where a component takes none or builds its props inline.
 
-**111 `.tsx` files** under `frontend/src`
+**147 `.tsx` files** under `frontend/src`
 
 ## Conventions
 
@@ -21,6 +21,58 @@
   is the Cmd+K search menu.
 - Components read MobX stores inside `observer()` wrappers; remote data comes from
   React Query hooks in `frontend/src/hooks/queries/`.
+
+### Render cost (#874)
+
+`observer()` from `mobx-react-lite` **already applies `React.memo`**. There is no
+bare `React.memo` on any observer component in this codebase and there must not be
+— mobx-react-lite throws if you nest the two. Consequences worth knowing before
+touching a list:
+
+- A component wrapped in `observer()` re-renders when (a) a prop fails shallow
+  comparison, or (b) an observable it read during render changed. (b) is what makes
+  the memo safe to rely on: an observable that changes under a component with equal
+  props still re-renders it.
+- That safety does **not** extend to non-MobX reactive reads. A React Query
+  subscription inside a memoised row re-renders that row itself, which is correct but
+  costs one observer per row. List-wide values belong in the list.
+- The usual reason a memo does nothing is an **unstable prop from the parent**: an
+  inline arrow, a `useMutation` result (new object every render), or an array/Map
+  rebuilt per render. Before adding memoisation, check whether the existing memo is
+  simply being defeated.
+
+Concretely, in the message log:
+
+- `MessageList` subscribes once to skin, background lightness, viewer and mention
+  roster, and passes them to every row as one `useMemo`-stable
+  `MessageRenderContext` (`components/Message/messageRenderContext.ts`). Rows and
+  `MessageBody` must not re-acquire these per row.
+- Callbacks handed to rows (`onScrollToReply`, `onToggleSave`, `onCopyLink`) and to
+  `MessageList` from `MainContent` (`onReply`, `onEdit`, `onDelete`, `onLoadMore`,
+  `getAuthorUsername`, `focusComposer`) are `useCallback`-pinned, several via refs
+  so they stay stable across message arrivals. `MainContent` re-renders on every
+  keystroke in the edit bar; unstable identities there re-render the entire log.
+- Reply targets are resolved once into a `Map` by `MessageList`, not with a
+  `find()` per row.
+**The log is still not virtualised, and two obvious approaches are already ruled out.**
+`loadMore` grows the timeline without limit, so layout/paint cost still scales with
+history length (render cost no longer does). Before attempting this again:
+
+- **Windowed virtualisation** breaks three subsystems that locate rows by
+  `querySelector` on the live DOM: permalink jumps (`messageJumpStore`), arrow-key
+  focus projection (`messageNavStore`), and reply-quote scrolling
+  (`scrollToMessage`). A row outside the window is not in the document at all.
+  Any windowing must first teach all three to expand the window and await a render.
+- **`content-visibility: auto` on the row does not work** — tried and reverted in
+  #874. It implies *paint containment*, which clips the row's `absolute` hover
+  action bar (`end-4 top-0 -translate-y-1/2`) and its dropdown menu, both of which
+  deliberately overflow the row box. It fails 8 `bookmarks.spec.ts` cases. It could
+  only work if the action bar were hoisted out of the row into a single shared
+  overlay tracking the hovered row (the way Slack does it).
+- **Truncating retained history** is the wrong trade here: "history is bounded, not
+  flaky" bounds what the *server* retains, not what a scrolled-back user can see.
+
+Guards live in `e2e/render-cost.spec.ts`, backed by `utils/renderProbe.ts`.
 
 ### Presence
 
@@ -120,10 +172,10 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`
 - **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, copyLinkState, onReply, onOpenThread, onToggleSave, onCopyLink, onEdit, onDelete — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut.
 - **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
-- **MessageItem** — props: message, allMessages, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onEdit, onDelete, onPin, onScrollToReply — `frontend/src/components/Message/MessageItem.tsx`
-- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onEdit, onDelete, onPin, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`.
+- **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
+- **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, copyLinkState, isSaved, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed.
+- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`.
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
-- **MessageReactions** — props: messageId — `frontend/src/components/Message/MessageReactions.tsx`
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`
 
 ### `components/Search` (1)
