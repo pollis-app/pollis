@@ -160,6 +160,12 @@ interface MockStore {
   // half of the contract.
   autoLockMinutes: number | null;
   activityReports: number;
+  // Opt-in message pagination (#874). Off by default so every existing spec
+  // keeps getting its whole seeded conversation in one page; a preload sets
+  // `paginate: true` to make `read_*_messages` honour `limit`/`cursor` and
+  // hand back a real `next_cursor`, which is what the load-more path — and
+  // the windowed log's scroll anchoring across a prepend — needs to exercise.
+  paginate: boolean;
 }
 
 // Only `@tauri-apps/api/core` and `/event` are vite-aliased to these mocks.
@@ -227,6 +233,7 @@ const store: MockStore = {
   clipboard: '',
   autoLockMinutes: null,
   activityReports: 0,
+  paginate: preload.paginate === true,
 };
 
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
@@ -238,6 +245,52 @@ function generateId(): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+interface MessageCursor {
+  sent_at: string;
+  id: string;
+}
+
+/**
+ * One page of a conversation, newest-last, the way `read_channel_messages`
+ * and `read_dm_messages` answer.
+ *
+ * With `paginate` off (the default) the whole seeded conversation comes back
+ * in one page and `next_cursor` is null — the historical behaviour every other
+ * spec relies on. With it on, the page is the newest `limit` messages older
+ * than `cursor`, and `next_cursor` points at the oldest message returned so
+ * the next call continues from there.
+ */
+function readMessagePage(
+  conversationId: string,
+  limit?: number,
+  cursor?: MessageCursor | null,
+): { messages: MockMessage[]; next_cursor: MessageCursor | null } {
+  const all = store.messages[conversationId] ?? [];
+  if (!store.paginate) {
+    return { messages: all, next_cursor: null };
+  }
+  const chronological = [...all].sort((a, b) =>
+    a.sent_at === b.sent_at ? a.id.localeCompare(b.id) : a.sent_at.localeCompare(b.sent_at),
+  );
+  const older = cursor
+    ? chronological.filter(
+        (m) =>
+          m.sent_at < cursor.sent_at ||
+          (m.sent_at === cursor.sent_at && m.id < cursor.id),
+      )
+    : chronological;
+  const size = limit && limit > 0 ? limit : older.length;
+  const page = older.slice(Math.max(older.length - size, 0));
+  const oldestReturned = page[0];
+  const hasMore = oldestReturned !== undefined && older.length > page.length;
+  return {
+    messages: page,
+    next_cursor: hasMore
+      ? { sent_at: oldestReturned.sent_at, id: oldestReturned.id }
+      : null,
+  };
 }
 
 /** Look a message up across every conversation, as the local DB's primary key
@@ -531,18 +584,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // aliases so older callers (and this mock's own history) still resolve.
     case 'get_channel_messages':
     case 'read_channel_messages': {
-      const { channelId } = args as { channelId: string };
-      return { messages: store.messages[channelId] ?? [], next_cursor: null };
+      const { channelId, limit, cursor } = args as {
+        channelId: string;
+        limit?: number;
+        cursor?: MessageCursor | null;
+      };
+      return readMessagePage(channelId, limit, cursor);
     }
 
     case 'get_dm_messages':
     case 'read_dm_messages': {
-      const { dmChannelId, conversationId } = args as {
+      const { dmChannelId, conversationId, limit, cursor } = args as {
         dmChannelId?: string;
         conversationId?: string;
+        limit?: number;
+        cursor?: MessageCursor | null;
       };
       const key = dmChannelId ?? conversationId ?? '';
-      return { messages: store.messages[key] ?? [], next_cursor: null };
+      return readMessagePage(key, limit, cursor);
     }
 
     case 'list_dm_channels':

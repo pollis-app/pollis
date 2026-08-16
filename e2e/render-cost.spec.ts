@@ -121,6 +121,31 @@ async function assertProbeLive(page: Page) {
   expect(await renders(page, "MessageList")).toBeGreaterThan(0);
 }
 
+/**
+ * Wait until the log has stopped re-rendering of its own accord.
+ *
+ * Since the log is windowed (#874) it renders once more after any layout
+ * change, when the virtualizer measures the rows it has just mounted. That
+ * settle is legitimate and is not what these tests are about — they are about
+ * what the NEXT interaction costs — so the baseline must be taken after it,
+ * not in the middle of it. Polling for a stable counter rather than sleeping
+ * keeps the assertions below exact instead of merely likely.
+ */
+async function settleRenders(page: Page) {
+  let previous = -1;
+  await expect
+    .poll(
+      async () => {
+        const current = await renders(page, "MessageList");
+        const stable = current === previous;
+        previous = current;
+        return stable;
+      },
+      { intervals: [50, 100, 100, 200, 200, 400] },
+    )
+    .toBe(true);
+}
+
 for (const skin of SKINS) {
   test.describe(`message log render cost — ${skin} skin`, () => {
     test("typing in the edit bar re-renders no message rows", async ({ page }) => {
@@ -137,6 +162,7 @@ for (const skin of SKINS) {
 
       // Baseline taken AFTER the bar is open: opening it is a legitimate state
       // change. What must cost nothing is the typing that follows.
+      await settleRenders(page);
       const rowsBefore = await renders(page, "MessageItem");
       const listBefore = await renders(page, "MessageList");
 
@@ -152,6 +178,7 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
       await assertProbeLive(page);
+      await settleRenders(page);
 
       const rowsBefore = await renders(page, "MessageItem");
 
@@ -169,6 +196,7 @@ for (const skin of SKINS) {
       await assertProbeLive(page);
 
       await page.getByTestId("message-input").click();
+      await settleRenders(page);
       const rowsBefore = await renders(page, "MessageItem");
 
       // Rows style themselves via CSS :focus-within, so walking the log is
@@ -185,6 +213,7 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
       await assertProbeLive(page);
+      await settleRenders(page);
 
       const shellBefore = await renders(page, "AppShell");
       const sidebarBefore = await renders(page, "Sidebar");
