@@ -153,6 +153,8 @@ async function sendMessage(browser, text) {
 // Drives the real UI: the hover toolbar's delete button opens the confirm bar
 // that replaces the composer (NO MODALS), then the confirm button commits.
 async function deleteMessage(browser) {
+  // Delete moved into the per-message "more" menu — open it first.
+  await h.clickTestId(browser, "message-actions-more");
   await h.clickTestId(browser, "delete-button");
   await h.waitTestId(browser, "delete-message-bar", 15000);
   await h.clickTestId(browser, "delete-message-confirm");

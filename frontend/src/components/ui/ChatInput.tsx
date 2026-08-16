@@ -71,6 +71,11 @@ interface ChatInputProps {
   // out an `all_mention`). Gates the live "@all notifies everyone" composer
   // hint so it only appears where the mention does something.
   canNotifyAll?: boolean;
+  // Bash-history hand-off: called when ArrowUp is pressed while the message
+  // is empty or the caret sits on the first line. Return true to claim the
+  // key — the input blurs and the parent takes focus into the message log;
+  // return false (e.g. no messages to walk) to keep native caret movement.
+  onHistoryUp?: () => boolean;
 }
 
 function typeFromMime(mime: string): Attachment["type"] {
@@ -172,6 +177,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   onValueChange,
   draftKey = null,
   canNotifyAll = false,
+  onHistoryUp,
 }, ref) => {
   const { t } = useTranslation("common");
   // Resolved at render, not as a default parameter, so the fallback follows
@@ -575,6 +581,24 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       }
     }
 
+    // Bash-history hand-off into the message log. "First line" is the first
+    // LOGICAL line (no \n before the caret) — a soft-wrapped long first line
+    // counts wholesale, which errs toward the REPL behavior over caret
+    // movement, exactly like a shell with a wrapped prompt line.
+    if (e.key === "ArrowUp" && onHistoryUp) {
+      const el = e.currentTarget as HTMLTextAreaElement;
+      const caret = el.selectionStart ?? 0;
+      const collapsed = el.selectionEnd === caret;
+      const onFirstLine = !message.slice(0, caret).includes("\n");
+      if (collapsed && (message === "" || onFirstLine)) {
+        if (onHistoryUp()) {
+          e.preventDefault();
+          el.blur();
+          return;
+        }
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -696,7 +720,16 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             grows leftwards, and this trigger sits hard against the content
             region's left edge, which AppShell clips with `overflow: hidden` —
             so most of the panel was being cut off and left unclickable. */}
-        <EmojiPickerButton onSelect={insertAtCursor} placement="up" align="left" />
+        {/* h-8 = the textarea's single-row box (1.5rem line + py-1), so the
+            24px trigger centers on the first text line — vertically centered
+            at minimum composer height, and pinned to the first line (like the
+            +/send buttons) when the input grows. */}
+        <EmojiPickerButton
+          onSelect={insertAtCursor}
+          placement="up"
+          align="left"
+          className="h-8 flex items-center"
+        />
 
         {/* Positioning context for the terminal skin's inline ghost, which
             mirrors this exact box. */}

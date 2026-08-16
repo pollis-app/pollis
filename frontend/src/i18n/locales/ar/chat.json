@@ -24,7 +24,8 @@
     "copyLinkFailed": "تعذّر نسخ الرابط",
     "edit": "تعديل الرسالة",
     "delete": "حذف الرسالة",
-    "deleteAsAdmin": "حذف الرسالة (مشرف)"
+    "deleteAsAdmin": "حذف الرسالة (مشرف)",
+    "more": "المزيد من الإجراءات"
   },
   "thread": {
     "replyCount_zero": "{{count}} رد",

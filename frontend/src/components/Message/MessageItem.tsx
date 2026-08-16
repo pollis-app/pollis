@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Reply, CornerUpLeft, Edit2, Trash2, MessagesSquare, Bookmark, Link, Check, AlertCircle } from "lucide-react";
+import { Reply, CornerUpLeft } from "lucide-react";
 import { ThreadReplyCount } from "./ThreadReplyCount";
 import { formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
 import { observer } from "mobx-react-lite";
@@ -11,6 +11,7 @@ import { getUsernameColor, useBackgroundIsLight } from "../../utils/usernameColo
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
+import { MessageActions } from "./MessageActions";
 import { ReceiptIndicator } from "./ReceiptIndicator";
 import type { Message, MessageReceipts } from "../../types";
 
@@ -88,28 +89,6 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   // Falls back to the same placeholder the default prop used to supply, but
   // resolved at render so it follows the active language.
   const displayName = authorUsername ?? t("message.unknownAuthor");
-  // Copy-link feedback (#889). A clipboard write that failed used to look
-  // exactly like one that succeeded — both silent — so the affordance read as
-  // broken. Both skins show the same three states; only the glyph size differs.
-  const copyLinkIcon =
-    copyLinkState === "copied"
-      ? Check
-      : copyLinkState === "failed"
-        ? AlertCircle
-        : Link;
-  const copyLinkLabel =
-    copyLinkState === "copied"
-      ? t("actions.copyLinkCopied")
-      : copyLinkState === "failed"
-        ? t("actions.copyLinkFailed")
-        : t("actions.copyLink");
-  const copyLinkTone =
-    copyLinkState === "copied"
-      ? "text-[var(--c-text-accent)]"
-      : copyLinkState === "failed"
-        ? "text-[var(--c-danger)]"
-        : "text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]";
-
   // Stable per-user color for non-own, non-admin authors. Key on username
   // when available so the same person keeps the same color across groups
   // even if their user id rotates; fall back to sender_id otherwise.
@@ -184,7 +163,12 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       <div
         data-testid={`message-${message.id}`}
         aria-label={t("message.fromLabel", { name: displayName })}
-        className="group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 hover:bg-hover transition-colors duration-75"
+        // tabIndex -1: arrow-key log navigation (messageNavStore) focuses the
+        // row programmatically; focus-within mirrors the hover treatment so a
+        // keyboard-focused row (or its action bar) reads exactly like a
+        // hovered one, with zero per-keystroke re-render.
+        tabIndex={-1}
+        className="group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75"
         style={{
           paddingTop: isGroupStart ? "var(--msg-header-gap)" : "var(--msg-group-gap)",
           paddingBottom: "var(--msg-row-pad-y)",
@@ -308,78 +292,20 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
         {/* Floating hover action toolbar */}
         {!isDeleted && (
-          <div className="absolute end-4 top-0 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 rounded-[var(--radius-control)] border border-line bg-surface-raised px-1 py-0.5">
-            <button
-              data-testid="reply-button"
-              onClick={() => onReply?.(message.id)}
-              aria-label={t("actions.reply")}
-              className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-            >
-              <Reply size={16} className="rtl-mirror" />
-            </button>
-            {onOpenThread && (
-              <button
-                data-testid="thread-button"
-                onClick={() => onOpenThread(message.id)}
-                aria-label={t("actions.replyInThread")}
-                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <MessagesSquare size={16} />
-              </button>
-            )}
-            {onToggleSave && (
-              <button
-                data-testid="save-button"
-                onClick={() => onToggleSave(message.id)}
-                aria-label={isSaved ? t("actions.removeBookmark") : t("actions.save")}
-                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <Bookmark size={16} fill={isSaved ? "currentColor" : "none"} />
-              </button>
-            )}
-            {onCopyLink && (
-              <button
-                data-testid="copy-link-button"
-                data-copy-state={copyLinkState}
-                onClick={() => onCopyLink(message.id)}
-                aria-label={copyLinkLabel}
-                title={copyLinkLabel}
-                className={`p-1 ${copyLinkTone}`}
-              >
-                {React.createElement(copyLinkIcon, { size: 16 })}
-              </button>
-            )}
-            {isOwn && onEdit && (
-              <button
-                data-testid="edit-button"
-                onClick={() => onEdit(message.id)}
-                aria-label={t("actions.edit")}
-                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <Edit2 size={16} />
-              </button>
-            )}
-            {isOwn && onDelete && (
-              <button
-                data-testid="delete-button"
-                onClick={() => onDelete(message.id)}
-                aria-label={t("actions.delete")}
-                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
-            {!isOwn && canModerate && onDelete && (
-              <button
-                data-testid="admin-delete-button"
-                onClick={() => onDelete(message.id)}
-                aria-label={t("actions.deleteAsAdmin")}
-                className="p-1 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
-          </div>
+          <MessageActions
+            messageId={message.id}
+            variant="refined"
+            isOwn={isOwn}
+            canModerate={canModerate}
+            isSaved={isSaved}
+            copyLinkState={copyLinkState}
+            onReply={onReply}
+            onOpenThread={onOpenThread}
+            onToggleSave={onToggleSave}
+            onCopyLink={onCopyLink}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
         )}
       </div>
     );
@@ -389,7 +315,9 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
     <div
       data-testid={`message-${message.id}`}
       aria-label={t("message.fromLabel", { name: displayName })}
-      className="group relative px-4 py-1 hover:bg-[var(--c-hover)] transition-colors duration-75"
+      // tabIndex -1 + focus-within: see the refined row above.
+      tabIndex={-1}
+      className="group relative px-4 py-1 hover:bg-[var(--c-hover)] focus-within:bg-[var(--c-hover)] outline-none transition-colors duration-75"
     >
       {/* Reply thread indicator */}
       {message.reply_to_message_id && (
@@ -490,82 +418,20 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
 
         {/* Action buttons — only visible on hover */}
         {!isDeleted && (
-          <div className="flex-shrink-0 ms-2 flex items-center gap-4 h-6">
-            <button
-              data-testid="reply-button"
-              onClick={() => onReply?.(message.id)}
-              aria-label={t("actions.reply")}
-              className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-            >
-              <Reply size={18} className="rtl-mirror" />
-            </button>
-            {onOpenThread && (
-              <button
-                data-testid="thread-button"
-                onClick={() => onOpenThread(message.id)}
-                aria-label={t("actions.replyInThread")}
-                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <MessagesSquare size={18} />
-              </button>
-            )}
-            {onToggleSave && (
-              <button
-                data-testid="save-button"
-                onClick={() => onToggleSave(message.id)}
-                aria-label={isSaved ? t("actions.removeBookmark") : t("actions.save")}
-                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <Bookmark size={18} fill={isSaved ? "currentColor" : "none"} />
-              </button>
-            )}
-            {onCopyLink && (
-              <button
-                data-testid="copy-link-button"
-                data-copy-state={copyLinkState}
-                onClick={() => onCopyLink(message.id)}
-                aria-label={copyLinkLabel}
-                title={copyLinkLabel}
-                className={`${
-                  copyLinkState === "idle"
-                    ? "opacity-0 group-hover:opacity-100"
-                    : "opacity-100"
-                } ${copyLinkTone}`}
-              >
-                {React.createElement(copyLinkIcon, { size: 18 })}
-              </button>
-            )}
-            {isOwn && onEdit && (
-              <button
-                data-testid="edit-button"
-                onClick={() => onEdit(message.id)}
-                aria-label={t("actions.edit")}
-                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <Edit2 size={18} />
-              </button>
-            )}
-            {isOwn && onDelete && (
-              <button
-                data-testid="delete-button"
-                onClick={() => onDelete(message.id)}
-                aria-label={t("actions.delete")}
-                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <Trash2 size={18} />
-              </button>
-            )}
-            {!isOwn && canModerate && onDelete && (
-              <button
-                data-testid="admin-delete-button"
-                onClick={() => onDelete(message.id)}
-                aria-label={t("actions.deleteAsAdmin")}
-                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
-              >
-                <Trash2 size={18} />
-              </button>
-            )}
-          </div>
+          <MessageActions
+            messageId={message.id}
+            variant="terminal"
+            isOwn={isOwn}
+            canModerate={canModerate}
+            isSaved={isSaved}
+            copyLinkState={copyLinkState}
+            onReply={onReply}
+            onOpenThread={onOpenThread}
+            onToggleSave={onToggleSave}
+            onCopyLink={onCopyLink}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
         )}
       </div>
 

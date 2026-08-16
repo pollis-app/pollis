@@ -24,7 +24,8 @@
     "copyLinkFailed": "Impossible de copier le lien",
     "edit": "Modifier le message",
     "delete": "Supprimer le message",
-    "deleteAsAdmin": "Supprimer le message (admin)"
+    "deleteAsAdmin": "Supprimer le message (admin)",
+    "more": "Plus d'actions"
   },
   "thread": {
     "replyCount_one": "{{count}} réponse",

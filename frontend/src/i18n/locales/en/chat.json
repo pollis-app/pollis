@@ -24,7 +24,8 @@
     "copyLinkFailed": "Couldn't copy link",
     "edit": "Edit message",
     "delete": "Delete message",
-    "deleteAsAdmin": "Delete message (admin)"
+    "deleteAsAdmin": "Delete message (admin)",
+    "more": "More actions"
   },
   "thread": {
     "replyCount_one": "{{count}} reply",

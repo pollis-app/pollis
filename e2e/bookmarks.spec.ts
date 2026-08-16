@@ -348,20 +348,10 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
 
-      const copyButton = page
-        .getByTestId(`message-${CHANNEL_MESSAGE_ID}`)
-        .getByTestId("copy-link-button");
-
-      // The per-message toolbar buttons live in `MessageItem.tsx`, which is
-      // owned by the #843 mentions work — they are filed as a cross-cutting
-      // request and land at integration. Everything they call is already wired
-      // from `MessageList`, so this asserts the moment they appear.
-      if ((await copyButton.count()) === 0) {
-        test.skip(
-          true,
-          "MessageItem save/copy-link buttons land at integration (see FEAT-COORDINATION.md)",
-        );
-      }
+      // Copy-link lives in the per-message "more" menu — open it first.
+      const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      await message.getByTestId("message-actions-more").click();
+      const copyButton = message.getByTestId("copy-link-button");
 
       await copyButton.click();
       const clipboard = await page.evaluate(
@@ -380,9 +370,12 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
 
-      const copyButton = page
-        .getByTestId(`message-${CHANNEL_MESSAGE_ID}`)
-        .getByTestId("copy-link-button");
+      // Copy-link lives in the per-message "more" menu — open it first. The
+      // menu deliberately stays open after the click so the copied/failed
+      // feedback is visible where the click happened.
+      const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      await message.getByTestId("message-actions-more").click();
+      const copyButton = message.getByTestId("copy-link-button");
 
       await expect(copyButton).toHaveAttribute("data-copy-state", "idle");
       await copyButton.click();
@@ -404,9 +397,10 @@ for (const skin of SKINS) {
       await boot(page, skin, [], { failClipboard: true });
       await gotoChannel(page);
 
-      const copyButton = page
-        .getByTestId(`message-${CHANNEL_MESSAGE_ID}`)
-        .getByTestId("copy-link-button");
+      // Copy-link lives in the per-message "more" menu — open it first.
+      const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      await message.getByTestId("message-actions-more").click();
+      const copyButton = message.getByTestId("copy-link-button");
 
       await copyButton.click();
 
@@ -428,16 +422,10 @@ for (const skin of SKINS) {
       await boot(page, skin);
       await gotoChannel(page);
 
-      const saveButton = page
-        .getByTestId(`message-${CHANNEL_MESSAGE_ID}`)
-        .getByTestId("save-button");
-
-      if ((await saveButton.count()) === 0) {
-        test.skip(
-          true,
-          "MessageItem save button lands at integration (see FEAT-COORDINATION.md)",
-        );
-      }
+      // Save lives in the per-message "more" menu — open it first.
+      const message = page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`);
+      await message.getByTestId("message-actions-more").click();
+      const saveButton = message.getByTestId("save-button");
 
       await saveButton.click();
       await gotoSaved(page);

@@ -17,6 +17,9 @@ import { messageJumpStore } from "../../stores/messageJumpStore";
 import { useConversationReceipts } from "../../hooks/queries/useReceipts";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { appStore } from "../../stores/appStore";
+import { messageNavStore } from "../../stores/messageNavStore";
+import type { MessageNavAction } from "../../utils/messageNav";
+import { arrowStep, isHorizontalArrow, isRtlElement } from "../../utils/direction";
 import type { Message } from "../../types";
 
 // How long the permalink jump highlight stays on the target row.
@@ -134,6 +137,10 @@ interface MessageListProps {
   hasMore?: boolean;
   isFetchingMore?: boolean;
   onLoadMore?: () => void;
+  /** Opting into arrow-key log navigation: return focus to this surface's
+   * composer. Only the surface that owns the app's main composer passes it —
+   * exactly one mounted list may lend the nav store its context. */
+  focusComposer?: () => void;
 }
 
 export const MessageList: React.FC<MessageListProps> = observer(({
@@ -152,6 +159,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   hasMore,
   isFetchingMore,
   onLoadMore,
+  focusComposer,
 }) => {
   const { t } = useTranslation("chat");
   const skin = useSkin();
@@ -400,6 +408,133 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return () => clearTimeout(timer);
   }, [jumpTargetMessageId, timeline.length]);
 
+  // ── Arrow-key log navigation (bash-history style) ───────────────────────
+  // The machine lives in `utils/messageNav.ts`, the live state in
+  // `stores/messageNavStore.ts`; this component lends the store its context
+  // (rendered order + per-row action bars), projects the logical focus onto
+  // real DOM focus, and translates key events. Rows style themselves purely
+  // via CSS `focus-within`, so keystrokes re-render nothing.
+
+  // Blocked-author rows render as inert stubs with no hover actions — skip
+  // them when walking the log, like tombstones they are not actionable, but
+  // unlike tombstones there is nothing to read either.
+  const navigableIds = useMemo(
+    () => sortedMessages.filter((m) => !blockedIds.has(m.sender_id)).map((m) => m.id),
+    [sortedMessages, blockedIds],
+  );
+  const navigableIdsRef = useRef(navigableIds);
+  navigableIdsRef.current = navigableIds;
+  const focusComposerRef = useRef(focusComposer);
+  focusComposerRef.current = focusComposer;
+
+  useEffect(() => {
+    // Presence of `focusComposer` is the opt-in — surfaces without it (search
+    // results, future thread lists) never touch the nav store.
+    if (!focusComposer) {
+      return;
+    }
+    const ctx = {
+      orderedIds: () => navigableIdsRef.current,
+      // The RENDERED action bar is the source of truth for what this row
+      // offers — reading the DOM here means the nav machine can never select
+      // a button that isn't on screen (deleted rows have no bar at all).
+      actionsFor: (messageId: string) => {
+        const row = containerRef.current?.querySelector(
+          `[data-testid="message-${messageId}"]`,
+        );
+        if (!row) {
+          return [];
+        }
+        return Array.from(row.querySelectorAll<HTMLElement>("[data-nav-action]")).map(
+          (el) => el.dataset.navAction as MessageNavAction,
+        );
+      },
+      focusComposer: () => focusComposerRef.current?.(),
+    };
+    messageNavStore.registerContext(ctx);
+    return () => messageNavStore.unregisterContext(ctx);
+    // Register once per mount; the callbacks read refs, so they always see
+    // the latest list without re-registering (which would reset nav state).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!focusComposer]);
+
+  // Switching conversations swaps the entire log out from under an in-flight
+  // navigation — reset rather than leaving state pointing into the old list.
+  useEffect(() => {
+    if (messageNavStore.active) {
+      messageNavStore.dispatch({ type: "cancel" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  // Project the logical focus onto real DOM focus: the row in `message` mode,
+  // the specific bar button in `action` mode. Real focus keeps Enter/Space
+  // activation and screen-reader tracking native.
+  const navState = messageNavStore.state;
+  useEffect(() => {
+    if (navState.mode === "composer") {
+      return;
+    }
+    const row = containerRef.current?.querySelector<HTMLElement>(
+      `[data-testid="message-${navState.messageId}"]`,
+    );
+    if (!row) {
+      return;
+    }
+    const target =
+      navState.mode === "action"
+        ? (row.querySelector<HTMLElement>(`[data-nav-action="${navState.action}"]`) ?? row)
+        : row;
+    target.focus({ preventScroll: true });
+    row.scrollIntoView({ block: "nearest" });
+  }, [navState]);
+
+  const handleNavKeyDown = (e: React.KeyboardEvent) => {
+    if (!messageNavStore.active) {
+      return;
+    }
+    // While a row's more-menu is open it owns the keyboard (its own Escape
+    // closes it); swallowing nothing here keeps that self-contained.
+    if (containerRef.current?.querySelector('[data-testid="message-actions-menu"]')) {
+      return;
+    }
+    // stopPropagation on every claimed key: the global shortcut registry
+    // listens at window bubble (Escape = nav.back, which would navigate the
+    // whole channel away), and a claimed key must never double-fire there.
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      messageNavStore.dispatch({ type: "up" });
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      messageNavStore.dispatch({ type: "down" });
+    } else if (isHorizontalArrow(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+      const step = arrowStep(e.key, isRtlElement(containerRef.current));
+      messageNavStore.dispatch({ type: step > 0 ? "nextAction" : "prevAction" });
+    } else if (e.key === "Escape" || e.key === "Tab") {
+      e.preventDefault();
+      e.stopPropagation();
+      messageNavStore.dispatch({ type: "exit" });
+    }
+  };
+
+  const handleNavBlur = (e: React.FocusEvent) => {
+    if (!messageNavStore.active) {
+      return;
+    }
+    const next = e.relatedTarget as Node | null;
+    if (next && containerRef.current?.contains(next)) {
+      return;
+    }
+    // Focus left the log for somewhere else (a click, an activated action
+    // that opened the reply/edit bar) — the session is over, and wherever
+    // focus went now legitimately owns it.
+    messageNavStore.dispatch({ type: "cancel" });
+  };
+
   if (timeline.length === 0) {
     return (
       <div
@@ -420,6 +555,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       ref={containerRef}
       className="flex-1 overflow-y-auto min-h-0"
       style={{ background: "var(--c-bg)" }}
+      onKeyDown={handleNavKeyDown}
+      onBlur={handleNavBlur}
     >
       {isFetchingMore && (
         <p

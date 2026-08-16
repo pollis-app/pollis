@@ -48,8 +48,11 @@ export const SkinTonePicker: React.FC<SkinTonePickerProps> = ({ toneIndex, onCha
               background: selected ? "var(--c-active)" : undefined,
             }}
           >
-            {SWATCH_BASE}
-            {tone}
+            {/* One string, one text node: adjacent JSX expressions become
+                separate DOM text nodes, and the font shaper won't combine a
+                skin-tone modifier with a base across that boundary — the
+                modifier renders as a standalone colored square. */}
+            {SWATCH_BASE + tone}
           </button>
         );
       })}

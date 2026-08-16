@@ -113,14 +113,15 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 
 **Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?thread=` on such a route falls back to the roster rather than rendering an empty thread.
 
-### `components/Message` (9)
+### `components/Message` (10)
 
 - **AttachmentDisplay** — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **LastMessagePreview** — props: channelId, conversationId — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`
+- **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, copyLinkState, onReply, onOpenThread, onToggleSave, onCopyLink, onEdit, onDelete — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut.
 - **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
 - **MessageItem** — props: message, allMessages, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onEdit, onDelete, onPin, onScrollToReply — `frontend/src/components/Message/MessageItem.tsx`
-- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onEdit, onDelete, onPin, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore — `frontend/src/components/Message/MessageList.tsx`
+- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onEdit, onDelete, onPin, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`.
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
 - **MessageReactions** — props: messageId — `frontend/src/components/Message/MessageReactions.tsx`
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`

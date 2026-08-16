@@ -19,6 +19,7 @@ import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups
 import type { Message, MessageAttachment } from "../../types";
 import { buildMessageContent } from "../../utils/attachmentEnvelope";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
+import { messageNavStore } from "../../stores/messageNavStore";
 import { TypingIndicator } from "../TypingIndicator";
 
 // Passed from DM page when the current user has not yet accepted the DM.
@@ -488,6 +489,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             hasMore={!!pageCursor}
             isFetchingMore={loadingMore}
             onLoadMore={loadMore}
+            focusComposer={() => chatInputRef.current?.focus()}
           />
         )}
       </div>
@@ -695,6 +697,13 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             onSend={handleSend}
             onValueChange={typing.notify}
             autoFocus
+            // ArrowUp from an empty/first-line composer walks up the message
+            // log (bash-history style). Claimed only when the log actually
+            // has a message to focus.
+            onHistoryUp={() => {
+              messageNavStore.dispatch({ type: "enter" });
+              return messageNavStore.active;
+            }}
             // @all fans out a notification only in group channels (DMs don't),
             // so the live "@all notifies everyone" hint is gated on one.
             canNotifyAll={!!selectedChannelId}

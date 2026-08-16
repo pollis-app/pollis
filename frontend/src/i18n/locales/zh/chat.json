@@ -24,7 +24,8 @@
     "copyLinkFailed": "无法复制链接",
     "edit": "编辑消息",
     "delete": "删除消息",
-    "deleteAsAdmin": "删除消息（管理员）"
+    "deleteAsAdmin": "删除消息（管理员）",
+    "more": "更多操作"
   },
   "thread": {
     "replyCount_other": "{{count}} 条回复"
