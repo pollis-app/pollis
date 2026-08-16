@@ -111,13 +111,11 @@ const AttachmentPreview: React.FC<{
   return (
     <div className="relative flex-shrink-0" style={{ width: PREVIEW_SIZE }}>
       <div
-        className="flex items-center justify-center overflow-hidden"
+        className="flex items-center justify-center overflow-hidden border-2 border-line bg-surface-high"
         style={{
           width: PREVIEW_SIZE,
           height: PREVIEW_SIZE,
-          border: "2px solid var(--c-border)",
           borderRadius: 8,
-          background: "var(--c-surface-high)",
           cursor: canExpand ? "zoom-in" : "default",
         }}
         onClick={() => {
@@ -127,21 +125,21 @@ const AttachmentPreview: React.FC<{
         }}
       >
         {attachment.loading ? (
-          <span className="text-sm font-mono" style={{ color: "var(--c-text-muted)", animation: "pulse 1.5s ease-in-out infinite" }}>…</span>
+          <span className="text-sm font-mono text-muted" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>…</span>
         ) : attachment.preview ? (
           <img src={attachment.preview} alt={attachment.name} className="w-full h-full object-cover" style={{ borderRadius: 6 }} />
         ) : attachment.type === "video" ? (
-          <Film size={28} style={{ color: "var(--c-text-dim)" }} />
+          <Film size={28} className="text-dim" />
         ) : attachment.type === "audio" ? (
-          <Music size={28} style={{ color: "var(--c-text-dim)" }} />
+          <Music size={28} className="text-dim" />
         ) : (() => {
           const Icon = getFileIcon(attachment.name);
-          return <Icon size={28} style={{ color: "var(--c-text-dim)" }} />;
+          return <Icon size={28} className="text-dim" />;
         })()}
       </div>
       <div
-        className="mt-0.5 text-xs font-mono truncate"
-        style={{ color: "var(--c-text-muted)", maxWidth: PREVIEW_SIZE }}
+        className="mt-0.5 text-xs font-mono truncate text-muted"
+        style={{ maxWidth: PREVIEW_SIZE }}
         title={attachment.name}
       >
         {attachment.name}
@@ -149,16 +147,13 @@ const AttachmentPreview: React.FC<{
       <button
         onClick={() => onRemove(attachment.id)}
         aria-label={t("composer.removeAttachment", { name: attachment.name })}
-        className="absolute flex items-center justify-center"
+        className="absolute flex items-center justify-center bg-surface-high border border-line-strong text-dim"
         style={{
           top: -6,
           right: -6,
           width: 22,
           height: 22,
           borderRadius: 4,
-          background: "var(--c-surface-high)",
-          border: "1px solid var(--c-border-active)",
-          color: "var(--c-text-dim)",
         }}
       >
         <X className="w-3.5 h-3.5" />
@@ -652,8 +647,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   return (
     <div
-      className={`relative border-t ${className}`}
-      style={{ borderColor: "var(--c-border)", background: "var(--c-bg)" }}
+      className={`relative border-t border-line bg-bg ${className}`}
     >
       {/* Refined skin's mention list. Anchored to this container with
           `absolute`, never a portal or a fixed overlay. */}
@@ -670,8 +664,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       {/* Attachment previews */}
       {attachments.length > 0 && (
         <div
-          className="px-2 py-2 flex items-start gap-2 flex-wrap"
-          style={{ borderBottom: "1px solid var(--c-border)" }}
+          className="px-2 py-2 flex items-start gap-2 flex-wrap border-b border-line"
         >
           {attachments.map((att) => (
             <AttachmentPreview
@@ -689,11 +682,10 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           everyone. Not a modal: an inline row in the composer. */}
       {willNotifyEveryone && (
         <div
-          className="px-3 py-1 flex items-center gap-1.5 text-xs font-mono"
-          style={{ color: "var(--c-accent)", borderBottom: "1px solid var(--c-border)" }}
+          className="px-3 py-1 flex items-center gap-1.5 text-xs font-mono text-accent border-b border-line"
         >
           <span style={{ fontWeight: 600 }}>@all</span>
-          <span style={{ color: "var(--c-text-muted)" }}>
+          <span className="text-muted">
             {t("composer.allMentionHint")}
           </span>
         </div>
@@ -706,7 +698,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           onClick={handlePickFiles}
           disabled={disabled || attachments.length >= maxAttachments}
           aria-label={t("composer.addAttachment")}
-          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-[var(--c-text-muted)] enabled:hover:text-[var(--c-accent)]"
+          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-muted enabled:hover:text-accent"
           style={{ opacity: disabled ? 0.4 : 1 }}
         >
           <Plus className="w-4 h-4" />
@@ -761,7 +753,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             autoCapitalize="off"
             spellCheck={false}
             rows={1}
-            className={`chat-input-textarea w-full px-2 py-1 resize-none font-mono text-sm transition-colors${isFocused ? " is-focused" : ""}`}
+            className={`chat-input-textarea w-full px-2 py-1 resize-none font-mono text-sm transition-colors border-0${isFocused ? " is-focused" : ""}`}
             style={{
               lineHeight: "1.5rem",
               minHeight: "1.5rem",
@@ -769,7 +761,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
               background: isFocused ? "var(--c-accent)" : "var(--c-hover)",
               color: isFocused ? "var(--c-bg)" : "var(--c-text)",
               outline: "none",
-              border: "none",
               opacity: disabled ? 0.5 : 1,
             }}
             aria-label={t("composer.inputLabel")}
@@ -787,7 +778,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           disabled={disabled || (!message.trim() && attachments.length === 0) || hasLoadingAttachments}
           data-testid="message-send-button"
           aria-label={t("composer.send")}
-          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-[var(--c-text-muted)] enabled:hover:text-[var(--c-accent)]"
+          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-muted enabled:hover:text-accent"
           style={{
             opacity: disabled || (!message.trim() && !attachments.length) ? 0.3 : 1,
           }}
@@ -830,7 +821,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           )}
           <button
             onClick={() => setExpandedPreview(null)}
-            className="mt-3 text-xs font-mono transition-colors text-[var(--c-text-dim)] bg-transparent hover:bg-[var(--c-accent)] hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
+            className="mt-3 text-xs font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
             style={{ border: "1px solid transparent", borderRadius: 4, cursor: "pointer" }}
           >
             [esc]

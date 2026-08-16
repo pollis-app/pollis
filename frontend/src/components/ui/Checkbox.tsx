@@ -19,9 +19,8 @@ export const Checkbox: React.FC<CheckboxProps> = ({
 }) => {
   return (
     <label
-      className={`flex items-start gap-3 font-mono text-xs ${className}`}
+      className={`flex items-start gap-3 font-mono text-xs text-dim ${className}`}
       style={{
-        color: "var(--c-text-dim)",
         cursor: disabled ? "not-allowed" : "pointer",
         lineHeight: 1.6,
       }}
@@ -42,13 +41,11 @@ export const Checkbox: React.FC<CheckboxProps> = ({
         role="checkbox"
         aria-checked={checked}
         tabIndex={0}
-        className="flex-shrink-0 flex items-center justify-center mt-px"
+        className={`flex-shrink-0 flex items-center justify-center mt-px border-2 ${checked ? "border-accent bg-accent" : "border-line-strong bg-transparent"}`}
         style={{
           width: 16,
           height: 16,
           borderRadius: 3,
-          border: `2px solid ${checked ? "var(--c-accent)" : "var(--c-border-active)"}`,
-          background: checked ? "var(--c-accent)" : "transparent",
           transition: "background 150ms, border-color 150ms",
           opacity: disabled ? 0.5 : 1,
           cursor: disabled ? "not-allowed" : "pointer",

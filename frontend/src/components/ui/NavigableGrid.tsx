@@ -204,8 +204,7 @@ export function NavigableGrid<T>({
   if (items.length === 0) {
     return (
       <div
-        className="flex-1 flex items-center justify-center font-mono text-xs"
-        style={{ color: "var(--c-text-dim)" }}
+        className="flex-1 flex items-center justify-center font-mono text-xs text-dim"
         data-testid={testId}
       >
         {resolvedEmptyLabel}
