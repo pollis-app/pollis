@@ -92,6 +92,13 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::groups::delete_channel,
             crate::commands::groups::set_member_role,
             crate::commands::groups::search_group_by_slug,
+            // #917: the emoji LIST is members-only while the emoji RENDER path
+            // deliberately is not (#848). Both are registered here so the
+            // integration suite can hold that pair apart — the guard and the
+            // thing the guard must not break are only meaningful together.
+            crate::commands::emoji::list_group_emoji,
+            crate::commands::emoji::list_usable_emoji,
+            crate::commands::emoji::get_emoji_url,
             crate::commands::dm::create_dm_channel,
             crate::commands::dm::list_dm_channels,
             crate::commands::dm::list_dm_requests,

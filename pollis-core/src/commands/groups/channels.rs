@@ -7,11 +7,22 @@ use crate::state::AppState;
 use super::types::Channel;
 use super::authz;
 
+/// Every channel in a group.
+///
+/// #917: members-only. Channel names are content-adjacent metadata — `#general`
+/// says nothing, `#q3-layoffs` says a great deal — and this took no caller, so
+/// any group's channel list was readable by anyone who named the group id. The
+/// sibling read `list_user_groups_with_channels` has always joined through
+/// `group_member`; this is the same rule, applied to the same data, reached by
+/// a different door.
 pub async fn list_group_channels(
     group_id: String,
+    requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<Channel>> {
     let conn = state.remote_db.conn().await?;
+
+    authz::require_member(&conn, &group_id, &requester_id).await?;
 
     let mut rows = conn.query(
         "SELECT id, group_id, name, description, channel_type FROM channels WHERE group_id = ?1",

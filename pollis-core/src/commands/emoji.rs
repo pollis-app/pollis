@@ -592,11 +592,36 @@ pub async fn list_usable_emoji(user_id: String, state: &Arc<AppState>) -> Result
 }
 
 /// Every custom emoji registered to one group — the management page's list.
+///
+/// #917: members-only, and that does **not** contradict #848.
+///
+/// #848 requires that a user who is in NONE of an emoji's groups still SEES it
+/// when someone sends it. That requirement is discharged entirely by the render
+/// path — `get_emoji_url` takes a content hash, verifies `sha256(bytes)` and
+/// serves the object, with no group argument and deliberately no membership
+/// check. Nothing in rendering reaches this function.
+///
+/// Resolving one hash you were handed and enumerating a group's whole emoji set
+/// are different acts. The first is "show me the decoration in this message I
+/// can already read"; the second is "tell me what that group has", which is
+/// group metadata — the shortcodes alone (`:q3-layoffs-parrot:`) leak the same
+/// way channel names do, plus `created_by` names members. So the hash stays
+/// open and the LIST closes, which is the narrowest rule that keeps #848's
+/// cross-group rendering intact.
+///
+/// The picker never used this: `list_usable_emoji` has always joined through
+/// `group_member`, because it is simultaneously the picker's source and the
+/// send-permission rule. This function is the management page's list, and the
+/// management page is only reachable from inside the group.
 pub async fn list_group_emoji(
     group_id: String,
+    requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<CustomEmoji>> {
     let conn = state.remote_db.conn().await?;
+
+    crate::commands::groups::authz::require_member(&conn, &group_id, &requester_id).await?;
+
     let mut rows = conn
         .query(
             "SELECT ge.group_id, COALESCE(g.name, ''), ge.shortcode, ge.content_hash, \

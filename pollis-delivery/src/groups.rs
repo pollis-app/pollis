@@ -30,7 +30,8 @@
 //!   - invite accept/decline: the actor is the invitee (writes are scoped
 //!     `invitee_id = :actor`).
 //!   - leave group: the actor is a current member (removes only their own row).
-//!   - join-request create: the actor is the requester.
+//!   - join-request create: the actor is the requester, the group exists, and
+//!     the actor is not already a member (#917).
 //!
 //! On the no-auth path (`authed == None`, only when `POLLIS_DS_REQUIRE_AUTH` is
 //! off) the role/identity checks are skipped and the actor comes from the body,
@@ -97,6 +98,22 @@ pub(crate) async fn is_member(
 /// True when the actor is a current admin of `group_id` (re-derived server-side).
 pub(crate) async fn is_admin(conn: &Connection, group_id: &str, user_id: &str) -> anyhow::Result<bool> {
     Ok(group_role(conn, group_id, user_id).await?.as_deref() == Some("admin"))
+}
+
+/// True when `group_id` names a real group.
+///
+/// #917: needed because this crate's connections run with `foreign_keys=OFF`
+/// (see `db.rs`), so a `REFERENCES groups(id)` column does NOT reject a write
+/// naming a group that was never created. Any `apply_*` that inserts a row
+/// keyed by a client-supplied group id has to say so itself.
+pub(crate) async fn group_exists(conn: &Connection, group_id: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM groups WHERE id = ?1",
+            libsql::params![group_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// The group that owns a channel, or `None` if the channel doesn't exist.
@@ -835,7 +852,28 @@ pub async fn create_join_request(
 
 /// UPSERT a pending join request (or reset a prior rejected/approved row back to
 /// pending). Authz: the actor requests for THEMSELVES (`requester_id` bound to
-/// the signer). Group-existence / not-already-member checks stay client-side.
+/// the signer), for a group that EXISTS, and only while they are NOT already in
+/// it.
+///
+/// #917: those last two used to be documented here as "checks [that] stay
+/// client-side", which is another way of saying they were not checks. The
+/// client half lives in `pollis_core::commands::groups::request_group_access`
+/// and is a helpful preflight, but the DS is the only authoritative writer, so
+/// anything it does not re-derive is unenforced. A client that simply skipped
+/// the preflight could:
+///
+///   * insert `group_join_request` rows for arbitrary — including nonexistent —
+///     group ids, since `foreign_keys` is OFF on this connection
+///     (`db.rs`), so the schema's `REFERENCES groups(id)` does not catch it; and
+///   * spray a row into every admin's pending-request list, group by group,
+///     using ids harvested by slug enumeration.
+///
+/// Both are now refused here. This mirrors the rest of domain B, where the
+/// admin role is re-derived server-side rather than trusted from the body.
+///
+/// Note the check is `is_member` **negated** — a join request is by definition
+/// from a non-member, so "no membership check" was never the fix; the invariant
+/// is that a member cannot ask to join what they are already in.
 pub async fn apply_create_join_request(
     conn: &Connection,
     authed: Option<&str>,
@@ -845,6 +883,20 @@ pub async fn apply_create_join_request(
         Ok(r) => r,
         Err(o) => return Ok(o),
     };
+
+    // The group must exist. Checked explicitly rather than left to the FK,
+    // because this connection runs with `foreign_keys=OFF`.
+    if !group_exists(conn, &body.group_id).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
+
+    // A current member has nothing to request. Letting this through would make
+    // an approvable request for someone already in the group representable —
+    // and approving it would re-run `add_member_rows` for an existing member.
+    if is_member(conn, &body.group_id, &requester).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
+
     conn.execute(
         "INSERT INTO group_join_request (id, group_id, requester_id, status, created_at)
          VALUES (?1, ?2, ?3, 'pending', datetime('now'))

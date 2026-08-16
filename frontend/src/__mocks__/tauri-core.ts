@@ -373,6 +373,20 @@ function roleInGroup(groupId: string): string | null {
 }
 
 /**
+ * The mock's copy of `authz::require_member` (#917).
+ *
+ * The roster, channel-list and emoji-list reads are members-only in Rust. The
+ * mock enforces the same rule so a hook that forgets to send `requesterId`
+ * fails here — in a fast browser test — instead of only against a real Turso.
+ * The wording matches `authz::NOT_A_MEMBER` so assertions can be shared.
+ */
+function requireMemberMock(groupId: string): void {
+  if (roleInGroup(groupId) === null) {
+    throw new Error('you are not a member of this group');
+  }
+}
+
+/**
  * A stand-in image for one custom emoji.
  *
  * Production hands back `http://127.0.0.1:<port>/<token>/<hash>` from the
@@ -610,12 +624,14 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'list_group_channels': {
-      const { groupId } = args as { groupId: string };
+      const { groupId } = args as { groupId: string; requesterId?: string };
+      requireMemberMock(groupId);
       return store.channels[groupId] ?? [];
     }
 
     case 'get_group_members': {
-      const { groupId } = args as { groupId: string };
+      const { groupId } = args as { groupId: string; requesterId?: string };
+      requireMemberMock(groupId);
       return store.groupMembers[groupId] ?? [];
     }
 
@@ -828,7 +844,8 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return store.customEmoji;
 
     case 'list_group_emoji': {
-      const { groupId } = args as { groupId: string };
+      const { groupId } = args as { groupId: string; requesterId?: string };
+      requireMemberMock(groupId);
       return store.customEmoji.filter((e) => e.group_id === groupId);
     }
 

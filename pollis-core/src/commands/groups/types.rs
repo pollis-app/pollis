@@ -9,6 +9,40 @@ pub struct Group {
     pub created_at: String,
 }
 
+/// What a stranger may learn about a group by naming its slug (#917).
+///
+/// `search_group_by_slug` is the discovery step of the join flow, so it cannot
+/// take a membership check without making itself useless — you search for a
+/// group precisely because you are not in it yet. The guard therefore has to be
+/// the SHAPE rather than the caller, and this type is that guard: a distinct
+/// struct, not a trimmed [`Group`], so "which fields may an outsider see" is
+/// answered once by the type instead of being re-decided at each call site.
+/// A field added to `Group` cannot leak here by accident.
+///
+/// Present, because the join prompt renders them: `name` and `description`
+/// (what the user is asking to join) and `id` (the argument to
+/// `request_group_access`; already known to anyone who can reach the row, and
+/// useless without an approving admin).
+///
+/// Deliberately absent:
+///   * `owner_id` — names a specific user. It is the roster leak of #917 in
+///     miniature: one member, but a member, and reliably the admin.
+///   * `created_at` — no UI consumes it; a stranger has no business profiling
+///     when a group was formed.
+///   * Member count — deliberately NOT added. It has no consumer in the join
+///     prompt, and a per-group population figure is exactly the aggregate a
+///     slug-enumerating client would want. This narrows the disclosure; it must
+///     not widen it under cover of the same change.
+///
+/// The slug is not returned: it is `derive_slug(name)`, and both the renderer
+/// (`urlRouting.ts`) and this crate already derive it from the name.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GroupPreview {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Channel {
     pub id: String,

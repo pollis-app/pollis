@@ -14,8 +14,8 @@ pub async fn list_usable_emoji(user_id: String, state: State<'_, Arc<AppState>>)
 }
 
 #[tauri::command]
-pub async fn list_group_emoji(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<CustomEmoji>> {
-    pollis_core::commands::emoji::list_group_emoji(group_id, &state).await
+pub async fn list_group_emoji(group_id: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<CustomEmoji>> {
+    pollis_core::commands::emoji::list_group_emoji(group_id, requester_id, &state).await
 }
 
 #[tauri::command]

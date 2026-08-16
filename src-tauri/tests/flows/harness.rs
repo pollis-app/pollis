@@ -523,6 +523,56 @@ pub(crate) async fn writable_remote() -> Arc<RemoteDb> {
     world().await.remote.clone()
 }
 
+/// Register a custom emoji in `group_id`, server-side (#917 / #848).
+///
+/// Emoji registration is a DS write backed by an R2 upload, and the flows world
+/// has neither an R2 nor the re-encoder's input. Seeding the two rows the
+/// upload would have produced — one `custom_emoji_object`, one `group_emoji` —
+/// through the WRITABLE handle stands in for exactly that server-side effect,
+/// the same way the envelope-GC scenarios seed backdated envelopes. It lets the
+/// suite exercise the two READ paths, which is what #917 is about.
+///
+/// `r2_key` is deliberately stored WRONG (it does not match
+/// `emoji/<hash>.<ext>`). `get_emoji_url` re-derives the key and refuses to
+/// fetch on a mismatch, which gives the render path a deterministic terminal
+/// error reached AFTER the object lookup and BEFORE any network call. That is
+/// what makes a hermetic assertion about the render path possible at all: the
+/// interesting question is never "did the bytes arrive", it is "was membership
+/// consulted on the way", and this stops the test at the first point where the
+/// answer is knowable.
+pub(crate) async fn seed_group_emoji(
+    group_id: &str,
+    shortcode: &str,
+    content_hash: &str,
+    created_by: &str,
+) {
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("writable conn for seed_group_emoji");
+    conn.execute(
+        "INSERT OR IGNORE INTO custom_emoji_object \
+             (content_hash, r2_key, content_type, size_bytes, animated) \
+         VALUES (?1, ?2, 'image/webp', 1024, 0)",
+        libsql::params![
+            content_hash.to_string(),
+            format!("emoji/{content_hash}-deliberately-not-the-derived-key.webp"),
+        ],
+    )
+    .await
+    .expect("insert custom_emoji_object");
+    conn.execute(
+        "INSERT OR REPLACE INTO group_emoji (group_id, shortcode, content_hash, created_by) \
+         VALUES (?1, ?2, ?3, ?4)",
+        libsql::params![
+            group_id.to_string(),
+            shortcode.to_string(),
+            content_hash.to_string(),
+            created_by.to_string(),
+        ],
+    )
+    .await
+    .expect("insert group_emoji");
+}
+
 /// Post-hoc commit-log GAP injection for the epoch-gap recovery scenario
 /// (#430-P2 / invariant F1).
 ///
@@ -1173,7 +1223,10 @@ impl TestClient {
 
     pub(crate) async fn group_member_ids(&self, group_id: &str) -> Vec<String> {
         let members: serde_json::Value = self
-            .invoke_json("get_group_members", json!({ "groupId": group_id }))
+            .invoke_json(
+                "get_group_members",
+                json!({ "groupId": group_id, "requesterId": self.user_id() }),
+            )
             .await;
         members
             .as_array()
@@ -1185,7 +1238,10 @@ impl TestClient {
 
     pub(crate) async fn list_group_channels(&self, group_id: &str) -> Vec<serde_json::Value> {
         let channels: serde_json::Value = self
-            .invoke_json("list_group_channels", json!({ "groupId": group_id }))
+            .invoke_json(
+                "list_group_channels",
+                json!({ "groupId": group_id, "requesterId": self.user_id() }),
+            )
             .await;
         channels.as_array().expect("channels array").clone()
     }
@@ -1481,10 +1537,25 @@ impl TestClient {
         .await;
     }
 
+    /// Give this client a media-server port and token (#917).
+    ///
+    /// `get_emoji_url` bails immediately when the loopback media server has not
+    /// started, which every flows client is — so without this the render path
+    /// would fail before reaching any authorization-relevant code and a test
+    /// asserting on it would prove nothing. The values are never connected to;
+    /// they only have to exist for the command to proceed to the object lookup.
+    pub(crate) async fn arm_media_server(&self) {
+        *self.state.media_server_port.lock().await = Some(1);
+        *self.state.media_server_token.lock().await = Some("test-token".to_string());
+    }
+
     /// Return the (user_id, role) pairs for every current member of a group.
     pub(crate) async fn group_member_roles(&self, group_id: &str) -> Vec<(String, String)> {
         let members: serde_json::Value = self
-            .invoke_json("get_group_members", json!({ "groupId": group_id }))
+            .invoke_json(
+                "get_group_members",
+                json!({ "groupId": group_id, "requesterId": self.user_id() }),
+            )
             .await;
         members
             .as_array()

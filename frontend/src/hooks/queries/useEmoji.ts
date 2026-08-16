@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useObserver } from "mobx-react-lite";
 import { invoke } from "../../bridge";
+import { appStore } from "../../stores/appStore";
 import type { CustomEmoji } from "../../types";
 
 export const emojiQueryKeys = {
@@ -34,14 +36,25 @@ export function useUsableEmoji(userId: string | null) {
   });
 }
 
-/** One group's custom emoji, for the group's emoji management page. */
+/**
+ * One group's custom emoji, for the group's emoji management page.
+ *
+ * #917: members-only. This does NOT affect rendering an emoji from a group you
+ * are not in — that path is `useEmojiImage` → `get_emoji_url`, which takes a
+ * content hash and no group, exactly as #848 requires.
+ */
 export function useGroupEmoji(groupId: string) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
   return useQuery({
     queryKey: emojiQueryKeys.group(groupId),
     queryFn: async (): Promise<CustomEmoji[]> => {
-      return await invoke<CustomEmoji[]>("list_group_emoji", { groupId });
+      return await invoke<CustomEmoji[]>("list_group_emoji", {
+        groupId,
+        requesterId: currentUser?.id,
+      });
     },
-    enabled: !!groupId,
+    enabled: !!groupId && !!currentUser,
     staleTime: 1000 * 60,
   });
 }

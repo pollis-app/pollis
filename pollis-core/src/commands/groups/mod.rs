@@ -41,8 +41,8 @@ pub use authz::{channel_group_role, group_role, GroupRole, NOT_A_MEMBER};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{
-    Channel, CreatedInviteLink, Group, GroupMember, GroupWithChannels, InviteLinkSummary,
-    JoinRequest, PendingInvite, RedeemedInvite,
+    Channel, CreatedInviteLink, Group, GroupMember, GroupPreview, GroupWithChannels,
+    InviteLinkSummary, JoinRequest, PendingInvite, RedeemedInvite,
 };
 
 // ── Group CRUD / search ──────────────────────────────────────────────────────

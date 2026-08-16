@@ -19,8 +19,8 @@ pub async fn list_user_groups_with_channels(user_id: String, state: State<'_, Ar
 }
 
 #[tauri::command]
-pub async fn list_group_channels(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<Channel>> {
-    pollis_core::commands::groups::list_group_channels(group_id, &state).await
+pub async fn list_group_channels(group_id: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<Channel>> {
+    pollis_core::commands::groups::list_group_channels(group_id, requester_id, &state).await
 }
 
 #[tauri::command]
@@ -89,8 +89,8 @@ pub async fn delete_group(group_id: String, requester_id: String, state: State<'
 }
 
 #[tauri::command]
-pub async fn get_group_members(group_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<GroupMember>> {
-    pollis_core::commands::groups::get_group_members(group_id, &state).await
+pub async fn get_group_members(group_id: String, requester_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<GroupMember>> {
+    pollis_core::commands::groups::get_group_members(group_id, requester_id, &state).await
 }
 
 #[tauri::command]
@@ -119,7 +119,7 @@ pub async fn set_member_role(group_id: String, user_id: String, role: String, re
 }
 
 #[tauri::command]
-pub async fn search_group_by_slug(slug: String, state: State<'_, Arc<AppState>>) -> Result<Group> {
+pub async fn search_group_by_slug(slug: String, state: State<'_, Arc<AppState>>) -> Result<GroupPreview> {
     pollis_core::commands::groups::search_group_by_slug(slug, &state).await
 }
 
