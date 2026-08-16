@@ -155,6 +155,7 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 - `list_thread_summaries(conversation_id)` → `Vec<ThreadSummary>` — reply count + last-reply time per thread root
 - `get_channel_messages(user_id, channel_id, limit, cursor?)` → `MessagePage`
 - `get_dm_messages(user_id, dm_channel_id, limit, cursor?)` → `MessagePage`
+- `read_last_messages(conversation_ids)` → `Vec<ChannelMessage>` — the newest message in each of the given conversations, in ONE call (#874). Drives every sidebar preview row (channels, DMs, DM requests): the previous shape was one `read_channel_messages` / `read_dm_messages` per ROW, re-fired on mount, on window focus and on every `deleted_message` event. A single `ROW_NUMBER() OVER (PARTITION BY conversation_id ...)` over the local `message` table, chunked at 400 bound parameters, plus one batched username hydration. Conversations with no local messages are ABSENT from the result — the caller keys by `conversation_id`, so a null placeholder would be a second spelling of the same answer. Ordering key matches `read_local_channel_page` exactly, so a preview and the top of the opened conversation cannot disagree.
 - `edit_message(message_id, conversation_id, sender_id, new_content)`
 - `delete_message(message_id, user_id)` — hard-deletes the envelope on Turso + the sender's local row. Both branches (self and admin) build the `POST /v1/messages/delete` body through the one `delete_message_body(...)` helper so `actor_id` cannot be forgotten on either — see "Every DS write body must NAME ITS ACTOR" above; it was missing on both before #875, which made deletion 403 on any `require_auth = false` deployment. If the message had attachments (`_att` in the plaintext JSON payload), each `content_hash` is reference-counted against the sender's other non-deleted local messages; unreferenced ones have their `attachment_object` row + R2 object removed (best-effort, logged on failure). Cross-user references are invisible because attachment metadata lives inside the MLS-encrypted payload — convergent encryption means another member re-uploading the same file simply re-registers the dedup row.
 - `search_messages(user_id, query, conversation_id?)` → `Message[]`
@@ -228,7 +229,8 @@ Corrected 2026-08-03 (#714):
 ## device_enrollment (`commands/device_enrollment.rs`)
 Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key recovery, identity reset) hands the bytes to `AppState.unlock` — never to the keystore unwrapped. The frontend then routes to pin-create; `set_pin` wraps under the user's PIN and opens the local DB.
 - `start_device_enrollment(user_id)` → `EnrollmentHandle`
-- `poll_enrollment_status(request_id)` → `EnrollmentStatus`. On `Approved`, populates `AppState.unlock`; defers cert / KP / external-join to `finalize_device_enrollment`.
+- `poll_enrollment_status(request_id)` → `EnrollmentStatus`. On `Approved`, populates `AppState.unlock`; defers cert / KP / external-join to `finalize_device_enrollment`. The row read goes through `RemoteDb::with_retry` (#874) — this runs on a device with no local DB and no keystore entry, so a dropped libsql stream used to strand the user on a spinner.
+- `await_enrollment_approval(request_id)` → `EnrollmentStatus` — resolves once the request reaches a terminal state (#874). What the renderer calls; it replaced a 2-second `setInterval` on `poll_enrollment_status`, which CLAUDE.md bans. The new device is pre-enrollment and cannot subscribe to realtime, so the answer genuinely has to be fetched — but the waiting is the backend's, with 1s→8s exponential backoff and a hard stop at the request's own 10-minute TTL, so it cannot outlive the thing it waits on. The renderer awaits one promise and ignores late answers from superseded requests via a generation counter.
 - `approve_device_enrollment(request_id, user_id, verification_code)`
 - `reject_device_enrollment(request_id, user_id)`
 - `list_pending_enrollment_requests(user_id)` → `PendingEnrollmentRequest[]`
@@ -270,8 +272,10 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 - `get_last_join_timings()` — debug: most recent `JoinTimings` record (jwt, room connect, mic init, first publish, total).
 
 ## r2 (`commands/r2.rs`)
-- `upload_file(data, key, content_type)` → URL
-- `download_file(key)` → bytes
+- `upload_file(data, key, content_type)` → URL — caller-chosen key. Legacy; new public objects should use `upload_public_file`.
+- `download_file(key)` → bytes — returned over the JSON IPC as an array of integers (~3x inflation). Now only the FALLBACK path for legacy non-content-addressed keys; see `get_public_file_url`.
+- `upload_public_file(prefix, data, content_type)` → `UploadResult` — uploads an avatar / group icon under a CONTENT-ADDRESSED key `{prefix}/{sha256}.{ext}` (#874). Avatars used to live at a stable `avatars/{user_id}` overwritten in place, and a mutable key is what made a local cache impossible: nothing short of re-fetching could tell you whether a cached copy was current, so every viewer re-downloaded every avatar on every launch. A new avatar is now a new key, which the profile row already publishes.
+- `get_public_file_url(key)` → URL — resolves a public object to a loopback media-server URL, caching the bytes on disk encrypted at rest under the same content-addressed scheme attachments and custom emoji use. The key IS the expected digest, so the integrity check is free and mandatory (these objects are stored unencrypted). Returns `""` — the same sentinel `get_media_url` uses — for a LEGACY key that carries no digest, or when the media server isn't up; the frontend falls back to `download_file` for those.
 - ~~`presign_upload(key, content_type)`~~ — **does not exist** under that name as of 2026-08-03 (#714). Presigning is server-side: the DS secrets broker mints URLs via `POST /v1/r2/presign` (see `delete_r2_object` below and `docs/secrets-broker.md`).
 - `get_media_url(r2_key, content_hash, content_type)` → URL — builds the loopback media-server URL (`http://127.0.0.1:<port>/<token>/<hash>`) for a cached item; errors if the server isn't started or there is no active unlock. See `pollis-core/src/media_server.rs`.
 - `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso.
@@ -306,7 +310,7 @@ The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *
 
 ## Appendix A — full registered-command inventory (names only)
 
-Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, the two `messages` receipt commands added by #857, and the two `autolock` commands added by #851. **196 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
+Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, the two `messages` receipt commands added by #857, the two `autolock` commands added by #851, and the four added by #874 (`messages::read_last_messages`, `r2::upload_public_file`, `r2::get_public_file_url`, `device_enrollment::await_enrollment_approval`). **200 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
 
 Regenerate with:
 
@@ -320,18 +324,18 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`
 - **`bookmarks`** — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 - **`camera`** — `list_video_devices`, `start_camera`, `start_camera_preview`, `stop_camera`, `stop_camera_preview`, `subscribe_camera_events`
-- **`device_enrollment`** — `approve_device_enrollment`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
+- **`device_enrollment`** — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 - **`dm`** — `accept_dm_request`, `add_user_to_dm_channel`, `create_dm_channel`, `get_dm_channel`, `leave_dm_channel`, `list_dm_channels`, `list_dm_requests`, `remove_user_from_dm_channel`
 - **`emoji`** — `get_emoji_url`, `list_group_emoji`, `list_usable_emoji`, `prepare_emoji_text`, `remove_group_emoji`, `upload_group_emoji`
 - **`groups`** — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `create_group_invite_link`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_group_invite_links`, `list_user_groups`, `list_user_groups_with_channels`, `redeem_group_invite_link`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `revoke_group_invite_link`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
 - **`install_kind`** — `detect_managed_install`
 - **`livekit`** — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
 - **`media_permissions`** — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
-- **`messages`** — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
+- **`messages`** — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
 - **`mls`** — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 - **`overlay`** — `get_overlay_mode`, `set_overlay_mode`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
-- **`r2`** — `download_file`, `download_media`, `get_media_url`, `upload_file`, `upload_media`
+- **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_public_file`
 - **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
 - **`safety`** — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
 - **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`, `subscribe_screen_share_frames`
@@ -353,7 +357,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **196 commands** in 28 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **200 commands** in 28 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -370,7 +374,7 @@ than hand-edit.
 
 **`autolock`** (2) — `report_user_activity`, `set_auto_lock_timeout`
 
-**`device_enrollment`** (9) — `approve_device_enrollment`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
+**`device_enrollment`** (10) — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
 
 **`safety`** (3) — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
 
@@ -390,13 +394,13 @@ than hand-edit.
 
 **`bookmarks`** (5) — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 
-**`messages`** (21) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
+**`messages`** (22) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
 
 **`mls`** (3) — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 
 **`livekit`** (12) — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
 
-**`r2`** (5) — `download_file`, `download_media`, `get_media_url`, `upload_file`, `upload_media`
+**`r2`** (7) — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_public_file`
 
 **`update`** (2) — `is_update_required`, `mark_update_required`
 

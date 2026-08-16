@@ -22,6 +22,35 @@
 - Components read MobX stores inside `observer()` wrappers; remote data comes from
   React Query hooks in `frontend/src/hooks/queries/`.
 
+### Query layer (#874)
+
+Four rules, each of which had been broken somewhere and cost real round trips:
+
+- **A list fetches for the whole list, never per row.** The list owner calls one
+  batched hook and hands each row its slice as a prop (`useLastMessages` →
+  `LastMessagePreview`). A row that fetches for itself multiplies by N and does it
+  again on every invalidation.
+- **`refetchOnWindowFocus` stays off.** The global default in `main.tsx` is `false`
+  for a documented reason; freshness comes from realtime events and explicit
+  invalidation. Exactly one hook overrides it — `useMediaPermissions`, because OS
+  permission state changes outside the app entirely and no event exists for it. If
+  you find yourself wanting the override, the missing piece is usually a realtime
+  event: #874 added `membership_changed` publishes to `create_channel`,
+  `update_channel` and `update_group`, which is what let the sidebar drop it.
+- **A cache key names its INPUTS, in full.** Not their count
+  (`useAllPendingJoinRequests` was keyed on `adminGroupIds.length`, so two different
+  sets of three groups shared one entry), and not a key already meaning something
+  else (`useUserProfile` and `useOtherUserProfile` shared one key holding two
+  different response shapes).
+- **Invalidate the narrowest prefix that actually changed.** `['groups']` also
+  matches every group's channel list; `membership_changed` used to invalidate all of
+  it. Where a key puts the id in the middle (`["groups", <id>, "members"]`) and no
+  prefix selects the right set, use a `predicate` rather than widening.
+
+Counts are asserted, not assumed: `e2e/ipc-efficiency.spec.ts` reads the per-command
+tally the Tauri mock keeps (`window.__tauriInvokeCounts`) and pins how many calls each
+interaction may make.
+
 ### Presence
 
 `presenceStore` infers online-ness from LiveKit room participation, keeping a
@@ -116,7 +145,7 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 ### `components/Message` (10)
 
 - **AttachmentDisplay** — `frontend/src/components/Message/AttachmentDisplay.tsx`
-- **LastMessagePreview** — props: channelId, conversationId — `frontend/src/components/Message/LastMessagePreview.tsx`
+- **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`
 - **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, copyLinkState, onReply, onOpenThread, onToggleSave, onCopyLink, onEdit, onDelete — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut.
 - **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
