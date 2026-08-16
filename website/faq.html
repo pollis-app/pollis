@@ -302,10 +302,12 @@
         <div class="faq-question">Is Pollis open source?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>The source is public on <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">GitHub</a>. You can read it, build it, and check our work.</p>
+            <p>No, not in the strict sense of that phrase. The right word is <strong>source-available</strong>. The whole source is public on <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">GitHub</a> and you can read it, build it, and check our work — that part is real, and it is the part every verification claim on this site depends on. But the licence only permits personal and noncommercial use. Using Pollis inside a business needs a separate commercial licence from us.</p>
           </div>
           <div class="dev">
-            <p>Source lives at <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">github.com/actuallydan/pollis</a>. Check the repo for the current license.</p>
+            <p>No — source-available, not OSI open source, and we would rather say so than let the word do work it hasn't earned.</p>
+            <p>The repo at <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">github.com/actuallydan/pollis</a> is published under the <a href="https://polyformproject.org/licenses/noncommercial/1.0.0" target="_blank" rel="noopener noreferrer">PolyForm Noncommercial License 1.0.0</a>. Any noncommercial purpose is permitted, which includes personal use, hobby projects, academic and public research, and use by charities, schools and government institutions — you may run it, modify it, and redistribute it for those purposes, provided you pass the licence terms along. Any commercial or business use requires a separate commercial licence; contact <a href="mailto:dankral01@gmail.com">dankral01@gmail.com</a>. The canonical text is <a href="https://github.com/actuallydan/pollis/blob/main/LICENSE.md" target="_blank" rel="noopener noreferrer"><code>LICENSE.md</code></a> in the repo.</p>
+            <p>What this does not restrict is auditing. Nothing about the licence limits reading the source, rebuilding a release to compare it against the transparency log, or building and running <code>pollis-verify</code> yourself. The licence governs what you may ship, not what you may check.</p>
           </div>
         </div>
       </div>
@@ -315,11 +317,12 @@
         <div class="faq-answer">
           <div class="plain">
             <p>Pollis publishes a fingerprint of every version it releases into a public, tamper-evident log. A small tool, <code>pollis-verify</code>, lets anyone confirm that the app they're running is one Pollis has publicly published, so nobody can quietly slip a single person a tampered build without it either showing up in that public log forever or being conspicuously missing from it.</p>
-            <p>Honest caveat: this proves the app matches what Pollis published, not yet that those bytes were built from the public source. Letting outsiders rebuild it byte-for-byte and confirm the match is still being worked on.</p>
+            <p>On Linux this goes one step further: after every release an automated rebuild from the public source confirms the released app matches, byte for byte. On macOS and Windows that last step isn't there yet, so on those two the log proves the app matches what Pollis published, not yet that those bytes came from the source you can read.</p>
           </div>
           <div class="dev">
             <p>Binary transparency (shipped). Each released artifact's hashes plus its build recipe are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a single pinned log key (post-quantum <strong>ML-DSA-44</strong>; the key is published on the <a href="artifacts.html">artifacts page</a>). <code>pollis-verify release &lt;tag&gt;</code> checks a build against the log, trusting only that key rather than Pollis's word.</p>
-            <p>Not yet shipped: byte-for-byte reproducible builds, a second Pollis-independent signature anchor, and an in-app "verify this build" button.</p>
+            <p>Also shipped: a post-release workflow that rebuilds the Linux AppImage from public source and asserts its hash against the log, failing the job on any mismatch; SLSA build provenance plus keyless <code>cosign</code> signatures on every artifact for all three platforms, published beside the downloads and anchored in Sigstore's public Rekor log, so verification needs no Pollis-held key; and an in-app "verify this build" button on the security screen, which hashes the running binary and re-runs the same release check the CLI does.</p>
+            <p>Their limits, stated plainly: the rebuild covers the Linux AppImage only (not <code>.deb</code>/<code>.rpm</code>, not macOS, not Windows) and needs the published build recipe rather than source alone, because a build-time value is baked in; its verdict is a public CI run rather than a published artifact. Provenance is not a release gate, and two earlier releases shipped without it. The in-app check is advisory, proves log inclusion rather than reproduction from source, and reports <code>pending</code> until the log's next daily rebuild covers a new release.</p>
           </div>
         </div>
       </div>
@@ -328,10 +331,10 @@
         <div class="faq-question">Is it free?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Yes.</p>
+            <p>For personal and other noncommercial use, yes — free to download and free to run, with no account tier to buy. Using it inside a business is the one exception: that needs a separate commercial licence.</p>
           </div>
           <div class="dev">
-            <p>Yes.</p>
+            <p>Free for any noncommercial purpose under PolyForm Noncommercial 1.0.0. Commercial or business use requires a separate commercial licence — see the licensing question above.</p>
           </div>
         </div>
       </div>

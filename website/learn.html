@@ -1693,7 +1693,7 @@ A message being read in the middle while both screens still show a padlock, safe
             never holds your Secret Key. So the company cannot open your account, and neither can
             anyone who steals the stored box.</p>
           <p><strong>Adding a device, two ways.</strong> The easy path is to approve the new device
-            from one you already have: both show the same six-digit code, you confirm they match, and
+            from one you already have: both show the same eight-character code, you confirm they match, and
             the two devices agree on a private key right in front of the server without revealing it
             (an X25519 key agreement, the same family from <a href="#vocabulary">Topic 2</a>). The
             code you compare is the human-checkable part, so even a server that could tamper with its
@@ -1746,7 +1746,7 @@ A message being read in the middle while both screens still show a padlock, safe
               Secret Key. So the company cannot open your account, and neither can anyone who steals
               the box.</p>
             <p>To sign in on a new device you have two ways. The easy way is to approve it from a
-              device you already have: the two show the same six-digit code, you confirm they match,
+              device you already have: the two show the same eight-character code, you confirm they match,
               and they agree on a private key in plain sight of the server. The other way is your
               Secret Key, the same recovery without a second device. Either way, the new device then
               joins every group you are in, from today forward, with no old history, which is the
@@ -2019,13 +2019,13 @@ Each log introduced by the problem it protects against, an attempted split being
           <p>Each release is recorded at three levels, because "the app" is not one file. The <strong>payload</strong> is the program and its resources before any signature; this is the level an independent person can rebuild from source and compare. The <strong>signed</strong> level is what you actually download, after Apple or Windows wraps it; signing deliberately mixes in unique data, so the signed file cannot be identical between two builds, by design. The <strong>installed program</strong> level records the fingerprint of the main program exactly as it sits on your machine, which is the one thing a running app can measure about itself. The app's built-in "verify this build" check compares the program you are running against that recorded fingerprint.</p>
           <p><strong>What this buys you.</strong> Suppose two people download the app. One gets the public build, whose fingerprint is in the log. If a different build were ever made for one person, its fingerprint would either be missing from the log, which that person's own app would notice, or present in the log, sitting in public next to the normal release for everyone to see. There is no quiet third option.</p>
           <p><strong>Reproducible builds, and where we actually are.</strong> A logged fingerprint proves we published these bytes. It does not by itself prove those bytes came from the source code you can read. Closing that gap needs reproducible builds, where anyone compiling the source at a given version gets a byte-for-byte identical result. That is hard, because ordinary builds bake in timestamps, file paths, and ordering that differ from machine to machine. Where we stand today:</p>
-          <p><strong>Linux is reproducible.</strong> An independent rebuild, run from a public copy of the source with none of our secrets, produces the same fingerprint we logged. <strong>macOS and Windows are not there yet.</strong> This is the current frontier of the work, and the reproducible Linux build below shows where it is already closed. The signing wrapper is never reproducible on any platform, by design.</p>
+          <p><strong>The Linux AppImage is reproducible.</strong> An independent rebuild, run from a public copy of the source and the published build recipe with none of our secrets, produces the same fingerprint we logged, and we run that rebuild automatically after every release. <strong>macOS and Windows are not there yet.</strong> This is the current frontier of the work, and the reproducible Linux build below shows where it is already closed. The signing wrapper is never reproducible on any platform, by design.</p>
           <p>There is also a second, independent record. Every release carries a build provenance record, stored in a public log that is not ours, proving which automated workflow produced the bytes, with no Pollis key involved in checking it. That answers a different question from reproducibility: provenance says who built it, reproducibility says whether it matches the source. Having both means a single compromised key does not undo the whole story.</p>
         </div>
 
         <div class="ln-limit">
           <div class="ln-limit-label">Where the guarantee ends today</div>
-          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux build closes that last loop today, and the same approach is being extended to macOS and Windows. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
+          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux AppImage closes that last loop today — the Linux <code>.deb</code> and <code>.rpm</code> are not rebuilt either — and the same approach is being extended to the rest. The rebuild's verdict is a public continuous-integration run you can read, not a report we publish as an artifact. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
         </div>
 
         <figure class="ln-figure">
@@ -2055,7 +2055,7 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             <p>Each release is recorded at three levels, because the app is not one file. The payload is the program before any signature; that is the level someone else can rebuild from source. The signed level is what you download, after notarization, which mixes in unique data on purpose, so it is never identical twice. And the installed-program level is the fingerprint of the main program as it sits on your machine, which is what a running app can measure about itself.</p>
             <p>Here is what it buys you. Two people download the app. One gets the public build, whose fingerprint is in the log. If a different build were made for one person, its fingerprint is either missing from the log, which their own app notices, or in the log, in public next to the real release. There is no quiet option.</p>
             <p>Now the part to be careful about. A fingerprint proves we published these bytes. It does not prove they came from the source code you can read. For that you need reproducible builds: anyone compiling the source gets an identical result.</p>
-            <p>On Linux, we have that. An independent rebuild, with none of our secrets, produces the same fingerprint we logged. On macOS and Windows, not yet. That is the current frontier, and the Linux build shows the approach already working. And the signing wrapper is never reproducible anywhere, by design.</p>
+            <p>For the Linux AppImage, we have that. An independent rebuild, from the public source and the published build recipe with none of our secrets, produces the same fingerprint we logged, and it runs automatically after every release. On macOS and Windows, not yet. That is the current frontier, and the Linux build shows the approach already working. And the signing wrapper is never reproducible anywhere, by design.</p>
             <p>There is one more record. Every release carries a build provenance record in a public log that is not ours, proving which workflow produced the bytes, with no key of ours involved in checking it. A different question from reproducibility, and a useful one when the worry is a compromised key.</p>
           </div>
         </details>
