@@ -14,6 +14,7 @@ import { receiptQueryKeys } from './queries/useReceipts';
 import { invalidateVoiceRoom, voiceQueryKeys } from './queries/useVoiceParticipants';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
+import { blocksQueryKeys } from './queries/useBlocks';
 import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
 import { logIgnored } from '../utils/log';
 import { typingStore, typingRoomKey } from '../stores/typingStore';
@@ -349,10 +350,8 @@ export function useLiveKitRealtime() {
         .finally(() => {
           if (channelId) {
             queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
-            queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.channel(channelId) });
           } else if (conversationId) {
             queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
-            queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.conversation(conversationId) });
             // Receipts (#857) arrive as MLS control envelopes on this very
             // path — the ingest above is what decrypts and records them, so
             // this is the point at which new ticks become visible. DM-only, and
@@ -360,6 +359,17 @@ export function useLiveKitRealtime() {
             // routing-only hint an ordinary message does.
             queryClientRef.current.invalidateQueries({ queryKey: receiptQueryKeys.conversation(conversationId) });
           }
+          // Previews are batched per set of conversations (#874), so there is
+          // no per-conversation key left to target — the prefix is the unit.
+          queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
+          // Threads live under their own key (`messages/thread/*`) that the two
+          // invalidations above do not reach. Refreshing them here is what lets
+          // the thread panel and its reply counts drop `refetchOnWindowFocus`
+          // (#874) without a peer's reply going unseen until the next focus.
+          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.threads });
+          queryClientRef.current.invalidateQueries({
+            queryKey: messageQueryKeys.threadSummaries(targetId),
+          });
         });
     };
 
@@ -367,6 +377,13 @@ export function useLiveKitRealtime() {
       if (event.type === 'dm_created') {
         queryClientRef.current.invalidateQueries({
           queryKey: messageQueryKeys.dmConversations(currentUser.id),
+        });
+        // An inbound DM arrives as a REQUEST first, and that list has its own
+        // key. Without this the request badge appeared only on the next window
+        // focus — which is what `useDMRequests` was overriding the global
+        // `refetchOnWindowFocus: false` for (#874).
+        queryClientRef.current.invalidateQueries({
+          queryKey: blocksQueryKeys.dmRequests(currentUser.id),
         });
         // Apply the Welcome now instead of waiting for the invitee to open
         // the DM or restart the app. Without this, any message the inviter
@@ -392,10 +409,40 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'membership_changed') {
-        // Invalidate all group and invite queries — covers invite received,
-        // join-request approved, member removed, member left. The ['groups']
-        // prefix also covers member queries (["groups", groupId, "members"]).
-        queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
+        // Covers invite received, join-request approved, member removed,
+        // member left.
+        //
+        // NARROWED from the whole `['groups']` prefix (#874). That prefix also
+        // matches every `["groups", groupId, "channels"]` entry, so a single
+        // member joining somewhere refetched the channel list of every group
+        // the user is in — none of which changed. What actually moves is the
+        // user's own group list (which embeds their role) and the affected
+        // group's roster, so those are what get invalidated.
+        queryClientRef.current.invalidateQueries({
+          queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id),
+        });
+        queryClientRef.current.invalidateQueries({
+          queryKey: groupQueryKeys.userGroups(currentUser.id),
+        });
+        if (event.conversation_id) {
+          queryClientRef.current.invalidateQueries({
+            queryKey: groupQueryKeys.members(event.conversation_id),
+          });
+          // Channel create/rename/delete publish this same event (#874), so
+          // the named group's channel list is refreshed too — just that one,
+          // not every group's.
+          queryClientRef.current.invalidateQueries({
+            queryKey: groupQueryKeys.channels(event.conversation_id),
+          });
+        } else {
+          // No group named: the event is a generic reconcile, so every roster
+          // is suspect. `["groups", <id>, "members"]` has the id in the middle,
+          // so there is no prefix that selects rosters — a predicate is the
+          // narrowest available match, and it still excludes channel lists.
+          queryClientRef.current.invalidateQueries({
+            predicate: (q) => q.queryKey[0] === 'groups' && q.queryKey[2] === 'members',
+          });
+        }
         queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
         // Same as dm_created: a membership change may have added us to an
         // MLS group, so pull the Welcome and catch up on commits immediately.
@@ -446,24 +493,25 @@ export function useLiveKitRealtime() {
 
       if (event.type === 'member_role_changed') {
         // Targeted: only the affected group's member list and the current user's
-        // groups-with-channels (which embeds current_user_role).
+        // groups-with-channels (which embeds current_user_role). The second one
+        // used to be the whole `['groups']` prefix, which dragged every group's
+        // channel list along with it (#874).
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.members(event.group_id),
         });
-        queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
+        queryClientRef.current.invalidateQueries({
+          queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id),
+        });
         return;
       }
 
       if (event.type === 'join_requests_changed') {
-        // A new join request arrived for a group this admin manages.
-        // Invalidate both the per-group list and the aggregate
-        // "all admin" count so the menu badge and the group's bottom-bar
-        // pending list both update without a manual refetch.
+        // A new join request arrived for a group this admin manages. The
+        // per-group key is now the ONLY key — the cross-group aggregate reads
+        // the same entries (#874) — so this one invalidation updates both the
+        // menu badge and the group's bottom-bar pending list.
         queryClientRef.current.invalidateQueries({
           queryKey: groupQueryKeys.joinRequests(event.group_id),
-        });
-        queryClientRef.current.invalidateQueries({
-          queryKey: ['join-requests', 'all-admin'],
         });
         return;
       }
@@ -491,8 +539,10 @@ export function useLiveKitRealtime() {
       if (event.type === 'deleted_message') {
         // Ingest applies the type='delete' tombstone envelope as a
         // soft-delete on the local row; MessageList renders [deleted].
+        // `ingestAndInvalidate` already busts the preview cache — a second
+        // invalidation here bought a second identical refetch and nothing else
+        // (#874).
         ingestAndInvalidate(event.channel_id, event.conversation_id);
-        queryClientRef.current.invalidateQueries({ queryKey: lastMessageQueryKeys.all });
         return;
       }
 

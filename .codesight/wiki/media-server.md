@@ -19,6 +19,15 @@ token-gated routes (same secret, 403 on anything else):
   One frame stream serves every track; the renderer dispatches by the `track_key`
   in each frame header.
 
+Three subsystems write into the one content-addressed cache and are served by
+the same `GET /{token}/{hash}` route without it knowing which: message
+attachments (`commands::r2::get_media_url`), custom emoji
+(`commands::emoji::get_emoji_url`), and — since #874 — public profile objects,
+i.e. avatars and group icons (`commands::r2::get_public_file_url`). The route
+resolves a hash by scanning for `<hash>.<ext>.enc`, so a new producer needs no
+server change at all; what it needs is a content-addressed name, which is why
+avatars had to stop living at a mutable `avatars/{user_id}` key first.
+
 This fits the "media is Rust-first" architecture (see [overview.md](./overview.md)):
 the renderer's WebRTC is intentionally unused; IPC carries UI events only, never
 media bytes.

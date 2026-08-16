@@ -39,8 +39,6 @@ type GatePhase =
   | { phase: "expired" }
   | { phase: "error"; message: string };
 
-const POLL_INTERVAL_MS = 2000;
-
 export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   userId,
   userEmail,
@@ -51,48 +49,45 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   const { t } = useTranslation("auth");
   const [state, setState] = useState<GatePhase>({ phase: "choose" });
   const [isStarting, setIsStarting] = useState(false);
-  const pollTimerRef = useRef<number | null>(null);
+  // Bumped whenever the user abandons a wait (cancel, unmount, restart). A
+  // late answer from a superseded request must not steer the UI — the promise
+  // it belongs to cannot be cancelled, so it is IGNORED instead. This replaces
+  // the `clearInterval` bookkeeping the old 2-second poll needed in five
+  // places (#874).
+  const waitGenerationRef = useRef(0);
 
-  // Stop polling on unmount or whenever the phase changes away from awaiting.
   useEffect(() => {
     return () => {
-      if (pollTimerRef.current !== null) {
-        window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
+      waitGenerationRef.current += 1;
     };
   }, []);
 
-  const startPolling = (requestId: string) => {
-    if (pollTimerRef.current !== null) {
-      window.clearInterval(pollTimerRef.current);
-    }
-    pollTimerRef.current = window.setInterval(async () => {
+  // One awaited call. Rust waits with backoff, bounded by the request's own
+  // TTL, and resolves as soon as an existing device approves or rejects.
+  const awaitApproval = (requestId: string) => {
+    waitGenerationRef.current += 1;
+    const generation = waitGenerationRef.current;
+    void (async () => {
       try {
-        const status = await api.pollEnrollmentStatus(requestId);
+        const status = await api.awaitEnrollmentApproval(requestId);
+        if (waitGenerationRef.current !== generation) {
+          return;
+        }
         if (status.status === "approved") {
-          if (pollTimerRef.current !== null) {
-            window.clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
           onEnrolled();
         } else if (status.status === "rejected") {
-          if (pollTimerRef.current !== null) {
-            window.clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
           setState({ phase: "rejected" });
         } else if (status.status === "expired") {
-          if (pollTimerRef.current !== null) {
-            window.clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
           setState({ phase: "expired" });
         }
       } catch (err) {
-        console.error("[enrollment] poll failed:", err);
+        if (waitGenerationRef.current !== generation) {
+          return;
+        }
+        console.error("[enrollment] approval wait failed:", err);
+        setState({ phase: "expired" });
       }
-    }, POLL_INTERVAL_MS) as unknown as number;
+    })();
   };
 
   const handleStartApproval = async () => {
@@ -108,7 +103,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
         verificationCode: handle.verification_code,
         expiresAt: handle.expires_at,
       });
-      startPolling(handle.request_id);
+      awaitApproval(handle.request_id);
     } catch (err) {
       // Tauri rejects with a serialized string, not an Error — use String(err)
       // (matching the other panes) so the real backend reason surfaces instead
@@ -122,10 +117,8 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   };
 
   const restart = () => {
-    if (pollTimerRef.current !== null) {
-      window.clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
+    // Abandon any outstanding wait — see `waitGenerationRef`.
+    waitGenerationRef.current += 1;
     setState({ phase: "choose" });
   };
 
@@ -323,6 +316,9 @@ const AwaitingApprovalPane: React.FC<{
 }> = ({ code, expiresAt, onCancel }) => {
   const { t } = useTranslation("auth");
   const [secondsLeft, setSecondsLeft] = useState(() => secondsUntil(expiresAt));
+  // A display clock, not a poll: it ticks a rendered countdown and touches no
+  // network. The no-periodic-polling rule is about keepalives, not about
+  // seconds visibly counting down on screen.
   useEffect(() => {
     const t = window.setInterval(() => {
       setSecondsLeft(secondsUntil(expiresAt));

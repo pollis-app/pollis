@@ -39,6 +39,11 @@ pub async fn read_dm_messages(dm_channel_id: String, limit: Option<i64>, cursor:
 }
 
 #[tauri::command]
+pub async fn read_last_messages(conversation_ids: Vec<String>, state: State<'_, Arc<AppState>>) -> Result<Vec<ChannelMessage>> {
+    pollis_core::commands::messages::read_last_messages(conversation_ids, &state).await
+}
+
+#[tauri::command]
 pub async fn read_thread_messages(thread_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<ChannelMessage>> {
     pollis_core::commands::messages::read_thread_messages(thread_id, &state).await
 }

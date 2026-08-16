@@ -266,6 +266,26 @@ const store: MockStore = {
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
 (window as any).__tauriMock = store;
 
+/**
+ * Per-command invoke tally (#874).
+ *
+ * The IPC-efficiency work is only ever as good as its measurement: "the
+ * sidebar feels snappier" is not a result, "one `read_last_messages` instead
+ * of nine `read_channel_messages`" is. Specs read
+ * `window.__tauriInvokeCounts` and call `window.__resetTauriInvokeCounts()`
+ * to scope a count to one interaction (e.g. a window-focus round).
+ *
+ * Counting lives here rather than in each spec because every spec shares this
+ * module — a per-spec wrapper would only see its own calls.
+ */
+const invokeCounts: Record<string, number> = {};
+(window as any).__tauriInvokeCounts = invokeCounts;
+(window as any).__resetTauriInvokeCounts = () => {
+  for (const key of Object.keys(invokeCounts)) {
+    delete invokeCounts[key];
+  }
+};
+
 function generateId(): string {
   return Math.random().toString(36).slice(2, 11);
 }
@@ -489,6 +509,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'subscribe_realtime':
     case 'subscribe_camera_events':
     case 'subscribe_screen_share_events':
+    case 'await_enrollment_approval':
     case 'poll_mls_welcomes':
     case 'catch_up_all_mls_groups':
     case 'process_pending_commits':
@@ -508,6 +529,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // Loopback media server URL — nothing serves it in the browser.
     case 'screenshare_ws_url':
       return null;
+
+    // No media server in the browser build, so the sentinel that means "fall
+    // back to the byte path" is the honest answer (#874).
+    case 'get_public_file_url':
+      return '';
 
     // Desktop-shell side effects with no browser equivalent. Explicit no-ops
     // so they don't show up as "unhandled" noise in test output.
@@ -640,6 +666,23 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       };
       const key = dmChannelId ?? conversationId ?? '';
       return readMessagePage(key, limit, cursor);
+    }
+
+    // #874: one batched call for every sidebar preview row. Mirrors
+    // `pollis_core::commands::messages::read_last_messages` — newest message
+    // per conversation, and conversations with no messages are simply absent
+    // from the result rather than carrying a null.
+    case 'read_last_messages': {
+      const { conversationIds } = args as { conversationIds: string[] };
+      const out: MockMessage[] = [];
+      for (const id of conversationIds ?? []) {
+        const msgs = store.messages[id] ?? [];
+        if (msgs.length === 0) {
+          continue;
+        }
+        out.push(msgs[msgs.length - 1]);
+      }
+      return out;
     }
 
     case 'list_dm_channels':
@@ -1039,6 +1082,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'rotate_signed_prekey':
     case 'replenish_one_time_prekeys':
     case 'upload_file':
+    case 'upload_public_file':
     case 'download_file':
     case 'get_livekit_token':
       return null;
@@ -1056,6 +1100,7 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   // observably completed by the time the click handler's task ends. A macrotask
   // hop instead parks the effect behind every timer the app has queued, which
   // is long enough for a test to look at the result and find nothing there.
+  invokeCounts[command] = (invokeCounts[command] ?? 0) + 1;
   return new Promise((resolve, reject) => {
     try {
       resolve(handleCommand(command, args ?? {}) as T);
@@ -1080,10 +1125,34 @@ export class Channel<T = unknown> {
   id = 0;
   onmessage: ((message: T) => void) | null = null;
 
+  constructor() {
+    // Register every channel the app opens so a spec can push a realtime event
+    // into it (#874). Realtime is the ONLY thing that keeps a query fresh once
+    // `refetchOnWindowFocus` is off, so "this event invalidates exactly these
+    // caches" has to be assertable — otherwise the tests can only prove the
+    // refetches are gone, not that anything replaced them.
+    openChannels.push(this as unknown as Channel<unknown>);
+  }
+
   toJSON(): string {
     return `__CHANNEL__:${this.id}`;
   }
 }
+
+const openChannels: Channel<unknown>[] = [];
+
+(window as any).__emitRealtimeEvent = (event: unknown) => {
+  // Deliver to the MOST RECENTLY created channel only. StrictMode
+  // double-invokes effects in dev, so several Channel objects exist but only
+  // the last one is the live subscription — fanning an event out to all of
+  // them would multiply every invalidation and make the counts meaningless.
+  const live = openChannels[openChannels.length - 1];
+  if (!live) {
+    return 0;
+  }
+  live.onmessage?.(event);
+  return 1;
+};
 
 export function convertFileSrc(filePath: string, _protocol = "asset"): string {
   return filePath;

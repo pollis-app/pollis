@@ -114,6 +114,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::messages::get_dm_messages,
             crate::commands::messages::read_channel_messages,
             crate::commands::messages::read_dm_messages,
+            crate::commands::messages::read_last_messages,
             crate::commands::messages::read_thread_messages,
             crate::commands::messages::list_thread_summaries,
             crate::commands::messages::list_messages_by_sender,

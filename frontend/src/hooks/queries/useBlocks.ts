@@ -26,7 +26,6 @@ export function useDMRequests() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -115,6 +114,5 @@ export function useBlockedUsers() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
-    refetchOnWindowFocus: true,
   });
 }

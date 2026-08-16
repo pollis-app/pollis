@@ -168,6 +168,16 @@ pub async fn update_group(
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
+    // Announce the rename/icon change to the group (#874). Without this the
+    // only thing that refreshed another member's sidebar was a window-focus
+    // refetch — a poll wearing an event's clothes.
+    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
+        &state.livekit,
+        &group_id,
+    ).await {
+        eprintln!("[realtime] update_group: notify group {group_id}: {e}");
+    }
+
     let mut rows = conn.query(
         "SELECT id, name, description, owner_id, created_at FROM groups WHERE id = ?1",
         libsql::params![group_id],

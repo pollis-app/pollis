@@ -259,7 +259,10 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations } = useDMConversations();
-  const { members: allGroupMembers } = useAllGroupMembers();
+  // Gated on `isOpen` (#874): this fans out to one `get_group_members` query
+  // PER GROUP, and the panel is mounted-but-closed for the whole session until
+  // someone presses Cmd+K.
+  const { members: allGroupMembers } = useAllGroupMembers(isOpen);
   const activeVoiceChannelId =
     appStore.voiceState.kind === 'idle' ? null : appStore.voiceState.channelId;
   const currentUserId = appStore.currentUser?.id ?? null;

@@ -1,16 +1,18 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { useLastMessage } from "../../hooks/queries/useMessages";
 import { ScrambleText } from "../ui/ScrambleText";
+import type { Message } from "../../types";
 
 interface LastMessagePreviewProps {
-  channelId?: string;
-  conversationId?: string;
+  // The row's newest message, or undefined when the conversation has none.
+  // Handed down rather than fetched here: the list owner asks for every row's
+  // preview in one batched call (#874), so this component only renders.
+  message?: Message;
+  isLoading?: boolean;
 }
 
-export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ channelId, conversationId }) => {
+export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ message, isLoading }) => {
   const { t } = useTranslation("chat");
-  const { data: message, isLoading, isFetching } = useLastMessage(channelId ?? null, conversationId ?? null);
 
   const text = message?.content_decrypted
     ? (message.sender_username
@@ -33,9 +35,9 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ channelI
     return t("preview.noMessages");
   })();
 
-  // While initial load or refetch with no prior data, show a scrambling placeholder
-  // so the row height never collapses.
-  if (isLoading || (isFetching && !text)) {
+  // While the batch is still in flight, show a scrambling placeholder so the
+  // row height never collapses.
+  if (isLoading && !text) {
     return <ScrambleText text={null} placeholderLength={24} typeSpeed={25} />;
   }
 

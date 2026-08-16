@@ -5,7 +5,7 @@ import { ArrowLeft, Inbox, Ban, Plus, ShieldCheck, ShieldAlert } from "lucide-re
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
-import { useDMConversations } from "../hooks/queries/useMessages";
+import { useDMConversations, useLastMessages } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
 import { usePeerVerificationMap } from "../hooks/queries/useUserProfile";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
@@ -18,7 +18,13 @@ export const DMsPage: React.FC = observer(() => {
 
   const { data: conversations = [] } = useDMConversations();
   const { data: requests = [] } = useDMRequests();
+  // The shared extraction (this map was duplicated in three files) plus the
+  // batched preview fetch — both halves of #874 apply here.
   const verificationByPeer = usePeerVerificationMap();
+  // One batched preview fetch for every DM row (#874), not one call per row.
+  const conversationIds = useMemo(() => conversations.map((c) => c.id), [conversations]);
+  const { data: lastMessages = {}, isLoading: previewsLoading } =
+    useLastMessages(conversationIds);
 
   let items: TerminalMenuItem[] = [];
 
@@ -84,7 +90,9 @@ export const DMsPage: React.FC = observer(() => {
               testId={`dm-avatar-${c.id}`}
             />
           ),
-          description: <LastMessagePreview conversationId={c.id} />,
+          description: (
+            <LastMessagePreview message={lastMessages[c.id]} isLoading={previewsLoading} />
+          ),
           action: () => {
             setSelectedConversationId(c.id);
             markRead(c.id);
