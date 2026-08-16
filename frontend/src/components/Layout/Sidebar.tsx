@@ -26,6 +26,7 @@ import { appStore } from "../../stores/appStore";
 import { PresenceDot } from "../ui/PresenceDot";
 import { useShortcutLabel } from "../../keyboard";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { probeRender } from "../../utils/renderProbe";
 import { PresenceAvatar } from "../ui/PresenceAvatar";
 import { SidebarProfilePanel } from "./SidebarProfilePanel";
 
@@ -54,6 +55,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) => {
+  probeRender("Sidebar");
   const { t } = useTranslation("nav");
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
