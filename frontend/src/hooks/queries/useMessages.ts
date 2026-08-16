@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
@@ -27,14 +27,19 @@ export const messageQueryKeys = {
   conversation: (conversationId: string | null) => ["messages", "conversation", conversationId] as const,
   dmConversations: (userId: string | null) => ["dm-conversations", userId] as const,
   thread: (threadId: string | null) => ["messages", "thread", threadId] as const,
+  /** Prefix covering every open thread — neither `channel` nor `conversation` reaches it. */
+  threads: ["messages", "thread"] as const,
   threadSummaries: (conversationId: string | null) =>
     ["messages", "thread-summaries", conversationId] as const,
 };
 
 export const lastMessageQueryKeys = {
   all: ["last-message"] as const,
-  channel: (channelId: string | null) => ["last-message", "channel", channelId] as const,
-  conversation: (conversationId: string | null) => ["last-message", "conversation", conversationId] as const,
+  // One entry per SET of conversations, not per conversation (#874). The
+  // sidebar asks for all its preview rows at once, so the cache key is the
+  // request, and every invalidation path targets the `all` prefix.
+  batch: (conversationIds: string[]) =>
+    ["last-message", "batch", conversationIds.join(",")] as const,
 };
 
 // Wire shape of a single attachment inside the `_att` array embedded in
@@ -213,7 +218,6 @@ export function useMessages(channelId: string | null, conversationId: string | n
     },
     enabled: !!(channelId || conversationId) && !!currentUser,
     staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
   });
 
   // Fire ingest in the background after the local read mounts. Skipped if a
@@ -324,11 +328,24 @@ export function useSendMessage() {
         return { ...prev, messages: [...filtered, confirmedMessage] };
       });
 
-      // Update the last-message preview immediately.
-      const lastMsgKey = variables.channelId
-        ? lastMessageQueryKeys.channel(variables.channelId)
-        : lastMessageQueryKeys.conversation(variables.conversationId);
-      queryClient.setQueryData(lastMsgKey, confirmedMessage);
+      // Update the last-message preview immediately. Previews are batched per
+      // set of conversations (#874), so patch the entry inside whichever cached
+      // batches contain this conversation rather than writing a per-id key.
+      const previewId = variables.channelId || variables.conversationId;
+      queryClient.setQueriesData<LastMessageMap>(
+        {
+          queryKey: lastMessageQueryKeys.all,
+          // Only the batches that ASKED for this conversation. Keyed on the id
+          // list rather than on the cached data, so the first message ever sent
+          // into a conversation still lands — an empty conversation has no
+          // entry to match against, but its batch still named it.
+          predicate: (query) => {
+            const idList = query.queryKey[2];
+            return typeof idList === "string" && idList.split(",").includes(previewId);
+          },
+        },
+        (old) => ({ ...(old ?? {}), [previewId]: confirmedMessage }),
+      );
 
       // Then invalidate in the background so we stay in sync with the server.
       queryClient.invalidateQueries({ queryKey });
@@ -376,41 +393,55 @@ export function useDMConversations() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
-    refetchOnWindowFocus: true,
   });
 }
 
-export function useLastMessage(channelId: string | null, conversationId: string | null) {
+/** Newest message per conversation, keyed by conversation id. */
+export type LastMessageMap = Record<string, Message>;
+
+/**
+ * The newest message for every conversation in `conversationIds`, in ONE IPC
+ * call (#874).
+ *
+ * Previously each preview row owned its own `useLastMessage`, so a sidebar of
+ * N channels plus M DMs fired N+M `read_channel_messages` / `read_dm_messages`
+ * calls — on mount, again on every window focus, and again on every
+ * `deleted_message` event. The backend does the same indexed scan and the same
+ * username hydration either way, so asking once is strictly cheaper.
+ *
+ * Callers pass the ids and hand each row its own entry; the map is keyed by
+ * conversation id and a conversation with no messages is simply absent.
+ */
+export function useLastMessages(conversationIds: string[]) {
   const currentUser = useObserver(() => appStore.currentUser);
-  const isChannel = !!channelId;
-  const queryKey = isChannel
-    ? lastMessageQueryKeys.channel(channelId)
-    : lastMessageQueryKeys.conversation(conversationId);
+
+  // Sorted + de-duplicated so the cache key is a property of the SET, not of
+  // the render order the caller happened to produce. Two renders listing the
+  // same conversations must hit the same entry rather than refetching.
+  const idsKey = conversationIds.join(",");
+  const ids = useMemo(
+    () => Array.from(new Set(conversationIds)).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [idsKey],
+  );
 
   return useQuery({
-    queryKey,
-    queryFn: async (): Promise<Message | null> => {
-      if (isChannel && channelId) {
-        const page = await invoke<MessagePage>('read_channel_messages', {
-          channelId,
-          limit: 1,
-        });
-        const msgs = (page.messages || []).map(transformChannelMessage);
-        return msgs[msgs.length - 1] ?? null;
+    queryKey: lastMessageQueryKeys.batch(ids),
+    queryFn: async (): Promise<LastMessageMap> => {
+      if (ids.length === 0) {
+        return {};
       }
-      if (conversationId) {
-        const page = await invoke<MessagePage>('read_dm_messages', {
-          dmChannelId: conversationId,
-          limit: 1,
-        });
-        const msgs = (page.messages || []).map(transformChannelMessage);
-        return msgs[msgs.length - 1] ?? null;
+      const rows = await invoke<RawChannelMessage[]>('read_last_messages', {
+        conversationIds: ids,
+      });
+      const out: LastMessageMap = {};
+      for (const row of rows || []) {
+        out[row.conversation_id] = transformChannelMessage(row);
       }
-      return null;
+      return out;
     },
-    enabled: !!(channelId || conversationId) && !!currentUser,
+    enabled: ids.length > 0 && !!currentUser,
     staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -583,7 +614,6 @@ export function useThreadMessages(threadId: string | null) {
     },
     enabled: !!threadId && !!currentUser,
     staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
   });
 }
 
@@ -607,6 +637,5 @@ export function useThreadSummaries(conversationId: string | null) {
     },
     enabled: !!conversationId && !!currentUser,
     staleTime: 1000 * 30,
-    refetchOnWindowFocus: true,
   });
 }

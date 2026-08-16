@@ -7,6 +7,7 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useUserGroupsWithChannels, useGroupJoinRequests } from "../hooks/queries/useGroups";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
+import { useLastMessages } from "../hooks/queries/useMessages";
 import { useVoiceRoomCounts } from "../hooks/queries/useVoiceParticipants";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 
@@ -26,6 +27,15 @@ export const GroupPage: React.FC = observer(() => {
   );
   const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
   const { data: joinRequests = [] } = useGroupJoinRequests(isAdmin ? groupId : null);
+
+  // One batched preview fetch for the whole channel list (#874) instead of one
+  // IPC call per row. Computed above the early returns because hooks must be.
+  const previewChannelIds = useMemo(
+    () => (group?.channels ?? []).filter((ch) => ch.channel_type !== "voice").map((ch) => ch.id),
+    [group]
+  );
+  const { data: lastMessages = {}, isLoading: previewsLoading } =
+    useLastMessages(previewChannelIds);
 
   if (isLoading) {
     return (
@@ -61,7 +71,7 @@ export const GroupPage: React.FC = observer(() => {
     id: ch.id,
     label: ch.name,
     icon: <Hash size={14} />,
-    description: <LastMessagePreview channelId={ch.id} />,
+    description: <LastMessagePreview message={lastMessages[ch.id]} isLoading={previewsLoading} />,
     action: () => {
       setSelectedChannelId(ch.id);
       markRead(ch.id);
