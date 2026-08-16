@@ -75,6 +75,25 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
   - Two traps worth knowing. `R2_S3_ENDPOINT` in Doppler is **path-style and already ends in `/pollis`**, so passing it alongside `--bucket pollis` writes to `pollis/<key>` — the objects land and the CDN 404s them. Use the bare account endpoint, exactly as `desktop-release.yml` builds it from `CLOUDFLARE_ACCOUNT_ID`. And `aws s3 sync` fails against R2 for a prefix that does not exist yet (it lists the destination and gets `NoSuchKey`) — use `cp --recursive`.
   - The `<video>` elements carry `crossorigin="anonymous"` because the media is now cross-origin; without it the browser refuses the `<track>` cue files. `cdn.pollis.com` reflects an `Access-Control-Allow-Origin` for both `pollis.com` and `www.pollis.com`, and www 308s to the apex, so both work.
   - Release retention only prunes `releases/v*/`, so the `learn/` prefix is never touched by it.
+- **Trust-signal pages (#877)** — work the project already did and had never published:
+  - `assurance.html` + `assurance.js` — per-release **rebuild verdicts**, the Kani/TLA+ results, the
+    supply-chain posture, and signing-key custody/rotation. The verdict table renders
+    `website/rebuild-ledger.json`.
+  - `subprocessors.html` — who sees what, in what form, in which region; plus the honest relay-pool
+    roster (first-party AWS only, four US regions, random 24 h placement, opt-in and off by default).
+  - `device-security.html` — the lost/stolen-device path: how to revoke, and what a holder of the
+    device can still read.
+  - `doc-page.css` — the shared long-form page shell these three use, so the layout lives once.
+- **`website/rebuild-ledger.json` must be regenerated after every release.** `scripts/rebuild-ledger.sh`
+  rebuilds it from the public Actions API; `website-verify.yml` runs `--check` daily and **fails** when
+  rebuild-verify has run since the ledger was last published. It is a committed file rather than a
+  workflow write because `rebuild-verify.yml` deliberately holds **no** `secrets.*` — that is what lets a
+  third party fork and run it — so it must not be given credentials to publish its own verdict.
+- **`docs/retention-public-draft.html` is the finished public retention policy, deliberately NOT in
+  `website/`.** Cloudflare Pages serves everything under `website/`, so a file placed there is public
+  whether or not anything links to it. It ships only when the owner signs off
+  `docs/metadata-retention-policy.md` (§10); the footer links are commented out and tagged
+  `TODO(#877): retention`. Owner sign-off is the only blocker — no code change is outstanding.
 
 ### 4. pollis-verify (auditor CLI)
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)
