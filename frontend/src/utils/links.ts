@@ -11,13 +11,23 @@
 
 // Matches http://, https://, and www.-prefixed URLs.
 //
-// Module-level and `/g`, so it carries `lastIndex` between calls. `findUrls`
-// below is the ONLY thing that execs it, and it resets `lastIndex` first —
-// that reset is what keeps a `/g` regex safe to share. Without it a second
-// message starts matching from wherever the previous one stopped and silently
-// drops its leading links. Do not export this, and do not exec it anywhere
-// else: callers get `findUrls`, which has no state to get wrong.
-const URL_REGEX = /(https?:\/\/[^\s<>"')\]]+|www\.[^\s<>"')\]]+\.[^\s<>"')\]]+)/gi;
+// Deliberately a SOURCE STRING rather than a module-level `RegExp`. A shared
+// `/g` regex carries `lastIndex` between calls, and this pattern is now scanned
+// by two components — the linkifier and the media unfurl — interleaved, over
+// every message body in the log. The two duplicated copies each guarded that by
+// resetting `lastIndex` before scanning.
+//
+// The reset works, but it is weaker than it reads: a `while (exec(…))` loop run
+// to exhaustion already leaves `lastIndex` at 0, so deleting the reset breaks
+// nothing until some future caller stops early with a `break` or reaches for
+// `.test()`. That is a trap no test can fail on today — verified by deleting
+// the reset and watching the whole suite stay green.
+//
+// Compiling per scan removes the shared state instead of managing it: there is
+// no `lastIndex` to leak, whatever a caller does. Both consumers memoise their
+// scan on the message body, so the compile is paid once per body, against a
+// full regex scan of that same body.
+const URL_PATTERN = "(https?://[^\\s<>\"')\\]]+|www\\.[^\\s<>\"')\\]]+\\.[^\\s<>\"')\\]]+)";
 
 export interface UrlMatch {
   /** Index of the first character of `url` within the scanned text. */
@@ -35,10 +45,12 @@ export interface UrlMatch {
  * building any nodes at all without allocating.
  */
 export function findUrls(text: string): UrlMatch[] | null {
-  URL_REGEX.lastIndex = 0;
+  // Fresh per scan — see `URL_PATTERN`. Nothing here is shared with the next
+  // caller, so there is no ordering between callers to get wrong.
+  const re = new RegExp(URL_PATTERN, "gi");
   let found: UrlMatch[] | null = null;
   let match: RegExpExecArray | null;
-  while ((match = URL_REGEX.exec(text)) !== null) {
+  while ((match = re.exec(text)) !== null) {
     if (found === null) {
       found = [];
     }

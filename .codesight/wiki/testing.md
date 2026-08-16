@@ -661,6 +661,7 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
 | `render-cost.spec.ts` | Regression guards on message-log render cost in BOTH skins — typing in the edit bar, opening the reply bar and arrow-key navigation must re-render **zero** rows; a shell re-render must not re-render the sidebar; paired with the other half (skin flip restructures rows, an edit updates its row, day dividers survive) so a memo cannot pass by freezing the UI (#874) |
 | `message-window.spec.ts` | The virtualised log: only the visible slice is in the DOM, and every DOM-locating path still reaches a row outside the window, in BOTH skins (#874) |
+| `linkify.spec.ts` | URL detection in message bodies in BOTH skins — every body keeps the link it *starts* with, the media unfurl agrees with the linkifier about which URLs exist, and a bare `www.` link gets a protocol. Guards the pattern shared by `LinkifiedText` and `MediaLinkUnfurl` (#874) |
 | `thread-panel.spec.ts` | The thread panel's timestamps in BOTH skins — a seconds-precision `created_at` must render the real date rather than 1970, a millisecond one must be left alone, and the thread must agree with the channel about when a message was sent (#874) |
 
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
