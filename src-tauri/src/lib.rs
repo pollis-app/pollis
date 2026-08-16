@@ -499,6 +499,7 @@ pub fn run() {
             commands::auth::is_current_device_registered,
             commands::device_enrollment::start_device_enrollment,
             commands::device_enrollment::poll_enrollment_status,
+            commands::device_enrollment::await_enrollment_approval,
             commands::device_enrollment::list_pending_enrollment_requests,
             commands::device_enrollment::approve_device_enrollment,
             commands::device_enrollment::reject_device_enrollment,

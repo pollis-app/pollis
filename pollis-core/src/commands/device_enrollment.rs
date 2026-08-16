@@ -330,26 +330,42 @@ pub async fn poll_enrollment_status(
     state: &Arc<AppState>,
     request_id: String,
 ) -> Result<EnrollmentStatus> {
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT user_id, new_device_id, status, wrapped_account_key, expires_at \
-             FROM device_enrollment_request WHERE id = ?1",
-            libsql::params![request_id.clone()],
-        )
+    // `with_retry` rather than a bare `conn()`: this runs on a device that has
+    // no local database, no keystore entry, and no way to retry itself — a
+    // dropped libsql stream here used to mean the user watched a spinner until
+    // they gave up and restarted the sign-in. Reconnecting once and asking
+    // again is the difference between a blip and a dead end.
+    let id = request_id.clone();
+    let row_data: Option<(String, String, Option<Vec<u8>>, String)> = state
+        .remote_db
+        .with_retry(|conn| {
+            let id = id.clone();
+            async move {
+                let mut rows = conn
+                    .query(
+                        "SELECT user_id, new_device_id, status, wrapped_account_key, expires_at \
+                         FROM device_enrollment_request WHERE id = ?1",
+                        libsql::params![id],
+                    )
+                    .await?;
+                match rows.next().await? {
+                    Some(row) => Ok(Some((
+                        row.get::<String>(0)?,
+                        row.get::<String>(2)?,
+                        row.get::<Option<Vec<u8>>>(3).ok().flatten(),
+                        row.get::<String>(4)?,
+                    ))),
+                    None => Ok(None),
+                }
+            }
+        })
         .await?;
-    let row = rows.next().await?.ok_or_else(|| {
+
+    let (user_id, status, wrapped, expires_at_str) = row_data.ok_or_else(|| {
         Error::Other(anyhow::anyhow!(
             "enrollment request {request_id} not found"
         ))
     })?;
-
-    let user_id: String = row.get(0)?;
-    let _new_device_id: String = row.get(1)?;
-    let status: String = row.get(2)?;
-    let wrapped: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(3).ok().flatten();
-    let expires_at_str: String = row.get(4)?;
-    drop(rows);
 
     // TTL check — if expired, short-circuit without touching the status column.
     if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(&expires_at_str) {
@@ -420,6 +436,53 @@ pub async fn poll_enrollment_status(
         other => Err(Error::Other(anyhow::anyhow!(
             "enrollment request {request_id} has unexpected status {other}"
         ))),
+    }
+}
+
+/// First delay after a `Pending` answer in [`await_enrollment_approval`].
+const AWAIT_BACKOFF_START_MS: u64 = 1_000;
+/// Ceiling the backoff climbs to. Approval is a human tapping a button on
+/// another device, so a few seconds of latency is invisible; what matters is
+/// that a request left open for its full ten minutes costs a handful of reads
+/// instead of three hundred.
+const AWAIT_BACKOFF_MAX_MS: u64 = 8_000;
+
+/// Wait for an enrollment request to reach a terminal state, then return it.
+///
+/// ONE call, not a poll loop in the renderer (#874). The new device is
+/// pre-enrollment: it has no device key, so it cannot sign a realtime
+/// subscription and cannot be pushed to — the answer genuinely has to be
+/// fetched. But `setInterval` in the frontend is banned outright by CLAUDE.md,
+/// and for good reason: it fired every two seconds regardless of how long the
+/// wait had already run, kept firing through transient failures, and outlived
+/// the component whenever a cleanup path was missed.
+///
+/// Here the waiting is the backend's, with exponential backoff between reads
+/// and a hard stop at the request's own TTL — so it cannot outlive the thing it
+/// is waiting on. The renderer awaits a promise.
+pub async fn await_enrollment_approval(
+    state: &Arc<AppState>,
+    request_id: String,
+) -> Result<EnrollmentStatus> {
+    // A little past the TTL so the expiry is reported by the same status check
+    // every other path uses, rather than being inferred from a timeout here.
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(ENROLLMENT_TTL_SECS as u64 + 5);
+    let mut delay = std::time::Duration::from_millis(AWAIT_BACKOFF_START_MS);
+
+    loop {
+        match poll_enrollment_status(state, request_id.clone()).await? {
+            EnrollmentStatus::Pending => {}
+            terminal => return Ok(terminal),
+        }
+        if std::time::Instant::now() + delay >= deadline {
+            return Ok(EnrollmentStatus::Expired);
+        }
+        tokio::time::sleep(delay).await;
+        delay = std::cmp::min(
+            delay * 2,
+            std::time::Duration::from_millis(AWAIT_BACKOFF_MAX_MS),
+        );
     }
 }
 

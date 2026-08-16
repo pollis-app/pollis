@@ -19,6 +19,11 @@ pub async fn poll_enrollment_status(state: State<'_, Arc<AppState>>, request_id:
 }
 
 #[tauri::command]
+pub async fn await_enrollment_approval(state: State<'_, Arc<AppState>>, request_id: String) -> Result<EnrollmentStatus> {
+    pollis_core::commands::device_enrollment::await_enrollment_approval(&state, request_id).await
+}
+
+#[tauri::command]
 pub async fn list_pending_enrollment_requests(state: State<'_, Arc<AppState>>, user_id: String) -> Result<Vec<PendingEnrollmentRequest>> {
     pollis_core::commands::device_enrollment::list_pending_enrollment_requests(&state, user_id).await
 }
