@@ -122,8 +122,9 @@ export const AppShell: React.FC = observer(() => {
 
   const currentUser = appStore.currentUser;
   const skin = useSkin();
-  // Panel open/closed lives in the URL, not in AppShell state — see
-  // `useRightPanel`. AppShell only needs the toggle for the shortcut.
+  // Panel open/closed lives in device-local, user-scoped storage rather than
+  // in AppShell state or the URL — see `useRightPanel`. AppShell only needs
+  // the toggle for the shortcut.
   const { toggle: toggleRightPanel } = useRightPanel();
 
   // Drive the looping ringtone off the incomingCall slot. Rust owns the

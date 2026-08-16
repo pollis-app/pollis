@@ -90,22 +90,28 @@ offline while they're still in another. Two properties are load-bearing:
 - **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
 - **MediaTile** — props: attachment — `frontend/src/components/Layout/RightPanel/MediaTile.tsx`
 
-The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay — opening it reflows the message list. Which panel is open lives in the URL, not in a store:
+The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay — opening it reflows the message list.
 
-| `?panel=` | Meaning |
-| --- | --- |
-| absent | Follow the default: the `right_panel_open_by_default` preference, else the skin (open in `refined`, closed in `terminal`). |
-| `members` | Explicitly open. |
-| `thread` | A thread is open; `?thread=<ULID>` names its root. Required iff `panel=thread` — `validatePanelSearch` drops the whole panel param rather than admit one without the other, so "thread open with no thread" is unrepresentable. |
-| `none` | Explicitly closed — distinct from absent, so a `refined` user can share a link with the panel shut. |
+**Open/closed and shape are two different pieces of state (#904).**
 
-`validatePanelSearch` (`frontend/src/types/panel.ts`) is declared on the **root** route, because the panel is AppShell's chrome rather than any one page's. It drops unrecognised values instead of throwing, so a stale or hand-edited link falls back to the default rather than blanking the app. `useRightPanel` resolves the precedence and owns the only write path.
+| State | Where it lives | Reacts to the route? |
+| --- | --- | --- |
+| Is the panel open? | `stores/rightPanelStore` → `localStorage` key `pollis-right-panel-open:<userId>` | **No.** Only the user toggling it moves it. |
+| Which shape, and whose data? | `?thread=<ULID>` for a thread; otherwise the members roster, scoped by `appStore` selection | **Yes.** That is what the panel is for. |
 
-`panel` is a discriminated union, not a boolean, so threads (#825) add a variant rather than a second sidebar. **`useRightPanel` navigates with an explicit `to: pathname`** — a relative `to: "."` would resolve against `/` (AppShell renders at the root route) and throw the user out of their conversation, and omitting `to` leaves the search type unresolved.
+Open/closed used to be a `?panel=` search param, which is what broke it: nothing in the app carries search params across a navigation (every `router.navigate({ to })` produces a bare URL), so the param was dropped on every sidebar click and the panel fell back to a SKIN default — shut in `terminal`, open in `refined`. One bug, two faces: a terminal panel that would not stay open, a refined one that would not stay shut. It is now device-local and **keyed by user id**, the same scheme as the device-local language (`i18n/storage.ts`) and font size (`loadDeviceFontSize`), so a shared OS account never leaks one person's layout to the next.
+
+**Seeding.** A device with nothing remembered falls back to the synced `right_panel_open_by_default` preference, else the skin's historical default — and then **writes that answer down**, once the preferences query has settled (the skin is read from that same query, so an earlier seed would record the loading placeholder). The write is what keeps the skin out of it: after seeding, the skin is never consulted again, so switching between `terminal` and `refined` cannot open or close the panel. The Preferences switch writes BOTH halves — device-local (so it actually moves the panel you are looking at) and synced (so the next new device seeds from it).
+
+`validatePanelSearch` (`frontend/src/types/panel.ts`) is declared on the **root** route, because the panel is AppShell's chrome rather than any one page's. It drops unrecognised values instead of throwing, so a stale or hand-edited link falls back to a plain conversation view rather than blanking the app. `useRightPanel` owns the only write path for both halves.
+
+**`useRightPanel` navigates with an explicit `to: pathname`** — a relative `to: "."` would resolve against `/` (AppShell renders at the root route) and throw the user out of their conversation, and omitting `to` leaves the search type unresolved. It navigates *only* when a thread id actually needs clearing; plain open/close touches the URL not at all.
+
+Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 
 **Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-bar border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, refined re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; refined keeps the airier avatar rows.
 
-**Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?panel=thread` on such a route falls back to the roster rather than rendering an empty thread.
+**Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?thread=` on such a route falls back to the roster rather than rendering an empty thread.
 
 ### `components/Message` (9)
 
