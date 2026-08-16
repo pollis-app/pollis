@@ -127,10 +127,9 @@ export const VoiceChannelPage: React.FC = observer(() => {
   const deleteFooter = isPendingDelete ? (
     <div data-testid="delete-channel-bar">
       <div
-        className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-        style={{ borderTop: "1px solid var(--c-border)", background: "var(--c-surface)" }}
+        className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
       >
-        <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: "var(--c-text-muted)" }}>
+        <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
           {t("channel.deleteHeading")}
         </span>
         <button
@@ -143,10 +142,9 @@ export const VoiceChannelPage: React.FC = observer(() => {
         </button>
       </div>
       <div
-        className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-        style={{ background: "var(--c-surface)" }}
+        className="flex items-center justify-between gap-4 px-4 pb-3 pt-2 bg-surface"
       >
-        <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
+        <p className="text-xs font-mono text-dim">
           {t("channel.deleteWarning")}
         </p>
         <Button

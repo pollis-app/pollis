@@ -114,49 +114,47 @@ export const UpdatePage: React.FC = observer(() => {
   return (
     <PageShell title={t("update.title")} scrollable>
       <div
-        className="flex-1 flex flex-col overflow-auto"
-        style={{ background: "var(--c-bg)" }}
+        className="flex-1 flex flex-col overflow-auto bg-bg"
       >
         <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
           <div className="w-full max-w-md flex flex-col gap-8">
             <section className="flex flex-col gap-4">
               <h2
-                className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-                style={{ color: "var(--c-text-dim)", borderColor: "var(--c-border)" }}
+                className="text-xs font-mono font-medium uppercase tracking-widest text-dim pb-1 border-b border-line"
               >
                 {t("update.heading")}
               </h2>
 
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                <p className="text-xs font-mono text-muted">
                   <Trans
                     t={t}
                     i18nKey="update.currentVersion"
                     values={{ version: appVersion || t("update.versionLoading") }}
-                    components={{ val: <span style={{ color: "var(--c-text)" }} /> }}
+                    components={{ val: <span className="text-fg" /> }}
                   />
                 </p>
 
                 {status === "checking" && (
-                  <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                  <p className="text-xs font-mono text-muted">
                     {t("update.checking")}
                   </p>
                 )}
 
                 {status === "available" && (
-                  <p className="text-xs font-mono" style={{ color: "var(--c-accent)" }}>
+                  <p className="text-xs font-mono text-accent">
                     {t("update.available", { version })}
                   </p>
                 )}
 
                 {status === "none" && (
-                  <p className="text-xs font-mono" style={{ color: "var(--c-accent-dim)" }}>
+                  <p className="text-xs font-mono text-accent-dim">
                     {t("update.upToDate")}
                   </p>
                 )}
 
                 {status === "error" && (
-                  <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
+                  <p className="text-xs font-mono text-danger">
                     {errorMessage}
                   </p>
                 )}
@@ -164,21 +162,20 @@ export const UpdatePage: React.FC = observer(() => {
                 {status === "managed" && managed && (
                   <>
                     {version && (
-                      <p className="text-xs font-mono" style={{ color: "var(--c-accent)" }}>
+                      <p className="text-xs font-mono text-accent">
                         {t("update.available", { version })}
                       </p>
                     )}
                     <p
-                      className="text-xs font-mono"
-                      style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
+                      className="text-xs font-mono text-muted"
+                      style={{ lineHeight: 1.5 }}
                     >
                       {t("update.managedNote", { manager: managed.display_name })}
                     </p>
                     {managed.update_command && (
                       <div
+                        className="bg-bg border border-line"
                         style={{
-                          background: "var(--c-bg-elevated, var(--c-bg))",
-                          border: "1px solid var(--c-border)",
                           padding: "0.75rem 1rem",
                           display: "flex",
                           alignItems: "center",
@@ -189,8 +186,7 @@ export const UpdatePage: React.FC = observer(() => {
                       >
                         <code
                           dir="ltr"
-                          className="text-xs font-mono"
-                          style={{ color: "var(--c-text)" }}
+                          className="text-xs font-mono text-fg"
                           data-testid="update-page-managed-command"
                         >
                           {managed.update_command}

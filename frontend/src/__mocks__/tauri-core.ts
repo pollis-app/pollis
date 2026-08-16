@@ -33,7 +33,26 @@ interface MockMessage {
   sender_id: string;
   content?: string;
   reply_to_id?: string;
-  sent_at: string;
+  /**
+   * Normally an ISO-8601 string, exactly as `pollis-core` serializes it.
+   *
+   * A NUMBER is allowed as the legacy epoch-**seconds** shape: the renderer
+   * turns `sent_at` into `created_at` with `new Date(sent_at).getTime()`,
+   * which passes a seconds-magnitude number straight through, and every
+   * component that formats a message timestamp is required to run it through
+   * `toMs` before rendering. Only a spec that is testing that normalisation
+   * should use it — see `e2e/thread-panel.spec.ts` (#874).
+   */
+  sent_at: string | number;
+  edited_at?: string;
+  thread_id?: string;
+}
+
+/** Mirrors `ThreadSummary` in `pollis-core/src/commands/messages/types.rs`. */
+interface MockThreadSummary {
+  thread_id: string;
+  reply_count: number;
+  last_reply_at?: string;
 }
 
 interface MockProfile {
@@ -131,6 +150,13 @@ interface MockStore {
   groups: MockGroup[];
   channels: Record<string, MockChannel[]>;
   messages: Record<string, MockMessage[]>;
+  // Thread replies (#825), keyed by the ROOT message's id — local-only in
+  // production too, because `thread_id` lives inside the MLS ciphertext.
+  threadMessages: Record<string, MockMessage[]>;
+  // Per-conversation reply counts, keyed by conversation id. Separate from
+  // `threadMessages` on purpose: the channel row renders the count without
+  // loading the thread, so a preload can seed one without the other.
+  threadSummaries: Record<string, MockThreadSummary[]>;
   dmChannels: MockDmChannel[];
   // Keyed by group id. Drives the @mention candidate list (#843), which is
   // deliberately derived from roster membership only.
@@ -159,6 +185,12 @@ interface MockStore {
   // half of the contract.
   autoLockMinutes: number | null;
   activityReports: number;
+  // Opt-in message pagination (#874). Off by default so every existing spec
+  // keeps getting its whole seeded conversation in one page; a preload sets
+  // `paginate: true` to make `read_*_messages` honour `limit`/`cursor` and
+  // hand back a real `next_cursor`, which is what the load-more path — and
+  // the windowed log's scroll anchoring across a prepend — needs to exercise.
+  paginate: boolean;
 }
 
 // Only `@tauri-apps/api/core` and `/event` are vite-aliased to these mocks.
@@ -208,6 +240,8 @@ const store: MockStore = {
   groups: preload.groups ?? [],
   channels: preload.channels ?? {},
   messages: preload.messages ?? {},
+  threadMessages: preload.threadMessages ?? {},
+  threadSummaries: preload.threadSummaries ?? {},
   dmChannels: preload.dmChannels ?? [],
   groupMembers: preload.groupMembers ?? {},
   bookmarks: preload.bookmarks ?? [],
@@ -226,10 +260,31 @@ const store: MockStore = {
   clipboard: '',
   autoLockMinutes: null,
   activityReports: 0,
+  paginate: preload.paginate === true,
 };
 
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
 (window as any).__tauriMock = store;
+
+/**
+ * Per-command invoke tally (#874).
+ *
+ * The IPC-efficiency work is only ever as good as its measurement: "the
+ * sidebar feels snappier" is not a result, "one `read_last_messages` instead
+ * of nine `read_channel_messages`" is. Specs read
+ * `window.__tauriInvokeCounts` and call `window.__resetTauriInvokeCounts()`
+ * to scope a count to one interaction (e.g. a window-focus round).
+ *
+ * Counting lives here rather than in each spec because every spec shares this
+ * module — a per-spec wrapper would only see its own calls.
+ */
+const invokeCounts: Record<string, number> = {};
+(window as any).__tauriInvokeCounts = invokeCounts;
+(window as any).__resetTauriInvokeCounts = () => {
+  for (const key of Object.keys(invokeCounts)) {
+    delete invokeCounts[key];
+  }
+};
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 11);
@@ -237,6 +292,56 @@ function generateId(): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+interface MessageCursor {
+  sent_at: string;
+  id: string;
+}
+
+/**
+ * One page of a conversation, newest-last, the way `read_channel_messages`
+ * and `read_dm_messages` answer.
+ *
+ * With `paginate` off (the default) the whole seeded conversation comes back
+ * in one page and `next_cursor` is null — the historical behaviour every other
+ * spec relies on. With it on, the page is the newest `limit` messages older
+ * than `cursor`, and `next_cursor` points at the oldest message returned so
+ * the next call continues from there.
+ */
+function readMessagePage(
+  conversationId: string,
+  limit?: number,
+  cursor?: MessageCursor | null,
+): { messages: MockMessage[]; next_cursor: MessageCursor | null } {
+  const all = store.messages[conversationId] ?? [];
+  if (!store.paginate) {
+    return { messages: all, next_cursor: null };
+  }
+  // `sent_at` is an ISO string in every paginating spec, but the type also
+  // admits the legacy numeric shape, so order on the string spelling rather
+  // than calling `localeCompare` on something that might be a number.
+  const at = (m: MockMessage) => String(m.sent_at);
+  const chronological = [...all].sort((a, b) =>
+    at(a) === at(b) ? a.id.localeCompare(b.id) : at(a).localeCompare(at(b)),
+  );
+  const older = cursor
+    ? chronological.filter(
+        (m) =>
+          at(m) < cursor.sent_at ||
+          (at(m) === cursor.sent_at && m.id < cursor.id),
+      )
+    : chronological;
+  const size = limit && limit > 0 ? limit : older.length;
+  const page = older.slice(Math.max(older.length - size, 0));
+  const oldestReturned = page[0];
+  const hasMore = oldestReturned !== undefined && older.length > page.length;
+  return {
+    messages: page,
+    next_cursor: hasMore
+      ? { sent_at: at(oldestReturned), id: oldestReturned.id }
+      : null,
+  };
 }
 
 /** Look a message up across every conversation, as the local DB's primary key
@@ -388,15 +493,23 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_group_invites':
     case 'list_security_events':
     case 'get_pinned_messages':
-    case 'read_thread_messages':
-    case 'list_thread_summaries':
       return [];
+
+    // Threads (#825). Keyed by the root message id and by conversation id
+    // respectively, matching the two Rust commands. Empty unless a preload
+    // seeds them, so every spec that predates threads is unaffected.
+    case 'read_thread_messages':
+      return store.threadMessages[args.threadId as string] ?? [];
+
+    case 'list_thread_summaries':
+      return store.threadSummaries[args.conversationId as string] ?? [];
 
     // Realtime / MLS background work the browser build has no backend for.
     case 'connect_rooms':
     case 'subscribe_realtime':
     case 'subscribe_camera_events':
     case 'subscribe_screen_share_events':
+    case 'await_enrollment_approval':
     case 'poll_mls_welcomes':
     case 'catch_up_all_mls_groups':
     case 'process_pending_commits':
@@ -416,6 +529,11 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // Loopback media server URL — nothing serves it in the browser.
     case 'screenshare_ws_url':
       return null;
+
+    // No media server in the browser build, so the sentinel that means "fall
+    // back to the byte path" is the honest answer (#874).
+    case 'get_public_file_url':
+      return '';
 
     // Desktop-shell side effects with no browser equivalent. Explicit no-ops
     // so they don't show up as "unhandled" noise in test output.
@@ -530,18 +648,41 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     // aliases so older callers (and this mock's own history) still resolve.
     case 'get_channel_messages':
     case 'read_channel_messages': {
-      const { channelId } = args as { channelId: string };
-      return { messages: store.messages[channelId] ?? [], next_cursor: null };
+      const { channelId, limit, cursor } = args as {
+        channelId: string;
+        limit?: number;
+        cursor?: MessageCursor | null;
+      };
+      return readMessagePage(channelId, limit, cursor);
     }
 
     case 'get_dm_messages':
     case 'read_dm_messages': {
-      const { dmChannelId, conversationId } = args as {
+      const { dmChannelId, conversationId, limit, cursor } = args as {
         dmChannelId?: string;
         conversationId?: string;
+        limit?: number;
+        cursor?: MessageCursor | null;
       };
       const key = dmChannelId ?? conversationId ?? '';
-      return { messages: store.messages[key] ?? [], next_cursor: null };
+      return readMessagePage(key, limit, cursor);
+    }
+
+    // #874: one batched call for every sidebar preview row. Mirrors
+    // `pollis_core::commands::messages::read_last_messages` — newest message
+    // per conversation, and conversations with no messages are simply absent
+    // from the result rather than carrying a null.
+    case 'read_last_messages': {
+      const { conversationIds } = args as { conversationIds: string[] };
+      const out: MockMessage[] = [];
+      for (const id of conversationIds ?? []) {
+        const msgs = store.messages[id] ?? [];
+        if (msgs.length === 0) {
+          continue;
+        }
+        out.push(msgs[msgs.length - 1]);
+      }
+      return out;
     }
 
     case 'list_dm_channels':
@@ -580,6 +721,23 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       store.messages[conversationId].push(message);
       return message;
+    }
+
+    // `useEditMessage` applies an optimistic cache update and then invalidates,
+    // so without this case the refetch served the ORIGINAL text back and the
+    // edit appeared to silently revert. Mutating the store keeps the mock
+    // honest about what a real `edit_message` does (#874).
+    case 'edit_message': {
+      const { messageId, newContent } = args as {
+        messageId: string;
+        newContent: string;
+      };
+      const message = findMessage(messageId);
+      if (message) {
+        message.content = newContent;
+        message.edited_at = nowIso();
+      }
+      return null;
     }
 
     // ── Saved messages + permalinks (#854) ───────────────────────────────
@@ -924,6 +1082,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'rotate_signed_prekey':
     case 'replenish_one_time_prekeys':
     case 'upload_file':
+    case 'upload_public_file':
     case 'download_file':
     case 'get_livekit_token':
       return null;
@@ -941,6 +1100,7 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   // observably completed by the time the click handler's task ends. A macrotask
   // hop instead parks the effect behind every timer the app has queued, which
   // is long enough for a test to look at the result and find nothing there.
+  invokeCounts[command] = (invokeCounts[command] ?? 0) + 1;
   return new Promise((resolve, reject) => {
     try {
       resolve(handleCommand(command, args ?? {}) as T);
@@ -965,10 +1125,34 @@ export class Channel<T = unknown> {
   id = 0;
   onmessage: ((message: T) => void) | null = null;
 
+  constructor() {
+    // Register every channel the app opens so a spec can push a realtime event
+    // into it (#874). Realtime is the ONLY thing that keeps a query fresh once
+    // `refetchOnWindowFocus` is off, so "this event invalidates exactly these
+    // caches" has to be assertable — otherwise the tests can only prove the
+    // refetches are gone, not that anything replaced them.
+    openChannels.push(this as unknown as Channel<unknown>);
+  }
+
   toJSON(): string {
     return `__CHANNEL__:${this.id}`;
   }
 }
+
+const openChannels: Channel<unknown>[] = [];
+
+(window as any).__emitRealtimeEvent = (event: unknown) => {
+  // Deliver to the MOST RECENTLY created channel only. StrictMode
+  // double-invokes effects in dev, so several Channel objects exist but only
+  // the last one is the live subscription — fanning an event out to all of
+  // them would multiply every invalidation and make the counts meaningless.
+  const live = openChannels[openChannels.length - 1];
+  if (!live) {
+    return 0;
+  }
+  live.onmessage?.(event);
+  return 1;
+};
 
 export function convertFileSrc(filePath: string, _protocol = "asset"): string {
   return filePath;

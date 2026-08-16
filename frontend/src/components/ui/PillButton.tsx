@@ -50,7 +50,7 @@ export const PillButton: React.FC<PillButtonProps> = ({
       aria-label={ariaLabel}
       title={title}
       onClick={onClick}
-      className="flex items-center justify-center font-mono transition-colors cursor-pointer rounded-[3px] border border-solid border-[var(--pill-accent)] bg-[var(--pill-accent)] text-[var(--c-bg)] hover:bg-[var(--c-bg)] hover:text-[var(--pill-accent)]"
+      className="flex items-center justify-center font-mono transition-colors cursor-pointer rounded-[3px] border border-solid border-[var(--pill-accent)] bg-[var(--pill-accent)] text-bg hover:bg-bg hover:text-[var(--pill-accent)]"
       style={{
         ["--pill-accent" as string]: accent,
         padding: square ? "3px" : "1px 8px",

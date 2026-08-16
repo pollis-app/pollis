@@ -656,13 +656,18 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849) |
 | `autolock.spec.ts` | Idle auto-lock: the window is chosen, reaches the backend and survives a restart; the shell reports activity; a backend lock drops to the PIN gate **and empties the query cache**, in BOTH skins (#851) |
 | `i18n.spec.ts` | The language selector, switching, per-device persistence, OS-locale default and the English fallback — driven through a synthetic locale so it survives the real language list changing, in BOTH skins (#855) |
+| `ipc-efficiency.spec.ts` | IPC/query-layer COUNTS (#874): one batched preview call per list instead of one per row, zero refetches on window focus, a closed Cmd+K panel costing zero member queries, `membership_changed` touching only the named group's roster, join requests keyed per group id, own-profile vs public-profile not colliding. Skin-agnostic except the two tests that also assert something renders |
 | `rtl.spec.ts` | Right-to-left layout, asserted as **measured geometry** (`getBoundingClientRect`, a `Range` over the text, the painted physical border edge) rather than a `dir` attribute — which passes on unmirrored code. Drives the real `ar` locale and pins the LTR case in the same body, in BOTH skins (#855) |
 
-`.spec.ts` is as welcome as `.spec.js`; one config matches both.
-| `bookmarks.spec.ts` | Saved messages + permalink jump/highlight in BOTH skins (#854) |
 | `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
+| `render-cost.spec.ts` | Regression guards on message-log render cost in BOTH skins — typing in the edit bar, opening the reply bar and arrow-key navigation must re-render **zero** rows; a shell re-render must not re-render the sidebar; paired with the other half (skin flip restructures rows, an edit updates its row, day dividers survive) so a memo cannot pass by freezing the UI (#874) |
+| `message-window.spec.ts` | The virtualised log: only the visible slice is in the DOM, and every DOM-locating path still reaches a row outside the window, in BOTH skins (#874) |
+| `linkify.spec.ts` | URL detection in message bodies in BOTH skins — every body keeps the link it *starts* with, the media unfurl agrees with the linkifier about which URLs exist, and a bare `www.` link gets a protocol. Guards the pattern shared by `LinkifiedText` and `MediaLinkUnfurl` (#874) |
+| `thread-panel.spec.ts` | The thread panel's timestamps in BOTH skins — a seconds-precision `created_at` must render the real date rather than 1970, a millisecond one must be left alone, and the thread must agree with the channel about when a message was sent (#874) |
 
-Four things to know before writing one:
+`.spec.ts` is as welcome as `.spec.js`; one config matches both.
+
+Five things to know before writing one:
 
 - **Fixtures go in `window.__POLLIS_PRELOAD__`** via `page.addInitScript`, read
   once by the mock on load. Extend `MockStore` in `frontend/src/__mocks__/tauri-core.ts`
@@ -671,14 +676,44 @@ Four things to know before writing one:
   `createMemoryHistory` (`frontend/src/router.tsx`), so `page.goto('/groups/…')`
   changes the address bar and renders Root anyway. Click
   `menu-item-groups` → `group-option-<id>` → `channel-option-<id>`.
+- **A fixture slice nobody seeds is a coverage hole, not a saving.** `read_thread_messages`
+  and `list_thread_summaries` returned a hard-coded `[]` for as long as threads have
+  existed, so no spec ever rendered a thread row — and a timestamp bug in it survived a
+  wholesale rewrite of that component (#874). They read `threadMessages` (keyed by root
+  message id) and `threadSummaries` (keyed by conversation id) now.
 - **The mock is a real surface — keep it current.** An unhandled command returns
   `null`, and `null` is not `undefined`, so `const { data = [] }` defaults do NOT
   catch it and the page dies in an error boundary. When a Rust command is renamed
   (`get_channel_messages` → `read_channel_messages`) the mock silently rots until
   someone runs these specs.
+- **Invoke counts are assertable (#874).** The mock tallies every command in
+  `window.__tauriInvokeCounts` and exposes `window.__resetTauriInvokeCounts()` to
+  scope a count to one interaction. That is what makes an IPC-efficiency claim a
+  number rather than an impression — `ipc-efficiency.spec.ts` pins how many calls
+  a screen or a focus round is allowed. Counting lives in the shared mock, not in
+  a per-spec wrapper, because every spec imports the same module.
+- **Realtime events are drivable too (#874).** Every `Channel` the app opens is
+  registered, and `window.__emitRealtimeEvent(event)` pushes one through the live
+  subscription (the most recently created channel — StrictMode double-invokes
+  effects, so older ones are dead). Once `refetchOnWindowFocus` is off, realtime
+  IS the freshness mechanism, so "this event invalidates exactly these caches"
+  has to be testable.
 - **Backend-pushed events are drivable.** `frontend/src/__mocks__/tauri-event.ts`
   keeps a listener registry and exposes `window.__tauriEmit(name, payload)`, so a
   spec can stand in for the shell's `AppHandle::emit` (`autolock.spec.ts` fires
   `auto-lock` this way). It used to drop every handler on the floor, which made
   that whole class of behaviour untestable in this tier. `bridge/invoke.ts`
   unwraps `e.payload`, so the registry delivers `{ payload }`, as real Tauri does.
+- **Render cost is measurable here.** `frontend/src/utils/renderProbe.ts` exposes
+  `probeRender(name)`, called at the top of a component body; under
+  `VITE_PLAYWRIGHT=true` it counts render-function entries into
+  `window.__pollisRenders`. A `React.memo` bail-out means the body never runs, so
+  the counter is exactly the signal — no stopwatch, no flake. It compiles to
+  nothing in a real build (`import.meta.env.VITE_PLAYWRIGHT` is statically
+  replaced, so Rollup drops the body).
+  Two rules when asserting on it: counts are **relative only** — StrictMode
+  double-invokes render in dev, so absolute numbers are 2x and must never be
+  hard-coded — and every "must not re-render" assertion needs a companion "must
+  still re-render" case, or a component that has stopped updating entirely will
+  sail through. Assert the probe is non-zero first, or the whole file can pass
+  vacuously against a counter that was never wired up.

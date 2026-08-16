@@ -42,11 +42,12 @@ interface DeviceSelectProps {
 
 const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onChange, fallbackLabel }) => (
   <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
-    <span style={{ color: "var(--c-text-muted)" }}>{label}</span>
+    <span className="text-muted">{label}</span>
     <div className="relative">
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        className={selectClass}
         style={selectStyle}
         onFocus={(e) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; }}
         onBlur={(e) => { e.currentTarget.style.borderColor = "var(--c-border)"; }}
@@ -63,8 +64,7 @@ const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onCh
       </select>
       <ChevronDown
         size={14}
-        className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none"
-        style={{ color: "var(--c-text-muted)" }}
+        className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted"
       />
     </div>
   </div>
@@ -90,11 +90,12 @@ const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, 
   const { t } = useTranslation("voice");
   return (
     <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
-      <span style={{ color: "var(--c-text-muted)" }}>{t("settings.noiseSuppression")}</span>
+      <span className="text-muted">{t("settings.noiseSuppression")}</span>
       <div className="relative">
         <select
           value={value}
           onChange={(e) => onChange(e.target.value as NoiseSuppressionLevel)}
+          className={selectClass}
           style={selectStyle}
           onFocus={(e) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; }}
           onBlur={(e) => { e.currentTarget.style.borderColor = "var(--c-border)"; }}
@@ -107,11 +108,10 @@ const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, 
         </select>
         <ChevronDown
           size={14}
-          className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none"
-          style={{ color: "var(--c-text-muted)" }}
+          className="absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted"
         />
       </div>
-      <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+      <span className="text-xs font-mono text-muted">
         {t("settings.noiseSuppressionHint")}
       </span>
     </div>
@@ -134,7 +134,7 @@ const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onCh
   const { t } = useTranslation("voice");
   return (
     <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
-      <span style={{ color: "var(--c-text-muted)" }}>{t("settings.captureFramerate")}</span>
+      <span className="text-muted">{t("settings.captureFramerate")}</span>
       <div className="flex gap-2">
         {SCREEN_SHARE_FPS_OPTIONS.map((fps) => (
           <Button
@@ -148,7 +148,7 @@ const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onCh
           </Button>
         ))}
       </div>
-      <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+      <span className="text-xs font-mono text-muted">
         {t("settings.fpsHint", {
           hint: t(SCREEN_SHARE_FPS_HINT_KEYS[value] ?? "settings.fpsHintStandard"),
         })}
@@ -180,8 +180,8 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
   return (
     <div className="flex items-center justify-between gap-3" style={{ maxWidth: 320 }}>
       <div className="flex flex-col">
-        <span style={{ color: "var(--c-text)" }}>{label}</span>
-        <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+        <span className="text-fg">{label}</span>
+        <span className="text-xs font-mono text-muted">
           {t(PERMISSION_LABEL_KEY[state])}
         </span>
       </div>
@@ -194,12 +194,14 @@ const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage:
   );
 };
 
+// The token-backed half of the `<select>` skin — surface fill, foreground text
+// and the 2px hairline — as utilities. Paired with `selectStyle` below, which
+// keeps only what has no utility equivalent.
+const selectClass = "bg-surface text-fg border-2 border-line";
+
 const selectStyle: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
-  background: "var(--c-surface)",
-  color: "var(--c-text)",
-  border: "2px solid var(--c-border)",
   // Logical padding: the trailing 28px reserves room for the caret, which
   // sits on the inline-END edge and therefore swaps sides under `dir=rtl`.
   paddingBlock: "6px",
@@ -381,8 +383,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.devicesHeading")}
           </h2>
@@ -404,15 +405,14 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12" data-testid="voice-camera-section">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.cameraHeading")}
           </h2>
           {cam.kind === "loading" ? (
-            <span style={{ color: "var(--c-text-muted)" }}>{t("settings.detectingCameras")}</span>
+            <span className="text-muted">{t("settings.detectingCameras")}</span>
           ) : cam.kind === "empty" ? (
-            <span style={{ color: "var(--c-text-muted)" }}>{t("settings.noCameraDetected")}</span>
+            <span className="text-muted">{t("settings.noCameraDetected")}</span>
           ) : (
             <>
               <DeviceSelect
@@ -426,19 +426,18 @@ export const VoiceSettingsPage: React.FC = observer(() => {
                   letterbox; RemoteVideoTile contains + auto-mirrors the key. */}
               <div
                 data-testid="voice-camera-preview"
-                className="flex items-center justify-center overflow-hidden rounded"
+                className="flex items-center justify-center overflow-hidden rounded border border-line"
                 style={{
                   width: "100%",
                   maxWidth: 320,
                   aspectRatio: "16 / 9",
                   background: "#000",
-                  border: "1px solid var(--c-border)",
                 }}
               >
                 {cam.kind === "live" ? (
                   <RemoteVideoTile trackKey={LOCAL_CAMERA_PREVIEW_KEY} />
                 ) : (
-                  <span className="px-3 text-center text-sm" style={{ color: "var(--c-text-muted)" }}>
+                  <span className="px-3 text-center text-sm text-muted">
                     {cam.kind === "failed"
                       ? cam.error
                       : cam.kind === "starting"
@@ -469,8 +468,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
         {permissions.data && (
           <section className="flex flex-col gap-4 mb-12" data-testid="voice-permissions-section">
             <h2
-              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-              style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+              className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
             >
               {t("settings.permissionsHeading")}
             </h2>
@@ -489,34 +487,32 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-5 mb-12" data-testid="voice-test-section">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.testHeading")}
           </h2>
 
           {/* ── Microphone test ────────────────────────────────────────── */}
           <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
-            <span style={{ color: "var(--c-text-muted)" }}>{t("settings.microphone")}</span>
+            <span className="text-muted">{t("settings.microphone")}</span>
 
             {/* Level meter. Reserves its height even when idle so the
                 layout doesn't jump on start/stop. */}
             <div
               data-testid="voice-test-meter"
               aria-label={t("settings.micLevelLabel")}
+              className="bg-surface border border-line"
               style={{
                 height: 12,
-                background: "var(--c-surface)",
                 borderRadius: 4,
                 overflow: "hidden",
-                border: "1px solid var(--c-border)",
               }}
             >
               <div
+                className="bg-accent"
                 style={{
                   width: `${Math.max(test.peak, test.rms) * 100}%`,
                   height: "100%",
-                  background: "var(--c-accent)",
                   transition: "width 60ms linear",
                 }}
               />
@@ -579,7 +575,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
           {/* ── Speaker test ───────────────────────────────────────────── */}
           <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
-            <span style={{ color: "var(--c-text-muted)" }}>{t("settings.speaker")}</span>
+            <span className="text-muted">{t("settings.speaker")}</span>
             <div className="flex flex-wrap gap-2">
               <Button
                 data-testid="voice-test-play-sweep"
@@ -616,8 +612,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
           {test.error && (
             <p
               data-testid="voice-test-error"
-              className="text-xs font-mono"
-              style={{ color: "var(--c-danger)" }}
+              className="text-xs font-mono text-danger"
             >
               {test.error}
             </p>
@@ -626,8 +621,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-7 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.audioProcessingHeading")}
           </h2>
@@ -690,8 +684,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.screenShareHeading")}
           </h2>
@@ -700,8 +693,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
-            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line"
           >
             {t("settings.behaviorHeading")}
           </h2>

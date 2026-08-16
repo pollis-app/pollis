@@ -88,8 +88,8 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
   return (
     <div
       data-testid="pin-create-screen"
-      className="flex flex-col h-full w-full"
-      style={{ background: "var(--c-bg)", position: "relative" }}
+      className="flex flex-col h-full w-full bg-bg"
+      style={{ position: "relative" }}
     >
       <div style={{ position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none" }}>
         <DotMatrix />
@@ -102,12 +102,12 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
         <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 360 }}>
           <div className="flex flex-col gap-5">
             <div>
-              <h2 className="text-sm font-mono font-semibold" style={{ color: "var(--c-text)" }}>
+              <h2 className="text-sm font-mono font-semibold text-fg">
                 {step === "confirm" ? t("pinCreate.confirmHeadline") : headline}
               </h2>
               <p
-                className="text-xs mt-1 font-mono"
-                style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
+                className="text-xs mt-1 font-mono text-muted"
+                style={{ lineHeight: 1.5 }}
               >
                 {step === "confirm" ? t("pinCreate.confirmSubline") : subline}
               </p>
@@ -116,8 +116,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
             {error && (
               <p
                 data-testid="pin-create-error"
-                className="text-xs font-mono"
-                style={{ color: "var(--c-danger)" }}
+                className="text-xs font-mono text-danger"
               >
                 {error}
               </p>
@@ -162,11 +161,9 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
               <button
                 data-testid="pin-create-cancel"
                 onClick={onCancel}
-                className="text-xs font-mono self-center"
+                className="text-xs font-mono self-center text-muted border-0"
                 style={{
-                  color: "var(--c-text-muted)",
                   background: "none",
-                  border: "none",
                   cursor: "pointer",
                   padding: "0.25rem 0",
                 }}

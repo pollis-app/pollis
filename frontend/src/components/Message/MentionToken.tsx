@@ -21,7 +21,7 @@ interface MentionTokenProps {
  * refined uses the rounded chip Slack made familiar.
  */
 export const MentionToken: React.FC<MentionTokenProps> = ({ name, isSelf, skin }) => {
-  const shared = "rounded-[var(--radius-chip)] px-1";
+  const shared = "rounded-chip px-1";
   const font = skin === "terminal" ? "font-mono" : "";
 
   const tone = isSelf

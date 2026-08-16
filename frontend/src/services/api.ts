@@ -140,6 +140,20 @@ export async function pollEnrollmentStatus(requestId: string): Promise<Enrollmen
   return invoke('poll_enrollment_status', { requestId });
 }
 
+/**
+ * Resolves once the enrollment request reaches a terminal state (#874).
+ *
+ * Replaces a 2-second `setInterval` in the renderer. The new device is
+ * pre-enrollment and cannot be pushed to, so the answer does have to be
+ * fetched — but the fetching, its backoff, and its stop condition live in
+ * Rust, which is the only place that can bound them against the request's own
+ * TTL. Long-lived by design: this promise is meant to be outstanding for as
+ * long as the user is walking to their other device.
+ */
+export async function awaitEnrollmentApproval(requestId: string): Promise<EnrollmentStatus> {
+  return invoke('await_enrollment_approval', { requestId });
+}
+
 export async function listPendingEnrollmentRequests(userId: string): Promise<PendingEnrollmentRequest[]> {
   return invoke('list_pending_enrollment_requests', { userId });
 }

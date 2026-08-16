@@ -42,10 +42,9 @@ export const MessageQueue: React.FC = observer(() => {
   return (
     <div
       data-testid="message-queue"
-      className="flex flex-col gap-1 px-4 py-2 flex-shrink-0"
-      style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+      className="flex flex-col gap-1 px-4 py-2 flex-shrink-0 border-t border-line bg-surface"
     >
-      <span className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+      <span className="text-2xs font-mono uppercase tracking-widest text-muted">
         {t('queue.heading')}
       </span>
 
@@ -61,18 +60,17 @@ export const MessageQueue: React.FC = observer(() => {
               className="flex items-center gap-2"
             >
               {item.status === 'sending' ? (
-                <Send size={14} aria-hidden="true" style={{ color: 'var(--c-accent)' }} />
+                <Send size={14} aria-hidden="true" className="text-accent" />
               ) : (
-                <Clock size={14} aria-hidden="true" style={{ color: 'var(--c-text-muted)' }} />
+                <Clock size={14} aria-hidden="true" className="text-muted" />
               )}
               <span
                 data-testid="queue-item-status"
-                className="text-2xs font-mono"
-                style={{ color: 'var(--c-text-muted)' }}
+                className="text-2xs font-mono text-muted"
               >
                 {t(`status.${item.status}`)}
               </span>
-              <p className="text-xs font-mono flex-1 truncate" style={{ color: 'var(--c-text-dim)' }}>{snippet}</p>
+              <p className="text-xs font-mono flex-1 truncate text-dim">{snippet}</p>
               <button
                 data-testid={`cancel-queue-item-${item.id}`}
                 onClick={() => handleCancel(item.id, item.message_id)}
@@ -95,11 +93,11 @@ export const MessageQueue: React.FC = observer(() => {
               data-testid={`queue-item-failed-${item.id}`}
               className="flex items-center gap-2"
             >
-              <AlertCircle size={14} aria-hidden="true" style={{ color: 'var(--c-danger)' }} />
-              <span className="text-2xs font-mono" style={{ color: 'var(--c-danger)' }}>
+              <AlertCircle size={14} aria-hidden="true" className="text-danger" />
+              <span className="text-2xs font-mono text-danger">
                 {t('queue.failedCount', { count: item.retry_count })}
               </span>
-              <p className="text-xs font-mono flex-1 truncate" style={{ color: 'var(--c-text-dim)' }}>{snippet}</p>
+              <p className="text-xs font-mono flex-1 truncate text-dim">{snippet}</p>
               <div className="flex items-center gap-1">
                 <Button
                   data-testid={`retry-queue-item-${item.id}`}

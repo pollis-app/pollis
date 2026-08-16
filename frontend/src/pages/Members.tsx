@@ -1,11 +1,11 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { ShieldCheck, ShieldAlert } from "lucide-react";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useGroupMembers, useSetMemberRole } from "../hooks/queries/useGroups";
-import { usePeerVerifications } from "../hooks/queries/useUserProfile";
+import { usePeerVerificationMap } from "../hooks/queries/useUserProfile";
 import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
@@ -21,20 +21,10 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
   const currentUser = appStore.currentUser;
   const { data: members = [], isLoading } = useGroupMembers(groupId);
   const setRoleMutation = useSetMemberRole();
-  const { data: peerVerifications = [] } = usePeerVerifications();
   // peerUserId → { verified, key_changed }. Reuses the same query the DM
   // sidebar already loads, so the badge state is consistent across every
   // surface where the same person appears (DM, group, channel author).
-  const verificationByPeer = useMemo(() => {
-    const map = new Map<string, { verified: boolean; key_changed: boolean }>();
-    for (const entry of peerVerifications) {
-      map.set(entry.peer_user_id, {
-        verified: entry.verified,
-        key_changed: entry.key_changed,
-      });
-    }
-    return map;
-  }, [peerVerifications]);
+  const verificationByPeer = usePeerVerificationMap();
 
   return (
     <NavigableList
@@ -75,20 +65,20 @@ export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) =
           <span
             data-testid={`member-verification-verified-${m.user_id}`}
             title={t("members.verified")}
-            style={{ display: "inline-flex", color: "var(--c-accent)", flexShrink: 0 }}
+            className="text-accent"
+            style={{ display: "inline-flex", flexShrink: 0 }}
           >
             <ShieldCheck size={14} />
           </span>
         ) : null;
         return (
           <span
-            className="flex-1 truncate flex items-center gap-2"
-            style={{ color: "var(--c-text)" }}
+            className="flex-1 truncate flex items-center gap-2 text-fg"
           >
             <span className="truncate">{m.username ?? m.user_id}</span>
             {badge}
             {isSelf && (
-              <span className="ms-1" style={{ color: "var(--c-text-muted)" }}>
+              <span className="ms-1 text-muted">
                 {t("members.self")}
               </span>
             )}

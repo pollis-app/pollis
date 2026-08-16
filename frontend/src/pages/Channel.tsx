@@ -47,12 +47,7 @@ export const ChannelPage: React.FC = observer(() => {
   return (
     <div className="flex flex-col h-full">
       <div
-        className="flex items-center px-4 flex-shrink-0 text-xs font-mono"
-        style={{
-          height: "var(--bar-h)",
-          borderBottom: "1px solid var(--c-border)",
-          color: "var(--c-text-muted)",
-        }}
+        className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
       >
         <span className="flex-1">{title}</span>
         {isAdmin && channel && pendingDeleteChannelId !== channelId && (

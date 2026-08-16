@@ -39,8 +39,6 @@ type GatePhase =
   | { phase: "expired" }
   | { phase: "error"; message: string };
 
-const POLL_INTERVAL_MS = 2000;
-
 export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   userId,
   userEmail,
@@ -51,48 +49,45 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   const { t } = useTranslation("auth");
   const [state, setState] = useState<GatePhase>({ phase: "choose" });
   const [isStarting, setIsStarting] = useState(false);
-  const pollTimerRef = useRef<number | null>(null);
+  // Bumped whenever the user abandons a wait (cancel, unmount, restart). A
+  // late answer from a superseded request must not steer the UI — the promise
+  // it belongs to cannot be cancelled, so it is IGNORED instead. This replaces
+  // the `clearInterval` bookkeeping the old 2-second poll needed in five
+  // places (#874).
+  const waitGenerationRef = useRef(0);
 
-  // Stop polling on unmount or whenever the phase changes away from awaiting.
   useEffect(() => {
     return () => {
-      if (pollTimerRef.current !== null) {
-        window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
+      waitGenerationRef.current += 1;
     };
   }, []);
 
-  const startPolling = (requestId: string) => {
-    if (pollTimerRef.current !== null) {
-      window.clearInterval(pollTimerRef.current);
-    }
-    pollTimerRef.current = window.setInterval(async () => {
+  // One awaited call. Rust waits with backoff, bounded by the request's own
+  // TTL, and resolves as soon as an existing device approves or rejects.
+  const awaitApproval = (requestId: string) => {
+    waitGenerationRef.current += 1;
+    const generation = waitGenerationRef.current;
+    void (async () => {
       try {
-        const status = await api.pollEnrollmentStatus(requestId);
+        const status = await api.awaitEnrollmentApproval(requestId);
+        if (waitGenerationRef.current !== generation) {
+          return;
+        }
         if (status.status === "approved") {
-          if (pollTimerRef.current !== null) {
-            window.clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
           onEnrolled();
         } else if (status.status === "rejected") {
-          if (pollTimerRef.current !== null) {
-            window.clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
           setState({ phase: "rejected" });
         } else if (status.status === "expired") {
-          if (pollTimerRef.current !== null) {
-            window.clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
           setState({ phase: "expired" });
         }
       } catch (err) {
-        console.error("[enrollment] poll failed:", err);
+        if (waitGenerationRef.current !== generation) {
+          return;
+        }
+        console.error("[enrollment] approval wait failed:", err);
+        setState({ phase: "expired" });
       }
-    }, POLL_INTERVAL_MS) as unknown as number;
+    })();
   };
 
   const handleStartApproval = async () => {
@@ -108,7 +103,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
         verificationCode: handle.verification_code,
         expiresAt: handle.expires_at,
       });
-      startPolling(handle.request_id);
+      awaitApproval(handle.request_id);
     } catch (err) {
       // Tauri rejects with a serialized string, not an Error — use String(err)
       // (matching the other panes) so the real backend reason surfaces instead
@@ -122,21 +117,18 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
   };
 
   const restart = () => {
-    if (pollTimerRef.current !== null) {
-      window.clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
+    // Abandon any outstanding wait — see `waitGenerationRef`.
+    waitGenerationRef.current += 1;
     setState({ phase: "choose" });
   };
 
+  // `bg-bg` is a distinct background tint vs the OTP screen so users don't
+  // think they entered the wrong code.
   return (
     <div
       data-testid="enrollment-gate-screen"
-      className="flex flex-col h-full w-full"
+      className="flex flex-col h-full w-full bg-bg"
       style={{
-        // Distinct background tint vs the OTP screen so users don't think
-        // they entered the wrong code.
-        background: "var(--c-bg)",
         position: "relative",
       }}
     >
@@ -167,19 +159,14 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
           }}
         >
           <div className="flex flex-col gap-5">
-            <div style={{
-              borderBottom: "1px solid var(--c-border)",
-            }}>
+            <div className="border-b border-line">
               <p
-                className="text-sm font-mono uppercase tracking-wider mb-8"
-                style={{ color: "var(--c-accent)", letterSpacing: "0.15em" }}
+                className="text-sm font-mono uppercase tracking-wider mb-8 text-accent"
+                style={{ letterSpacing: "0.15em" }}
               >
                 {t("enroll.badge")}
               </p>
-              <h1
-                className="text-base font-mono font-bold mt-1 mb-8"
-                style={{ color: "var(--c-text)" }}
-              >
+              <h1 className="text-base font-mono font-bold mt-1 mb-8 text-fg">
                 {t("enroll.title")}
               </h1>
             </div>
@@ -286,16 +273,13 @@ const ChoosePane: React.FC<{
       >
         {t("enroll.approveFromDevice")}
       </Button>
-      <p
-        className="text-xs font-mono mb-4"
-        style={{ color: "var(--c-text-muted)" }}
-      >
+      <p className="text-xs font-mono mb-4 text-muted">
         {t("enroll.approveHint")}
       </p>
 
       <div
+        className="border-t border-line"
         style={{
-          borderTop: "1px solid var(--c-border)",
           paddingTop: "1rem",
         }}
       >
@@ -307,10 +291,7 @@ const ChoosePane: React.FC<{
         >
           {t("enroll.useSecretKey")}
         </Button>
-        <p
-          className="text-xs font-mono mt-4"
-          style={{ color: "var(--c-text-muted)" }}
-        >
+        <p className="text-xs font-mono mt-4 text-muted">
           {t("enroll.useSecretKeyHint")}
         </p>
       </div>
@@ -335,6 +316,9 @@ const AwaitingApprovalPane: React.FC<{
 }> = ({ code, expiresAt, onCancel }) => {
   const { t } = useTranslation("auth");
   const [secondsLeft, setSecondsLeft] = useState(() => secondsUntil(expiresAt));
+  // A display clock, not a poll: it ticks a rendered countdown and touches no
+  // network. The no-periodic-polling rule is about keepalives, not about
+  // seconds visibly counting down on screen.
   useEffect(() => {
     const t = window.setInterval(() => {
       setSecondsLeft(secondsUntil(expiresAt));
@@ -344,18 +328,15 @@ const AwaitingApprovalPane: React.FC<{
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-xs font-mono" style={{ color: "var(--c-text)" }}>
+      <p className="text-xs font-mono text-fg">
         {t("enroll.awaitingIntro")}
       </p>
       <div
         data-testid="verification-code-display"
-        className="font-mono text-3xl font-bold text-center select-all"
+        className="font-mono text-3xl font-bold text-center select-all bg-surface border-2 border-accent text-accent"
         style={{
-          background: "var(--c-surface)",
-          border: "2px solid var(--c-accent)",
           borderRadius: "0.5rem",
           padding: "1.5rem",
-          color: "var(--c-accent)",
           letterSpacing: "0.4em",
         }}
       >
@@ -363,7 +344,7 @@ const AwaitingApprovalPane: React.FC<{
       </div>
       <div className="flex items-center gap-2 justify-center">
         <LoadingSpinner size="sm" />
-        <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+        <span className="text-xs font-mono text-muted">
           {secondsLeft > 0
             ? t("enroll.awaitingCountdown", { time: formatCountdown(secondsLeft) })
             : t("enroll.awaitingExpired")}
@@ -414,14 +395,14 @@ const SecretKeyFallbackPane: React.FC<{
   return (
     <div className="flex flex-col gap-3">
       <p
-        className="text-xs font-mono"
-        style={{ color: "var(--c-text)", lineHeight: 1.6 }}
+        className="text-xs font-mono text-fg"
+        style={{ lineHeight: 1.6 }}
       >
         {t("recover.intro")}
       </p>
       <p
-        className="text-xs font-mono mb-2"
-        style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
+        className="text-xs font-mono mb-2 text-muted"
+        style={{ lineHeight: 1.6 }}
       >
         {t("recover.hint")}
       </p>
@@ -515,21 +496,18 @@ const ResetConfirmPane: React.FC<{
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2
-          className="text-sm font-mono font-bold"
-          style={{ color: "var(--c-danger)" }}
-        >
+        <h2 className="text-sm font-mono font-bold text-danger">
           {t("reset.title")}
         </h2>
         <p
-          className="text-xs mt-2 font-mono"
-          style={{ color: "var(--c-text)", lineHeight: 1.6 }}
+          className="text-xs mt-2 font-mono text-fg"
+          style={{ lineHeight: 1.6 }}
         >
           {t("reset.body")}
         </p>
         <p
-          className="text-xs mt-2 font-mono mb-4"
-          style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
+          className="text-xs mt-2 font-mono mb-4 text-muted"
+          style={{ lineHeight: 1.6 }}
         >
           {t("reset.keepNote")}
         </p>
@@ -594,14 +572,13 @@ const ResultPane: React.FC<{
     <div className="flex flex-col gap-4">
       <div>
         <h2
-          className="text-sm font-mono font-bold"
-          style={{ color: tone === "error" ? "var(--c-danger)" : "var(--c-text)" }}
+          className={`text-sm font-mono font-bold ${tone === "error" ? "text-danger" : "text-fg"}`}
         >
           {heading}
         </h2>
         <p
-          className="text-xs mt-2 font-mono"
-          style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
+          className="text-xs mt-2 font-mono text-muted"
+          style={{ lineHeight: 1.6 }}
         >
           {body}
         </p>

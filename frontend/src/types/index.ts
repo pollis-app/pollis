@@ -136,6 +136,12 @@ export interface PresignedUploadResponse {
   public_url: string;
 }
 
+// Mirrors `pollis_core::commands::messages::Reaction`. NO renderer code reads
+// this today — the reactions UI was removed in #874 as dead (it was commented
+// out at both call sites). The type stays because the Rust struct and the
+// `add_reaction` / `remove_reaction` / `get_reactions` commands behind it are
+// still registered and still work; this is the TS mirror they are kept in sync
+// with. Delete both sides together or neither.
 export interface Reaction {
   emoji: string;
   user_ids: string[];

@@ -226,7 +226,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
             <SearchIcon size={16} />
             <kbd
               aria-hidden="true"
-              className="font-mono font-machine rounded-[var(--radius-control)] border border-line bg-bg px-1.5 py-0.5 text-xs leading-none text-muted"
+              className="font-mono font-machine rounded-control border border-line bg-bg px-1.5 py-0.5 text-xs leading-none text-muted"
             >
               {searchLabel}
             </kbd>
@@ -235,7 +235,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
             data-testid="breadcrumb-settings-button"
             onClick={() => router.navigate({ to: "/settings" })}
             aria-label={t("breadcrumb.settings")}
-            className={`flex items-center justify-center rounded-[var(--radius-control)] p-1 transition-colors hover:bg-hover hover:text-accent ${isOnSettingsHub ? "text-accent" : "text-dim"}`}
+            className={`flex items-center justify-center rounded-control p-1 transition-colors hover:bg-hover hover:text-accent ${isOnSettingsHub ? "text-accent" : "text-dim"}`}
           >
             <SettingsIcon size={18} />
           </button>
@@ -247,11 +247,10 @@ export const BreadcrumbNav: React.FC = observer(() => {
   return (
     <div
       data-testid="breadcrumb-nav"
+      className="border-b border-line bg-surface"
       style={{
         height: 28,
         flexShrink: 0,
-        borderBottom: "1px solid var(--c-border)",
-        background: "var(--c-surface)",
         display: "flex",
         alignItems: "center",
         gap: 8,
@@ -264,12 +263,11 @@ export const BreadcrumbNav: React.FC = observer(() => {
           data-testid="breadcrumb-back-button"
           onClick={handleBack}
           aria-label={t("common:actions.back")}
-          className="flex items-center justify-center transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
+          className="flex items-center justify-center transition-colors text-muted hover:text-accent border-0"
           style={{
             width: 20,
             height: 20,
             background: "none",
-            border: "none",
             padding: 0,
             cursor: "pointer",
           }}
@@ -281,21 +279,20 @@ export const BreadcrumbNav: React.FC = observer(() => {
       )}
       <span
         data-testid="breadcrumb-trail"
-        className="text-xs font-mono truncate"
-        style={{ color: "var(--c-text-muted)", flex: 1 }}
+        className="text-xs font-mono truncate text-muted"
+        style={{ flex: 1 }}
       >
         {segments.map((seg, i) => (
           <React.Fragment key={`${seg.to}-${i}`}>
             {i > 0 && <span style={{ opacity: 0.5 }}> / </span>}
             {i === segments.length - 1 ? (
-              <bdi style={{ color: "var(--c-text)" }}>{seg.label}</bdi>
+              <bdi className="text-fg">{seg.label}</bdi>
             ) : (
               <button
                 onClick={() => router.navigate({ to: seg.to })}
-                className="font-mono transition-colors text-inherit hover:text-[var(--c-accent)]"
+                className="font-mono transition-colors text-inherit hover:text-accent border-0"
                 style={{
                   background: "none",
-                  border: "none",
                   padding: 0,
                   cursor: "pointer",
                   fontSize: "inherit",
@@ -312,11 +309,10 @@ export const BreadcrumbNav: React.FC = observer(() => {
         onClick={openSearch}
         aria-label={t("breadcrumb.searchButton", { shortcut: searchLabel })}
         title={t("breadcrumb.searchButton", { shortcut: searchLabel })}
-        className="flex items-center gap-1.5 transition-colors text-[var(--c-text)] hover:text-[var(--c-accent)]"
+        className="flex items-center gap-1.5 transition-colors text-fg hover:text-accent border-0"
         style={{
           height: 20,
           background: "none",
-          border: "none",
           padding: "0 6px",
           cursor: "pointer",
         }}
@@ -324,13 +320,11 @@ export const BreadcrumbNav: React.FC = observer(() => {
         <SearchIcon size={16} />
         <kbd
           aria-hidden="true"
-          className="font-mono font-machine text-xs"
+          className="font-mono font-machine text-xs bg-bg border border-line"
           style={{
             color: "inherit",
-            background: "var(--c-bg)",
             padding: "1px 5px",
             borderRadius: 3,
-            border: "1px solid var(--c-border)",
             lineHeight: 1.2,
           }}
         >
@@ -341,11 +335,10 @@ export const BreadcrumbNav: React.FC = observer(() => {
         data-testid="breadcrumb-settings-button"
         onClick={() => router.navigate({ to: "/settings" })}
         aria-label={t("breadcrumb.settings")}
-        className={`flex items-center justify-center transition-colors bg-transparent hover:bg-[var(--c-hover)] hover:text-[var(--c-accent)] ${isOnSettingsHub ? "text-[var(--c-accent)]" : "text-[var(--c-text)]"}`}
+        className={`flex items-center justify-center transition-colors bg-transparent hover:bg-hover hover:text-accent border-0 ${isOnSettingsHub ? "text-accent" : "text-fg"}`}
         style={{
           width: 24,
           height: 24,
-          border: "none",
           padding: 0,
           borderRadius: 4,
           cursor: "pointer",

@@ -108,22 +108,22 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   if (step === 'otp') {
     return (
       <div data-testid="otp-form-container" className="flex flex-col gap-4">
-        <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+        <p className="text-xs font-mono text-dim">
           <Trans
             t={t}
             i18nKey="otp.sentTo"
             values={{ email }}
-            components={{ address: <span style={{ color: 'var(--c-accent)' }} /> }}
+            components={{ address: <span className="text-accent" /> }}
           />
         </p>
         {error && (
-          <p data-testid="auth-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+          <p data-testid="auth-error" className="text-xs font-mono text-danger">
             {error}
           </p>
         )}
         <form data-testid="otp-form" onSubmit={handleVerifyOTP} className="flex flex-col gap-4">
           <div>
-            <label className="block text-xs font-mono font-medium mb-2" style={{ color: 'var(--c-text-dim)' }}>
+            <label className="block text-xs font-mono font-medium mb-2 text-dim">
               {t('otp.codeLabel')}
             </label>
             <InputOtp
@@ -149,8 +149,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
         <button
           data-testid="back-to-email-button"
           onClick={() => { setStep('email'); setOtp(''); setError(null); }}
-          className="inline-flex items-center gap-1 leading-none text-xs font-mono"
-          style={{ color: 'var(--c-text-muted)' }}
+          className="inline-flex items-center gap-1 leading-none text-xs font-mono text-muted"
         >
           <ArrowLeft size={14} className="rtl-mirror" /> {t('common:actions.back')}
         </button>
@@ -161,7 +160,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   return (
     <div data-testid="email-form-container" className="flex flex-col gap-4">
       {error && (
-        <p data-testid="auth-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+        <p data-testid="auth-error" className="text-xs font-mono text-danger">
           {error}
         </p>
       )}

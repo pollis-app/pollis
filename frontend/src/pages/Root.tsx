@@ -45,7 +45,7 @@ export const RootPage: React.FC = observer(() => {
       label: t("home.invites"),
       icon: <Mail size={14} />,
       description: pendingInvites.length > 0
-        ? <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{t("home.pending", { count: pendingInvites.length })}</span>
+        ? <span className="status-bar-blink text-accent">{t("home.pending", { count: pendingInvites.length })}</span>
         : t("home.noPendingInvites"),
       action: () => navigate({ to: "/invites" }),
       type: "system" as const,
@@ -64,7 +64,7 @@ export const RootPage: React.FC = observer(() => {
       id: "join-requests",
       label: t("home.joinRequests"),
       icon: <UserPlus size={14} />,
-      description: <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{t("home.pending", { count: pendingJoinRequests.length })}</span>,
+      description: <span className="status-bar-blink text-accent">{t("home.pending", { count: pendingJoinRequests.length })}</span>,
       action: () => navigate({ to: "/join-requests" }),
       type: "system" as const,
       testId: "menu-item-join-requests",

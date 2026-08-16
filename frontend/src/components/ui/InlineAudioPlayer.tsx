@@ -78,10 +78,8 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
 
   return (
     <div
-      className={`flex items-center gap-3 p-2 rounded-lg ${className}`}
+      className={`flex items-center gap-3 p-2 rounded-lg border-2 border-line bg-surface-high ${className}`}
       style={{
-        border: "2px solid var(--c-border)",
-        background: "var(--c-surface-high)",
         cursor: onClick ? "pointer" : "default",
       }}
       onClick={onClick}
@@ -90,18 +88,14 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
 
       <button
         onClick={togglePlay}
-        className="p-1 rounded transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
-        style={{ color: "var(--c-accent)" }}
+        className="p-1 rounded transition-colors duration-200 text-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
         aria-label={isPlaying ? t("media.pause") : t("media.play")}
       >
         {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
       </button>
 
       {title && (
-        <span
-          className="font-mono text-xs truncate min-w-0"
-          style={{ color: "var(--c-accent)" }}
-        >
+        <span className="font-mono text-xs truncate min-w-0 text-accent">
           {title}
         </span>
       )}
@@ -113,15 +107,12 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         value={currentTime}
         onChange={handleSeek}
         onClick={(e) => e.stopPropagation()}
-        className="flex-1 h-1 rounded appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
+        className="flex-1 h-1 rounded appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
         disabled={!duration}
         aria-label={t("media.seek")}
       />
 
-      <span
-        className="font-mono text-xs whitespace-nowrap"
-        style={{ color: "var(--c-text-dim)" }}
-      >
+      <span className="font-mono text-xs whitespace-nowrap text-dim">
         {formatDuration(currentTime)} / {formatDuration(duration)}
       </span>
     </div>

@@ -90,7 +90,7 @@ export const Avatar: React.FC<AvatarProps> = ({
       <User
         size={Math.round(size * 0.6)}
         aria-hidden="true"
-        style={{ color: "var(--c-text-muted)" }}
+        className="text-muted"
       />
     </span>
   );

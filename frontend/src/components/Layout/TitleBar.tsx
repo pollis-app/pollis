@@ -47,7 +47,7 @@ export const TitleBar: React.FC = () => {
         data-testid="title-bar-close"
         onClick={handleClose}
         aria-label={t("common:actions.close")}
-        className="flex items-center justify-center w-8 h-8 transition-colors text-[var(--c-text-muted)] hover:bg-[#c42b1c] hover:text-white"
+        className="flex items-center justify-center w-8 h-8 transition-colors text-muted hover:bg-[#c42b1c] hover:text-white"
       >
         <X size={12} aria-hidden="true" />
       </button>
@@ -69,11 +69,9 @@ export const TitleBar: React.FC = () => {
       data-testid="title-bar"
       data-tauri-drag-region
       onMouseDown={handleMouseDown}
-      className="flex items-center justify-between flex-shrink-0 select-none"
+      className="flex items-center justify-between flex-shrink-0 select-none bg-surface border-b border-line"
       style={{
         height: isMac ? 32 : 36,
-        background: "var(--c-surface)",
-        borderBottom: "1px solid var(--c-border)",
         // PHYSICAL on purpose (#855): these insets frame the OS window
         // controls — macOS traffic lights top-left, Windows caption buttons
         // top-right — whose positions come from the platform, not from the
@@ -90,14 +88,13 @@ export const TitleBar: React.FC = () => {
       ) : (
         <div className="flex items-center gap-2">
           <PollisLogo size={14} color="var(--c-accent)" />
-          <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>Pollis</span>
+          <span className="text-xs font-mono text-muted">Pollis</span>
         </div>
       )}
 
       {/* Center — title */}
       <span
-        className="absolute left-1/2 -translate-x-1/2 text-xs font-mono pointer-events-none"
-        style={{ color: "var(--c-text-muted)" }}
+        className="absolute left-1/2 -translate-x-1/2 text-xs font-mono pointer-events-none text-muted"
       >
         {isMac && "Pollis"}
       </span>

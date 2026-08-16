@@ -13,6 +13,7 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
 
   return (
     <div
+      className="bg-bg"
       style={{
         position: "relative",
         display: "flex",
@@ -21,7 +22,6 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
         justifyContent: "center",
         height: "100%",
         width: "100%",
-        background: "var(--c-bg)",
         overflow: "hidden",
       }}
     >
@@ -29,6 +29,7 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
 
       {/* Content */}
       <div
+        className="bg-surface border border-line"
         style={{
           position: "relative",
           zIndex: 1,
@@ -37,8 +38,6 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
           alignItems: "center",
           gap: "1.5rem",
           padding: "2.5rem",
-          background: "var(--c-surface)",
-          border: "1px solid var(--c-border)",
           borderRadius: "0.5rem",
           maxWidth: 360,
           width: "100%",
@@ -46,22 +45,22 @@ const ErrorFallback: React.FC<{ onRestart: () => void }> = ({ onRestart }) => {
       >
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
           <span
-            className="font-mono text-xs"
-            style={{ color: "var(--c-accent)", letterSpacing: "0.15em" }}
+            className="font-mono text-xs text-accent"
+            style={{ letterSpacing: "0.15em" }}
           >
             {t("boundary.tag")}
           </span>
           <h1
-            className="font-mono text-base"
-            style={{ color: "var(--c-text)", margin: 0 }}
+            className="font-mono text-base text-fg"
+            style={{ margin: 0 }}
           >
             {t("boundary.title")}
           </h1>
         </div>
 
         <p
-          className="font-mono text-xs text-center"
-          style={{ color: "var(--c-text-muted)", margin: 0, lineHeight: 1.6 }}
+          className="font-mono text-xs text-center text-muted"
+          style={{ margin: 0, lineHeight: 1.6 }}
         >
           {t("boundary.message")}
           <br />

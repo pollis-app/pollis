@@ -3,6 +3,7 @@ import {
   createRoute,
   createRootRouteWithContext,
   createMemoryHistory,
+  lazyRouteComponent,
 } from "@tanstack/react-router";
 import { AppShell } from "./components/Layout/AppShell";
 import type { RouterContext } from "./types/router";
@@ -15,18 +16,13 @@ import { DMsPage } from "./pages/DMs";
 import { DMPage } from "./pages/DM";
 import { DMSettingsPage } from "./pages/DMSettings";
 import { LeaveGroupPage } from "./pages/LeaveGroup";
-import { VoiceChannelPage } from "./pages/VoiceChannel";
 import { CreateGroupPage } from "./pages/CreateGroupPage";
 import { SearchGroupPage } from "./pages/SearchGroupPage";
 import { CreateChannelPage } from "./pages/CreateChannelPage";
 import { StartDMPage } from "./pages/StartDMPage";
-import { PreferencesPage } from "./pages/PreferencesPage";
-import { VoiceSettingsPage } from "./pages/VoiceSettingsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SettingsHubPage } from "./pages/SettingsHub";
 import { UserProfilePage } from "./pages/UserProfile";
-import { SecurityPage } from "./pages/SecurityPage";
-import { ChangePinPage } from "./pages/ChangePinPage";
 import { InvitesPage } from "./pages/InvitesPage";
 import { JoinByInvitePage } from "./pages/JoinByInvitePage";
 import { InviteLinkLandingPage } from "./pages/InviteLinkLandingPage";
@@ -38,13 +34,9 @@ import { KickMemberPage } from "./pages/KickMemberPage";
 import { SearchPage } from "./pages/Search";
 import { RequestsPage } from "./pages/RequestsPage";
 import { BlockedPage } from "./pages/BlockedPage";
-import { CallPage } from "./pages/Call";
 import { RenameChannelPage } from "./pages/RenameChannelPage";
 import { RenameGroupPage } from "./pages/RenameGroupPage";
 import { GroupEmojiPage } from "./pages/GroupEmojiPage";
-import { KeyboardShortcutsPage } from "./pages/KeyboardShortcutsPage";
-import { UpdatePage } from "./pages/UpdatePage";
-import { ArcadePage } from "./pages/ArcadePage";
 import { SavedPage } from "./pages/SavedPage";
 
 // Re-export RouterContext so callers can import from either location.
@@ -161,7 +153,7 @@ const leaveGroupRoute = createRoute({
 const voiceChannelRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/$groupId/voice/$channelId",
-  component: VoiceChannelPage,
+  component: lazyRouteComponent(() => import("./pages/VoiceChannel"), "VoiceChannelPage"),
 });
 
 const dmsRoute = createRoute({
@@ -204,13 +196,13 @@ const dmSettingsRoute = createRoute({
 const preferencesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/preferences",
-  component: PreferencesPage,
+  component: lazyRouteComponent(() => import("./pages/PreferencesPage"), "PreferencesPage"),
 });
 
 const voiceSettingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/voice-settings",
-  component: VoiceSettingsPage,
+  component: lazyRouteComponent(() => import("./pages/VoiceSettingsPage"), "VoiceSettingsPage"),
 });
 
 const settingsRoute = createRoute({
@@ -234,13 +226,13 @@ const userProfileRoute = createRoute({
 const securityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security",
-  component: SecurityPage,
+  component: lazyRouteComponent(() => import("./pages/SecurityPage"), "SecurityPage"),
 });
 
 const changePinRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security/change-pin",
-  component: ChangePinPage,
+  component: lazyRouteComponent(() => import("./pages/ChangePinPage"), "ChangePinPage"),
 });
 
 const invitesRoute = createRoute({
@@ -277,19 +269,19 @@ const searchRoute = createRoute({
 const keyboardShortcutsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/shortcuts",
-  component: KeyboardShortcutsPage,
+  component: lazyRouteComponent(() => import("./pages/KeyboardShortcutsPage"), "KeyboardShortcutsPage"),
 });
 
 const updateRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/update",
-  component: UpdatePage,
+  component: lazyRouteComponent(() => import("./pages/UpdatePage"), "UpdatePage"),
 });
 
 const callRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/call/$callId",
-  component: CallPage,
+  component: lazyRouteComponent(() => import("./pages/Call"), "CallPage"),
 });
 
 const savedRoute = createRoute({
@@ -301,7 +293,7 @@ const savedRoute = createRoute({
 const arcadeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/arcade",
-  component: ArcadePage,
+  component: lazyRouteComponent(() => import("./pages/ArcadePage"), "ArcadePage"),
 });
 
 // The terminal pane is a persistent component owned by AppShell (so the

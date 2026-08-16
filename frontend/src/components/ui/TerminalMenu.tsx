@@ -159,21 +159,16 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     >
       {/* Keyboard hints */}
       <div
-        className="flex items-center gap-1 px-4 text-xs font-mono flex-shrink-0"
-        style={{
-          height: "var(--bar-h)",
-          borderBottom: "1px solid var(--c-border)",
-          color: "var(--c-text-muted)",
-        }}
+        className="flex items-center gap-1 px-4 text-xs font-mono flex-shrink-0 h-bar border-b border-line text-muted"
       >
         <ArrowUp className="w-3 h-3" />
         <ArrowDown className="w-3 h-3" />
         <span>{t("menu.navigateHint")}</span>
-        <span className="mx-1" style={{ color: "var(--c-border-active)" }}>•</span>
+        <span className="mx-1 text-line-strong">•</span>
         <span>{t("menu.selectHint")}</span>
         {onEsc && (
           <>
-            <span className="mx-1" style={{ color: "var(--c-border-active)" }}>•</span>
+            <span className="mx-1 text-line-strong">•</span>
             <span>{t("menu.escHint")}</span>
           </>
         )}
@@ -186,7 +181,8 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
             return (
               <div
                 key={item.id}
-                style={{ borderTop: "2px solid var(--c-border)", margin: "0" }}
+                className="border-t-2 border-line"
+                style={{ margin: "0" }}
                 aria-hidden="true"
               />
             );
@@ -200,10 +196,9 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
               key={item.id}
               ref={(el) => { itemRefs.current[index] = el; }}
               data-testid={item.testId}
-              className="flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors"
+              className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors${isSelected ? " bg-active" : ""}`}
               style={{
                 borderInlineStart: `3px solid ${isSelected ? "var(--c-accent)" : "transparent"}`,
-                background: isSelected ? "var(--c-active)" : undefined,
                 opacity: item.disabled ? 0.4 : 1,
                 cursor: item.disabled ? "not-allowed" : "pointer",
               }}
@@ -215,24 +210,19 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
               {/* Chevron indicator — stays centered in the full row height */}
               <div className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
                 {isSelected
-                  ? <ChevronRight className="w-4 h-4 rtl-mirror" style={{ color: "var(--c-accent)" }} />
+                  ? <ChevronRight className="w-4 h-4 rtl-mirror text-accent" />
                   : <div className="w-4 h-4" />
                 }
               </div>
 
               <div className="flex-1 min-w-0">
                 <div
-                  className="font-mono text-sm flex items-center gap-3"
-                  style={{
-                    color: isSelected
-                      ? "var(--c-accent)"
-                      : isSystem
-                        ? "var(--c-text-muted)"
-                        : "var(--c-text)",
-                  }}
+                  className={`font-mono text-sm flex items-center gap-3 ${
+                    isSelected ? "text-accent" : isSystem ? "text-muted" : "text-fg"
+                  }`}
                 >
                   {item.icon && (
-                    <span className="flex-shrink-0" style={{ color: isSelected ? "var(--c-accent)" : "var(--c-text-dim)" }}>
+                    <span className={`flex-shrink-0 ${isSelected ? "text-accent" : "text-dim"}`}>
                       {item.icon}
                     </span>
                   )}
@@ -243,19 +233,13 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                     </span>
                   )}
                   {item.badge != null && item.badge > 0 && (
-                    <span
-                      className="font-mono text-xs"
-                      style={{ color: "var(--c-accent)" }}
-                    >
+                    <span className="font-mono text-xs text-accent">
                       [{item.badge}]
                     </span>
                   )}
                 </div>
                 {item.description && (
-                  <div
-                    className="text-xs font-mono mt-0.5 truncate"
-                    style={{ color: "var(--c-text-muted)" }}
-                  >
+                  <div className="text-xs font-mono mt-0.5 truncate text-muted">
                     {item.description}
                   </div>
                 )}

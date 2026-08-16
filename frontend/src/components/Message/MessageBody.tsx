@@ -1,16 +1,20 @@
 import React, { useMemo } from "react";
-import { observer } from "mobx-react-lite";
-import { appStore } from "../../stores/appStore";
 import { LinkifiedText } from "../ui/LinkifiedText";
 import { EmojiText } from "../Emoji/EmojiText";
 import { MentionToken } from "./MentionToken";
-import { useSkin } from "../../hooks/queries/usePreferences";
-import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
 import { findMentions } from "../../utils/mentions";
+import type { MessageRenderContext } from "./messageRenderContext";
 
 interface MessageBodyProps {
   text: string;
+  ctx: MessageRenderContext;
 }
+
+// Hoisted so every row shares one function identity — inline arrows here would
+// hand `EmojiText` a new `renderText` on every render of every row.
+const renderLinkified = (text: string, key: string | number) => (
+  <LinkifiedText key={key} text={text} />
+);
 
 /**
  * A message body: `@mentions` rendered as tokens, everything else handed to
@@ -25,26 +29,19 @@ interface MessageBodyProps {
  *
  * `LinkifiedText` is untouched by this — it still owns URL detection, and each
  * non-mention slice is delegated to it, so a message can contain both.
+ *
+ * #874: this used to call `useSkin()` and `useMentionCandidates()` itself, i.e.
+ * two React Query observers and five MobX reactions PER MESSAGE, and rebuilt
+ * the resolution Set per row. All of that is list-wide, so it now arrives via
+ * `ctx` — one subscription for the whole log. The component reads no
+ * observables at all as a result, so plain `React.memo` is the right wrapper;
+ * `observer()` would only add a reaction that tracks nothing.
  */
-export const MessageBody: React.FC<MessageBodyProps> = observer(({ text }) => {
-  const skin = useSkin();
-  const candidates = useMentionCandidates();
-  const { currentUser } = appStore;
-  const selfName = currentUser?.username?.toLowerCase();
-
-  const known = useMemo(() => {
-    const set = new Set<string>(["all"]);
-    for (const c of candidates) {
-      set.add(c.username.toLowerCase());
-    }
-    if (selfName) {
-      set.add(selfName);
-    }
-    return set;
-  }, [candidates, selfName]);
+export const MessageBody: React.FC<MessageBodyProps> = React.memo(({ text, ctx }) => {
+  const { skin, mentionNames, selfName } = ctx;
 
   const parts = useMemo(() => {
-    const mentions = findMentions(text).filter((m) => known.has(m.name));
+    const mentions = findMentions(text).filter((m) => mentionNames.has(m.name));
     if (mentions.length === 0) {
       return null;
     }
@@ -56,7 +53,7 @@ export const MessageBody: React.FC<MessageBodyProps> = observer(({ text }) => {
           <EmojiText
             key={`t${cursor}`}
             text={text.slice(cursor, m.start)}
-            renderText={(t, k) => <LinkifiedText key={k} text={t} />}
+            renderText={renderLinkified}
           />,
         );
       }
@@ -69,21 +66,17 @@ export const MessageBody: React.FC<MessageBodyProps> = observer(({ text }) => {
     }
     if (cursor < text.length) {
       nodes.push(
-        <EmojiText
-          key={`t${cursor}`}
-          text={text.slice(cursor)}
-          renderText={(t, k) => <LinkifiedText key={k} text={t} />}
-        />,
+        <EmojiText key={`t${cursor}`} text={text.slice(cursor)} renderText={renderLinkified} />,
       );
     }
     return nodes;
-  }, [text, known, selfName, skin]);
+  }, [text, mentionNames, selfName, skin]);
 
   if (parts === null) {
-    return (
-      <EmojiText text={text} renderText={(t, k) => <LinkifiedText key={k} text={t} />} />
-    );
+    return <EmojiText text={text} renderText={renderLinkified} />;
   }
 
   return <>{parts}</>;
 });
+
+MessageBody.displayName = "MessageBody";

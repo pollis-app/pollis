@@ -66,18 +66,12 @@ export const CameraPicker: React.FC = observer(() => {
   return (
     <div
       data-testid="camera-picker"
-      className="flex-1 flex flex-col font-mono text-xs min-h-0"
-      style={{
-        borderTop: "1px solid var(--c-border)",
-        borderBottom: "1px solid var(--c-border)",
-        background: "var(--c-bg)",
-      }}
+      className="flex-1 flex flex-col font-mono text-xs min-h-0 border-t border-b border-line bg-bg"
     >
       <header
-        className="flex items-center justify-between px-3 py-2"
-        style={{ borderBottom: "1px solid var(--c-border)", color: "var(--c-text)" }}
+        className="flex items-center justify-between px-3 py-2 border-b border-line text-fg"
       >
-        <span style={{ color: "var(--c-accent)" }} className="flex items-center gap-2">
+        <span className="flex items-center gap-2 text-accent">
           <Video size={13} /> {t("camera.pickerHeading")}
         </span>
         <Button
@@ -105,22 +99,20 @@ export const CameraPicker: React.FC = observer(() => {
               onClick={() => handlePick(c)}
               disabled={busy}
               data-testid={`camera-picker-device-${c.id}`}
-              className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] rounded-[6px]"
+              className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-[6px]"
               style={{ minHeight: 100 }}
             >
               <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
                 <div
-                  className="flex-1 flex items-center justify-center overflow-hidden"
+                  className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted"
                   style={{
                     aspectRatio: "16 / 10",
-                    background: "var(--c-bg)",
-                    color: "var(--c-text-muted)",
                   }}
                 >
                   <Video size={32} />
                 </div>
                 <div className="p-2">
-                  <div className="truncate" style={{ color: "var(--c-text)" }} title={c.name}>
+                  <div className="truncate text-fg" title={c.name}>
                     {c.name}
                   </div>
                 </div>

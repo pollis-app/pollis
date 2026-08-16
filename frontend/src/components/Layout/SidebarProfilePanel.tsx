@@ -128,7 +128,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
             onClick={() => voiceSession.leave()}
             aria-label={t("profile.disconnect")}
             title={t("profile.disconnect")}
-            className="icon-btn-sm hover:text-[var(--c-danger)]"
+            className="icon-btn-sm hover:text-danger"
           >
             <PhoneOff size={15} />
           </button>

@@ -86,22 +86,13 @@ export const ScreenSharePicker: React.FC = observer(() => {
   return (
     <div
       data-testid="screen-share-picker"
-      className="flex-1 flex flex-col font-mono text-xs min-h-0"
-      style={{
-        borderTop: "1px solid var(--c-border)",
-        borderBottom: "1px solid var(--c-border)",
-        background: "var(--c-bg)",
-      }}
+      className="flex-1 flex flex-col font-mono text-xs min-h-0 border-t border-b border-line bg-bg"
     >
       <header
-        className="flex items-center justify-between px-3 py-2"
-        style={{
-          borderBottom: "1px solid var(--c-border)",
-          color: "var(--c-text)",
-        }}
+        className="flex items-center justify-between px-3 py-2 border-b border-line text-fg"
       >
         <div className="flex items-center gap-3">
-          <span style={{ color: "var(--c-accent)" }}>{t("share.heading")}</span>
+          <span className="text-accent">{t("share.heading")}</span>
           <div className="flex items-center gap-1">
             <Button
               variant={tab === "displays" ? "primary" : "secondary"}
@@ -136,10 +127,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
 
       <div className="flex-1 overflow-auto p-3">
         {items.length === 0 ? (
-          <div
-            className="h-full flex items-center justify-center"
-            style={{ color: "var(--c-text-muted)" }}
-          >
+          <div className="h-full flex items-center justify-center text-muted">
             {tab === "displays" ? t("share.noDisplays") : t("share.noWindows")}
           </div>
         ) : (
@@ -198,20 +186,18 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
     type="button"
     onClick={onPick}
     disabled={disabled}
-    className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] rounded-[6px]"
+    className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-[6px]"
     style={{ minHeight: 100 }}
   >
     <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
       <div
-        className="flex-1 flex items-center justify-center overflow-hidden"
+        className="flex-1 flex items-center justify-center overflow-hidden bg-bg text-muted"
         style={{
           // Fixed aspect for thumbnails so the grid stays even when
           // sources have wildly different aspect ratios (an ultra-wide
           // monitor next to a portrait phone screen sharer, etc).
           // 16:10 matches the 320×200 thumbnail size we request in main.
           aspectRatio: "16 / 10",
-          background: "var(--c-bg)",
-          color: "var(--c-text-muted)",
         }}
       >
         {thumbnail ? (
@@ -229,13 +215,13 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
         )}
       </div>
       <div className="p-2">
-        <div className="truncate" style={{ color: "var(--c-text)" }}>
+        <div className="truncate text-fg">
           {title}
         </div>
         {subtitle ? (
           <div
-            className="truncate"
-            style={{ color: "var(--c-text-muted)", fontSize: 10 }}
+            className="truncate text-muted"
+            style={{ fontSize: 10 }}
           >
             {subtitle}
           </div>

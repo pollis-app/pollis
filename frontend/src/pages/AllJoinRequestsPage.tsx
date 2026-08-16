@@ -57,11 +57,10 @@ export const AllJoinRequestsPage: React.FC = () => {
       <PageShell title={t("joinRequests.allPageTitle")}>
         <div
           data-testid="all-join-requests-page"
-          className="flex-1 flex flex-col overflow-auto"
-          style={{ background: "var(--c-bg)" }}
+          className="flex-1 flex flex-col overflow-auto bg-bg"
         >
           <div className="px-4 py-4">
-            <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+            <p className="text-xs font-mono text-muted">
               {t("common:states.loading")}
             </p>
           </div>
@@ -75,11 +74,10 @@ export const AllJoinRequestsPage: React.FC = () => {
       <PageShell title={t("joinRequests.allPageTitle")}>
         <div
           data-testid="all-join-requests-page"
-          className="flex-1 flex flex-col overflow-auto"
-          style={{ background: "var(--c-bg)" }}
+          className="flex-1 flex flex-col overflow-auto bg-bg"
         >
           <div className="flex-1" style={{ paddingTop: "1rem", paddingInline: "1rem" }}>
-            <p className="text-xs font-mono text-start" style={{ color: "var(--c-text-dim)" }}>
+            <p className="text-xs font-mono text-start text-dim">
               {t("joinRequests.allEmpty")}
             </p>
           </div>
@@ -92,8 +90,7 @@ export const AllJoinRequestsPage: React.FC = () => {
     <PageShell title={t("joinRequests.allPageTitle")}>
       <div
         data-testid="all-join-requests-page"
-        className="flex-1 flex flex-col overflow-auto"
-        style={{ background: "var(--c-bg)" }}
+        className="flex-1 flex flex-col overflow-auto bg-bg"
       >
         {groupIds.map((groupId) => {
           const requests = requestsByGroup[groupId];
@@ -102,11 +99,11 @@ export const AllJoinRequestsPage: React.FC = () => {
           return (
             <div key={groupId} className="flex flex-col">
               <div className="px-4 py-4">
-                <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
+                <p className="text-xs font-mono text-dim">
                   <Trans
                     i18nKey="channels:joinRequests.pendingFor"
                     values={{ name: groupName }}
-                    components={{ accent: <span style={{ color: "var(--c-accent)" }} /> }}
+                    components={{ accent: <span className="text-accent" /> }}
                   />
                 </p>
               </div>
@@ -117,8 +114,7 @@ export const AllJoinRequestsPage: React.FC = () => {
                 rowTestId={(req) => `join-request-${req.id}`}
                 renderRow={(req) => (
                   <span
-                    className="flex-1 truncate text-xs font-mono"
-                    style={{ color: "var(--c-text)" }}
+                    className="flex-1 truncate text-xs font-mono text-fg"
                   >
                     {req.requester_username ?? req.requester_id}
                   </span>

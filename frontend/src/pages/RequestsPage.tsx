@@ -1,5 +1,5 @@
 import { errorMessage } from "../utils/errorMessage";
-import React from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
@@ -10,20 +10,25 @@ import {
   useAcceptDMRequest,
   useBlockUser,
 } from "../hooks/queries";
-import { useLastMessage } from "../hooks/queries/useMessages";
+import { useLastMessages } from "../hooks/queries/useMessages";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
 import { ScrambleText } from "../components/ui/ScrambleText";
 import { timeAgo } from "../utils/timeAgo";
-import type { DmChannel } from "../types";
+import type { DmChannel, Message } from "../types";
 
 // Renders the first/latest decrypted message body of a DM request. The
 // sender's name is shown separately on the row, so no prefix is needed
 // here. The MLS envelope is decrypted during the normal polling flow —
 // acceptance is a UI-only flag, not a decryption gate.
-const RequestPreview: React.FC<{ dmChannelId: string }> = ({ dmChannelId }) => {
+//
+// The message arrives as a prop: the page fetches every request's preview in
+// one batched call (#874) rather than one per row.
+const RequestPreview: React.FC<{ message?: Message; isLoading: boolean }> = ({
+  message,
+  isLoading,
+}) => {
   const { t } = useTranslation("dms");
-  const { data: message, isLoading } = useLastMessage(null, dmChannelId);
 
   if (isLoading) {
     return <ScrambleText text={null} placeholderLength={28} typeSpeed={25} />;
@@ -40,6 +45,9 @@ export const RequestsPage: React.FC = observer(() => {
   const { data: requests = [], isLoading } = useDMRequests();
   const acceptMutation = useAcceptDMRequest();
   const blockMutation = useBlockUser();
+  const requestIds = useMemo(() => requests.map((c) => c.id), [requests]);
+  const { data: lastMessages = {}, isLoading: previewsLoading } =
+    useLastMessages(requestIds);
 
   const findOther = (c: DmChannel) => {
     return c.members.find((m) => m.user_id !== currentUser?.id);
@@ -105,7 +113,10 @@ export const RequestsPage: React.FC = observer(() => {
                   className="text-xs font-mono truncate"
                   style={{ color: "var(--c-text-muted)" }}
                 >
-                  <RequestPreview dmChannelId={c.id} />
+                  <RequestPreview
+                    message={lastMessages[c.id]}
+                    isLoading={previewsLoading}
+                  />
                 </span>
               </div>
             );

@@ -1,12 +1,20 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useRef, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { MessageItem } from "./MessageItem";
 import "./messageHighlight.css";
+import {
+  estimateRowPx,
+  findRow,
+  revealRow,
+  ROW_OVERSCAN,
+  type MessageRowWindow,
+} from "./messageWindow";
 import { useBlockedUsers } from "../../hooks/queries";
 import { useGroupMembers } from "../../hooks/queries/useGroups";
 import { observer } from "mobx-react-lite";
 import { rosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
-import { formatDayDivider } from "../../utils/format";
+import { formatDayDivider, toMs } from "../../utils/format";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import {
   useSavedMessageIds,
@@ -16,17 +24,19 @@ import { useMessagePermalink } from "../../hooks/useMessagePermalink";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { useConversationReceipts } from "../../hooks/queries/useReceipts";
 import { useDMConversations } from "../../hooks/queries/useMessages";
+import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
+import { useBackgroundIsLight } from "../../utils/usernameColor";
+import { probeRender } from "../../utils/renderProbe";
+import type { MessageRenderContext } from "./messageRenderContext";
 import { appStore } from "../../stores/appStore";
 import { messageNavStore } from "../../stores/messageNavStore";
 import type { MessageNavAction } from "../../utils/messageNav";
 import { arrowStep, isHorizontalArrow, isRtlElement } from "../../utils/direction";
 import type { Message } from "../../types";
+import { EmptyState } from "../ui/EmptyState";
 
 // How long the permalink jump highlight stays on the target row.
 const HIGHLIGHT_MS = 1800;
-
-const toMs = (timestamp: number): number =>
-  timestamp < 1e12 ? timestamp * 1000 : timestamp;
 
 const startOfLocalDay = (d: Date): number =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
@@ -34,20 +44,20 @@ const startOfLocalDay = (d: Date): number =>
 // Time gap (ms) beyond which a same-author message still starts a new group.
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
-const DayDivider: React.FC<{ label: string; refined: boolean }> = ({ label, refined }) => {
+// Memoised for the same reason the rows are: there is one of these per day in
+// the log and their inputs are two primitives that almost never change.
+const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ label, refined }) => {
   if (refined) {
     // Centered mono label between two hairline rules, with density-driven
     // breathing room above and below.
     return (
       <div
         data-testid="day-divider"
-        className="flex items-center gap-3 px-4 select-none"
-        style={{ marginTop: "var(--msg-divider-gap)", marginBottom: "var(--msg-divider-gap)" }}
+        className="flex items-center gap-3 px-4 select-none mt-msg-divider mb-msg-divider"
       >
         <div className="flex-1 border-t border-line" />
         <span
-          className="font-machine text-2xs tabular-nums"
-          style={{ color: "var(--c-text-muted)" }}
+          className="font-machine text-2xs tabular-nums text-muted"
         >
           {label}
         </span>
@@ -60,22 +70,22 @@ const DayDivider: React.FC<{ label: string; refined: boolean }> = ({ label, refi
       data-testid="day-divider"
       className="flex items-center gap-3 py-2 select-none"
     >
-      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <div className="flex-1 h-px bg-line" />
       <span
-        className="text-xs font-mono"
-        style={{ color: "var(--c-text-muted)" }}
+        className="text-xs font-mono text-muted"
       >
         {label}
       </span>
-      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <div className="flex-1 h-px bg-line" />
     </div>
   );
-};
+});
+DayDivider.displayName = "DayDivider";
 
 const RosterChangeBanner: React.FC<{
   banner: RosterBanner;
   resolveName: (userId: string) => string;
-}> = ({ banner, resolveName }) => {
+}> = React.memo(({ banner, resolveName }) => {
   const { t } = useTranslation("chat");
   const name = resolveName(banner.payload.user_id);
   let label: string;
@@ -98,17 +108,17 @@ const RosterChangeBanner: React.FC<{
       data-testid={`roster-banner-${banner.id}`}
       className="flex items-center gap-3 py-2 select-none"
     >
-      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <div className="flex-1 h-px bg-line" />
       <span
-        className="text-xs font-mono"
-        style={{ color: "var(--c-text-muted)" }}
+        className="text-xs font-mono text-muted"
       >
         {label}
       </span>
-      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <div className="flex-1 h-px bg-line" />
     </div>
   );
-};
+});
+RosterChangeBanner.displayName = "RosterChangeBanner";
 
 interface MessageListProps {
   messages: Message[];
@@ -131,7 +141,6 @@ interface MessageListProps {
   threadReplyCounts?: Map<string, number>;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
-  onPin?: (messageId: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   getAuthorUsername?: (authorId: string, message?: Message) => string;
   hasMore?: boolean;
@@ -161,19 +170,15 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   onLoadMore,
   focusComposer,
 }) => {
+  probeRender("MessageList");
   const { t } = useTranslation("chat");
   const skin = useSkin();
-  const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const prevLengthRef = useRef(0);
   const { data: blockedUsers = [] } = useBlockedUsers();
   const blockedIds = useMemo(
     () => new Set(blockedUsers.map((b) => b.user_id)),
     [blockedUsers],
   );
-  // Saved scroll metrics taken just before a load-more fetch begins, used to
-  // restore relative scroll position after older messages are prepended.
-  const savedScrollRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   const sortedMessages = useMemo(
     () =>
@@ -228,7 +233,64 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     }
     return map;
   }, [groupMembers]);
-  const resolveName = (userId: string) => usernameByUserId.get(userId) ?? userId;
+  const resolveName = useCallback(
+    (userId: string) => usernameByUserId.get(userId) ?? userId,
+    [usernameByUserId],
+  );
+
+  // ── List-wide render inputs, subscribed ONCE (#874) ─────────────────────
+  // Every one of these used to be resolved per row: `useSkin()` and
+  // `useMentionCandidates()` inside each `MessageItem`/`MessageBody` meant a
+  // React Query observer and up to five MobX reactions PER MESSAGE, all
+  // answering the same list-wide question. Subscribing here and passing one
+  // memoised object down is not just cheaper — it is what makes the row memo
+  // meaningful, because a fresh object per render would defeat it.
+  const isLightBg = useBackgroundIsLight();
+  const currentUser = appStore.currentUser;
+  const mentionCandidates = useMentionCandidates();
+  const selfName = currentUser?.username?.toLowerCase();
+  const mentionNames = useMemo(() => {
+    const set = new Set<string>(["all"]);
+    for (const c of mentionCandidates) {
+      set.add(c.username.toLowerCase());
+    }
+    if (selfName) {
+      set.add(selfName);
+    }
+    return set;
+  }, [mentionCandidates, selfName]);
+  const renderCtx = useMemo<MessageRenderContext>(
+    () => ({
+      skin,
+      isLightBg,
+      currentUserId: currentUser?.id,
+      mentionNames,
+      selfName,
+    }),
+    [skin, isLightBg, currentUser?.id, mentionNames, selfName],
+  );
+
+  // Reply targets resolved in ONE pass. Each row used to run
+  // `allMessages.find()`, which is O(N^2) across the log (#874). Only messages
+  // that are actually replied to are indexed, so this stays small.
+  const replyTargets = useMemo(() => {
+    const wanted = new Set<string>();
+    for (const m of sortedMessages) {
+      if (m.reply_to_message_id) {
+        wanted.add(m.reply_to_message_id);
+      }
+    }
+    if (wanted.size === 0) {
+      return new Map<string, Message>();
+    }
+    const map = new Map<string, Message>();
+    for (const m of sortedMessages) {
+      if (wanted.has(m.id)) {
+        map.set(m.id, m);
+      }
+    }
+    return map;
+  }, [sortedMessages]);
 
   // Interleave messages + roster banners by timestamp. Messages use
   // `created_at` (Rust unix seconds or ms — `toMs` normalizes); banners
@@ -255,43 +317,101 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return items;
   }, [sortedMessages, rosterBanners]);
 
-  // Scroll to bottom when new messages arrive (but not when older pages load).
-  useEffect(() => {
-    if (sortedMessages.length > prevLengthRef.current && !isFetchingMore) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-    prevLengthRef.current = sortedMessages.length;
-  }, [sortedMessages.length, isFetchingMore]);
+  // ── Windowing (#874) ────────────────────────────────────────────────────
+  // Only the visible slice of the timeline is in the DOM, so layout and paint
+  // stop scaling with history length the way render cost already stopped.
+  //
+  // The list keeps its OWN scroll container and its own markup — the library
+  // is headless, which is what lets day dividers, roster banners, sender
+  // grouping and both skins' row shapes carry on unchanged inside the window.
+  //
+  // Timeline keys, not indexes, identify rows (`getItemKey`). That is what
+  // makes prepending a page of older messages cheap: every row already
+  // measured keeps its real height even though its index just shifted by 50.
+  const timelineRef = useRef(timeline);
+  timelineRef.current = timeline;
+  const getItemKey = useCallback(
+    (index: number) => timelineRef.current[index]?.key ?? index,
+    [],
+  );
+  // Recomputed per render (one style read) rather than memoised, so it follows
+  // a font-size change; the estimate only governs rows never yet on screen.
+  const rowEstimatePx = estimateRowPx(skin);
+  const rowEstimateRef = useRef(rowEstimatePx);
+  rowEstimateRef.current = rowEstimatePx;
+  const estimateSize = useCallback(() => rowEstimateRef.current, []);
 
-  // When a load-more fetch starts, save current scroll metrics so position can
-  // be restored after older messages are prepended.
+  const virtualizer = useVirtualizer({
+    count: timeline.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize,
+    getItemKey,
+    overscan: ROW_OVERSCAN,
+    // A chat log is anchored at its END, not its start. This is what replaces
+    // the hand-rolled scroll-restore that used to bracket a load-more: the
+    // library re-pins the row the user is looking at across any count change,
+    // whether 50 older messages were prepended or a row above the fold turned
+    // out taller than its estimate.
+    anchorTo: "end",
+    // Follow new messages down — but only from the bottom. Scrolled back
+    // through history, an arriving message no longer yanks the viewport away,
+    // which is how Slack and Discord both behave.
+    followOnAppend: "smooth",
+    // "At the bottom" with one row of slack, rather than the 1px default.
+    scrollEndThreshold: rowEstimatePx,
+  });
+
+  // Message id → timeline index, for the three subsystems that have to ask for
+  // a row before they can look at it (see `messageWindow.ts`).
+  const indexByMessageId = useMemo(() => {
+    const map = new Map<string, number>();
+    timeline.forEach((item, index) => {
+      if (item.kind === "message") {
+        map.set(item.message.id, index);
+      }
+    });
+    return map;
+  }, [timeline]);
+  const indexByMessageIdRef = useRef(indexByMessageId);
+  indexByMessageIdRef.current = indexByMessageId;
+
+  // Stable across renders and ref-backed, so a reveal that is still in flight
+  // reads the live timeline rather than the one that existed when it started.
+  const rowWindow = useMemo<MessageRowWindow>(
+    () => ({
+      container: () => containerRef.current,
+      indexOf: (messageId: string) => indexByMessageIdRef.current.get(messageId),
+      virtualizer,
+    }),
+    [virtualizer],
+  );
+  // Held in a ref as well so the row callbacks below keep the empty dependency
+  // array that #874 made load-bearing — a fresh `onScrollToReply` identity
+  // re-renders every row in the log.
+  const rowWindowRef = useRef(rowWindow);
+  rowWindowRef.current = rowWindow;
+
+  // Open at the newest message.
+  //
+  // `followOnAppend` keeps the log pinned to the bottom from then on, but it
+  // only reacts to the message COUNT changing while a scroll container exists
+  // — and a conversation whose first page is already in hand renders its whole
+  // log in one go, with nothing for it to react to. Without this, opening a
+  // channel with any real history lands the reader at its very first message.
+  //
+  // Deliberately re-runs rather than latching on a ref: React re-attaches the
+  // scroll element on its dev-mode double mount, and the virtualizer rewinds
+  // to the offset it still believes in when that happens. An anchor that fires
+  // once, first, loses that race — and losing it silently is exactly the shape
+  // of bug that ships.
+  const logKey = `${selectedChannelId ?? ""}|${selectedConversationId ?? ""}`;
+  const hasRows = timeline.length > 0;
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
+    if (!hasRows) {
       return;
     }
-    if (isFetchingMore) {
-      savedScrollRef.current = {
-        scrollTop: container.scrollTop,
-        scrollHeight: container.scrollHeight,
-      };
-    }
-  }, [isFetchingMore]);
-
-  // After the message list grows following a load-more, restore relative scroll
-  // so the previously visible messages stay in view.
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    const saved = savedScrollRef.current;
-    if (!container || !saved || isFetchingMore) {
-      return;
-    }
-    const heightDelta = container.scrollHeight - saved.scrollHeight;
-    if (heightDelta > 0) {
-      container.scrollTop = saved.scrollTop + heightDelta;
-      savedScrollRef.current = null;
-    }
-  }, [sortedMessages.length, isFetchingMore]);
+    virtualizer.scrollToIndex(timelineRef.current.length - 1, { align: "end" });
+  }, [logKey, hasRows, virtualizer]);
 
   // Trigger load-more when the user scrolls near the top.
   useEffect(() => {
@@ -308,13 +428,31 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return () => container.removeEventListener("scroll", handleScroll);
   }, [hasMore, isFetchingMore, onLoadMore]);
 
-  const scrollToMessage = (messageId: string) => {
-    const el = containerRef.current?.querySelector(`[data-testid="message-${messageId}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-    onScrollToMessage?.(messageId);
-  };
+  // `useCallback` is load-bearing, not tidiness: this is handed to every row as
+  // `onScrollToReply`, so a fresh identity per render re-rendered the entire log
+  // on any parent state change — one keystroke in the edit bar was N row
+  // renders (#874). Reads the DOM and a ref only, so it has no dependencies.
+  //
+  // #874: the quoted parent is very often OFF the window — that is the whole
+  // point of quoting it — so this can no longer be a bare `querySelector`. It
+  // asks the window for the row first and only then scrolls.
+  const onScrollToMessageRef = useRef(onScrollToMessage);
+  onScrollToMessageRef.current = onScrollToMessage;
+  const replyRevealRef = useRef(0);
+  const scrollToMessage = useCallback((messageId: string) => {
+    const token = ++replyRevealRef.current;
+    void revealRow(
+      rowWindowRef.current,
+      messageId,
+      "center",
+      () => replyRevealRef.current !== token,
+    ).then((el) => {
+      if (el && replyRevealRef.current === token) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    });
+    onScrollToMessageRef.current?.(messageId);
+  }, []);
 
   // ── Saved messages + permalinks (#854) ──────────────────────────────────
   const savedMessageIds = useSavedMessageIds();
@@ -338,16 +476,26 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     return () => window.clearTimeout(timer);
   }, [copyLinkState]);
 
-  const handleToggleSave = useCallback(
-    (messageId: string) => {
-      toggleSavedMutation.mutate(messageId);
-    },
-    [toggleSavedMutation],
-  );
+  // Both row callbacks below are pinned to a stable identity via refs rather
+  // than dependency arrays (#874). `useMutation` returns a NEW result object
+  // every render, and `sortedMessages` changes whenever any message arrives —
+  // either as a dependency would hand all N rows a new prop and re-render the
+  // whole log. Refs are read at call time, so the behaviour is identical while
+  // the identity never changes.
+  const toggleSavedRef = useRef(toggleSavedMutation);
+  toggleSavedRef.current = toggleSavedMutation;
+  const handleToggleSave = useCallback((messageId: string) => {
+    toggleSavedRef.current.mutate(messageId);
+  }, []);
+
+  const sortedMessagesRef = useRef(sortedMessages);
+  sortedMessagesRef.current = sortedMessages;
+  const copyPermalinkRef = useRef(copyPermalink);
+  copyPermalinkRef.current = copyPermalink;
 
   const handleCopyLink = useCallback(
     async (messageId: string) => {
-      const message = sortedMessages.find((m) => m.id === messageId);
+      const message = sortedMessagesRef.current.find((m) => m.id === messageId);
       // The message's OWN conversation, never the list's `conversationId` prop
       // — that prop is the MLS group id for channels, which would produce a
       // permalink that resolves nowhere.
@@ -358,10 +506,10 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         setCopyLinkState({ messageId, state: "failed" });
         return;
       }
-      const ok = await copyPermalink(targetConversationId, messageId);
+      const ok = await copyPermalinkRef.current(targetConversationId, messageId);
       setCopyLinkState({ messageId, state: ok ? "copied" : "failed" });
     },
-    [sortedMessages, copyPermalink],
+    [],
   );
 
   // Read the pending jump during RENDER, not only inside the effect below.
@@ -386,26 +534,42 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   //
   // A jump requested before its target has loaded simply is not claimed yet —
   // it stays pending and this effect re-runs when the message arrives.
+  //
+  // #874: a permalink almost by definition points at something old, so the
+  // target is usually outside the window. `revealRow` moves the window there
+  // and waits for the commit; the jump is only claimed once a real row exists,
+  // which keeps the "not loaded yet, stay pending" behaviour intact.
   useEffect(() => {
     if (!jumpTargetMessageId) {
       return;
     }
-    const el = containerRef.current?.querySelector(
-      `[data-testid="message-${jumpTargetMessageId}"]`,
-    );
-    if (!el) {
-      return;
-    }
-    if (!messageJumpStore.claimMessage(jumpTargetMessageId)) {
-      return;
-    }
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("pollis-message-flash");
-    const timer = setTimeout(() => {
-      el.classList.remove("pollis-message-flash");
-      messageJumpStore.clearHighlight();
-    }, HIGHLIGHT_MS);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    void revealRow(
+      rowWindowRef.current,
+      jumpTargetMessageId,
+      "center",
+      () => cancelled,
+    ).then((el) => {
+      if (!el || cancelled) {
+        return;
+      }
+      if (!messageJumpStore.claimMessage(jumpTargetMessageId)) {
+        return;
+      }
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("pollis-message-flash");
+      timer = setTimeout(() => {
+        el.classList.remove("pollis-message-flash");
+        messageJumpStore.clearHighlight();
+      }, HIGHLIGHT_MS);
+    });
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
   }, [jumpTargetMessageId, timeline.length]);
 
   // ── Arrow-key log navigation (bash-history style) ───────────────────────
@@ -438,10 +602,11 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       // The RENDERED action bar is the source of truth for what this row
       // offers — reading the DOM here means the nav machine can never select
       // a button that isn't on screen (deleted rows have no bar at all).
+      // Only ever asked about the row the projection above just focused, which
+      // is on screen by construction — so this stays a plain synchronous read
+      // even though the log is windowed.
       actionsFor: (messageId: string) => {
-        const row = containerRef.current?.querySelector(
-          `[data-testid="message-${messageId}"]`,
-        );
+        const row = findRow(rowWindowRef.current, messageId);
         if (!row) {
           return [];
         }
@@ -470,23 +635,43 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   // Project the logical focus onto real DOM focus: the row in `message` mode,
   // the specific bar button in `action` mode. Real focus keeps Enter/Space
   // activation and screen-reader tracking native.
+  //
+  // #874: walking off the top edge of the window lands on a row that is not in
+  // the document. The synchronous path is kept for the overwhelmingly common
+  // case (the next row is already rendered, thanks to the overscan) and only
+  // falls back to an awaited reveal when it genuinely is not.
   const navState = messageNavStore.state;
   useEffect(() => {
     if (navState.mode === "composer") {
       return;
     }
-    const row = containerRef.current?.querySelector<HTMLElement>(
-      `[data-testid="message-${navState.messageId}"]`,
-    );
-    if (!row) {
+    const project = (row: HTMLElement) => {
+      const target =
+        navState.mode === "action"
+          ? (row.querySelector<HTMLElement>(`[data-nav-action="${navState.action}"]`) ?? row)
+          : row;
+      target.focus({ preventScroll: true });
+      row.scrollIntoView({ block: "nearest" });
+    };
+    const rendered = findRow(rowWindowRef.current, navState.messageId);
+    if (rendered) {
+      project(rendered);
       return;
     }
-    const target =
-      navState.mode === "action"
-        ? (row.querySelector<HTMLElement>(`[data-nav-action="${navState.action}"]`) ?? row)
-        : row;
-    target.focus({ preventScroll: true });
-    row.scrollIntoView({ block: "nearest" });
+    let cancelled = false;
+    void revealRow(
+      rowWindowRef.current,
+      navState.messageId,
+      "auto",
+      () => cancelled,
+    ).then((row) => {
+      if (row && !cancelled) {
+        project(row);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [navState]);
 
   const handleNavKeyDown = (e: React.KeyboardEvent) => {
@@ -535,136 +720,158 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     messageNavStore.dispatch({ type: "cancel" });
   };
 
+  // One timeline entry, dividers and grouping included. Both are computed from
+  // the FULL timeline by index rather than from the rendered slice, so a day
+  // divider or a grouped follow-up looks the same whether or not its neighbour
+  // happens to be inside the window.
+  const renderTimelineItem = (idx: number) => {
+    const item = timeline[idx];
+    // Day divider only fires on message items (banners aren't tied to
+    // a wall-clock day in the same way — they're notifications).
+    const prev = idx > 0 ? timeline[idx - 1] : null;
+    const currentDay = startOfLocalDay(new Date(item.ts));
+    const prevDay = prev ? startOfLocalDay(new Date(prev.ts)) : null;
+    const showDivider =
+      item.kind === "message" && (prevDay === null || prevDay !== currentDay);
+
+    // A message starts a new sender group (refined skin) when it's the
+    // first item, when a banner or day-divider separates it from the
+    // previous item, when the previous rendered item is a different
+    // author, or when the same author's gap exceeds GROUP_GAP_MS.
+    const isGroupStart =
+      item.kind === "message" &&
+      (prev === null ||
+        prev.kind === "banner" ||
+        showDivider ||
+        prev.message.sender_id !== item.message.sender_id ||
+        item.ts - prev.ts > GROUP_GAP_MS);
+
+    if (item.kind === "banner") {
+      return (
+        <RosterChangeBanner banner={item.banner} resolveName={resolveName} />
+      );
+    }
+
+    const { message } = item;
+    const rendered = blockedIds.has(message.sender_id) ? (
+      <div data-testid={`message-blocked-${message.id}`} className="px-4 py-1">
+        <div className="flex items-start gap-2 min-w-0">
+          <span
+            className="flex-shrink-0 font-mono text-sm text-dim"
+          >
+            {t("list.blockedAuthor")}
+          </span>
+          <span
+            className="font-mono text-sm text-muted"
+          >
+            {t("list.blockedBody")}
+          </span>
+        </div>
+      </div>
+    ) : (
+      <MessageItem
+        message={message}
+        ctx={renderCtx}
+        replyToMessage={
+          message.reply_to_message_id
+            ? (replyTargets.get(message.reply_to_message_id) ?? null)
+            : undefined
+        }
+        authorUsername={
+          getAuthorUsername
+            ? getAuthorUsername(message.sender_id, message)
+            : t("list.unknownAuthor")
+        }
+        isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
+        canModerate={viewerIsAdmin}
+        isGroupStart={isGroupStart}
+        onReply={onReply}
+        onOpenThread={onOpenThread}
+        threadReplyCount={threadReplyCounts?.get(message.id) ?? 0}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onScrollToReply={scrollToMessage}
+        isSaved={savedMessageIds.has(message.id)}
+        onToggleSave={handleToggleSave}
+        onCopyLink={handleCopyLink}
+        copyLinkState={
+          copyLinkState?.messageId === message.id ? copyLinkState.state : "idle"
+        }
+        receipt={receipts?.get(message.id)}
+        peerCount={peerCount}
+        isDm={isDm}
+      />
+    );
+
+    return (
+      <>
+        {showDivider && (
+          <DayDivider
+            label={formatDayDivider(toMs(message.created_at))}
+            refined={skin === "refined"}
+          />
+        )}
+        {rendered}
+      </>
+    );
+  };
+
   if (timeline.length === 0) {
     return (
-      <div
-        data-testid="empty-messages"
-        className="flex-1 flex items-center justify-center"
-        style={{ background: "var(--c-bg)" }}
-      >
-        <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-          {t("list.empty")}
-        </p>
-      </div>
+      <EmptyState testId="empty-messages">{t("list.empty")}</EmptyState>
     );
   }
+
+  const virtualItems = virtualizer.getVirtualItems();
 
   return (
     <div
       data-testid="message-list"
       ref={containerRef}
-      className="flex-1 overflow-y-auto min-h-0"
-      style={{ background: "var(--c-bg)" }}
+      className="flex-1 overflow-y-auto min-h-0 bg-bg"
       onKeyDown={handleNavKeyDown}
       onBlur={handleNavBlur}
     >
       {isFetchingMore && (
         <p
-          className="text-xs font-mono text-center py-2"
-          style={{ color: "var(--c-text-muted)" }}
+          className="text-xs font-mono text-center py-2 text-muted"
         >
           {t("common:states.loading")}
         </p>
       )}
-      {timeline.map((item, idx) => {
-        // Day divider only fires on message items (banners aren't tied to
-        // a wall-clock day in the same way — they're notifications).
-        const prev = idx > 0 ? timeline[idx - 1] : null;
-        const currentDay = startOfLocalDay(new Date(item.ts));
-        const prevDay = prev ? startOfLocalDay(new Date(prev.ts)) : null;
-        const showDivider =
-          item.kind === "message" && (prevDay === null || prevDay !== currentDay);
-
-        // A message starts a new sender group (refined skin) when it's the
-        // first item, when a banner or day-divider separates it from the
-        // previous item, when the previous rendered item is a different
-        // author, or when the same author's gap exceeds GROUP_GAP_MS.
-        const isGroupStart =
-          item.kind === "message" &&
-          (prev === null ||
-            prev.kind === "banner" ||
-            showDivider ||
-            prev.message.sender_id !== item.message.sender_id ||
-            item.ts - prev.ts > GROUP_GAP_MS);
-
-        if (item.kind === "banner") {
-          return (
-            <RosterChangeBanner
-              key={item.key}
-              banner={item.banner}
-              resolveName={resolveName}
-            />
-          );
-        }
-
-        const { message } = item;
-        const rendered = blockedIds.has(message.sender_id) ? (
+      {/* The full height of the whole history, holding the scrollbar steady,
+          with only the visible slice of rows actually inside it. */}
+      <div
+        data-testid="message-window"
+        className="relative"
+        style={{ height: `${virtualizer.getTotalSize()}px` }}
+      >
+        {virtualItems.map((virtualRow) => (
+          // Absolute placement is what makes the row's position independent of
+          // its neighbours, and it establishes a block formatting context, so
+          // the refined day divider's margins are measured INSIDE the row
+          // rather than escaping it and leaving every measurement short.
+          //
+          // It does NOT change how the row's own overflowing chrome paints:
+          // the hover action bar and its `z-40` menu are positioned against
+          // the row's existing `relative` box, exactly as before, and nothing
+          // here clips (which is what ruled out `content-visibility` in
+          // phase 2 — see `.codesight/wiki/ui.md`).
           <div
-            key={message.id}
-            data-testid={`message-blocked-${message.id}`}
-            className="px-4 py-1"
+            key={virtualRow.key}
+            data-index={virtualRow.index}
+            ref={virtualizer.measureElement}
+            style={{
+              position: "absolute",
+              insetInlineStart: 0,
+              insetInlineEnd: 0,
+              top: `${virtualRow.start}px`,
+            }}
           >
-            <div className="flex items-start gap-2 min-w-0">
-              <span
-                className="flex-shrink-0 font-mono text-sm"
-                style={{ color: "var(--c-text-dim)" }}
-              >
-                {t("list.blockedAuthor")}
-              </span>
-              <span
-                className="font-mono text-sm"
-                style={{ color: "var(--c-text-muted)" }}
-              >
-                {t("list.blockedBody")}
-              </span>
-            </div>
+            {renderTimelineItem(virtualRow.index)}
           </div>
-        ) : (
-          <MessageItem
-            key={message.id}
-            message={message}
-            allMessages={sortedMessages}
-            authorUsername={
-              getAuthorUsername
-                ? getAuthorUsername(message.sender_id, message)
-                : t("list.unknownAuthor")
-            }
-            isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
-            canModerate={viewerIsAdmin}
-            isGroupStart={isGroupStart}
-            onReply={onReply}
-            onOpenThread={onOpenThread}
-            threadReplyCount={threadReplyCounts?.get(message.id) ?? 0}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            onScrollToReply={scrollToMessage}
-            isSaved={savedMessageIds.has(message.id)}
-            onToggleSave={handleToggleSave}
-            onCopyLink={handleCopyLink}
-            copyLinkState={
-              copyLinkState?.messageId === message.id
-                ? copyLinkState.state
-                : "idle"
-            }
-            receipts={receipts}
-            peerCount={peerCount}
-            isDm={isDm}
-          />
-        );
-
-        return (
-          <React.Fragment key={item.key}>
-            {showDivider && (
-              <DayDivider
-                label={formatDayDivider(toMs(message.created_at))}
-                refined={skin === "refined"}
-              />
-            )}
-            {rendered}
-          </React.Fragment>
-        );
-      })}
-      <div ref={bottomRef} />
+        ))}
+      </div>
     </div>
   );
 });

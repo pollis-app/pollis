@@ -35,8 +35,7 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
   return (
     <div
       data-testid="invite-member-page"
-      className="flex-1 flex flex-col overflow-auto"
-      style={{ background: 'var(--c-bg)' }}
+      className="flex-1 flex flex-col overflow-auto bg-bg"
     >
       <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
         <div className="w-full max-w-md flex flex-col gap-8">
@@ -44,11 +43,11 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
           onSubmit={handleInvite}
           className="flex flex-col gap-6"
         >
-          <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+          <p className="text-xs font-mono text-dim">
             <Trans
               i18nKey="channels:inviteMember.intro"
               values={{ name: groupName }}
-              components={{ accent: <span style={{ color: 'var(--c-accent)' }} /> }}
+              components={{ accent: <span className="text-accent" /> }}
             />
           </p>
 
@@ -74,13 +73,13 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
           </div>
 
           {success && (
-            <p data-testid="invite-sent-confirmation" className="text-xs font-mono" style={{ color: 'var(--c-accent-dim)' }}>
+            <p data-testid="invite-sent-confirmation" className="text-xs font-mono text-accent-dim">
               {t("inviteMember.sent")}
             </p>
           )}
 
           {inviteMutation.error && (
-            <p data-testid="invite-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
+            <p data-testid="invite-error" className="text-xs font-mono text-danger">
               {errorMessage(inviteMutation.error, t("inviteMember.sendFailed"))}
             </p>
           )}

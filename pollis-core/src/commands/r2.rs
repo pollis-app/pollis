@@ -295,6 +295,141 @@ pub async fn download_file(
     r2_get_url(overlay.as_deref(), &get_url).await
 }
 
+// ── Public objects (avatars, group icons) ─────────────────────────────────
+//
+// Avatars and group icons are stored in the CLEAR — they are public profile
+// decoration, not message content. What they are not is stable: an avatar used
+// to live at `avatars/{user_id}` and be overwritten in place, and a mutable key
+// is precisely what makes a local cache unrepresentable-correctly. There is no
+// way to know a cached copy is current without fetching it, so the client
+// fetched every avatar again on every launch — as a JSON array of integers
+// through the IPC, roughly three bytes on the wire per byte of image.
+//
+// So the key carries the hash of its own bytes. That makes the object
+// immutable: a new avatar is a new key, which the profile row already
+// publishes, so every viewer picks it up by normal cache invalidation and the
+// on-disk copy of the old one is simply never asked for again. It also makes
+// the integrity check free — the key IS the expected digest, exactly as
+// custom emoji work (`commands::emoji::get_emoji_url`).
+
+/// Upload a public object under a content-addressed key `{prefix}/{sha256}.{ext}`.
+///
+/// Returns the key so the caller can persist it (profile row, group row); the
+/// bytes are reachable afterwards through [`get_public_file_url`].
+pub async fn upload_public_file(
+    prefix: String,
+    data: Vec<u8>,
+    content_type: String,
+    state: &Arc<AppState>,
+) -> Result<UploadResult> {
+    let hash = hex::encode(sha256_bytes(&data));
+    let ext = ext_for_content_type(&content_type);
+    let key = format!("{}/{hash}.{ext}", prefix.trim_matches('/'));
+
+    let put_url = presign_r2(state, "put", &key).await?;
+    let overlay = state.overlay_handle();
+    r2_put_url(overlay.as_deref(), &put_url, data, &content_type).await?;
+    let url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), key);
+    Ok(UploadResult { key, url })
+}
+
+/// The sha256 a content-addressed public key commits to, plus its extension.
+///
+/// `None` for a LEGACY key (`avatars/{user_id}`, `group-icons/{id}/{ts}-{name}`)
+/// written before objects were content-addressed. Those cannot be cached — the
+/// bytes behind them can change without the key changing — so the caller falls
+/// back to the byte path for them instead of serving a copy it cannot verify.
+fn public_key_digest(key: &str) -> Option<(String, String)> {
+    let name = key.rsplit('/').next()?;
+    let (hash, ext) = name.rsplit_once('.')?;
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+        return None;
+    }
+    Some((hash.to_string(), ext.to_string()))
+}
+
+/// Resolve a public object to a loopback HTTP URL the webview can use directly
+/// as `<img src>`, caching the bytes on disk encrypted at rest.
+///
+/// Returns `""` (the same empty-string sentinel [`get_media_url`] uses) when
+/// this object cannot be served that way — a legacy non-content-addressed key,
+/// or a media server that isn't up yet. The frontend falls back to the byte
+/// path for those, which is what every caller did before #874.
+pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<String> {
+    let Some((content_hash, ext)) = public_key_digest(&key) else {
+        return Ok(String::new());
+    };
+
+    let port = *state.media_server_port.lock().await;
+    let token = state.media_server_token.lock().await.clone();
+    let (Some(port), Some(token)) = (port, token) else {
+        return Ok(String::new());
+    };
+    let url = format!("http://127.0.0.1:{port}/{token}/{content_hash}");
+
+    // Cache hit needs nothing else — the cached file's own extension is what
+    // the media server serves it with.
+    if find_cached_file(&content_hash).is_some() {
+        return Ok(url);
+    }
+
+    let content_type = content_type_for_ext(&ext);
+    let target = cache_file_path(&content_hash, content_type)?;
+
+    let get_url = presign_r2(state, "get", &key).await?;
+    let overlay = state.overlay_handle();
+    let bytes = r2_get_url(overlay.as_deref(), &get_url).await?;
+
+    if bytes.len() as u64 > MEDIA_CACHE_MAX_FILE_BYTES {
+        return Ok(String::new());
+    }
+
+    // The key is the address; verify the bytes ARE their address. Public
+    // objects are stored unencrypted, so nothing else attests to them — a
+    // substituted or corrupted object would otherwise be cached and rendered
+    // as genuine, and then kept.
+    let actual = hex::encode(sha256_bytes(&bytes));
+    if actual != content_hash {
+        return Err(Error::Other(anyhow::anyhow!(
+            "public object {key} failed its content-hash check (got {actual}); \
+             refusing to render substituted bytes"
+        )));
+    }
+
+    let db_key = {
+        let guard = state.unlock.lock().await;
+        match guard.as_ref() {
+            Some(u) => u.db_key.to_vec(),
+            None => {
+                return Err(Error::Other(anyhow::anyhow!(
+                    "cannot cache a public object without an active unlock"
+                )))
+            }
+        }
+    };
+    let encrypted = cache_encrypt(&bytes, &db_key, content_hash.as_bytes())?;
+
+    let dir = media_cache_dir()?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| Error::Other(anyhow::anyhow!("create cache dir: {e}")))?;
+
+    // Atomic write, mirroring `get_media_url`: a half-written cache file would
+    // be served as a corrupt image rather than re-fetched.
+    let mut tmp = target.clone();
+    let final_ext = target.extension().and_then(|s| s.to_str()).unwrap_or("enc");
+    tmp.set_extension(format!("{final_ext}.tmp"));
+    tokio::fs::write(&tmp, &encrypted)
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("write public cache: {e}")))?;
+    if let Err(e) = tokio::fs::rename(&tmp, &target).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(Error::Other(anyhow::anyhow!("rename public cache: {e}")));
+    }
+
+    enforce_cache_cap(&dir);
+    Ok(url)
+}
+
 // ── Media upload (convergent encryption + cross-user dedup) ───────────────
 
 #[derive(Debug, Serialize, Deserialize)]

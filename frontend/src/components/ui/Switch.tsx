@@ -36,16 +36,14 @@ export const Switch: React.FC<SwitchProps> = ({
           aria-describedby={descriptionId}
           onClick={() => { if (!disabled) { onChange(!checked); } }}
           disabled={disabled}
-          className="relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black disabled:opacity-50 disabled:cursor-not-allowed"
+          className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black disabled:opacity-50 disabled:cursor-not-allowed ${checked ? "bg-accent" : "bg-line-strong"}`}
           style={{
-            background: checked ? "var(--c-accent)" : "var(--c-border-active)",
             cursor: disabled ? "not-allowed" : "pointer",
           }}
         >
           <span
-            className="inline-block h-4 w-4 transform rounded-full transition-transform duration-200"
+            className="inline-block h-4 w-4 transform rounded-full transition-transform duration-200 bg-bg"
             style={{
-              background: "var(--c-bg)",
               // Track is w-9 (2.25rem), thumb is w-4 (1rem). Express travel
               // in rem (not px) so it scales with the same root font size the
               // track does — keeps the dot centered with an even 0.125rem
@@ -59,9 +57,8 @@ export const Switch: React.FC<SwitchProps> = ({
 
         <label
           htmlFor={inputId}
-          className="text-sm font-mono"
+          className="text-sm font-mono text-dim"
           style={{
-            color: "var(--c-text-dim)",
             cursor: disabled ? "not-allowed" : "pointer",
           }}
         >
@@ -72,8 +69,7 @@ export const Switch: React.FC<SwitchProps> = ({
       {description && (
         <p
           id={descriptionId}
-          className="text-xs font-mono ms-12"
-          style={{ color: "var(--c-text-muted)" }}
+          className="text-xs font-mono ms-12 text-muted"
         >
           {description}
         </p>

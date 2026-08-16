@@ -291,18 +291,18 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
       style={{ cursor: "default" }}
       onClick={(e) => e.stopPropagation()}
     >
-      <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+      <span className="text-xs font-mono text-muted">
         {attachment.filename}
       </span>
       {attachment.file_size > 0 && (
-        <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+        <span className="text-xs font-mono text-muted">
           {formatFileSize(attachment.file_size)}
         </span>
       )}
       <button
         onClick={handleDownload}
         disabled={downloadStatus !== "idle"}
-        className="text-xs font-mono transition-colors text-[var(--c-accent)] bg-transparent enabled:hover:bg-[var(--c-accent)] enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
+        className="text-xs font-mono transition-colors text-accent bg-transparent enabled:hover:bg-accent enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
         style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
       >
         {downloadStatus === "downloading" ? (
@@ -315,7 +315,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
       </button>
       <button
         onClick={() => setViewerOpen(false)}
-        className="text-xs font-mono transition-colors text-[var(--c-text-dim)] bg-transparent hover:bg-[var(--c-accent)] hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black"
+        className="text-xs font-mono transition-colors text-dim bg-transparent hover:bg-accent hover:text-black focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1 focus:ring-offset-black"
         style={lightboxBtnStyle}
       >
         {t("attachment.lightboxClose")}
@@ -329,14 +329,13 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
       className="flex items-center gap-2 px-2 py-1"
     >
       <span
-        className="flex-1 min-w-0 text-xs font-mono truncate"
-        style={{ color: "var(--c-accent-dim)" }}
+        className="flex-1 min-w-0 text-xs font-mono truncate text-accent-dim"
       >
         {attachment.filename}
       </span>
       {extra}
       {attachment.file_size > 0 && (
-        <span className="text-xs font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>
+        <span className="text-xs font-mono flex-shrink-0 text-muted">
           {formatFileSize(attachment.file_size)}
         </span>
       )}
@@ -345,8 +344,8 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
           onClick={handleDownload}
           disabled={downloadStatus !== "idle"}
           aria-label={t("attachment.downloadLabel", { filename: attachment.filename })}
-          className="flex-shrink-0 p-1"
-          style={{ color: downloadStatus === "done" ? "var(--c-accent)" : "var(--c-text-dim)", lineHeight: 0 }}
+          className={`flex-shrink-0 p-1 ${downloadStatus === "done" ? "text-accent" : "text-dim"}`}
+          style={{ lineHeight: 0 }}
         >
           {downloadStatus === "downloading" ? (
             <LoadingSpinner size="sm" />
@@ -370,12 +369,12 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
           disabled={!downloadUrl}
           aria-label={t("attachment.viewLabel", { filename: attachment.filename })}
           title={attachment.filename}
+          className="border-0"
           style={{
             width: 96,
             height: 96,
             padding: 0,
             background: "transparent",
-            border: "none",
             borderRadius: "0.5rem",
             overflow: "hidden",
             cursor: downloadUrl ? "zoom-in" : "default",
@@ -409,7 +408,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
               />
             </div>
           ) : (
-            <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+            <span className="text-xs font-mono text-muted">
               {error ? t("attachment.error") : "…"}
             </span>
           )}
@@ -473,13 +472,12 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
             />
           ) : (
             <div
-              className="flex items-center gap-2 px-3 py-2"
+              className="flex items-center gap-2 px-3 py-2 bg-surface-high"
               style={{
-                background: "var(--c-surface-high)",
                 borderRadius: 8,
               }}
             >
-              <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+              <span className="text-xs font-mono text-muted">
                 {isLoading ? t("attachment.loading") : error ? error : "…"}
               </span>
             </div>
@@ -532,6 +530,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
           disabled={isPending || isLoading}
           aria-label={t("attachment.openLabel", { filename: attachment.filename })}
           title={attachment.filename}
+          className="border-0"
           style={{
             display: "flex",
             alignItems: "center",
@@ -540,7 +539,6 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
             height: 96,
             padding: 0,
             background: "transparent",
-            border: "none",
             cursor: isPending || isLoading ? "default" : "pointer",
             position: "relative",
             overflow: "hidden",
@@ -647,15 +645,13 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
   return (
     <div
       data-testid={`attachment-${attachment.id}`}
-      className="flex items-center gap-2 px-2.5 py-1.5 min-w-0"
+      className="flex items-center gap-2 px-2.5 py-1.5 min-w-0 border-2 border-line bg-surface-high"
       style={{
-        border: "2px solid var(--c-border)",
-        background: "var(--c-surface-high)",
         maxWidth: 360,
         borderRadius: 8,
       }}
     >
-      <FileTypeIcon size={14} aria-hidden="true" style={{ color: "var(--c-text-dim)", flexShrink: 0 }} />
+      <FileTypeIcon size={14} aria-hidden="true" className="text-dim" style={{ flexShrink: 0 }} />
       {(() => {
         const lastDot = attachment.filename.lastIndexOf(".");
         const hasExt = lastDot > 0 && lastDot < attachment.filename.length - 1;
@@ -663,9 +659,8 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
         const tail = hasExt ? attachment.filename.slice(lastDot) : "";
         return (
           <span
-            className="text-sm font-mono flex-1 min-w-0 flex"
+            className="text-sm font-mono flex-1 min-w-0 flex text-accent-dim"
             title={attachment.filename}
-            style={{ color: "var(--c-accent-dim)" }}
           >
             <span className="truncate">{head}</span>
             {tail && <span className="flex-shrink-0">{tail}</span>}
@@ -673,25 +668,23 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
         );
       })()}
       {attachment.file_size > 0 && (
-        <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>
+        <span className="text-sm font-mono flex-shrink-0 text-muted">
           {formatFileSize(attachment.file_size)}
         </span>
       )}
       {error ? (
-        <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>{t("attachment.error")}</span>
+        <span className="text-sm font-mono flex-shrink-0 text-muted">{t("attachment.error")}</span>
       ) : isPending ? (
-        <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>…</span>
+        <span className="text-sm font-mono flex-shrink-0 text-muted">…</span>
       ) : (
         <button
           onClick={handleDownload}
           disabled={downloadStatus !== "idle"}
           aria-label={t("attachment.downloadLabel", { filename: attachment.filename })}
-          className="flex-shrink-0"
+          className={`flex-shrink-0 border-0 ${downloadStatus === "done" ? "text-accent" : "text-dim"}`}
           style={{
-            color: downloadStatus === "done" ? "var(--c-accent)" : "var(--c-text-dim)",
             lineHeight: 0,
             background: "none",
-            border: "none",
             padding: 0,
           }}
         >

@@ -72,16 +72,14 @@ export const SettingsHubPage: React.FC = observer(() => {
             <div className="flex flex-col min-w-0">
               <div
                 data-testid="settings-hub-headline"
-                className="font-mono text-2xl truncate"
-                style={{ color: "var(--c-accent)" }}
+                className="font-mono text-2xl truncate text-accent"
               >
                 {headlineName}
               </div>
               {profile?.preferred_name && profile?.username && (
                 <div
                   data-testid="settings-hub-username"
-                  className="font-mono text-xs truncate"
-                  style={{ color: "var(--c-text-muted)" }}
+                  className="font-mono text-xs truncate text-muted"
                 >
                   <bdi>@{profile.username}</bdi>
                 </div>
@@ -97,7 +95,7 @@ export const SettingsHubPage: React.FC = observer(() => {
             />
           </div>
 
-          <div style={{ borderTop: "1px solid var(--c-border)" }}>
+          <div className="border-t border-line">
             <TerminalMenu items={items} onEsc={() => navigate({ to: "/" })} />
           </div>
         </div>

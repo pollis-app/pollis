@@ -2,23 +2,20 @@ import { invoke } from '../bridge';
 import type { PresignedUploadResponse } from '../types';
 import { IMAGE_EXT_MIME } from '../utils/fileIcon';
 
-function sanitizeFilename(name: string): string {
-  return name.replace(/[^A-Za-z0-9._-]/g, '_');
-}
-
 export async function uploadAvatar(
   userId: string,
   _aliasId: string,
   file: File,
 ): Promise<PresignedUploadResponse> {
   const data = new Uint8Array(await file.arrayBuffer());
-  // Stable per-user key so each upload overwrites the previous object in R2.
-  // No extension or timestamp — the content-type is stored on the R2 object
-  // at PUT time, and the frontend sniffs magic bytes on download to pick a
-  // MIME type for the Blob.
-  const key = `avatars/${userId}`;
-  const result = await invoke<{ key: string; url: string }>('upload_file', {
-    key,
+  // Content-addressed: Rust hashes the bytes and writes
+  // `avatars/{userId}/{sha256}.{ext}` (#874). The key used to be a bare
+  // `avatars/{userId}` overwritten in place, and a mutable key is what made
+  // every viewer re-download every avatar on every launch — there was no way
+  // to tell a cached copy was still current. A new avatar is now a new key,
+  // which the profile row already publishes.
+  const result = await invoke<{ key: string; url: string }>('upload_public_file', {
+    prefix: `avatars/${userId}`,
     data: Array.from(data),
     contentType: file.type || 'image/png',
   });
@@ -30,9 +27,8 @@ export async function uploadGroupIcon(
   file: File,
 ): Promise<PresignedUploadResponse> {
   const data = new Uint8Array(await file.arrayBuffer());
-  const key = `group-icons/${groupId}/${Date.now()}-${sanitizeFilename(file.name)}`;
-  const result = await invoke<{ key: string; url: string }>('upload_file', {
-    key,
+  const result = await invoke<{ key: string; url: string }>('upload_public_file', {
+    prefix: `group-icons/${groupId}`,
     data: Array.from(data),
     contentType: file.type || 'image/png',
   });
@@ -59,19 +55,45 @@ function sniffImageMime(bytes: Uint8Array): string | null {
   return null;
 }
 
-/// Download a public (unencrypted) file from R2 and return a blob URL.
-/// Used for avatars and group icons uploaded via upload_file.
-/// The MIME type is derived from the key extension when present; for keys
-/// without a known extension (e.g. stable avatar keys `avatars/{userId}`),
-/// we sniff the file's magic bytes so the browser correctly identifies
-/// GIFs and animated WebPs and plays them in <img> elements.
+// One live blob URL per legacy key. `URL.createObjectURL` pins its Blob in
+// memory until revoked, and this used to revoke nothing at all — every refetch
+// of the same avatar leaked another copy of the image for the life of the
+// document. Revoking the previous URL for a key when a new one replaces it
+// bounds that to one per distinct key.
+const legacyBlobUrls = new Map<string, string>();
+
+/// Resolve a public (unencrypted) object — an avatar or group icon — to a URL
+/// the webview can use as `<img src>`.
+///
+/// Primary path: `get_public_file_url` returns a loopback media-server URL
+/// (`http://127.0.0.1:<port>/<token>/<hash>`) backed by the on-disk cache, so
+/// the bytes never cross the JSON IPC and a restart re-reads them from disk
+/// instead of R2. Same mechanism attachments and custom emoji already use.
+///
+/// Fallback, when Rust hands back the empty-string sentinel: a LEGACY key
+/// written before objects were content-addressed (`avatars/{userId}`), or a
+/// media server that isn't up. Those come down as bytes and become an
+/// in-memory Blob URL, exactly as every avatar did before #874. The MIME type
+/// is taken from the key extension when present and sniffed from magic bytes
+/// otherwise, so GIFs and animated WebPs still animate.
 export async function getFileDownloadUrl(key: string): Promise<string> {
+  const served = await invoke<string>('get_public_file_url', { key });
+  if (served) {
+    return served;
+  }
+
   const raw = await invoke<number[]>('download_file', { key });
   const bytes = new Uint8Array(raw);
   const ext = key.split('.').pop()?.toLowerCase() ?? '';
   const mimeType = IMAGE_EXT_MIME[ext] ?? sniffImageMime(bytes) ?? 'image/png';
   const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  const previous = legacyBlobUrls.get(key);
+  if (previous) {
+    URL.revokeObjectURL(previous);
+  }
+  legacyBlobUrls.set(key, url);
+  return url;
 }
 
 /// Download an encrypted media attachment, decrypt it, and return a blob URL
