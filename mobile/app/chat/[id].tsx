@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text, FlatList } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Screen, Crumb, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
@@ -18,6 +18,7 @@ import {
   useToggleReaction,
   useEditMessage,
   useDeleteMessage,
+  flattenPages,
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
@@ -36,6 +37,12 @@ type ChatViewProps = {
   name?: string;
   embedded?: boolean;
 };
+
+// Rows for the inverted timeline list — messages interleaved with day
+// separators, newest first.
+type ChatListItem =
+  | { type: "sep"; key: string; label: string }
+  | { type: "msg"; key: string; message: Message };
 
 function TextChat(props: ChatViewProps = {}) {
   const router = useRouter();
@@ -57,11 +64,18 @@ function TextChat(props: ChatViewProps = {}) {
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
   const currentUser = appStore.currentUser;
 
-  const { data, isLoading, isError } = useMessages(conversationId, kind);
-  const messages = data?.messages ?? [];
+  const {
+    data,
+    isLoading,
+    isError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useMessages(conversationId, kind);
+  // Newest-first (matches the inverted list's render order).
+  const messages = useMemo(() => flattenPages(data), [data]);
   const sendMessage = useSendMessage(conversationId, kind);
   const ingest = useIngestConversation();
   const toggleReaction = useToggleReaction(conversationId, kind);
@@ -102,16 +116,20 @@ function TextChat(props: ChatViewProps = {}) {
     }, [conversationId, kind, ingest]),
   );
 
-  // Auto-scroll to bottom whenever the message list grows (new arrival or
-  // optimistic send).
+  // Auto-scroll to bottom when a NEW newest message lands (arrival or
+  // optimistic send). Keyed on the newest id rather than the array length so
+  // loading an older page never yanks the reader away from the history they
+  // are reading.
+  const listRef = useRef<FlatList<ChatListItem>>(null);
+  const newestId = messages[0]?.id;
   useEffect(() => {
-    if (messages.length === 0) {
+    if (!newestId) {
       return;
     }
     requestAnimationFrame(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
-  }, [messages.length]);
+  }, [newestId]);
 
   const onSend = () => {
     const text = draft.trim();
@@ -138,19 +156,29 @@ function TextChat(props: ChatViewProps = {}) {
     );
   };
 
-  const sections = useMemo(() => {
-    const out: { label: string; messages: Message[] }[] = [];
+  // Inverted-list items: build chronologically (day separator before the
+  // first message of each day), then reverse so index 0 is the newest row.
+  const items = useMemo(() => {
+    const chrono = [...messages].reverse();
+    const out: ChatListItem[] = [];
     let lastKey = "";
-    for (const m of messages) {
+    for (const m of chrono) {
       const k = dayKey(m.created_at);
       if (k !== lastKey) {
-        out.push({ label: dayLabel(m.created_at), messages: [] });
+        out.push({ type: "sep", key: `sep-${k}`, label: dayLabel(m.created_at) });
         lastKey = k;
       }
-      out[out.length - 1].messages.push(m);
+      out.push({ type: "msg", key: m.id, message: m });
     }
+    out.reverse();
     return out;
   }, [messages]);
+
+  const onEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const ctxLabel = kind === "dm" ? "DIRECT" : "CHANNEL";
 
@@ -171,102 +199,127 @@ function TextChat(props: ChatViewProps = {}) {
     peerName ||
     (kind === "dm" ? "Direct message" : "Channel");
 
+  const renderItem = useCallback(
+    ({ item }: { item: ChatListItem }) => {
+      if (item.type === "sep") {
+        return <DaySeparator label={item.label} />;
+      }
+      const m = item.message;
+      const mine = currentUser?.id === m.sender_id;
+      const name = m.sender_username || (mine ? "you" : "user");
+      return (
+        <MessageRow
+          testID={`row-message-${m.id}`}
+          av={name.slice(0, 2)}
+          amber={mine}
+          name={name}
+          time={timeLabel(m.created_at)}
+          text={m.content}
+          pending={m.pending}
+          edited={!!m.edited_at}
+          onPressAvatar={
+            mine
+              ? undefined
+              : () =>
+                  router.push({
+                    pathname: "/user/[id]",
+                    params: { id: m.sender_id },
+                  })
+          }
+          onLongPress={m.pending ? undefined : () => setActionTarget(m)}
+        />
+      );
+    },
+    [currentUser?.id, router],
+  );
+
   const content = (
     <>
       <Crumb segs={[{ label: ctxLabel, leaf: true }]} />
-      <ScrollView
-        ref={scrollRef}
+      {isLoading && messages.length === 0 ? (
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 13,
+            color: semantic.mute,
+            paddingHorizontal: 18,
+            paddingTop: 12,
+          }}
+        >
+          Loading messages…
+        </Text>
+      ) : null}
+      {isError ? (
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 13,
+            color: semantic.danger,
+            paddingHorizontal: 18,
+            paddingTop: 12,
+          }}
+        >
+          Couldn't load messages.
+        </Text>
+      ) : null}
+      {!isLoading && !isError && items.length === 0 ? (
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 13,
+            color: semantic.mute,
+            paddingHorizontal: 18,
+            paddingTop: 12,
+          }}
+        >
+          No messages yet. Be the first to say something.
+        </Text>
+      ) : null}
+      <FlatList
+        ref={listRef}
+        testID="list-messages"
+        inverted
+        data={items}
+        keyExtractor={(item) => item.key}
+        renderItem={renderItem}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingVertical: 4 }}
-      >
-        {isLoading && messages.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            Loading messages…
-          </Text>
-        ) : null}
-        {isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            Couldn't load messages.
-          </Text>
-        ) : null}
-        {!isLoading && !isError && sections.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            No messages yet. Be the first to say something.
-          </Text>
-        ) : null}
-        {sections.map((section, sIdx) => (
-          <View key={`${section.label}-${sIdx}`}>
-            <DaySeparator label={section.label} />
-            {section.messages.map((m) => {
-              const mine = currentUser?.id === m.sender_id;
-              const name = m.sender_username || (mine ? "you" : "user");
-              return (
-                <MessageRow
-                  key={m.id}
-                  testID={`row-message-${m.id}`}
-                  av={name.slice(0, 2)}
-                  amber={mine}
-                  name={name}
-                  time={timeLabel(m.created_at)}
-                  text={m.content}
-                  pending={m.pending}
-                  edited={!!m.edited_at}
-                  onPressAvatar={
-                    mine
-                      ? undefined
-                      : () =>
-                          router.push({
-                            pathname: "/user/[id]",
-                            params: { id: m.sender_id },
-                          })
-                  }
-                  onLongPress={
-                    m.pending ? undefined : () => setActionTarget(m)
-                  }
-                />
-              );
-            })}
-          </View>
-        ))}
-        {sendMessage.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 8,
-              paddingBottom: 4,
-            }}
-          >
-            {(sendMessage.error as Error).message || "Couldn't send message."}
-          </Text>
-        ) : null}
-      </ScrollView>
+        // With `inverted`, the "end" is the visual top — the oldest loaded
+        // message. RN re-evaluates onEndReached on content-size changes as
+        // well as scroll, so a prepend that leaves no scroll offset still
+        // advances (desktop PR #958's dead-end shape).
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          isFetchingNextPage ? (
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 12,
+                color: semantic.mute,
+                paddingHorizontal: 18,
+                paddingVertical: 10,
+              }}
+            >
+              Loading older messages…
+            </Text>
+          ) : null
+        }
+      />
+      {sendMessage.isError ? (
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 12,
+            color: semantic.danger,
+            paddingHorizontal: 18,
+            paddingTop: 8,
+            paddingBottom: 4,
+          }}
+        >
+          {(sendMessage.error as Error).message || "Couldn't send message."}
+        </Text>
+      ) : null}
 
       <Ctx
         hideBack={embedded}

@@ -1,13 +1,23 @@
 // Message read + send + ingest hooks. Mirrors the read paths of
 // `frontend/src/hooks/queries/useMessages.ts` — `get_channel_messages` and
 // `get_dm_messages` both invoke envelope-ingest internally before reading
-// the local DB, so a single call gives a fresh page. Pagination (load
-// older history) and infinite-scroll come in a follow-on; this hook
-// returns the most-recent `limit` messages newest-first and exposes a
-// `useSendMessage` mutation for the composer.
+// the local DB, so a single call gives a fresh page.
+//
+// Pagination: `useMessages` is an infinite query over cursor pages. The
+// cursor for each older page is derived from the PREVIOUS PAGE'S DATA
+// (`getNextPageParam`), never seeded from an effect — desktop PR #958 fixed
+// a bug where a cursor seeded from an effect read the previous
+// conversation's cached pages and permanently capped history at 50. Deriving
+// from page data makes that state unrepresentable: a new conversation key
+// starts from a fresh first page.
 
 import { useCallback } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
@@ -27,9 +37,14 @@ export interface RawChannelMessage {
   deleted_at?: string;
 }
 
+export interface MessageCursor {
+  sent_at: string;
+  id: string;
+}
+
 export interface MessagePage {
   messages: RawChannelMessage[];
-  next_cursor: { sent_at: string; id: string } | null;
+  next_cursor: MessageCursor | null;
 }
 
 export interface Message {
@@ -45,6 +60,15 @@ export interface Message {
   /** Local-only optimistic stub flag. Replaced when `send_message` resolves. */
   pending?: boolean;
 }
+
+/** One decoded page: newest-first messages plus the cursor to the next
+ *  (older) page, exactly as the Rust `MessagePage` reports it. */
+export interface DecodedPage {
+  messages: Message[];
+  nextCursor: MessageCursor | null;
+}
+
+export type MessagesData = InfiniteData<DecodedPage, MessageCursor | null>;
 
 function parseContent(raw: string | undefined): string {
   if (!raw) {
@@ -80,6 +104,29 @@ function transform(raw: RawChannelMessage): Message {
   };
 }
 
+/** Flatten pages (each newest-first) into one newest-first array, dropping
+ *  duplicates — after new arrivals shift the timeline, a refetched page
+ *  boundary can briefly overlap its neighbour. */
+export function flattenPages(
+  data: { pages: DecodedPage[] } | undefined,
+): Message[] {
+  if (!data) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: Message[] = [];
+  for (const page of data.pages) {
+    for (const m of page.messages) {
+      if (seen.has(m.id)) {
+        continue;
+      }
+      seen.add(m.id);
+      out.push(m);
+    }
+  }
+  return out;
+}
+
 export const messageQueryKeys = {
   all: ["messages"] as const,
   conversation: (
@@ -89,54 +136,68 @@ export const messageQueryKeys = {
 };
 
 /**
- * Fetch the most recent `limit` messages for a channel or DM. `get_*_messages`
- * runs envelope ingest itself before reading, so each call picks up newly
- * delivered messages — no separate ingest hook is required for the basic
- * polling path. The chat screen still triggers an explicit ingest via
- * `useIngestConversation` on focus so a returning user sees fresh content
- * immediately, without waiting for the next refetch.
+ * Infinite query over a conversation's message history, newest page first.
+ * `get_*_messages` runs envelope ingest itself before reading, so each
+ * first-page fetch picks up newly delivered messages. Older pages load via
+ * `fetchNextPage` (the chat list calls it from `onEndReached` on its
+ * inverted list — which RN re-evaluates on content-size changes as well as
+ * scroll, so a load that lands with no scroll offset left still advances;
+ * desktop PR #958's second bug shape).
  */
 export function useMessages(
   conversationId: string | null,
   kind: ConversationKind | null,
-  opts?: { limit?: number; refetchIntervalMs?: number | false },
+  opts?: { limit?: number },
 ) {
   const currentUser = useObserver(() => appStore.currentUser);
   const limit = opts?.limit ?? 50;
-  // No polling by default. Realtime push (a follow-on PR) will invalidate
-  // this query when a new envelope arrives; until then the focus-effect
-  // ingest in the chat screen covers the "open a chat and see what was
-  // sent while I was away" case. A periodic poll would just be ripped
-  // out the moment realtime lands.
-  const refetchInterval = opts?.refetchIntervalMs ?? false;
 
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: messageQueryKeys.conversation(conversationId, kind),
-    queryFn: async (): Promise<{ messages: Message[]; nextCursor: MessagePage["next_cursor"] }> => {
+    initialPageParam: null as MessageCursor | null,
+    queryFn: async ({ pageParam }): Promise<DecodedPage> => {
       if (!conversationId || !kind || !currentUser) {
         return { messages: [], nextCursor: null };
       }
       const cmd =
         kind === "channel" ? "get_channel_messages" : "get_dm_messages";
-      const args =
+      const args: Record<string, unknown> =
         kind === "channel"
           ? { userId: currentUser.id, channelId: conversationId, limit }
           : { userId: currentUser.id, dmChannelId: conversationId, limit };
+      if (pageParam) {
+        args.cursor = pageParam;
+      }
       const page = await invoke<MessagePage>(cmd, args);
-      // Server returns newest-first; reverse for chronological render.
-      const transformed = (page.messages ?? []).map(transform).reverse();
-      return { messages: transformed, nextCursor: page.next_cursor };
+      return {
+        messages: (page.messages ?? []).map(transform),
+        nextCursor: page.next_cursor ?? null,
+      };
     },
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: !!(conversationId && kind && currentUser),
     staleTime: 1000 * 15,
-    refetchInterval,
   });
 }
 
+/** Immutably update every cached page's message array. */
+function mapPages(
+  cache: MessagesData | undefined,
+  fn: (messages: Message[]) => Message[],
+): MessagesData | undefined {
+  if (!cache) {
+    return cache;
+  }
+  return {
+    ...cache,
+    pages: cache.pages.map((p) => ({ ...p, messages: fn(p.messages) })),
+  };
+}
+
 /**
- * Send a text message. Optimistic: the new message is appended to the
- * cache immediately with `pending: true`, then replaced with the
- * server-confirmed row on success (or removed on failure).
+ * Send a text message. Optimistic: the new message is prepended to the
+ * newest cached page with `pending: true`, then replaced with the
+ * server-confirmed row on success (or rolled back on failure).
  */
 export function useSendMessage(
   conversationId: string | null,
@@ -176,34 +237,34 @@ export function useSendMessage(
         created_at: Date.now(),
         pending: true,
       };
-      const previous = queryClient.getQueryData<{
-        messages: Message[];
-        nextCursor: MessagePage["next_cursor"];
-      }>(key);
-      queryClient.setQueryData(key, {
-        messages: [...(previous?.messages ?? []), optimistic],
-        nextCursor: previous?.nextCursor ?? null,
-      });
+      const previous = queryClient.getQueryData<MessagesData>(key);
+      if (previous && previous.pages.length > 0) {
+        const pages = previous.pages.slice();
+        pages[0] = {
+          ...pages[0],
+          messages: [optimistic, ...pages[0].messages],
+        };
+        queryClient.setQueryData<MessagesData>(key, {
+          ...previous,
+          pages,
+        });
+      } else {
+        queryClient.setQueryData<MessagesData>(key, {
+          pages: [{ messages: [optimistic], nextCursor: null }],
+          pageParams: [null],
+        });
+      }
       return { previous, optimisticId, key };
     },
     onSuccess: (confirmed, _vars, ctx) => {
       if (!ctx) {
         return;
       }
-      queryClient.setQueryData<{
-        messages: Message[];
-        nextCursor: MessagePage["next_cursor"];
-      }>(ctx.key, (cache) => {
-        if (!cache) {
-          return cache;
-        }
-        return {
-          ...cache,
-          messages: cache.messages.map((m) =>
-            m.id === ctx.optimisticId ? confirmed : m,
-          ),
-        };
-      });
+      queryClient.setQueryData<MessagesData>(ctx.key, (cache) =>
+        mapPages(cache, (msgs) =>
+          msgs.map((m) => (m.id === ctx.optimisticId ? confirmed : m)),
+        ),
+      );
     },
     onError: (_e, _vars, ctx) => {
       if (!ctx?.previous) {
@@ -277,23 +338,16 @@ export function useEditMessage(
       }
       const key = messageQueryKeys.conversation(conversationId, kind);
       await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<{
-        messages: Message[];
-        nextCursor: MessagePage["next_cursor"];
-      }>(key);
-      queryClient.setQueryData(key, (cache: typeof previous) => {
-        if (!cache) {
-          return cache;
-        }
-        return {
-          ...cache,
-          messages: cache.messages.map((m) =>
+      const previous = queryClient.getQueryData<MessagesData>(key);
+      queryClient.setQueryData<MessagesData>(key, (cache) =>
+        mapPages(cache, (msgs) =>
+          msgs.map((m) =>
             m.id === vars.messageId
               ? { ...m, content: vars.newContent, edited_at: Date.now() }
               : m,
           ),
-        };
-      });
+        ),
+      );
       return { previous, key };
     },
     onError: (_e, _vars, ctx) => {
@@ -327,19 +381,10 @@ export function useDeleteMessage(
       }
       const key = messageQueryKeys.conversation(conversationId, kind);
       await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<{
-        messages: Message[];
-        nextCursor: MessagePage["next_cursor"];
-      }>(key);
-      queryClient.setQueryData(key, (cache: typeof previous) => {
-        if (!cache) {
-          return cache;
-        }
-        return {
-          ...cache,
-          messages: cache.messages.filter((m) => m.id !== messageId),
-        };
-      });
+      const previous = queryClient.getQueryData<MessagesData>(key);
+      queryClient.setQueryData<MessagesData>(key, (cache) =>
+        mapPages(cache, (msgs) => msgs.filter((m) => m.id !== messageId)),
+      );
       return { previous, key };
     },
     onError: (_e, _vars, ctx) => {
@@ -353,8 +398,7 @@ export function useDeleteMessage(
 /**
  * Imperative ingest trigger — fire-and-forget. Called from `useFocusEffect`
  * in the chat screen when the screen mounts or refocuses, so the user sees
- * any messages delivered while the app was backgrounded. The refetch
- * interval in `useMessages` covers the steady-state polling.
+ * any messages delivered while the app was backgrounded.
  */
 export function useIngestConversation() {
   const currentUser = useObserver(() => appStore.currentUser);
