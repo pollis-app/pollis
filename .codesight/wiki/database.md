@@ -134,8 +134,51 @@ not depend on each other, so this is kept identical by hand and by matching test
 both sides; diff them if you change either. (Before #875 they had drifted: the client
 copy did not trim.)
 
+### conversation _(migration `000016`, #880)_
+- `id` TEXT PK — the conversation-id namespace, shared by all three kinds
+- `kind` TEXT NOT NULL CHECK (`dm` | `group` | `channel`)
+- `created_at` TEXT NOT NULL DEFAULT now
+- UNIQUE index on (`id`, `kind`) — redundant against the PK today; it exists to back the composite foreign key the tightening phase needs (see below)
+
+**What it is for.** `dm_channel`, `groups` and `channels` are three tables with
+three separate primary keys, so SQLite accepts the same id in all three — and
+`is_member` (`pollis-delivery/src/writes.rs`) ORs across all three on one id. A
+DM whose id is a victim group's id therefore made `is_member(victim_group, you)`
+true: membership of a group you were never in, and with it commit injection, a
+GroupInfo/Welcome overwrite and a LiveKit token for their room. Not a ULID
+collision — every creation endpoint takes the id from the request body, so an
+attacker *names* an existing conversation.
+
+`conversation` owns that namespace. Every DS create path claims the id here **in
+the same transaction** as the row it names (`writes::claim_conversation_id`), so
+a second claim of one id cannot commit: the primary key refuses it and the
+creation rolls back whole. `conversation_id_taken` still runs first and is still
+worth having — it turns the refusal into a clean 403 instead of a 500 — but it is
+no longer the only thing standing between an attacker and a shared id.
+
+**Append-only.** Rows are never deleted, not even when the conversation is. A
+claimed id is claimed forever, because the attack is *reuse*: a deleted
+conversation is the most attractive id to squat (members' clients may still hold
+MLS state keyed to it), and with `foreign_keys=OFF` in production the baseline's
+`ON DELETE CASCADE` clauses do not fire, so a deleted group leaves its
+`group_member` and `channels` rows behind for a re-registered id to inherit. The
+cost is one small row per conversation ever created, with no user linkage.
+
+**Not yet a foreign key** (follow-up: #948). Making the three tables reference
+this one means rebuilding each of them (SQLite's 12-step CREATE/copy/DROP/RENAME),
+which is not additive and so cannot ship in the same release. Two constraints
+shape that phase:
+- a *bare* FK per table would not be enough — `groups.id REFERENCES
+  conversation(id)` and `dm_channel.id REFERENCES conversation(id)` are both
+  satisfied by the same parent row, so the pair could still share an id. It needs
+  a constant `kind` column on each child and a composite `(id, kind)` FK;
+- production Turso runs with **`foreign_keys=OFF`**, so any FK is inert there.
+  The mechanism that actually enforces this on Turso is a `BEFORE INSERT` trigger
+  per table claiming the id — triggers fire regardless of the pragma, which the
+  commit-log DB already relies on (`migrations-log/000005`).
+
 ### groups
-- `id` TEXT PK
+- `id` TEXT PK — also registered in `conversation` with `kind='group'` (#880)
 - `name` TEXT NOT NULL
 - `description` TEXT
 - `icon_url` TEXT
@@ -150,7 +193,7 @@ copy did not trim.)
 - `joined_at` TEXT NOT NULL DEFAULT now
 
 ### channels
-- `id` TEXT PK
+- `id` TEXT PK — also registered in `conversation` with `kind='channel'` (#880), including the default text/voice channels `groups/create` makes
 - `group_id` TEXT NOT NULL FK groups
 - `name` TEXT NOT NULL
 - `description` TEXT
@@ -263,7 +306,7 @@ operator still sees the sender in real time. Closing that axis is v1.5
 anonymous-membership (not shipped — tracked in #489).
 
 ### dm_channel
-- `id` TEXT PK
+- `id` TEXT PK — also registered in `conversation` with `kind='dm'` (#880)
 - `created_by` TEXT NOT NULL
 - `created_at` TEXT NOT NULL DEFAULT now
 

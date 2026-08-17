@@ -146,6 +146,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "custom_emoji",
         include_str!("../migrations/000015_custom_emoji.sql"),
     ),
+    (
+        16,
+        "conversation_namespace",
+        include_str!("../migrations/000016_conversation_namespace.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element
