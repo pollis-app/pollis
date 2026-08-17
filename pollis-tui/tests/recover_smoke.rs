@@ -16,7 +16,7 @@
 //!   new device:  set_pin -> finalize(user_id) -> initialize_identity
 //!
 //! Device A and the recovering device B are the SAME user → separate
-//! `POLLIS_DATA_DIR`s. Carol (a third user) is the independent decryptor proving
+//! data dirs. Carol (a third user) is the independent decryptor proving
 //! B's recovered leaf works. Bounded-history: B does not inherit the message A
 //! sent before recovery, but once recovered B can send + the members decrypt.
 

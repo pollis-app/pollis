@@ -10,7 +10,7 @@
 //! 1. A (file-backed keystore, so identity survives a `drop`) and B sign up.
 //! 2. A opens a DM to B; B accepts; B sends "before restart".
 //! 3. A syncs and reads it once (proves the pre-restart baseline).
-//! 4. A's `AppState` is DROPPED and rebuilt on the SAME `POLLIS_DATA_DIR` + libsql
+//! 4. A's `AppState` is DROPPED and rebuilt on the SAME data dir + libsql
 //!    with a FRESH `default_os_keystore` — a genuine quit→relaunch.
 //! 5. `auth::boot` must report `Returning`; `auth::unlock` with A's PIN succeeds.
 //! 6. A re-syncs and can STILL read "before restart" — resync after restart.

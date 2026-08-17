@@ -78,12 +78,16 @@ pub(crate) async fn world() -> &'static TestWorld {
             // runs at exit. Dropping it during an ongoing test would delete
             // open DBs.
             let path = tmp.keep();
-            std::env::set_var("POLLIS_DATA_DIR", &path);
+            // Not `std::env::set_var`: the harness runs an in-process DS and
+            // per-client background work on other threads, and mutating the
+            // process environment while another thread may be reading it is a
+            // data race (#923). `set_data_dir` is a locked write.
+            pollis_core::db::local::set_data_dir(&path);
 
-            // DEV_OTP short-circuits email send in request_otp and fixes the
-            // OTP to a known value — safe because debug_assertions is on in
-            // integration tests.
-            std::env::set_var("DEV_OTP", DEV_OTP);
+            // No `DEV_OTP` in the environment: the in-process DS is handed the
+            // code explicitly as `OtpConfig { dev_otp }` and every client posts
+            // `DEV_OTP` literally to verify-otp, so the env var was carrying
+            // nothing but the same `set_var` race (#923).
 
             // Stand-in for "remote Turso" (the MAIN DB) — a libsql file in the
             // same temp dir as the per-user SQLCipher DBs. No network round-trip.

@@ -41,7 +41,7 @@ const ROWS: u16 = 40;
 const TEST_SYNC_CADENCE: Duration = Duration::from_millis(40);
 
 /// One headless UI client: its own `App` + `AppState` + `TestBackend`, pinned to
-/// its own `POLLIS_DATA_DIR` so two drivers in one process never collide on disk.
+/// its own data dir so two drivers in one process never collide on disk.
 pub struct Driver {
     app: App,
     terminal: Terminal<TestBackend>,
@@ -54,10 +54,10 @@ impl Driver {
     /// scopes this client's on-disk state (local SQLCipher DB + accounts index).
     pub fn new(world: &World, device_name: &str) -> Self {
         let data_dir = world.device_dir(device_name);
-        // Point POLLIS_DATA_DIR at this client's dir before building anything that
-        // reads it (the keystore is in-memory, but accounts.json / local DB derive
-        // their path from it during signup).
-        std::env::set_var("POLLIS_DATA_DIR", &data_dir);
+        // Point the data dir at this client's before building anything that reads
+        // it (the keystore is in-memory, but accounts.json / local DB derive their
+        // path from it during signup).
+        pollis_core::db::local::set_data_dir(&data_dir);
 
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
         let state = Arc::new(AppState::new_with_parts(
@@ -95,14 +95,17 @@ impl Driver {
             .to_string()
     }
 
-    /// Re-point the process-global `POLLIS_DATA_DIR` at THIS driver's dir. Called
-    /// before any keystore/local-DB/accounts touch. Safe because a single test
-    /// drives its clients sequentially and each integration-test file is its own
-    /// process (mirrors `TestClient::use_dir`). Post-signup send/sync/read paths
-    /// use the already-cached local-DB + in-memory keystore handles, so they
-    /// don't depend on the env var — only boot/signup do.
+    /// Re-point the process-wide data dir at THIS driver's. Called before any
+    /// keystore/local-DB/accounts touch (mirrors `TestClient::use_dir`).
+    /// Post-signup send/sync/read paths use the already-cached local-DB +
+    /// in-memory keystore handles, so they never resolve it — only boot/signup do.
+    ///
+    /// This is the one place in the crate where a *concurrent* reader is real:
+    /// each driver runs a background sync loop while the other is being pumped.
+    /// `set_data_dir` is a locked write, so the worst case is a stale-but-whole
+    /// path; `std::env::set_var` here was a genuine data race (#923).
     fn activate(&self) {
-        std::env::set_var("POLLIS_DATA_DIR", &self.data_dir);
+        pollis_core::db::local::set_data_dir(&self.data_dir);
     }
 
     // ── Pumping the UI ────────────────────────────────────────────────────────

@@ -4,22 +4,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// When POLLIS_DATA_DIR is set (second dev instance), namespace keyring entries
-/// so multiple instances don't stomp each other's session/identity keys.
-/// Production builds without POLLIS_DATA_DIR are unaffected.
+/// When an explicit data dir is chosen (a second dev instance's
+/// `POLLIS_DATA_DIR`, or a test rig's [`crate::db::local::set_data_dir`]),
+/// namespace keyring entries so multiple instances don't stomp each other's
+/// session/identity keys. A build that chose no directory — every shipped
+/// desktop install — is unaffected and keeps its unprefixed keys.
 fn namespaced(key: &str) -> String {
     #[cfg(debug_assertions)]
     let key = format!("DEV:{key}");
 
-    match std::env::var("POLLIS_DATA_DIR") {
-        Ok(dir) => {
-            let label = std::path::Path::new(&dir)
+    match crate::db::local::explicit_data_dir() {
+        Some(dir) => {
+            let label = dir
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("dev2");
             format!("{label}:{key}")
         }
-        Err(_) => key.to_string(),
+        None => key.to_string(),
     }
 }
 
@@ -588,42 +590,13 @@ mod file_backend {
     use std::path::{Path, PathBuf};
 
     fn store_path() -> PathBuf {
-        #[cfg(target_os = "macos")]
-        let base = {
-            if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
-                PathBuf::from(dir)
-            } else {
-                let home = std::env::var("HOME").unwrap_or_default();
-                PathBuf::from(home).join("Library/Application Support/com.pollis.app")
-            }
-        };
-        #[cfg(target_os = "linux")]
-        let base = {
-            if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
-                PathBuf::from(dir)
-            } else {
-                let home = std::env::var("HOME").unwrap_or_default();
-                PathBuf::from(home).join(".local/share/pollis")
-            }
-        };
-        #[cfg(target_os = "windows")]
-        let base = {
-            if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
-                PathBuf::from(dir)
-            } else {
-                let appdata = std::env::var("APPDATA").unwrap_or_default();
-                PathBuf::from(appdata).join("pollis")
-            }
-        };
-        // Mobile: the bridge passes POLLIS_DATA_DIR (app sandbox).
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        let base = {
-            if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
-                PathBuf::from(dir)
-            } else {
-                std::env::temp_dir().join("pollis")
-            }
-        };
+        // The same directory the local DB and `accounts.json` resolve to. This
+        // used to be a hand-copied per-OS duplicate of `dirs_path()`; the two
+        // agreed on every branch, so the copy bought nothing and could only ever
+        // drift — a keystore looking in a different directory from the database
+        // it unlocks is exactly the failure that would not show up until a
+        // platform default changed on one side.
+        let base = crate::db::local::dirs_path();
         // The name is a fossil from when this file really was debug-only. It is
         // deliberately NOT renamed: a rename means writing the new file and
         // then deleting the old one, and the delete is a delete of live key
