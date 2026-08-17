@@ -153,7 +153,17 @@ jobs:
           sudo docker image prune --all --force || true
           df -h /
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The PINNED toolchain, not `@stable`. The action exports
+      # `RUSTUP_TOOLCHAIN`, which OVERRIDES `rust-toolchain.toml` — so this job
+      # was silently testing on whatever stable happened to be that week while
+      # releases build on 1.96.0, and it would ignore the pin's new `clippy`
+      # component. Pinning here makes the lint gate below deterministic (a new
+      # stable's new lints cannot turn an untouched PR red on their own) and
+      # makes the gate test what actually ships. Bump in lockstep with
+      # rust-toolchain.toml and the desktop-release refs.
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
         with:

@@ -74,7 +74,7 @@ so it can set that env var without racing another test.
 4. `cargo test -p pollis-core` — MLS unit tests.
 5. `cargo test -p pollis-tui` — see below.
 6. `cargo test --features test-harness --test flows` — the integration harness.
-7. `cargo clippy --workspace --all-targets -- -D warnings` — the Rust lint gate (#912). Runs last so the test signal lands first, and inside this job because the toolchain, apt deps and cargo cache are already there. The pinned toolchain ships clippy via `components = ["clippy"]` in `rust-toolchain.toml`, so `cargo clippy` works on a dev box with no extra step.
+7. `cargo clippy --workspace --all-targets -- -D warnings` — the Rust lint gate (#912). Runs last so the test signal lands first, and inside this job because the toolchain, apt deps and cargo cache are already there. `rust-toolchain.toml` lists `components = ["clippy"]`, so `cargo clippy` works on a dev box with no extra step; the job pins `dtolnay/rust-toolchain@1.96.0` (the action exports `RUSTUP_TOOLCHAIN` and would otherwise override the pin) so a new stable's new lints cannot turn an untouched PR red.
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so one failure still lets the rest report.
 

@@ -171,13 +171,13 @@ cargo test -p pollis-tui        # unit tests + auth/sync smokes, all in-box
   DoD's quit→relaunch→unlock→resync coverage consolidated away in M2a). A (a
   **file-backed keystore** client, so its identity survives an `AppState` drop)
   receives B's message, then its `AppState` is dropped and rebuilt on the SAME
-  `POLLIS_DATA_DIR` + libsql (`TestClient::{new_persistent,restart}` in the rig).
+  data dir + libsql (`TestClient::{new_persistent,restart}` in the rig).
   `auth::boot` must report `Returning`, `auth::unlock` with the PIN succeeds, and
   after `sync_rounds` A can STILL read the pre-restart message.
 - `tests/enroll_smoke.rs` — **the M4 enrollment gate: second device via sibling
   approval + working MLS leaf.** Device A (alice) is in a DM with Carol (a third
   user) and has sent a message. A fresh device B (same user, **its own
-  `POLLIS_DATA_DIR`**) proves alice's email (`begin_enrollment`), requests
+  data dir**) proves alice's email (`begin_enrollment`), requests
   enrollment (`request_enrollment`), A confirms the verification code and
   `approve`s, B polls to `Approved` and finishes (`set_pin` → `finalize` →
   `initialize_identity`). B then **sends** a message that both Carol and A
@@ -190,11 +190,18 @@ cargo test -p pollis-tui        # unit tests + auth/sync smokes, all in-box
 
 Both M4 smokes need **per-device data dirs** — two devices of the same user
 would otherwise collide on `pollis_{user_id}.db`, the file keystore, and
-`accounts.json` (all keyed off `POLLIS_DATA_DIR`). The rig's
+`accounts.json` (all keyed off the data dir). The rig's
 `TestClient::new_persistent_in(world, name)` pins each device to its own subdir
-and repoints `POLLIS_DATA_DIR` just-in-time (`use_dir`, called from `activate`)
-before every on-disk touch; safe because a test drives its clients sequentially
-and each test file is its own process. The rig also wires the enrollment DS
+and repoints the process at it just-in-time (`use_dir`, called from `activate`)
+before every on-disk touch.
+
+That repointing goes through **`pollis_core::db::local::set_data_dir`**, never
+`std::env::set_var("POLLIS_DATA_DIR", ..)` (#923). The rig always has other
+threads live — the in-process DS, each `App`'s background sync loop — and
+`setenv` racing another thread's `getenv` is undefined behaviour, which shows up
+as a rare load-dependent failure and nothing else. `set_data_dir` is a locked
+write; `POLLIS_DATA_DIR` still works and is still what a second dev instance and
+the mobile bridge use. The rig also wires the enrollment DS
 routes (`/v1/auth/enrollment-request` session-gated, `/v1/enrollment/{approve,
 reject}` device-signed, `/v1/security-events`).
 
