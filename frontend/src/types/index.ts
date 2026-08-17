@@ -350,7 +350,24 @@ export interface ReleaseArtifact {
   payload_sha256: string; // lowercase hex
   artifact_sha256: string; // lowercase hex
   provenance_uri: string;
+  // The build recipe recorded in this artifact's leaf. Every field reads
+  // "unknown" for tags attested before #939, and the tree is append-only, so
+  // those cannot be backfilled — treat "unknown" as absent, never as a value.
+  toolchain: Toolchain;
   included: boolean; // inclusion proof verified against the latest binaries STH
+}
+
+// The reproducibility recipe pinned into each binary-transparency leaf,
+// mirroring the Rust `Toolchain` (`verifiable_log_builder::binaries`).
+export interface Toolchain {
+  rustc: string; // e.g. "1.96.0", or "unknown" pre-#939
+  node: string;
+  pnpm: string;
+  // CI runner image identity, e.g. "ubuntu22@20260810.260.1", with a
+  // "+helper:<os>@<version>" suffix on Linux because the AppImage embeds a
+  // capture helper compiled on a second image.
+  runner_image: string;
+  source_date_epoch: number; // Unix seconds — the tag commit's timestamp
 }
 
 // Result of verifying a single release tag's binaries, mirroring the Rust

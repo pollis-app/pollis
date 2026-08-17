@@ -51,6 +51,12 @@ pub const BINARIES_TENANT: &str = binaries::TENANT;
 /// must be able to name it without depending on the builder crate.
 pub use binaries::Layer;
 
+/// Re-exported for the same reason as [`Layer`]: since #944 the recorded build
+/// recipe is part of [`ReleaseArtifact`], because a rebuilder has to be able to
+/// check it *ran in the environment the leaf names* before it is entitled to
+/// call a byte divergence a reproducibility failure.
+pub use binaries::Toolchain;
+
 /// One released artifact in a tag's set, as reported to a caller. Mirrors the
 /// key structural fields of a [`BinaryRecord`] plus whether its inclusion proof
 /// checked out against the signed head.
@@ -72,6 +78,22 @@ pub struct ReleaseArtifact {
     pub artifact_sha256: String,
     /// URI of this artifact's provenance attestation.
     pub provenance_uri: String,
+    /// The build recipe the release recorded for this artifact, verbatim from
+    /// the leaf.
+    ///
+    /// Surfaced (#944) because a rebuilder cannot honestly classify a byte
+    /// divergence without it. The Linux AppImage vendors host system libraries
+    /// (`libkrb5`, `libsqlite3`, `libsystemd`, …) that `linuxdeploy` copies off
+    /// the runner, so a rebuild on a DIFFERENT runner image legitimately
+    /// produces different bytes with identical source. v1.9.3 diverged for
+    /// exactly that reason and was published as an unexplained "did not
+    /// reproduce" for three days, because the verdict step could not see that
+    /// the two builds ran on different images. It can now.
+    ///
+    /// Tags attested before #939 carry `"unknown"` in every version field; that
+    /// is a *recorded* fact about the leaf, not a defect here, and a consumer
+    /// must treat it as "the recipe is unknown", never as a match.
+    pub toolchain: Toolchain,
     /// Did this entry's inclusion proof verify against the latest binaries STH?
     pub included: bool,
 }
@@ -279,6 +301,7 @@ pub fn verify_release_in_bundle_at(
             payload_sha256: record.payload_sha256.clone(),
             artifact_sha256: record.artifact_sha256.clone(),
             provenance_uri: record.provenance_uri.clone(),
+            toolchain: record.toolchain.clone(),
             included,
         });
     }
