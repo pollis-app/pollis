@@ -352,14 +352,17 @@ pub async fn ds_livekit_send_data(
 }
 
 /// List a voice room's roster via the DS (server-side `ListParticipants`).
-/// Returns `(identity, display_name)` pairs; internal participants are already
-/// filtered server-side. Replaces `room_service_list_participants`. Desktop-only
-/// — mobile has no Rust-side voice roster (see `livekit_stub`).
+///
+/// Returns each participant already resolved to a user (#836): the DS holds the
+/// per-room identity key, so it decrypts the opaque identities LiveKit reports
+/// and attaches the user id and display name on the way back. Internal
+/// participants and `view` clients are filtered server-side. Desktop-only —
+/// mobile has no Rust-side voice roster (see `livekit_stub`).
 #[cfg(feature = "media")]
 pub async fn ds_livekit_participants(
     state: &Arc<AppState>,
     room: &str,
-) -> Result<Vec<(String, String)>> {
+) -> Result<Vec<ResolvedIdentity>> {
     // No-auth fallback for the acting user — see `ds_livekit_token`.
     let body = pollis_api::broker::LivekitParticipantsBody {
         room: room.to_string(),
@@ -373,24 +376,83 @@ pub async fn ds_livekit_participants(
             "ds_livekit_participants {status}: {txt}"
         )));
     }
-    #[derive(serde::Deserialize)]
-    struct P {
-        identity: String,
-        name: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct Resp {
-        participants: Vec<P>,
-    }
-    let parsed: Resp = resp
+    let parsed: IdentityResp = resp
         .json()
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_livekit_participants decode: {e}")))?;
-    Ok(parsed
-        .participants
-        .into_iter()
-        .map(|p| (p.identity, p.name))
-        .collect())
+    Ok(parsed.participants)
+}
+
+/// One participant identity resolved back to a Pollis user (#836).
+///
+/// `identity` is the opaque per-room pseudonym LiveKit sees; the rest is what
+/// only the DS can recover from it. `kind` is absent on the roster endpoint
+/// (which already filters to real voice participants) and present when
+/// resolving raw identities off the SDK event stream.
+#[cfg(feature = "media")]
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct ResolvedIdentity {
+    pub identity: String,
+    pub user_id: String,
+    /// Display name. Since #836 the LiveKit JWT carries no `name` claim — it was
+    /// the user's username, which made pseudonymising the identity pointless —
+    /// so this comes from the DS's own DB rather than off the SFU.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+#[cfg(feature = "media")]
+#[derive(serde::Deserialize)]
+struct IdentityResp {
+    #[serde(default)]
+    participants: Vec<ResolvedIdentity>,
+    #[serde(default)]
+    identities: Vec<ResolvedIdentity>,
+}
+
+/// Ask the DS to resolve opaque LiveKit participant identities back to users
+/// (#836).
+///
+/// Identities minted for a room are only meaningful under that room's key, which
+/// lives on the DS and nowhere else — a per-room key shipped in a release binary
+/// could be extracted, and one that resolved every room would hand the whole
+/// social graph back. So a client that learns a peer identity from the LiveKit
+/// event stream asks here.
+///
+/// `room` is the **logical** room (conversation id / `inbox-<user>` /
+/// `call-<ulid>`), not the LiveKit pseudonym. Identities the DS cannot resolve
+/// are simply absent from the result; callers leave those participants
+/// unattributed rather than guessing.
+#[cfg(feature = "media")]
+pub async fn ds_livekit_identities(
+    state: &Arc<AppState>,
+    room: &str,
+    identities: Vec<String>,
+) -> Result<Vec<ResolvedIdentity>> {
+    if identities.is_empty() {
+        return Ok(Vec::new());
+    }
+    // No-auth fallback for the acting user — see `ds_livekit_token`.
+    let body = pollis_api::broker::LivekitIdentitiesBody {
+        room: room.to_string(),
+        identities,
+        user_id: Some(current_user_id(state).await?),
+    };
+    let resp = ds_post(state, &body).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "ds_livekit_identities {status}: {txt}"
+        )));
+    }
+    let parsed: IdentityResp = resp
+        .json()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_livekit_identities decode: {e}")))?;
+    Ok(parsed.identities)
 }
 
 /// Mint a short-TTL **read-only** Turso token via the DS. Returns `(token,

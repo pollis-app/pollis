@@ -82,6 +82,59 @@ pub fn roster_changed_payload(conversation_id: &str, epoch_before: u64, epoch_af
     })
 }
 
+/// `typing` broadcast to a conversation's LiveKit room.
+///
+/// A SHARED-ROOM broadcast, so §5 applies in full: it used to carry `user_id`
+/// and `username`, which — after #836 made participant identity an opaque
+/// per-room pseudonym — was the shortest path back to undoing that. The SFU
+/// forwards these in cleartext and knows which participant published them, so a
+/// `user_id` in the body annotates the pseudonym with the account it was
+/// supposed to hide, on every keystroke burst.
+///
+/// The recipient attributes the typist from the PUBLISHING PARTICIPANT instead
+/// (resolved through the DS, like every other identity), which is strictly
+/// better than trusting a self-declared id in the body anyway.
+pub fn typing_payload(
+    channel_id: Option<&str>,
+    conversation_id: Option<&str>,
+    is_typing: bool,
+) -> Value {
+    json!({
+        "type": "typing",
+        "channel_id": channel_id,
+        "conversation_id": conversation_id,
+        "is_typing": is_typing,
+    })
+}
+
+/// `voice_joined` / `voice_left` broadcast to a group's LiveKit room: "the voice
+/// roster for this channel changed — refetch it".
+///
+/// Identity-free for the same reason as [`typing_payload`]: it is a shared-room
+/// broadcast, and it used to carry `user_id` + `display_name`. The recipient
+/// takes the actor from the publishing participant; the roster it then refetches
+/// is authoritative regardless.
+pub fn voice_presence_payload(channel_id: &str, joined: bool) -> Value {
+    json!({
+        "type": if joined { "voice_joined" } else { "voice_left" },
+        "channel_id": channel_id,
+    })
+}
+
+/// `device_revoked` nudge sent to a user's own inbox room: "one of your devices
+/// was revoked — every device re-check whether it is still registered".
+///
+/// Carries nothing. It used to send `device_id` + `user_id`, and **no recipient
+/// read either**: the handler states outright that the payload is advisory and
+/// spoofable, so it ignores the `device_id` and re-checks authoritatively with
+/// `is_current_device_registered` using the user id it already holds. They were
+/// pure leakage — and the `user_id` was worse than most, because it re-identified
+/// the *inbox room* that #828 had just made pseudonymous, from inside a packet
+/// LiveKit forwards in cleartext.
+pub fn device_revoked_payload() -> Value {
+    json!({ "type": "device_revoked" })
+}
+
 /// `dm_created` wake-up sent to a user's PRIVATE inbox room (`inbox-{userId}`,
 /// single-subscriber). Unlike the group-room broadcasts above, this MAY carry
 /// the creator's public username: only the recipient subscribes to their own
@@ -166,6 +219,44 @@ mod tests {
         assert_eq!(p["type"], "deleted_message");
         assert_eq!(p["message_id"], "msg-1");
         assert_no_identity(&p);
+    }
+
+    /// #836: the typing broadcast is where the pseudonymous participant identity
+    /// used to be un-done — it carried the typist's `user_id` and `username` in
+    /// cleartext, published by that very participant, several times a minute.
+    #[test]
+    fn typing_broadcast_carries_no_typist() {
+        let p = typing_payload(Some("chan-1"), None, true);
+        assert_eq!(p["type"], "typing");
+        assert_eq!(p["channel_id"], "chan-1");
+        assert_eq!(p["is_typing"], true);
+        assert_no_identity(&p);
+        // `display_name` is not in the shared blocklist (it is legitimate on the
+        // inbox payloads); pin it here, where it is not.
+        assert!(p.as_object().unwrap().get("display_name").is_none());
+    }
+
+    /// Same for the voice roster nudge, which carried `user_id` + `display_name`.
+    #[test]
+    fn voice_presence_broadcast_carries_no_actor() {
+        for joined in [true, false] {
+            let p = voice_presence_payload("chan-1", joined);
+            assert_eq!(p["type"], if joined { "voice_joined" } else { "voice_left" });
+            assert_eq!(p["channel_id"], "chan-1");
+            assert_no_identity(&p);
+            assert!(p.as_object().unwrap().get("display_name").is_none());
+        }
+    }
+
+    /// The nudge must stay empty: `user_id` here would undo #828's pseudonymous
+    /// inbox room name, and `device_id` was never read by anyone.
+    #[test]
+    fn device_revoked_nudge_is_empty() {
+        let p = device_revoked_payload();
+        assert_eq!(p["type"], "device_revoked");
+        assert_no_identity(&p);
+        assert!(p.as_object().unwrap().get("device_id").is_none());
+        assert_eq!(p.as_object().unwrap().len(), 1, "nudge must carry only its type: {p}");
     }
 
     #[test]

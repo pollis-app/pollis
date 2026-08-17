@@ -70,9 +70,11 @@ export type RealtimeEvent =
       devices_removed: [string, string][];
     }
   | {
+      // Carries nothing (#836). It never usefully did: the handler treats the
+      // payload as advisory and spoofable, ignores any device id in it, and
+      // re-checks registration authoritatively — so the ids were pure leakage
+      // on a cleartext channel.
       type: "device_revoked";
-      device_id: string;
-      user_id: string;
     };
 
 // The set of `type` discriminants this client understands. An event whose

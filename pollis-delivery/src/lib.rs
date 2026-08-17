@@ -38,6 +38,7 @@ pub mod headers;
 pub mod invite_token;
 pub mod messages;
 pub mod otp;
+pub mod participant_id;
 pub mod profile;
 pub mod ratelimit;
 pub mod redact;
@@ -407,6 +408,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<broker::LivekitTokenBody as DsRequest>::PATH, post(broker::livekit_token))
         .route(<broker::LivekitSendDataBody as DsRequest>::PATH, post(broker::livekit_send_data))
         .route(<broker::LivekitParticipantsBody as DsRequest>::PATH, post(broker::livekit_participants))
+        .route(<broker::LivekitIdentitiesBody as DsRequest>::PATH, post(broker::livekit_identities))
         .route(<broker::TursoTokenBody as DsRequest>::PATH, post(broker::turso_token))
         .route(<broker::R2PresignBody as DsRequest>::PATH, post(broker::r2_presign))
         // Hardening middleware (#345). Rate limiting runs first (inner); security

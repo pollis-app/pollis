@@ -1535,11 +1535,7 @@ pub async fn revoke_device(
     // `is_current_device_registered` and only the revoked device logs out.
     // Advisory UX only — a hostile/offline device that ignores this is still
     // evicted at the MLS layer (honest members reject its self-add). Non-fatal.
-    let payload = serde_json::json!({
-        "type": "device_revoked",
-        "device_id": device_id,
-        "user_id": user_id,
-    });
+    let payload = crate::commands::livekit_signalling::device_revoked_payload();
     if let Err(e) =
         crate::commands::livekit::publish_to_user_inbox(state, &user_id, payload).await
     {

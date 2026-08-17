@@ -266,8 +266,11 @@ pub async fn publish_member_role_changed_to_room(
 pub async fn publish_voice_presence(
     group_id: String,
     channel_id: String,
-    user_id: String,
-    display_name: String,
+    // #836: the actor no longer travels in the payload — recipients take it from
+    // the publishing participant. Kept for command-signature stability with the
+    // renderer/shim, like `connect_rooms`' `_username`.
+    _user_id: String,
+    _display_name: String,
     joined: bool,
     state: &Arc<AppState>,
 ) -> Result<()> {
@@ -277,20 +280,13 @@ pub async fn publish_voice_presence(
     };
 
     if let Some(room) = room {
-        let payload = if joined {
-            serde_json::to_vec(&serde_json::json!({
-                "type": "voice_joined",
-                "channel_id": channel_id,
-                "user_id": user_id,
-                "display_name": display_name,
-            }))
-        } else {
-            serde_json::to_vec(&serde_json::json!({
-                "type": "voice_left",
-                "channel_id": channel_id,
-                "user_id": user_id,
-            }))
-        }
+        // #836/§5: identity-free. The actor is the publishing participant, which
+        // LiveKit reports to every recipient anyway — repeating it in the body as
+        // a raw `user_id` only told the SFU which account is behind the
+        // pseudonymous participant that just published it.
+        let payload = serde_json::to_vec(
+            &crate::commands::livekit_signalling::voice_presence_payload(&channel_id, joined),
+        )
         .map_err(Error::Serde)?;
 
         let _ = room
@@ -315,8 +311,9 @@ pub async fn publish_typing(
     room_id: String,
     channel_id: Option<String>,
     conversation_id: Option<String>,
-    user_id: String,
-    username: Option<String>,
+    // See `publish_voice_presence` — identity comes from the sender now.
+    _user_id: String,
+    _username: Option<String>,
     is_typing: bool,
     state: &Arc<AppState>,
 ) -> Result<()> {
@@ -330,14 +327,13 @@ pub async fn publish_typing(
         Some(r) => r,
     };
 
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "type": "typing",
-        "channel_id": channel_id,
-        "conversation_id": conversation_id,
-        "user_id": user_id,
-        "username": username,
-        "is_typing": is_typing,
-    }))
+    // #836/§5: identity-free — see `voice_presence_payload`. The recipient
+    // attributes the typist from the publishing participant.
+    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::typing_payload(
+        channel_id.as_deref(),
+        conversation_id.as_deref(),
+        is_typing,
+    ))
     .map_err(Error::Serde)?;
 
     let _ = room

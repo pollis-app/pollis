@@ -227,6 +227,11 @@ class VoiceSessionManager {
    * participant is ourselves. Lazily fetched once via `get_device_id`; stays
    * null (→ legacy `voice-{userId}` identity) only if the backend can't supply
    * one yet.
+   *
+   * #836 did not change this. The identity LiveKit sees is now an opaque
+   * per-room pseudonym, but Rust pins its own pseudonym to exactly the string
+   * built here before it connects, so both ends still agree on one local
+   * identity — see `livekit::identity::pin_local_identity`.
    */
   private deviceId: string | null = null;
   /**
@@ -724,8 +729,8 @@ class VoiceSessionManager {
   /**
    * Build this device's voice identity: `voice-{userId}:{deviceId}` once the
    * device id is known, else the legacy `voice-{userId}`. Must match exactly
-   * what the Rust side mints (`voice/lifecycle.rs::voice_identity`) so the
-   * local participant's events resolve as `isLocal`.
+   * what the Rust side builds (`commands/livekit_identity.rs::voice_identity`)
+   * so the local participant's events resolve as `isLocal`.
    */
   private localVoiceIdentity(userId: string): string {
     return this.deviceId ? `voice-${userId}:${this.deviceId}` : `voice-${userId}`;

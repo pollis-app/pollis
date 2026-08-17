@@ -355,25 +355,8 @@ impl VoiceState {
     }
 }
 
-/// Extract the bare `user_id` from a voice-channel LiveKit identity.
-///
-/// Identity formats produced by this module:
-///   - `voice-{user_id}` (today)
-///   - `voice-{user_id}:{device_id}` (reserved for #140; not emitted yet)
-///
-/// Anything that doesn't match the `voice-` prefix is returned unchanged so
-/// the helper degrades to a no-op if some other identity scheme leaks in.
-///
-/// NOTE (#140 — multi-device voice): if/when a single user can be present
-/// in a voice channel from multiple devices, decide whether `user_volumes`
-/// should remain user-scoped (current behavior — simpler, "Bob is Bob") or
-/// shift to per-device (`{user_id}:{device_id}`). If you change the key
-/// shape, update both this helper and the frontend writers in
-/// `RemoteUserVolumeSlider.tsx` / `useVoiceChannel.ts`.
-pub fn user_id_from_voice_identity(identity: &str) -> &str {
-    let stripped = identity.strip_prefix("voice-").unwrap_or(identity);
-    match stripped.split_once(':') {
-        Some((uid, _device)) => uid,
-        None => stripped,
-    }
-}
+// The identity grammar itself lives in `commands::livekit_identity` (#836) —
+// outside the media gate so it is unit-tested on every target, and in one place
+// because there are now two identity spaces (opaque wire pseudonym vs. internal
+// key) and splitting the parsing across modules is how they drift.
+pub use crate::commands::livekit_identity::user_id_from_voice_identity;

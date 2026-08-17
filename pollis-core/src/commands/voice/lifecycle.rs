@@ -17,7 +17,10 @@ use livekit::{
 
 use crate::{
     commands::{
-        livekit::{lookup_avatar_url, lookup_avatar_url_for_identity},
+        livekit::{
+            is_view_identity, lookup_avatar_url, lookup_avatar_url_for_identity,
+            pin_local_identity, resolve_participant, resolve_participants,
+        },
         voice_apm,
         voice_denoiser,
         voice_e2ee,
@@ -84,19 +87,12 @@ fn apply_gate_to_room(voice: &VoiceState, gate: &TransmitGate) {
     }
 }
 
-/// Build the per-device LiveKit identity for a voice participant:
-/// `voice-{user_id}:{device_id}` when a device id is known (the normal case
-/// once logged in), falling back to the legacy `voice-{user_id}` when it
-/// isn't yet. The `:device_id` suffix is what lets two devices of the same
-/// user coexist in one room instead of colliding on the SFU and kicking each
-/// other (#140) — it mirrors the realtime/inbox flow in `livekit/realtime.rs`.
-/// Parse the `user_id` back out with `types::user_id_from_voice_identity`.
-fn voice_identity(user_id: &str, device_id: Option<&str>) -> String {
-    match device_id {
-        Some(d) => format!("voice-{user_id}:{d}"),
-        None => format!("voice-{user_id}"),
-    }
-}
+// The LOCAL participant's identity. Note "local": since #836 the identity that
+// reaches LiveKit is an opaque per-room pseudonym, and this is the internal key
+// the app and the renderer share for *ourselves*, where the device id is known.
+// Remote peers arrive as pseudonyms and are translated by
+// `livekit::identity::resolve_participants`. See `commands::livekit_identity`.
+use crate::commands::livekit_identity::voice_identity;
 
 // ── Tauri commands ────────────────────────────────────────────────────────
 
@@ -359,6 +355,14 @@ pub async fn join_voice_channel(
     if url.is_empty() {
         return Err(anyhow::anyhow!("LiveKit is not configured on this server").into());
     }
+
+    // #836: pin OUR pseudonym → `local_identity` before connecting, so every
+    // event LiveKit reports about our own participant (notably the `TrackMuted`
+    // that fires on each push-to-talk keypress) lands on the local tile instead
+    // of a synthetic-device identity nothing else uses. Read from the token we
+    // were just handed — the pseudonym is computed server-side and travels only
+    // there.
+    pin_local_identity(state, &channel_id, &token, &local_identity, &display_name).await;
 
     // ── Run room connect and mic init concurrently ─────────────────────────
     // Both are independent and individually expensive on cold starts. Running
@@ -673,21 +677,40 @@ pub async fn join_voice_channel(
     // subscribed tracks once the event loop drains buffered events, and
     // attaching twice creates competing draining tasks.
     let local_avatar_url = lookup_avatar_url(state, &user_id).await;
+    // #836: everything the SDK reports is an opaque per-room pseudonym. Resolve
+    // the whole seed roster in ONE batched DS call — the join path already pays
+    // for a Turso avatar lookup here, and doing it per participant instead would
+    // put a round trip between the user and every tile.
+    let seen: Vec<String> = room
+        .remote_participants()
+        .into_values()
+        .map(|p| p.identity().to_string())
+        .collect();
+    let resolved = resolve_participants(state, &channel_id, &seen).await;
     let existing_remote: Vec<(String, String, bool)> = room
         .remote_participants()
-        .into_iter()
-        // Skip renderer-side `:view` clients (Phase 6 — Electron screen-
-        // share connection). They share the same user as the matching
-        // `voice-<id>` participant and would otherwise dup the tile grid.
-        // The screen-share tracks they publish are still routed (they're
-        // not hidden); we just don't render them as a separate tile.
-        .filter(|(_, p)| !p.identity().to_string().ends_with(":view"))
-        .map(|(_id, p)| {
+        .into_values()
+        .filter_map(|p| {
+            let wire = p.identity().to_string();
+            let (identity, name) = resolved
+                .get(&wire)
+                .cloned()
+                .unwrap_or_else(|| (wire.clone(), String::new()));
+            // Skip renderer-side `view` clients (Phase 6 — Electron screen-
+            // share connection). They share the same user as the matching voice
+            // participant and would otherwise dup the tile grid. The screen-share
+            // tracks they publish are still routed (they're not hidden); we just
+            // don't render them as a separate tile. `is_view_identity` reads both
+            // the resolved `:view` suffix and the unresolved `w-` pseudonym, so a
+            // resolve failure cannot turn one into a phantom participant.
+            if is_view_identity(&identity) || is_view_identity(&wire) {
+                return None;
+            }
             // Seed mute state from current publications — TrackMuted only
             // fires on transitions, so a participant who muted before we
             // joined would otherwise render as unmuted indefinitely.
             let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
-            (p.identity().to_string(), p.name(), is_muted)
+            Some((identity, name, is_muted))
         })
         .collect();
     let mut existing_with_avatars: Vec<(String, String, bool, Option<String>)> =
@@ -719,6 +742,9 @@ pub async fn join_voice_channel(
 
     let voice_arc = Arc::clone(&state.voice);
     let state_for_room = Arc::clone(state);
+    // The LOGICAL room, needed to resolve peer pseudonyms (#836): identity keys
+    // are room-scoped, so the same string means nothing under another room.
+    let logical_room = channel_id.clone();
     let apm_rate_for_room = mic_rate;
     // Captured for the self-hear filter on TrackSubscribed: audio published by
     // this user's *other* devices must not be played back locally (#140).
@@ -727,9 +753,18 @@ pub async fn join_voice_channel(
         while let Some(event) = events.recv().await {
             match event {
                 RoomEvent::ParticipantConnected(p) => {
-                    let identity = p.identity().to_string();
+                    let wire = p.identity().to_string();
                     // Same filter as the seed loop above — see comment there.
-                    if identity.ends_with(":view") {
+                    if is_view_identity(&wire) {
+                        continue;
+                    }
+                    // #836: translate before anything downstream sees it. The
+                    // display name comes back with it — the LiveKit `name` claim
+                    // is empty now, because it used to be the username and made
+                    // the pseudonymous identity beside it pointless.
+                    let (identity, name) =
+                        resolve_participant(&state_for_room, &logical_room, &wire).await;
+                    if is_view_identity(&identity) {
                         continue;
                     }
                     eprintln!("[voice] participant joined: {identity}");
@@ -740,15 +775,20 @@ pub async fn join_voice_channel(
                     if let Some(ch) = &voice.channel {
                         let _ = ch.send(VoiceEvent::ParticipantJoined {
                             identity,
-                            name: p.name(),
+                            name,
                             is_muted,
                             avatar_url,
                         });
                     }
                 }
                 RoomEvent::ParticipantDisconnected(p) => {
-                    let identity = p.identity().to_string();
-                    if identity.ends_with(":view") {
+                    let wire = p.identity().to_string();
+                    if is_view_identity(&wire) {
+                        continue;
+                    }
+                    let (identity, _) =
+                        resolve_participant(&state_for_room, &logical_room, &wire).await;
+                    if is_view_identity(&identity) {
                         continue;
                     }
                     eprintln!("[voice] participant left: {identity}");
@@ -765,9 +805,14 @@ pub async fn join_voice_channel(
                     }
                 }
                 RoomEvent::TrackSubscribed { track, publication, participant } => {
+                    let (participant_identity, _) = resolve_participant(
+                        &state_for_room,
+                        &logical_room,
+                        &participant.identity().to_string(),
+                    )
+                    .await;
                     match track {
                         RemoteTrack::Audio(audio_track) => {
-                            let participant_identity = participant.identity().to_string();
                             // Self-hear mute (#140): never attach a playback
                             // stream for audio published by our own user's other
                             // devices. The participant still shows in the UI (its
@@ -780,19 +825,19 @@ pub async fn join_voice_channel(
                                 );
                                 continue;
                             }
-                            let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                            let track_key = format!("{}-{}", participant_identity, audio_track.sid());
                             eprintln!("[voice] track subscribed: {track_key}");
                             register_remote_track(
                                 audio_track.rtc_track(),
                                 track_key,
                                 Arc::clone(&voice_arc),
-                                participant.identity().to_string(),
+                                participant_identity,
                                 apm_rate_for_room,
                             )
                             .await;
                         }
                         RemoteTrack::Video(video_track) => {
-                            let track_key = format!("{}-{}", participant.identity(), video_track.sid());
+                            let track_key = format!("{}-{}", participant_identity, video_track.sid());
                             // Screen share and webcam both arrive as remote
                             // video; the publication's TrackSource is the only
                             // thing that tells them apart, so the renderer can
@@ -806,7 +851,7 @@ pub async fn join_voice_channel(
                             eprintln!("[voice] video track subscribed: {track_key} (source={source:?})");
                             crate::commands::screenshare::on_remote_video_subscribed(
                                 video_track,
-                                participant.identity().to_string(),
+                                participant_identity,
                                 source,
                                 &state_for_room,
                             )
@@ -815,9 +860,15 @@ pub async fn join_voice_channel(
                     }
                 }
                 RoomEvent::TrackUnsubscribed { track, publication: _, participant } => {
+                    let (participant_identity, _) = resolve_participant(
+                        &state_for_room,
+                        &logical_room,
+                        &participant.identity().to_string(),
+                    )
+                    .await;
                     match track {
                         RemoteTrack::Audio(audio_track) => {
-                            let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                            let track_key = format!("{}-{}", participant_identity, audio_track.sid());
                             eprintln!("[voice] track unsubscribed: {track_key}");
                             let voice = voice_arc.lock().await;
                             let mut pb = voice.playback.lock().unwrap();
@@ -832,7 +883,7 @@ pub async fn join_voice_channel(
                         RemoteTrack::Video(video_track) => {
                             crate::commands::screenshare::on_remote_video_unsubscribed(
                                 video_track,
-                                participant.identity().to_string(),
+                                participant_identity,
                                 &state_for_room,
                             )
                             .await;
@@ -841,14 +892,24 @@ pub async fn join_voice_channel(
                 }
 
                 RoomEvent::TrackMuted { participant, publication: _ } => {
-                    let identity = participant.identity().to_string();
+                    let (identity, _) = resolve_participant(
+                        &state_for_room,
+                        &logical_room,
+                        &participant.identity().to_string(),
+                    )
+                    .await;
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
                         let _ = ch.send(VoiceEvent::Muted { identity });
                     }
                 }
                 RoomEvent::TrackUnmuted { participant, publication: _ } => {
-                    let identity = participant.identity().to_string();
+                    let (identity, _) = resolve_participant(
+                        &state_for_room,
+                        &logical_room,
+                        &participant.identity().to_string(),
+                    )
+                    .await;
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
                         let _ = ch.send(VoiceEvent::Unmuted { identity });
@@ -885,10 +946,16 @@ pub async fn join_voice_channel(
                         ConnectionQuality::Poor => "poor",
                         ConnectionQuality::Lost => "lost",
                     };
+                    let (identity, _) = resolve_participant(
+                        &state_for_room,
+                        &logical_room,
+                        &participant.identity().to_string(),
+                    )
+                    .await;
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
                         let _ = ch.send(VoiceEvent::ConnectionQualityChanged {
-                            identity: participant.identity().to_string(),
+                            identity,
                             quality: quality_str.to_string(),
                         });
                     }

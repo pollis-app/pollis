@@ -207,6 +207,7 @@ endpoints! {
     broker::LivekitTokenBody => "/v1/livekit/token",
     broker::LivekitSendDataBody => "/v1/livekit/send-data",
     broker::LivekitParticipantsBody => "/v1/livekit/participants",
+    broker::LivekitIdentitiesBody => "/v1/livekit/identities",
     broker::TursoTokenBody => "/v1/turso/token",
     broker::R2PresignBody => "/v1/r2/presign",
 }

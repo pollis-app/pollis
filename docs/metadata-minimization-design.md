@@ -183,6 +183,25 @@ The `new_message` event is only a **hint to fetch** — the actual ciphertext co
 - **Stronger (v2.5):** the wake token can be a **per-conversation pseudonym** (same construction as §3.2) so LiveKit can't even use `conversation_id` to build the graph — it just sees "wake token X fired." Because LiveKit rooms are already keyed by conversation/group (`send.rs:155-181`), the *room* still leaks the conversation to LiveKit; fully hiding that requires moving wake-ups off LiveKit (see §5.2). Pseudonymizing the payload is the cheap 80%.
 - **Cost:** **zero** — the payload gets *smaller*; the client does one extra ingest it was already going to do; UX identical. This is the second-cheapest win after size padding.
 
+### 5.1a Shared-room broadcasts that still named their actor (#836)
+
+v2 as written above covered the `new_message` / `edited_message` / `deleted_message`
+wake-ups. Two shared-room broadcasts were left carrying identity and are now stripped:
+`typing` (`user_id` + `username`, several times a minute while composing) and
+`voice_joined` / `voice_left` (`user_id` + `display_name`).
+
+The reason to finish it was #836. Once the participant identity itself became an opaque
+per-room pseudonym, a `user_id` sitting in a packet **published by that very participant**
+was the shortest path back to undoing it — the SFU reads the sender's pseudonym off the
+packet and the account out of its body, in one step.
+
+The replacement is not a new field: the recipient attributes both from the **publishing
+participant**, which LiveKit reports on every `DataReceived` and which resolves to a user
+through the DS. That is also strictly stronger than what it replaces — a self-declared
+`user_id` in the body was unauthenticated. Builders live in
+`pollis-core/src/commands/livekit_signalling.rs` and are covered by its `assert_no_identity`
+sweep, so the fields cannot quietly come back.
+
 ### 5.2 Or move notification off the metadata-leaking path
 
 An alternative to minimizing LiveKit JSON is to route wake-ups through the **push path** (`push.rs::notify_new_message`, already content-free per `send.rs:219-248`) or the relay overlay, so LiveKit isn't in the notification metadata path at all. This is a bigger architectural move; v2's payload minimization captures most of the value first. Note it as a follow-on, not a prerequisite.

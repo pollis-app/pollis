@@ -123,7 +123,7 @@ pub async fn connect_rooms(
                     emit_room_initial_presence(
                         &room,
                         &room_id_owned,
-                        &lk_arc_task,
+                        &app_state_connect,
                         &user_id_task,
                     )
                     .await;
@@ -143,7 +143,7 @@ pub async fn connect_rooms(
                                 match event {
                                     RoomEvent::ParticipantConnected(p) => {
                                         emit_presence(
-                                            lk_arc,
+                                            app_state,
                                             &p.identity().to_string(),
                                             room_id,
                                             user_id,
@@ -153,7 +153,7 @@ pub async fn connect_rooms(
                                     }
                                     RoomEvent::ParticipantDisconnected(p) => {
                                         emit_presence(
-                                            lk_arc,
+                                            app_state,
                                             &p.identity().to_string(),
                                             room_id,
                                             user_id,
@@ -161,13 +161,33 @@ pub async fn connect_rooms(
                                         )
                                         .await;
                                     }
-                                    RoomEvent::DataReceived { payload, .. } => {
+                                    RoomEvent::DataReceived { payload, participant, .. } => {
+                                        // #836: shared-room broadcasts no longer name their
+                                        // actor, so resolve the PUBLISHER instead. `None` for
+                                        // server-side emitters (the DS's own SendData), which
+                                        // is why the arms that need an actor tolerate it.
+                                        let sender = match participant {
+                                            Some(p) => {
+                                                let wire = p.identity().to_string();
+                                                let (internal, name) =
+                                                    super::identity::resolve_participant(
+                                                        app_state, room_id, &wire,
+                                                    )
+                                                    .await;
+                                                super::identity::user_id_from_identity(&internal)
+                                                    .map(|uid| super::PacketSender {
+                                                        user_id: uid.to_string(),
+                                                        username: (!name.is_empty()).then_some(name),
+                                                    })
+                                            }
+                                            None => None,
+                                        };
                                         let channel = {
                                             let lk = lk_arc.lock().await;
                                             lk.channel.clone()
                                         };
                                         if let Some(ch) = channel {
-                                            let reconcile_id = super::dispatch_data(payload.as_slice(), ch.as_ref());
+                                            let reconcile_id = super::dispatch_data(payload.as_slice(), sender.as_ref(), ch.as_ref());
                                             // On membership changes: process inbound commits
                                             // so this device advances to the current epoch,
                                             // and poll Welcomes in case this device was just
@@ -272,7 +292,7 @@ pub async fn connect_rooms(
                                     emit_room_initial_presence(
                                         &new_room,
                                         &room_id_owned,
-                                        &lk_arc_task,
+                                        &app_state_task,
                                         &user_id_task,
                                     )
                                     .await;
@@ -310,16 +330,22 @@ pub async fn connect_rooms(
 }
 
 /// Send a single PresenceChanged event to the frontend, given a participant's
-/// raw LiveKit identity. No-ops if the identity isn't a real user (server
-/// pseudo-participants, the local user themselves) — those would just be noise.
+/// LiveKit identity as reported by the SDK.
+///
+/// #836: that identity is an opaque per-room pseudonym, so it is resolved
+/// through the DS first. No-ops if it isn't a real user — internal
+/// pseudo-participants, the local user themselves, or an identity that could not
+/// be resolved. That last case is deliberate: presence is a name next to a
+/// green dot, and showing the wrong person is worse than showing nobody.
 pub(super) async fn emit_presence(
-    lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    state: &Arc<AppState>,
     identity: &str,
     room_id: &str,
     self_user_id: &str,
     present: bool,
 ) {
-    let user_id = match user_id_from_identity(identity) {
+    let (internal, _) = super::identity::resolve_participant(state, room_id, identity).await;
+    let user_id = match user_id_from_identity(&internal) {
         Some(uid) => uid,
         None => return,
     };
@@ -327,7 +353,7 @@ pub(super) async fn emit_presence(
         return;
     }
     let channel = {
-        let lk = lk_arc.lock().await;
+        let lk = state.livekit.lock().await;
         lk.channel.clone()
     };
     if let Some(ch) = channel {
@@ -345,11 +371,15 @@ pub(super) async fn emit_presence(
 pub(super) async fn emit_room_initial_presence(
     room: &Arc<livekit::Room>,
     room_id: &str,
-    lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    state: &Arc<AppState>,
     self_user_id: &str,
 ) {
     let participants = room.remote_participants();
-    for (identity, _) in participants.iter() {
-        emit_presence(lk_arc, identity.as_str(), room_id, self_user_id, true).await;
+    // One batched resolve for the whole snapshot, so a room with N members costs
+    // one DS round trip rather than N.
+    let wire: Vec<String> = participants.keys().map(|k| k.to_string()).collect();
+    let _ = super::identity::resolve_participants(state, room_id, &wire).await;
+    for identity in wire {
+        emit_presence(state, &identity, room_id, self_user_id, true).await;
     }
 }

@@ -36,6 +36,13 @@ pub mod livekit;
 // payloads here so the metadata-minimized shape (§5) has one source of truth
 // and unit-tests on every target.
 pub mod livekit_signalling;
+// The participant-identity grammar (#836): the two identity spaces (opaque
+// wire pseudonym vs. internal `voice-{user}:{device}` key) and the pure
+// translation between them. Outside the media gate for the same reason as
+// `livekit_signalling` — it is pure string handling shared by the media voice
+// path and the headless stub, and keeping it here is what gets it unit-tested
+// on every target instead of only where LiveKit builds.
+pub mod livekit_identity;
 pub mod mls;
 // Runtime application of the closed-overlay relay mode (design §14): the engine
 // behind get/set_overlay_mode that live-routes control-plane traffic through the

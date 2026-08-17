@@ -23,9 +23,10 @@ answers, like OTP with no Resend key).
 
 | Endpoint | Does | Env (all required, else `503`) |
 |----------|------|--------------------------------|
-| `POST /v1/livekit/token` | HS256 participant JWT; identity = `{user}:{device}` (or `voice-`/`:view` per `kind`) from the **verified signer**; room authz (own `inbox-*` and `call-*` always ok, else membership) on the **logical** room, then the grant carries the **pseudonym** (#828) | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` |
+| `POST /v1/livekit/token` | HS256 participant JWT; identity = an opaque **per-room participant pseudonym** derived from the **verified signer** + its device + `kind` (#836); no `name` claim; room authz (own `inbox-*` and `call-*` always ok, else membership) on the **logical** room, then the grant carries the **room pseudonym** (#828) | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` |
 | `POST /v1/livekit/send-data` | Server-side `RoomService/SendData` — signs an admin JWT + Twirp POSTs a content-free control payload to a room | same LiveKit env |
-| `POST /v1/livekit/participants` | Server-side `RoomService/ListParticipants` (voice roster), internal identities filtered; membership-gated | same LiveKit env |
+| `POST /v1/livekit/participants` | Server-side `RoomService/ListParticipants` (voice roster); each identity **resolved back to its user + username** server-side (#836), internal and `view` participants filtered; membership-gated | same LiveKit env |
+| `POST /v1/livekit/identities` | Resolve opaque participant pseudonyms → `{user_id, name, kind}` for a room the caller may join (#836). The per-room key never leaves the DS | same LiveKit env |
 | `POST /v1/turso/token` | Mints a short-TTL **read-only** Turso token via the Platform API | `TURSO_PLATFORM_TOKEN`, `TURSO_ORG`, `TURSO_DB` |
 | `POST /v1/r2/presign` | SigV4 query-string presigned URL (GET/PUT/DELETE), path-style, `UNSIGNED-PAYLOAD`, `host`-only signed header | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_REGION` defaults `auto`) |
 
@@ -54,10 +55,41 @@ Rotating `LIVEKIT_API_SECRET` re-keys every room name. That is self-healing rath
 break: rotation already invalidates outstanding LiveKit tokens, so clients re-request one
 and get the new name in the same round trip.
 
-**Residual, stated plainly:** participant identity is still `{user_id}:{device_id}`, so
-the operator continues to see *which users* share a room even when it cannot tell which
-conversation that room is. Co-membership clustering survives. These are also stable
-pseudonyms, not unlinkable ones — one name per conversation for the life of the secret.
+These are stable pseudonyms, not unlinkable ones — one name per conversation for the life
+of the secret.
+
+### Participant identities are pseudonymous too (#836)
+
+Room names alone said nothing about *who* was in a room: identity was still
+`{user_id}:{device_id}` (`voice-` / `:view` per kind) and the JWT `name` claim was the
+user's **username**, so the operator kept the membership of every room and could cluster
+the social graph by co-membership without ever naming a conversation.
+
+Every identity is now `{prefix}{base64url(siv ‖ ct ‖ tag)}` — the user id **encrypted**
+under a key derived per **logical room** (`pollis-delivery/src/participant_id.rs`), with
+the device id folded into the synthetic IV so a user's two devices stay distinct
+participants (#140) without either id reaching the wire. The `name` claim is empty.
+
+Encryption rather than a one-way MAC, unlike room names, because identity is *matched
+against*: the roster, speaking indicators, presence and the self-hear filter all need to
+get from a participant back to a user. A MAC would force the resolver to enumerate
+candidate `(user, device)` pairs, which is impossible for `call-<ulid>` rooms (no
+membership rows) and stale for a device enrolled since the last sync.
+
+The key stays **server-side**, exactly as in #828 — clients resolve through
+`POST /v1/livekit/identities`, which answers only for rooms they may already join. A
+per-room key shipped in a release binary could be extracted; one that resolved every room
+would hand the whole graph back.
+
+Client side, `pollis-core/src/commands/livekit_identity.rs` owns the two identity spaces:
+the opaque **wire** pseudonym and the internal `voice-{user}:{device}` key the app and
+renderer speak. Every LiveKit boundary translates inbound; nothing internal reaches a wire.
+
+**What the SFU can still do:** count participants in a room, and recognise a returning one
+**within that room** (identities are stable per room, like room names). For 1:1 calls that
+is already per-call, because `call-<ulid>` rooms are ephemeral. What it can no longer do:
+map a participant to an account, or tell that a participant in one room is the same person
+as one in another.
 
 **The `/v1/livekit/token` response is `{token, url}`, and the URL is authoritative.**
 A LiveKit JWT is only accepted by the server that issued it, so the two travel
