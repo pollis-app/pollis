@@ -565,3 +565,86 @@ test.describe("windowed message log — cost", () => {
     expect(nodes).toBeLessThan(1500);
   });
 });
+
+/*
+ * The load-more seam (#934).
+ *
+ * `MainContent` used to clear `loadingMore` in the same `finally` that
+ * prepended the page. React batches every setState from one async
+ * continuation, so the rows and `loadingMore === false` landed in a single
+ * commit and there was no committed — or painted — state in which the fetched
+ * rows existed while the log still said it was fetching.
+ *
+ * That state is the seam anything reacting between "the page arrived" and "the
+ * load is over" needs: a scroll anchor, a spinner that must not flash, a
+ * timing measurement. Asserted through a MutationObserver rather than by
+ * polling, because polling cannot see a state that lasts one commit — and
+ * because the observer callback fires once per DOM mutation BATCH, which is
+ * exactly the granularity the claim is about: if both changes were still in
+ * one commit, no batch would ever contain new rows alongside the loading line.
+ */
+test.describe("load-more leaves a frame with the new rows and the flag still set", () => {
+  /** The newest row of the SECOND page — i.e. one that only a load-more can
+   *  put in the document, and near enough the window edge to be rendered. */
+  const FIRST_OLDER_ROW = idAt(TOTAL - 51);
+
+  for (const skin of SKINS) {
+    test(`${skin}: a prepend batch still carries the loading line`, async ({
+      page,
+    }) => {
+      await boot(page, skin, { paginate: true });
+      await openCommandPalette(page);
+      await page.getByTestId("search-panel-input").fill("general");
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId(`message-${NEWEST}`)).toBeVisible();
+
+      // Nothing older than the first page is in the document yet.
+      await expect(page.getByTestId(`message-${FIRST_OLDER_ROW}`)).toHaveCount(0);
+
+      await page.evaluate((olderRow) => {
+        const w = window as unknown as {
+          __seam: { withLoading: number; withoutLoading: number };
+        };
+        w.__seam = { withLoading: 0, withoutLoading: 0 };
+        const loadingLine = () =>
+          !!document.querySelector('[data-testid="message-loading-older"]');
+        const olderRowPresent = () =>
+          !!document.querySelector(`[data-testid="message-${olderRow}"]`);
+        // Every mutation batch in which the older row is present gets
+        // classified by whether the log still calls itself busy.
+        new MutationObserver(() => {
+          if (!olderRowPresent()) {
+            return;
+          }
+          if (loadingLine()) {
+            w.__seam.withLoading++;
+          } else {
+            w.__seam.withoutLoading++;
+          }
+        }).observe(document.body, { childList: true, subtree: true });
+      }, FIRST_OLDER_ROW);
+
+      // Scrolling to the top is what asks for the next page.
+      await scrollLogTo(page, 0);
+      await expect(page.getByTestId(`message-${FIRST_OLDER_ROW}`)).toHaveCount(1);
+      // …and the load does finish: the flag is not simply stuck on.
+      await expect(page.getByTestId("message-loading-older")).toHaveCount(0);
+
+      const seam = await page.evaluate(
+        () =>
+          (window as unknown as {
+            __seam: { withLoading: number; withoutLoading: number };
+          }).__seam,
+      );
+
+      expect(
+        seam.withLoading,
+        "no batch contained the prepended rows while the log still reported " +
+          "fetching — the prepend and the flag clear are back in one commit (#934)",
+      ).toBeGreaterThan(0);
+      // And the end state really is reached, so the assertion above is not
+      // passing on a log that never stopped loading.
+      expect(seam.withoutLoading).toBeGreaterThan(0);
+    });
+  }
+});

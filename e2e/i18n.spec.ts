@@ -754,3 +754,91 @@ test.describe("member roles are translated, not echoed from the wire", () => {
     await expect(page.getByTestId(`member-row-${USER.id}`)).toContainText("member");
   });
 });
+
+/*
+ * Navigation must not depend on a translated label (#932).
+ *
+ * The sidebar's settings rows are the only sidebar rows whose text comes from
+ * a catalogue — groups, channels and DMs are labelled with user-generated
+ * names. They carried no `data-testid`, so every spec that navigated to one
+ * matched on its English label, and since #855 a locale change could therefore
+ * break navigation tests for reasons that had nothing to do with navigation.
+ * Worse, the failure reads as a routing bug rather than a selector bug.
+ *
+ * This is the assertion that pins it: under a locale that renames every one of
+ * those rows, the testids still reach the pages.
+ */
+test.describe("sidebar settings rows are located by testid, not by label", () => {
+  const NAV_LANG = "qtn";
+  const NAV_TRANSLATED: Record<string, string> = {
+    saved: "NAV-SAVED",
+    preferences: "NAV-PREFERENCES",
+    userSettings: "NAV-USER",
+    voiceAndVideo: "NAV-VOICE",
+    security: "NAV-SECURITY",
+    keyBindings: "NAV-KEYS",
+    softwareUpdate: "NAV-UPDATE",
+  };
+
+  const NAV_LOCALE: TestLocaleShape = {
+    code: NAV_LANG,
+    label: "Nàvish",
+    dir: "ltr",
+    catalogues: { nav: { sidebar: NAV_TRANSLATED } },
+  };
+
+  /** Row testid → the page testid clicking it must land on. */
+  const ROWS: ReadonlyArray<readonly [string, string, string]> = [
+    ["saved", "saved-page", "saved"],
+    ["preferences", "preferences-page", "preferences"],
+    ["user", "settings-page", "userSettings"],
+    ["voice-settings", "voice-settings-page", "voiceAndVideo"],
+    ["security", "security-page", "security"],
+    ["shortcuts", "keyboard-shortcuts-page", "keyBindings"],
+    ["update", "update-page", "softwareUpdate"],
+  ];
+
+  test("every settings row keeps its testid when its label is translated", async ({
+    page,
+  }) => {
+    await boot(page, "terminal", { osLanguages: [NAV_LANG], locale: NAV_LOCALE });
+    await expect(page.locator("html")).toHaveAttribute("lang", NAV_LANG);
+
+    for (const [rowId, , labelKey] of ROWS) {
+      const row = page.getByTestId(`sidebar-row-${rowId}`);
+      // The row is findable by id…
+      await expect(row).toBeVisible();
+      // …and its text really did change, so a label-based selector would be
+      // looking for a string that is no longer on the page. Without that, this
+      // test would pass just as well in English and prove nothing.
+      await expect(row).toContainText(NAV_TRANSLATED[labelKey]);
+    }
+
+    // The English labels the old selectors used are gone from the sidebar.
+    const sidebar = page.getByTestId("sidebar");
+    await expect(sidebar).not.toContainText("Preferences");
+    await expect(sidebar).not.toContainText("Key Bindings");
+  });
+
+  test("each settings row still navigates to its page under a translated locale", async ({
+    page,
+  }) => {
+    await boot(page, "terminal", { osLanguages: [NAV_LANG], locale: NAV_LOCALE });
+
+    for (const [rowId, pageTestId] of ROWS) {
+      await page.getByTestId(`sidebar-row-${rowId}`).click();
+      await expect(page.getByTestId(pageTestId)).toBeVisible();
+    }
+  });
+
+  test("the same testids work in English, so they are not a locale-only path", async ({
+    page,
+  }) => {
+    await boot(page, "refined", { osLanguages: ["en-US"], locale: NAV_LOCALE });
+
+    for (const [rowId, pageTestId] of ROWS) {
+      await page.getByTestId(`sidebar-row-${rowId}`).click();
+      await expect(page.getByTestId(pageTestId)).toBeVisible();
+    }
+  });
+});

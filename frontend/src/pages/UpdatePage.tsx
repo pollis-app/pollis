@@ -114,6 +114,7 @@ export const UpdatePage: React.FC = observer(() => {
   return (
     <PageShell title={t("update.title")} scrollable>
       <div
+        data-testid="update-page"
         className="flex-1 flex flex-col overflow-auto bg-bg"
       >
         <div className="flex-1 flex justify-center overflow-auto px-6 py-8">

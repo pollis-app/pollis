@@ -255,6 +255,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       return;
     }
     setLoadingMore(true);
+    // Whether this call reached the prepend. Only the paths that did NOT get
+    // there clear the flag inline; see the `finally`.
+    let prepended = false;
     try {
       let page: RawMessagePage;
       if (selectedChannelId) {
@@ -275,6 +278,9 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
       const fetched = page.messages.map(transformChannelMessage);
       const continuation = page.next_cursor ?? null;
+      // The prepend below is what ends this load, and the effect keyed on
+      // `olderPages` is what clears the flag — see the `finally`.
+      prepended = true;
 
       // Written against the log this fetch was issued for. A conversation
       // switch mid-flight therefore lands on a key nothing reads, rather than
@@ -291,9 +297,32 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         };
       });
     } finally {
-      setLoadingMore(false);
+      // Only the paths that never reached the prepend clear the flag here —
+      // an early return, a throw. A successful load is ended by the effect
+      // below instead (#934).
+      //
+      // Clearing here unconditionally is what used to happen, and it put the
+      // prepend and the flag clear in ONE commit: React batches every
+      // setState from a single async continuation, so there was no committed
+      // state in which the new rows existed and the log still said it was
+      // fetching. Nothing needed that seam yet, which is exactly why it went
+      // unnoticed — but it is the state anything reacting between "the page
+      // arrived" and "the load is over" (a scroll anchor, a spinner that must
+      // not flash, an analytics timing) has to be able to observe.
+      if (!prepended) {
+        setLoadingMore(false);
+      }
     }
   }, [pageCursor, loadingMore, currentUser, logKey, selectedChannelId, selectedConversationId]);
+
+  // The other half: a load that DID prepend ends one commit later, when the
+  // rows it fetched are already on screen. A passive effect is precisely that
+  // boundary — it runs after the commit carrying the new rows (and after the
+  // virtualiser's layout-effect re-anchor), so `loadingMore` is still true for
+  // the whole of that commit and drops in the next one.
+  useEffect(() => {
+    setLoadingMore(false);
+  }, [olderPages]);
 
   const handleConfirmDelete = async () => {
     if (!pendingDeleteId) {

@@ -669,16 +669,21 @@ commands::livekit::get_livekit_token,
             commands::terminal::terminal_ack,
         ])
         // On macOS, hide the window on close instead of quitting.
-        // On window focus, re-evaluate the media-cache cap so files
-        // copied into the dir externally / mtime-tampered / etc. don't
-        // let it grow past the limit.
+        //
+        // The media-cache cap is deliberately NOT re-evaluated here (#930).
+        // It used to be: every alt-tab walked the whole cache directory to
+        // total its size, which scales with months of accumulated media rather
+        // than with anything the user just did, and after #874 removed the
+        // seven focus-time IPC calls it was the only work left on focus. The
+        // cap is enforced by `pollis_core::commands::r2` on every cache write
+        // instead — a cache nobody is writing to cannot grow past it.
         .on_window_event(|_window, _event| {
             #[cfg(target_os = "macos")]
             hide_on_close(_window, _event);
             if let tauri::WindowEvent::Focused(true) = _event {
-                pollis_core::commands::r2::enforce_cache_cap_now();
                 // Bounded local history: evict messages past the device-local
-                // retention window on focus, alongside the media-cache cap.
+                // retention window on focus. This one is bounded by the
+                // retention window, not by the size of anything on disk.
                 if let Some(state) = _window.app_handle().try_state::<Arc<AppState>>() {
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {

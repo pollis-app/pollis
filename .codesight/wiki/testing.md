@@ -6,6 +6,29 @@ Pollis has four tiers of automated tests:
 2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end against a disposable test Turso database. Most of this document covers the harness.
 3. **WebDriver E2E tests** (`e2e/*.js`) — drives the real shipped Tauri app (native WebKitGTK WebView, real Rust core) via `tauri-driver`. See [WebDriver E2E tests](#webdriver-e2e-tests-e2e) below.
 4. **Playwright UI specs** (`e2e/*.spec.js`) — front-end interaction only, against the browser build with `VITE_PLAYWRIGHT=true` (Tauri IPC mocked in `frontend/src/__mocks__/`). No backend, seconds to run. See [Playwright UI specs](#playwright-ui-specs-e2especjs) below.
+5. **Renderer unit tests** (`frontend/tests/*.test.ts`, `pnpm --filter frontend test`) — plain `node --test` over the renderer's pure functions, plus the source-scan guards. Milliseconds, no browser, no build step; Node's type stripping runs the TypeScript directly, so imports need the `.ts` extension.
+
+### Source-scan guards, and when one is honest
+
+Several of the renderer's tests read source files instead of driving the app.
+That is the right shape when the thing being asserted is a rule **about the
+code** rather than about what the code renders — where the symptom is invisible
+to any behavioural test, or where the offending call sits somewhere no test can
+reach:
+
+| guard | the rule |
+|---|---|
+| `no-periodic-polling.test.ts` | no `setInterval` outside a reasoned allowlist (#874) |
+| `query-store-boundary.test.ts` | no `queryFn` writes to a MobX store; the exports #929 deleted stay deleted |
+| `message-window.test.ts` | no px load-more constant in `MessageList` (#934) |
+| `ui-inventory.test.ts` | `.codesight/wiki/ui.md`'s inventory is regenerated, not hand-patched (#933) |
+| `commands::r2::tests` (Rust) | the media-cache sweep never returns to window focus (#930) |
+
+A guard is a poor substitute for a behavioural test and a good complement to
+one. Each of the above is paired with something that exercises the real
+behaviour — the rem threshold's arithmetic, the cap's actual eviction, the
+inventory's round-trip — so a guard passing on broken code is not enough to
+make the suite green.
 
 > The harness is built on top of Tauri's test machinery (`tauri::test::get_ipc_response` + `MockRuntime`). Tauri is the shipping shell, so the harness drives the real command logic through the same dispatch path the app uses, headlessly — `pollis-core` is the unit under test, reached through the `#[tauri::command]` shims exactly as at runtime.
 
@@ -705,13 +728,13 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | `invite-links.spec.ts` | Invite-link create / one-time copy / revoke, in BOTH skins (#847) |
 | `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849) |
 | `autolock.spec.ts` | Idle auto-lock: the window is chosen, reaches the backend and survives a restart; the shell reports activity; a backend lock drops to the PIN gate **and empties the query cache**, in BOTH skins (#851) |
-| `i18n.spec.ts` | The language selector, switching, per-device persistence, OS-locale default and the English fallback — driven through a synthetic locale so it survives the real language list changing, in BOTH skins (#855) |
+| `i18n.spec.ts` | The language selector, switching, per-device persistence, OS-locale default and the English fallback — driven through a synthetic locale so it survives the real language list changing, in BOTH skins (#855). Also pins that the sidebar's settings rows are reached by `sidebar-row-*` testid and not by their translated label, under a locale that renames every one of them (#932) |
 | `ipc-efficiency.spec.ts` | IPC/query-layer COUNTS (#874): one batched preview call per list instead of one per row, zero refetches on window focus, a closed Cmd+K panel costing zero member queries, `membership_changed` touching only the named group's roster, join requests keyed per group id, own-profile vs public-profile not colliding. Skin-agnostic except the two tests that also assert something renders |
 | `rtl.spec.ts` | Right-to-left layout, asserted as **measured geometry** (`getBoundingClientRect`, a `Range` over the text, the painted physical border edge) rather than a `dir` attribute — which passes on unmirrored code. Drives the real `ar` locale and pins the LTR case in the same body, in BOTH skins (#855) |
 
 | `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
 | `render-cost.spec.ts` | Regression guards on message-log render cost in BOTH skins — typing in the edit bar, opening the reply bar and arrow-key navigation must re-render **zero** rows; a shell re-render must not re-render the sidebar; paired with the other half (skin flip restructures rows, an edit updates its row, day dividers survive) so a memo cannot pass by freezing the UI (#874) |
-| `message-window.spec.ts` | The virtualised log: only the visible slice is in the DOM, and every DOM-locating path still reaches a row outside the window, in BOTH skins (#874) |
+| `message-window.spec.ts` | The virtualised log: only the visible slice is in the DOM, and every DOM-locating path still reaches a row outside the window, in BOTH skins (#874). Plus the load-more seam (#934) — a `MutationObserver` proves some DOM batch carries the prepended rows while the log still reports fetching, which a poll could never catch |
 | `linkify.spec.ts` | URL detection in message bodies in BOTH skins — every body keeps the link it *starts* with, the media unfurl agrees with the linkifier about which URLs exist, and a bare `www.` link gets a protocol. Guards the pattern shared by `LinkifiedText` and `MediaLinkUnfurl` (#874) |
 | `thread-panel.spec.ts` | The thread panel's timestamps in BOTH skins — a seconds-precision `created_at` must render the real date rather than 1970, a millisecond one must be left alone, and the thread must agree with the channel about when a message was sent (#874) |
 
