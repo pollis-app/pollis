@@ -253,11 +253,8 @@ for (const skin of SKINS) {
       const other = skin === "terminal" ? "refined" : "terminal";
       // In-app navigation via the sidebar — a bare `page.goto` on a
       // client-side route just re-serves the SPA shell at its root. Located by
-      // label because the sidebar's settings rows carry no `data-testid`.
-      await page
-        .getByTestId("sidebar")
-        .getByRole("button", { name: "Preferences", exact: true })
-        .click();
+      // `data-testid`, not by the row's translated label (#932).
+      await page.getByTestId("sidebar-row-preferences").click();
       await page.getByTestId(`pref-skin-${other}`).click();
       await expect(page.locator("html")).toHaveAttribute("data-skin", other);
 

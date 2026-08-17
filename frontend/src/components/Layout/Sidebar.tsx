@@ -312,6 +312,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
             onClick={() => router.navigate({ to: s.to })}
             leading={s.icon}
             label={s.label}
+            testId={s.id}
           />
         ))}
       </div>
@@ -400,9 +401,17 @@ interface RowProps {
   badge?: number | null;
   /** Optional trailing decoration (e.g. shield-check / shield-alert badges) rendered before the unread badge. */
   trailing?: React.ReactNode;
+  /** Stable id for the navigating button's `data-testid`, same
+      `sidebar-row-*` scheme as `SectionHeader` (#932). Deliberately separate
+      from `label`, which is translated: since #855 a locale change would
+      otherwise break every navigation test that located a row by its text,
+      and the failure reads as a routing bug rather than a selector one.
+      Omitted for group / channel / DM rows, whose labels are user-generated
+      and therefore already locale-independent. */
+  testId?: string;
 }
 
-const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing }) => {
+const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing, testId }) => {
   return (
     <div
       data-active={isActive ? "true" : "false"}
@@ -433,6 +442,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
       <button
         type="button"
         onClick={onClick}
+        data-testid={testId ? `sidebar-row-${testId}` : undefined}
         className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pe-2.5 text-base text-start cursor-pointer text-inherit ${
           chevron ? "ps-[0.4rem]" : indentPadClass(indent)
         }`}
