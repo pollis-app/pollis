@@ -206,11 +206,25 @@ jobs:
           TURSO_TOKEN=placeholder
           EOF
 
-      # The client/server wire contract (#875). Runs FIRST because it is the
-      # cheapest signal and the most load-bearing: its `compile_fail` doctests ARE
+      # The remote schema itself (#924). Runs FIRST — it is seconds-cheap, it has
+      # no system deps, and it is the definition every other job here stamps its
+      # databases from. Its tests are the only automatic check that a migration
+      # file on disk is actually LISTED (an unlisted file is applied by
+      # `db-apply.sh` in production and by no harness — a test passing against a
+      # schema no deploy has), that versions are unique and ascending, and that
+      # `single_db_scripts()` keeps main-then-log order, which is what a single-DB
+      # deploy depends on to get migrations-log/000004's `generation` column.
+      # Nothing ran these before, so the constraint every deployment relies on was
+      # pinned only by a test nobody executed.
+      - name: Remote schema + migration ordering (pollis-schema)
+        run: cargo test -p pollis-schema
+
+      # The client/server wire contract (#875). Runs early because it is a cheap
+      # signal and the most load-bearing: its `compile_fail` doctests ARE
       # the guarantee that a client body missing or misspelling a field cannot
       # compile, so a contract that CI never exercises would be worth nothing.
       - name: DS write-API contract (pollis-api)
+        if: ${{ !cancelled() }}
         run: cargo test -p pollis-api
 
       # Cheap and media-free — fast signal that the DS serializer holds. Includes
