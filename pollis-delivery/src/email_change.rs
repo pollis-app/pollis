@@ -184,7 +184,7 @@ pub async fn verify_email_change(
         Err(_) => return Ok(bad_request("invalid body")),
     };
 
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     match apply_verify_email_change(
         &conn,
         &state.email_change,

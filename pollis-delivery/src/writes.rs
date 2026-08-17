@@ -64,7 +64,7 @@ pub(crate) async fn gate(
     if !state.require_auth {
         return Ok(Ok(None));
     }
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     // Cached pubkey lookup (#658): this gate is the single chokepoint every
     // device-signed endpoint funnels through, so caching here is what removes
     // the per-request Turso round trip fleet-wide. Signature verification is
@@ -360,7 +360,7 @@ pub async fn group_info(
     // Authz: a signed request may only republish for a conversation it belongs
     // to. Skipped on the no-auth path (mirrors submit).
     if let Some(user_id) = &authed {
-        let conn = state.db.conn()?;
+        let conn = state.db.conn().await?;
         if !is_member(&conn, &parsed.conversation_id, user_id).await? {
             return Ok(AuthRejection::Forbidden.into_response());
         }
@@ -371,7 +371,7 @@ pub async fn group_info(
         Err(_) => return Ok(bad_request("invalid group_info")),
     };
 
-    let conn = state.log_db.conn()?;
+    let conn = state.log_db.conn().await?;
     upsert_group_info(
         &conn,
         &parsed.conversation_id,
@@ -470,7 +470,7 @@ pub async fn welcomes_ack(
         Err(resp) => return Ok(resp),
     };
 
-    let conn = state.log_db.conn()?;
+    let conn = state.log_db.conn().await?;
     let updated = ack_welcomes(&conn, &recipient, &parsed.welcome_ids).await?;
 
     Ok(ok_json(serde_json::json!({ "status": "ok", "updated": updated })))
@@ -532,7 +532,7 @@ pub async fn welcomes_reset(
         Err(resp) => return Ok(resp),
     };
 
-    let conn = state.log_db.conn()?;
+    let conn = state.log_db.conn().await?;
     let updated = reset_welcomes(&conn, &recipient, parsed.device_id.as_deref()).await?;
 
     Ok(ok_json(serde_json::json!({ "status": "ok", "updated": updated })))
@@ -588,7 +588,7 @@ pub async fn welcomes_purge(
         Err(resp) => return Ok(resp),
     };
 
-    let conn = state.log_db.conn()?;
+    let conn = state.log_db.conn().await?;
     let deleted = purge_welcomes(&conn, &recipient).await?;
 
     Ok(ok_json(serde_json::json!({ "status": "ok", "deleted": deleted })))
@@ -633,7 +633,7 @@ pub async fn welcomes_resubmit(
     // Authz: a signed request may only resubmit for a conversation it belongs to.
     // Skipped on the no-auth path (mirrors submit / group_info).
     if let Some(user_id) = &authed {
-        let conn = state.db.conn()?;
+        let conn = state.db.conn().await?;
         if !is_member(&conn, &parsed.conversation_id, user_id).await? {
             return Ok(AuthRejection::Forbidden.into_response());
         }
@@ -644,7 +644,7 @@ pub async fn welcomes_resubmit(
         Err(_) => return Ok(bad_request("invalid welcome")),
     };
 
-    let conn = state.log_db.conn()?;
+    let conn = state.log_db.conn().await?;
     upsert_welcome(
         &conn,
         &parsed.conversation_id,

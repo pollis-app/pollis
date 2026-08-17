@@ -104,7 +104,7 @@ pub async fn publish_key_packages(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_publish_key_packages(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -164,7 +164,7 @@ pub async fn replenish_key_packages(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_replenish_key_packages(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -278,7 +278,7 @@ pub async fn claim_key_package(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     Ok(claim_outcome_response(apply_claim_key_package(&conn, &parsed).await?))
 }
 
@@ -389,7 +389,7 @@ pub async fn resign_device_certs(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     let outcome = apply_resign_device_certs(&conn, authed.as_deref(), &parsed).await?;
     // Whole-fleet cert rewrite → evict the whole user's cached pubkeys (#658).
     // Today this UPDATE deliberately leaves `mls_signature_pub_pq` alone, so no
@@ -457,7 +457,7 @@ pub async fn register_push_token(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_register_push_token(&conn, authed.as_deref(), &parsed).await?)
 }
 

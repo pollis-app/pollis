@@ -63,7 +63,7 @@ fn body_with_welcome(conv: &str, epoch: i64, sender: &str, welcome_recipient: &s
 /// COUNT(*) of `table` scoped to a conversation — small helper so the atomicity
 /// assertions read cleanly.
 async fn count_for_conv(db: &Db, table: &str, conv: &str) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let sql = format!("SELECT COUNT(*) FROM {table} WHERE conversation_id = ?1");
     let mut rows = conn.query(&sql, libsql::params![conv]).await.unwrap();
     rows.next().await.unwrap().unwrap().get(0).unwrap()
@@ -75,14 +75,14 @@ async fn fresh_db() -> Arc<Db> {
     // Keep the tempdir alive for the process.
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn accepts_head_rejects_stale_and_gap() {
     let db = fresh_db().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let c = "conv1";
 
     // Empty group: head is 0. A commit from epoch 0 wins.
@@ -132,7 +132,7 @@ async fn concurrent_submitters_yield_exactly_one_winner() {
     for i in 0..8 {
         let db = Arc::clone(&db);
         handles.push(tokio::spawn(async move {
-            let conn = db.conn().unwrap();
+            let conn = db.conn().await.unwrap();
             // busy_timeout is per-connection: each writer waits for the local
             // file lock instead of erroring (a local-file test artifact; Turso
             // serializes writes server-side). The conditional INSERT still
@@ -162,7 +162,7 @@ async fn concurrent_submitters_yield_exactly_one_winner() {
     assert_eq!(rejected, 7);
 
     // And the log has exactly one commit at epoch 0.
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let commits = fetch_commits(&conn, c, 0, 0).await.unwrap();
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0].epoch, 0);
@@ -177,7 +177,7 @@ async fn concurrent_submitters_yield_exactly_one_winner() {
 #[tokio::test(flavor = "multi_thread")]
 async fn welcome_failure_rolls_back_commit_and_group_info() {
     let db = fresh_db().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let c = "atomic";
 
     // Poison the LAST write of the submit bundle so a Welcome to 'BOOM' aborts.
@@ -237,7 +237,7 @@ async fn welcome_failure_rolls_back_commit_and_group_info() {
 #[tokio::test(flavor = "multi_thread")]
 async fn duplicate_welcome_insert_is_idempotent() {
     let db = fresh_db().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let c = "dupe";
 
     // A commit at head 0 carrying a Welcome to alice/dev1 wins and inserts it.
@@ -274,7 +274,7 @@ async fn duplicate_welcome_insert_is_idempotent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn inline_group_info_write_is_epoch_monotone() {
     let db = fresh_db().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let c = "monotone";
 
     // A newer GroupInfo (epoch 100) is already published out of band.
@@ -317,7 +317,7 @@ async fn inline_group_info_write_is_epoch_monotone() {
 #[tokio::test(flavor = "multi_thread")]
 async fn opening_a_generation_requires_naming_the_closed_head() {
     let db = fresh_db().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let c = "conv-mig";
 
     // Generation 0 runs to head 2.
@@ -376,7 +376,7 @@ async fn opening_a_generation_requires_naming_the_closed_head() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_generation_can_only_be_opened_once() {
     let db = fresh_db().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let c = "conv-mig2";
 
     submit_commit(&conn, &body(c, 0, "alice")).await.unwrap();
@@ -408,7 +408,7 @@ async fn a_generation_can_only_be_opened_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_closed_lineage_rejects_further_commits() {
     let db = fresh_db().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let c = "conv-mig3";
 
     submit_commit(&conn, &body(c, 0, "alice")).await.unwrap();
@@ -438,7 +438,7 @@ async fn a_closed_lineage_rejects_further_commits() {
 #[tokio::test(flavor = "multi_thread")]
 async fn successor_group_info_replaces_a_numerically_higher_epoch() {
     let db = fresh_db().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let c = "conv-mig4";
 
     // Generation 0 runs to head 5, publishing GroupInfo at epoch 5.
@@ -460,7 +460,7 @@ async fn successor_group_info_replaces_a_numerically_higher_epoch() {
 
 /// The published `(generation, epoch)` for a conversation.
 async fn published_group_info(db: &Db, conv: &str) -> (i64, i64) {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT generation, epoch FROM mls_group_info WHERE conversation_id = ?1",

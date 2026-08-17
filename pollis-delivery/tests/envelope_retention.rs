@@ -65,12 +65,12 @@ async fn fresh() -> Db {
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     db
 }
 
 async fn add_device(db: &Db, user: &str, device: &str, revoked: bool) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO user_device (user_id, device_id, revoked_at) \
@@ -82,7 +82,7 @@ async fn add_device(db: &Db, user: &str, device: &str, revoked: bool) {
 }
 
 async fn seed_watermark(db: &Db, conv: &str, user: &str, device: &str, offset: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at) \
@@ -104,7 +104,7 @@ async fn seed_watermark_reported(
     cursor: &str,
     reported: &str,
 ) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO conversation_watermark \
@@ -123,7 +123,7 @@ async fn seed_watermark_reported(
 }
 
 async fn add_envelope(db: &Db, id: &str, conv: &str, offset: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO message_envelope (id, conversation_id, sent_at, sender_id, ciphertext) \
@@ -135,7 +135,7 @@ async fn add_envelope(db: &Db, id: &str, conv: &str, offset: &str) {
 }
 
 async fn envelope_count(db: &Db, conv: &str) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM message_envelope WHERE conversation_id = ?1",
@@ -148,7 +148,7 @@ async fn envelope_count(db: &Db, conv: &str) -> i64 {
 
 /// The device ids that got a seeded watermark for `conv`, ascending.
 async fn watermark_devices(db: &Db, conv: &str) -> Vec<String> {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT device_id FROM conversation_watermark WHERE conversation_id = ?1 ORDER BY device_id ASC",
@@ -170,7 +170,7 @@ async fn watermark_devices(db: &Db, conv: &str) -> Vec<String> {
 #[tokio::test]
 async fn channel_gc_ignores_revoked_device_with_no_watermark() {
     let db = fresh().await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
@@ -189,7 +189,7 @@ async fn channel_gc_ignores_revoked_device_with_no_watermark() {
         is_dm: false,
         actor_id: Some("alice".into()),
     };
-    let out = apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+    let out = apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
 
     assert_eq!(
@@ -205,7 +205,7 @@ async fn channel_gc_ignores_revoked_device_with_no_watermark() {
 #[tokio::test]
 async fn dm_gc_ignores_stale_revoked_watermark() {
     let db = fresh().await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) \
                   VALUES ('d1', 'alice', 'alice', datetime('now'))", ())
@@ -222,7 +222,7 @@ async fn dm_gc_ignores_stale_revoked_watermark() {
         is_dm: true,
         actor_id: Some("alice".into()),
     };
-    apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+    apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
 
     assert_eq!(
         envelope_count(&db, "d1").await,
@@ -248,7 +248,7 @@ async fn create_dm_skips_revoked_member_devices() {
         member_ids: vec!["bob".into()],
         created_at: "2026-01-01T00:00:00+00:00".into(),
     };
-    apply_create_dm(&db.conn().unwrap(), None, &body).await.unwrap();
+    apply_create_dm(&db.conn().await.unwrap(), None, &body).await.unwrap();
 
     assert_eq!(
         watermark_devices(&db, "d1").await,
@@ -262,7 +262,7 @@ async fn create_dm_skips_revoked_member_devices() {
 #[tokio::test]
 async fn add_dm_member_skips_revoked_devices() {
     let db = fresh().await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute("INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at, accepted_at) \
                   VALUES ('d1', 'alice', 'alice', datetime('now'), datetime('now'))", ())
@@ -277,7 +277,7 @@ async fn add_dm_member_skips_revoked_devices() {
         added_by: "alice".into(),
         added_at: "2026-01-02T00:00:00+00:00".into(),
     };
-    apply_add_dm_member(&db.conn().unwrap(), None, &body).await.unwrap();
+    apply_add_dm_member(&db.conn().await.unwrap(), None, &body).await.unwrap();
 
     assert_eq!(
         watermark_devices(&db, "d1").await,
@@ -292,7 +292,7 @@ async fn add_dm_member_skips_revoked_devices() {
 #[tokio::test]
 async fn approve_join_request_skips_revoked_devices() {
     let db = fresh().await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute_batch(
             "INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');\
@@ -310,7 +310,7 @@ async fn approve_join_request_skips_revoked_devices() {
         approver_id: Some("alice".into()),
         reviewed_at: "2026-01-03T00:00:00+00:00".into(),
     };
-    let out = apply_approve_join_request(&db.conn().unwrap(), None, &body).await.unwrap();
+    let out = apply_approve_join_request(&db.conn().await.unwrap(), None, &body).await.unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
 
     assert_eq!(
@@ -352,7 +352,7 @@ async fn revoke_device_deletes_that_devices_watermarks_only() {
         device_id: "a-doomed".into(),
         user_id: None,
     };
-    let out = apply_revoke_device(&db.conn().unwrap(), Some("alice"), &body)
+    let out = apply_revoke_device(&db.conn().await.unwrap(), Some("alice"), &body)
         .await
         .unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
@@ -385,7 +385,7 @@ async fn revoke_device_cannot_delete_another_users_watermarks() {
         device_id: "b-live".into(),
         user_id: None,
     };
-    apply_revoke_device(&db.conn().unwrap(), Some("alice"), &body)
+    apply_revoke_device(&db.conn().await.unwrap(), Some("alice"), &body)
         .await
         .unwrap();
 
@@ -401,7 +401,7 @@ async fn revoke_device_cannot_delete_another_users_watermarks() {
 
 /// Seed a channel `c1` in group `g1` with the given members.
 async fn channel_with_members(db: &Db, members: &[&str]) {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan')", ())
         .await
         .unwrap();
@@ -421,7 +421,7 @@ async fn gc_channel(db: &Db) {
         is_dm: false,
         actor_id: Some("alice".into()),
     };
-    let out = apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+    let out = apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
@@ -501,7 +501,7 @@ async fn envelope_is_deleted_once_every_member_device_collected_past_it() {
 
     gc_channel(&db).await;
 
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT id FROM message_envelope WHERE conversation_id = 'c1'", ())
         .await
@@ -602,7 +602,7 @@ fn rfc3339_from_now(minutes: i64) -> String {
 }
 
 async fn add_envelope_at(db: &Db, id: &str, conv: &str, sender: &str, sent_at: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
@@ -619,7 +619,7 @@ async fn add_envelope_at(db: &Db, id: &str, conv: &str, sender: &str, sent_at: &
 }
 
 async fn seed_watermark_at(db: &Db, conv: &str, user: &str, device: &str, at: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO conversation_watermark \
@@ -638,7 +638,7 @@ async fn seed_watermark_at(db: &Db, conv: &str, user: &str, device: &str, at: &s
 
 /// The single `type='delete'` tombstone in `conv`, as `(id, sent_at)`.
 async fn only_tombstone(db: &Db, conv: &str) -> (String, String) {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT id, sent_at FROM message_envelope \
@@ -666,7 +666,7 @@ async fn only_tombstone(db: &Db, conv: &str) -> (String, String) {
 /// Every surviving `last_fetched_at` in `conv` — the cursors the tombstone has to
 /// clear to be fetched at all.
 async fn watermark_values(db: &Db, conv: &str) -> Vec<String> {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT last_fetched_at FROM conversation_watermark WHERE conversation_id = ?1",
@@ -698,7 +698,7 @@ async fn watermark_values(db: &Db, conv: &str) -> Vec<String> {
 async fn tombstone_clears_watermarks_that_outlived_envelope_gc() {
     let db = fresh().await;
     channel_with_members(&db, &["alice", "bob"]).await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute("UPDATE group_member SET role = 'admin' WHERE user_id = 'alice'", ())
         .await
@@ -728,7 +728,7 @@ async fn tombstone_clears_watermarks_that_outlived_envelope_gc() {
     // Alice (a group admin) deletes bob's message — the admin branch, which is
     // the one that writes a tombstone.
     let out = apply_delete_message(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("alice"),
         &DeleteMessageBody {
             message_id: "m1".into(),
@@ -763,7 +763,7 @@ async fn tombstone_clears_watermarks_that_outlived_envelope_gc() {
 async fn tombstone_is_not_pushed_forward_by_watermarks_behind_the_ds_clock() {
     let db = fresh().await;
     channel_with_members(&db, &["alice", "bob"]).await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute("UPDATE group_member SET role = 'admin' WHERE user_id = 'alice'", ())
         .await
@@ -779,7 +779,7 @@ async fn tombstone_is_not_pushed_forward_by_watermarks_behind_the_ds_clock() {
 
     let before = chrono::Utc::now();
     apply_delete_message(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("alice"),
         &DeleteMessageBody {
             message_id: "m1".into(),
@@ -820,7 +820,7 @@ async fn tombstone_is_not_pushed_forward_by_watermarks_behind_the_ds_clock() {
 #[tokio::test]
 async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
     let db = fresh().await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute_batch(
             // A channel every member device has caught up on.
@@ -849,7 +849,7 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
     add_envelope(&db, "eC", "cC", "-5 days").await;
 
     // No member ingests, no endpoint call — the sweep is the sole trigger.
-    let visited = sweep_envelope_gc(&db.conn().unwrap(), STALE).await.unwrap().visited;
+    let visited = sweep_envelope_gc(&db.conn().await.unwrap(), STALE).await.unwrap().visited;
 
     assert_eq!(visited, 3, "the sweep visits every conversation that still has envelopes");
     assert_eq!(
@@ -884,7 +884,7 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
 #[tokio::test]
 async fn dormant_device_stops_pinning_via_endpoint() {
     let db = fresh().await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
@@ -900,7 +900,7 @@ async fn dormant_device_stops_pinning_via_endpoint() {
     add_envelope(&db, "e1", "c1", "-100 days").await;
 
     let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
-    apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+    apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
 
     assert_eq!(
         envelope_count(&db, "c1").await,
@@ -919,7 +919,7 @@ async fn a_returning_device_reports_and_pins_again() {
     // Control: bob dormant, does NOT report → the envelope is collected.
     {
         let db = fresh().await;
-        db.conn().unwrap().execute_batch(
+        db.conn().await.unwrap().execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
              INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
@@ -931,14 +931,14 @@ async fn a_returning_device_reports_and_pins_again() {
         add_envelope(&db, "e1", "c1", "-100 days").await;
 
         let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
-        apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+        apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
         assert_eq!(envelope_count(&db, "c1").await, 0, "dormant → collected (control)");
     }
     // Comeback: bob reports a watermark BEFORE GC. Its cursor stays behind the
     // envelope, but `reported_at` is now fresh → bob is live → it re-pins.
     {
         let db = fresh().await;
-        db.conn().unwrap().execute_batch(
+        db.conn().await.unwrap().execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
              INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
@@ -957,10 +957,10 @@ async fn a_returning_device_reports_and_pins_again() {
             device_id: "b1".into(),
             last_fetched_at: past_datetime(&db, "-200 days").await,
         };
-        apply_advance_watermark(&db.conn().unwrap(), None, &wm).await.unwrap();
+        apply_advance_watermark(&db.conn().await.unwrap(), None, &wm).await.unwrap();
 
         let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
-        apply_envelope_gc(&db.conn().unwrap(), None, &body, STALE).await.unwrap();
+        apply_envelope_gc(&db.conn().await.unwrap(), None, &body, STALE).await.unwrap();
 
         assert_eq!(
             envelope_count(&db, "c1").await,
@@ -981,7 +981,7 @@ async fn a_returning_device_reports_and_pins_again() {
 async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
     async fn seeded(conv: &str) -> Db {
         let db = fresh().await;
-        db.conn().unwrap().execute_batch(&format!(
+        db.conn().await.unwrap().execute_batch(&format!(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
              INSERT INTO channels (id, group_id, name) VALUES ('{conv}', 'g1', 'chan');",
@@ -997,12 +997,12 @@ async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
     // Endpoint path.
     let via_endpoint = seeded("c1").await;
     let body = EnvelopeGcBody { conversation_id: "c1".into(), is_dm: false, actor_id: Some("alice".into()) };
-    apply_envelope_gc(&via_endpoint.conn().unwrap(), None, &body, STALE).await.unwrap();
+    apply_envelope_gc(&via_endpoint.conn().await.unwrap(), None, &body, STALE).await.unwrap();
     let endpoint_count = envelope_count(&via_endpoint, "c1").await;
 
     // Sweep path — same fixture, no endpoint call, no ingest.
     let via_sweep = seeded("c1").await;
-    sweep_envelope_gc(&via_sweep.conn().unwrap(), STALE).await.unwrap();
+    sweep_envelope_gc(&via_sweep.conn().await.unwrap(), STALE).await.unwrap();
     let sweep_count = envelope_count(&via_sweep, "c1").await;
 
     assert_eq!(endpoint_count, sweep_count, "sweep and endpoint must agree on the bound (#720)");
@@ -1014,7 +1014,7 @@ async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
 #[tokio::test]
 async fn sweep_reports_identity_free_growth_metrics() {
     let db = fresh().await;
-    db.conn().unwrap().execute_batch(
+    db.conn().await.unwrap().execute_batch(
         "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
          INSERT INTO channels (id, group_id, name) VALUES ('big', 'g1', 'chan');\
          INSERT INTO channels (id, group_id, name) VALUES ('small', 'g1', 'chan');",
@@ -1027,7 +1027,7 @@ async fn sweep_reports_identity_free_growth_metrics() {
     add_envelope(&db, "b3", "big", "-8 days").await;
     add_envelope(&db, "s1", "small", "-2 days").await;
 
-    let report = sweep_envelope_gc(&db.conn().unwrap(), STALE).await.unwrap();
+    let report = sweep_envelope_gc(&db.conn().await.unwrap(), STALE).await.unwrap();
     let m = report.metrics;
 
     assert_eq!(m.total_envelopes, 4, "total surviving envelopes across conversations");
@@ -1042,7 +1042,7 @@ async fn sweep_reports_identity_free_growth_metrics() {
 /// Read a `datetime('now', offset)` value back as a string, so a watermark body
 /// can carry a cursor at a known relative age in the DB's own clock/format.
 async fn past_datetime(db: &Db, offset: &str) -> String {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT datetime('now', ?1)", libsql::params![offset.to_string()])
         .await

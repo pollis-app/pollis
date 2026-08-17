@@ -38,7 +38,7 @@ async fn fresh_log() -> Db {
     let path = dir.path().join("log.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     for sql in LOG_MIGRATIONS {
         // Native batch: parses trigger bodies correctly, unlike a naive `;` split.
         conn.execute_batch(sql).await.expect("apply migration");
@@ -49,7 +49,7 @@ async fn fresh_log() -> Db {
 /// Insert a commit by DIRECT SQL — the bypass. Returns the raw libsql result so a
 /// test can assert the trigger rejected it.
 async fn raw_insert(db: &Db, conv: &str, gen: i64, epoch: i64) -> Result<u64, libsql::Error> {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO mls_commit_log (conversation_id, generation, epoch, sender_id, commit_data) \
@@ -69,7 +69,7 @@ async fn seed(db: &Db, conv: &str, gen: i64, up_to: i64) {
 }
 
 async fn epochs(db: &Db, conv: &str, gen: i64) -> Vec<i64> {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT epoch FROM mls_commit_log WHERE conversation_id = ?1 AND generation = ?2 \
@@ -129,7 +129,7 @@ async fn first_insert_must_be_epoch_zero() {
 async fn update_of_history_is_rejected() {
     let db = fresh_log().await;
     seed(&db, "c1", 0, 2).await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // Re-point an applied commit to a different epoch — history rewrite. Rejected.
     let repoint = conn
@@ -179,7 +179,7 @@ async fn delete_of_head_is_rejected() {
     // Deleting the head commit while epochs 0..2 remain is the ELECTRON shape —
     // it wedges every current member. Rejected.
     let del_head = db
-        .conn()
+        .conn().await
         .unwrap()
         .execute(
             "DELETE FROM mls_commit_log WHERE conversation_id = 'c1' AND generation = 0 AND epoch = 3",
@@ -194,7 +194,7 @@ async fn delete_of_head_is_rejected() {
     assert_eq!(epochs(&db, "c1", 0).await, vec![0, 1, 2, 3]);
 
     // A below-head (older) commit may be deleted — that is legitimate retention.
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "DELETE FROM mls_commit_log WHERE conversation_id = 'c1' AND generation = 0 AND epoch = 0",
@@ -213,7 +213,7 @@ async fn delete_of_generation_head_is_rejected() {
 
     // The head of the HEAD generation is protected.
     assert!(
-        db.conn()
+        db.conn().await
             .unwrap()
             .execute(
                 "DELETE FROM mls_commit_log WHERE conversation_id = 'c1' AND generation = 1 AND epoch = 1",
@@ -226,7 +226,7 @@ async fn delete_of_generation_head_is_rejected() {
 
     // But a CLOSED generation (gen 0) is not the head generation, so retiring it
     // wholesale — including its own local head — is allowed.
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "DELETE FROM mls_commit_log WHERE conversation_id = 'c1' AND generation < 1",
@@ -248,7 +248,7 @@ async fn delete_head_when_only_row_is_allowed() {
     let db = fresh_log().await;
     seed(&db, "c1", 0, 0).await; // a single commit — head-and-only-row
 
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "DELETE FROM mls_commit_log WHERE conversation_id = 'c1' AND generation = 0 AND epoch = 0",
@@ -271,7 +271,7 @@ async fn delete_head_when_only_row_is_allowed() {
 #[tokio::test]
 async fn bulk_wipe_empties_the_table() {
     let db = fresh_log().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     // Interleave two conversations' appends so their seqs alternate; each still
     // appends at its own head, so the forward-gap trigger never fires.
     for e in 0..=3 {
@@ -302,7 +302,7 @@ async fn bulk_wipe_empties_the_table() {
 async fn bottom_up_prune_to_empty_succeeds() {
     let db = fresh_log().await;
     seed(&db, "c1", 0, 3).await; // epochs 0..=3
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     for e in 0..=3 {
         conn.execute(
@@ -328,7 +328,7 @@ async fn bottom_up_prune_to_empty_succeeds() {
 async fn interior_delete_then_reinsert_corruption_passes() {
     let db = fresh_log().await;
     seed(&db, "c1", 0, 3).await; // epochs 0..=3, head at epoch 3
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // Snapshot the interior row (epoch 1) — the harness preserves seq so the row
     // keeps its place in the seq-ordered catch-up replay.
@@ -382,7 +382,7 @@ async fn interior_delete_then_reinsert_corruption_passes() {
 #[tokio::test]
 async fn legitimate_traffic_survives_triggers() {
     let db = fresh_log().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // A long contiguous append — every insert is at the head, none trips the gap
     // trigger.
@@ -414,7 +414,7 @@ async fn legitimate_traffic_survives_triggers() {
 #[tokio::test]
 async fn real_submit_path_coexists_with_triggers() {
     let db = fresh_log().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // base64 of a 3-byte commit blob — avoids pulling in the base64 crate.
     let body = |based_on_epoch: i64| SubmitBody {

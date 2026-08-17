@@ -133,7 +133,7 @@ fn spawn_envelope_gc_sweep(db: Arc<Db>, metrics: RetentionMetricsHandle) {
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            match db.conn() {
+            match db.conn().await {
                 Ok(conn) => match pollis_delivery::messages::sweep_envelope_gc(&conn, &stale).await {
                     Ok(report) => {
                         emit_retention_metrics(report.visited, &report.metrics);

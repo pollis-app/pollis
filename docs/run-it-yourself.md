@@ -130,7 +130,14 @@ docker run -p 8788:8788 \
   pollis-delivery
 ```
 
-Only `TURSO_URL` + `TURSO_TOKEN` are required (`PORT` defaults to 8788). To let
+Only `TURSO_URL` + `TURSO_TOKEN` are required (`PORT` defaults to 8788). Write
+authentication — the ML-DSA-44 device signature on every `POST /v1/...` — is
+**on by default** and needs no configuration; the client signs its writes
+automatically. `POLLIS_DS_REQUIRE_AUTH=false` turns it off for local debugging
+and the DS will log an `ERROR` on every start while it is off: with the gate
+down, the DS believes whichever actor id a caller puts in the request body, so
+anyone who can reach the port can write as anyone. Never expose such an instance.
+To let
 the DS also broker LiveKit tokens and R2 presigns server-side — so those secrets
 never ship in the client — pass the same `LIVEKIT_*` / `R2_*` vars you set in
 step 6. Put it behind any reverse proxy that terminates TLS (nginx, Caddy,

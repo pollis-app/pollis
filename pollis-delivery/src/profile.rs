@@ -97,7 +97,7 @@ pub async fn update_profile(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_update_profile(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -148,7 +148,7 @@ pub async fn save_preferences(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_save_preferences(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -191,7 +191,7 @@ pub async fn block_user(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_block_user(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
@@ -248,7 +248,7 @@ pub async fn unblock_user(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_unblock_user(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
@@ -288,7 +288,7 @@ pub async fn create_dm(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_create_dm(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -371,15 +371,18 @@ pub async fn apply_create_dm(
     // blocked by devices that didn't exist at channel creation. Revoked devices
     // are excluded (#685) — they never rejoin and so are not part of the roster
     // the envelope GC gate measures against.
+    let cursor = crate::messages::seeded_watermark_cursor();
     for member in std::iter::once(&creator).chain(others.iter()) {
         // `reported_at = datetime('now')` marks each seeded device LIVE as of DM
         // creation (#720): it pins for the staleness window, then stops if silent.
+        // The cursor is bound from `seeded_watermark_cursor` and the two columns
+        // are deliberately in different formats — see that function (#908).
         tx.execute(
             "INSERT OR IGNORE INTO conversation_watermark \
                  (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-             SELECT ?1, ?2, ud.device_id, datetime('now'), datetime('now') \
+             SELECT ?1, ?2, ud.device_id, ?3, datetime('now') \
              FROM user_device ud WHERE ud.user_id = ?2 AND ud.revoked_at IS NULL",
-            libsql::params![body.id.clone(), member.clone()],
+            libsql::params![body.id.clone(), member.clone(), cursor.clone()],
         )
         .await?;
     }
@@ -404,7 +407,7 @@ pub async fn accept_dm(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_accept_dm(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -471,7 +474,7 @@ pub async fn add_dm_member(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_add_dm_member(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -511,12 +514,18 @@ pub async fn apply_add_dm_member(
     // (#685) — they never rejoin, so they are not part of the GC roster.
     // `reported_at = datetime('now')` marks each seeded device LIVE as of the add
     // (#720): it pins for the staleness window, then stops if it never reports.
+    // The cursor is bound from `seeded_watermark_cursor` and the two columns are
+    // deliberately in different formats — see that function (#908).
     tx.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
              (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
-         SELECT ?1, ?2, ud.device_id, datetime('now'), datetime('now') \
+         SELECT ?1, ?2, ud.device_id, ?3, datetime('now') \
          FROM user_device ud WHERE ud.user_id = ?2 AND ud.revoked_at IS NULL",
-        libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
+        libsql::params![
+            body.dm_channel_id.clone(),
+            body.user_id.clone(),
+            crate::messages::seeded_watermark_cursor()
+        ],
     )
     .await?;
     tx.commit().await?;
@@ -540,7 +549,7 @@ pub async fn remove_dm_member(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_remove_dm_member(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -603,7 +612,7 @@ pub async fn leave_dm(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_leave_dm(&conn, authed.as_deref(), &parsed).await?)
 }
 

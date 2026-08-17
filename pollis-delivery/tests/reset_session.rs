@@ -31,7 +31,7 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("ds.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -144,7 +144,7 @@ fn rotate_body(based_on_version: i64) -> serde_json::Value {
 }
 
 async fn identity_version(db: &Db, user_id: &str) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT identity_version FROM users WHERE id = ?1", libsql::params![user_id])
         .await
@@ -153,7 +153,7 @@ async fn identity_version(db: &Db, user_id: &str) -> i64 {
 }
 
 async fn count(db: &Db, sql: &str, user_id: &str) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn.query(sql, libsql::params![user_id]).await.unwrap();
     rows.next().await.unwrap().expect("count row").get(0).unwrap()
 }
@@ -241,7 +241,7 @@ async fn reset_recover_accepts_session_and_cleans_up() {
     // trivial), a DM membership, a key package, an old enrolled device, and a
     // pending welcome.
     {
-        let conn = db.conn().unwrap();
+        let conn = db.conn().await.unwrap();
         for sql in [
             format!("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', '{user_id}')"),
             format!("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', '{user_id}', 'admin')"),

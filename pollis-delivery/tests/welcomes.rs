@@ -22,7 +22,7 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("delivery.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -66,7 +66,7 @@ fn req_from(body: serde_json::Value) -> Request<Body> {
 /// The COUNT + newest welcome_data + generation for a (conversation, recipient,
 /// device) tuple.
 async fn welcome_row(db: &Db, conv: &str, recipient: &str, device: &str) -> (i64, Vec<u8>, i64) {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT COUNT(*), MAX(welcome_data), COALESCE(MAX(generation), -1) FROM mls_welcome \

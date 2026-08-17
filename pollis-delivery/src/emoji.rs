@@ -302,7 +302,7 @@ pub async fn create_emoji(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     emoji_outcome_response(apply_create_emoji(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -420,7 +420,7 @@ pub async fn remove_emoji(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     emoji_outcome_response(apply_remove_emoji(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -508,7 +508,7 @@ pub async fn emoji_gc(
     if let Err(resp) = gate(&state, &headers, &method, &uri, &body).await? {
         return Ok(resp);
     }
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     let collected = sweep_unreferenced_emoji(&conn).await?;
     Ok(ok_json(serde_json::json!({
         "collected": collected.len(),

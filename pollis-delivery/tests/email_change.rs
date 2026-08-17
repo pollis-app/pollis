@@ -41,7 +41,7 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("ec.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -60,7 +60,7 @@ fn dev_state(db: Arc<Db>) -> AppState {
 
 /// Seed a `users` row + a live device with `vk` as its signing key.
 async fn seed_user(db: &Db, user_id: &str, email: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     conn.execute(
         "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
         libsql::params![user_id, email, format!("{user_id}_name")],
@@ -76,7 +76,7 @@ async fn seed_user(db: &Db, user_id: &str, email: &str, device_id: &str, vk: &Ve
 }
 
 async fn email_of(db: &Db, user_id: &str) -> String {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT email FROM users WHERE id = ?1", libsql::params![user_id])
         .await

@@ -14,10 +14,13 @@
 //! verifies against the registered `user_device.mls_signature_pub`. Reads
 //! (`GET /v1/commits/:id`) and `/health` stay open.
 //!
-//! Enforcement is **config-gated and default OFF** via `POLLIS_DS_REQUIRE_AUTH`
-//! (`true`/`1` → enforce; unset/anything else → today's no-auth behavior).
-//! That keeps existing unsigned clients and the integration harness working
-//! until a follow-up makes the pollis-core client sign + send the headers.
+//! Enforcement is **ON by default** (#921). `POLLIS_DS_REQUIRE_AUTH` is an
+//! explicit *opt-out* — only `false`/`0`/`no`/`off` disables it, unset and
+//! unrecognised values both enforce, and starting with it off logs at ERROR.
+//! See [`require_auth_from_value`]. With the gate off the DS attributes every
+//! write to an actor id the *caller* put in the body, so a no-auth deployment
+//! trusts whoever asks; that is a local development affordance and never a
+//! production configuration.
 
 pub mod account;
 pub mod auth;
@@ -178,12 +181,34 @@ impl AppState {
     }
 }
 
-/// Read the `POLLIS_DS_REQUIRE_AUTH` gate. `true`/`1` (case-insensitive) → on;
-/// unset or anything else → off (today's no-auth behavior).
+/// Read the `POLLIS_DS_REQUIRE_AUTH` gate. **Default ON** (#921) — see
+/// [`require_auth_from_value`] for the parsing rule and why it fails closed.
 pub fn require_auth_from_env() -> bool {
-    matches!(
-        std::env::var("POLLIS_DS_REQUIRE_AUTH").ok().as_deref(),
-        Some("true") | Some("TRUE") | Some("True") | Some("1")
+    require_auth_from_value(std::env::var("POLLIS_DS_REQUIRE_AUTH").ok().as_deref())
+}
+
+/// [`require_auth_from_env`] with the environment lifted out, so the rule itself
+/// is testable without mutating process-global state from a parallel test.
+///
+/// **ON unless explicitly turned off.** Only `false`/`0`/`no`/`off`
+/// (case-insensitive, surrounding whitespace ignored) disable enforcement;
+/// unset, empty, and anything unrecognised all mean ON.
+///
+/// It defaulted OFF until #921. That was survivable only by accident: with the
+/// gate off the DS takes the actor from a client-supplied body field, and until
+/// #875 twenty of those bodies simply never SET that field, so the unsigned path
+/// 403'd on its own. #875 fixed the omissions — which turned "auth off" from
+/// mostly-broken into a working deployment that believes whatever actor a caller
+/// names, on every write endpoint. A default that is only safe while a bug
+/// survives is not a default.
+///
+/// Fails closed on garbage on purpose: `POLLIS_DS_REQUIRE_AUTH=ture` is a typo,
+/// and the safe reading of a typo is "enforce", never "trust everyone". The one
+/// way to run open is to say so, in words the parser recognises.
+fn require_auth_from_value(raw: Option<&str>) -> bool {
+    !matches!(
+        raw.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("false") | Some("0") | Some("no") | Some("off")
     )
 }
 
@@ -208,15 +233,27 @@ pub fn build_router_with_log_db(db: Arc<Db>, log_db: Arc<Db>) -> Router {
 /// then build the router from the same state.
 pub fn build_app_state(db: Arc<Db>, log_db: Arc<Db>) -> AppState {
     let require_auth = require_auth_from_env();
-    tracing::info!(
-        require_auth,
-        "pollis-delivery write auth: {}",
-        if require_auth {
-            "ENFORCED (device-cert signature required on POST /v1/commits)"
-        } else {
-            "OFF (POLLIS_DS_REQUIRE_AUTH unset — writes accepted unauthenticated)"
-        }
-    );
+    if require_auth {
+        tracing::info!(
+            require_auth,
+            "pollis-delivery write auth: ENFORCED (device-cert signature required on writes)"
+        );
+    } else {
+        // Not `info!` (#921). Enforcement is the default and the only safe
+        // setting; running without it means every write endpoint takes the
+        // acting user from a body field the caller controls, so any client may
+        // write as anyone. It is reachable ONLY by setting the variable to an
+        // explicit off value, and it says so loudly enough to be noticed in a
+        // log the operator is scanning for problems rather than for startup
+        // chatter.
+        tracing::error!(
+            require_auth,
+            "pollis-delivery write auth: DISABLED by explicit POLLIS_DS_REQUIRE_AUTH opt-out — \
+             every write is attributed to a CLIENT-SUPPLIED actor id and CANNOT be trusted. \
+             This is not a supported production configuration; unset the variable to restore \
+             device-signature enforcement."
+        );
+    }
     let metrics_token = metrics_token_from_env();
     tracing::info!(
         metrics_endpoint = if metrics_token.is_some() { "gated" } else { "disabled" },
@@ -547,7 +584,7 @@ async fn submit(
     // Verify the signature over the *raw* body before parsing. The path is
     // taken from the matched URI (no query on this route).
     let authed_user = if state.require_auth {
-        let conn = state.db.conn()?;
+        let conn = state.db.conn().await?;
         match auth::verify_request_cached(
             &state.device_keys,
             &conn,
@@ -588,7 +625,7 @@ async fn submit(
         // — the committer must already be in the group (a commit that adds a new
         // member is authored by an existing one). Mirrors `/v1/group-info`'s
         // membership gate; skipped on the no-auth path.
-        let conn = state.db.conn()?;
+        let conn = state.db.conn().await?;
         if !writes::is_member(&conn, &parsed.conversation_id, user_id).await? {
             return Ok(AuthRejection::Forbidden.into_response());
         }
@@ -596,7 +633,7 @@ async fn submit(
 
     // The MLS control-plane tables live on the commit-log DB (== main DB when no
     // separate log DB is configured).
-    let conn = state.log_db.conn()?;
+    let conn = state.log_db.conn().await?;
     let outcome = commit::submit_commit(&conn, &parsed).await?;
 
     // Retention floor (#539, I4): a landed commit advanced the head, so run an
@@ -604,7 +641,7 @@ async fn submit(
     // never fail an accepted commit. Membership is read on the MAIN DB, the log is
     // pruned on the LOG DB.
     if matches!(outcome, SubmitResponse::Accepted { .. }) {
-        if let Ok(main_conn) = state.db.conn() {
+        if let Ok(main_conn) = state.db.conn().await {
             if let Err(e) = commit::prune_commit_log(&main_conn, &conn, &parsed.conversation_id).await
             {
                 tracing::warn!(error = %e, conversation_id = %parsed.conversation_id, "commit-log prune (on submit) failed");
@@ -648,7 +685,7 @@ async fn commits(
     Path(conversation_id): Path<String>,
     Query(q): Query<Since>,
 ) -> Result<impl IntoResponse, AppError> {
-    let conn = state.log_db.conn()?;
+    let conn = state.log_db.conn().await?;
 
     // `head` is the head of the lineage the caller ASKED for — that is what it
     // must drain — while `head_generation` is how it learns a newer one exists.
@@ -691,7 +728,7 @@ async fn report_commit_since(
     // DB. `(user_id, device_id)` come from the verified signature — never from
     // the body — when auth is on.
     let authed = if state.require_auth {
-        let conn = state.db.conn()?;
+        let conn = state.db.conn().await?;
         match auth::verify_request_identity_cached(
             &state.device_keys,
             &conn,
@@ -743,7 +780,7 @@ async fn report_commit_since(
     // Record the high-water, then re-compute + apply the floor. Best-effort: a
     // failure here must not fail the request. Membership is read on MAIN, the
     // log + high-waters on LOG.
-    let conn = state.log_db.conn()?;
+    let conn = state.log_db.conn().await?;
     if let Err(e) = commit::record_commit_since(
         &conn,
         &parsed.conversation_id,
@@ -755,11 +792,69 @@ async fn report_commit_since(
     .await
     {
         tracing::warn!(error = %e, conversation_id = %parsed.conversation_id, "record commit-since failed");
-    } else if let Ok(main_conn) = state.db.conn() {
+    } else if let Ok(main_conn) = state.db.conn().await {
         if let Err(e) = commit::prune_commit_log(&main_conn, &conn, &parsed.conversation_id).await {
             tracing::warn!(error = %e, conversation_id = %parsed.conversation_id, "commit-log prune (on catch-up) failed");
         }
     }
 
     Ok(StatusCode::OK.into_response())
+}
+
+#[cfg(test)]
+mod require_auth_gate_tests {
+    use super::require_auth_from_value;
+
+    /// The #921 fix itself: an unconfigured DS ENFORCES. This is the assertion
+    /// that flips against the old parser, which read "unset" as "no auth".
+    #[test]
+    fn an_unconfigured_ds_enforces_auth() {
+        assert!(
+            require_auth_from_value(None),
+            "an operator who sets nothing must get the safe configuration, not an \
+             open one — with the gate off every write endpoint takes its actor \
+             from a client-controlled body field"
+        );
+    }
+
+    /// Turning it off takes a word the parser recognises — and only those. Every
+    /// other value, including near-misses and typos of "true", enforces.
+    #[test]
+    fn only_an_explicit_off_value_disables_enforcement() {
+        for off in ["false", "FALSE", "False", "0", "no", "NO", "off", "OFF", "  false  "] {
+            assert!(
+                !require_auth_from_value(Some(off)),
+                "{off:?} is an explicit opt-out and must disable enforcement"
+            );
+        }
+        for on in ["true", "TRUE", "True", "1", "yes", "on", "", "   ", "ture", "flase", "maybe"] {
+            assert!(
+                require_auth_from_value(Some(on)),
+                "{on:?} is not a recognised opt-out, so it must ENFORCE — a typo \
+                 must never be read as permission to trust every caller"
+            );
+        }
+    }
+
+    /// `require_auth_from_env` really is [`require_auth_from_value`] applied to
+    /// the variable, so the rules above are about the shipped gate and not about
+    /// a parser nothing calls.
+    ///
+    /// Reads the ambient environment rather than setting it: `set_var` mutates
+    /// process-global state that every other test in this binary is concurrently
+    /// reading (`watermark_stale_modifier`, `gc_sweep_secs`, `OtpConfig::from_env`
+    /// …), which is a data race — the reason Rust 2024 made `set_var` `unsafe`.
+    /// Nothing is lost by not setting it: CI and every dev machine run with the
+    /// variable unset, so this asserts delegation on exactly the `None` case the
+    /// #921 fix is about, and the table above covers the rest of the rule.
+    #[test]
+    fn from_env_delegates_to_the_tested_rule() {
+        let ambient = std::env::var("POLLIS_DS_REQUIRE_AUTH").ok();
+        assert_eq!(
+            super::require_auth_from_env(),
+            require_auth_from_value(ambient.as_deref()),
+            "the shipped gate must be the rule tested above, applied to \
+             POLLIS_DS_REQUIRE_AUTH={ambient:?}"
+        );
+    }
 }

@@ -49,7 +49,7 @@ async fn fresh() -> Db {
     let db = Db::connect_local(path.to_str().unwrap())
         .await
         .expect("local db");
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     conn.execute_batch("PRAGMA foreign_keys=OFF;")
         .await
         .expect("pragma");
@@ -127,7 +127,7 @@ fn dm_body(id: &str, creator: &str) -> CreateDmBody {
 #[tokio::test]
 async fn every_kind_of_conversation_is_still_creatable_and_lands_in_the_registry() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     let g = apply_create_group(&conn, None, &group_body("grp-1", None, None))
         .await
@@ -157,7 +157,7 @@ async fn every_kind_of_conversation_is_still_creatable_and_lands_in_the_registry
 #[tokio::test]
 async fn a_dm_cannot_be_created_with_an_existing_groups_id() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     apply_create_group(&conn, None, &group_body("victim-group", None, None))
         .await
         .expect("group");
@@ -178,7 +178,7 @@ async fn a_dm_cannot_be_created_with_an_existing_groups_id() {
 #[tokio::test]
 async fn a_dm_naming_a_group_leaves_no_row_behind() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     apply_create_group(&conn, None, &group_body("victim-group", None, None))
         .await
         .expect("group");
@@ -213,7 +213,7 @@ async fn a_dm_naming_a_group_leaves_no_row_behind() {
 #[tokio::test]
 async fn a_channel_cannot_take_an_existing_dms_id() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     apply_create_group(&conn, None, &group_body("grp-1", None, None))
         .await
         .expect("group");
@@ -239,7 +239,7 @@ async fn a_channel_cannot_take_an_existing_dms_id() {
 #[tokio::test]
 async fn an_id_whose_conversation_is_gone_can_never_be_claimed_again() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     conn.execute(
         "INSERT INTO conversation (id, kind) VALUES ('retired-dm', 'dm')",
         (),
@@ -269,7 +269,7 @@ async fn an_id_whose_conversation_is_gone_can_never_be_claimed_again() {
 #[tokio::test]
 async fn a_default_channel_cannot_name_an_existing_group() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     apply_create_group(&conn, None, &group_body("victim-group", None, None))
         .await
         .expect("group");
@@ -307,7 +307,7 @@ async fn a_default_channel_cannot_name_an_existing_group() {
 #[tokio::test]
 async fn a_default_voice_channel_cannot_name_an_existing_channel() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     apply_create_group(&conn, None, &group_body("grp-1", Some("chan-1"), None))
         .await
         .expect("group");
@@ -333,7 +333,7 @@ async fn a_default_voice_channel_cannot_name_an_existing_channel() {
 #[tokio::test]
 async fn one_request_cannot_name_the_same_id_twice() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     let _ = apply_create_group(&conn, None, &group_body("dup", Some("dup"), None)).await;
     assert_eq!(
@@ -362,7 +362,7 @@ async fn one_request_cannot_name_the_same_id_twice() {
 #[tokio::test]
 async fn a_refused_group_creation_is_forbidden_not_an_error() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     apply_create_group(&conn, None, &group_body("victim-group", None, None))
         .await
         .expect("group");

@@ -34,8 +34,16 @@ helper, `writes::resolve_actor`:
 
 | DS `require_auth` | actor comes from | body's actor field |
 | --- | --- | --- |
-| **on** (production) | the device-signed `X-Pollis-User` | must EQUAL the signer, else `403` |
-| **off** | the body's actor field | **required** — missing/empty is `403` |
+| **on** (the default, and production) | the device-signed `X-Pollis-User` | must EQUAL the signer, else `403` |
+| **off** (explicit opt-out only) | the body's actor field | **required** — missing/empty is `403` |
+
+`require_auth` defaults to **ON** since #921: `POLLIS_DS_REQUIRE_AUTH` is an
+opt-*out*, only `false`/`0`/`no`/`off` disables it, an unrecognised value (a typo
+like `ture`) enforces, and starting with it off logs at `ERROR`. It used to
+default off, which was survivable only because the twenty missing actor fields
+below made the unsigned path `403` on its own — fixing those in #875 turned "auth
+off" into a deployment that genuinely works and trusts whatever actor a caller
+names, so the default had to move.
 
 So a client body that omits the field works perfectly against a signed deployment
 and hard-`403`s against an unsigned one. The field's NAME varies per endpoint —

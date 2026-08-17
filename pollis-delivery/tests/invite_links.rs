@@ -46,7 +46,7 @@ async fn fresh() -> Arc<Db> {
     let db = Db::connect_local(path.to_str().unwrap())
         .await
         .expect("local db");
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
     // backend turns it ON by default, so say so explicitly rather than inherit a
     // constraint no deploy has (`Db::connect_local` makes the same call).
@@ -99,7 +99,7 @@ async fn create_link(
 ) -> Link {
     let (token, selector, secret_hash) = mint();
     let out = apply_create_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some(ADMIN),
         &CreateInviteLinkBody {
             id: id.to_string(),
@@ -131,7 +131,7 @@ fn redeem_body(token: &str, attempt: &str, now: &str) -> RedeemInviteLinkBody {
 
 async fn redeem(db: &Db, token: &str, attempt: &str, now: &str) -> RedeemOutcome {
     apply_redeem_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some(JOINER),
         &redeem_body(token, attempt, now),
     )
@@ -140,7 +140,7 @@ async fn redeem(db: &Db, token: &str, attempt: &str, now: &str) -> RedeemOutcome
 }
 
 async fn is_member(db: &Db, group: &str, user: &str) -> bool {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
@@ -164,7 +164,7 @@ async fn the_database_never_stores_the_token() {
     let link = create_link(&db, "link-1", None, None).await;
     let (_, secret) = invite_token::parse(&link.token).unwrap();
 
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT id, group_id, created_by, selector, secret_hash, \
@@ -220,7 +220,7 @@ async fn a_revoked_token_is_rejected() {
     let link = create_link(&db, "link-1", None, None).await;
 
     let out = apply_revoke_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some(ADMIN),
         &RevokeInviteLinkBody {
             link_id: link.id.clone(),
@@ -283,7 +283,7 @@ async fn a_token_past_max_uses_is_rejected() {
 
     // A DIFFERENT user presenting the same, now-exhausted token is refused.
     let out = apply_redeem_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("other-1"),
         &RedeemInviteLinkBody {
             token: link.token.clone(),
@@ -300,7 +300,7 @@ async fn a_token_past_max_uses_is_rejected() {
         "an exhausted link must not admit a second person"
     );
 
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT uses FROM group_invite_link WHERE id = ?1",
@@ -319,7 +319,7 @@ async fn a_token_past_max_uses_is_rejected() {
 async fn the_use_cap_holds_under_concurrent_redemption() {
     let db = fresh().await;
     let link = create_link(&db, "link-1", None, Some(1)).await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // Two racers issue the same guarded UPDATE the redeem path issues.
     let stmt = "UPDATE group_invite_link SET uses = uses + 1 \
@@ -367,7 +367,7 @@ async fn redemption_goes_through_the_normal_membership_path() {
         }
     );
 
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // 1. A plain 'member' row — never 'admin', never a bespoke role.
     let mut rows = conn
@@ -454,7 +454,7 @@ async fn redemption_requires_an_authenticated_actor() {
     // authed = Some(...) is the signed path. Here the body claims to be someone
     // else — `resolve_actor` must refuse to act as a different user.
     let out = apply_redeem_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some(JOINER),
         &RedeemInviteLinkBody {
             token: link.token.clone(),
@@ -482,7 +482,7 @@ async fn every_failure_is_indistinguishable() {
     // Revoked.
     let revoked = create_link(&db, "l-revoked", None, None).await;
     apply_revoke_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some(ADMIN),
         &RevokeInviteLinkBody {
             link_id: revoked.id.clone(),
@@ -499,7 +499,7 @@ async fn every_failure_is_indistinguishable() {
     // Exhausted — consumed by someone else first.
     let exhausted = create_link(&db, "l-exhausted", None, Some(1)).await;
     apply_redeem_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("other-1"),
         &RedeemInviteLinkBody {
             token: exhausted.token.clone(),
@@ -607,7 +607,7 @@ async fn successful_redemptions_do_not_consume_the_failure_budget() {
             }
         );
     }
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM group_invite_link_redemption WHERE user_id = ?1 AND succeeded = 0",
@@ -640,7 +640,7 @@ async fn only_an_admin_can_create_a_link() {
     let db = fresh().await;
     let (_, selector, secret_hash) = mint();
     let out = apply_create_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         // A non-member signing as themselves.
         Some(JOINER),
         &CreateInviteLinkBody {
@@ -667,7 +667,7 @@ async fn an_admin_of_another_group_cannot_revoke_this_groups_link() {
 
     // `other-1` is an admin — of grp-2.
     let out = apply_revoke_invite_link(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("other-1"),
         &RevokeInviteLinkBody {
             link_id: link.id.clone(),
@@ -695,7 +695,7 @@ async fn a_low_entropy_secret_hash_is_refused() {
     let db = fresh().await;
     for bad in ["", "abc", &"z".repeat(64), &"a".repeat(63)] {
         let out = apply_create_invite_link(
-            &db.conn().unwrap(),
+            &db.conn().await.unwrap(),
             Some(ADMIN),
             &CreateInviteLinkBody {
                 id: format!("link-{}", bad.len()),
@@ -722,7 +722,7 @@ async fn a_low_entropy_secret_hash_is_refused() {
 async fn revocation_is_permanent_and_keeps_its_first_timestamp() {
     let db = fresh().await;
     let link = create_link(&db, "link-1", None, None).await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     for at in [NOW, "2026-09-01T00:00:00Z"] {
         apply_revoke_invite_link(

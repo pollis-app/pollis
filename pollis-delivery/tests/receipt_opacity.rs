@@ -51,9 +51,9 @@ async fn fresh() -> Arc<Db> {
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     let db = Arc::new(db);
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO dm_channel (id, created_by, created_at) VALUES (?1, 'alice', '2026-01-01')",
@@ -62,7 +62,7 @@ async fn fresh() -> Arc<Db> {
         .await
         .expect("dm");
     for user in ["alice", "bob"] {
-        db.conn()
+        db.conn().await
             .unwrap()
             .execute(
                 "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at, accepted_at) \
@@ -120,7 +120,7 @@ fn body(id: &str, ciphertext: &str) -> SendMessageBody {
 /// server-side view of it.
 async fn stored_row(db: &Db, id: &str) -> String {
     let mut rows = db
-        .conn()
+        .conn().await
         .unwrap()
         .query(
             "SELECT id, conversation_id, sender_id, ciphertext, \
@@ -190,7 +190,7 @@ async fn receipt_is_indistinguishable_from_an_ordinary_message() {
     let text_ct = seal(&text);
 
     for (id, ct) in [("env_receipt", &receipt_ct), ("env_text", &text_ct)] {
-        let outcome = apply_send_message(&db.conn().unwrap(), Some("bob"), &body(id, ct))
+        let outcome = apply_send_message(&db.conn().await.unwrap(), Some("bob"), &body(id, ct))
             .await
             .expect("send");
         assert!(matches!(outcome, WriteOutcome::Ok), "{id} must be accepted");
@@ -215,7 +215,7 @@ async fn receipt_is_indistinguishable_from_an_ordinary_message() {
 
     // And there is no column anywhere in the table that could name a receipt.
     let mut rows = db
-        .conn()
+        .conn().await
         .unwrap()
         .query("SELECT name FROM pragma_table_info('message_envelope')", ())
         .await
@@ -240,7 +240,7 @@ async fn receipt_plaintext_never_reaches_the_stored_row() {
     let plaintext = receipt_plaintext(true, "2026-08-15T12:00:00Z", &ACKED);
     let ct = seal(&plaintext);
 
-    apply_send_message(&db.conn().unwrap(), Some("bob"), &body("env_r", &ct))
+    apply_send_message(&db.conn().await.unwrap(), Some("bob"), &body("env_r", &ct))
         .await
         .expect("send");
 
@@ -279,7 +279,7 @@ async fn ds_round_trips_ciphertext_without_interpreting_it() {
     let garbage_ct = "mls:deadbeefdeadbeef";
 
     for (id, ct) in [("env_a", receipt_ct.as_str()), ("env_b", garbage_ct)] {
-        let outcome = apply_send_message(&db.conn().unwrap(), Some("bob"), &body(id, ct))
+        let outcome = apply_send_message(&db.conn().await.unwrap(), Some("bob"), &body(id, ct))
             .await
             .expect("send");
         assert!(
@@ -287,7 +287,7 @@ async fn ds_round_trips_ciphertext_without_interpreting_it() {
             "the DS must accept {id} without inspecting its payload",
         );
         let mut rows = db
-            .conn()
+            .conn().await
             .unwrap()
             .query(
                 "SELECT ciphertext FROM message_envelope WHERE id = ?1",
@@ -307,7 +307,7 @@ async fn ds_round_trips_ciphertext_without_interpreting_it() {
 async fn a_non_member_cannot_post_a_receipt() {
     let db = fresh().await;
     let ct = seal(&receipt_plaintext(true, "2026-08-15T12:00:00Z", &ACKED));
-    let outcome = apply_send_message(&db.conn().unwrap(), Some("mallory"), &body("env_x", &ct))
+    let outcome = apply_send_message(&db.conn().await.unwrap(), Some("mallory"), &body("env_x", &ct))
         .await
         .expect("send");
     assert!(

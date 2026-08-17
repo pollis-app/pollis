@@ -39,11 +39,12 @@ async fn fresh() -> Arc<Db> {
     let db = Db::connect_local(path.to_str().unwrap())
         .await
         .expect("local db");
-    let conn = db.conn().unwrap();
-    // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
-    // backend turns it ON by default. Match production explicitly — with FKs on,
-    // the unknown-group test would pass for the wrong reason.
-    conn.execute_batch("PRAGMA foreign_keys=OFF;").await.expect("pragma");
+    // No `PRAGMA foreign_keys=OFF` here: since #919 `Db` stamps it on EVERY
+    // connection it builds, so this fixture cannot get a stricter connection than
+    // production has however deeply the code under test nests its checkouts. It
+    // used to be set by hand right here, on this one connection, which was only
+    // ever half a fix.
+    let conn = db.conn().await.unwrap();
     pollis_schema::apply::single_db(&conn).await.expect("schema");
     conn.execute_batch(
         "INSERT INTO users (id, email, username) VALUES \
@@ -67,7 +68,7 @@ fn body(id: &str, group_id: &str, requester: &str) -> CreateJoinRequestBody {
 }
 
 async fn request_rows(db: &Db) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT COUNT(*) FROM group_join_request", ())
         .await
@@ -82,7 +83,7 @@ async fn request_rows(db: &Db) -> i64 {
 #[tokio::test]
 async fn a_join_request_for_an_unknown_group_is_refused() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     let outcome = apply_create_join_request(
         &conn,
@@ -109,7 +110,7 @@ async fn a_join_request_for_an_unknown_group_is_refused() {
 #[tokio::test]
 async fn an_existing_member_cannot_request_to_join() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     let outcome = apply_create_join_request(&conn, Some(MEMBER), &body("req-1", GROUP, MEMBER))
         .await
@@ -129,7 +130,7 @@ async fn an_existing_member_cannot_request_to_join() {
 #[tokio::test]
 async fn an_admin_cannot_request_to_join_their_own_group() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     let outcome = apply_create_join_request(&conn, Some(ADMIN), &body("req-1", GROUP, ADMIN))
         .await
@@ -148,7 +149,7 @@ async fn an_admin_cannot_request_to_join_their_own_group() {
 #[tokio::test]
 async fn a_non_member_may_request_to_join() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     let outcome =
         apply_create_join_request(&conn, Some(STRANGER), &body("req-1", GROUP, STRANGER))
@@ -178,7 +179,7 @@ async fn a_non_member_may_request_to_join() {
 #[tokio::test]
 async fn a_rejected_requester_may_apply_again() {
     let db = fresh().await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     apply_create_join_request(&conn, Some(STRANGER), &body("req-1", GROUP, STRANGER))
         .await

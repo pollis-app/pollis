@@ -146,7 +146,7 @@ pub async fn rotate_identity(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     let outcome = apply_rotate_identity(&conn, authed.as_deref(), &parsed).await?;
     // Rotation does not itself rewrite `mls_signature_pub_pq`, but it changes the
     // account key every device cert chains to and is immediately followed by
@@ -296,7 +296,7 @@ pub async fn record_security_event(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_record_security_event(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -349,7 +349,7 @@ pub async fn approve_enrollment(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_approve_enrollment(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -405,7 +405,7 @@ pub async fn reject_enrollment(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_reject_enrollment(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -456,7 +456,7 @@ pub async fn revoke_device(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     let outcome = apply_revoke_device(&conn, authed.as_deref(), &parsed).await?;
     // Revocation must bite on the NEXT request, not when the cache TTL lapses
     // (#658). Evicted unconditionally: if the write was Forbidden nothing
@@ -535,7 +535,7 @@ pub async fn logout_device(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     let outcome = apply_logout_device(&conn, authed.as_deref(), &parsed).await?;
     // The row is gone; the cached key must go with it (#658), or the logged-out
     // device would keep authenticating until the TTL lapsed.
@@ -591,7 +591,7 @@ pub async fn reset_recover(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     let outcome = apply_reset_recover(&conn, authed.as_deref(), &parsed).await?;
     // Account-wide device wipe → evict the whole user (#658). Cheaper to reason
     // about than enumerating which sibling devices were dropped, and the kept
@@ -684,7 +684,7 @@ pub async fn delete_account(
             Err(_) => return Ok(bad_request("invalid body")),
         }
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     let outcome = apply_delete_account(&conn, authed.as_deref(), &parsed).await?;
     // The `users` DELETE cascades to `user_device`, so every one of this user's
     // cached keys is now stale (#658).

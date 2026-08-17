@@ -53,13 +53,13 @@ async fn fresh() -> Arc<Db> {
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
 /// Insert the message envelope `msg` (the thing that makes a declaration count).
 async fn add_envelope(db: &Db, msg: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             // Every NOT NULL column is supplied. The old fixture inserted `id`
@@ -80,7 +80,7 @@ async fn add_envelope(db: &Db, msg: &str) {
 /// is what `/v1/messages/delete`, envelope GC, retention, and account/group
 /// teardown each do to the envelope.
 async fn delete_envelope(db: &Db, msg: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "DELETE FROM message_envelope WHERE id = ?1",
@@ -99,7 +99,7 @@ async fn register_ref(db: &Db, hash: &str, key: &str, msg: &str) {
         r2_key: key.into(),
         message_id: Some(msg.into()),
     };
-    let out = apply_register_attachment(&db.conn().unwrap(), Some("u1"), &body)
+    let out = apply_register_attachment(&db.conn().await.unwrap(), Some("u1"), &body)
         .await
         .unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
@@ -113,14 +113,14 @@ async fn release_ref(db: &Db, hash: &str, msg: &str) {
         content_hash: hash.into(),
         message_id: Some(msg.into()),
     };
-    let out = apply_delete_attachment(&db.conn().unwrap(), Some("u1"), &body)
+    let out = apply_delete_attachment(&db.conn().await.unwrap(), Some("u1"), &body)
         .await
         .unwrap();
     assert!(matches!(out, WriteOutcome::Ok));
 }
 
 async fn object_exists(db: &Db, hash: &str) -> bool {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT 1 FROM attachment_object WHERE content_hash = ?1",
@@ -132,7 +132,7 @@ async fn object_exists(db: &Db, hash: &str) -> bool {
 }
 
 async fn referenced(db: &Db, hash: &str) -> bool {
-    object_is_referenced(&db.conn().unwrap(), hash).await.unwrap()
+    object_is_referenced(&db.conn().await.unwrap(), hash).await.unwrap()
 }
 
 // ── The stranding invariant ───────────────────────────────────────────────────
@@ -226,7 +226,7 @@ async fn a_forged_attachment_delete_cannot_release_a_live_reference() {
     // endpoint naming it. `_authed` is unused by design — this proves the endpoint
     // is not the release chokepoint, so no authz on it can be the fix.
     let out = apply_delete_attachment(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("attacker"),
         &AttachmentDeleteBody { content_hash: hash.into(), message_id: Some("m_victim".into()) },
     )
@@ -275,7 +275,7 @@ async fn a_reference_cannot_outlive_its_message() {
 
     // The object is now collectable by the ordinary conditional collect.
     apply_delete_attachment(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("u1"),
         &AttachmentDeleteBody { content_hash: hash.into(), message_id: None },
     )
@@ -296,7 +296,7 @@ async fn old_client_delete_cannot_strand_a_referenced_object() {
 
     // An old client (no message_id) tries to delete the object unconditionally.
     let out = apply_delete_attachment(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("u2"),
         &AttachmentDeleteBody { content_hash: "h".into(), message_id: None },
     )
@@ -310,7 +310,7 @@ async fn old_client_delete_cannot_strand_a_referenced_object() {
     );
 
     // A legacy object with no references at all is collectable, as before.
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO attachment_object (content_hash, r2_key) VALUES ('legacy', 'media/legacy/f.enc')",
@@ -319,7 +319,7 @@ async fn old_client_delete_cannot_strand_a_referenced_object() {
         .await
         .unwrap();
     apply_delete_attachment(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some("u2"),
         &AttachmentDeleteBody { content_hash: "legacy".into(), message_id: None },
     )

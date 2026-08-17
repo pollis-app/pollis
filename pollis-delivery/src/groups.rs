@@ -155,14 +155,20 @@ async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> an
     // never rejoin, so they are not part of the GC roster.
     // `reported_at = datetime('now')` marks each seeded device LIVE as of the join
     // (#720): it pins for the staleness window, then stops if it never reports.
+    // The cursor is bound from `seeded_watermark_cursor` and the two columns are
+    // deliberately in different formats — see that function (#908).
     let _ = conn
         .execute(
             "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at, reported_at)
-             SELECT c.id, ?1, ud.device_id, datetime('now'), datetime('now')
+             SELECT c.id, ?1, ud.device_id, ?3, datetime('now')
              FROM channels c
              JOIN user_device ud ON ud.user_id = ?1 AND ud.revoked_at IS NULL
              WHERE c.group_id = ?2",
-            libsql::params![user_id.to_string(), group_id.to_string()],
+            libsql::params![
+                user_id.to_string(),
+                group_id.to_string(),
+                crate::messages::seeded_watermark_cursor()
+            ],
         )
         .await;
     Ok(())
@@ -185,7 +191,7 @@ pub async fn create_group(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_create_group(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -293,7 +299,7 @@ pub async fn update_group(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_update_group(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -351,7 +357,7 @@ pub async fn delete_group(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_delete_group(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -400,7 +406,7 @@ pub async fn leave_group(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_leave_group(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -464,7 +470,7 @@ pub async fn create_channel(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_create_channel(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -523,7 +529,7 @@ pub async fn update_channel(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_update_channel(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -578,7 +584,7 @@ pub async fn delete_channel(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_delete_channel(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -637,7 +643,7 @@ pub async fn remove_member(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_remove_member(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -683,7 +689,7 @@ pub async fn set_member_role(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_set_member_role(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -736,7 +742,7 @@ pub async fn create_invite(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_create_invite(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -784,7 +790,7 @@ pub async fn accept_invite(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_accept_invite(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -843,7 +849,7 @@ pub async fn decline_invite(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_decline_invite(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -883,7 +889,7 @@ pub async fn create_join_request(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_create_join_request(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -964,7 +970,7 @@ pub async fn approve_join_request(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_approve_join_request(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -1023,7 +1029,7 @@ pub async fn reject_join_request(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_reject_join_request(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -1130,7 +1136,7 @@ pub async fn create_invite_link(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_create_invite_link(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -1197,7 +1203,7 @@ pub async fn revoke_invite_link(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     outcome_response(apply_revoke_invite_link(&conn, authed.as_deref(), &parsed).await?)
 }
 
@@ -1275,7 +1281,7 @@ pub async fn redeem_invite_link(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let conn = state.db.conn()?;
+    let conn = state.db.conn().await?;
     Ok(
         match apply_redeem_invite_link(&conn, authed.as_deref(), &parsed).await? {
             RedeemOutcome::Joined { group_id } => {

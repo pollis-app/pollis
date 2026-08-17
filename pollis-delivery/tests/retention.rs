@@ -39,7 +39,7 @@ async fn fresh(half: Half) -> Db {
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     match half {
         Half::Main => pollis_schema::apply::main_db(&conn).await.expect("schema"),
         Half::Log => pollis_schema::apply::log_db(&conn).await.expect("schema"),
@@ -48,7 +48,7 @@ async fn fresh(half: Half) -> Db {
 }
 
 async fn add_member(main: &Db, group_id: &str, user_id: &str, device_id: &str) {
-    let conn = main.conn().unwrap();
+    let conn = main.conn().await.unwrap();
     conn.execute(
         "INSERT INTO group_member (group_id, user_id) VALUES (?1, ?2)",
         libsql::params![group_id, user_id],
@@ -64,7 +64,7 @@ async fn add_member(main: &Db, group_id: &str, user_id: &str, device_id: &str) {
 }
 
 async fn revoke_device(main: &Db, device_id: &str) {
-    main.conn()
+    main.conn().await
         .unwrap()
         .execute(
             "UPDATE user_device SET revoked_at = datetime('now') WHERE device_id = ?1",
@@ -76,7 +76,7 @@ async fn revoke_device(main: &Db, device_id: &str) {
 
 /// Append commits at epochs `0..=up_to` of generation `gen` for `conv`.
 async fn seed_commits_in(log: &Db, conv: &str, gen: i64, up_to: i64) {
-    let conn = log.conn().unwrap();
+    let conn = log.conn().await.unwrap();
     for e in 0..=up_to {
         conn.execute(
             "INSERT INTO mls_commit_log (conversation_id, generation, epoch, sender_id, commit_data) \
@@ -96,7 +96,7 @@ async fn seed_commits(log: &Db, conv: &str, up_to: i64) {
 
 /// The surviving epochs of generation `gen` for `conv`, ascending.
 async fn epochs_in(log: &Db, conv: &str, gen: i64) -> Vec<i64> {
-    let conn = log.conn().unwrap();
+    let conn = log.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT epoch FROM mls_commit_log WHERE conversation_id = ?1 AND generation = ?2 \
@@ -129,11 +129,11 @@ async fn tier1_prunes_prefix_but_keeps_slowest_member() {
     add_member(&main, conv, "bob", "b-dev").await;
     // head = 25 (epochs 0..24). Alice caught up to 20, Bob (slowest) to 15.
     seed_commits(&log, conv, 24).await;
-    let log_conn = log.conn().unwrap();
+    let log_conn = log.conn().await.unwrap();
     record_commit_since(&log_conn, conv, "alice", "a-dev", 0, 20).await.unwrap();
     record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 15).await.unwrap();
 
-    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
 
     // floor = min(15,20) - SLACK = 15 - 8 = 7.
     assert_eq!(report.floor, 15 - PRUNE_SLACK_EPOCHS);
@@ -159,11 +159,11 @@ async fn unreported_member_blocks_tier1_pruning() {
     add_member(&main, conv, "bob", "b-dev").await;
     seed_commits(&log, conv, 24).await;
     // Only alice reports; bob is unaccounted for.
-    record_commit_since(&log.conn().unwrap(), conv, "alice", "a-dev", 0, 20)
+    record_commit_since(&log.conn().await.unwrap(), conv, "alice", "a-dev", 0, 20)
         .await
         .unwrap();
 
-    let report = prune_commit_log(&main.conn().unwrap(), &log.conn().unwrap(), conv)
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log.conn().await.unwrap(), conv)
         .await
         .unwrap();
 
@@ -183,7 +183,7 @@ async fn revoked_device_does_not_pin_the_floor() {
 
     add_member(&main, conv, "alice", "a-old").await;
     // Second device for the same user, then revoke the old one.
-    main.conn()
+    main.conn().await
         .unwrap()
         .execute(
             "INSERT INTO user_device (user_id, device_id, revoked_at) VALUES ('alice', 'a-new', NULL)",
@@ -194,12 +194,12 @@ async fn revoked_device_does_not_pin_the_floor() {
     revoke_device(&main, "a-old").await;
 
     seed_commits(&log, conv, 24).await;
-    let log_conn = log.conn().unwrap();
+    let log_conn = log.conn().await.unwrap();
     // The revoked device reported a low epoch; the live one is caught up.
     record_commit_since(&log_conn, conv, "alice", "a-old", 0, 2).await.unwrap();
     record_commit_since(&log_conn, conv, "alice", "a-new", 0, 20).await.unwrap();
 
-    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
 
     // Only the live device (20) counts → floor = 20 - 8 = 12, not 2 - 8.
     assert_eq!(report.floor, 20 - PRUNE_SLACK_EPOCHS);
@@ -221,14 +221,14 @@ async fn bogus_high_water_above_head_cannot_wipe_the_live_log() {
     // drives Tier 1 directly — the worst case for the clamp.
     add_member(&main, conv, "alice", "a-dev").await;
     seed_commits(&log, conv, 10).await; // head = 11, epochs 0..=10
-    let log_conn = log.conn().unwrap();
+    let log_conn = log.conn().await.unwrap();
 
     // A forged/buggy report claiming an epoch astronomically above the real head.
     record_commit_since(&log_conn, conv, "alice", "a-dev", 0, i64::MAX)
         .await
         .unwrap();
 
-    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv)
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv)
         .await
         .unwrap();
 
@@ -260,11 +260,11 @@ async fn clamp_does_not_disturb_an_honest_prune() {
     add_member(&main, conv, "alice", "a-dev").await;
     add_member(&main, conv, "bob", "b-dev").await;
     seed_commits(&log, conv, 24).await; // head = 25
-    let log_conn = log.conn().unwrap();
+    let log_conn = log.conn().await.unwrap();
     record_commit_since(&log_conn, conv, "alice", "a-dev", 0, 20).await.unwrap();
     record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 15).await.unwrap();
 
-    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
 
     // Exactly the pre-clamp Tier-1 floor: min(15, 20) - SLACK, well below head.
     assert_eq!(report.floor, 15 - PRUNE_SLACK_EPOCHS);
@@ -282,12 +282,12 @@ async fn prune_preserves_unique_epoch_index() {
     let conv = "grp1";
     seed_commits(&log, conv, 10).await;
 
-    let deleted = delete_commits_below(&log.conn().unwrap(), conv, 0, 5).await.unwrap();
+    let deleted = delete_commits_below(&log.conn().await.unwrap(), conv, 0, 5).await.unwrap();
     assert_eq!(deleted, 5, "epochs 0..4 pruned");
 
     // A duplicate at a SURVIVING epoch must still conflict (fork-dedup holds).
     let dup = log
-        .conn()
+        .conn().await
         .unwrap()
         .execute(
             "INSERT OR IGNORE INTO mls_commit_log (conversation_id, generation, epoch, sender_id, commit_data) \
@@ -306,7 +306,7 @@ async fn prune_preserves_unique_epoch_index() {
 async fn record_commit_since_is_monotone() {
     let log = fresh(Half::Log).await;
     let conv = "grp1";
-    let conn = log.conn().unwrap();
+    let conn = log.conn().await.unwrap();
 
     record_commit_since(&conn, conv, "alice", "a-dev", 0, 10).await.unwrap();
     // A stale/reordered report at a lower epoch must be ignored.
@@ -345,13 +345,13 @@ async fn a_device_on_the_old_lineage_disables_tier1_on_the_new_one() {
     seed_commits_in(&log, conv, 0, 24).await;
     seed_commits_in(&log, conv, 1, 24).await;
 
-    let log_conn = log.conn().unwrap();
+    let log_conn = log.conn().await.unwrap();
     // Alice is on the new lineage at epoch 20. Bob never left generation 0 —
     // where he sits at a NUMERICALLY HIGHER epoch than alice.
     record_commit_since(&log_conn, conv, "alice", "a-dev", 1, 20).await.unwrap();
     record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 23).await.unwrap();
 
-    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
 
     assert_eq!(report.generation, 1, "the head lineage is the successor");
     assert_eq!(
@@ -383,11 +383,11 @@ async fn a_fully_vacated_lineage_is_retired() {
     seed_commits_in(&log, conv, 0, 24).await;
     seed_commits_in(&log, conv, 1, 24).await;
 
-    let log_conn = log.conn().unwrap();
+    let log_conn = log.conn().await.unwrap();
     record_commit_since(&log_conn, conv, "alice", "a-dev", 1, 20).await.unwrap();
     record_commit_since(&log_conn, conv, "bob", "b-dev", 1, 15).await.unwrap();
 
-    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
 
     assert_eq!(report.generation_floor, 1, "generation 0 is fully vacated");
     assert!(
@@ -422,14 +422,14 @@ async fn tier2_retires_a_lineage_a_stranded_device_still_occupies() {
     // The successor has run past the hard cap.
     seed_commits_in(&log, conv, 1, PRUNE_MAX_BEHIND_HEAD).await;
 
-    let log_conn = log.conn().unwrap();
+    let log_conn = log.conn().await.unwrap();
     record_commit_since(&log_conn, conv, "alice", "a-dev", 1, PRUNE_MAX_BEHIND_HEAD)
         .await
         .unwrap();
     // Bob never migrated.
     record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 1).await.unwrap();
 
-    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+    let report = prune_commit_log(&main.conn().await.unwrap(), &log_conn, conv).await.unwrap();
 
     assert_eq!(report.generation, 1);
     assert_eq!(report.generation_floor, 1, "Tier 2 retires the closed lineage");
@@ -448,7 +448,7 @@ async fn tier2_retires_a_lineage_a_stranded_device_still_occupies() {
 async fn record_commit_since_is_lexicographically_monotone() {
     let log = fresh(Half::Log).await;
     let conv = "grp1";
-    let conn = log.conn().unwrap();
+    let conn = log.conn().await.unwrap();
 
     record_commit_since(&conn, conv, "alice", "a-dev", 0, 40).await.unwrap();
     // Migrated: generation up, epoch DOWN. This is forward progress.
@@ -496,14 +496,14 @@ async fn delete_generations_below_only_touches_closed_lineages() {
     seed_commits_in(&log, conv, 0, 4).await;
     seed_commits_in(&log, conv, 1, 4).await;
 
-    let deleted = delete_generations_below(&log.conn().unwrap(), conv, 1).await.unwrap();
+    let deleted = delete_generations_below(&log.conn().await.unwrap(), conv, 1).await.unwrap();
     assert_eq!(deleted, 5, "generation 0's five commits");
     assert!(epochs_in(&log, conv, 0).await.is_empty());
     assert_eq!(epochs_in(&log, conv, 1).await, vec![0, 1, 2, 3, 4]);
 
     // Floor 0 is a no-op — there is no closed lineage below generation 0.
     assert_eq!(
-        delete_generations_below(&log.conn().unwrap(), conv, 0).await.unwrap(),
+        delete_generations_below(&log.conn().await.unwrap(), conv, 0).await.unwrap(),
         0
     );
 }
@@ -529,7 +529,7 @@ async fn a_duplicate_membership_row_is_rejected() {
     add_member(&main, "g", "alice", "a1").await;
 
     let err = main
-        .conn()
+        .conn().await
         .unwrap()
         .execute(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g', 'alice')",
@@ -543,7 +543,7 @@ async fn a_duplicate_membership_row_is_rejected() {
     );
 
     // And the roster the floor is computed over is still exactly one device.
-    let conn = main.conn().unwrap();
+    let conn = main.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM group_member WHERE group_id = 'g' AND user_id = 'alice'",
@@ -564,7 +564,7 @@ async fn a_device_id_cannot_belong_to_two_users() {
     add_member(&main, "g", "alice", "shared-device").await;
 
     let err = main
-        .conn()
+        .conn().await
         .unwrap()
         .execute(
             "INSERT INTO user_device (user_id, device_id) VALUES ('mallory', 'shared-device')",
@@ -586,7 +586,7 @@ async fn a_device_id_cannot_belong_to_two_users() {
 #[tokio::test]
 async fn a_device_cannot_report_two_high_waters_for_one_conversation() {
     let log = fresh(Half::Log).await;
-    let conn = log.conn().unwrap();
+    let conn = log.conn().await.unwrap();
     conn.execute(
         "INSERT INTO mls_commit_since (conversation_id, user_id, device_id, since_epoch) \
          VALUES ('c', 'alice', 'a1', 7)",

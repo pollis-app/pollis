@@ -28,7 +28,7 @@ async fn router() -> axum::Router {
     let db = Db::connect_local(path.to_str().unwrap())
         .await
         .expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap())
+    pollis_schema::apply::single_db(&db.conn().await.unwrap())
         .await
         .expect("schema");
     // Auth OFF: this test is about ROUTING, not authorization. With auth on

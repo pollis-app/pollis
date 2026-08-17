@@ -43,7 +43,7 @@ async fn fresh() -> Arc<Db> {
     let path = dir.path().join("db.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -53,7 +53,7 @@ fn hash(seed: char) -> String {
 }
 
 async fn add_group(db: &Db, group: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT OR IGNORE INTO groups (id) VALUES (?1)",
@@ -65,7 +65,7 @@ async fn add_group(db: &Db, group: &str) {
 
 async fn add_member(db: &Db, group: &str, user: &str, role: &str) {
     add_group(db, group).await;
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT OR IGNORE INTO group_member (group_id, user_id, role) VALUES (?1, ?2, ?3)",
@@ -96,7 +96,7 @@ async fn create_as(
     content_hash: &str,
 ) -> EmojiOutcome {
     apply_create_emoji(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some(actor),
         &create_body(group, shortcode, content_hash),
     )
@@ -106,7 +106,7 @@ async fn create_as(
 
 async fn remove_as(db: &Db, actor: &str, group: &str, shortcode: &str) -> EmojiOutcome {
     apply_remove_emoji(
-        &db.conn().unwrap(),
+        &db.conn().await.unwrap(),
         Some(actor),
         &RemoveEmojiBody {
             group_id: group.into(),
@@ -119,13 +119,13 @@ async fn remove_as(db: &Db, actor: &str, group: &str, shortcode: &str) -> EmojiO
 }
 
 async fn count(db: &Db, sql: &str) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn.query(sql, ()).await.unwrap();
     rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
 }
 
 async fn object_exists(db: &Db, content_hash: &str) -> bool {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT 1 FROM custom_emoji_object WHERE content_hash = ?1",
@@ -137,7 +137,7 @@ async fn object_exists(db: &Db, content_hash: &str) -> bool {
 }
 
 async fn can_use(db: &Db, user: &str, content_hash: &str) -> bool {
-    user_can_use_emoji(&db.conn().unwrap(), user, content_hash)
+    user_can_use_emoji(&db.conn().await.unwrap(), user, content_hash)
         .await
         .unwrap()
 }
@@ -303,7 +303,7 @@ async fn the_same_bytes_twice_are_one_stored_object() {
 
     // And the key is DERIVED from the hash, so both registrations necessarily
     // agree on where the bytes live; a client cannot name a different one.
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT r2_key FROM custom_emoji_object WHERE content_hash = ?1",
@@ -332,7 +332,7 @@ async fn a_colliding_shortcode_is_reported_not_swallowed() {
 
     // The loser's object must not linger: it has no reference, so the sweep
     // reclaims it rather than leaving a paid-for blob nobody can reach.
-    let collected = sweep_unreferenced_emoji(&db.conn().unwrap()).await.unwrap();
+    let collected = sweep_unreferenced_emoji(&db.conn().await.unwrap()).await.unwrap();
     assert_eq!(collected, vec![emoji_r2_key(&hash('b'), "webp")]);
 }
 
@@ -357,14 +357,14 @@ async fn gc_reclaims_an_unreferenced_emoji_and_only_then() {
         "g2 still uses it — collecting here would break g2's emoji everywhere it \
          has already been sent"
     );
-    assert!(object_is_referenced(&db.conn().unwrap(), &parrot).await.unwrap());
+    assert!(object_is_referenced(&db.conn().await.unwrap(), &parrot).await.unwrap());
 
     remove_as(&db, "u1", "g2", "parrot").await;
     assert!(
         !object_exists(&db, &parrot).await,
         "last reference gone → the object is collected"
     );
-    assert!(!object_is_referenced(&db.conn().unwrap(), &parrot).await.unwrap());
+    assert!(!object_is_referenced(&db.conn().await.unwrap(), &parrot).await.unwrap());
 }
 
 /// A deleted group releases its emoji references, and the sweep then reclaims
@@ -387,9 +387,9 @@ async fn deleting_a_group_releases_its_emoji_and_the_sweep_reclaims_them() {
     create_as(&db, "u1", "survivor", "shared", &shared).await;
 
     // What `apply_delete_group` now does before dropping the group row.
-    release_group_emoji(&db.conn().unwrap(), "doomed").await.unwrap();
+    release_group_emoji(&db.conn().await.unwrap(), "doomed").await.unwrap();
 
-    let collected = sweep_unreferenced_emoji(&db.conn().unwrap()).await.unwrap();
+    let collected = sweep_unreferenced_emoji(&db.conn().await.unwrap()).await.unwrap();
     assert_eq!(
         collected,
         vec![emoji_r2_key(&solo, "webp")],
@@ -402,7 +402,7 @@ async fn deleting_a_group_releases_its_emoji_and_the_sweep_reclaims_them() {
     );
 
     // The sweep is idempotent: running it again finds nothing.
-    assert!(sweep_unreferenced_emoji(&db.conn().unwrap())
+    assert!(sweep_unreferenced_emoji(&db.conn().await.unwrap())
         .await
         .unwrap()
         .is_empty());
@@ -422,7 +422,7 @@ async fn one_user_is_bounded_but_a_group_is_not() {
 
     // Fill the hog's quota directly (the API path is exercised elsewhere; this
     // is about the ceiling, not the write).
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1) \
@@ -491,7 +491,7 @@ async fn a_malformed_registration_is_refused() {
     for (label, mutate) in cases {
         let mut body = create_body("g", "parrot", &hash('a'));
         mutate(&mut body);
-        let out = apply_create_emoji(&db.conn().unwrap(), Some("u1"), &body)
+        let out = apply_create_emoji(&db.conn().await.unwrap(), Some("u1"), &body)
             .await
             .unwrap();
         assert!(

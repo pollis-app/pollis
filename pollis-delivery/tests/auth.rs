@@ -46,16 +46,19 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("delivery.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
 /// Make sure `user_id` exists. `user_device.user_id` and `group_member.user_id`
-/// are real foreign keys in the shipped schema, and libsql's local backend
-/// enforces them on any connection that has not been told otherwise — so a
-/// fixture that invents a user id is only valid because nothing was looking.
+/// are real foreign keys in the shipped schema but are inert on every deployment
+/// (remote Turso does not enable foreign-key enforcement, and `Db` matches that
+/// on every connection — see `db::LOCAL_PRAGMAS`), so nothing would reject a
+/// fixture that invents a user id. Seeding the row anyway keeps the fixture
+/// honest about what it is modelling rather than leaning on an unenforced
+/// constraint.
 async fn seed_user(db: &Db, user_id: &str) {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     conn.execute(
         "INSERT OR IGNORE INTO users (id, email, username) VALUES (?1, ?1 || '@x', ?1)",
         libsql::params![user_id],
@@ -68,7 +71,7 @@ async fn seed_user(db: &Db, user_id: &str) {
 /// exactly the bytes openmls `to_public_vec()` yields for ML-DSA-44.
 async fn seed_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
     seed_user(db, user_id).await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, mls_signature_pub_pq) VALUES (?1, ?2, ?3)",
         libsql::params![device_id, user_id, pq_pub(vk)],
@@ -82,7 +85,7 @@ async fn seed_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey<
 /// conversation id — a group's text channels share one MLS group keyed by it).
 async fn seed_group_membership(db: &Db, conversation_id: &str, user_id: &str) {
     seed_user(db, user_id).await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     conn.execute(
         "INSERT INTO group_member (group_id, user_id) VALUES (?1, ?2)",
         libsql::params![conversation_id, user_id],
@@ -94,7 +97,7 @@ async fn seed_group_membership(db: &Db, conversation_id: &str, user_id: &str) {
 /// Seed a *revoked* device (revoked_at set) — auth must reject it.
 async fn seed_revoked_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
     seed_user(db, user_id).await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, mls_signature_pub_pq, revoked_at) \
          VALUES (?1, ?2, ?3, datetime('now'))",
@@ -179,7 +182,7 @@ fn since_body_json(conv: &str, generation: i64, since: i64) -> Vec<u8> {
 /// The `(generation, since_epoch)` recorded for a device, or `None` if no report
 /// was recorded — the observable the #681 report-auth tests assert on.
 async fn recorded_since(db: &Db, conv: &str, device_id: &str) -> Option<(i64, i64)> {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT generation, since_epoch FROM mls_commit_since \
@@ -393,7 +396,7 @@ async fn unauthenticated_commit_since_report_is_ignored() {
     let sk = gen_signing_key();
     seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
     // A truthful prior high-water for alice's device.
-    pollis_delivery::commit::record_commit_since(&db.conn().unwrap(), "conv1", "alice", "dev-alice", 0, 5)
+    pollis_delivery::commit::record_commit_since(&db.conn().await.unwrap(), "conv1", "alice", "dev-alice", 0, 5)
         .await
         .unwrap();
 
@@ -443,12 +446,15 @@ async fn revoked_device_commit_since_report_is_rejected() {
     );
 }
 
-// ── Auth OFF (default) ────────────────────────────────────────────────────────
+// ── Auth OFF (explicit opt-out only, since #921) ──────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
 async fn auth_off_accepts_unauthenticated_commit() {
     let db = fresh_db().await;
-    // require_auth = false: today's behavior. No headers, no device row.
+    // `require_auth = false` is now reachable ONLY by setting
+    // POLLIS_DS_REQUIRE_AUTH to an explicit off value (#921) — it is no longer
+    // what an unconfigured DS does. The mode still exists for local development,
+    // so it still gets a test. No headers, no device row.
     let router = build_router_with_state(AppState::new(Arc::clone(&db), false));
     let body = submit_body_json("conv1", 0, "alice");
     let req = Request::builder()
@@ -492,7 +498,7 @@ async fn reads_are_open_even_with_auth_on() {
 /// so no invalidation hook fires. Used to prove whether an answer came from the
 /// cache or from the DB.
 async fn delete_device_row_behind_the_ds(db: &Db, device_id: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "DELETE FROM user_device WHERE device_id = ?1",
@@ -505,7 +511,7 @@ async fn delete_device_row_behind_the_ds(db: &Db, device_id: &str) {
 /// Overwrite a device's registered pubkey directly, again bypassing every
 /// endpoint (and therefore every eviction hook).
 async fn set_device_pubkey_behind_the_ds(db: &Db, device_id: &str, vk: &VerifyingKey<MlDsa44>) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "UPDATE user_device SET mls_signature_pub_pq = ?1 WHERE device_id = ?2",
@@ -517,7 +523,7 @@ async fn set_device_pubkey_behind_the_ds(db: &Db, device_id: &str, vk: &Verifyin
 
 /// `revoked_at` for a device — `None` when the row is absent or live.
 async fn revoked_at(db: &Db, device_id: &str) -> Option<String> {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT revoked_at FROM user_device WHERE device_id = ?1",
@@ -532,7 +538,7 @@ async fn revoked_at(db: &Db, device_id: &str) -> Option<String> {
 }
 
 async fn device_row_exists(db: &Db, device_id: &str) -> bool {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT 1 FROM user_device WHERE device_id = ?1",
@@ -786,7 +792,7 @@ async fn republished_cert_swaps_the_cached_pubkey() {
     let account = gen_signing_key();
 
     // The account identity the device cert must chain to.
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO users (id, email, username, account_id_pub, identity_version) \
@@ -871,7 +877,7 @@ async fn ttl_backstop_expires_a_cached_entry() {
     seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
 
     let cache = DeviceKeyCache::default();
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let t0 = now();
     let body = since_body_json("conv1", 0, 1);
     let headers = signed_headers("/v1/commits/since", "alice", "dev-alice", t0, &sk, &body);
@@ -934,7 +940,7 @@ async fn invalidate_device_forces_a_re_read_of_a_rotated_pubkey() {
     seed_device(&db, "alice", "dev-alice", &old_sk.verifying_key()).await;
 
     let cache = DeviceKeyCache::default();
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let t = now();
     let path = "/v1/commits/since";
     let body = since_body_json("conv1", 0, 1);
@@ -982,7 +988,7 @@ async fn a_miss_is_never_cached_so_a_new_device_is_not_locked_out() {
     let sk = gen_signing_key();
 
     let cache = DeviceKeyCache::default();
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let t = now();
     let path = "/v1/commits/since";
     let body = since_body_json("conv1", 0, 1);
@@ -1119,7 +1125,7 @@ async fn a_revoked_device_is_never_cached() {
     seed_revoked_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
 
     let cache = DeviceKeyCache::default();
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let t = now();
     let path = "/v1/commits/since";
     let body = since_body_json("conv1", 0, 1);

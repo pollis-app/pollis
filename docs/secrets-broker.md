@@ -29,12 +29,29 @@ the **identity is derived from the verified signer, never from client input**:
 - **Auth on** (`require_auth = true`): the acting user is the verified signer.
   Any `user_id` in the request body is **ignored**. A client cannot mint a
   LiveKit token — or act — as another user.
-- **Auth off** (default, e.g. the integration harness): there is no signed
-  identity, so the body's `user_id` is used; missing/empty → `400`.
+- **Auth off** (explicit `POLLIS_DS_REQUIRE_AUTH` opt-out only, since #921 —
+  local development, never a deployment): there is no signed identity, so the
+  body's `user_id` is used; missing/empty → `400`.
 
 When a required secret is unset in the DS env, the endpoint still exists and
 answers, returning **`503`** (mirrors OTP with no Resend key) rather than
 failing at startup.
+
+## Upstream failures (#913)
+
+Every outbound call carries a per-upstream deadline (`util::Upstream` —
+LiveKit 5s, Resend 10s, Turso Platform 10s), so an upstream that accepts the
+connection and then never answers can no longer pin the handler, or the pooled
+connection it borrowed, indefinitely. Endpoints that proxy an upstream
+distinguish the two failures:
+
+- **`502`** — the upstream answered and the answer was unusable (non-success
+  status, undecodable body). Retrying is unlikely to help.
+- **`504`** — the upstream did not answer inside its deadline. The body carries
+  `"retryable": true` and names the upstream; the client may retry.
+
+`POST /v1/livekit/send-data` is fire-and-forget and returns no upstream status
+either way — the deadline simply stops the nudge from holding its caller open.
 
 ## Endpoints
 

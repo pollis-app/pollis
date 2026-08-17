@@ -40,7 +40,7 @@ async fn fresh_db() -> Arc<Db> {
     // Keep the tempdir alive for the process.
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -79,7 +79,7 @@ async fn insert_kp_in_suite(
     created_at: &str,
     ciphersuite: Option<i64>,
 ) {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     match ciphersuite {
         Some(suite) => conn
             .execute(
@@ -135,7 +135,7 @@ fn device_body_in_suite(user_id: &str, device_id: &str, suite: i64) -> ClaimKeyP
 async fn claim_returns_the_right_bytes_then_exhausts() {
     let db = fresh_db().await;
     insert_kp(&db, "ref-a", "bob", "dev1", b"kp-bytes-a", "2024-01-01 00:00:00").await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // Device-scoped claim returns the published bytes.
     match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
@@ -160,7 +160,7 @@ async fn claim_is_oldest_first_and_device_scoped() {
     insert_kp(&db, "ref-old", "bob", "dev1", b"old", "2024-01-01 00:00:00").await;
     insert_kp(&db, "ref-new", "bob", "dev1", b"new", "2024-02-01 00:00:00").await;
     insert_kp(&db, "ref-d2", "bob", "dev2", b"d2", "2024-01-01 00:00:00").await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // Oldest unclaimed package for dev1 wins.
     match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
@@ -201,7 +201,7 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     for _ in 0..8 {
         let db = Arc::clone(&db);
         handles.push(tokio::spawn(async move {
-            let conn = db.conn().unwrap();
+            let conn = db.conn().await.unwrap();
             // busy_timeout is per-connection: each writer waits for the local
             // file lock instead of erroring (a local-file test artifact; Turso
             // serializes writes server-side). The conditional UPDATE still
@@ -228,7 +228,7 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
     assert_eq!(none, 7, "every other claimer must see no package — no double-claim");
 
     // The row is marked claimed exactly once.
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT claimed FROM mls_key_package WHERE ref_hash = ?1",
@@ -245,7 +245,7 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
 /// Publish one package for `(user, device)`, optionally naming its suite —
 /// `None` reproduces exactly what every currently deployed client sends.
 async fn publish_one(db: &Db, user: &str, device: &str, ref_hash: &str, suite: Option<i64>) {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     use base64::Engine as _;
     let body = PublishKeyPackagesBody {
         device_id: device.to_string(),
@@ -264,7 +264,7 @@ async fn publish_one(db: &Db, user: &str, device: &str, ref_hash: &str, suite: O
 
 /// Register a device row, so `pq_capable` has somewhere it *could* be flipped.
 async fn insert_device(db: &Db, user: &str, device: &str) {
-    db.conn()
+    db.conn().await
         .unwrap()
         .execute(
             "INSERT INTO user_device (user_id, device_id) VALUES (?1, ?2)",
@@ -276,7 +276,7 @@ async fn insert_device(db: &Db, user: &str, device: &str) {
 
 /// Read a device's retired `pq_capable` flag.
 async fn pq_capable(db: &Db, user: &str, device: &str) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT pq_capable FROM user_device WHERE user_id = ?1 AND device_id = ?2",
@@ -289,7 +289,7 @@ async fn pq_capable(db: &Db, user: &str, device: &str) -> i64 {
 
 /// Count a device's unclaimed packages in one suite.
 async fn unclaimed_in_suite(db: &Db, user: &str, device: &str, suite: i64) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM mls_key_package \
@@ -319,7 +319,7 @@ fn replenish_body(user: &str, device: &str, suite: i64, refs: &[&str]) -> Replen
 }
 
 async fn stored_suite(db: &Db, ref_hash: &str) -> i64 {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT ciphersuite FROM mls_key_package WHERE ref_hash = ?1",
@@ -345,7 +345,7 @@ async fn publish_and_claim_without_a_suite_land_on_the_current_suite() {
     publish_one(&db, "bob", "dev1", "ref-untagged", None).await;
     assert_eq!(stored_suite(&db, "ref-untagged").await, CIPHERSUITE_PQ);
 
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-untagged"),
         ClaimOutcome::NoKeyPackage => panic!("an untagged package must stay claimable"),
@@ -367,7 +367,7 @@ async fn rows_written_without_the_column_take_the_schema_default_not_the_current
     insert_kp_in_suite(&db, "ref-old", "bob", "dev1", b"old", "2024-01-01 00:00:00", None).await;
     assert_eq!(stored_suite(&db, "ref-old").await, CIPHERSUITE_LEGACY);
 
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     assert!(
         matches!(
             apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap(),
@@ -393,7 +393,7 @@ async fn rows_written_without_the_column_take_the_schema_default_not_the_current
 async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
     let db = fresh_db().await;
     publish_one(&db, "bob", "dev1", "ref-legacy", Some(CIPHERSUITE_LEGACY)).await;
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_PQ))
         .await
@@ -426,7 +426,7 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
     publish_one(&db, "bob", "dev1", "ref-legacy", Some(CIPHERSUITE_LEGACY)).await;
     publish_one(&db, "bob", "dev1", "ref-pq", Some(CIPHERSUITE_PQ)).await;
     assert_eq!(stored_suite(&db, "ref-pq").await, CIPHERSUITE_PQ);
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
 
     // A suite-less claim means the current suite, so it must draw the PQ one.
     match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
@@ -444,7 +444,7 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
     }
 
     // Both pools are now drained; neither claim resurrects the other's package.
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     assert!(matches!(
         apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
             .await
@@ -485,7 +485,7 @@ async fn publishing_no_longer_derives_the_retired_pq_capable_flag() {
     );
 
     // Nor does the rotation path, which carried its own copy of the write.
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     apply_replenish_key_packages(
         &conn,
         Some("bob"),
@@ -514,7 +514,7 @@ async fn rotating_one_suite_leaves_the_other_pool_intact() {
     insert_device(&db, "bob", "dev1").await;
 
     // Seed both pools via replenish.
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     apply_replenish_key_packages(
         &conn,
         Some("bob"),
@@ -553,7 +553,7 @@ async fn rotating_one_suite_leaves_the_other_pool_intact() {
 
     // The old legacy refs are gone (rotated out); the PQ refs remain.
     assert_eq!(stored_suite(&db, "h1").await, CIPHERSUITE_PQ);
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM mls_key_package WHERE ref_hash IN ('c1','c2')",

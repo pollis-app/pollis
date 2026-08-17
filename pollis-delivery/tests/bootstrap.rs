@@ -65,7 +65,7 @@ async fn fresh_db() -> Arc<Db> {
     let path = dir.path().join("ds.db");
     std::mem::forget(dir);
     let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
-    pollis_schema::apply::single_db(&db.conn().unwrap()).await.expect("schema");
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     Arc::new(db)
 }
 
@@ -259,7 +259,7 @@ async fn login(state: &AppState, email: &str, device_id: &str) -> serde_json::Va
 }
 
 async fn account_pub(db: &Db, user_id: &str) -> Option<Vec<u8>> {
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT account_id_pub FROM users WHERE id = ?1", libsql::params![user_id])
         .await
@@ -331,7 +331,7 @@ async fn full_bootstrap_happy_path() {
     assert_eq!(s, StatusCode::OK, "publish-device-cert should succeed");
 
     // The pivot landed: mls_signature_pub is now set, and the session is spent.
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query("SELECT mls_signature_pub FROM user_device WHERE device_id = ?1", libsql::params![device_id])
         .await
@@ -660,7 +660,7 @@ async fn publish_cert_validity_alone_no_session() {
     );
 
     // The pivot landed.
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT mls_signature_pub FROM user_device WHERE device_id = ?1",
@@ -771,7 +771,7 @@ async fn enrollment_request_is_session_gated_and_binds_user() {
     let (s, _) = send(&state, "/v1/auth/enrollment-request", req_body, Some(&token)).await;
     assert_eq!(s, StatusCode::OK, "enrollment-request with session should 200");
 
-    let conn = db.conn().unwrap();
+    let conn = db.conn().await.unwrap();
     let mut rows = conn
         .query(
             "SELECT user_id, new_device_id, status FROM device_enrollment_request WHERE id = ?1",
