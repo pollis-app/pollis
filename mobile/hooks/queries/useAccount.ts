@@ -10,8 +10,30 @@
 //     NOT strand the user signed-in to a deleted account, so it is logged
 //     and swallowed — the caller always proceeds to sign-out.
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
+
+// Mirrors `IdentityInfo` in pollis-core/src/commands/auth.rs.
+export interface IdentityInfo {
+  user_id: string;
+  public_key: string;
+  is_new: boolean;
+}
+
+/**
+ * This device's own MLS identity, for the Security screen's public-key line.
+ * The arm returns null (or an empty public_key) when no identity is
+ * published from this device yet — the UI shows a muted placeholder then.
+ */
+export function useIdentity() {
+  return useQuery({
+    queryKey: ["identity"],
+    queryFn: async (): Promise<IdentityInfo | null> => {
+      return await invoke<IdentityInfo | null>("get_identity");
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+}
 
 export function useDeleteAccount() {
   return useMutation({

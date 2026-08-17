@@ -11,6 +11,7 @@ export * from "./useUserSearch";
 export * from "./usePreferences";
 export * from "./useDevices";
 export * from "./useAccount";
+export * from "./useSecurityEvents";
 export * from "./useGroupInvites";
 export * from "./useEnrollment";
 export * from "./useSearch";
