@@ -1,11 +1,21 @@
 {
-  "generated_at": "2026-08-16T22:35:26Z",
+  "generated_at": "2026-08-17T14:05:43Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "564353ae",
     "date": "2026-08-16"
   },
   "runs": [
+    {
+      "tag": "v1.9.3",
+      "conclusion": "success",
+      "created_at": "2026-08-17T13:41:23Z",
+      "event": "workflow_dispatch",
+      "run_id": "32036282718",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32036282718",
+      "classification": null,
+      "evidence": null
+    },
     {
       "tag": "v1.9.7",
       "conclusion": "success",
@@ -53,8 +63,8 @@
       "event": "workflow_run",
       "run_id": "31753766171",
       "run_url": "https://github.com/actuallydan/pollis/actions/runs/31753766171",
-      "classification": "real",
-      "evidence": "The tag was published and the log verified (found: true); the rebuilt AppImage differed from the shipped one in 105,863,272 bytes, across the main binary and several bundled libraries. Still unexplained."
+      "classification": "environment_drift",
+      "evidence": "Explained by #944, and not a finding against the shipped binary. The tag was published and the log verified (found: true), and the AppImage genuinely differed: logged 07bccca8…, rebuilt a6767a4c…. The cause is that the two builds ran on different CI machine images — the release on ubuntu22@20260810.260.1, the rebuild 36 minutes later on ubuntu22@20260720.234.2, because GitHub rolls a re-imaged ubuntu-22.04 label out gradually. (Both read from the two runs' own logs; this tag's leaf predates #939 and records runner_image \"unknown\", which is why the workflow could not tell at the time.) An AppImage vendors the app's system libraries off the build machine, and seven differed in real code — libgssapi_krb5, libk5crypto, libkrb5, libkrb5support, libsqlite3, libsystemd, libudev — with changed .text sizes and shifted symbol addresses, not merely new build ids. The 105,863,272 differing bytes are compression smear across a squashfs, not the size of the change. The only difference in anything built from Pollis source was the ORDER of the twelve CSP content hashes inside usr/bin/pollis: the same twelve values, permuted, because tauri-codegen emits them in filesystem readdir order. That the twelve digests are identical is itself proof the frontend bundle reproduced byte-for-byte. Nothing indicates the shipped binary differs from the tagged source. Proven, not merely argued: re-running the identical rebuild on 2026-08-17 landed on ubuntu22@20260810.260.1 — the exact image the release built on — and reproduced 07bccca8… byte-for-byte (run 32036282718). Same source, same tag, one variable changed, and the bytes match. Full write-up: docs/reproducible-builds-residuals.md §6 and §6a."
     },
     {
       "tag": "v1.9.2",
@@ -123,26 +133,6 @@
       "event": "workflow_dispatch",
       "run_id": "31361471279",
       "run_url": "https://github.com/actuallydan/pollis/actions/runs/31361471279",
-      "classification": null,
-      "evidence": null
-    },
-    {
-      "tag": "v1.8.4",
-      "conclusion": "failure",
-      "created_at": "2026-08-10T05:48:18Z",
-      "event": "workflow_dispatch",
-      "run_id": "31359760127",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31359760127",
-      "classification": null,
-      "evidence": null
-    },
-    {
-      "tag": "v1.8.4",
-      "conclusion": "failure",
-      "created_at": "2026-08-10T05:21:40Z",
-      "event": "workflow_dispatch",
-      "run_id": "31358349776",
-      "run_url": "https://github.com/actuallydan/pollis/actions/runs/31358349776",
       "classification": null,
       "evidence": null
     },
