@@ -97,6 +97,19 @@
             "A genuine reproducibility finding. " + (rel.latest.evidence || ""),
         };
       }
+      // The AppImage vendors system libraries copied off the build runner, so a
+      // rebuild on a different runner image differs for reasons that have
+      // nothing to do with our source. That is a failed precondition, not a
+      // failed reproduction, and publishing it as the latter is what happened to
+      // v1.9.3 for three days (#944). Still red — inconclusive is not a pass.
+      if (cls === "environment_drift") {
+        return {
+          badge: '<span class="doc-badge doc-badge--warn">inconclusive</span>',
+          note:
+            "Explained, and not a finding against the shipped binary. " +
+            (rel.latest.evidence || ""),
+        };
+      }
       var preFix = new Date(rel.latest.created_at) < new Date(fixDate);
       return {
         badge: '<span class="doc-badge doc-badge--fail">did not reproduce</span>',
@@ -133,7 +146,14 @@
     // marked red but which is known to have reproduced is not a failure, and
     // reporting it as one would understate the record as badly as hiding it
     // would overstate it.
-    var counts = { success: 0, real: 0, falseRed: 0, skipped: 0, other: 0 };
+    var counts = {
+      success: 0,
+      real: 0,
+      falseRed: 0,
+      drift: 0,
+      skipped: 0,
+      other: 0,
+    };
     releases.forEach(function (r) {
       var c = r.latest.conclusion;
       if (c === "success") {
@@ -143,6 +163,8 @@
       } else if (c === "failure") {
         if (r.latest.classification === "false_red") {
           counts.falseRed += 1;
+        } else if (r.latest.classification === "environment_drift") {
+          counts.drift += 1;
         } else {
           counts.real += 1;
         }
@@ -161,6 +183,13 @@
       parts.push(
         counts.falseRed +
           " went red on a since-fixed reporting bug but did reproduce"
+      );
+    }
+    if (counts.drift) {
+      parts.push(
+        counts.drift +
+          " could not be compared because the rebuild landed on a different " +
+          "CI runner image than the release"
       );
     }
     if (counts.skipped) {

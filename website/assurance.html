@@ -97,9 +97,28 @@
             <code>564353ae</code> (16 August 2026) the workflow could report "did not reproduce" for a release
             that was merely not yet published into the log — the underlying check exits cleanly over an empty
             artifact set, so the wait loop gave up immediately and compared the rebuild against nothing. Two runs
-            failed exactly that way (v1.9.4 and v1.9.5) and both in fact reproduced byte-identically. The
-            <strong>v1.9.3 failure was real</strong>, is still unexplained, and is not being reclassified.
+            failed exactly that way (v1.9.4 and v1.9.5) and both in fact reproduced byte-identically.
             The reds are left in the table rather than deleted.
+          </p>
+          <p>
+            <strong>v1.9.3 is explained, and the explanation is not "the binary was wrong".</strong> It was
+            classified separately from the two above, as a genuine byte divergence — correctly, because it was
+            one — and then sat unexplained. The cause is that a Linux AppImage is not purely a function of our
+            source: the bundler copies the app's system libraries off the build machine into the bundle. GitHub
+            rebuilds the machine image behind its <code>ubuntu-22.04</code> label every few weeks and rolls it
+            out gradually, so the release build and the rebuild — 36 minutes apart — landed on
+            <em>different</em> images, and seven vendored libraries (Kerberos, SQLite, systemd, udev) came out
+            different. Nothing built from Pollis source changed except the order of a list of content hashes
+            inside the executable, which a compile-time dependency emits in filesystem order and which carries
+            no meaning.
+          </p>
+          <p>
+            So the honest verdict for v1.9.3 is <strong>inconclusive, not failed</strong>: the check requires a
+            matching build machine and did not get one. The run is still shown as red, because an inconclusive
+            rebuild is not a passing rebuild. What changed is that the workflow now reads the machine image the
+            release recorded, compares it to its own, and says which of the two situations it is in — so this
+            can never again be published as an unexplained accusation. The full write-up, including the byte
+            evidence, is in <code>docs/reproducible-builds-residuals.md</code>.
           </p>
         </div>
       </section>
