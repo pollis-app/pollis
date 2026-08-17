@@ -84,11 +84,6 @@ config, deliberately not yet added).
 The `security` flow additionally covers the in-app account-deletion entry
 (`row-delete-account` → typed-DELETE confirm screen, `btn-delete-account`
 disabled until armed) — assert the disabled state only; never run the actual
-deletion against a shared seed account.
-
-The `security` flow additionally covers the in-app account-deletion entry
-(`row-delete-account` → typed-DELETE confirm screen, `btn-delete-account`
-disabled until armed) — assert the disabled state only; never run the actual
 deletion against a shared seed account. It also covers auto-lock (#899):
 select a window via `chip-autolock-1`, tap `row-lock-now`, assert the PIN
 unlock screen appears, unlock with the fixed PIN, and assert the app restores
@@ -111,6 +106,19 @@ self-sign-out on the inbox connection~~ (done — authoritative
 `is_current_device_registered` check, sign-out, and navigation to the auth
 screen); purge stale "not implemented" comments; add iOS keystore on-device
 verification to the checklist.
+
+**Landed since lock (inbox-parity set):** `dm/info` actions, the
+decoded-but-ignored realtime events, and `device_revoked` self-sign-out are all
+wired. The inbox realtime now also holds every group/DM room (ref-counted with
+the open chat's subscription) to drive real unread counts (list-row dots +
+tab-bar badges, cleared on open), batched last-message previews + timestamps on
+the Groups/Direct tabs (`read_last_messages`, one call per list), DM-request
+Block-beside-Accept (desktop's decline path), search hits carrying their real
+conversation kind, role-then-alphabetical member ordering (presence ordering
+awaits a presence source), a `conversation/info` screen (roster + shared-media
+grid, capped 30), and the real core version on the initializing screen. Flows
+touching the Groups/Direct rows should assert previews/unread via
+`unread-<id>` / `badge-<tab>` testIDs.
 
 ## Explicit non-goals (and why)
 

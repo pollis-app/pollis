@@ -55,6 +55,11 @@ export function useBlockUser() {
       queryClient.invalidateQueries({
         queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
       });
+      // Blocking is also the decline path for a DM request (desktop's
+      // RequestsPage does the same) — drop the sender's pending request row.
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.requests(currentUser?.id ?? null),
+      });
     },
   });
 }

@@ -22,6 +22,11 @@ import {
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
+import type { MessageAttachment } from "../../types";
+import {
+  buildMessageContent,
+  type PickedAttachment,
+} from "../../lib/attachments";
 
 export type ConversationKind = "channel" | "dm";
 
@@ -63,6 +68,7 @@ export interface Message {
   sender_id: string;
   sender_username?: string;
   content: string;
+  attachments: MessageAttachment[];
   reply_to_id?: string | null;
   thread_id?: string | null;
   created_at: number;
@@ -81,33 +87,69 @@ export interface DecodedPage {
 
 export type MessagesData = InfiniteData<DecodedPage, MessageCursor | null>;
 
-function parseContent(raw: string | undefined): string {
-  if (!raw) {
-    return "";
+// Wire shape of a single attachment inside the `_att` array embedded in
+// message content JSON — must stay in lockstep with desktop's parseContent
+// (frontend/src/hooks/queries/useMessages.ts) and the writer in
+// lib/attachments.ts.
+interface AttachmentWire {
+  key: string;
+  hash: string;
+  name: string;
+  ct: string;
+  size: number;
+  bh?: string;
+  w?: number;
+  h?: number;
+}
+
+// Parses structured attachment JSON embedded in message content.
+// Plain-text messages pass through as-is. Content with attachments looks
+// like: {"_att":[{"key":"media/…","name":"…","ct":"…","size":N,…}],"_txt":"caption"}
+function parseContent(raw: string | undefined): {
+  text: string;
+  attachments: MessageAttachment[];
+} {
+  if (!raw?.startsWith("{")) {
+    return { text: raw ?? "", attachments: [] };
   }
-  // Desktop wraps attachments in a structured envelope; mobile doesn't
-  // upload attachments yet, so for now we just strip that envelope down
-  // to the text payload if it's present.
-  if (raw.startsWith("{")) {
-    try {
-      const parsed = JSON.parse(raw);
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed._att)) {
+      // Legacy `_txt`-only envelopes still reduce to their caption.
       if (typeof parsed?._txt === "string") {
-        return parsed._txt;
+        return { text: parsed._txt, attachments: [] };
       }
-    } catch {
-      // Fall through — treat as plain text.
+      return { text: raw, attachments: [] };
     }
+    return {
+      text: typeof parsed._txt === "string" ? parsed._txt : "",
+      attachments: (parsed._att as AttachmentWire[]).map((a) => ({
+        id: a.key,
+        object_key: a.key,
+        content_hash: a.hash,
+        filename: a.name,
+        content_type: a.ct,
+        file_size: a.size,
+        uploaded_at: Date.now(),
+        blurhash: a.bh,
+        width: a.w,
+        height: a.h,
+      })),
+    };
+  } catch {
+    return { text: raw, attachments: [] };
   }
-  return raw;
 }
 
 function transform(raw: RawChannelMessage): Message {
+  const parsed = parseContent(raw.content);
   return {
     id: raw.id,
     conversation_id: raw.conversation_id,
     sender_id: raw.sender_id,
     sender_username: raw.sender_username,
-    content: parseContent(raw.content),
+    content: parsed.text,
+    attachments: parsed.attachments,
     reply_to_id: raw.reply_to_id ?? null,
     thread_id: raw.thread_id ?? null,
     created_at: new Date(raw.sent_at).getTime(),
@@ -229,14 +271,21 @@ export function useSendMessage(
       content: string;
       replyToId?: string;
       threadId?: string;
+      attachments?: PickedAttachment[];
     }) => {
       if (!conversationId || !currentUser) {
         throw new Error("No active conversation");
       }
+      // Upload first (Rust does encrypt + dedup + register), then send the
+      // envelope string — same sequence as desktop's send handlers.
+      const content = await buildMessageContent(
+        vars.attachments ?? [],
+        vars.content,
+      );
       const raw = await invoke<RawChannelMessage>("send_message", {
         conversationId,
         senderId: currentUser.id,
-        content: vars.content,
+        content,
         replyToId: vars.replyToId ?? null,
         threadId: vars.threadId ?? null,
         senderUsername: currentUser.username ?? null,
@@ -256,6 +305,19 @@ export function useSendMessage(
         sender_id: currentUser.id,
         sender_username: currentUser.username,
         content: vars.content,
+        // Picked-but-uploading images render from their local URI.
+        attachments: (vars.attachments ?? []).map((att) => ({
+          id: att.id,
+          object_key: "",
+          content_hash: "",
+          filename: att.name,
+          content_type: att.mimeType,
+          file_size: 0,
+          uploaded_at: Date.now(),
+          width: att.width,
+          height: att.height,
+          localPreviewUri: att.uri,
+        })),
         reply_to_id: vars.replyToId ?? null,
         thread_id: vars.threadId ?? null,
         created_at: Date.now(),
