@@ -548,7 +548,7 @@ Group-channel blocks are render-side only — the blocker filters out blocked se
 It then:
 
 1. Generates a fresh account-identity ML-DSA-44 keypair, bumps `users.identity_version`, replaces the `account_recovery` blob.
-2. Deletes the user from every `group_member`, `dm_channel_member`, `mls_key_package`, `mls_welcome` row. Promotes a new admin if the user was sole admin. Deletes empty groups.
+2. Deletes the user from every `group_member`, `dm_channel_member`, `mls_key_package`, `conversation_watermark` and `mls_welcome` row, and orphans their other `user_device` rows. Promotes a new admin if the user was sole admin (handing `groups.owner_id` over with the role). Tears down groups and DMs left with nobody in them — explicitly, table by table, because production Turso runs `foreign_keys=OFF` and the schema's `ON DELETE CASCADE` clauses do not fire (`pollis-delivery/src/teardown.rs`). The `users` row and the account's own records survive: this is a reset, not a deletion.
 3. Wipes the local SQLCipher DB and its WAL/SHM.
 4. Records a `security_event` of kind `identity_reset`.
 

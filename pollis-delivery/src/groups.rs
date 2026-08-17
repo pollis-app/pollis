@@ -358,35 +358,43 @@ pub async fn delete_group(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_delete_group(&conn, authed.as_deref(), &parsed).await?)
+    let (outcome, dead_conversations) =
+        apply_delete_group(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) && !dead_conversations.is_empty() {
+        let log_conn = state.log_db.conn().await?;
+        crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
+    }
+    outcome_response(outcome)
 }
 
-/// Delete a group (CASCADE removes members/channels/invites). Authz: admin.
+/// Delete a group and everything belonging to it, in one transaction. Authz:
+/// admin.
+///
+/// This used to be `DELETE FROM groups` alone, trusting `ON DELETE CASCADE` for
+/// members, channels and invites. Production Turso has `foreign_keys=OFF`, so
+/// that cascade has never fired and the group's entire membership roster,
+/// channel list, message envelopes and invites survived the delete. Teardown is
+/// now explicit — see [`crate::teardown::purge_group`].
+///
+/// Returns the destroyed conversation ids for the caller's post-commit
+/// commit-log purge.
 pub async fn apply_delete_group(
     conn: &Connection,
     authed: Option<&str>,
     body: &DeleteGroupBody,
-) -> anyhow::Result<WriteOutcome> {
+) -> anyhow::Result<(WriteOutcome, Vec<String>)> {
     let requester = match resolve_actor(authed, body.requester_id.as_deref()) {
         Ok(r) => r,
-        Err(o) => return Ok(o),
+        Err(o) => return Ok((o, Vec::new())),
     };
     if authed.is_some() && !is_admin(conn, &body.group_id, &requester).await? {
-        return Ok(WriteOutcome::Forbidden);
+        return Ok((WriteOutcome::Forbidden, Vec::new()));
     }
-    // Release the group's custom-emoji references BEFORE the group row goes
-    // (#848). A deleted group's shortcodes are meaningless, and a `group_emoji`
-    // row that outlives its group would pin its shared object forever — the
-    // object is collectable only when NO row names its hash. Release here,
-    // collect in `POST /v1/emoji/gc`; keeping the two apart is what lets every
-    // teardown path release correctly by deleting nothing but its own rows.
-    crate::emoji::release_group_emoji(conn, &body.group_id).await?;
-    conn.execute(
-        "DELETE FROM groups WHERE id = ?1",
-        libsql::params![body.group_id.clone()],
-    )
-    .await?;
-    Ok(WriteOutcome::Ok)
+    let tx = conn.transaction().await?;
+    let mut dead = crate::teardown::purge_group(&tx, &body.group_id).await?;
+    tx.commit().await?;
+    dead.push(body.group_id.clone());
+    Ok((WriteOutcome::Ok, dead))
 }
 
 // ── POST /v1/groups/leave ────────────────────────────────────────────────────
@@ -407,27 +415,42 @@ pub async fn leave_group(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_leave_group(&conn, authed.as_deref(), &parsed).await?)
+    let (outcome, dead_conversations) =
+        apply_leave_group(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) && !dead_conversations.is_empty() {
+        let log_conn = state.log_db.conn().await?;
+        crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
+    }
+    outcome_response(outcome)
 }
 
-/// Remove the actor's own membership; if the group is now empty, delete it.
+/// Remove the actor's own membership; if the group is now empty, tear it down.
 /// Authz: the actor is a current member (a signed request may only remove its
 /// OWN row — `user_id` is bound to the signer).
+///
+/// The teardown is explicit for the same reason as [`apply_delete_group`]: the
+/// cascade it used to rely on does not fire on Turso.
 pub async fn apply_leave_group(
     conn: &Connection,
     authed: Option<&str>,
     body: &LeaveGroupBody,
-) -> anyhow::Result<WriteOutcome> {
+) -> anyhow::Result<(WriteOutcome, Vec<String>)> {
     let user = match resolve_actor(authed, body.user_id.as_deref()) {
         Ok(u) => u,
-        Err(o) => return Ok(o),
+        Err(o) => return Ok((o, Vec::new())),
     };
     if authed.is_some() && group_role(conn, &body.group_id, &user).await?.is_none() {
-        return Ok(WriteOutcome::Forbidden);
+        return Ok((WriteOutcome::Forbidden, Vec::new()));
     }
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+        libsql::params![body.group_id.clone(), user.clone()],
+    )
+    .await?;
+    // The leaver's own group-scoped rows go with them; other members' rows stay.
+    tx.execute(
+        "DELETE FROM user_groups WHERE group_id = ?1 AND user_id = ?2",
         libsql::params![body.group_id.clone(), user.clone()],
     )
     .await?;
@@ -442,15 +465,13 @@ pub async fn apply_leave_group(
         None => 0,
     };
     drop(count_rows);
+    let mut dead: Vec<String> = Vec::new();
     if remaining == 0 {
-        tx.execute(
-            "DELETE FROM groups WHERE id = ?1",
-            libsql::params![body.group_id.clone()],
-        )
-        .await?;
+        dead = crate::teardown::purge_group(&tx, &body.group_id).await?;
+        dead.push(body.group_id.clone());
     }
     tx.commit().await?;
-    Ok(WriteOutcome::Ok)
+    Ok((WriteOutcome::Ok, dead))
 }
 
 // ── POST /v1/channels/create ─────────────────────────────────────────────────
@@ -585,11 +606,25 @@ pub async fn delete_channel(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_delete_channel(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_delete_channel(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) {
+        let log_conn = state.log_db.conn().await?;
+        crate::teardown::purge_conversation_log(
+            &log_conn,
+            std::slice::from_ref(&parsed.channel_id),
+        )
+        .await?;
+    }
+    outcome_response(outcome)
 }
 
-/// Delete a channel and its envelopes/watermarks in one transaction. Authz:
+/// Delete a channel and its whole message history in one transaction. Authz:
 /// admin of the owning group (a destructive op).
+///
+/// Envelopes and watermarks were already explicit here; the reactions and
+/// attachment references hanging off those envelopes were not, and outlived
+/// them (nothing cascades on Turso, and neither table has a foreign key in the
+/// first place). [`crate::teardown::purge_conversation_rows`] covers the set.
 pub async fn apply_delete_channel(
     conn: &Connection,
     authed: Option<&str>,
@@ -607,16 +642,7 @@ pub async fn apply_delete_channel(
         return Ok(WriteOutcome::Forbidden);
     }
     let tx = conn.transaction().await?;
-    tx.execute(
-        "DELETE FROM message_envelope WHERE conversation_id = ?1",
-        libsql::params![body.channel_id.clone()],
-    )
-    .await?;
-    tx.execute(
-        "DELETE FROM conversation_watermark WHERE conversation_id = ?1",
-        libsql::params![body.channel_id.clone()],
-    )
-    .await?;
+    crate::teardown::purge_conversation_rows(&tx, &body.channel_id).await?;
     tx.execute(
         "DELETE FROM channels WHERE id = ?1",
         libsql::params![body.channel_id.clone()],
@@ -664,11 +690,21 @@ pub async fn apply_remove_member(
     {
         return Ok(WriteOutcome::Forbidden);
     }
-    conn.execute(
+    let tx = conn.transaction().await?;
+    tx.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
         libsql::params![body.group_id.clone(), body.user_id.clone()],
     )
     .await?;
+    // The directory-index row for exactly this (user, group) pair goes with the
+    // membership it mirrors. Scoped to both ids, so it cannot reach another
+    // member's row or another group's.
+    tx.execute(
+        "DELETE FROM user_groups WHERE group_id = ?1 AND user_id = ?2",
+        libsql::params![body.group_id.clone(), body.user_id.clone()],
+    )
+    .await?;
+    tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
 

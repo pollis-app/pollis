@@ -587,11 +587,20 @@ pub async fn apply_remove_dm_member(
             None => return Ok(WriteOutcome::Forbidden),
         }
     }
-    conn.execute(
+    let tx = conn.transaction().await?;
+    tx.execute(
         "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
         libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
     )
     .await?;
+    // The directory-index row mirrors exactly this (user, channel) membership.
+    // Scoped to both ids, so it cannot reach another member's row.
+    tx.execute(
+        "DELETE FROM user_dms WHERE dm_channel_id = ?1 AND user_id = ?2",
+        libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
+    )
+    .await?;
+    tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -613,26 +622,51 @@ pub async fn leave_dm(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_leave_dm(&conn, authed.as_deref(), &parsed).await?)
+    let (outcome, torn_down) = apply_leave_dm(&conn, authed.as_deref(), &parsed).await?;
+    if matches!(outcome, WriteOutcome::Ok) && torn_down {
+        let log_conn = state.log_db.conn().await?;
+        crate::teardown::purge_conversation_log(
+            &log_conn,
+            std::slice::from_ref(&parsed.dm_channel_id),
+        )
+        .await?;
+    }
+    outcome_response(outcome)
 }
 
 /// Remove the actor's own `dm_channel_member` row and, when the channel is left
-/// empty, tear it down (its envelopes + the `dm_channel` row) — all in one
-/// transaction so a DM never lingers half-deleted. Authz: self only — the actor
-/// (`user_id`, bound to the authenticated user) may leave only their own
-/// membership; `resolve_actor` already refuses any other `user_id`.
+/// empty, tear it down — all in one transaction so a DM never lingers
+/// half-deleted. Authz: self only — the actor (`user_id`, bound to the
+/// authenticated user) may leave only their own membership; `resolve_actor`
+/// already refuses any other `user_id`.
+///
+/// The teardown used to drop the envelopes and the `dm_channel` row and trust
+/// `ON DELETE CASCADE` for the rest; with `foreign_keys=OFF` in production that
+/// left the per-device cursors, reactions, attachment references and the
+/// directory-index rows behind. [`crate::teardown::purge_dm_channel`] is the
+/// full set.
+///
+/// The `bool` is "the channel was destroyed", so the caller knows whether to
+/// purge its commit-log-DB state.
 pub async fn apply_leave_dm(
     conn: &Connection,
     authed: Option<&str>,
     body: &LeaveDmBody,
-) -> anyhow::Result<WriteOutcome> {
+) -> anyhow::Result<(WriteOutcome, bool)> {
     let user = match resolve_actor(authed, Some(body.user_id.as_str())) {
         Ok(u) => u,
-        Err(o) => return Ok(o),
+        Err(o) => return Ok((o, false)),
     };
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
+        libsql::params![body.dm_channel_id.clone(), user.clone()],
+    )
+    .await?;
+    // The leaver's own directory-index row goes with their membership; the other
+    // members' rows are untouched.
+    tx.execute(
+        "DELETE FROM user_dms WHERE dm_channel_id = ?1 AND user_id = ?2",
         libsql::params![body.dm_channel_id.clone(), user],
     )
     .await?;
@@ -648,18 +682,10 @@ pub async fn apply_leave_dm(
         None => 0,
     };
     drop(rows);
-    if remaining == 0 {
-        tx.execute(
-            "DELETE FROM message_envelope WHERE conversation_id = ?1",
-            libsql::params![body.dm_channel_id.clone()],
-        )
-        .await?;
-        tx.execute(
-            "DELETE FROM dm_channel WHERE id = ?1",
-            libsql::params![body.dm_channel_id.clone()],
-        )
-        .await?;
+    let torn_down = remaining == 0;
+    if torn_down {
+        crate::teardown::purge_dm_channel(&tx, &body.dm_channel_id).await?;
     }
     tx.commit().await?;
-    Ok(WriteOutcome::Ok)
+    Ok((WriteOutcome::Ok, torn_down))
 }

@@ -182,22 +182,25 @@ const LOCAL_PRAGMAS: PerConnPragmas = &["PRAGMA busy_timeout=5000", "PRAGMA fore
 /// locked" while the other holds the write lock. Previously `from_shared` set
 /// nothing at all, so the DS half of the harness ran at libsql's default of 0.
 ///
-/// **`foreign_keys` is knowingly left ON here, and that diverges from
-/// production.** By the reasoning in [`LOCAL_PRAGMAS`] it ought to be OFF: `flows`
-/// is the suite that exists to mirror the real deployment. It is not, because
-/// turning it off does not merely relax a fixture — it makes the harness execute
-/// the deletion semantics production actually has, and the DS has call sites that
-/// depend on cascades which therefore never fire on any deploy
-/// (`account::apply_delete_account` leans on `DELETE FROM users` to clear
+/// **`foreign_keys=OFF`, matching production and [`LOCAL_PRAGMAS`].**
+///
+/// This used to be the one place that diverged. `flows` ran with foreign keys ON
+/// — libsql's local default — so the harness executed *stricter* deletion
+/// semantics than any real deploy, and the DS's cascade-dependent call sites
+/// looked correct there while leaving rows behind on Turso
+/// (`account::apply_delete_account` leaned on `DELETE FROM users` to clear
 /// `user_device`, `dm_channel_member`, `group_invite`, `account_recovery` and
-/// `security_event`; `groups::delete_group` leans on it for members/channels/
-/// invites). Flipping this constant is the right thing to do *together with*
-/// making those deletes explicit, and that is a data-retention change with its own
-/// blast radius — not part of #919, which is about a pragma reaching every
-/// connection rather than about which pragmas are correct. Left ON so this PR
-/// changes no `flows` behaviour; the divergence is recorded here rather than
-/// silently inherited.
-const SHARED_LOCAL_PRAGMAS: PerConnPragmas = &["PRAGMA busy_timeout=10000"];
+/// `security_event`; `groups::delete_group` leaned on it for members, channels
+/// and invites). The divergence was recorded rather than fixed because flipping
+/// it alone would have failed the suite on that very bug.
+///
+/// Those deletes are now explicit ([`crate::teardown`]), so the flip is safe and
+/// is made here: `flows` is the suite that exists to mirror the real deployment,
+/// and it now does. With FKs off, a future teardown path that forgets a table
+/// leaves its rows behind in `flows` exactly as it would in production, which is
+/// the only way that class of bug is visible to a test.
+const SHARED_LOCAL_PRAGMAS: PerConnPragmas =
+    &["PRAGMA busy_timeout=10000", "PRAGMA foreign_keys=OFF"];
 
 pub struct Db {
     db: Arc<Database>,

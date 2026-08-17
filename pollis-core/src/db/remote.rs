@@ -194,6 +194,16 @@ impl RemoteDb {
             // `query` (not `execute`) — PRAGMA busy_timeout returns the
             // resulting value as a row.
             conn.query("PRAGMA busy_timeout=10000", ()).await?;
+            // Production parity, not a fixture convenience. Remote Turso does
+            // not enforce foreign keys, so the remote schema's `REFERENCES` and
+            // `ON DELETE CASCADE` clauses are inert on every deployment.
+            // libsql's LOCAL backend turns them ON by default, which would make
+            // the `flows` harness STRICTER than any real deploy and let a
+            // teardown path that forgets a table pass here while leaking rows in
+            // production — the exact defect `pollis_delivery::teardown` exists
+            // to close. Mirrors `pollis-delivery`'s `LOCAL_PRAGMAS` /
+            // `SHARED_LOCAL_PRAGMAS`, which stamp the DS half of that same file.
+            conn.query("PRAGMA foreign_keys=OFF", ()).await?;
         }
         // Read-only view: reject INSERT/UPDATE/DELETE on this connection,
         // exactly like a read-only Turso token. Per-connection, so it must be

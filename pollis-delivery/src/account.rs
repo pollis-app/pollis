@@ -465,6 +465,12 @@ pub async fn revoke_device(
         state
             .device_keys
             .invalidate_device(&owner, &parsed.device_id);
+        // The device's commit catch-up high-water lives on the commit-log DB and
+        // so cannot join the transaction above.
+        if matches!(outcome, WriteOutcome::Ok) {
+            let log_conn = state.log_db.conn().await?;
+            crate::teardown::purge_device_log_rows(&log_conn, &owner, &parsed.device_id).await?;
+        }
     }
     outcome_response(outcome)
 }
@@ -543,14 +549,27 @@ pub async fn logout_device(
         state
             .device_keys
             .invalidate_device(&owner, &parsed.device_id);
+        // Commit-log DB — see `revoke_device` above.
+        if matches!(outcome, WriteOutcome::Ok) {
+            let log_conn = state.log_db.conn().await?;
+            crate::teardown::purge_device_log_rows(&log_conn, &owner, &parsed.device_id).await?;
+        }
     }
     outcome_response(outcome)
 }
 
-/// DELETE the device row `WHERE device_id = ? AND user_id = actor`. The
-/// `user_id = actor` bind is the authz: a signer can only log out a device on
-/// THEIR OWN account. Idempotent — removing an already-gone device is a no-op
-/// `Ok` (a re-tried logout must never error).
+/// DELETE the device row `WHERE device_id = ? AND user_id = actor`, together
+/// with that device's per-device state. The `user_id = actor` bind is the authz:
+/// a signer can only log out a device on THEIR OWN account. Idempotent —
+/// removing an already-gone device is a no-op `Ok` (a re-tried logout must never
+/// error).
+///
+/// The key-package and watermark deletes mirror [`apply_revoke_device`], which
+/// has always done them. Logout did not, so a logged-out device left unclaimed
+/// key packages behind — claimable by a peer, producing a Welcome for a device
+/// that no longer exists — plus a fetch cursor that can never advance. Neither
+/// is reachable by a cascade (`conversation_watermark` has no foreign key at
+/// all), so both are explicit.
 pub async fn apply_logout_device(
     conn: &Connection,
     authed: Option<&str>,
@@ -560,11 +579,23 @@ pub async fn apply_logout_device(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
-    conn.execute(
+    let tx = conn.transaction().await?;
+    tx.execute(
+        "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
+        libsql::params![actor.clone(), body.device_id.clone()],
+    )
+    .await?;
+    tx.execute(
+        "DELETE FROM conversation_watermark WHERE user_id = ?1 AND device_id = ?2",
+        libsql::params![actor.clone(), body.device_id.clone()],
+    )
+    .await?;
+    tx.execute(
         "DELETE FROM user_device WHERE device_id = ?1 AND user_id = ?2",
         libsql::params![body.device_id.clone(), actor],
     )
     .await?;
+    tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -592,12 +623,19 @@ pub async fn reset_recover(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    let outcome = apply_reset_recover(&conn, authed.as_deref(), &parsed).await?;
+    let (outcome, dead_conversations) =
+        apply_reset_recover(&conn, authed.as_deref(), &parsed).await?;
     // Account-wide device wipe → evict the whole user (#658). Cheaper to reason
     // about than enumerating which sibling devices were dropped, and the kept
     // `current_device_id` merely pays one re-read.
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         state.device_keys.invalidate_user(&owner);
+    }
+    // Conversations this reset emptied no longer exist; drop their MLS state
+    // from the commit-log DB, after the main transaction has committed.
+    if matches!(outcome, WriteOutcome::Ok) && !dead_conversations.is_empty() {
+        let log_conn = state.log_db.conn().await?;
+        crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
     }
     outcome_response(outcome)
 }
@@ -606,17 +644,39 @@ pub async fn reset_recover(
 /// actor is the signer, and every statement is bound to `user_id = actor` (the
 /// admin promotions touch related rows as a server-authorized consequence of the
 /// actor leaving — exactly mirroring [`apply_delete_account`]).
+///
+/// This is NOT account deletion: the `users` row and the account's own records
+/// (preferences, blocks, security events, recovery blob) deliberately survive,
+/// because the account does. Only membership and device state is shed. Returns
+/// the conversation ids this reset destroyed, for the caller's post-commit
+/// commit-log purge.
 pub async fn apply_reset_recover(
     conn: &Connection,
     authed: Option<&str>,
     body: &ResetRecoverBody,
-) -> anyhow::Result<WriteOutcome> {
+) -> anyhow::Result<(WriteOutcome, Vec<String>)> {
     let actor = match resolve_actor(authed, body.user_id.as_deref()) {
         Ok(a) => a,
-        Err(o) => return Ok(o),
+        Err(o) => return Ok((o, Vec::new())),
     };
     let tx = conn.transaction().await?;
-    handoff_group_ownership(&tx, &actor).await?;
+
+    // Note the actor's DMs before their membership rows go — see
+    // `apply_delete_account` for why this has to happen first.
+    let mut dm_ids: Vec<String> = Vec::new();
+    {
+        let mut rows = tx
+            .query(
+                "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
+                libsql::params![actor.clone()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            dm_ids.push(row.get(0)?);
+        }
+    }
+
+    let mut dead_conversations = handoff_group_ownership(&tx, &actor).await?;
 
     tx.execute(
         "DELETE FROM group_member WHERE user_id = ?1",
@@ -653,17 +713,64 @@ pub async fn apply_reset_recover(
         }
     }
 
+    // Per-device cursors belong to devices that no longer exist. Keyed on the
+    // surviving device so the kept one's cursor is preserved.
+    match &body.current_device_id {
+        Some(dev) => {
+            tx.execute(
+                "DELETE FROM conversation_watermark WHERE user_id = ?1 AND device_id != ?2",
+                libsql::params![actor.clone(), dev.clone()],
+            )
+            .await?;
+        }
+        None => {
+            tx.execute(
+                "DELETE FROM conversation_watermark WHERE user_id = ?1",
+                libsql::params![actor.clone()],
+            )
+            .await?;
+        }
+    }
+
+    // A DM the actor has just left with nobody else in it is dead.
+    for dm_id in &dm_ids {
+        let remaining: i64 = {
+            let mut rows = tx
+                .query(
+                    "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
+                    libsql::params![dm_id.clone()],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => row.get(0)?,
+                None => 0,
+            }
+        };
+        if remaining == 0 {
+            crate::teardown::purge_dm_channel(&tx, dm_id).await?;
+            dead_conversations.push(dm_id.clone());
+        }
+    }
+
     tx.commit().await?;
-    Ok(WriteOutcome::Ok)
+    Ok((WriteOutcome::Ok, dead_conversations))
 }
 
 // ── POST /v1/account/delete ──────────────────────────────────────────────────
 
 /// POST /v1/account/delete — permanently delete the actor's account, as ONE
 /// transaction. Handles group ownership (delete empty groups / promote a sole
-/// admin's successor), removes sent envelopes, key packages, and memberships,
-/// then deletes the `users` row (cascading `dm_channel_member`, `group_invite`,
-/// `user_device`, `account_recovery`, `security_event`, …).
+/// admin's successor), tears down any DM left with nobody in it, and deletes
+/// every main-DB row naming the actor via [`crate::teardown::purge_user_rows`].
+///
+/// Nothing here relies on `ON DELETE CASCADE`: production Turso runs with
+/// `foreign_keys=OFF`, so the schema's cascade clauses never fire and this used
+/// to leave the device roster, DM membership, invites, recovery blob and
+/// security-event log behind. See [`crate::teardown`].
+///
+/// The commit-log DB cannot join the main transaction, so its rows (the actor's
+/// Welcomes, plus the MLS state of any conversation this deletion destroyed) are
+/// purged after the commit.
 pub async fn delete_account(
     State(state): State<AppState>,
     method: Method,
@@ -685,46 +792,83 @@ pub async fn delete_account(
         }
     };
     let conn = state.db.conn().await?;
-    let outcome = apply_delete_account(&conn, authed.as_deref(), &parsed).await?;
-    // The `users` DELETE cascades to `user_device`, so every one of this user's
-    // cached keys is now stale (#658).
+    let (outcome, dead_conversations) =
+        apply_delete_account(&conn, authed.as_deref(), &parsed).await?;
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        // `user_device` is now empty for this user, so every one of their cached
+        // keys is stale (#658).
         state.device_keys.invalidate_user(&owner);
+        // Commit-log DB, only once the main transaction has committed — see
+        // `teardown::purge_conversation_log` for why the order is load-bearing.
+        if matches!(outcome, WriteOutcome::Ok) {
+            let log_conn = state.log_db.conn().await?;
+            crate::writes::purge_welcomes(&log_conn, &owner).await?;
+            crate::teardown::purge_user_log_rows(&log_conn, &owner).await?;
+            crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
+        }
     }
     outcome_response(outcome)
 }
 
 /// Every remote-data delete of account deletion, in one transaction. Self-scoped
 /// to the signer.
+///
+/// Returns the ids of conversations this deletion destroyed (channels of groups
+/// the actor was the last member of, and DMs left with nobody in them), so the
+/// caller can purge their commit-log-DB rows once this transaction has
+/// committed.
 pub async fn apply_delete_account(
     conn: &Connection,
     authed: Option<&str>,
     body: &DeleteAccountBody,
-) -> anyhow::Result<WriteOutcome> {
+) -> anyhow::Result<(WriteOutcome, Vec<String>)> {
     let actor = match resolve_actor(authed, body.user_id.as_deref()) {
         Ok(a) => a,
-        Err(o) => return Ok(o),
+        Err(o) => return Ok((o, Vec::new())),
     };
     let tx = conn.transaction().await?;
-    handoff_group_ownership(&tx, &actor).await?;
 
-    tx.execute(
-        "DELETE FROM message_envelope WHERE sender_id = ?1",
-        libsql::params![actor.clone()],
-    )
-    .await?;
-    tx.execute(
-        "DELETE FROM mls_key_package WHERE user_id = ?1",
-        libsql::params![actor.clone()],
-    )
-    .await?;
-    tx.execute(
-        "DELETE FROM group_member WHERE user_id = ?1",
-        libsql::params![actor.clone()],
-    )
-    .await?;
-    // The user row last — FK ON DELETE CASCADE clears dm_channel_member,
-    // group_invite, user_device, account_recovery, security_event, …
+    // Note the actor's DMs BEFORE their membership rows go — afterwards there is
+    // nothing left to identify which channels they were in, and an emptied DM
+    // would keep its ciphertext and metadata forever.
+    let mut dm_ids: Vec<String> = Vec::new();
+    {
+        let mut rows = tx
+            .query(
+                "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
+                libsql::params![actor.clone()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            dm_ids.push(row.get(0)?);
+        }
+    }
+
+    let mut dead_conversations = handoff_group_ownership(&tx, &actor).await?;
+    crate::teardown::purge_user_rows(&tx, &actor).await?;
+
+    // Any DM the actor has just left that now has no members at all is dead:
+    // tear it down rather than leaving an unreachable conversation behind.
+    for dm_id in &dm_ids {
+        let remaining: i64 = {
+            let mut rows = tx
+                .query(
+                    "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
+                    libsql::params![dm_id.clone()],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => row.get(0)?,
+                None => 0,
+            }
+        };
+        if remaining == 0 {
+            crate::teardown::purge_dm_channel(&tx, dm_id).await?;
+            dead_conversations.push(dm_id.clone());
+        }
+    }
+
+    // The anchor row last.
     tx.execute(
         "DELETE FROM users WHERE id = ?1",
         libsql::params![actor.clone()],
@@ -732,16 +876,20 @@ pub async fn apply_delete_account(
     .await?;
 
     tx.commit().await?;
-    Ok(WriteOutcome::Ok)
+    Ok((WriteOutcome::Ok, dead_conversations))
 }
 
 /// Group-ownership handoff shared by [`apply_delete_account`] and
-/// [`apply_reset_recover`]: for every group the actor belongs to, delete the
-/// group if they are its sole member, else promote a successor if they are its
-/// sole admin. Runs inside the caller's transaction (`&Transaction` derefs to
-/// `&Connection`). Mirrors the direct logic this replaces in `auth.rs` /
+/// [`apply_reset_recover`]: for every group the actor belongs to, tear the
+/// group down if they are its sole member, else promote a successor if they are
+/// its sole admin. Runs inside the caller's transaction (`&Transaction` derefs
+/// to `&Connection`). Mirrors the direct logic this replaces in `auth.rs` /
 /// `device_enrollment.rs`.
-async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Result<()> {
+///
+/// Returns the conversation ids destroyed along the way (the channels of every
+/// group torn down), for the caller's post-commit commit-log purge.
+async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Result<Vec<String>> {
+    let mut dead_conversations: Vec<String> = Vec::new();
     let mut memberships: Vec<(String, String)> = Vec::new();
     {
         let mut rows = conn
@@ -770,12 +918,11 @@ async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Resu
         };
 
         if member_count <= 1 {
-            // Sole member — delete the entire group (cascades channels, invites…).
-            conn.execute(
-                "DELETE FROM groups WHERE id = ?1",
-                libsql::params![gid.clone()],
-            )
-            .await?;
+            // Sole member — tear the whole group down. Explicitly, table by
+            // table: the cascade this used to trust does not fire on Turso.
+            let channels = crate::teardown::purge_group(conn, gid).await?;
+            dead_conversations.extend(channels);
+            dead_conversations.push(gid.clone());
         } else if role == "admin" {
             let other_admins: i64 = {
                 let mut rows = conn
@@ -808,12 +955,22 @@ async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Resu
                     conn.execute(
                         "UPDATE group_member SET role = 'admin' \
                          WHERE group_id = ?1 AND user_id = ?2",
-                        libsql::params![gid.clone(), new_admin],
+                        libsql::params![gid.clone(), new_admin.clone()],
+                    )
+                    .await?;
+                    // Hand the `groups.owner_id` pointer over too. It has no
+                    // foreign key, so it was left naming a user who no longer
+                    // exists — a dangling reference AND a deleted user's id
+                    // retained in a table that outlives them.
+                    conn.execute(
+                        "UPDATE groups SET owner_id = ?1 \
+                         WHERE id = ?2 AND owner_id = ?3",
+                        libsql::params![new_admin, gid.clone(), actor.to_string()],
                     )
                     .await?;
                 }
             }
         }
     }
-    Ok(())
+    Ok(dead_conversations)
 }

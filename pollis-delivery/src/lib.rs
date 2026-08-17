@@ -43,6 +43,7 @@ pub mod ratelimit;
 pub mod redact;
 pub mod room_id;
 pub mod session;
+pub mod teardown;
 pub mod util;
 pub mod writes;
 

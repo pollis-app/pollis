@@ -24,8 +24,10 @@ how the MLS group state evolved. Encrypted envelopes are retained **only until e
 device has collected them** — bounded by the slowest device, never by a clock. Client IP addresses are
 used for rate limiting and are never written to a database. Push tokens are stored until the device
 re-registers or the account is deleted, and the notification they carry is content-free. Account
-records, membership rows, and the account-key history are retained for the life of the account and
-removed when the account is deleted. The public transparency ledger is, by design, permanent and
+records and membership rows are retained for the life of the account and removed when the account is
+deleted — as of 2026-08 by an enumerated, table-by-table teardown rather than by foreign-key cascades
+that never fired in production (§2.1). The account-key history is the deliberate exception: it is
+append-only and survives deletion (§8). The public transparency ledger is, by design, permanent and
 append-only; #701 replaces the commit log's formerly-stable conversation and sender identifiers with
 windowed pseudonyms, so a third party can no longer build a longitudinal activity map from it (§6). That
 change takes effect at the next full republish (the #672 / #699 key-rotation ceremony), because the leaf
@@ -113,21 +115,68 @@ DB, split out in #420 Goal A).
 | Data | Table | Retention | Enforced by |
 |---|---|---|---|
 | Encrypted message envelopes | `message_envelope` | Until every current **live** member device has reported a watermark past the row. **No TTL** (age never deletes); since #720 a device silent past `POLLIS_DS_WATERMARK_STALE_MONTHS` (set to 12) stops pinning, bounded on the device's last **report**, not the message's age. Also removed immediately on user-initiated delete. | `messages.rs` `CLEANUP_*`; #688/#716, #720 |
-| Reactions | `message_reaction` | Life of the account; cascade-deleted with the user | `000000_baseline.sql` FK |
-| Per-device fetch cursors | `conversation_watermark` | **Indefinite** — advanced, never deleted, except with the device. Carries `reported_at` (server-stamped last-report wall-clock, #720), the liveness signal the envelope floor reads | `apply_advance_watermark`; #720 |
+| Reactions | `message_reaction` | Life of the account; **explicitly deleted** on account deletion (both the user's own reactions and any reaction to a message that goes with them) | `teardown.rs` `purge_user_rows` / `purge_conversation_rows` |
+| Per-device fetch cursors | `conversation_watermark` | **Indefinite** — advanced, never aged out. Deleted with the device (revoke, logout), with the conversation, and on account deletion. Carries `reported_at` (server-stamped last-report wall-clock, #720), the liveness signal the envelope floor reads | `apply_advance_watermark`; #720; `teardown.rs` |
 | MLS commit history | `mls_commit_log` (log DB) | Pruned to the tier-1 floor (min applied epoch across current member devices) with a tier-2 per-conversation hard cap | commit-log retention code + `retention_tests` |
 | Latest MLS group state | `mls_group_info` | Latest epoch only; overwritten, no history | `000001_commit_log_db.sql` |
-| Per-device commit catch-up | `mls_commit_since` | Indefinite, upserted monotonically | `000003_mls_commit_since.sql` |
-| Welcome messages | `mls_welcome` | Deduplicated per `(conversation_id, recipient_id, recipient_device_id)`; a resend for that tuple replaces the blob and re-arms delivery rather than stacking a row; cascade-deleted with the user | `migrations-log/000002_mls_welcome_unique_recipient.sql` |
-| Key packages | `mls_key_package` | Claimed packages are marked `claimed=1`, not hard-deleted; cascade-deleted with the user | `000000_baseline.sql`, `000010` |
-| Accounts | `users` | Life of the account; deleted on account deletion | `account.rs:808` |
-| Devices | `user_device` | Revocation writes a `revoked_at` tombstone (the row is retained so revoked devices stop pinning retention and cannot re-authenticate); rows are hard-deleted on logout and on account deletion | `000004_user_device_revoked_at.sql`; `account.rs:626,715,722` |
+| Per-device commit catch-up | `mls_commit_since` | Upserted monotonically; deleted with the device, with the conversation, and on account deletion. Until 2026-08 nothing ever deleted from it, so it retained a `(conversation, user, device)` triple indefinitely | `000003_mls_commit_since.sql`; `teardown.rs` `purge_user_log_rows` / `purge_device_log_rows` |
+| Welcome messages | `mls_welcome` | Deduplicated per `(conversation_id, recipient_id, recipient_device_id)`; a resend for that tuple replaces the blob and re-arms delivery rather than stacking a row; **explicitly deleted** on account deletion and with the conversation | `migrations-log/000002_mls_welcome_unique_recipient.sql`; `writes.rs` `purge_welcomes`, `teardown.rs` |
+| Key packages | `mls_key_package` | Claimed packages are marked `claimed=1`, not hard-deleted; **explicitly deleted** on account deletion, device revocation and logout | `000000_baseline.sql`, `000010`; `teardown.rs`, `account.rs` |
+| Accounts | `users` | Life of the account; deleted on account deletion, last in the teardown transaction | `account.rs` `apply_delete_account` |
+| Devices | `user_device` | Revocation writes a `revoked_at` tombstone (the row is retained so revoked devices stop pinning retention and cannot re-authenticate); rows are hard-deleted on logout and on account deletion, together with that device's key packages and fetch cursors | `000004_user_device_revoked_at.sql`; `account.rs` `apply_logout_device` / `apply_revoke_device`, `teardown.rs` |
 | Account identity-key history | `account_key_log` | **Append-only, never deleted.** This is deliberate: it is the client-verifiable record that an account's key did not change behind your back | `000005_account_key_log.sql` |
-| Membership and social graph | `group_member`, `dm_channel_member`, `groups`, `channels`, `dm_channel`, `user_block`, `group_invite`, `group_join_request`, `user_groups`, `user_dms` | Life of the account / conversation; cascade-deleted with the user | `000000_baseline.sql`, `000009_directory_index.sql` |
-| Security events | `security_event` (`id`, `user_id`, `kind`, `device_id`, `created_at`, `metadata`) | **Indefinite** — no TTL; cascade-deleted with the user | `000000_baseline.sql` |
+| Membership and social graph | `group_member`, `dm_channel_member`, `groups`, `channels`, `dm_channel`, `user_block`, `group_invite`, `group_join_request`, `group_invite_link`, `group_invite_link_redemption`, `group_emoji`, `user_groups`, `user_dms`, `account_recovery`, `user_preferences`, `device_enrollment_request` | Life of the account / conversation; **explicitly deleted** on account deletion and on group/DM teardown, table by table | `teardown.rs` `purge_user_rows` / `purge_group` / `purge_dm_channel`, enumerated in `USER_PURGED_TABLES` |
+| Security events | `security_event` (`id`, `user_id`, `kind`, `device_id`, `created_at`, `metadata`) | **90 days** since #762 (`POLLIS_DS_SECURITY_EVENT_RETENTION_DAYS`, §9); also **explicitly deleted** on account deletion | `messages.rs` `sweep_aged_records`; `teardown.rs` `purge_user_rows` |
 | Attachment dedup index | `attachment_object` (`content_hash` → `r2_key`) | **Reference-counted (#690):** collected only when no still-existing message references the hash. | `messages.rs` `apply_delete_attachment` (conditional `NOT EXISTS (attachment_ref ⋈ message_envelope)`) |
 | Attachment references | `attachment_ref` (`content_hash`, `message_id`) | One declaration per (message that carries a file). The count is **derived** — a declaration counts only while its `message_envelope` exists — so a reference is released by deleting the message envelope (self/admin delete, envelope GC #689, retention #720, teardown), never by a dedicated call, and cannot outlive its message. Orphaned/forged declarations are reaped by `sweep_envelope_gc`. **New at-rest linkage — see the note below.** | `messages.rs` (`object_is_referenced`, `sweep_envelope_gc`), `000012_attachment_ref.sql` |
-| Push tokens | `push_token` | Until the device re-registers (upsert on `token`) or the account is deleted. **No TTL and no reap of stale tokens** | `000006_push_token.sql` |
+| Push tokens | `push_token` | Until the device re-registers (upsert on `token`), **180 days** since last refresh (#762, `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS`, §9), or account deletion — the last of which is now an explicit delete rather than a cascade that never fired | `000006_push_token.sql`; `sweep_aged_records`; `teardown.rs` |
+
+### 2.1 Deletion is explicit, because the cascades never fired
+
+Until 2026-08 this section's deletion claims were **wrong**, and the reason is worth recording so it is
+not reintroduced.
+
+The remote schema decorates nearly every child table with `REFERENCES users(id) ON DELETE CASCADE` (and
+the same for `groups`, `channels`, `dm_channel`). **Production Turso does not enable foreign-key
+enforcement**, so none of those clauses has ever fired on any deployment. `delete_account` ran
+`DELETE FROM users` and trusted the cascade; `delete_group` ran `DELETE FROM groups` and did the same.
+In reality the device roster, DM membership, invites, join requests, blocks, preferences, the recovery
+blob, the security-event log, the push tokens, the directory-index rows and the group's entire channel
+and message history all survived the delete. The rows a user asked us to remove stayed in the database.
+
+Deletion is now **enumerated**, in `pollis-delivery/src/teardown.rs`:
+
+- `purge_user_rows` names every main-DB table that carries a user identifier;
+- `purge_group`, `purge_dm_channel` and `purge_conversation_rows` do the same per conversation;
+- `purge_user_log_rows`, `purge_device_log_rows` and `purge_conversation_log` cover the commit-log DB,
+  which is a separate database and so runs after the main transaction commits — deliberately in that
+  order, so a rolled-back teardown can never have already destroyed a live conversation's MLS state.
+
+Everything a single teardown does on the main DB is one transaction. Two properties are enforced by
+tests rather than by review (`pollis-delivery/tests/teardown.rs`):
+
+1. **Completeness.** `every_user_scoped_table_is_accounted_for` reads the *live* schema and fails if any
+   table naming a user is neither purged nor listed in `EXEMPT_FROM_USER_PURGE` with a stated reason. A
+   new migration that adds a table with a `user_id` and forgets the teardown fails CI at the point it
+   lands. (It found one on the first run: `mls_commit_since`, which nothing had ever deleted from.)
+2. **Scoping.** `account_deletion_cannot_reach_another_account` and
+   `group_deletion_cannot_reach_another_group` seed two fully-populated subjects and assert that
+   deleting one changes not a single row of the other — the #878 defect class ("authorised on one field,
+   deleted by another") pinned down for the destructive paths.
+
+The tests run with `PRAGMA foreign_keys=OFF`, matching production. So does the `flows` integration
+harness as of this change; it previously ran with foreign keys ON, which made it *stricter* than any
+real deploy and is why the suite never caught this.
+
+Three columns cannot be deleted or blanked, because they are `NOT NULL` pointers on rows that belong to
+a conversation other people are still using: `groups.owner_id`, `dm_channel.created_by` and
+`dm_channel_member.added_by`. Teardown **hands them over** to a remaining participant rather than
+leaving a deleted user's id in a live row. For `dm_channel.created_by` that is also a correctness fix
+rather than tidiness — it is an authorization input (the DM creator may remove a member), so left naming
+a deleted account the capability belonged to somebody who can never authenticate again.
+
+**What deletion does not remove** is listed in §8, and each exemption is also carried as a machine-read
+reason string next to the code.
 
 **Sealed sender.** Since #607 / migration `000008`, `message_envelope.sender_id` holds a sentinel rather
 than the real sender; the true sender is authenticated inside the MLS ciphertext and recoverable only by
@@ -298,10 +347,18 @@ Being specific here is what makes the rest of the document credible:
 
 1. **Transparency-ledger entries.** Permanent and public by construction. An account deletion does not
    and cannot remove past commit-log or account-key leaves.
-2. **Message copies on recipients' devices.** Delivered messages live in recipients' local encrypted
+2. **Your commits in a conversation that outlives you.** `mls_commit_log` is an append-only MLS epoch
+   chain shared by every member. Deleting a departed member's commits from the middle of it would leave
+   permanent epoch gaps that stop the *remaining* members from advancing, so those rows stay for as long
+   as the conversation does — and go the moment it is deleted. They carry a commit blob and, since #701,
+   a windowed pseudonym rather than a stable sender id. The baseline schema's
+   `sender_id ... ON DELETE CASCADE` would do the destructive thing here; it is inert because Turso runs
+   with foreign keys off, and `teardown.rs` records it as a deliberate exemption so it is never "fixed"
+   into firing.
+3. **Message copies on recipients' devices.** Delivered messages live in recipients' local encrypted
    databases. We have no mechanism to reach them and no backup of history anywhere
    (`docs/security-explained.md`).
-3. **Third-party operational data.** Cloudflare edge logs, Turso platform logs, LiveKit's own telemetry,
+4. **Third-party operational data.** Cloudflare edge logs, Turso platform logs, LiveKit's own telemetry,
    and APNs/FCM delivery records are governed by those providers' policies, not this one.
 
 ---

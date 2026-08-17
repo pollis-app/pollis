@@ -129,7 +129,7 @@
               <tr><td>Per-device delivery cursors</td>
                 <td class="doc-td-dim"><strong>Kept, deliberately.</strong> These are what stop undelivered mail
                   being collected early, so removing them to save space would risk deleting messages. Removed with
-                  the device</td></tr>
+                  the device, and when you delete your account</td></tr>
               <tr><td>Attachments</td>
                 <td class="doc-td-dim">Reference-counted: an encrypted file is collected once no surviving message
                   refers to it. No timer</td></tr>
@@ -167,8 +167,17 @@
       <section class="doc-section">
         <h2 class="doc-section-title">What deleting your account removes</h2>
         <p>
-          Deleting your account removes your user record, your devices, your membership of every group and DM,
-          your reactions, your push tokens, your security events and your undelivered envelopes.
+          Deleting your account removes your user record, your devices and their delivery cursors, your
+          membership of every group and DM, your reactions, your invites and join requests, your blocks, your
+          settings, your account-recovery blob, your push tokens, your security events, your custom emoji and
+          your undelivered envelopes. Each of those is removed by name, in one transaction, rather than left to
+          the database to work out.
+        </p>
+        <p>
+          A group or DM you were the last member of is torn down with you: its channels, its stored envelopes,
+          its invites and its encryption state all go. A conversation that still has other people in it stays,
+          minus everything that identified you — and if you were its last admin, someone else is promoted so the
+          group is not left ownerless.
         </p>
 
         <div class="doc-limit">
@@ -182,6 +191,13 @@
             outside observer cannot build a long-term map of who talks to whom. Your identity-key history remains
             deliberately identifiable, because looking a person up by name is the entire point of key
             transparency.
+          </p>
+          <p>
+            <strong>Your encryption commits in a conversation that outlives you.</strong> A group's encryption
+            history is a chain, and every remaining member walks it to catch up. Cutting a departed member's
+            links out of the middle would strand everyone still in the group, so those entries stay for as long
+            as the conversation does — and are deleted the moment it is. They contain no message content and, in
+            the published ledger, no lasting identifier for you.
           </p>
           <p>
             <strong>Messages already delivered to other people's devices.</strong> They are in recipients' local

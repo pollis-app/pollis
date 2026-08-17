@@ -120,9 +120,13 @@ the invariant that makes it unrepresentable.
   sweeps an entire *live* conversation's rows is no longer stopped at the schema
   layer, which is acceptable — it is whole-conversation removal, a different
   operation from I1's head-regression failure mode, and nothing above the DB
-  issues an unscoped per-conversation delete (the only production deletes are the
-  two prefix/generation retention shapes; account deletion in `account.rs` never
-  touches `mls_commit_log`). The two boundary cases are pinned by
+  issues an unscoped per-conversation delete *for a conversation that still
+  exists* (the retention deletes are the two prefix/generation shapes; the only
+  whole-conversation delete is `teardown::purge_conversation_log`, which runs
+  exclusively on ids the same operation just destroyed, and account deletion
+  never removes a departed member's commits from a conversation that survives —
+  that is a documented exemption in `teardown.rs`, because doing so would gap the
+  chain for every remaining member). The two boundary cases are pinned by
   `bulk_wipe_empties_the_table` / `delete_head_when_only_row_is_allowed` in
   `commit_log_triggers.rs`.
 

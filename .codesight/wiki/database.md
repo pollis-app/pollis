@@ -160,9 +160,14 @@ no longer the only thing standing between an attacker and a shared id.
 claimed id is claimed forever, because the attack is *reuse*: a deleted
 conversation is the most attractive id to squat (members' clients may still hold
 MLS state keyed to it), and with `foreign_keys=OFF` in production the baseline's
-`ON DELETE CASCADE` clauses do not fire, so a deleted group leaves its
-`group_member` and `channels` rows behind for a re-registered id to inherit. The
-cost is one small row per conversation ever created, with no user linkage.
+`ON DELETE CASCADE` clauses do not fire. The cost is one small row per
+conversation ever created, with no user linkage.
+
+(The "a deleted group leaves its `group_member` and `channels` rows behind" that
+used to motivate this paragraph was literally true and is now fixed —
+`pollis-delivery/src/teardown.rs` deletes them by name. The registry stays
+append-only regardless: id reuse is the attack, and not re-opening that window
+does not depend on teardown being complete.)
 
 **Not yet a foreign key** (follow-up: #948). Making the three tables reference
 this one means rebuilding each of them (SQLite's 12-step CREATE/copy/DROP/RENAME),
@@ -683,7 +688,52 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 - Retention: rows unrefreshed for `POLLIS_DS_PUSH_TOKEN_RETENTION_DAYS` are swept by the DS.
 
 ### user_groups / user_dms _(migration 000009 — created, then unused)_
-Backfilled-then-stale, unread tables. Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned), and the maintenance + reads were reverted — but the migration is append-only history and the tables were already applied to prod/dev/test, so they remain **unreferenced**. Note they are not empty: the migration backfills them from current membership at the bottom of the file, so they hold a frozen snapshot of the roster as of the moment it was applied — stale, and misleading if anyone assumes otherwise. No code writes or reads them. Left in place; a future tightening migration can `DROP` them if desired.
+Backfilled-then-stale, unread tables. Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned), and the maintenance + reads were reverted — but the migration is append-only history and the tables were already applied to prod/dev/test, so they remain **unreferenced**. Note they are not empty: the migration backfills them from current membership at the bottom of the file, so they hold a frozen snapshot of the roster as of the moment it was applied — stale, and misleading if anyone assumes otherwise. No code writes or reads them. Left in place; a future tightening migration can `DROP` them if desired. They **are** now cleared by account/group teardown — that frozen snapshot is real membership metadata about real users, so it has to go when they do.
+
+---
+
+## Deletion and teardown (`pollis-delivery/src/teardown.rs`)
+
+**Nothing in the DS may rely on `ON DELETE CASCADE`.** Production Turso runs with
+`foreign_keys=OFF`, so every `REFERENCES ... ON DELETE CASCADE` in the baseline is
+inert on every deployment. This was a live data-retention bug until 2026-08:
+`delete_account` ran `DELETE FROM users` and `delete_group` ran `DELETE FROM
+groups`, each trusting a cascade that never fired, so the device roster, DM
+membership, invites, blocks, preferences, recovery blob, security events, push
+tokens, directory-index rows and a deleted group's whole channel + message
+history all survived.
+
+Teardown is now enumerated in one module:
+
+| Function | Scope |
+|---|---|
+| `purge_user_rows(conn, user_id)` | every main-DB table naming a user (caller deletes the `users` row last) |
+| `purge_conversation_rows(conn, conversation_id)` | envelopes + the reactions / attachment refs hanging off them + cursors |
+| `purge_group(conn, group_id)` | each channel's history, then the group's own rows; returns the dead conversation ids |
+| `purge_dm_channel(conn, dm_id)` | a DM with no members left |
+| `purge_user_log_rows` / `purge_device_log_rows` / `purge_conversation_log` | the commit-log DB (`mls_commit_since`, `mls_group_info`, `mls_welcome`, `mls_commit_log`) |
+
+Rules that matter:
+
+- **Main-DB teardown is one transaction.** The commit-log DB is a separate Turso
+  and cannot join it, so its purges run **after** the main commit — deliberately
+  in that order, so a rolled-back teardown can never have already destroyed a
+  still-live conversation's MLS state. Leftover rows for a dead conversation are
+  recoverable; deleted state for a living one is not.
+- **Two tables are exempt, with reasons carried in code**
+  (`EXEMPT_FROM_USER_PURGE`): `account_key_log` (published, client-verified,
+  append-only) and `mls_commit_log` for a *surviving* conversation (deleting a
+  departed member's commits gaps the epoch chain for everyone still in it — the
+  baseline's `sender_id ... ON DELETE CASCADE` would do exactly that if FKs were
+  ever switched on). `conversation` is append-only by its own design (#880).
+- **Adding a table with a `user_id` means adding it to the teardown.**
+  `pollis-delivery/tests/teardown.rs` reads the live schema and fails if a table
+  naming a user or a conversation is in neither the purge list nor an exemption
+  list. It found `mls_commit_since` on its first run — a table nothing had ever
+  deleted from.
+- **Every delete is scoped to the id being torn down**, and the suite pins that
+  deleting one account/group changes not one row of another (the #878 defect
+  class).
 
 ---
 
