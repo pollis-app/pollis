@@ -15,6 +15,7 @@ export function MessageActionsSheet({
   isOwn,
   onReact,
   onOpenPicker,
+  onReplyInThread,
   onEdit,
   onDelete,
   onClose,
@@ -23,6 +24,7 @@ export function MessageActionsSheet({
   isOwn: boolean;
   onReact: (emoji: string) => void;
   onOpenPicker: () => void;
+  onReplyInThread: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -75,6 +77,34 @@ export function MessageActionsSheet({
           <Icon.plus color={semantic.ink} />
         </Pressable>
       </View>
+
+      <Pressable
+        onPress={onReplyInThread}
+        testID="btn-reply-thread"
+        accessibilityRole="button"
+        accessibilityLabel="Reply in thread"
+        style={{
+          paddingVertical: 14,
+          paddingHorizontal: 12,
+          borderWidth: 1,
+          borderColor: semantic.hairStrong,
+          borderRadius: r.sm,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <Icon.thread color={semantic.ink} />
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 14,
+            color: semantic.ink,
+          }}
+        >
+          Reply in thread
+        </Text>
+      </Pressable>
 
       {isOwn ? (
         <>

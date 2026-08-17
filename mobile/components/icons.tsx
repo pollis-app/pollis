@@ -37,6 +37,7 @@ import {
   Diamond,
   Volume2,
   Info,
+  MessagesSquare,
   type LucideIcon,
 } from "lucide-react-native";
 import { semantic } from "../theme/tokens";
@@ -88,6 +89,7 @@ export const Icon = {
   alert: wrap(AlertCircle),
   diamond: wrap(Diamond, 16),
   info: wrap(Info, 16),
+  thread: wrap(MessagesSquare, 14),
 };
 
 export type IconName = keyof typeof Icon;

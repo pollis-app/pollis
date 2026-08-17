@@ -21,6 +21,8 @@ export function MessageRow({
   receipt,
   peerCount = 0,
   showReceipt = false,
+  threadCount = 0,
+  onOpenThread,
   onPressAvatar,
   onLongPress,
   testID,
@@ -39,6 +41,8 @@ export function MessageRow({
   receipt?: MessageReceipts;
   peerCount?: number;
   showReceipt?: boolean;
+  threadCount?: number;
+  onOpenThread?: () => void;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
   testID?: string;
@@ -118,6 +122,31 @@ export function MessageRow({
             currentUserId={currentUserId}
             onToggle={onToggleReaction}
           />
+        ) : null}
+        {threadCount > 0 && onOpenThread ? (
+          <Pressable
+            onPress={onOpenThread}
+            testID={`btn-thread-${messageId ?? ""}`}
+            accessibilityRole="button"
+            accessibilityLabel={`Open thread, ${threadCount} ${threadCount === 1 ? "reply" : "replies"}`}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              marginTop: 6,
+              alignSelf: "flex-start",
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 12,
+                color: semantic.accent,
+              }}
+            >
+              {threadCount} {threadCount === 1 ? "reply" : "replies"} ›
+            </Text>
+          </Pressable>
         ) : null}
       </View>
     </Pressable>

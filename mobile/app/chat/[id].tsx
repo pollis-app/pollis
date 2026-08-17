@@ -22,6 +22,7 @@ import {
   useDeleteMessage,
   useConversationReceipts,
   useSendReadReceipts,
+  useThreadSummaries,
   flattenPages,
   type ConversationKind,
   type Message,
@@ -188,10 +189,18 @@ function TextChat(props: ChatViewProps = {}) {
     );
   };
 
+  // Reply-count chips for thread roots (#831).
+  const { data: threadSummaries } = useThreadSummaries(conversationId);
+
   // Inverted-list items: build chronologically (day separator before the
   // first message of each day), then reverse so index 0 is the newest row.
+  // Thread replies stay out of the main timeline — they render only in the
+  // thread screen (#837's isolation fix; same filter as desktop's
+  // `!m.thread_id || m.thread_id === m.id` render boundary).
   const items = useMemo(() => {
-    const chrono = [...messages].reverse();
+    const chrono = [...messages]
+      .reverse()
+      .filter((m) => !m.thread_id || m.thread_id === m.id);
     const out: ChatListItem[] = [];
     let lastKey = "";
     for (const m of chrono) {
@@ -250,6 +259,24 @@ function TextChat(props: ChatViewProps = {}) {
     peerName ||
     (kind === "dm" ? "Direct message" : "Channel");
 
+  const openThread = useCallback(
+    (rootId: string) => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      router.push({
+        pathname: "/chat/thread",
+        params: {
+          threadId: rootId,
+          id: conversationId,
+          kind,
+          name: title,
+        },
+      });
+    },
+    [conversationId, kind, router, title],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: ChatListItem }) => {
       if (item.type === "sep") {
@@ -274,6 +301,8 @@ function TextChat(props: ChatViewProps = {}) {
           receipt={receiptsByMessage?.get(m.id)}
           peerCount={peerCount}
           showReceipt={mine && isDm}
+          threadCount={threadSummaries?.get(m.id)?.reply_count ?? 0}
+          onOpenThread={() => openThread(m.id)}
           onToggleReaction={(emoji, reacted) =>
             toggleReaction.mutate({
               messageId: m.id,
@@ -302,6 +331,8 @@ function TextChat(props: ChatViewProps = {}) {
       receiptsByMessage,
       peerCount,
       isDm,
+      threadSummaries,
+      openThread,
     ],
   );
 
@@ -493,6 +524,11 @@ function TextChat(props: ChatViewProps = {}) {
           onOpenPicker={() => {
             setPickerTarget(actionTarget);
             setActionTarget(null);
+          }}
+          onReplyInThread={() => {
+            const rootId = actionTarget.id;
+            setActionTarget(null);
+            openThread(rootId);
           }}
           onEdit={() => {
             setEditTarget(actionTarget);
