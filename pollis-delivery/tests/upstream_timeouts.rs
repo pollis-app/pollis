@@ -20,17 +20,17 @@
 //! `util::Upstream` and is shared by all three, so the table test below is what
 //! covers the other two.
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt as _;
 use pollis_delivery::broker::BrokerConfig;
-use pollis_delivery::db::Db;
 use pollis_delivery::util::Upstream;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
+
+mod common;
 
 /// An upstream that accepts connections and never replies. Sockets are parked in
 /// a `Vec` so nothing closes them and turns the hang into a clean EOF.
@@ -48,17 +48,12 @@ async fn black_hole() -> String {
     format!("http://{addr}")
 }
 
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("delivery.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().expect("utf-8 path"))
-        .await
-        .expect("local db");
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("delivery.db").await;
     pollis_schema::apply::single_db(&db.conn().await.expect("checkout"))
         .await
         .expect("schema");
-    Arc::new(db)
+    db
 }
 
 fn livekit_broker(url: &str) -> BrokerConfig {
@@ -79,7 +74,8 @@ fn livekit_broker(url: &str) -> BrokerConfig {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_hung_livekit_returns_504_instead_of_hanging_the_handler() {
     let url = black_hole().await;
-    let state = AppState::new(fresh_db().await, false).with_broker_config(livekit_broker(&url));
+    let db = fresh_db().await;
+    let state = AppState::new(db.arc(), false).with_broker_config(livekit_broker(&url));
 
     let req = Request::builder()
         .method("POST")

@@ -23,6 +23,8 @@ use pollis_delivery::{build_router_with_state, AppState};
 use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
 
+mod common;
+
 /// Mint a fresh ML-DSA-44 signing key from OS randomness. An ML-DSA private key
 /// IS its 32-byte seed, so 32 random bytes is the whole key.
 fn gen_signing_key() -> SigningKey<MlDsa44> {
@@ -41,13 +43,10 @@ fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
 }
 
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("delivery.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("delivery.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
-    Arc::new(db)
+    db
 }
 
 /// Make sure `user_id` exists. `user_device.user_id` and `group_member.user_id`

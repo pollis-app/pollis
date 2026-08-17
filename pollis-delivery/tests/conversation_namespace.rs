@@ -28,12 +28,13 @@
 //! must not borrow enforcement no deploy has.
 
 use libsql::Connection;
-use pollis_delivery::db::Db;
 use pollis_delivery::groups::{
     apply_create_channel, apply_create_group, CreateChannelBody, CreateGroupBody,
 };
 use pollis_delivery::profile::{apply_create_dm, CreateDmBody};
 use pollis_delivery::writes::WriteOutcome;
+
+mod common;
 
 const OWNER: &str = "owner-1";
 const MALLORY: &str = "mallory-1";
@@ -42,13 +43,8 @@ const MALLORY: &str = "mallory-1";
 
 /// A database at the CURRENT schema (baseline + every migration), the shape a
 /// deployed DS talks to.
-async fn fresh() -> Db {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("db.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap())
-        .await
-        .expect("local db");
+async fn fresh() -> common::TempDb {
+    let db = common::TempDb::open("db.db").await;
     let conn = db.conn().await.unwrap();
     conn.execute_batch("PRAGMA foreign_keys=OFF;")
         .await
@@ -409,8 +405,10 @@ fn conversation_namespace_sql() -> &'static str {
 }
 
 /// A database stamped at the previous version and seeded with `sql`, then
-/// migrated. Returns the connection so the caller can inspect the result.
-async fn backfilled(seed: &str) -> Connection {
+/// migrated. Returns the connection so the caller can inspect the result, plus
+/// the `Database` handle it borrows from — the caller must hold that for as long
+/// as it uses the connection. This used to be `std::mem::forget(db)` (#942).
+async fn backfilled(seed: &str) -> (libsql::Database, Connection) {
     let db = libsql::Builder::new_local(":memory:")
         .build()
         .await
@@ -428,16 +426,14 @@ async fn backfilled(seed: &str) -> Connection {
     conn.execute_batch(conversation_namespace_sql())
         .await
         .expect("migration");
-    // Leak the handle: the connection borrows the in-memory database.
-    std::mem::forget(db);
-    conn
+    (db, conn)
 }
 
 /// The rows production actually has: a group with two channels, a group with
 /// none, and a DM. Exactly one registry row each, with the right kind.
 #[tokio::test]
 async fn the_backfill_registers_every_existing_conversation_exactly_once() {
-    let conn = backfilled(
+    let (_db, conn) = backfilled(
         "INSERT INTO groups (id, name, owner_id, created_at) VALUES \
            ('g-with-channels','G1','u1','2026-01-01'),\
            ('g-empty','G2','u1','2026-01-02');\
@@ -470,7 +466,7 @@ async fn the_backfill_registers_every_existing_conversation_exactly_once() {
 /// An empty database backfills to nothing — the migration must not invent rows.
 #[tokio::test]
 async fn the_backfill_of_an_empty_database_is_empty() {
-    let conn = backfilled("").await;
+    let (_db, conn) = backfilled("").await;
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM conversation").await, 0);
 }
 
@@ -481,7 +477,7 @@ async fn the_backfill_of_an_empty_database_is_empty() {
 /// inherits the victim's id.
 #[tokio::test]
 async fn a_pre_existing_collision_backfills_to_the_older_conversation() {
-    let conn = backfilled(
+    let (_db, conn) = backfilled(
         "INSERT INTO groups (id, name, owner_id, created_at) VALUES \
            ('shared','G','u1','2026-01-01');\
          INSERT INTO dm_channel (id, created_by, created_at) VALUES \
@@ -504,7 +500,7 @@ async fn a_pre_existing_collision_backfills_to_the_older_conversation() {
 /// first, the DM keeps the id.
 #[tokio::test]
 async fn a_pre_existing_collision_is_resolved_by_age_not_by_table_order() {
-    let conn = backfilled(
+    let (_db, conn) = backfilled(
         "INSERT INTO dm_channel (id, created_by, created_at) VALUES \
            ('shared','u1','2026-01-01');\
          INSERT INTO groups (id, name, owner_id, created_at) VALUES \
@@ -519,7 +515,7 @@ async fn a_pre_existing_collision_is_resolved_by_age_not_by_table_order() {
 /// database is what refuses the second one.
 #[tokio::test]
 async fn the_registry_refuses_a_second_kind_for_one_id() {
-    let conn = backfilled("").await;
+    let (_db, conn) = backfilled("").await;
     conn.execute("INSERT INTO conversation (id, kind) VALUES ('x', 'group')", ())
         .await
         .expect("first claim");
@@ -536,7 +532,7 @@ async fn the_registry_refuses_a_second_kind_for_one_id() {
 /// there are, so a fourth cannot be smuggled in.
 #[tokio::test]
 async fn the_registry_refuses_an_unknown_kind() {
-    let conn = backfilled("").await;
+    let (_db, conn) = backfilled("").await;
     assert!(conn
         .execute(
             "INSERT INTO conversation (id, kind) VALUES ('x', 'voice-room')",

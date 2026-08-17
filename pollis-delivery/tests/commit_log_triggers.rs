@@ -22,6 +22,8 @@ use pollis_delivery::commit::{
 };
 use pollis_delivery::db::Db;
 
+mod common;
+
 // The real log-DB schema, in version order (mirrors POST_BASELINE_LOG_MIGRATIONS
 // + LOG_DB_SCHEMA). 000005 is the trigger migration under test.
 const LOG_MIGRATIONS: &[&str] = &[
@@ -33,11 +35,8 @@ const LOG_MIGRATIONS: &[&str] = &[
 ];
 
 /// A fresh local log DB with the real migrations (triggers included) applied.
-async fn fresh_log() -> Db {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("log.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh_log() -> common::TempDb {
+    let db = common::TempDb::open("log.db").await;
     let conn = db.conn().await.unwrap();
     for sql in LOG_MIGRATIONS {
         // Native batch: parses trigger bodies correctly, unlike a naive `;` split.

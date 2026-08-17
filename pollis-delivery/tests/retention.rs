@@ -23,6 +23,8 @@ use pollis_delivery::commit::{
 };
 use pollis_delivery::db::Db;
 
+mod common;
+
 /// Which half of the #420 split a handle is. Passing the wrong one is now a
 /// type error rather than a silently-wider schema: the MAIN db has no
 /// `mls_commit_log`-with-`generation` and the LOG db has no `group_member`, so a
@@ -34,11 +36,8 @@ enum Half {
     Log,
 }
 
-async fn fresh(half: Half) -> Db {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("db.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh(half: Half) -> common::TempDb {
+    let db = common::TempDb::open("db.db").await;
     let conn = db.conn().await.unwrap();
     match half {
         Half::Main => pollis_schema::apply::main_db(&conn).await.expect("schema"),

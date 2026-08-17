@@ -16,6 +16,8 @@ use pollis_delivery::commit::{
 };
 use pollis_delivery::db::Db;
 
+mod common;
+
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -69,14 +71,10 @@ async fn count_for_conv(db: &Db, table: &str, conv: &str) -> i64 {
     rows.next().await.unwrap().unwrap().get(0).unwrap()
 }
 
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("delivery.db");
-    // Keep the tempdir alive for the process.
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("delivery.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
-    Arc::new(db)
+    db
 }
 
 #[tokio::test(flavor = "multi_thread")]

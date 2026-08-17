@@ -356,15 +356,32 @@ function findMessage(messageId: string): MockMessage | undefined {
   return undefined;
 }
 
-/** This user's role in `groupId`, or null when they are not a member. */
+/**
+ * This user's role in `groupId`, or null when they are not a member.
+ *
+ * The two sources are consulted in order and neither shadows the other (#942).
+ * That ordering is the fix for a sharp edge: preloading `groupMembers` used to
+ * make the roster the ONLY answer, so a spec that preloaded a roster and left
+ * the session user out of it — an easy omission, since the specs care about the
+ * other members — silently became a non-member and got
+ * `authz::NOT_A_MEMBER` thrown at it from an unrelated call. The error described
+ * a production authorization failure; the cause was an incomplete fixture.
+ *
+ * In production the roster and the group list cannot disagree about whether you
+ * are in a group, so the mock should not manufacture a disagreement out of a
+ * partial fixture. A roster that names you wins; a roster that does not falls
+ * through to the group row, exactly as an unset roster already did.
+ */
 function roleInGroup(groupId: string): string | null {
-  const members = store.groupMembers[groupId];
   const me = store.session?.id;
-  if (members && me) {
-    return members.find((m) => m.user_id === me)?.role ?? null;
+  const fromRoster = me
+    ? (store.groupMembers[groupId]?.find((m) => m.user_id === me)?.role ?? null)
+    : null;
+  if (fromRoster) {
+    return fromRoster;
   }
-  // No roster preloaded — fall back to the group row, which is what
-  // `list_user_groups_with_channels` already reports to the UI.
+  // The group row is what `list_user_groups_with_channels` already reports to
+  // the UI: if this group is in the user's own group list, they are in it.
   const group = store.groups.find((g) => g.id === groupId);
   if (!group) {
     return null;
@@ -379,6 +396,10 @@ function roleInGroup(groupId: string): string | null {
  * mock enforces the same rule so a hook that forgets to send `requesterId`
  * fails here — in a fast browser test — instead of only against a real Turso.
  * The wording matches `authz::NOT_A_MEMBER` so assertions can be shared.
+ *
+ * To test the genuine non-member path, leave the group out of `store.groups`.
+ * That is now the only way to reach this throw, which is what makes the message
+ * below trustworthy rather than ambiguous (#942).
  */
 function requireMemberMock(groupId: string): void {
   if (roleInGroup(groupId) === null) {

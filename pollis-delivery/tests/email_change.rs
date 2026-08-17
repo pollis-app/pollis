@@ -23,6 +23,8 @@ use pollis_delivery::{build_router_with_state, AppState};
 use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
 
+mod common;
+
 const DEV_CODE: &str = "424242";
 
 
@@ -36,13 +38,10 @@ fn gen_signing_key() -> SigningKey<MlDsa44> {
     SigningKey::<MlDsa44>::from_seed(&seed.into())
 }
 
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("ec.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("ec.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
-    Arc::new(db)
+    db
 }
 
 /// State with auth ENFORCED (these endpoints are device-signed) and a fixed

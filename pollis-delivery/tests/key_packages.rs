@@ -28,20 +28,18 @@ use pollis_delivery::devices::{
 };
 use pollis_delivery::writes::WriteOutcome;
 
+mod common;
+
 /// MLS code point `0x0001` — the suite Pollis shipped before #454, retired by
 /// #669. Defined here rather than in the DS because the DS has no reason to name
 /// it any more; the tests do, as a concrete "not the current suite".
 const CIPHERSUITE_LEGACY: i64 = 0x0001;
 
 
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("kp.db");
-    // Keep the tempdir alive for the process.
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("kp.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
-    Arc::new(db)
+    db
 }
 
 /// Insert one unclaimed key package in the current suite — an ordinary package

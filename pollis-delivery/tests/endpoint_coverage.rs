@@ -16,25 +16,23 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use pollis_delivery::db::Db;
 use pollis_delivery::{build_router_with_state, AppState};
-use std::sync::Arc;
 use tower::ServiceExt as _;
 
-async fn router() -> axum::Router {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("db.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap())
-        .await
-        .expect("local db");
+mod common;
+
+/// The router plus the fixture that owns its temp dir. The guard is returned
+/// rather than dropped here: it deletes the directory the DB lives in, so the
+/// caller has to hold it for as long as it drives the router (#942).
+async fn router() -> (axum::Router, common::TempDb) {
+    let db = common::TempDb::open("db.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap())
         .await
         .expect("schema");
     // Auth OFF: this test is about ROUTING, not authorization. With auth on
     // every probe would stop at the 401 gate, which is indistinguishable from a
     // route that exists — and would pass even for a path that does not.
-    build_router_with_state(AppState::new(Arc::new(db), false))
+    (build_router_with_state(AppState::new(db.arc(), false)), db)
 }
 
 /// The treatment: every path in the shared endpoint table resolves to a handler.
@@ -44,7 +42,7 @@ async fn router() -> axum::Router {
 /// did. The assertion is only ever about the difference between those two.
 #[tokio::test]
 async fn every_declared_endpoint_is_routed() {
-    let app = router().await;
+    let (app, _db) = router().await;
     let mut missing = Vec::new();
 
     for endpoint in pollis_api::ENDPOINTS {
@@ -76,7 +74,7 @@ async fn every_declared_endpoint_is_routed() {
 /// 404 through the same probe.
 #[tokio::test]
 async fn an_unrouted_path_is_observably_404() {
-    let app = router().await;
+    let (app, _db) = router().await;
     let req = Request::builder()
         .method("POST")
         .uri("/v1/definitely-not-an-endpoint")

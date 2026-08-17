@@ -32,6 +32,47 @@
 //! `schema_is_complete` in this crate's tests fails if a file on disk is missing
 //! from the list, so the two cannot silently diverge.
 
+/// The two membership predicates that BOTH sides of a group-scoped write
+/// evaluate (#942).
+///
+/// Group authorization is one rule with two implementations: the Delivery
+/// Service re-derives it server-side and is the enforcing copy
+/// (`pollis_delivery::groups`), while the client evaluates the same thing as a
+/// preflight so the user gets a fast, specific error instead of a bare 403
+/// (`pollis_core::commands::groups::authz`). The preflight is deliberate and
+/// worth keeping — but two hand-typed copies of one rule only ever drift, and
+/// when they do the client is wrong by definition and the symptom is a command
+/// that "works" locally and 403s remotely.
+///
+/// So the statements live here, in the crate both sides already depend on for
+/// exactly this reason: the tables themselves were hand-copied until drift
+/// produced eleven different `user_device` definitions (see the module docs).
+/// A read whose shape is a contract between the two crates is the same problem,
+/// and gets the same answer — one definition, shared, rather than two that
+/// happen to match today.
+///
+/// Parity over the resulting decisions is asserted in
+/// `pollis-delivery/tests/join_requests.rs::preflight_parity`.
+pub mod authz {
+    /// The caller's role in a group, or no row when they are not a member.
+    /// Parameters: `?1` group id, `?2` user id.
+    ///
+    /// `role` is read as a column rather than tested in SQL on purpose: the two
+    /// crates map it to their own types (`GroupRole` / `Option<String>`) and an
+    /// undecodable value must error rather than silently read as "not an admin"
+    /// (#875).
+    pub const GROUP_ROLE_SQL: &str =
+        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2";
+
+    /// Whether a group id names a real group. Parameter: `?1` group id.
+    ///
+    /// Not redundant with the schema's `REFERENCES groups(id)`: every
+    /// deployment runs with `foreign_keys=OFF` (remote Turso does not enforce
+    /// them, and both crates match that on every connection), so the constraint
+    /// is inert and existence has to be checked explicitly.
+    pub const GROUP_EXISTS_SQL: &str = "SELECT 1 FROM groups WHERE id = ?1";
+}
+
 /// Frozen baseline schema for the main remote DB. Embedded at compile time so a
 /// test harness can stamp a fresh database without an out-of-band migration
 /// step.

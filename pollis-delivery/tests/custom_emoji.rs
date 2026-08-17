@@ -37,14 +37,13 @@ use pollis_delivery::{build_router_with_state, AppState};
 use std::sync::Arc;
 use tower::ServiceExt as _;
 
+mod common;
 
-async fn fresh() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("db.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+
+async fn fresh() -> common::TempDb {
+    let db = common::TempDb::open("db.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
-    Arc::new(db)
+    db
 }
 
 /// A well-formed content hash. Distinct `seed`s give distinct objects.

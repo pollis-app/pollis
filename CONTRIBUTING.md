@@ -28,6 +28,15 @@ subsystem docs live in [`.codesight/wiki/`](.codesight/wiki/index.md).
 pnpm install          # install JS dependencies
 ```
 
+**Run it before anything TypeScript, including in a new worktree.** A fresh
+checkout fails `pnpm tsc` / `pnpm lint` with unresolved imports until it has —
+`node_modules/` is not in the tree, and a dependency added since your last
+install (`@tanstack/react-virtual`, most recently) shows up as a missing module
+rather than as "you need to install". The Rust side has no equivalent step;
+`cargo` fetches on demand. This bites hardest with `git worktree`, which does not
+share `node_modules/` with the checkout it came from, so a second worktree needs
+its own `pnpm install` even though the first one works.
+
 ## Running
 
 ```bash

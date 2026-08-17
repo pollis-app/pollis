@@ -105,7 +105,7 @@ pub async fn group_role(
 ) -> Result<Option<GroupRole>> {
     let mut rows = conn
         .query(
-            "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+            pollis_schema::authz::GROUP_ROLE_SQL,
             libsql::params![group_id.to_string(), user_id.to_string()],
         )
         .await?;
@@ -113,6 +113,24 @@ pub async fn group_role(
         Some(row) => Some(GroupRole::from_column(&row.get::<String>(0)?)),
         None => None,
     })
+}
+
+/// Whether `group_id` names a real group.
+///
+/// The other half of `request_group_access`'s preflight, which used to inline
+/// this SELECT at the call site. Both this and [`group_role`] now run
+/// `pollis_schema::authz`'s statements — the same text the Delivery Service
+/// executes when it re-derives the decision (#942). The DS remains the enforcing
+/// copy; sharing the statement removes the way the preflight could quietly stop
+/// agreeing with it.
+pub async fn group_exists(conn: &Connection, group_id: &str) -> Result<bool> {
+    let mut rows = conn
+        .query(
+            pollis_schema::authz::GROUP_EXISTS_SQL,
+            libsql::params![group_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// The caller's role in the group that owns `channel_id`, or `None` when the

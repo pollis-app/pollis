@@ -33,6 +33,19 @@ pollis-device-cert = { path = "../pollis-device-cert" }
 # pollis-device-cert and pollis-schema it is a leaf crate (serde only), so
 # sharing it does not breach the DS-does-not-depend-on-pollis-core rule.
 pollis-api = { path = "../pollis-api" }
+# #942: the group-membership predicates (`pollis_schema::authz`) that this crate
+# ENFORCES and pollis-core preflights. Two hand-typed copies of one authz rule
+# drift, and when they do the client is wrong by definition — so there is one
+# copy, in the crate that already exists to stop exactly this between exactly
+# these two crates.
+#
+# It moved from a dev-dependency to a real one to do that. The dev-dep comment
+# below said "the DS binary carries no schema", which stays true in the way that
+# matters: WITHOUT the `libsql` feature this dependency contributes only `&str`
+# constants and no runner, and the migration bodies are unreferenced `pub const`s
+# that the linker drops. The dev-dependency below keeps the feature so tests can
+# still stamp a real connection.
+pollis-schema = { path = "../pollis-schema" }
 # Request-signature auth (#668): verify the client's ML-DSA-44 signature over a
 # canonical message that binds sha256(body). The DS request credential is
 # `user_device.mls_signature_pub_pq`. Also the device-cert signature scheme.

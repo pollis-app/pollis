@@ -17,18 +17,17 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt as _;
-use pollis_delivery::db::Db;
 use pollis_delivery::messages::RetentionSnapshot;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
 
+mod common;
+
 /// A bare local DB — the metrics handler reads only the in-memory snapshot cell,
 /// never a table, so no schema is needed.
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("delivery.db");
-    std::mem::forget(dir);
-    Arc::new(Db::connect_local(path.to_str().unwrap()).await.expect("local db"))
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("delivery.db").await;
+    db
 }
 
 /// A `GET /v1/retention/metrics` request with an optional bearer token.
@@ -170,7 +169,8 @@ fn config_request(token: Option<&str>) -> Request<Body> {
 /// endpoint: an unconfigured deploy must not even advertise that it exists.
 #[tokio::test]
 async fn config_is_not_served_without_a_token() {
-    let state = AppState::new(fresh_db().await, true);
+    let db = fresh_db().await;
+    let state = AppState::new(db.arc(), true);
     let (status, body) = call(&state, config_request(None)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(body.is_empty(), "an unconfigured route must not describe itself");
@@ -182,7 +182,8 @@ async fn config_is_not_served_without_a_token() {
 /// full deploy cycle.
 #[tokio::test]
 async fn config_rejects_a_missing_or_wrong_token_with_401() {
-    let state = AppState::new(fresh_db().await, true).with_metrics_token(Some("right".into()));
+    let db = fresh_db().await;
+    let state = AppState::new(db.arc(), true).with_metrics_token(Some("right".into()));
     assert_eq!(call(&state, config_request(None)).await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(
         call(&state, config_request(Some("wrong"))).await.0,
@@ -193,7 +194,8 @@ async fn config_rejects_a_missing_or_wrong_token_with_401() {
 /// Correct token → the EFFECTIVE config, and never a secret's value.
 #[tokio::test]
 async fn config_reports_effective_values_and_no_secrets() {
-    let state = AppState::new(fresh_db().await, true).with_metrics_token(Some("right".into()));
+    let db = fresh_db().await;
+    let state = AppState::new(db.arc(), true).with_metrics_token(Some("right".into()));
     let (status, body) = call(&state, config_request(Some("right"))).await;
     assert_eq!(status, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();

@@ -31,6 +31,8 @@ use pollis_delivery::writes::WriteOutcome;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
 
+mod common;
+
 
 /// The blinded sender every send writes under unconditional sealed sender
 /// (#607) — receipts included.
@@ -46,13 +48,9 @@ const ACKED: [&str; 2] = [
     "01J8XQ2M5H7NR3T0V9WZ4KDCEB",
 ];
 
-async fn fresh() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("db.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh() -> common::TempDb {
+    let db = common::TempDb::open("db.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
-    let db = Arc::new(db);
     db.conn().await
         .unwrap()
         .execute(

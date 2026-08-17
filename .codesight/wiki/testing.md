@@ -231,6 +231,37 @@ binary gets its own process and never loads rusqlite. See
 `pollis-core/tests/revoked_device_reconcile.rs`. This is why pollis-core had no
 `user_device` query coverage before #679.
 
+## `pollis-delivery` DB fixtures — use `common::TempDb` (#942)
+
+Every DS integration test that needs a real database gets it from
+`pollis-delivery/tests/common/mod.rs`:
+
+```rust
+mod common;
+
+async fn fresh() -> common::TempDb {
+    let db = common::TempDb::open("db.db").await;
+    pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
+    db
+}
+```
+
+`TempDb` owns the database **and** the temp directory, and derefs to `Arc<Db>`, so
+`db.conn()`, `Arc::clone(&db)` and `&db` where a `&Db` is wanted all work
+unchanged. The one rule is to **hold it for the whole test** rather than let it
+drop early — which binding it to a `let` already does. Where a fixture hands back
+something that borrows the DB (a `Router`, a `Connection`), return the guard
+alongside it so the caller keeps it alive.
+
+Do **not** reach for `std::mem::forget(dir)`. Twenty-one fixtures used to, because
+a `TempDir` deletes its directory on drop and dropping it at the end of the
+builder pulled the ground out from under a database the test had not started using
+yet. Leaking was the shortest fix and a permanent one: every test binary left a
+directory in `/tmp` on every run, and nothing ever removed them. Ownership solves
+the same problem without the leak. `pollis-delivery/tests/fixtures.rs` asserts the
+directory really is removed on drop, so a regression to leaking fails a test rather
+than quietly filling the disk.
+
 ## Performance guards (#875)
 
 Four tests pin the SHAPE of hot paths rather than their wall clock, because a

@@ -25,14 +25,13 @@ use pollis_delivery::otp::OtpConfig;
 use pollis_delivery::{build_router_with_state, AppState};
 use tower::ServiceExt as _;
 
+mod common;
 
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("ds.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("ds.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
-    Arc::new(db)
+    db
 }
 
 /// Auth ENFORCED (unlike the bootstrap tests) — the point here is the gate.

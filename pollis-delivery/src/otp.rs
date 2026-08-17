@@ -527,10 +527,13 @@ mod tests {
     // A local libsql connection for the account-write path. `with_users` toggles
     // whether the `users` table exists — omitting it makes the write fail, which is
     // exactly the transient/config DB failure #518 is about.
-    async fn conn_with(with_users: bool) -> (Db, crate::db::ConnGuard) {
+    /// Returns the `TempDir` first so the caller binds and holds it: it deletes
+    /// the directory the database lives in when it drops, and this used to be
+    /// `std::mem::forget(dir)`, which kept the directory alive by never cleaning
+    /// it up at all (#942).
+    async fn conn_with(with_users: bool) -> (tempfile::TempDir, Db, crate::db::ConnGuard) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("otp-test.db");
-        std::mem::forget(dir);
         let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
         let conn = db.conn().await.unwrap();
         if with_users {
@@ -540,7 +543,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&conn).await.expect("schema");
         }
-        (db, conn)
+        (dir, db, conn)
     }
 
     #[test]
@@ -631,7 +634,7 @@ mod tests {
     /// function that holds the INSERT.
     #[tokio::test]
     async fn the_same_address_spelled_two_ways_resolves_to_one_account() {
-        let (_db, conn) = conn_with(true).await;
+        let (_dir, _db, conn) = conn_with(true).await;
         let (otp, sessions, cfg) = (OtpStore::default(), SessionStore::default(), OtpConfig::default());
 
         let first = verify(&conn, &otp, &sessions, &cfg, "alice@x.com").await;
@@ -658,7 +661,7 @@ mod tests {
     /// empty first segment, never `None`.
     #[tokio::test]
     async fn the_default_username_is_the_email_prefix_and_a_ulid_suffix() {
-        let (_db, conn) = conn_with(true).await;
+        let (_dir, _db, conn) = conn_with(true).await;
         let (otp, sessions, cfg) = (OtpStore::default(), SessionStore::default(), OtpConfig::default());
 
         match verify(&conn, &otp, &sessions, &cfg, "alice@x.com").await {
@@ -681,7 +684,7 @@ mod tests {
     /// yet", never an error.
     #[tokio::test]
     async fn has_identity_reflects_the_stored_key_and_null_reads_as_absent() {
-        let (_db, conn) = conn_with(true).await;
+        let (_dir, _db, conn) = conn_with(true).await;
         let (otp, sessions, cfg) = (OtpStore::default(), SessionStore::default(), OtpConfig::default());
 
         // No key yet.
@@ -714,7 +717,7 @@ mod tests {
     // succeeds once the DB is healthy.
     #[tokio::test]
     async fn correct_code_with_failing_db_write_errors_then_retry_succeeds() {
-        let (_db, conn) = conn_with(false).await; // no `users` table → the write fails
+        let (_dir, _db, conn) = conn_with(false).await; // no `users` table → the write fails
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();
@@ -744,7 +747,7 @@ mod tests {
     // On the success path the code is consumed exactly once — a replay is rejected.
     #[tokio::test]
     async fn correct_code_is_single_use_on_success() {
-        let (_db, conn) = conn_with(true).await;
+        let (_dir, _db, conn) = conn_with(true).await;
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();
@@ -763,7 +766,7 @@ mod tests {
     // though the account-write (which would fail here) is never reached for them.
     #[tokio::test]
     async fn wrong_guesses_still_lock_out_regardless_of_db() {
-        let (_db, conn) = conn_with(false).await; // a correct code's write would fail
+        let (_dir, _db, conn) = conn_with(false).await; // a correct code's write would fail
         let otp = OtpStore::default();
         let sessions = SessionStore::default();
         let cfg = OtpConfig::default();

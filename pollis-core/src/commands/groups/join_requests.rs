@@ -15,21 +15,25 @@ pub async fn request_group_access(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Verify group exists
-    let mut rows = conn.query(
-        "SELECT 1 FROM groups WHERE id = ?1",
-        libsql::params![group_id.clone()],
-    ).await?;
-    if rows.next().await?.is_none() {
+    // PREFLIGHT, not enforcement (#875's pattern, tightened by #942).
+    //
+    // The Delivery Service re-derives both of these conditions in
+    // `apply_create_join_request` and is the only copy that decides anything —
+    // a client that skipped this entirely would still be refused. What the
+    // preflight buys is a specific local error instead of an opaque 403, which
+    // is why it stays.
+    //
+    // What it must NOT be is a second, independently-worded version of the same
+    // rule. Both checks below run `pollis_schema::authz`'s statements, which is
+    // the same text the DS executes; `preflight_parity` in
+    // `pollis-delivery/tests/join_requests.rs` asserts the two sides reach the
+    // same verdict over the whole decision matrix. If they ever disagree the
+    // client is wrong by definition.
+    if !authz::group_exists(&conn, &group_id).await? {
         return Err(Error::Other(anyhow::anyhow!("group not found")));
     }
 
-    // Check not already a member
-    let mut member_rows = conn.query(
-        "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id.clone()],
-    ).await?;
-    if member_rows.next().await?.is_some() {
+    if authz::group_role(&conn, &group_id, &requester_id).await?.is_some() {
         return Err(Error::Other(anyhow::anyhow!("you are already a member of this group")));
     }
 

@@ -21,6 +21,8 @@ use pollis_delivery::{build_router_with_state, AppState};
 use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
 
+mod common;
+
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -60,13 +62,10 @@ fn device_pubs() -> ([u8; 32], Vec<u8>) {
     (ed_pub, pub_of(&gen_key()))
 }
 
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("ds.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("ds.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
-    Arc::new(db)
+    db
 }
 
 /// A state whose OTP `DEV_OTP` is the fixed code below — no email send, no

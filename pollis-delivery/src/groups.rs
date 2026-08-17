@@ -65,6 +65,9 @@ pub use pollis_api::groups::*;
 /// `None` when the actor is not a member. Every admin-gated domain-B write
 /// re-derives this rather than trusting any client-supplied role.
 ///
+/// The statement itself is [`pollis_schema::authz::GROUP_ROLE_SQL`], shared with
+/// the client's preflight so the two cannot drift (#942).
+///
 /// `pub(crate)` because it is the ONLY group-role read in the DS: `emoji.rs`
 /// used to carry its own copy whose `row.get::<String>(0).ok()` swallowed a
 /// decode error into "not an admin", so a corrupt `role` column silently denied
@@ -76,7 +79,7 @@ pub(crate) async fn group_role(
 ) -> anyhow::Result<Option<String>> {
     let mut rows = conn
         .query(
-            "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+            pollis_schema::authz::GROUP_ROLE_SQL,
             libsql::params![group_id.to_string(), user_id.to_string()],
         )
         .await?;
@@ -109,7 +112,7 @@ pub(crate) async fn is_admin(conn: &Connection, group_id: &str, user_id: &str) -
 pub(crate) async fn group_exists(conn: &Connection, group_id: &str) -> anyhow::Result<bool> {
     let mut rows = conn
         .query(
-            "SELECT 1 FROM groups WHERE id = ?1",
+            pollis_schema::authz::GROUP_EXISTS_SQL,
             libsql::params![group_id.to_string()],
         )
         .await?;

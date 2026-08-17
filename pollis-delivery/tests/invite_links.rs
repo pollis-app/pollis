@@ -32,20 +32,16 @@ use pollis_delivery::groups::{
 };
 use pollis_delivery::invite_token;
 use pollis_delivery::writes::WriteOutcome;
-use std::sync::Arc;
+
+mod common;
 
 
 const GROUP: &str = "grp-1";
 const ADMIN: &str = "admin-1";
 const JOINER: &str = "joiner-1";
 
-async fn fresh() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("db.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap())
-        .await
-        .expect("local db");
+async fn fresh() -> common::TempDb {
+    let db = common::TempDb::open("db.db").await;
     let conn = db.conn().await.unwrap();
     // Production is Turso, where foreign-key enforcement is off; libsql's LOCAL
     // backend turns it ON by default, so say so explicitly rather than inherit a
@@ -64,7 +60,7 @@ async fn fresh() -> Arc<Db> {
     )
     .await
     .expect("seed");
-    Arc::new(db)
+    db
 }
 
 /// A minted token plus the link id it was stored under. Mirrors what the client

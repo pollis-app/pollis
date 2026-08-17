@@ -54,17 +54,16 @@ use pollis_delivery::profile::{apply_add_dm_member, apply_create_dm, AddDmMember
 use pollis_delivery::groups::{apply_approve_join_request, ApproveJoinRequestBody};
 use pollis_delivery::writes::WriteOutcome;
 
+mod common;
+
 
 /// The device-liveness staleness window these tests drive GC with (#720). Wide
 /// enough that legacy fixtures (which seed `reported_at = NULL`, treated as live)
 /// are never excluded; the #720 tests set `reported_at` and probe the boundary.
 const STALE: &str = "-6 months";
 
-async fn fresh() -> Db {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("db.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+async fn fresh() -> common::TempDb {
+    let db = common::TempDb::open("db.db").await;
     pollis_schema::apply::single_db(&db.conn().await.unwrap()).await.expect("schema");
     db
 }
@@ -979,7 +978,7 @@ async fn a_returning_device_reports_and_pins_again() {
 /// fails against the pre-change code.
 #[tokio::test]
 async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
-    async fn seeded(conv: &str) -> Db {
+    async fn seeded(conv: &str) -> common::TempDb {
         let db = fresh().await;
         db.conn().await.unwrap().execute_batch(&format!(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\

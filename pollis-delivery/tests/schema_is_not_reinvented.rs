@@ -91,17 +91,17 @@ async fn the_two_halves_are_not_interchangeable() {
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<(), libsql::Error>> + 'a>,
         >,
-    ) -> libsql::Connection {
+    ) -> (libsql::Database, libsql::Connection) {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let c = db.connect().unwrap();
         f(&c).await.expect("schema");
-        // Leak the Database handle so the in-memory file outlives this scope.
-        std::mem::forget(db);
-        c
+        // The connection borrows the in-memory database, so the handle is
+        // returned for the caller to hold rather than leaked (#942).
+        (db, c)
     }
 
-    let main = conn_with(|c| Box::pin(pollis_schema::apply::main_db(c))).await;
-    let log = conn_with(|c| Box::pin(pollis_schema::apply::log_db(c))).await;
+    let (_main_db, main) = conn_with(|c| Box::pin(pollis_schema::apply::main_db(c))).await;
+    let (_log_db, log) = conn_with(|c| Box::pin(pollis_schema::apply::log_db(c))).await;
 
     // The log DB has no membership tables — a misrouted authz read must fail.
     assert!(

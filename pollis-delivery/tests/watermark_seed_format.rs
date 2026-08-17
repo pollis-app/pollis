@@ -22,10 +22,10 @@
 //! consistent in a format production never mixes. These drive a REAL seed path
 //! against a REAL envelope stamp.
 
-use std::sync::Arc;
 
 use libsql::Connection;
-use pollis_delivery::db::Db;
+
+mod common;
 
 /// A day is the resolution at which the defect bites: the space-vs-`T`
 /// comparison only decides anything once the `YYYY-MM-DD` prefix matches, so an
@@ -48,17 +48,12 @@ fn rfc3339(at: chrono::DateTime<chrono::Utc>) -> String {
     at.to_rfc3339_opts(chrono::SecondsFormat::Nanos, false)
 }
 
-async fn fresh_db() -> Arc<Db> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("delivery.db");
-    std::mem::forget(dir);
-    let db = Db::connect_local(path.to_str().expect("utf-8 path"))
-        .await
-        .expect("local db");
+async fn fresh_db() -> common::TempDb {
+    let db = common::TempDb::open("delivery.db").await;
     pollis_schema::apply::single_db(&db.conn().await.expect("checkout"))
         .await
         .expect("schema");
-    Arc::new(db)
+    db
 }
 
 /// One user, one group, one channel, and one envelope sent at the start of the
