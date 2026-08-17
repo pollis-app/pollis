@@ -66,6 +66,18 @@ coverage:
 real `POLLIS_DATA_DIR` and inspects the resulting file. It is its own test binary
 so it can set that env var without racing another test.
 
+### What `mls-tests.yml` runs, in order
+
+1. `cargo test -p pollis-schema` — the remote schema itself (#924). Seconds-cheap, no system deps, and it is the definition every other job stamps its databases from: it is the only automatic check that every migration file on disk is *listed*, that versions are unique and ascending, and that `single_db_scripts()` keeps main-then-log order (what a single-DB deploy depends on).
+2. `cargo test -p pollis-api` — the client/server wire contract (#875), whose `compile_fail` doctests are the guarantee that a mistyped request body cannot compile.
+3. `cargo test -p pollis-delivery` — DS serializer + route coverage.
+4. `cargo test -p pollis-core` — MLS unit tests.
+5. `cargo test -p pollis-tui` — see below.
+6. `cargo test --features test-harness --test flows` — the integration harness.
+7. `cargo clippy --workspace --all-targets -- -D warnings` — the Rust lint gate (#912). Runs last so the test signal lands first, and inside this job because the toolchain, apt deps and cargo cache are already there. The pinned toolchain ships clippy via `components = ["clippy"]` in `rust-toolchain.toml`, so `cargo clippy` works on a dev box with no extra step.
+
+Every step after the first carries `if: ${{ !cancelled() }}`, so one failure still lets the rest report.
+
 ### pollis-tui in CI (#487)
 
 `.github/workflows/mls-tests.yml` also runs `cargo test -p pollis-tui` — the
@@ -128,7 +140,20 @@ Known prod schema drift is applied in `apply_drift_fixups` (currently: `group_in
 
 ## DEV_OTP
 
-The harness sets `DEV_OTP=000000` before spinning up any client. `verify_otp` short-circuits email send and accepts this fixed code when `debug_assertions` are on — which they are in integration tests. No real emails are sent and no OTP storage round-trips through Resend.
+`DEV_OTP` is the fixed code `000000`: `verify_otp` short-circuits the email send and accepts it, so no real emails are sent and no OTP storage round-trips through Resend.
+
+It is passed **explicitly**, never through the environment (#923): the in-process DS is constructed with `OtpConfig { dev_otp: Some(DEV_OTP), .. }` and every client posts the constant to verify-otp. The harnesses used to also `set_var("DEV_OTP", ..)`, which changed no behaviour (the client-side default is the same code) and only added a `setenv` race.
+
+## The process-wide data dir — never `set_var`
+
+Everything a device keeps on disk (the local SQLCipher DB, `accounts.json`, the file keystore, the overlay guard book) hangs off one directory, resolved by `pollis_core::db::local::dirs_path()`.
+
+Test rigs need to point that somewhere disposable, and a multi-device rig needs to *swap* it between simulated devices. Do it with **`pollis_core::db::local::set_data_dir(dir)`**, never `std::env::set_var("POLLIS_DATA_DIR", ..)`:
+
+- `setenv` mutates a process-global array that any other thread's `getenv` may be reading at that instant. That is a data race — the reason Rust 2024 made `set_var` `unsafe` — and these rigs always have other threads live (the in-process DS, background sync loops, `spawn_blocking` keystore work). It fails rarely, under load, with nothing broken (#923).
+- `set_data_dir` is a locked write behind an `RwLock`, so a reader always sees one whole path.
+
+`POLLIS_DATA_DIR` still works and is still what a second dev instance and the mobile bridge use; the override just takes precedence. Production never sets it.
 
 ## Writing a scenario
 
@@ -590,6 +615,11 @@ Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
 ## Known flakes
 
 - **`channel_message_round_trip`** can fail with "stream not found" during `send_group_invite`'s MLS reconcile — a libsql hrana stream timeout. It passes reliably in isolation and in the current suite, but is sensitive to connection state accumulation. If it flakes again, the first suspect is stream lifetime, not test logic.
+
+### Rules the fixed flakes left behind
+
+- **Never assert an exact count over a real dial/round trip.** `net::overlay`'s latency-ordering tests seeded latencies and then asserted "6 of 6 dials took the fast relay" *through real loopback QUIC connections* — but a successful dial folds its own elapsed time into the latency EWMA and a failed one marks the endpoint dead, so on a loaded runner the pool legitimately re-ordered itself and the test went red with nothing broken (#953, and #812/#813 before it). They now inject a `PathDialer` (`RealRelayFactory::with_dialer`) that records which endpoint each `connect` chose and dials nothing, so the ordering is asserted exactly and the clock is out of the loop. If a selection test needs a socket, assert the property, not the tally.
+- **No process-global mutation from a rig with live threads** — see the data-dir section above.
 
 ## WebDriver E2E tests (`e2e/`)
 

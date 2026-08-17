@@ -19,3 +19,12 @@
 [toolchain]
 channel = "1.96.0"
 profile = "minimal"
+# `minimal` ships rustc + cargo and nothing else, so `cargo clippy` was simply
+# unavailable on this toolchain — thousands of lines of Rust merged without a
+# lint pass ever running, including the #875 work whose central finding was
+# duplication drifting into divergence (#912). Listing the component here means
+# rustup installs it wherever the pin is honoured — dev boxes and CI alike — so
+# the lint gate needs no separate install step and cannot silently un-arm.
+# Components are not part of the compiled output, so this does not affect
+# build reproducibility.
+components = ["clippy"]
