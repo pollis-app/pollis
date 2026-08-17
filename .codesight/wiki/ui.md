@@ -180,6 +180,21 @@ rules follow from what went wrong:
   threshold, so it fetches one page and stops. Anchoring happens in a layout
   effect, i.e. before that re-check, so `scrollTop` there is already the
   post-prepend truth.
+- **The threshold is in rem, and read at call time (#934).** `loadMoreThresholdPx()`
+  in `messageWindow.ts`, 10rem — which is the old hardcoded 150px exactly, at the
+  15px default root. A px constant meant a reader on a 20px root got taller rows
+  and the same 150px of slack, i.e. a trigger that fired proportionally later in
+  what they could see. Reading it per call rather than capturing it is what lets it
+  follow a font-size change under a mounted log.
+- **The prepend and the end of the load are two commits, deliberately (#934).**
+  `MainContent` used to clear `loadingMore` in the same `finally` that prepended
+  the page; React batches both into one commit, so no committed state ever had the
+  new rows present while the log still called itself busy. The successful path now
+  ends in a `useEffect` keyed on `olderPages` — which runs after the commit
+  carrying the rows, and after the virtualiser's layout-effect re-anchor — while
+  only the paths that never reached the prepend clear it inline. `e2e/message-window.spec.ts`
+  pins the seam with a `MutationObserver`, since a state that lasts one commit
+  cannot be polled for.
 
 **`content-visibility: auto` on the row does not work** — tried and reverted in
 #874, and not worth retrying. It implies *paint containment*, which clips the

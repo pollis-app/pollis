@@ -51,6 +51,38 @@ export function estimateRowPx(skin: string): number {
 }
 
 /**
+ * How close to the top of the log counts as "asking for older messages".
+ *
+ * In rem, for the same reason the row estimates are (#934). This was a
+ * hardcoded 150px, which at the 15px default happened to be ten lines of slack
+ * — but a user on a 20px root gets taller rows and the SAME 150px, i.e. a
+ * trigger that fires proportionally later in what they actually see. Ten rem
+ * is 150px at 15px root by construction, so the default behaviour is unchanged
+ * and only the scaling is new.
+ */
+const LOAD_MORE_THRESHOLD_REM = 10;
+
+/**
+ * The load-more threshold in px at the CURRENT root font size.
+ *
+ * Read per call rather than memoised: the font-size preference can change
+ * under a mounted log, and this is one `getComputedStyle` on a scroll handler
+ * that already reads three layout properties.
+ */
+export function loadMoreThresholdPx(): number {
+  return LOAD_MORE_THRESHOLD_REM * rootFontSizePx();
+}
+
+/**
+ * The same value from an explicit root font size. Exported for the unit test
+ * that pins the scaling — the DOM-reading wrapper above cannot be exercised
+ * outside a browser.
+ */
+export function loadMoreThresholdPxAt(rootPx: number): number {
+  return LOAD_MORE_THRESHOLD_REM * rootPx;
+}
+
+/**
  * What `revealRow` needs to know about the list. Deliberately three functions
  * rather than a component reference: the caller passes a ref-backed object, so
  * a reveal in flight always reads the CURRENT timeline instead of the one that
