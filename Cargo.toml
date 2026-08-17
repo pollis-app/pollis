@@ -27,14 +27,18 @@ exclude = [
 [workspace.package]
 version = "1.1.0"
 edition = "2021"
-# The toolchain this repo pins (rust-toolchain.toml) and the ONLY one anything is
-# built or tested with — releases are byte-reproducible against that exact rustc,
-# so there is no second supported version for this floor to describe. It said
-# 1.77 while the tree had been using 1.82+ APIs (`Option::is_none_or`,
-# `slice::split_at_checked`) for some time; nothing caught it because clippy — the
-# thing that checks a declared MSRV — was not installed (#912). Bump this in
-# lockstep with rust-toolchain.toml.
-rust-version = "1.96"
+# The real floor. It said 1.77 while the tree had been using 1.82 APIs
+# (`Option::is_none_or` and friends) for some time, and
+# nothing caught it because clippy — the thing that checks a declared MSRV —
+# was not installed (#912).
+#
+# NOT the pinned 1.96 from rust-toolchain.toml, even though that is the only
+# rustc anything ships with: Kani builds these crates with its OWN pinned
+# nightly (1.93 today), and cargo refuses outright to build a package whose
+# `rust-version` is above the compiler in hand. Declaring the true API floor
+# keeps `clippy::incompatible_msrv` armed AND keeps the proof harnesses
+# buildable. Raise it only when the code actually starts needing a newer API.
+rust-version = "1.82"
 
 # Lints applied to every workspace crate that opts in with `lints.workspace =
 # true`. `kani` is a cfg the proof harnesses are gated on and the Kani driver
