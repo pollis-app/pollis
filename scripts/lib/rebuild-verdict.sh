@@ -40,6 +40,20 @@
 # match and the bytes differ, that is the real finding this whole program exists
 # to surface, and no amount of environment nuance may soften it.
 # `scripts/test-rebuild-verdict.sh` asserts both directions.
+#
+# WHERE THE RECORDED IMAGE MUST COME FROM, and why it is not a detail. This value
+# can only ever DOWNGRADE an accusation — it is the one input that can turn
+# "the shipped binary does not match its source" into "never mind". So it has to
+# be as trustworthy as the verdict it softens.
+#
+# It is therefore read from `release-report.json`, which the verify-log-inclusion
+# job produced by running `pollis-verify release` against the signed binaries
+# tree under the PINNED ML-DSA-44 key, after asserting the served key is that
+# pin. The recipe in that report is committed to by a leaf whose inclusion proof
+# verified against a signed head. Fetching it instead from `entries.json`, or any
+# other unauthenticated endpoint, would hand whoever serves verify.pollis.com a
+# way to fake an image mismatch and talk this workflow out of a genuine finding.
+# Do not "simplify" it to a direct fetch.
 
 # rebuild_logged_linux_payload <release-report.json>
 #
