@@ -20,11 +20,14 @@ import {
   useConversationReactions,
   useEditMessage,
   useDeleteMessage,
+  useConversationReceipts,
+  useSendReadReceipts,
   flattenPages,
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
+import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -88,6 +91,23 @@ function TextChat(props: ChatViewProps = {}) {
     kind,
     messageIds,
   );
+
+  // DM receipts (#892): one fetch per open conversation; mark-read reporting
+  // via the list's viewability config, gated on the reciprocal synced
+  // preference. Channels render nothing and report nothing.
+  const isDm = kind === "dm";
+  const sendReadReceipts = useSendReadReceipts();
+  const { data: receiptsByMessage } = useConversationReceipts(
+    isDm ? conversationId : null,
+  );
+  const { viewabilityConfigCallbackPairs } = useReadReceipts(
+    conversationId,
+    currentUser?.id ?? null,
+    isDm && sendReadReceipts,
+  );
+  // Mobile DMs are strictly 1:1 (desktop derives from member_count with the
+  // same 2-member fallback).
+  const peerCount = 1;
   const sendMessage = useSendMessage(conversationId, kind);
   const ingest = useIngestConversation();
   const toggleReaction = useToggleReaction(conversationId, kind);
@@ -251,6 +271,9 @@ function TextChat(props: ChatViewProps = {}) {
           edited={!!m.edited_at}
           reactions={reactionsByMessage?.get(m.id)}
           currentUserId={currentUser?.id}
+          receipt={receiptsByMessage?.get(m.id)}
+          peerCount={peerCount}
+          showReceipt={mine && isDm}
           onToggleReaction={(emoji, reacted) =>
             toggleReaction.mutate({
               messageId: m.id,
@@ -271,7 +294,15 @@ function TextChat(props: ChatViewProps = {}) {
         />
       );
     },
-    [currentUser?.id, router, reactionsByMessage, toggleReaction],
+    [
+      currentUser?.id,
+      router,
+      reactionsByMessage,
+      toggleReaction,
+      receiptsByMessage,
+      peerCount,
+      isDm,
+    ],
   );
 
   const content = (
@@ -331,6 +362,7 @@ function TextChat(props: ChatViewProps = {}) {
         // advances (desktop PR #958's dead-end shape).
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
+        viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs}
         ListFooterComponent={
           isFetchingNextPage ? (
             <Text
