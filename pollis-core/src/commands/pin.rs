@@ -17,9 +17,21 @@
 //! blobs carry only a fresh nonce + ciphertext and reuse the already-
 //! derived KEK — one Argon2 evaluation per unlock, not three.
 //!
-//! Nothing in this module runs until the frontend opts into the new
-//! flow. Existing unwrapped `db_key_{user_id}` / `account_id_key_{user_id}`
-//! slots are left alone by stage 3; stage 6 cuts them over.
+//! ## The legacy unwrapped slots (#194 stage 6, finished by #951)
+//!
+//! Before #194 the two secrets lived in `db_key_{user_id}` and
+//! `account_id_key_{user_id}` as raw bytes with no PIN layer over them.
+//! #882 later put the file backend's whole contents inside AES-256-GCM,
+//! which helped those slots incidentally, but they still skipped the
+//! Argon2id KEK everyone enrolled after #194 gets — so an attacker who
+//! defeated the file layer read them directly instead of meeting a slow
+//! KDF.
+//!
+//! `set_pin` is the cutover: an upgrader boots with `pin_set = false`,
+//! the frontend routes them to the create-PIN screen (`App.tsx`), and
+//! [`source_initial_keys`] reads the legacy slots so [`install_wrapped_slots`]
+//! can wrap them. The **ordering** in that function is the load-bearing
+//! part — see its documentation.
 
 use aes_gcm::aead::OsRng as AeadOsRng;
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -312,11 +324,12 @@ pub struct UnlockStateSnapshot {
 ///   the old PIN, rewrap under the new one.
 ///
 /// On success: writes the three PIN-protected blobs (`pin_meta`,
-/// `db_key_wrapped`, `account_id_key_wrapped`), deletes the legacy
-/// unwrapped slots, populates `AppState.unlock`, and opens the local
-/// SQLCipher DB under the same `db_key`. Best-effort `ensure_device_cert`
-/// follows so a fresh signup publishes its cert as part of the same
-/// roundtrip.
+/// `db_key_wrapped`, `account_id_key_wrapped`), verifies they read back
+/// (see [`install_wrapped_slots`] — this is what makes the next step
+/// safe), deletes the legacy unwrapped slots, populates
+/// `AppState.unlock`, and opens the local SQLCipher DB under the same
+/// `db_key`. Best-effort `ensure_device_cert` follows so a fresh signup
+/// publishes its cert as part of the same roundtrip.
 pub async fn set_pin(
     state: &Arc<AppState>,
     old_pin: Option<String>,
@@ -359,9 +372,6 @@ pub async fn set_pin(
         .encrypt(&verifier_nonce_raw, VERIFIER_PLAINTEXT.as_slice())
         .map_err(|e| Error::Crypto(format!("verifier encrypt: {e}")))?;
 
-    let db_key_blob = wrap_bytes(&kek, &db_key)?;
-    let account_id_key_blob = wrap_bytes(&kek, &account_id_key)?;
-
     let meta = PinMeta {
         m_cost_kib: ARGON2_M_COST_KIB,
         t_cost: ARGON2_T_COST,
@@ -373,31 +383,16 @@ pub async fn set_pin(
         last_attempt_unix: crate::util::now_unix(),
     };
 
-    // All three writes land together. If the process dies after two of
-    // three, the next `unlock` sees an inconsistent state; the user
-    // re-runs set_pin to heal. No half-wrapped account is produced.
-    keystore
-        .store_for_user(DB_KEY_WRAPPED_SLOT, &user_id, &db_key_blob)
-        .await?;
-    keystore
-        .store_for_user(ACCOUNT_ID_KEY_WRAPPED_SLOT, &user_id, &account_id_key_blob)
-        .await?;
-    store_pin_meta(keystore, &user_id, &meta).await?;
-
-    // The wrapped blobs are now durable. Delete every plaintext slot
-    // we know about — legacy db_key, legacy account_id_key, legacy
-    // session blob. Idempotent for the unlock-sourced path.
-    let _ = keystore
-        .delete_for_user(DB_KEY_SLOT_LEGACY, &user_id)
-        .await;
-    let _ = keystore
-        .delete_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, &user_id)
-        .await;
-    if old_pin.is_none() {
-        let _ = keystore
-            .delete_for_user(SESSION_SLOT_LEGACY, &user_id)
-            .await;
-    }
+    install_wrapped_slots(
+        keystore,
+        &user_id,
+        &kek,
+        &meta,
+        &db_key,
+        &account_id_key,
+        old_pin.is_none(),
+    )
+    .await?;
 
     *state.unlock.lock().await = Some(UnlockState {
         user_id: user_id.clone(),
@@ -457,14 +452,147 @@ pub async fn set_pin(
     Ok(())
 }
 
+/// Write the three PIN-protected slots, prove they are readable, and only then
+/// remove the unwrapped legacy originals.
+///
+/// # Why the order is the whole point (#951)
+///
+/// For a pre-#194 upgrader the legacy `db_key_{uid}` / `account_id_key_{uid}`
+/// slots are not stale duplicates — until this function finishes they are the
+/// **only** copy of the account identity key on this device, and losing an
+/// account identity key is unrecoverable (`account_identity.rs`: the sole other
+/// copy is the server-side `account_recovery` blob, which needs the one-time
+/// Secret Key the user was told to write down and typically has not).
+///
+/// So the sequence mirrors the atomic-rename migration #882 gave the keystore
+/// file, where every interruption leaves either the complete old state or the
+/// complete new one:
+///
+///   1. wrap under the PIN-derived KEK and write `db_key_wrapped`,
+///      `account_id_key_wrapped`, `pin_meta`;
+///   2. **read all three back and unwrap them**, asserting they reproduce the
+///      exact bytes that went in;
+///   3. only then delete the unwrapped slots.
+///
+/// Step 2 is not ceremony. A `store` returning `Ok(())` is a claim by the
+/// backend, not evidence: the OS keychain can report a successful write for an
+/// entry a later read does not return (a locked or half-available Secret
+/// Service is the #184 failure class), and the file backend can fail to seal on
+/// a host whose machine identity has gone missing. Every one of those is
+/// survivable while the legacy slot still exists and unrecoverable the moment it
+/// does not, so the delete is gated on a real round-trip rather than on a
+/// return code.
+///
+/// A failure anywhere in 1–2 propagates with the legacy slots untouched. The
+/// user is told to retry, and the retry re-runs the whole sequence — writes are
+/// idempotent overwrites, so a partially-written triple heals rather than
+/// accumulating.
+#[allow(clippy::too_many_arguments)]
+async fn install_wrapped_slots(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+    kek: &Zeroizing<[u8; KEK_LEN]>,
+    meta: &PinMeta,
+    db_key: &[u8],
+    account_id_key: &[u8],
+    drop_legacy_session: bool,
+) -> Result<()> {
+    // 1. Write the new state.
+    keystore
+        .store_for_user(DB_KEY_WRAPPED_SLOT, user_id, &wrap_bytes(kek, db_key)?)
+        .await?;
+    keystore
+        .store_for_user(
+            ACCOUNT_ID_KEY_WRAPPED_SLOT,
+            user_id,
+            &wrap_bytes(kek, account_id_key)?,
+        )
+        .await?;
+    store_pin_meta(keystore, user_id, meta).await?;
+
+    // 2. Prove the new state is real before discarding the old one.
+    verify_wrapped_slots(keystore, user_id, kek, db_key, account_id_key).await?;
+
+    // 3. The wrapped blobs are now durable AND readable. Delete every unwrapped
+    //    slot we know about. Idempotent for the post-#194 path, where these
+    //    slots never existed in the first place.
+    let _ = keystore.delete_for_user(DB_KEY_SLOT_LEGACY, user_id).await;
+    let _ = keystore
+        .delete_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, user_id)
+        .await;
+    if drop_legacy_session {
+        let _ = keystore.delete_for_user(SESSION_SLOT_LEGACY, user_id).await;
+    }
+    Ok(())
+}
+
+/// Read back the triple `install_wrapped_slots` just wrote and unwrap it under
+/// the same KEK, checking it reproduces the supplied key material.
+///
+/// This is deliberately the same shape as the read half of [`unlock_inner`] —
+/// `pin_meta` present and its verifier decrypting, both wrapped blobs present
+/// and unwrapping — so what it proves is exactly "a future `unlock` with this
+/// PIN will recover these keys", not merely "some bytes were stored".
+async fn verify_wrapped_slots(
+    keystore: &dyn crate::keystore::Keystore,
+    user_id: &str,
+    kek: &Zeroizing<[u8; KEK_LEN]>,
+    db_key: &[u8],
+    account_id_key: &[u8],
+) -> Result<()> {
+    let fail = |what: &str| {
+        Error::Crypto(format!(
+            "PIN setup could not verify {what} after writing it; the device \
+             keystore accepted the write but did not return it. Your existing \
+             keys have been left in place — try again."
+        ))
+    };
+
+    let meta = load_pin_meta(keystore, user_id)
+        .await?
+        .ok_or_else(|| fail("pin_meta"))?;
+    let verifier_ok = XChaCha20Poly1305::new((&**kek).into())
+        .decrypt(
+            XNonce::from_slice(&meta.verifier_nonce),
+            meta.verifier_ct.as_slice(),
+        )
+        .ok()
+        .map(|pt| pt.as_slice() == VERIFIER_PLAINTEXT.as_slice())
+        .unwrap_or(false);
+    if !verifier_ok {
+        return Err(fail("the PIN verifier"));
+    }
+
+    for (slot, expected) in [
+        (DB_KEY_WRAPPED_SLOT, db_key),
+        (ACCOUNT_ID_KEY_WRAPPED_SLOT, account_id_key),
+    ] {
+        let blob = keystore
+            .load_for_user(slot, user_id)
+            .await?
+            .ok_or_else(|| fail(slot))?;
+        let got = unwrap_bytes(kek, &blob).map_err(|_| fail(slot))?;
+        if *got != *expected {
+            return Err(fail(slot));
+        }
+    }
+    Ok(())
+}
+
 /// Source the raw `(db_key, account_id_key)` for the initial-set path.
 ///
 /// Tier 1: `AppState.unlock` is the canonical post-#194 source. Fresh
 /// signup, identity reset, and device enrollment all populate it.
 ///
 /// Tier 2: legacy plaintext keystore slots from a pre-PIN build. Read
-/// the bytes here so the wrap step works; `set_pin` deletes the slots
-/// after the wrap succeeds.
+/// the bytes here so the wrap step works; [`install_wrapped_slots`]
+/// deletes the slots once the wrapped copies are proven readable.
+///
+/// Both slots are required together. A device holding only one of them
+/// has nothing this function can turn into a working unlock, and
+/// erroring out leaves whichever slot does exist untouched — the
+/// non-destructive answer, since the caller's next move is to retry or
+/// re-enroll rather than to overwrite.
 async fn source_initial_keys(
     state: &Arc<AppState>,
     user_id: &str,
@@ -719,7 +847,7 @@ pub async fn get_unlock_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::keystore::InMemoryKeystore;
+    use crate::keystore::{InMemoryKeystore, Keystore as _};
     use std::sync::Arc as StdArc;
 
     async fn seed_legacy(ks: &dyn crate::keystore::Keystore, uid: &str) {
@@ -971,5 +1099,235 @@ mod tests {
         unlock_inner(&*ks, uid, "9999").await.unwrap();
         let after = load_pin_meta(&*ks, uid).await.unwrap().unwrap();
         assert_eq!(after.failed_attempts, 0);
+    }
+
+    // ── #951: finishing #194's cutover off the unwrapped legacy slots ───
+    //
+    // These drive `install_wrapped_slots` — the real function `set_pin`
+    // calls — rather than a restatement of it, so the ordering they pin is
+    // the ordering production runs. `set_pin` itself needs a full
+    // `AppState`; the flows harness covers that seam
+    // (`flows::auth::pin_set_lock_unlock_roundtrip`).
+
+    /// A keystore that accepts a write for one slot and then does not have
+    /// it — the exact failure `install_wrapped_slots`' verify step exists to
+    /// catch, and the one a `store` return code cannot distinguish from
+    /// success. Modelled on a Secret Service that reports a stored
+    /// credential it will not hand back (#184's failure class).
+    struct DropsWritesTo {
+        inner: InMemoryKeystore,
+        slot_prefix: &'static str,
+        /// When false the write is refused outright instead of silently
+        /// vanishing. Both must be non-destructive; only the loud one is
+        /// caught without the read-back.
+        silently: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::keystore::Keystore for DropsWritesTo {
+        async fn store(&self, key: &str, value: &[u8]) -> Result<()> {
+            if key.starts_with(self.slot_prefix) {
+                return if self.silently {
+                    Ok(())
+                } else {
+                    Err(Error::Crypto("keystore write refused (test)".into()))
+                };
+            }
+            self.inner.store(key, value).await
+        }
+        async fn load(&self, key: &str) -> Result<Option<Vec<u8>>> {
+            self.inner.load(key).await
+        }
+        async fn delete(&self, key: &str) -> Result<()> {
+            self.inner.delete(key).await
+        }
+    }
+
+    /// `(kek, meta)` at cheap Argon2 settings — the real 64 MiB parameters
+    /// would make these tests glacial and nothing here depends on the cost.
+    fn cheap_kek_and_meta(pin: &str) -> (Zeroizing<[u8; KEK_LEN]>, PinMeta) {
+        let mut salt = [0u8; SALT_LEN];
+        rand::rngs::OsRng.fill_bytes(&mut salt);
+        let kek = derive_kek(pin, &salt, 8, 1, 1).unwrap();
+        let verifier_nonce_raw = XChaCha20Poly1305::generate_nonce(&mut AeadOsRng);
+        let verifier_ct = XChaCha20Poly1305::new((&*kek).into())
+            .encrypt(&verifier_nonce_raw, VERIFIER_PLAINTEXT.as_slice())
+            .unwrap();
+        let meta = PinMeta {
+            m_cost_kib: 8,
+            t_cost: 1,
+            p_cost: 1,
+            salt,
+            verifier_nonce: verifier_nonce_raw.into(),
+            verifier_ct,
+            failed_attempts: 0,
+            last_attempt_unix: 0,
+        };
+        (kek, meta)
+    }
+
+    const LEGACY_DB_KEY: [u8; 32] = [7u8; 32];
+    const LEGACY_ACCOUNT_KEY: [u8; 32] = [42u8; 32];
+
+    /// The migration itself: a pre-#194 upgrader's raw slots become
+    /// PIN-wrapped ones, the wrapped copies really do carry the same key
+    /// material, and only then do the unwrapped originals go away.
+    #[tokio::test]
+    async fn legacy_slots_are_wrapped_then_removed() {
+        let ks: StdArc<dyn crate::keystore::Keystore> = StdArc::new(InMemoryKeystore::new());
+        let uid = "upgrader_01";
+        seed_legacy(&*ks, uid).await;
+        ks.store_for_user(SESSION_SLOT_LEGACY, uid, b"stale-session")
+            .await
+            .unwrap();
+
+        let (kek, meta) = cheap_kek_and_meta("1357");
+        install_wrapped_slots(
+            &*ks,
+            uid,
+            &kek,
+            &meta,
+            &LEGACY_DB_KEY,
+            &LEGACY_ACCOUNT_KEY,
+            true,
+        )
+        .await
+        .expect("migration must succeed on a healthy keystore");
+
+        // The unwrapped slots are gone — the point of the ticket.
+        assert!(
+            ks.load_for_user(DB_KEY_SLOT_LEGACY, uid).await.unwrap().is_none(),
+            "the unwrapped db_key slot must not survive the migration"
+        );
+        assert!(
+            ks.load_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, uid).await.unwrap().is_none(),
+            "the unwrapped account_id_key slot must not survive the migration"
+        );
+        assert!(
+            ks.load_for_user(SESSION_SLOT_LEGACY, uid).await.unwrap().is_none(),
+            "the legacy session blob goes with them on the initial-set path"
+        );
+
+        // And the key material survived, reachable only through the PIN.
+        let unlocked = unlock_inner(&*ks, uid, "1357").await.unwrap();
+        assert_eq!(&*unlocked.db_key, &LEGACY_DB_KEY);
+        assert_eq!(&*unlocked.account_id_key, &LEGACY_ACCOUNT_KEY);
+        assert!(
+            unlock_inner(&*ks, uid, "2468").await.is_err(),
+            "the migrated key must now be behind the PIN, not beside it"
+        );
+    }
+
+    /// The property that makes the migration safe to ship: an interruption
+    /// anywhere before the wrapped copies are proven readable must leave the
+    /// legacy slots — the only other copy of an unrecoverable key — exactly
+    /// as they were.
+    ///
+    /// Both failure shapes are covered. The loud one (`store` errors) is
+    /// caught by `?` alone; the quiet one (`store` returns `Ok(())` and the
+    /// value is simply not there afterwards) is caught ONLY by the read-back
+    /// in `verify_wrapped_slots`, and is the case that used to delete a
+    /// user's account identity key.
+    #[tokio::test]
+    async fn an_interrupted_migration_loses_nothing() {
+        for silently in [true, false] {
+            for slot_prefix in [ACCOUNT_ID_KEY_WRAPPED_SLOT, DB_KEY_WRAPPED_SLOT, PIN_META_SLOT] {
+                let ks = DropsWritesTo {
+                    inner: InMemoryKeystore::new(),
+                    slot_prefix,
+                    silently,
+                };
+                let uid = "upgrader_02";
+                seed_legacy(&ks, uid).await;
+
+                let (kek, meta) = cheap_kek_and_meta("1357");
+                let err = install_wrapped_slots(
+                    &ks,
+                    uid,
+                    &kek,
+                    &meta,
+                    &LEGACY_DB_KEY,
+                    &LEGACY_ACCOUNT_KEY,
+                    true,
+                )
+                .await
+                .expect_err(
+                    "a migration whose new state is not readable must fail, \
+                     not proceed to the delete",
+                );
+
+                assert_eq!(
+                    ks.load_for_user(DB_KEY_SLOT_LEGACY, uid).await.unwrap(),
+                    Some(LEGACY_DB_KEY.to_vec()),
+                    "{slot_prefix} (silently={silently}, err={err}): the legacy \
+                     db_key must survive an interrupted migration"
+                );
+                assert_eq!(
+                    ks.load_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, uid).await.unwrap(),
+                    Some(LEGACY_ACCOUNT_KEY.to_vec()),
+                    "{slot_prefix} (silently={silently}, err={err}): losing the \
+                     account identity key here is unrecoverable"
+                );
+
+                // And the retry heals: the same call against a healthy
+                // keystore completes, so the failure is a pause, not a
+                // dead end.
+                let healthy: StdArc<dyn crate::keystore::Keystore> =
+                    StdArc::new(InMemoryKeystore::new());
+                seed_legacy(&*healthy, uid).await;
+                install_wrapped_slots(
+                    &*healthy,
+                    uid,
+                    &kek,
+                    &meta,
+                    &LEGACY_DB_KEY,
+                    &LEGACY_ACCOUNT_KEY,
+                    true,
+                )
+                .await
+                .expect("the retry completes");
+                assert_eq!(
+                    &*unlock_inner(&*healthy, uid, "1357").await.unwrap().account_id_key,
+                    &LEGACY_ACCOUNT_KEY,
+                );
+            }
+        }
+    }
+
+    /// The overwhelmingly common case — a post-#194 user who never had an
+    /// unwrapped slot — must be untouched by any of this: the wrap still
+    /// happens, the absent legacy slots are a no-op rather than an error,
+    /// and no OTHER user's slots are collateral.
+    #[tokio::test]
+    async fn a_user_with_no_legacy_slot_is_unaffected() {
+        let ks: StdArc<dyn crate::keystore::Keystore> = StdArc::new(InMemoryKeystore::new());
+        let modern = "modern_01";
+        let bystander = "upgrader_03";
+
+        // A second account on the same device that HAS legacy slots and is
+        // not the one being set up.
+        seed_legacy(&*ks, bystander).await;
+
+        let db_key = [1u8; 32];
+        let account_id_key = [2u8; 32];
+        let (kek, meta) = cheap_kek_and_meta("8642");
+        install_wrapped_slots(&*ks, modern, &kek, &meta, &db_key, &account_id_key, true)
+            .await
+            .expect("no legacy slot is not an error");
+
+        let unlocked = unlock_inner(&*ks, modern, "8642").await.unwrap();
+        assert_eq!(&*unlocked.db_key, &db_key);
+        assert_eq!(&*unlocked.account_id_key, &account_id_key);
+
+        // The bystander's slots are namespaced per user and must be
+        // untouched — the delete is `delete_for_user`, not a sweep.
+        assert_eq!(
+            ks.load_for_user(DB_KEY_SLOT_LEGACY, bystander).await.unwrap(),
+            Some(LEGACY_DB_KEY.to_vec()),
+        );
+        assert_eq!(
+            ks.load_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, bystander).await.unwrap(),
+            Some(LEGACY_ACCOUNT_KEY.to_vec()),
+        );
     }
 }
