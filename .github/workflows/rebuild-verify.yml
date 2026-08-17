@@ -320,6 +320,27 @@ jobs:
              src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
           chmod +x src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
 
+      # THE WORKSPACE IS THE TAG, THE TOOLING MUST NOT BE.
+      #
+      # Every checkout in this workflow is `ref: $TAG`, because the whole point is
+      # to build the released source. That also means `scripts/` in the workspace
+      # is the TAG'S copy — which for any tag older than a given helper simply
+      # does not contain it. Sourcing `scripts/lib/attest-helpers.sh` from the
+      # workspace and calling `runner_image_id` gave
+      # `runner_image_id: command not found` on v1.9.3, because that helper
+      # arrived with #939, after the tag. Worse, the failure was SILENT: the
+      # command substitution came back empty, `echo` still succeeded, and the job
+      # went green having recorded no image at all.
+      #
+      # So the rebuilder's own tooling is checked out separately, at the ref the
+      # workflow itself is running from, and always sourced from there. Deliberately
+      # placed AFTER every build step in this job, so an extra directory in the
+      # workspace cannot be an input to anything that gets compiled.
+      - name: Check out the rebuilder's own tooling (#944)
+        uses: actions/checkout@v4
+        with:
+          path: .rebuild-tools
+
       # Mirrors the release's "Record the capture-helper runner image" step, with
       # the SAME helper, so the two strings are comparable by construction rather
       # than by two hand-written formats that agree until one of them is edited.
@@ -327,9 +348,19 @@ jobs:
         id: helper_image
         run: |
           set -euo pipefail
-          . scripts/lib/attest-helpers.sh
-          echo "image=$(runner_image_id)" >> "$GITHUB_OUTPUT"
-          echo "capture helper rebuilt on $(runner_image_id)"
+          . .rebuild-tools/scripts/lib/attest-helpers.sh
+          image="$(runner_image_id)"
+          # Belt and braces over runner_image_id's own guard: an empty image here
+          # would silently degrade every later verdict to `recipe_unrecorded`,
+          # which reads as "we could not tell" when the truth is "this workflow
+          # is miswired". Fail where the wiring is, not three jobs downstream.
+          if [ -z "${image}" ]; then
+            echo "::error::could not identify this runner's image; the rebuild verdict"
+            echo "::error::would silently degrade to inconclusive. Refusing to continue."
+            exit 1
+          fi
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "capture helper rebuilt on ${image}"
 
       - name: Upload screen-capture helper
         uses: actions/upload-artifact@v4
@@ -560,6 +591,22 @@ jobs:
         with:
           name: release-report
 
+      # The rebuilder's own tooling, at the ref this workflow is running from —
+      # NOT the tag's copy in the workspace. See the note on the same step in
+      # rebuild-capture-helper: `scripts/` here is v1.9.3's `scripts/`, which has
+      # neither `runner_image_id` (added by #939) nor `rebuild-verdict.sh` (added
+      # by #944), and sourcing a file that does not exist would kill this step
+      # outright for every historical tag.
+      #
+      # Deliberately AFTER the build and the payload hash, so it cannot be an
+      # input to the bytes being judged. `scripts/lib/payload-hash.sh` is still
+      # sourced from the WORKSPACE on purpose — that one has to be the tag's, so
+      # the reproducer hashes the payload exactly as the release did.
+      - name: Check out the rebuilder's own tooling (#944)
+        uses: actions/checkout@v4
+        with:
+          path: .rebuild-tools
+
       # The verdict that makes this a REBUILDER, not just a log reader: assert
       # the hash we independently reproduced is present in the log as the Linux
       # AppImage payload for this tag. Absent/mismatched → loud failure.
@@ -570,8 +617,8 @@ jobs:
           HELPER_RUNNER_IMAGE: ${{ needs.rebuild-capture-helper.outputs.runner_image }}
         run: |
           set -euo pipefail
-          . scripts/lib/attest-helpers.sh
-          . scripts/lib/rebuild-verdict.sh
+          . .rebuild-tools/scripts/lib/attest-helpers.sh
+          . .rebuild-tools/scripts/lib/rebuild-verdict.sh
           HASH="${{ steps.rehash.outputs.hash }}"
 
           # The environment this rebuild actually ran in, composed exactly as

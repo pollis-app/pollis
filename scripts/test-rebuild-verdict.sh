@@ -147,6 +147,45 @@ check "no Linux AppImage leaf yields an empty payload hash" \
 check "no Linux AppImage leaf yields an empty runner image" \
   "$(rebuild_logged_runner_image "$work/nolinux.json")" ""
 
+echo "wiring — the rebuilder must not source its own tooling from the tag"
+
+# The bug this catches, found live on the first end-to-end run of #944's change:
+# every checkout in rebuild-verify.yml is `ref: $TAG`, so `scripts/` in the
+# workspace is the RELEASED tag's copy. Sourcing this library from there works on
+# a tag cut after it landed and fails on every older one — and it failed
+# SILENTLY, because `$(runner_image_id)` on a missing function yields an empty
+# string that `echo` happily accepts. The job stayed green having recorded
+# nothing, which would have degraded every later verdict to "inconclusive" while
+# looking fine.
+#
+# The rule: anything whose CURRENT behaviour the verdict depends on is sourced
+# from `.rebuild-tools` (a second checkout at the workflow's own ref).
+# `payload-hash.sh` is the deliberate exception — that one must be the tag's, so
+# the reproducer hashes the payload exactly as the release did.
+wf="$(cd "$here/.." && pwd)/.github/workflows/rebuild-verify.yml"
+if [ ! -f "$wf" ]; then
+  bad "rebuild-verify.yml not found at $wf"
+else
+  for lib in rebuild-verdict.sh attest-helpers.sh; do
+    if grep -qE "^\s*\.\s+scripts/lib/${lib}" "$wf"; then
+      bad "$lib is sourced from the workspace (the tag's copy), not .rebuild-tools"
+    else
+      ok "$lib is not sourced from the tag's workspace copy"
+    fi
+  done
+  if grep -qE "^\s*\.\s+\.rebuild-tools/scripts/lib/rebuild-verdict\.sh" "$wf"; then
+    ok "the verdict library is sourced from the workflow's own ref"
+  else
+    bad "the verdict library is not sourced from .rebuild-tools"
+  fi
+  # The exception, asserted so nobody "fixes" it into consistency.
+  if grep -qE "^\s*\.\s+scripts/lib/payload-hash\.sh" "$wf"; then
+    ok "payload-hash.sh still comes from the tag, as it must"
+  else
+    bad "payload-hash.sh must be sourced from the tag's workspace, not .rebuild-tools"
+  fi
+fi
+
 echo
 echo "rebuild verdict: ${pass} passed, ${fail} failed"
 [ "$fail" -eq 0 ]
