@@ -655,6 +655,9 @@ independently.
 - `device_id` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
 - `metadata` TEXT
+- Written **only** through `POST /v1/security-events`, which attributes the row to the signer — a caller cannot forge an entry under another user. Read back by `list_security_events` for the Security settings page.
+- Kinds emitted today: `device_enrolled` (`metadata = via=approval,approver=<device>`), `device_rejected`, `device_revoked` (`metadata = name=<device name at revocation>`, #947), `identity_reset`, `secret_key_rotated`. An unknown kind renders as its raw wire string rather than being dropped, so a newer client's event is never invisible on an older one.
+- All of these writes are best-effort by design: the state change they record has already committed, so failing the command on a flaky audit write would report a failure for something that did happen. `revoke_device` posts its event immediately after the tombstone lands and *before* the per-conversation MLS reconcile loop, so the trail does not depend on N commits succeeding — "did the revocation take effect?" is the question that flow produces, and it is asked under pressure.
 
 ### account_key_log _(migration 000005)_
 Append-only history of account identity keys — the data source for the

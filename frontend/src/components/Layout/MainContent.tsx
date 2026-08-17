@@ -44,6 +44,30 @@ type MessagesQueryData = {
   nextCursor: PageCursor | null;
 };
 
+/**
+ * Older pages fetched for one conversation, and the cursor the next page
+ * continues from.
+ *
+ * Stamped with the log they belong to so the pages and the conversation on
+ * screen can never disagree, not even for the one render an effect-based
+ * reset leaves between them (#927).
+ */
+type OlderPages = {
+  logKey: string;
+  messages: Message[];
+  cursor: PageCursor | null;
+  /** Whether a page has been fetched for this log yet — before the first
+   *  one, the cursor to continue from is the initial page's own. */
+  fetched: boolean;
+};
+
+const NO_OLDER_PAGES: OlderPages = {
+  logKey: "",
+  messages: [],
+  cursor: null,
+  fetched: false,
+};
+
 interface MainContentProps {
   pendingDmRequest?: PendingDmRequest | null;
 }
@@ -123,14 +147,29 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   const [editBarFocused, setEditBarFocused] = useState(false);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const [olderMessages, setOlderMessages] = useState<Message[]>([]);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [pageCursor, setPageCursor] = useState<PageCursor | null>(null);
+  // Which conversation the log on screen belongs to. Channels and DMs share
+  // this component, so both ids go into the key.
+  const logKey = `${selectedChannelId ?? ""}|${selectedConversationId ?? ""}`;
 
-  // Reset pagination and edit state when the selected channel/conversation changes.
+  const [olderPages, setOlderPages] = useState<OlderPages>(NO_OLDER_PAGES);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Pages belonging to another conversation are simply not this log's — no
+  // reset effect, so there is no window in which they could be read as if
+  // they were, and nothing to re-run.
+  const older = olderPages.logKey === logKey ? olderPages : NO_OLDER_PAGES;
+  const olderMessages = older.messages;
+  // Where the next page continues from: the initial page's cursor until a
+  // page has been fetched, then whatever that fetch handed back. Derived
+  // during render, because the effect that used to seed it read the PREVIOUS
+  // conversation's page list — so opening a conversation whose first page was
+  // already cached left it with no cursor at all, and no dependency would
+  // ever change to give it one. That conversation stayed capped at its newest
+  // 50 messages for as long as the cache held it (#927).
+  const pageCursor = older.fetched ? older.cursor : nextCursor;
+
+  // Reset edit state when the selected channel/conversation changes.
   useEffect(() => {
-    setOlderMessages([]);
-    setPageCursor(null);
     setEditingMessage(null);
   }, [selectedChannelId, selectedConversationId]);
 
@@ -169,17 +208,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     window.addEventListener('keydown', handler, { capture: true });
     return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [editingMessage, pendingDeleteId, replyToMessageId, isDeletingThisChannel]);
-
-  // Initialise the cursor from the initial page load (only if no older pages
-  // have been fetched yet — don't overwrite cursor mid-pagination).
-  // Include the selected channel/conversation so the cursor re-initialises on
-  // switch — keyed on nextCursor alone it could miss a re-init when the new
-  // channel's initial cursor equals the previous one.
-  useEffect(() => {
-    if (nextCursor && olderMessages.length === 0) {
-      setPageCursor(nextCursor);
-    }
-  }, [nextCursor, selectedChannelId, selectedConversationId]);
 
   // MessageItem dispatches this when an attachment lightbox closes so focus
   // returns to the chat input — keeps the keyboard-driven flow intact.
@@ -246,17 +274,26 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       }
 
       const fetched = page.messages.map(transformChannelMessage);
+      const continuation = page.next_cursor ?? null;
 
-      setOlderMessages((prev) => {
-        const existingIds = new Set(prev.map((m) => m.id));
+      // Written against the log this fetch was issued for. A conversation
+      // switch mid-flight therefore lands on a key nothing reads, rather than
+      // prepending one conversation's history onto another's.
+      setOlderPages((prev) => {
+        const base = prev.logKey === logKey ? prev : NO_OLDER_PAGES;
+        const existingIds = new Set(base.messages.map((m) => m.id));
         const newOnes = fetched.filter((m) => !existingIds.has(m.id));
-        return [...newOnes, ...prev];
+        return {
+          logKey,
+          messages: [...newOnes, ...base.messages],
+          cursor: continuation,
+          fetched: true,
+        };
       });
-      setPageCursor(page.next_cursor ?? null);
     } finally {
       setLoadingMore(false);
     }
-  }, [pageCursor, loadingMore, currentUser, selectedChannelId, selectedConversationId]);
+  }, [pageCursor, loadingMore, currentUser, logKey, selectedChannelId, selectedConversationId]);
 
   const handleConfirmDelete = async () => {
     if (!pendingDeleteId) {

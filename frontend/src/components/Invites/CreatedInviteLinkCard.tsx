@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Copy } from "lucide-react";
+import { AlertCircle, Check, Copy } from "lucide-react";
 import { Button } from "../ui/Button";
+import { writeClipboardText } from "../../bridge";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { activeLocale } from "../../utils/format";
 import type { CreatedInviteLink } from "../../hooks/queries/useGroups";
@@ -9,6 +10,13 @@ import type { CreatedInviteLink } from "../../hooks/queries/useGroups";
 interface CreatedInviteLinkCardProps {
   link: CreatedInviteLink;
 }
+
+/** Outcome of the last copy, in the same three states the message
+ *  copy-link button uses (#889). */
+type CopyState = "idle" | "copied" | "failed";
+
+/** How long an outcome stays on the button before it returns to idle. */
+const COPY_FEEDBACK_MS = 2000;
 
 /**
  * #847 — the one and only view of a freshly minted invite link.
@@ -23,17 +31,40 @@ interface CreatedInviteLinkCardProps {
 export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ link }) => {
   const { t } = useTranslation("channels");
   const skin = useSkin();
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+
+  // Clear the outcome a couple of seconds after it appears, and never leave a
+  // timer behind that would set state on an unmounted card.
+  useEffect(() => {
+    if (copyState === "idle") {
+      return;
+    }
+    const timer = window.setTimeout(() => setCopyState("idle"), COPY_FEEDBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [copyState]);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(link.url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy invite link:", err);
-    }
+    // Back to idle first so a second click on an already-failed button is a
+    // visible state change, and so the feedback timer restarts.
+    setCopyState("idle");
+    // Through the clipboard bridge rather than `navigator.clipboard`: the
+    // latter is unreliable on WebKitGTK, the Linux webview this app ships on.
+    // A link that is only ever shown once and was never actually copied is the
+    // worst possible thing to report as a success, so the false return — and a
+    // rejected write — surface as a failed state instead of a console line
+    // nobody reads (#898).
+    const copied = await writeClipboardText(link.url).catch(() => false);
+    setCopyState(copied ? "copied" : "failed");
   };
+
+  const copyLabel =
+    copyState === "copied"
+      ? t("inviteLinks.copiedLabel")
+      : copyState === "failed"
+        ? t("inviteLinks.copyFailedLabel")
+        : t("inviteLinks.copyLabel");
+  const copyVariant =
+    copyState === "copied" ? "secondary" : copyState === "failed" ? "danger" : "primary";
 
   const bounds: string[] = [];
   if (link.max_uses != null) {
@@ -67,14 +98,25 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
           </code>
           <Button
             onClick={handleCopy}
-            variant={copied ? "secondary" : "primary"}
+            variant={copyVariant}
             size="sm"
             data-testid="copy-invite-link"
-            aria-label={t("inviteLinks.copyLabel")}
+            data-copy-state={copyState}
+            aria-label={copyLabel}
           >
             <span className="flex items-center gap-1.5">
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-              {copied ? t("inviteLinks.copied") : t("inviteLinks.copy")}
+              {copyState === "copied" ? (
+                <Check size={14} />
+              ) : copyState === "failed" ? (
+                <AlertCircle size={14} />
+              ) : (
+                <Copy size={14} />
+              )}
+              {copyState === "copied"
+                ? t("inviteLinks.copied")
+                : copyState === "failed"
+                  ? t("inviteLinks.copyFailed")
+                  : t("inviteLinks.copy")}
             </span>
           </Button>
         </div>
@@ -100,12 +142,17 @@ export const CreatedInviteLinkCard: React.FC<CreatedInviteLinkCardProps> = ({ li
         </code>
         <Button
           onClick={handleCopy}
-          variant={copied ? "secondary" : "primary"}
+          variant={copyVariant}
           size="sm"
           data-testid="copy-invite-link"
-          aria-label={t("inviteLinks.copyLabel")}
+          data-copy-state={copyState}
+          aria-label={copyLabel}
         >
-          {copied ? t("inviteLinks.copiedTerminal") : t("inviteLinks.copyTerminal")}
+          {copyState === "copied"
+            ? t("inviteLinks.copiedTerminal")
+            : copyState === "failed"
+              ? t("inviteLinks.copyFailedTerminal")
+              : t("inviteLinks.copyTerminal")}
         </Button>
       </div>
       <p className="mt-2 text-xs text-muted">{boundsLabel}</p>

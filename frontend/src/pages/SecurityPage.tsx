@@ -84,6 +84,32 @@ function describe(
           ? t("security.eventDeviceRejectedDetail", { device: shortId(event.device_id) })
           : t("security.eventDeviceRejectedDetailUnknown"),
       };
+    case "device_revoked": {
+      if (!event.device_id) {
+        return {
+          heading: t("security.eventDeviceRevokedHeading"),
+          detail: t("security.eventDeviceRevokedDetailUnknown"),
+        };
+      }
+      // `name=<device name>` when the revoked row carried one (#947). The
+      // device id alone answers "was it revoked"; the name answers "which
+      // one", which is the question someone who has just lost a laptop is
+      // actually asking.
+      const name = event.metadata?.startsWith("name=")
+        ? event.metadata.slice("name=".length)
+        : null;
+      return {
+        heading: t("security.eventDeviceRevokedHeading"),
+        detail: name
+          ? t("security.eventDeviceRevokedDetailNamed", {
+              name,
+              device: shortId(event.device_id),
+            })
+          : t("security.eventDeviceRevokedDetail", {
+              device: shortId(event.device_id),
+            }),
+      };
+    }
     case "identity_reset":
       return {
         heading: t("security.eventIdentityResetHeading"),

@@ -45,30 +45,51 @@ const ANCIENT = idAt(3);
 /** The message the newest one quotes — also far outside the window. */
 const QUOTED = idAt(7);
 
-function messages() {
+/** A second channel with a history of its own, for the tests that need to
+ *  leave a conversation and come back to it (#927). */
+const OTHER_CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y2OCB";
+const otherIdAt = (i: number) =>
+  `01HQ7Z3K9M2P5R8T1V4W6Y3${String(i).padStart(3, "0")}`;
+
+function messagesFor(
+  conversationId: string,
+  id: (i: number) => string,
+  withReply: boolean,
+) {
   const out = [];
   for (let i = 0; i < TOTAL; i++) {
     const day = i < FIRST_DAY ? "01" : "02";
     const minute = i % FIRST_DAY;
     out.push({
-      id: idAt(i),
-      conversation_id: CHANNEL_ID,
+      id: id(i),
+      conversation_id: conversationId,
       // Runs of RUN from one author, so `isGroupStart` is exactly `i % RUN`.
       sender_id: Math.floor(i / RUN) % 2 === 0 ? "u-bob" : USER.id,
       content: `message number ${i}`,
       // One per minute inside a day: never the >5min gap that would start a
       // new sender group on its own.
       sent_at: `2026-08-${day}T${String(10 + Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}:00.000Z`,
-      ...(i === TOTAL - 1 ? { reply_to_id: QUOTED } : {}),
+      ...(withReply && i === TOTAL - 1 ? { reply_to_id: QUOTED } : {}),
     });
   }
   return out;
 }
 
+function messages() {
+  return messagesFor(CHANNEL_ID, idAt, true);
+}
+
 type Skin = "terminal" | "refined";
 const SKINS: Skin[] = ["terminal", "refined"];
 
-function preloadState(skin: Skin, opts: { paginate?: boolean } = {}) {
+type BootOptions = {
+  paginate?: boolean;
+  /** Seed a second channel, "archive", with a history of its own. */
+  secondChannel?: boolean;
+};
+
+function preloadState(skin: Skin, opts: BootOptions = {}) {
+  const { secondChannel, ...preloadOpts } = opts;
   return {
     session: USER,
     profile: { id: USER.id, username: USER.username },
@@ -82,16 +103,26 @@ function preloadState(skin: Skin, opts: { paginate?: boolean } = {}) {
       },
     ],
     channels: {
-      [GROUP_ID]: [{ id: CHANNEL_ID, group_id: GROUP_ID, name: "general" }],
+      [GROUP_ID]: [
+        { id: CHANNEL_ID, group_id: GROUP_ID, name: "general" },
+        ...(secondChannel
+          ? [{ id: OTHER_CHANNEL_ID, group_id: GROUP_ID, name: "archive" }]
+          : []),
+      ],
     },
     dmChannels: [],
-    messages: { [CHANNEL_ID]: messages() },
+    messages: {
+      [CHANNEL_ID]: messages(),
+      ...(secondChannel
+        ? { [OTHER_CHANNEL_ID]: messagesFor(OTHER_CHANNEL_ID, otherIdAt, false) }
+        : {}),
+    },
     bookmarks: [],
-    ...opts,
+    ...preloadOpts,
   };
 }
 
-async function boot(page: Page, skin: Skin, opts: { paginate?: boolean } = {}) {
+async function boot(page: Page, skin: Skin, opts: BootOptions = {}) {
   await page.addInitScript((preload) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = preload;
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
@@ -125,6 +156,37 @@ async function gotoChannel(page: Page) {
   await page.keyboard.press("Enter");
   // The log opens at its newest message, as a chat log must.
   await expect(page.getByTestId(`message-${NEWEST}`)).toBeVisible();
+}
+
+/** Open a channel by name and wait for it to land on its newest message. */
+async function openChannel(page: Page, name: string, newestId: string) {
+  await openCommandPalette(page);
+  await page.getByTestId("search-panel-input").fill(name);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId(`message-${newestId}`)).toBeVisible();
+}
+
+/**
+ * Scroll back through the log the way a reader does — a real wheel over the
+ * message list, not an assignment to `scrollTop`, because the windowed log
+ * re-anchors itself and a synthetic offset is not what the browser hands a
+ * scrolling user.
+ *
+ * Stops as soon as `untilId` is in the document, so a passing run costs only
+ * the scrolling it needed. Bounded: `MAX_WHEELS` is several times the ~21
+ * steps a 400-message history takes at 50 messages a page.
+ */
+const MAX_WHEELS = 90;
+async function wheelBackTo(page: Page, untilId: string): Promise<boolean> {
+  await page.getByTestId("message-list").hover();
+  for (let i = 0; i < MAX_WHEELS; i++) {
+    if ((await page.getByTestId(`message-${untilId}`).count()) > 0) {
+      return true;
+    }
+    await page.mouse.wheel(0, -600);
+    await page.waitForTimeout(80);
+  }
+  return (await page.getByTestId(`message-${untilId}`).count()) > 0;
 }
 
 /**
@@ -375,6 +437,61 @@ for (const skin of SKINS) {
       // One row of tolerance: the prepended rows are measured as they mount,
       // so the anchor settles rather than snapping.
       expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(60);
+    });
+
+    test("scrolling back reaches the oldest message, not just the newest page (guard)", async ({
+      page,
+    }) => {
+      await boot(page, skin, { paginate: true });
+      await gotoChannel(page);
+
+      // 400 messages, 50 to a page: getting to the first one means seven
+      // pages after the one the log opened with.
+      const oldest = page.getByTestId(`message-${idAt(0)}`);
+      await expect(oldest).toHaveCount(0);
+
+      expect(await wheelBackTo(page, idAt(0))).toBe(true);
+      await expect(oldest).toBeVisible();
+      await expect(oldest).toContainText("message number 0");
+
+      // Every page arrived, and none of them arrived twice.
+      const distinct = await page.evaluate(
+        () =>
+          new Set(
+            Array.from(
+              document.querySelectorAll('[data-testid^="message-01"]'),
+            ).map((el) => el.getAttribute("data-testid")),
+          ).size,
+      );
+      expect(distinct).toBe(await renderedRows(page).count());
+      // And it is still a window, not 400 rows in the document.
+      expect(await renderedRows(page).count()).toBeLessThan(80);
+    });
+
+    test("a conversation reopened from cache can still reach its oldest message", async ({
+      page,
+    }) => {
+      await boot(page, skin, { paginate: true, secondChannel: true });
+
+      // Visit "archive" once so its first page is in the query cache, then
+      // read back through "general" so there ARE older pages held for some
+      // other conversation.
+      await openChannel(page, "archive", otherIdAt(TOTAL - 1));
+      await openChannel(page, "general", NEWEST);
+      expect(await wheelBackTo(page, idAt(TOTAL - 60))).toBe(true);
+
+      // Back to "archive", now served from cache. Its cursor used to be
+      // seeded by an effect that read the pages belonging to the conversation
+      // just left — non-empty, so it declined to seed anything, and no
+      // dependency would ever change to make it try again. The channel was
+      // pinned to its newest 50 messages for as long as the cache held it,
+      // with the rest sitting on disk unreachable (#927).
+      await openChannel(page, "archive", otherIdAt(TOTAL - 1));
+      expect(await wheelBackTo(page, otherIdAt(0))).toBe(true);
+      await expect(page.getByTestId(`message-${otherIdAt(0)}`)).toBeVisible();
+      await expect(
+        page.getByTestId(`message-${otherIdAt(0)}`),
+      ).toContainText("message number 0");
     });
   });
 }

@@ -661,9 +661,21 @@ for (const skin of SKINS) {
         const controlOnRight = controlBox.left > listBox.left + listBox.width / 2;
         sides[language] = controlOnRight;
 
-        await list.focus();
-        await page.keyboard.press(controlOnRight ? "ArrowRight" : "ArrowLeft");
-        await expect(firstControl).toBeFocused();
+        // Focus + press + assert as ONE retried step. A keystroke is consumed
+        // by whatever holds focus at the instant it is dispatched, so if a
+        // render lands between `focus()` and `press()` the arrow goes to the
+        // body and no amount of retrying the ASSERTION can recover it — the
+        // key it was waiting on has already been spent. That is a flake in the
+        // test, not in the app: it failed roughly one full-suite run in four,
+        // on `main`, always in the first (RTL) pass where the shortcuts page
+        // has the most left to settle. Retrying the whole interaction weakens
+        // nothing — an arrow that genuinely walks the wrong way still never
+        // lands on the control.
+        await expect(async () => {
+          await list.focus();
+          await page.keyboard.press(controlOnRight ? "ArrowRight" : "ArrowLeft");
+          await expect(firstControl).toBeFocused({ timeout: 1_000 });
+        }).toPass({ timeout: 10_000 });
 
         // And the opposite key walks back to the row, leaving the control.
         await page.keyboard.press(controlOnRight ? "ArrowLeft" : "ArrowRight");

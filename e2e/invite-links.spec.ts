@@ -46,7 +46,11 @@ const EARLIER_LINK = {
   revoked_at: null,
 };
 
-function preloadFor(skin: Skin, inviteLinks: unknown[] = []) {
+function preloadFor(
+  skin: Skin,
+  inviteLinks: unknown[] = [],
+  extra: Record<string, unknown> = {},
+) {
   return {
     session: ME,
     profile: { id: ME.id, username: ME.username },
@@ -69,14 +73,20 @@ function preloadFor(skin: Skin, inviteLinks: unknown[] = []) {
     dmChannels: [],
     inviteLinks,
     preferences: { skin },
+    ...extra,
   };
 }
 
 /** Boot with the given skin and walk to the group's invite page. */
-async function openInvitePage(page: Page, skin: Skin, inviteLinks: unknown[] = []) {
+async function openInvitePage(
+  page: Page,
+  skin: Skin,
+  inviteLinks: unknown[] = [],
+  extra: Record<string, unknown> = {},
+) {
   await page.addInitScript((data) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = data;
-  }, preloadFor(skin, inviteLinks));
+  }, preloadFor(skin, inviteLinks, extra));
   await page.goto("/");
   await expect(page.getByTestId("app-ready")).toBeAttached();
 
@@ -100,10 +110,6 @@ async function createLink(page: Page, expiry: string, uses: string): Promise<str
 
 for (const skin of SKINS) {
   test.describe(`invite links — ${skin} skin`, () => {
-    // The copy button goes through the real `navigator.clipboard`, not the
-    // mocked `write_clipboard_text` command, so the browser has to allow it.
-    test.use({ permissions: ["clipboard-read", "clipboard-write"] });
-
     test("a created link is shown once, with the bounds it was created under", async ({
       page,
     }) => {
@@ -149,14 +155,75 @@ for (const skin of SKINS) {
       await copyButton.click();
 
       // The button confirms, which is also the signal the async write settled.
-      await expect(copyButton).toContainText(/copied/i);
+      await expect(copyButton).toHaveAttribute("data-copy-state", "copied");
 
-      const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+      // Read back through the mocked Rust command, because that is now what
+      // performs the write: `navigator.clipboard` is unreliable on WebKitGTK,
+      // the Linux webview this app ships on, which is why the bridge exists
+      // and why this button no longer calls the browser API (#898).
+      const clipboard = await page.evaluate(
+        () =>
+          (window as unknown as { __tauriMock: { clipboard: string } })
+            .__tauriMock.clipboard,
+      );
       expect(clipboard).toBe(url);
       // The bare link and nothing else — no group name, no invented preamble.
       expect(clipboard).toMatch(INVITE_URL_RE);
       expect(clipboard).not.toContain("invites");
       expect(clipboard).not.toContain("mia");
+    });
+
+    test("a copy that fails says so instead of looking like a success", async ({
+      page,
+    }) => {
+      // `failClipboard` models the OS write failing — the Rust command returns
+      // false rather than throwing, which is precisely the return this button
+      // used to drop on the floor with a `console.error` (#898). A link that
+      // can only ever be shown once is the worst thing to falsely report as
+      // copied: the user closes the card believing they have it.
+      await openInvitePage(page, skin, [], { failClipboard: true });
+      await createLink(page, "24", "1");
+
+      const copyButton = page.getByTestId("copy-invite-link");
+      await expect(copyButton).toHaveAttribute("data-copy-state", "idle");
+      await copyButton.click();
+
+      await expect(copyButton).toHaveAttribute("data-copy-state", "failed");
+      await expect(copyButton).toHaveAccessibleName("Couldn't copy invite link");
+      // Not the success wording, in either skin.
+      await expect(copyButton).not.toContainText(/^\[?copied/i);
+
+      // And nothing reached the clipboard, which is exactly why they have to
+      // be told: there is nothing to paste and no second chance to copy.
+      const clipboard = await page.evaluate(
+        () =>
+          (window as unknown as { __tauriMock: { clipboard: string } })
+            .__tauriMock.clipboard,
+      );
+      expect(clipboard).toBe("");
+
+      await page.screenshot({ path: `artifacts/invite-link-copy-failed-${skin}.png` });
+    });
+
+    test("a successful copy confirms itself and then goes back", async ({
+      page,
+    }) => {
+      await openInvitePage(page, skin);
+      await createLink(page, "24", "1");
+
+      const copyButton = page.getByTestId("copy-invite-link");
+      await expect(copyButton).toHaveAttribute("data-copy-state", "idle");
+      await expect(copyButton).toHaveAccessibleName("Copy invite link");
+
+      await copyButton.click();
+      await expect(copyButton).toHaveAttribute("data-copy-state", "copied");
+      await expect(copyButton).toHaveAccessibleName("Invite link copied");
+
+      // Three states, not two: the confirmation clears itself rather than
+      // sticking, so a second copy is visibly a second copy.
+      await expect(copyButton).toHaveAttribute("data-copy-state", "idle", {
+        timeout: 5000,
+      });
     });
 
     test("the management list cannot hand the token back", async ({ page }) => {

@@ -629,6 +629,87 @@ async fn revoked_device_reports_itself_unregistered() {
     drop(alice);
 }
 
+/// Revoking a device leaves a trail in the account's own security log (#947).
+///
+/// "I just revoked the laptop that was stolen — did it take effect?" is the
+/// question the flow produces, and `list_security_events` is where the app
+/// answers it. Before this, revocation wrote nothing: enrollments and
+/// rejections were logged, revocation — the one a user goes looking for under
+/// pressure — was not, and the only trace was a row vanishing from a list.
+///
+/// Drives the real `revoke_device` command against the in-process Delivery
+/// Service, so the event travels the same signed `POST /v1/security-events`
+/// path production uses rather than being written into the table by the test.
+/// The control assertion is that the log starts without the entry: a log that
+/// contained it before the revocation would pass for the wrong reason.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn revoking_a_device_records_a_security_event() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+
+    // A sibling device to revoke — the current device cannot revoke itself.
+    let sibling = "sibling-device-947";
+    conn.execute(
+        "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3)",
+        libsql::params![sibling, user_id.clone(), "Alice's old laptop"],
+    )
+    .await
+    .expect("insert sibling user_device row");
+
+    let revocations = || async {
+        let events: Vec<serde_json::Value> = invoke(
+            &alice.webview,
+            "list_security_events",
+            json!({ "userId": user_id, "limit": 100 }),
+        )
+        .await
+        .expect("list_security_events must be a reachable command");
+        events
+            .into_iter()
+            .filter(|e| e["kind"] == "device_revoked")
+            .collect::<Vec<_>>()
+    };
+
+    assert!(
+        revocations().await.is_empty(),
+        "control: nothing has been revoked yet, so the log must hold no \
+         device_revoked entry — otherwise the assertion below proves nothing"
+    );
+
+    invoke::<()>(
+        &alice.webview,
+        "revoke_device",
+        json!({ "userId": user_id, "deviceId": sibling }),
+    )
+    .await
+    .expect("revoke_device");
+
+    let logged = revocations().await;
+    assert_eq!(
+        logged.len(),
+        1,
+        "revoking a device must append exactly one device_revoked entry to the \
+         account's security log (#947), got {logged:?}"
+    );
+    assert_eq!(
+        logged[0]["device_id"], sibling,
+        "the entry must name the device that was revoked — an audit line that \
+         cannot say WHICH device does not answer the question it exists for"
+    );
+    assert_eq!(
+        logged[0]["metadata"], "name=Alice's old laptop",
+        "the device's name is carried into the event because the `user_device` \
+         row it came from is tombstoned by the revocation"
+    );
+}
+
 /// The negative twin of the test above (#685, part C): the boot-time sweep must
 /// re-sign a stale LIVE sibling and must NOT re-sign a stale REVOKED one.
 ///

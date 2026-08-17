@@ -44,6 +44,9 @@ const startOfLocalDay = (d: Date): number =>
 // Time gap (ms) beyond which a same-author message still starts a new group.
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
+// How close to the top of the log counts as "asking for older messages".
+const LOAD_MORE_THRESHOLD_PX = 150;
+
 // Memoised for the same reason the rows are: there is one of these per day in
 // the log and their inputs are two primitives that almost never change.
 const DayDivider: React.FC<{ label: string; refined: boolean }> = React.memo(({ label, refined }) => {
@@ -413,20 +416,49 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     virtualizer.scrollToIndex(timelineRef.current.length - 1, { align: "end" });
   }, [logKey, hasRows, virtualizer]);
 
+  // Ask for another page while the reader is at the top of the log — or while
+  // there is no top to reach, because the log does not fill its own viewport.
+  const maybeLoadMore = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || !hasMore || isFetchingMore) {
+      return;
+    }
+    const scrollable =
+      container.scrollHeight - container.clientHeight > LOAD_MORE_THRESHOLD_PX;
+    if (!scrollable || container.scrollTop < LOAD_MORE_THRESHOLD_PX) {
+      onLoadMore?.();
+    }
+  }, [hasMore, isFetchingMore, onLoadMore]);
+
   // Trigger load-more when the user scrolls near the top.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
     }
-    const handleScroll = () => {
-      if (container.scrollTop < 150 && hasMore && !isFetchingMore) {
-        onLoadMore?.();
-      }
-    };
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    return () => container.removeEventListener("scroll", handleScroll);
-  }, [hasMore, isFetchingMore, onLoadMore]);
+    container.addEventListener("scroll", maybeLoadMore, { passive: true });
+    return () => container.removeEventListener("scroll", maybeLoadMore);
+  }, [maybeLoadMore]);
+
+  // …and again whenever the log's contents change.
+  //
+  // Scrolling is the only thing that ever asks for history, and a viewport
+  // already at offset 0 — or one the whole first page fits inside — has no
+  // scrolling left to give: the browser emits no event for a wheel that
+  // cannot move anything. A prepend that lands the reader back at the top
+  // therefore used to dead-end the log on the page it had, with the rest of
+  // the conversation sitting decryptable on disk and unreachable (#927).
+  //
+  // The conditions inside `maybeLoadMore` are what keep this from running
+  // away: the reader has to still be at the top, so the ordinary prepend —
+  // which re-anchors them onto the row they were reading, well below it —
+  // stops after one page. The anchoring runs in a layout effect, i.e. before
+  // this one, so `scrollTop` here is already the post-prepend truth. Opening
+  // a conversation is safe for the same reason: the log has scrolled itself
+  // to its newest message by the time this runs.
+  useEffect(() => {
+    maybeLoadMore();
+  }, [maybeLoadMore, timeline.length]);
 
   // `useCallback` is load-bearing, not tidiness: this is handed to every row as
   // `onScrollToReply`, so a fresh identity per render re-rendered the entire log

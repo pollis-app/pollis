@@ -28,9 +28,12 @@ jobs:
 
       # cache: "pnpm" caches the pnpm content-addressable store keyed on
       # pnpm-lock.yaml, so warm runs skip nearly all downloads.
+      # 22, not 20: the unit-test step below runs TypeScript directly on the
+      # built-in runner, and native type stripping is a 22.18+ feature. On 20
+      # `node --test` cannot parse a `.ts` file at all.
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "pnpm"
 
       # --filter ./frontend... installs only the frontend package (+ workspace
@@ -42,3 +45,12 @@ jobs:
       # nothing and just fails on type errors (~3s).
       - name: Typecheck
         run: pnpm --filter frontend exec tsc
+
+      # The renderer's pure-helper unit tests (`frontend/tests/`), on Node's
+      # built-in runner — no framework, no browser, under a second. They were
+      # gated by nothing until #911 needed one of them to actually guard
+      # something: a locale that cases differently from the invariant mapping
+      # is not reachable from a browser spec, so the unit tier is the only
+      # tier that can hold that line.
+      - name: Unit tests
+        run: pnpm --filter frontend test

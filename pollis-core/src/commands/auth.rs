@@ -1422,18 +1422,24 @@ pub async fn revoke_device(
 
     let conn = state.remote_db.conn().await?;
 
-    // Confirm the device belongs to this user before touching anything.
+    // Confirm the device belongs to this user before touching anything. The
+    // name comes back with it because after the row is tombstoned the audit
+    // entry below is the only place it can still be read from.
     let mut owner_rows = conn
         .query(
-            "SELECT 1 FROM user_device WHERE device_id = ?1 AND user_id = ?2",
+            "SELECT device_name FROM user_device WHERE device_id = ?1 AND user_id = ?2",
             libsql::params![device_id.clone(), user_id.clone()],
         )
         .await?;
-    if owner_rows.next().await?.is_none() {
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "device not found for this user"
-        )));
-    }
+    let device_name: Option<String> = match owner_rows.next().await? {
+        Some(row) => row.get::<Option<String>>(0).ok().flatten(),
+        None => {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "device not found for this user"
+            )))
+        }
+    };
+    drop(owner_rows);
 
     // Drop the revoked device's unclaimed key packages (one-time-use, useless
     // now) and tombstone its row (issue #372 — a tombstone, not a hard-delete,
@@ -1453,6 +1459,38 @@ pub async fn revoke_device(
         user_id: Some(user_id.clone()),
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
+
+    // Append the revocation to the account's own security log (#947).
+    //
+    // Written HERE — immediately after the tombstone lands, before the
+    // reconcile loop below, which walks every conversation and only logs its
+    // failures. "I revoked the stolen laptop, did it take effect?" is the
+    // first question this flow produces and the Security page is where it is
+    // asked; an audit trail that is contingent on N MLS commits succeeding
+    // would be missing exactly when the user most needs it.
+    //
+    // Best-effort, like the enrollment events (`device_enrolled` /
+    // `device_rejected`) it sits beside: the revocation itself has already
+    // committed and is authoritative, so failing the command on a flaky audit
+    // write would report "revocation failed" for a device that is, in fact,
+    // revoked — which is the more dangerous of the two lies.
+    let ev = pollis_api::account::SecurityEventBody {
+        kind: "device_revoked".to_string(),
+        device_id: Some(device_id.clone()),
+        // The device's name at the moment it was revoked. `user_device` keeps
+        // the tombstoned row, but a log that says only "device 01HQ7Z…" is not
+        // the answer to "was it the laptop or the phone?".
+        metadata: device_name.map(|n| format!("name={n}")),
+        // The DS's no-auth fallback for the acting user
+        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+        // user and this must EQUAL it; auth off → this IS the actor, and a
+        // body without it is refused outright. Sending it never widens what
+        // the caller may do.
+        user_id: Some(user_id.clone()),
+    };
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, &ev).await {
+        eprintln!("[revoke_device] DS security-event failed (non-fatal): {e}");
+    }
 
     // Collect every conversation the user belongs to (groups + DMs) so
     // we can reconcile each one as the calling device.

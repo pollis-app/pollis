@@ -159,6 +159,28 @@ not what a scrolled-back user can see — and windowing removes the reason to
 want to: an off-window message costs one array entry and one cached height, no
 DOM node, no layout, no paint.
 
+**Reading back through history (#927).** `MainContent` owns the paging state:
+the older pages it has fetched, and the cursor the next one continues from,
+both stamped with the conversation they belong to and read during render. Two
+rules follow from what went wrong:
+
+- **Never seed the cursor from an effect.** The pair that used to do it reset
+  the pages on a conversation change and then declined to seed a cursor while
+  pages were held — but read the *previous* conversation's pages to decide, and
+  had no dependency left to re-run on. Reopening a conversation whose first page
+  was still cached therefore left it with no cursor at all, pinned to its newest
+  50 messages for as long as the cache held it. Deriving both from state keyed by
+  the conversation makes that state unrepresentable.
+- **A scroll event is not the only thing that means "give me more".** At scroll
+  offset 0, and in a viewport the first page does not fill, the browser has no
+  scroll left to emit — so `MessageList` re-checks whenever the timeline
+  changes, not only on `scroll`. The check itself (still at the top, or not
+  scrollable at all) is what stops it running away: the ordinary prepend
+  re-anchors the reader onto the row they were reading, well below the
+  threshold, so it fetches one page and stops. Anchoring happens in a layout
+  effect, i.e. before that re-check, so `scrollTop` there is already the
+  post-prepend truth.
+
 **`content-visibility: auto` on the row does not work** — tried and reverted in
 #874, and not worth retrying. It implies *paint containment*, which clips the
 row's `absolute` hover action bar (`end-4 top-0 -translate-y-1/2`) and its

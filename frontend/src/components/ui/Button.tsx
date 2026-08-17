@@ -29,6 +29,13 @@ interface ButtonProps {
    */
   "aria-pressed"?: boolean;
   "data-testid"?: string;
+  /**
+   * Outcome of the last copy this button performed — `idle`, `copied` or
+   * `failed`. The same marker the message copy-link button carries (#889), so
+   * a copy affordance's three states are assertable wherever one is rendered
+   * through this component (#898).
+   */
+  "data-copy-state"?: string;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -46,6 +53,7 @@ export const Button: React.FC<ButtonProps> = ({
   "aria-label": ariaLabel,
   "aria-pressed": ariaPressed,
   "data-testid": testId,
+  "data-copy-state": copyState,
 }) => {
   const { t } = useTranslation("common");
   // Resolved here rather than as a default parameter value so the fallback
@@ -73,6 +81,7 @@ export const Button: React.FC<ButtonProps> = ({
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
       data-testid={testId}
+      data-copy-state={copyState}
       className={`inline-flex items-center justify-center gap-2 font-mono font-medium rounded-control tracking-[0.5px] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black ${variantClass} ${size === "xs" ? "px-1.5 py-0.5 text-[10px]" : size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}
     >
       {isLoading && <Spinner />}

@@ -100,6 +100,24 @@ export function languageDirection(code: string | null | undefined): "ltr" | "rtl
 }
 
 /**
+ * Uppercase already-translated copy the way `language` itself does.
+ *
+ * Bare `String.toUpperCase()` applies the locale-INVARIANT mapping, which is a
+ * different answer from the language's own in more places than it looks:
+ * Turkish uppercases "i" to "İ" and "ı" to "I", so an invariant upcase spells
+ * a Turkish word wrong rather than merely oddly. It is also simply a no-op in
+ * the caseless scripts already shipped (Arabic, Chinese), where the transform
+ * is doing nothing but pretending to.
+ *
+ * Casing translated text in code is a smell in general — the catalogue knows
+ * the intended form and no other layer does. Where a skin's typography calls
+ * for it anyway, this is the only sanctioned spelling (#911).
+ */
+export function localeUpperCase(value: string, language: string): string {
+  return value.toLocaleUpperCase(language);
+}
+
+/**
  * Reduce an arbitrary BCP-47 tag to a supported language code, or null.
  *
  * `pt-BR` → `pt` when we ship `pt`, because a regional catalogue we do not

@@ -136,7 +136,7 @@
         </p>
 
         <div class="doc-limit">
-          <span class="doc-limit-title">Two things revocation does not do, that you might expect</span>
+          <span class="doc-limit-title">One thing revocation does not do, that you might expect</span>
           <p>
             <strong>Your contacts are not notified.</strong> Safety numbers in Pollis identify a
             <em>person</em>, not a device — every device chains to one account identity, which is what lets you
@@ -144,13 +144,16 @@
             identity, so nobody's safety number changes and no key-change warning appears for anyone you talk to.
             If you want your contacts to see something, you have to tell them.
           </p>
-          <p>
-            <strong>It is not recorded in your security event list.</strong> Device enrollments and rejections are
-            logged there; revocation is not. The only visible trace is the device disappearing from your
-            <strong>Devices</strong> list. Both of these are gaps rather than design decisions, and they are named
-            here rather than left for you to discover.
-          </p>
         </div>
+
+        <h3 class="doc-sub-title">Your own security log does record it</h3>
+        <p>
+          Revoking a device writes a <strong>Device revoked</strong> entry to
+          <strong>Settings → Security</strong>, alongside the enrollments and rejections already logged there,
+          naming the device and the time. That is the answer to the question this whole page exists for — "did
+          it actually take effect?" — and it does not depend on the device you revoked ever coming back online.
+          Until recently it was not recorded at all, and this page said so.
+        </p>
       </section>
 
       <!-- ─────────────────────────────────────────────────────────── -->

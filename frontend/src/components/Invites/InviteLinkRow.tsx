@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../ui/Button";
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { activeLocale } from "../../utils/format";
+import { localeUpperCase } from "../../i18n/languages";
 import type { InviteLinkSummary } from "../../hooks/queries/useGroups";
 
 interface InviteLinkRowProps {
@@ -41,6 +42,10 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
   } else {
     status = t("inviteLinks.statusExpired");
   }
+  // The terminal skin's upper-case badge, cased BY THE APP LANGUAGE rather
+  // than by the invariant mapping a bare `.toUpperCase()` would apply to copy
+  // that has already been through `t()` (#911).
+  const statusTerminal = localeUpperCase(status, activeLocale());
 
   const detail = [
     usesLabel,
@@ -89,7 +94,7 @@ export const InviteLinkRow: React.FC<InviteLinkRowProps> = ({
       className="flex items-center justify-between gap-3 border border-line bg-surface px-3 py-2"
     >
       <div className="min-w-0">
-        <p className={`text-sm ${statusClass}`}>[{status.toUpperCase()}]</p>
+        <p className={`text-sm ${statusClass}`}>[{statusTerminal}]</p>
         <p className="truncate text-xs text-dim">{detail}</p>
       </div>
       {link.is_live && (
