@@ -8,13 +8,14 @@
 // catch-up-after-background path; this hook only adds liveness on top.
 //
 // Entirely best-effort: if realtime is unavailable (no LiveKit URL, no
-// token command, connect error) `connectRealtime` returns null and this
-// hook is a clean no-op.
+// token command, connect error) the subscription stays inert and this
+// hook is a clean no-op. Subscriptions are ref-counted per room (see
+// lib/realtime/client), so sharing a room with the inbox realtime reuses
+// one LiveKit connection instead of evicting it.
 
 import { useEffect, useRef } from "react";
-import type { Room } from "livekit-client";
 import { useQueryClient } from "@tanstack/react-query";
-import { connectRealtime, disconnectRealtime } from "../lib/realtime/client";
+import { subscribeRealtime } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
 import { useIngestConversation, type ConversationKind } from "./queries/useMessages";
 import { groupQueryKeys } from "./queries/useUserGroups";
@@ -48,9 +49,6 @@ export function useConversationRealtime(
     if (!roomName) {
       return;
     }
-
-    let cancelled = false;
-    let room: Room | null = null;
 
     const handleEvent = (event: RealtimeEvent) => {
       // Membership / role events arrive on the conversation (group) room.
@@ -103,23 +101,11 @@ export function useConversationRealtime(
       }
     };
 
-    connectRealtime(roomName, handleEvent)
-      .then((connected) => {
-        if (cancelled) {
-          // Unmounted (or ids changed) before connect resolved.
-          disconnectRealtime(connected);
-          return;
-        }
-        room = connected;
-      })
-      .catch((e) => {
-        console.warn("[realtime] useConversationRealtime connect error:", e);
-      });
-
+    // Ref-counted: if the inbox realtime already holds this room, this just
+    // attaches a listener to the shared connection (see lib/realtime/client).
+    const sub = subscribeRealtime(roomName, handleEvent);
     return () => {
-      cancelled = true;
-      disconnectRealtime(room);
-      room = null;
+      sub.close();
     };
   }, [conversationId, kind, groupId]);
 }

@@ -1,5 +1,6 @@
+import { useCallback, useMemo } from "react";
 import { View, Text } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
   Screen,
   Crumb,
@@ -17,7 +18,11 @@ import {
   useDMChannels,
   useDMRequests,
   useAcceptDMRequest,
+  useBlockUser,
+  useLastMessages,
+  previewText,
 } from "../../hooks/queries";
+import { timeAgoShort } from "../../lib/timeAgo";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
@@ -29,13 +34,36 @@ function Direct() {
   const { data: dms = [], isLoading, isError } = useDMChannels();
   const { data: requests = [] } = useDMRequests();
   const acceptRequest = useAcceptDMRequest();
+  // "Decline" for a DM request is blocking the sender — mirrors desktop's
+  // RequestsPage / dm-request bar, which offer exactly Accept and Block
+  // (there is no decline command in pollis-core).
+  const blockUser = useBlockUser();
   const setSelectedConversationId = appStore.setSelectedConversationId;
   const selectedConversationId = appStore.selectedConversationId;
+  const unreadCounts = appStore.unreadCounts;
   // On regular (iPad) width the list is the left column of a two-pane
   // master-detail; on compact it is the whole screen with push navigation.
   const isRegular = useLayoutClass() === "regular";
   const selectedDm = dms.find((d) => d.id === selectedConversationId);
   const selectedHandle = selectedDm?.user2_identifier || undefined;
+
+  // One batched preview fetch for every DM row (desktop #874/#936) — never
+  // one call per row. A conversation with no locally-ingested messages is
+  // absent from the map and its row simply renders without a preview.
+  const dmIds = useMemo(() => dms.map((d) => d.id), [dms]);
+  const { data: lastMessages = {} } = useLastMessages(dmIds);
+
+  // On compact, being on this list means no conversation is open — clear the
+  // selection so realtime `new_message` events for the conversation the user
+  // just left count as unread again. On regular the detail pane keeps the
+  // conversation visible, so the selection (and unread suppression) stands.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isRegular) {
+        appStore.setSelectedConversationId(null);
+      }
+    }, [isRegular]),
+  );
 
   // The single-column content — rendered as the whole screen on compact, or as
   // the left list column of the two-pane on regular. Byte-for-byte identical on
@@ -68,14 +96,27 @@ function Direct() {
                   }
                   sub="wants to message you"
                   end={
-                    <Chip
-                      testID={`btn-accept-request-${d.id}`}
-                      accessibilityLabel="Accept request"
-                      variant="on"
-                      onPress={() => acceptRequest.mutate(d.id)}
-                    >
-                      {acceptRequest.isPending ? "…" : "Accept"}
-                    </Chip>
+                    <View style={{ flexDirection: "row", gap: 6 }}>
+                      <Chip
+                        testID={`btn-block-request-${d.id}`}
+                        accessibilityLabel="Block sender"
+                        onPress={() => {
+                          if (d.user2_id) {
+                            blockUser.mutate(d.user2_id);
+                          }
+                        }}
+                      >
+                        {blockUser.isPending ? "…" : "Block"}
+                      </Chip>
+                      <Chip
+                        testID={`btn-accept-request-${d.id}`}
+                        accessibilityLabel="Accept request"
+                        variant="on"
+                        onPress={() => acceptRequest.mutate(d.id)}
+                      >
+                        {acceptRequest.isPending ? "…" : "Accept"}
+                      </Chip>
+                    </View>
                   }
                 />
               );
@@ -124,6 +165,9 @@ function Direct() {
         {dms.map((d) => {
           const handle = d.user2_identifier || "user";
           const label = handle.slice(0, 2);
+          const last = lastMessages[d.id];
+          const preview = previewText(last);
+          const unread = unreadCounts[d.id] ?? 0;
           return (
             <ListRow
               key={d.id}
@@ -132,6 +176,9 @@ function Direct() {
               selected={isRegular && selectedConversationId === d.id}
               onPress={() => {
                 setSelectedConversationId(d.id);
+                // Opening a conversation clears its unread count (desktop
+                // does the same in its DM page).
+                appStore.markRead(d.id);
                 // On regular the right pane updates in place; on compact push
                 // the conversation as today.
                 if (!isRegular) {
@@ -152,6 +199,27 @@ function Direct() {
                 >
                   @{handle}
                 </Text>
+              }
+              sub={preview ?? undefined}
+              end={
+                <>
+                  {last ? (
+                    <Text style={[ty.label, { fontSize: 10 }]}>
+                      {timeAgoShort(last.created_at)}
+                    </Text>
+                  ) : null}
+                  {unread > 0 ? (
+                    <View
+                      testID={`unread-${d.id}`}
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: 4,
+                        backgroundColor: semantic.accent,
+                      }}
+                    />
+                  ) : null}
+                </>
               }
             />
           );

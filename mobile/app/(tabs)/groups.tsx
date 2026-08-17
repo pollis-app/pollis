@@ -1,5 +1,6 @@
+import { useCallback, useMemo } from "react";
 import { View, Text } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
   Screen,
   Crumb,
@@ -17,7 +18,10 @@ import {
   usePendingGroupInvites,
   useAcceptGroupInvite,
   useDeclineGroupInvite,
+  useLastMessages,
+  previewText,
 } from "../../hooks/queries";
+import { timeAgoShort } from "../../lib/timeAgo";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
@@ -34,9 +38,31 @@ function Groups() {
   const setSelectedChannelId = appStore.setSelectedChannelId;
   const selectedGroupId = appStore.selectedGroupId;
   const selectedChannelId = appStore.selectedChannelId;
+  const unreadCounts = appStore.unreadCounts;
   // On regular (iPad) width the list is the left column of a two-pane
   // master-detail; on compact it is the whole screen with push navigation.
   const isRegular = useLayoutClass() === "regular";
+
+  // One batched preview fetch for every channel row (desktop #874/#936) —
+  // never one call per row. A channel with no locally-ingested messages is
+  // simply absent from the map and its row falls back to the description.
+  const channelIds = useMemo(
+    () => groups.flatMap((g) => g.channels.map((c) => c.id)),
+    [groups],
+  );
+  const { data: lastMessages = {} } = useLastMessages(channelIds);
+
+  // On compact, being on this list means no conversation is open — clear the
+  // selection so realtime `new_message` events for the conversation the user
+  // just left count as unread again. On regular the detail pane keeps the
+  // conversation visible, so the selection (and unread suppression) stands.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isRegular) {
+        appStore.setSelectedChannelId(null);
+      }
+    }, [isRegular]),
+  );
 
   const totalChannels = groups.reduce((acc, g) => acc + g.channels.length, 0);
 
@@ -137,28 +163,60 @@ function Groups() {
                 No channels.
               </Text>
             ) : null}
-            {g.channels.map((c) => (
-              <ListRow
-                key={c.id}
-                testID={`row-channel-${c.id}`}
-                selected={isRegular && selectedChannelId === c.id}
-                glyph={<Icon.hash color={semantic.mute} />}
-                name={c.name}
-                sub={c.description ?? undefined}
-                onPress={() => {
-                  setSelectedGroupId(g.id);
-                  setSelectedChannelId(c.id);
-                  // On regular the right pane updates in place; on compact push
-                  // the channel chat as today.
-                  if (!isRegular) {
-                    router.push({
-                      pathname: "/chat/[id]",
-                      params: { id: c.id, kind: "channel", name: c.name },
-                    });
+            {g.channels.map((c) => {
+              const last = lastMessages[c.id];
+              const preview = previewText(last);
+              const unread = unreadCounts[c.id] ?? 0;
+              return (
+                <ListRow
+                  key={c.id}
+                  testID={`row-channel-${c.id}`}
+                  selected={isRegular && selectedChannelId === c.id}
+                  glyph={<Icon.hash color={semantic.mute} />}
+                  name={c.name}
+                  sub={
+                    preview
+                      ? `${last?.sender_username ? `${last.sender_username}: ` : ""}${preview}`
+                      : (c.description ?? undefined)
                   }
-                }}
-              />
-            ))}
+                  end={
+                    <>
+                      {last ? (
+                        <Text style={[ty.label, { fontSize: 10 }]}>
+                          {timeAgoShort(last.created_at)}
+                        </Text>
+                      ) : null}
+                      {unread > 0 ? (
+                        <View
+                          testID={`unread-${c.id}`}
+                          style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: 4,
+                            backgroundColor: semantic.accent,
+                          }}
+                        />
+                      ) : null}
+                    </>
+                  }
+                  onPress={() => {
+                    setSelectedGroupId(g.id);
+                    setSelectedChannelId(c.id);
+                    // Opening a conversation clears its unread count (desktop
+                    // does the same in its Channel page).
+                    appStore.markRead(c.id);
+                    // On regular the right pane updates in place; on compact push
+                    // the channel chat as today.
+                    if (!isRegular) {
+                      router.push({
+                        pathname: "/chat/[id]",
+                        params: { id: c.id, kind: "channel", name: c.name },
+                      });
+                    }
+                  }}
+                />
+              );
+            })}
           </View>
         ))}
       </Body>

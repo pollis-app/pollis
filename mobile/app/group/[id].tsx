@@ -1,5 +1,6 @@
+import { useCallback } from "react";
 import { View, Text } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import {
   Screen,
   Crumb,
@@ -42,6 +43,15 @@ function GroupDetail() {
 
   const setSelectedGroupId = appStore.setSelectedGroupId;
   const setSelectedChannelId = appStore.setSelectedChannelId;
+
+  // Being on this list means no conversation is open — clear the channel
+  // selection so realtime `new_message` events for the channel the user just
+  // left count as unread again (same rule as the tab lists).
+  useFocusEffect(
+    useCallback(() => {
+      appStore.setSelectedChannelId(null);
+    }, []),
+  );
 
   const groupName = group?.name ?? "Group";
   const adminCount = members.filter(
@@ -126,6 +136,8 @@ function GroupDetail() {
             onPress={() => {
               setSelectedGroupId(groupId);
               setSelectedChannelId(c.id);
+              // Opening a conversation clears its unread count.
+              appStore.markRead(c.id);
               router.push({
                 pathname: "/chat/[id]",
                 params: { id: c.id, kind: "channel", name: c.name },
