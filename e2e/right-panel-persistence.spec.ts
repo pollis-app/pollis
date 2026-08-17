@@ -42,8 +42,16 @@ const RANDOM = "random";
 const OFFSITE = "offsite";
 /** The DM peer's username — the sidebar labels a DM row with it. */
 const DM_PEER = "dave";
-/** The sidebar's Preferences row — a route with no conversation behind it. */
-const PREFERENCES = "Preferences";
+/**
+ * The sidebar's Preferences row — a route with no conversation behind it.
+ *
+ * Its `data-testid`, not its label (#932): the settings rows are the only
+ * sidebar rows whose text is translated, so locating one by label makes this
+ * spec fail on a locale change for a reason that has nothing to do with the
+ * right panel. Channel and DM rows below stay on their labels — those are
+ * user-generated names this fixture controls.
+ */
+const PREFERENCES_ROW = "sidebar-row-preferences";
 
 const SKINS = ["terminal", "refined"] as const;
 type Skin = (typeof SKINS)[number];
@@ -214,6 +222,11 @@ async function navigateTo(page: Page, label: string) {
     .click();
 }
 
+/** Navigate to a sidebar settings row by its stable testid (#932). */
+async function navigateToRow(page: Page, testId: string) {
+  await page.getByTestId(testId).click();
+}
+
 async function openViaShortcut(page: Page) {
   await page.keyboard.press(TOGGLE);
   await expectOpen(page, "the toggle shortcut should open the panel");
@@ -291,7 +304,7 @@ for (const skin of SKINS) {
       // only one that can catch a lingering skin dependency.
       const other: Skin = skin === "terminal" ? "refined" : "terminal";
       await boot(page, skin);
-      await navigateTo(page, PREFERENCES);
+      await navigateToRow(page, PREFERENCES_ROW);
       await expect(page.getByTestId(`pref-skin-${skin}`)).toBeVisible();
 
       // Whatever this skin starts at is the state under test; both transitions

@@ -32,6 +32,28 @@ This fits the "media is Rust-first" architecture (see [overview.md](./overview.m
 the renderer's WebRTC is intentionally unused; IPC carries UI events only, never
 media bytes.
 
+## The cache cap is enforced on writes, never on window focus (#930)
+
+The cache is capped at 500 MB and evicted oldest-mtime-first
+(`commands::r2::enforce_cache_cap`). **Every path that adds bytes calls it
+immediately after its write** — attachments, emoji and public profile objects
+alike — and that is the only thing that drives it.
+
+It used to run on `WindowEvent::Focused(true)` as well, to catch files copied
+into the directory from outside. That cost a full walk of the cache directory on
+every alt-tab: work proportional to months of accumulated media rather than to
+anything the user just did, and once #874 had removed the seven focus-time IPC
+calls it was the only thing left happening on focus. A cache nobody is writing
+to cannot grow past its cap, so the external-tamper case is still caught — at
+the next write, which is the first moment it can matter.
+
+There is deliberately **no public `enforce_cache_cap_now()`**; it existed only
+as the focus hook's entry point. Two guards in `commands::r2`'s test module keep
+it that way, and `cache_dir_walks()` (test builds only) counts directory walks
+so "this path does not stat the whole cache" is assertable as a number rather
+than a stopwatch. Note that CLAUDE.md's no-periodic-polling rule rules out the
+obvious alternative: a timer is not the answer, cache mutation is.
+
 ## Zero-copy screenshare frame fan-out (#480)
 
 Decoded screenshare frames are fanned out to every connected WebView subscriber

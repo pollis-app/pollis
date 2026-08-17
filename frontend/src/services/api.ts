@@ -428,56 +428,14 @@ export async function sendMessage(
   return toMessage(m);
 }
 
-// ── R2 ─────────────────────────────────────────────────────────────────────
-
-export async function uploadFile(
-  key: string,
-  data: Uint8Array,
-  contentType: string,
-): Promise<{ key: string; url: string }> {
-  return invoke('upload_file', { key, data: Array.from(data), contentType });
-}
-
-export async function downloadFile(key: string): Promise<Uint8Array> {
-  const bytes = await invoke<number[]>('download_file', { key });
-  return new Uint8Array(bytes);
-}
-
-// ── Deprecated stubs ───────────────────────────────────────────────────────
-
-export async function authenticateWithClerk(): Promise<string> {
-  throw new Error('Clerk auth removed — use requestOTP / verifyOTP');
-}
-
-export async function cancelAuth(): Promise<void> {
-  // no-op
-}
-
-/**
- * @deprecated Use getUserProfile instead
- */
-export async function getServiceUserData(): Promise<{ username: string; email: string; phone: string; avatar_url?: string }> {
-  throw new Error('getServiceUserData removed — use getUserProfile');
-}
-
-/**
- * @deprecated Use updateUserProfile instead
- */
-export async function updateServiceUserData(username: string, _email: string | null, _phone: string | null): Promise<void> {
-  const session = await getSession();
-  if (!session) {
-    throw new Error('No session');
-  }
-  await updateUserProfile(session.user.id, username);
-}
-
-/**
- * @deprecated Use updateUserProfile instead
- */
-export async function updateServiceUserAvatar(avatarUrl: string): Promise<void> {
-  const session = await getSession();
-  if (!session) {
-    throw new Error('No session');
-  }
-  await updateUserProfile(session.user.id, undefined, undefined, undefined, avatarUrl);
-}
+// R2 media round-trips do NOT live here. Uploads go through
+// `services/r2-upload.ts`, which is also the only caller of the
+// `download_file` command — the `uploadFile` / `downloadFile` wrappers this
+// module used to export had no callers at all (#929).
+//
+// Neither do the Clerk-era auth/profile stubs (`authenticateWithClerk`,
+// `cancelAuth`, `getServiceUserData`, `updateServiceUserData`,
+// `updateServiceUserAvatar`). Clerk has not been the auth path for a long
+// time; four of the five existed only to throw, and nothing called any of
+// them. Auth is `requestOTP` / `verifyOTP`; profiles are `getUserProfile` /
+// `updateUserProfile`, both above.

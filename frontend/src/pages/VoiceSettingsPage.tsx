@@ -378,7 +378,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
   return (
     <PageShell title={t("settings.title")} scrollable>
-      <div className="flex justify-center px-6 py-8">
+      <div data-testid="voice-settings-page" className="flex justify-center px-6 py-8">
       <div className="flex flex-col gap-8 w-full max-w-md">
 
         <section className="flex flex-col gap-4 mb-12">

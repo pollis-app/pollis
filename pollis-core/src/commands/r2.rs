@@ -162,9 +162,40 @@ pub fn find_cached_file(content_hash: &str) -> Option<(PathBuf, String)> {
     None
 }
 
+/// Counts every full walk of the media-cache directory.
+///
+/// Exists so "this code path does not stat the whole cache" can be asserted as
+/// a number rather than timed (#930). Test-only; there is no counter in a
+/// release build. Bumped by the three functions that enumerate the whole
+/// directory — `enforce_cache_cap_to`, `cache_total_bytes`, `clear_media_cache`
+/// — and not by `find_cached_file`, which short-circuits on its first match.
+#[cfg(any(test, feature = "test-harness"))]
+static CACHE_DIR_WALKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many times the media-cache directory has been walked in this process.
+#[cfg(any(test, feature = "test-harness"))]
+pub fn cache_dir_walks() -> u64 {
+    CACHE_DIR_WALKS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Called at the top of every function that enumerates the cache directory.
+#[inline]
+fn note_cache_dir_walk() {
+    #[cfg(any(test, feature = "test-harness"))]
+    CACHE_DIR_WALKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Stat every file in the cache; if total size exceeds the cap, delete by
-/// oldest mtime first until we're under. No in-memory index — directory is
-/// small enough that stat'ing it on each insert is fine.
+/// oldest mtime first until we're under.
+///
+/// **Driven by cache mutation, never by the UI (#930).** Every path that adds
+/// bytes to the cache calls this immediately after its write, which is what
+/// makes the cap hold and is also what catches files copied in from outside or
+/// mtime-tampered. It used to be called on window focus as well: that walked
+/// the entire directory on every alt-tab, scaling with the size of the cache
+/// rather than with anything the user had done — and after #874 removed the
+/// other focus-time costs it was the only work left there. A cache nobody is
+/// writing to cannot grow, so there is nothing for a focus event to find.
 fn enforce_cache_cap(dir: &Path) {
     enforce_cache_cap_to(dir, MEDIA_CACHE_MAX_BYTES);
 }
@@ -173,6 +204,7 @@ fn enforce_cache_cap(dir: &Path) {
 /// evicting oldest entries first. Used both by the regular cap-enforcer
 /// and by the pre-write headroom check in `get_media_url`.
 fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
+    note_cache_dir_walk();
     let entries = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(_) => return,
@@ -215,17 +247,16 @@ fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
     }
 }
 
-/// Public re-evaluation entry point — call from app focus to defend
-/// against external file copies / mtime tampering / cap-config changes.
-pub fn enforce_cache_cap_now() {
-    if let Ok(dir) = media_cache_dir() {
-        enforce_cache_cap(&dir);
-    }
-}
+// There is deliberately no `enforce_cache_cap_now()` (#930). It existed only
+// so `src-tauri`'s `WindowEvent::Focused(true)` arm could re-run the sweep;
+// see `enforce_cache_cap` above for why focus is the wrong trigger. Adding a
+// public entry point back would re-open that door — the cap belongs to the
+// write path.
 
 /// Sum of all cached file sizes. Used to gate downloads against the cap
 /// *before* writing new bytes, so the cache never peaks above the cap.
 pub fn cache_total_bytes() -> u64 {
+    note_cache_dir_walk();
     let dir = match media_cache_dir() {
         Ok(d) => d,
         Err(_) => return 0,
@@ -251,6 +282,7 @@ pub fn cache_total_bytes() -> u64 {
 /// lifecycle as the keystore unlock. The directory itself stays so a
 /// subsequent re-login doesn't have to re-create it.
 pub fn clear_media_cache() {
+    note_cache_dir_walk();
     let dir = match media_cache_dir() {
         Ok(d) => d,
         Err(_) => return,
@@ -998,4 +1030,164 @@ async fn r2_delete_url(overlay: Option<&pollis_relay::OverlayHandle>, url: &str)
     }
     let body = resp.text().await.unwrap_or_default();
     Err(Error::Other(anyhow::anyhow!("R2 delete failed: {} — {}", status, body)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+
+    /// `CACHE_DIR_WALKS` is process-global, so every test that sweeps a cache
+    /// directory has to hold this — not just the one that reads the counter,
+    /// or a concurrent sweep inflates its delta.
+    static WALK_COUNTER: Mutex<()> = Mutex::new(());
+
+    fn serialise_sweeps() -> std::sync::MutexGuard<'static, ()> {
+        WALK_COUNTER.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+
+    /// A private directory for one test. Not `tempfile` — pollis-core does not
+    /// depend on it, and one `create_dir_all` is the whole requirement.
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "pollis-r2-{tag}-{}-{n}",
+            std::process::id(),
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    /// Write `bytes` bytes to `<dir>/<name>`, then stamp its mtime so
+    /// "oldest first" is deterministic rather than dependent on filesystem
+    /// timestamp granularity.
+    fn write_aged(dir: &Path, name: &str, bytes: usize, age_secs: u64) {
+        let path = dir.join(name);
+        std::fs::write(&path, vec![0u8; bytes]).expect("write cache file");
+        let when =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000 - age_secs);
+        let f = std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .expect("reopen for mtime");
+        f.set_modified(when).expect("set mtime");
+    }
+
+    /// The cap is a real eviction, oldest first, and it leaves the newest
+    /// entries alone. This is the behaviour that has to keep working now that
+    /// the only thing driving it is a cache write (#930).
+    #[test]
+    fn the_cap_evicts_oldest_first_and_stops_at_the_target() {
+        let _serial = serialise_sweeps();
+        let dir = scratch_dir("evict");
+        // 400 bytes total, oldest first: a=100 (oldest), b=100, c=200 (newest).
+        write_aged(&dir, "a.png.enc", 100, 300);
+        write_aged(&dir, "b.png.enc", 100, 200);
+        write_aged(&dir, "c.png.enc", 200, 100);
+
+        enforce_cache_cap_to(&dir, 250);
+
+        assert!(!dir.join("a.png.enc").exists(), "the oldest entry must go first");
+        assert!(!dir.join("b.png.enc").exists(), "eviction must continue until under target");
+        assert!(
+            dir.join("c.png.enc").exists(),
+            "eviction must stop as soon as it is under the target, not empty the cache"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// In-progress writes are not cache entries and must survive a sweep.
+    #[test]
+    fn the_cap_ignores_in_progress_writes() {
+        let _serial = serialise_sweeps();
+        let dir = scratch_dir("tmp");
+        write_aged(&dir, "a.png.enc", 400, 300);
+        write_aged(&dir, "b.png.enc.tmp", 400, 400);
+
+        enforce_cache_cap_to(&dir, 100);
+
+        assert!(!dir.join("a.png.enc").exists());
+        assert!(
+            dir.join("b.png.enc.tmp").exists(),
+            "a .tmp is a half-written file someone is still writing, not an eviction candidate"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The counter the focus-path guard below is asserted against actually
+    /// counts. Without this, a guard reading "0 walks" would also pass if the
+    /// counter were broken and never incremented at all.
+    #[test]
+    fn the_walk_counter_counts_one_walk_per_sweep() {
+        let _serial = serialise_sweeps();
+        let dir = scratch_dir("counter");
+        write_aged(&dir, "a.png.enc", 10, 10);
+
+        let before = cache_dir_walks();
+        enforce_cache_cap_to(&dir, u64::MAX);
+        enforce_cache_cap_to(&dir, u64::MAX);
+        assert_eq!(
+            cache_dir_walks() - before,
+            2,
+            "each sweep must register exactly one directory walk"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// GUARD (#930): window focus must not walk the media cache.
+    ///
+    /// A source scan, because the thing being asserted is a rule about which
+    /// code may run on a UI event, and the offending call lived in a Tauri
+    /// event closure that no test can dispatch to. Paired with the counter test
+    /// above, which is what makes "does not walk" mean something: the sweep is
+    /// instrumented, so if it ever returns to the focus arm the reviewer of
+    /// that change has to delete this test to land it.
+    #[test]
+    fn guard_window_focus_does_not_sweep_the_media_cache() {
+        let shell = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../src-tauri/src/lib.rs"));
+
+        let focus_arm_start = shell
+            .find("tauri::WindowEvent::Focused(true)")
+            .expect("the shell must still have a window-focus arm for this guard to mean anything");
+        // The focus arm runs to the next `WindowEvent` match arm; scanning to
+        // the end of the closure is enough and cannot miss a call inside it.
+        let rest = &shell[focus_arm_start..];
+        let focus_arm_end = rest
+            .find("tauri::WindowEvent::CloseRequested")
+            .unwrap_or(rest.len());
+        let focus_arm = &rest[..focus_arm_end];
+
+        assert!(
+            !focus_arm.contains("enforce_cache_cap"),
+            "the media-cache sweep is back on window focus (#930): it walks the whole \
+             cache directory, so it costs more the longer the app has been used and \
+             nothing the user did on that alt-tab made the cache bigger. The cap is \
+             enforced on cache WRITES in this module instead."
+        );
+        assert!(
+            !focus_arm.contains("cache_total_bytes"),
+            "totalling the cache on focus is the same directory walk under another name (#930)"
+        );
+    }
+
+    /// GUARD (#930): the public focus-time entry point stays deleted.
+    #[test]
+    fn guard_no_public_entry_point_for_a_focus_time_sweep() {
+        // Only the module itself, not this test module — the assertion message
+        // below names the symbol, and a whole-file scan would match its own
+        // text and fail forever.
+        let source = include_str!("r2.rs");
+        let module = &source[..source.find("mod tests {").unwrap_or(source.len())];
+        // Assembled rather than written out, for the same reason.
+        let banned = format!("pub fn {}", "enforce_cache_cap_now");
+        assert!(
+            !module.contains(&banned),
+            "`enforce_cache_cap_now` existed only to be called from window focus (#930); \
+             re-exporting it re-opens that door — the cap belongs to the write path"
+        );
+    }
 }

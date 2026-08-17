@@ -6,6 +6,7 @@ import "./messageHighlight.css";
 import {
   estimateRowPx,
   findRow,
+  loadMoreThresholdPx,
   revealRow,
   ROW_OVERSCAN,
   type MessageRowWindow,
@@ -43,9 +44,6 @@ const startOfLocalDay = (d: Date): number =>
 
 // Time gap (ms) beyond which a same-author message still starts a new group.
 const GROUP_GAP_MS = 5 * 60 * 1000;
-
-// How close to the top of the log counts as "asking for older messages".
-const LOAD_MORE_THRESHOLD_PX = 150;
 
 // Memoised for the same reason the rows are: there is one of these per day in
 // the log and their inputs are two primitives that almost never change.
@@ -423,9 +421,11 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     if (!container || !hasMore || isFetchingMore) {
       return;
     }
-    const scrollable =
-      container.scrollHeight - container.clientHeight > LOAD_MORE_THRESHOLD_PX;
-    if (!scrollable || container.scrollTop < LOAD_MORE_THRESHOLD_PX) {
+    // Recomputed here, not captured: the threshold is in rem, so it follows a
+    // font-size change under a mounted log (#934).
+    const threshold = loadMoreThresholdPx();
+    const scrollable = container.scrollHeight - container.clientHeight > threshold;
+    if (!scrollable || container.scrollTop < threshold) {
       onLoadMore?.();
     }
   }, [hasMore, isFetchingMore, onLoadMore]);
@@ -866,6 +866,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     >
       {isFetchingMore && (
         <p
+          data-testid="message-loading-older"
           className="text-xs font-mono text-center py-2 text-muted"
         >
           {t("common:states.loading")}
