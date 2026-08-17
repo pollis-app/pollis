@@ -18,6 +18,7 @@ import {
   useRemoveMember,
   useSetMemberRole,
   useUserGroupsWithChannels,
+  sortMembersByRole,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -33,6 +34,11 @@ function Members() {
   const group = groups.find((g) => g.id === id);
   const removeMember = useRemoveMember(id);
   const setRole = useSetMemberRole(id);
+
+  // Role-then-alphabetical, mirroring desktop's members panel intent —
+  // desktop orders online-first, but mobile has no presence source yet, so
+  // presence ordering awaits one.
+  const sortedMembers = useMemo(() => sortMembersByRole(members), [members]);
 
   const myRole = useMemo(
     () => members.find((m) => m.user_id === currentUser?.id)?.role,
@@ -84,7 +90,7 @@ function Members() {
             Loading…
           </Text>
         ) : null}
-        {members.map((m) => {
+        {sortedMembers.map((m) => {
           const isMe = m.user_id === currentUser?.id;
           const isOwner = m.role === "owner";
           const isAdmin = m.role === "admin";

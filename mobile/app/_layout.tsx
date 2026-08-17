@@ -110,6 +110,7 @@ export default function RootLayout() {
               <Stack.Screen name="group/discover" />
               <Stack.Screen name="dm/new" />
               <Stack.Screen name="dm/info" />
+              <Stack.Screen name="conversation/info" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="user/[id]" />
               {/* Personal settings pages pop up from the bottom (pushing the
