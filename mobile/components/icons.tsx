@@ -31,6 +31,7 @@ import {
   ArrowRight,
   Diamond,
   Volume2,
+  Info,
   type LucideIcon,
 } from "lucide-react-native";
 import { semantic } from "../theme/tokens";
@@ -76,6 +77,7 @@ export const Icon = {
   key: wrap(Key),
   device: wrap(Smartphone),
   diamond: wrap(Diamond, 16),
+  info: wrap(Info, 16),
 };
 
 export type IconName = keyof typeof Icon;
