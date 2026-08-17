@@ -54,7 +54,7 @@ The same key signs the **binaries** tree. That tree is what a user consults to v
 binary they are running is the one we built.
 
 So consider recovery from a compromise. The pin lives in the client binary
-(`PINNED_LOG_PUBLIC_KEY` is a `const`), so re-pinning a new key **requires shipping a client update**.
+(`PINNED_LOG_PUBLIC_KEYS` is a `const`), so re-pinning a new key **requires shipping a client update**.
 But the mechanism that lets a user verify a client update is the binaries tree — signed by the key we
 are trying to retire. An attacker holding the leaked key can sign a binaries-tree view that vouches for
 their build of the "fix".
@@ -141,6 +141,7 @@ real one.
 | Overlap publishing | `builder --retired-key <hex>:<not_after_ms>` | repeatable; emits `retired_keys` into the bundle |
 | Rebuilder | `.github/workflows/rebuild-verify.yml` | `PINNED_LOG_KEY` accepts a comma/space-separated list |
 | Website | `website/artifacts.js` | `PINNED_KEYS` + `livePinnedKeys()` |
+| Copy agreement | `scripts/check-pinned-log-key.py` | The nine hard-coded copies must match `transparency.rs`; enforced on every PR by `scripts-check.yml`, and it also refuses an unregistered tenth (#945) |
 
 **`key_id` is a hint, not a trust input.** It is derived (`key_id_for` = first 8 bytes of
 `SHA-256(key)`), so anyone holding the key can recompute it and no registry can drift. It
@@ -253,8 +254,10 @@ Written to be followed literally. Every step is checkable; none of it is "and th
 **Pre-flight**
 1. Decide and record the custody option (§4) and whether the anchor split (§6) lands with this rotation.
    Write the decision and its date into this document before proceeding.
-2. Confirm `PINNED_LOG_PUBLIC_KEY` is still `None` in the shipped client. If it is not, this is no longer
-   a free rotation and the key-set shape (§5) is mandatory before continuing.
+2. Confirm `PINNED_LOG_PUBLIC_KEYS` is still empty in the shipped client. If it is not — and since #732 it
+   is not — this is no longer a free rotation and the key-set shape (§5) is mandatory before continuing.
+   (This step said `PINNED_LOG_PUBLIC_KEY ... is None`, naming a constant that no longer exists and a
+   shape it never had; the pin is a slice, and "unpinned" is the empty slice.)
 
 **Mint**
 3. Generate the ML-DSA-44 seed on the machine that will hold it, using the builder's own `generate`

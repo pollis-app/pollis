@@ -398,11 +398,22 @@ Two things about it are easy to get wrong and worth repeating here:
 - Dispatch `transparency-publish.yml` with **`full_resync: true`**. Re-signed
   artifacts are byte-length-identical to the ones they replace, so the default
   `--size-only` sync skips them and the rotation silently does not take.
-- The published key is pinned in five places that must never disagree:
-  `pollis-core/src/commands/transparency.rs` (`PINNED_LOG_PUBLIC_KEY`),
-  `website/artifacts.js` (`PINNED_KEY`), `.github/workflows/rebuild-verify.yml`
-  (`PINNED_LOG_KEY`), the `verifier-release.yml` release body, and
-  `SECURITY.md` / `README.md`. Change them in one commit.
+- The published key is pinned in **nine** places that must never disagree. This
+  paragraph used to say five, name two constants that no longer exist, and omit
+  three real copies — which is exactly the drift #945 was about, in the document
+  telling you how to avoid it. So the list is no longer maintained here by hand:
+  `scripts/check-pinned-log-key.py` holds it, treats
+  `pollis-core/src/commands/transparency.rs` as the source of truth, and fails CI
+  if any copy disagrees **or if a new copy appears that it does not know about**.
+  Run it locally before opening the rotation PR:
+
+  ```bash
+  python3 ./scripts/check-pinned-log-key.py
+  ```
+
+  Change every copy in one commit. If you add a tenth surface, register it in
+  that script's `COPIES` table in the same commit — the check fails until you do,
+  by design.
 
 **Known gap (#700):** there is no overlap window, so a rotation is a flag day —
 auditors holding cached pre-rotation heads see it as equivocation and can only

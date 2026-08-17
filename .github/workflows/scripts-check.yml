@@ -18,6 +18,16 @@ on:
     branches: [main]
     paths:
       - "scripts/**"
+      # #945: every surface that hard-codes the transparency log's pinned
+      # ML-DSA-44 key. A rotation touching one and missing another makes an
+      # honest log look tampered to whoever reads the stale copy.
+      - "pollis-core/src/commands/transparency.rs"
+      - "website/artifacts.js"
+      - "website/learn.html"
+      - "website/assurance.html"
+      - "key-set.json"
+      - "SECURITY.md"
+      - "README.md"
       - ".github/workflows/scripts-check.yml"
       - "pollis-delivery/worker/**"
       - "pollis-delivery/wrangler.dev.jsonc"
@@ -37,6 +47,16 @@ on:
     branches: [main]
     paths:
       - "scripts/**"
+      # #945: every surface that hard-codes the transparency log's pinned
+      # ML-DSA-44 key. A rotation touching one and missing another makes an
+      # honest log look tampered to whoever reads the stale copy.
+      - "pollis-core/src/commands/transparency.rs"
+      - "website/artifacts.js"
+      - "website/learn.html"
+      - "website/assurance.html"
+      - "key-set.json"
+      - "SECURITY.md"
+      - "README.md"
       - "pollis-delivery/worker/**"
       - "pollis-delivery/wrangler.dev.jsonc"
       - "pollis-delivery/wrangler.prod.jsonc"
@@ -92,6 +112,20 @@ jobs:
 
       - name: Build recipe drift (reproducibility)
         run: python3 ./scripts/check-build-recipe.py
+
+      # #945: the transparency log's pinned ML-DSA-44 key is hard-coded in nine
+      # places across Rust, JS, JSON, Markdown and two workflows. Nothing checked
+      # they agreed, and the failure is nastier than it sounds: the surface that
+      # keeps a retired key reports an HONEST log as tampered (#732 shipped
+      # exactly that to pollis.com/artifacts). Offline and dependency-free so it
+      # gates the PR rather than only observing a deployed site.
+      - name: Pinned transparency key agrees everywhere (#945)
+        run: python3 ./scripts/check-pinned-log-key.py
+
+      # And the gate's own ability to go red, one broken copy at a time. A
+      # consistency check nobody has watched fail is a check nobody should cite.
+      - name: Pinned-key check catches divergence (#945)
+        run: ./scripts/test-pinned-log-key.sh
 
       - name: Attest helper + payload-hash tests
         run: ./scripts/test-attest-helpers.sh

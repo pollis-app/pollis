@@ -55,11 +55,25 @@ jobs:
       # 1. The pinned transparency key on /artifacts must equal the constant in
       #    pollis-core. These are the same claim made to two audiences, and a
       #    disagreement is indistinguishable to a visitor from a compromised log.
-      - name: Pinned log key matches pollis-core
+      #
+      #    #945 split this in two. The IN-REPO half — do all nine hard-coded
+      #    copies agree — now lives in `check-pinned-log-key.py` and runs on
+      #    every PR via scripts-check.yml, because a check that only ever runs
+      #    against production finds the problem after it has shipped. What is
+      #    left here is the half only this workflow can do: is the DEPLOYED site
+      #    serving what `main` says.
+      - name: Pinned log key agrees across the repo (#945)
+        run: python3 ./scripts/check-pinned-log-key.py
+
+      - name: Deployed artifacts.js pins the key pollis-core compiles in
         run: |
           set -euo pipefail
-          repo_key="$(grep -oE '"[0-9a-f]{2624}"' pollis-core/src/commands/transparency.rs \
-            | head -1 | tr -d '"')"
+          # Asked for by const NAME, not by "the first 2624-hex literal in the
+          # file". That grep was correct only by accident: `PINNED_LOG_ROOT_KEYS`
+          # holds a literal of the identical shape, so declaring it above the
+          # signer would have silently made this step assert the root key while
+          # still reporting success (#945).
+          repo_key="$(python3 ./scripts/check-pinned-log-key.py --print signer)"
           if [ -z "$repo_key" ]; then
             echo "::error::could not read PINNED_LOG_PUBLIC_KEYS from pollis-core — has the shape changed?"
             exit 1
