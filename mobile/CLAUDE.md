@@ -163,6 +163,16 @@ Two things worth knowing:
   module; a native peer must be a direct dep so autolinking picks it up, or
   doctor's missing-peer check fails.
 
+- **Doctor drifts red on its own.** Expo ships patch releases to the SDK 55 line
+  continuously, so a set of packages that passed last month goes stale and fails
+  the gate on **every** PR regardless of content (this happened: 10 packages at
+  once). The fix is to re-pin to the versions doctor names, as a standalone PR.
+  Do **not** reach for `expo install --fix` to do it — the Expo CLI shells out to
+  `pnpm` without `--ignore-workspace`, which hoists mobile's tree into the root
+  `node_modules` and destroys the install (see "Project isolation" above). Edit
+  the versions in `package.json` by hand, then
+  `pnpm install --ignore-workspace`.
+
 `app.json` carries **no** `newArchEnabled` / `android.edgeToEdgeEnabled` — both are
 now unconditional defaults in SDK 55 / RN 0.83 and were dropped from the config
 schema, so listing them fails doctor's schema check for no behavioural gain.
