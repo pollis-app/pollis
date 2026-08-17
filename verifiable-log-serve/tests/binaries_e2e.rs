@@ -106,6 +106,57 @@ fn resign_sths_under(bundle: &mut Bundle, key: &SigningKey, context: &[u8]) {
     }
 }
 
+/// #944: the recipe recorded in each leaf must survive into the report, verbatim.
+///
+/// This is what lets `rebuild-verify.yml` tell "the shipped binary does not match
+/// its source" apart from "this rebuild ran on a different CI runner image than
+/// the release, and an AppImage vendors that image's system libraries". Without
+/// it the rebuilder has only a hash comparison, and a byte divergence caused by a
+/// runner re-image is indistinguishable from tampering — which is exactly how
+/// v1.9.3 came to be published as an unexplained non-reproduction.
+///
+/// The value must reach the report through the SAME verified path as the hashes
+/// (a leaf whose inclusion proof checked out against the signed head), because it
+/// is the one field that can talk the verdict OUT of an accusation.
+#[test]
+fn the_recorded_build_recipe_reaches_the_report() {
+    let builder_bundle = build_binaries_bundle(&fixture_records(), &signing_key(), TS).unwrap();
+    let bundle = to_serve_bundle(&builder_bundle);
+
+    let report = release::verify_release_in_bundle(&bundle, "v1.3.0");
+
+    assert!(report.found);
+    assert!(!report.artifacts.is_empty());
+    for artifact in &report.artifacts {
+        assert_eq!(
+            artifact.toolchain,
+            toolchain(),
+            "artifact `{}` must carry its leaf's recipe unchanged",
+            artifact.artifact_name
+        );
+    }
+
+    // Specifically the field the rebuilder keys on, reachable by the same
+    // selector the workflow uses (linux + appimage + payload).
+    let linux = report
+        .artifacts
+        .iter()
+        .find(|a| a.platform == "linux" && a.bundle == "appimage" && a.layer == Layer::Payload)
+        .expect("the Linux AppImage payload leaf is the reproducible unit");
+    assert_eq!(linux.toolchain.runner_image, "ubuntu-24.04@sha256:abc");
+
+    // And it must be present in the SERIALIZED report, since that JSON — not the
+    // Rust struct — is what `pollis-verify release --json` hands the workflow.
+    let json = serde_json::to_value(&report).unwrap();
+    let runner_image = json["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["platform"] == "linux" && a["bundle"] == "appimage" && a["layer"] == "payload")
+        .and_then(|a| a["toolchain"]["runner_image"].as_str());
+    assert_eq!(runner_image, Some("ubuntu-24.04@sha256:abc"));
+}
+
 #[test]
 fn wellformed_release_verifies_with_expected_artifacts() {
     let builder_bundle = build_binaries_bundle(&fixture_records(), &signing_key(), TS).unwrap();

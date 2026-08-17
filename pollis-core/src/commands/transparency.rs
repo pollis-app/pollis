@@ -1506,6 +1506,20 @@ mod tests {
     const HASH_OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
     const HASH_SIGNED: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 
+    // Every leaf carries a build recipe (#944 surfaced it on `ReleaseArtifact`),
+    // so a fixture without one is not a report the log could ever serve. Shaped
+    // like a real post-#939 Linux leaf rather than filled with placeholders, so
+    // a reader can tell what the field actually holds.
+    fn fixture_toolchain() -> serde_json::Value {
+        serde_json::json!({
+            "rustc": "1.96.0",
+            "node": "20.11.1",
+            "pnpm": "10.26.1",
+            "runner_image": "ubuntu22@20260810.260.1+helper:ubuntu24@20260810.260.1",
+            "source_date_epoch": 1_786_661_317_u64,
+        })
+    }
+
     // Build a fixture ReleaseReport by deserializing JSON. `payloads` become one
     // `payload` leaf each; the whole tree's validity and whether the tag is
     // found are set explicitly. Mirrors a pre-`exe` release (≤ v1.5.2).
@@ -1527,6 +1541,7 @@ mod tests {
                     "payload_sha256": h,
                     "artifact_sha256": h,
                     "provenance_uri": "cdn.pollis.com/x.intoto.jsonl",
+                    "toolchain": fixture_toolchain(),
                     "included": true,
                 })
             })
@@ -1561,13 +1576,15 @@ mod tests {
                 "platform": "darwin", "arch": "aarch64", "bundle": "dmg",
                 "layer": "payload", "artifact_name": "pollis-macos.dmg",
                 "payload_sha256": payload, "artifact_sha256": payload,
-                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl", "included": true,
+                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl",
+                "toolchain": fixture_toolchain(), "included": true,
             }),
             serde_json::json!({
                 "platform": "darwin", "arch": "aarch64", "bundle": "dmg",
                 "layer": "signed", "artifact_name": "pollis-macos.dmg",
                 "payload_sha256": payload, "artifact_sha256": HASH_SIGNED,
-                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl", "included": true,
+                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl",
+                "toolchain": fixture_toolchain(), "included": true,
             }),
         ];
         for e in exes {
@@ -1575,7 +1592,8 @@ mod tests {
                 "platform": "darwin", "arch": "aarch64", "bundle": "dmg",
                 "layer": "exe", "artifact_name": "pollis-macos.dmg",
                 "payload_sha256": payload, "artifact_sha256": e,
-                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl", "included": true,
+                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl",
+                "toolchain": fixture_toolchain(), "included": true,
             }));
         }
         let value = serde_json::json!({
