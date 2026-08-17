@@ -220,36 +220,6 @@ pub(crate) fn resolve_actor(
 ///
 /// Takes a bare [`Connection`] (the main DB) so the same gate is reusable from
 /// the integration harness, which drives a single shared connection rather than
-/// True when `id` is already in use as ANY kind of conversation — a DM channel,
-/// a group, or a channel.
-///
-/// The three live in separate tables with separate primary keys, so SQLite
-/// happily accepts the same id in all three. That is not a ULID collision
-/// (they do not collide by chance); every creation endpoint takes the id
-/// straight from the request body, so an attacker simply *names* an existing
-/// conversation. [`is_member`] then ORs across all three tables on one id, so
-/// creating a DM whose id is a victim group's id and adding yourself to it
-/// makes `is_member(victim_group, you)` true — membership of a group you were
-/// never in, and with it commit injection, GroupInfo/Welcome overwrite, and a
-/// LiveKit token for their room.
-///
-/// Every `create_*` path must call this before inserting. The durable fix is a
-/// single `conversation` table owning the id namespace so the database refuses
-/// this outright; this is the chokepoint that closes it today.
-pub async fn conversation_id_taken(conn: &Connection, id: &str) -> anyhow::Result<bool> {
-    let mut rows = conn
-        .query(
-            "SELECT 1 WHERE \
-                EXISTS (SELECT 1 FROM dm_channel WHERE id = ?1) \
-             OR EXISTS (SELECT 1 FROM groups     WHERE id = ?1) \
-             OR EXISTS (SELECT 1 FROM channels   WHERE id = ?1) \
-             LIMIT 1",
-            libsql::params![id.to_string()],
-        )
-        .await?;
-    Ok(rows.next().await?.is_some())
-}
-
 /// the DS's `AppState`.
 pub async fn is_member(
     conn: &Connection,
@@ -268,6 +238,98 @@ pub async fn is_member(
                         WHERE c.id = ?1 AND gm.user_id = ?2) \
              LIMIT 1",
             libsql::params![conversation_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
+// ── the conversation-id namespace (#880) ─────────────────────────────────────
+
+/// The kinds of conversation that share one id namespace — exactly the three
+/// legs [`is_member`] ORs over, which is precisely why they cannot be allowed to
+/// disagree about what an id means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationKind {
+    Dm,
+    Group,
+    Channel,
+}
+
+impl ConversationKind {
+    /// The value stored in `conversation.kind`. Migration `000016`'s CHECK
+    /// accepts these three strings and nothing else, so a fourth kind cannot be
+    /// smuggled in past the three `is_member` knows how to answer for.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ConversationKind::Dm => "dm",
+            ConversationKind::Group => "group",
+            ConversationKind::Channel => "channel",
+        }
+    }
+}
+
+/// Claim `id` for `kind` in the `conversation` registry (#880), the table that
+/// owns the conversation-id namespace.
+///
+/// **Call this inside the transaction that inserts the row the id names, never
+/// beside it.** The registry's primary key is what refuses a second claim, so
+/// the claim and the row it describes have to succeed or fail together —
+/// otherwise a rejected claim leaves the conversation created anyway, which is
+/// the whole hole.
+///
+/// Returns `Err` when the id is already registered, as any kind, *including one
+/// whose conversation has since been deleted*: the registry is append-only, so a
+/// claimed id is claimed forever. Releasing it would re-open the reuse window,
+/// and with `foreign_keys=OFF` in production a deleted group leaves its
+/// `group_member` and `channels` rows behind for the next claimant to inherit.
+///
+/// [`conversation_id_taken`] still runs first on every create path, so the
+/// ordinary case is a clean 403 rather than a 500. This is what holds when it is
+/// not consulted — a create path that forgets it, or a body carrying two ids
+/// that are equal to each other, which no lookup of existing rows can catch.
+pub async fn claim_conversation_id(
+    conn: &Connection,
+    id: &str,
+    kind: ConversationKind,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO conversation (id, kind) VALUES (?1, ?2)",
+        libsql::params![id.to_string(), kind.as_str().to_string()],
+    )
+    .await?;
+    Ok(())
+}
+
+/// True when `id` is already in use as ANY kind of conversation — a DM channel,
+/// a group, or a channel, or a registry claim outliving the conversation that
+/// made it.
+///
+/// The three tables have separate primary keys, so SQLite happily accepts the
+/// same id in all three. That is not a ULID collision (they do not collide by
+/// chance); every creation endpoint takes the id straight from the request body,
+/// so an attacker simply *names* an existing conversation. [`is_member`] then
+/// ORs across all three tables on one id, so creating a DM whose id is a victim
+/// group's id and adding yourself to it makes `is_member(victim_group, you)`
+/// true — membership of a group you were never in, and with it commit injection,
+/// GroupInfo/Welcome overwrite, and a LiveKit token for their room.
+///
+/// Every `create_*` path calls this before inserting, and it is no longer the
+/// only thing standing between an attacker and a shared id: since #880 the
+/// `conversation` registry claims the id in the same transaction, so this is the
+/// chokepoint that turns the refusal into a 403 instead of a constraint error.
+/// It queries the registry as well as the three tables because the two answer
+/// slightly different questions — the registry remembers retired ids, and the
+/// three tables cover any row that predates the registry.
+pub async fn conversation_id_taken(conn: &Connection, id: &str) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 WHERE \
+                EXISTS (SELECT 1 FROM conversation WHERE id = ?1) \
+             OR EXISTS (SELECT 1 FROM dm_channel   WHERE id = ?1) \
+             OR EXISTS (SELECT 1 FROM groups       WHERE id = ?1) \
+             OR EXISTS (SELECT 1 FROM channels     WHERE id = ?1) \
+             LIMIT 1",
+            libsql::params![id.to_string()],
         )
         .await?;
     Ok(rows.next().await?.is_some())

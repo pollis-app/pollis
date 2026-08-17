@@ -63,6 +63,7 @@ the invariant that makes it unrepresentable.
 | F4 | **Fragile delivery accounting** | delivery tracked by `sent_at` vs per-device `conversation_watermark` timestamp — clock skew, equal timestamps, coarse acks | timestamp ≠ a reliable cursor (**still open** — the monotonic-seq cursor of I3 is not yet built; the F3 fix bounds retention by that timestamp watermark) |
 | F5 | **Welcome dropped before delivery** | `mls_welcome.delivered` flag + delete paths; no retention floor | a new device can miss its only Welcome |
 | F6 | ~~**Retention ignores absent members**~~ — **FIXED for envelopes** | the envelope floor is the MIN `last_fetched_at` over every current member device (revoked devices excluded #685, devices silent past N months excluded #720), no longer gated by a TTL | F3's TTL was the leak; it is gone. The #720 liveness bound adds a *third* accepted loss (a device dormant past the window) — see I3. Commit/Welcome floors (I4) tracked separately |
+| F8 | **One id naming two conversations** — **registry-guarded (#880)**, not yet unrepresentable | `dm_channel`, `groups` and `channels` are three tables with three separate primary keys, so the same id fits in all three, and `is_member` ORs across all three on one id. #879 added the `conversation_id_taken` chokepoint; #880 added the `conversation` registry, claimed in the same transaction as the row it names, so a second claim cannot commit *through the DS*. A writer that skips the registry is still unconstrained until #948 makes the three tables reference it | a DM named after a victim's group made `is_member(victim_group, attacker)` true — commit injection, GroupInfo/Welcome overwrite, a LiveKit token for their room. Pinned in `pollis-delivery/tests/conversation_namespace.rs` |
 | F7 | **Schema divergence: test vs prod** | two apply paths — test harness uses `POST_BASELINE_MIGRATIONS` on a *fresh* DB; prod uses `db-apply.sh` (version-tracked) on the *long-lived* DB. Version numbers collide with the old lineage | prod missing `000005_account_key_log`, `000006_push_token` while all tests pass |
 
 ## Target invariants & where they're enforced
@@ -181,6 +182,19 @@ the invariant that makes it unrepresentable.
   is enforced. A migration that the test path applies but the prod path skips
   must be impossible.
 
+### I7 — A conversation id names exactly one conversation
+- One namespace, owned by the `conversation` table (migration `000016`, #880):
+  one row per id carrying the one `kind` it names. Every DS create path claims
+  the id in the **same transaction** as the row it names, so the registry's
+  primary key refusing a second claim rolls the creation back whole. The registry
+  is append-only — a claimed id is claimed forever — because the attack is reuse,
+  and with `foreign_keys=OFF` in production a deleted conversation leaves its
+  membership rows behind for the next claimant to inherit.
+- Not yet unrepresentable: nothing stops a writer that skips the registry. #948
+  is the tightening phase, and it is a trigger rather than a foreign key —
+  a bare per-table FK is satisfied by the same parent row for two children, and
+  in any case FK enforcement is off in production.
+
 ## Enforcement layers, summarized
 
 | Invariant | DB constraint/trigger | Rust type | Protocol | Test |
@@ -191,6 +205,7 @@ the invariant that makes it unrepresentable.
 | I4 retain-to-slowest | retention floor (no TTL) | — | GC reads floor | 300-behind catch-up |
 | I5 historical membership | — | — | derive from tree | churn + catch-up |
 | I6 one schema | `schema_migrations` integrity | — | single apply path | test==prod schema check |
+| I7 one id, one conversation | `conversation` PK + `kind` CHECK, claimed in the creating txn (#880); trigger pending (#948) | `ConversationKind` | `conversation_id_taken` → 403 | guard vs registry halves (`conversation_namespace.rs`) |
 
 ## Roadmap (phased)
 
