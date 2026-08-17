@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import * as api from "../../services/api";
@@ -40,7 +40,7 @@ export function useOtherUserProfile(userId: string | null | undefined) {
       if (!userId) {
         return null;
       }
-      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; avatar_url?: string } | null>(
+      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; phone?: string; avatar_url?: string } | null>(
         'get_user_profile',
         { userId },
       );
@@ -168,7 +168,7 @@ export function useSetContactVerified(peerUserId: string | null | undefined) {
 export function useUserProfile() {
   const currentUser = useObserver(() => appStore.currentUser);
 
-  return useQuery({
+  const query = useQuery({
     queryKey: userQueryKeys.profile(currentUser?.id ?? null),
     queryFn: async (): Promise<ServiceUserData> => {
       if (!currentUser) {
@@ -179,14 +179,6 @@ export function useUserProfile() {
         'get_user_profile',
         { userId: currentUser.id },
       );
-
-      // Hydrate the denormalized store avatar so the optimistic local voice
-      // participant (VoiceSessionManager builds its tile from
-      // `store.userAvatarUrl`) shows the user's avatar. Without this it stays
-      // null until an avatar *update*, so your own voice tile renders the
-      // placeholder. Remote tiles are unaffected — they get avatar_url from
-      // the backend voice presence (lookup_avatar_url).
-      appStore.setUserAvatarUrl(profile?.avatar_url ?? null);
 
       return {
         username: profile?.username || currentUser.username || '',
@@ -201,6 +193,31 @@ export function useUserProfile() {
     gcTime: 1000 * 60 * 5,
     refetchOnReconnect: true,
   });
+
+  // Hydrate the denormalized store avatar so the optimistic local voice
+  // participant (VoiceSessionManager builds its tile from
+  // `store.userAvatarUrl`, and it is not a React consumer) shows the user's
+  // avatar. Without it the field stays null until an avatar *update*, so your
+  // own voice tile renders the placeholder. Remote tiles are unaffected — they
+  // get avatar_url from the backend voice presence (lookup_avatar_url).
+  //
+  // An EFFECT, not the `queryFn` (#928). A query function runs on refetch, on
+  // retry and on cache-restore, with no ordering guarantee against render — so
+  // writing observable state from inside it let a background refetch nobody
+  // asked for mutate the store, and let a cache HIT (queryFn never runs) leave
+  // it unhydrated. Keying on the resolved value instead means the store
+  // follows the query's data whatever produced it, and settles at most once
+  // per actual change.
+  const avatarUrl = query.data?.avatar_url ?? null;
+  const hasProfile = query.data !== undefined;
+  useEffect(() => {
+    if (!hasProfile) {
+      return;
+    }
+    appStore.setUserAvatarUrl(avatarUrl);
+  }, [avatarUrl, hasProfile]);
+
+  return query;
 }
 
 export function useUpdateProfile() {

@@ -219,6 +219,17 @@ Four rules, each of which had been broken somewhere and cost real round trips:
   matches every group's channel list; `membership_changed` used to invalidate all of
   it. Where a key puts the id in the middle (`["groups", <id>, "members"]`) and no
   prefix selects the right set, use a `predicate` rather than widening.
+- **A `queryFn` fetches and returns. It does not write to a store (#928.)** React
+  Query runs it on refetch, on retry and on cache-restore, in no guaranteed order
+  against render, and skips it entirely on a cache hit — so a store write inside one
+  is mutated by background refetches nobody asked for, and *missed* exactly when the
+  data was already cached. `useUserProfile` hydrated `appStore.userAvatarUrl` from
+  its `queryFn` (the local voice tile reads that field, and `VoiceSessionManager` is
+  not a React consumer); it is now a `useEffect` keyed on the resolved value.
+  Denormalising query data into a store at all is a last resort for non-React
+  readers — prefer reading the query. Guarded by
+  `frontend/tests/query-store-boundary.test.ts`, which scans every `queryFn` in
+  `hooks/queries/`.
 
 Counts are asserted, not assumed: `e2e/ipc-efficiency.spec.ts` reads the per-command
 tally the Tauri mock keeps (`window.__tauriInvokeCounts`) and pins how many calls each
