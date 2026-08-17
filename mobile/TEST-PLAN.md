@@ -89,6 +89,19 @@ Wire `dm/info` actions; handle the realtime events currently decoded-but-ignored
 self-sign-out on the inbox connection; purge stale "not implemented" comments;
 add iOS keystore on-device verification to the checklist.
 
+**Landed since lock (inbox-parity set):** `dm/info` actions, the
+decoded-but-ignored realtime events, and `device_revoked` self-sign-out are all
+wired. The inbox realtime now also holds every group/DM room (ref-counted with
+the open chat's subscription) to drive real unread counts (list-row dots +
+tab-bar badges, cleared on open), batched last-message previews + timestamps on
+the Groups/Direct tabs (`read_last_messages`, one call per list), DM-request
+Block-beside-Accept (desktop's decline path), search hits carrying their real
+conversation kind, role-then-alphabetical member ordering (presence ordering
+awaits a presence source), a `conversation/info` screen (roster + shared-media
+grid, capped 30), and the real core version on the initializing screen. Flows
+touching the Groups/Direct rows should assert previews/unread via
+`unread-<id>` / `badge-<tab>` testIDs.
+
 ## Explicit non-goals (and why)
 
 - **Audio / video / screenshare / voice UI** — product decision: mobile has no

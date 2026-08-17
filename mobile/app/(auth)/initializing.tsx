@@ -4,7 +4,9 @@ import Svg, { Rect } from "react-native-svg";
 import { useRouter } from "expo-router";
 import { Screen, Crumb, Card } from "../../components/ui";
 import { palette, semantic, type as ty } from "../../theme/tokens";
+import { useQuery } from "@tanstack/react-query";
 import { useInitializeIdentity } from "../../hooks/queries/useAuth";
+import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -42,6 +44,14 @@ function Initializing() {
   const currentUser = appStore.currentUser;
   const initIdentity = useInitializeIdentity();
   const [error, setError] = useState<string | null>(null);
+
+  // Real core version from the bridge's `version` command (pollis-core's
+  // CARGO_PKG_VERSION) — replaces the design handoff's hardcoded string.
+  const { data: coreVersion } = useQuery({
+    queryKey: ["core-version"],
+    queryFn: () => invoke<string>("version"),
+    staleTime: Infinity,
+  });
 
   const ranRef = useState({ ran: false })[0];
   const navTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -250,7 +260,7 @@ function Initializing() {
           paddingVertical: 14,
         }}
       >
-        <Text style={ty.label}>v3.1.2 · NODE 0x4A2C</Text>
+        <Text style={ty.label}>{coreVersion ? `v${coreVersion}` : ""}</Text>
         <Pressable
           onPress={() => router.replace("/(tabs)/groups")}
           testID="btn-continue"
