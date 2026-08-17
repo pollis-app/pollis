@@ -29,6 +29,7 @@ import {
 } from "../../hooks/queries";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
+import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -192,6 +193,26 @@ function TextChat(props: ChatViewProps = {}) {
   // Reply-count chips for thread roots (#831).
   const { data: threadSummaries } = useThreadSummaries(conversationId);
 
+  // Mention candidates come from the visible roster only (#886); the
+  // resolution set for rendering adds `all` and the reader's own name so
+  // self-mentions highlight.
+  const mentionCandidates = useMentionCandidates(
+    kind,
+    conversationId,
+    groupId ?? null,
+  );
+  const selfName = currentUser?.username?.toLowerCase() ?? null;
+  const mentionNames = useMemo(() => {
+    const set = new Set<string>(["all"]);
+    for (const c of mentionCandidates) {
+      set.add(c.username.toLowerCase());
+    }
+    if (selfName) {
+      set.add(selfName);
+    }
+    return set;
+  }, [mentionCandidates, selfName]);
+
   // Inverted-list items: build chronologically (day separator before the
   // first message of each day), then reverse so index 0 is the newest row.
   // Thread replies stay out of the main timeline — they render only in the
@@ -303,6 +324,8 @@ function TextChat(props: ChatViewProps = {}) {
           showReceipt={mine && isDm}
           threadCount={threadSummaries?.get(m.id)?.reply_count ?? 0}
           onOpenThread={() => openThread(m.id)}
+          mentionNames={mentionNames}
+          selfName={selfName}
           onToggleReaction={(emoji, reacted) =>
             toggleReaction.mutate({
               messageId: m.id,
@@ -333,6 +356,8 @@ function TextChat(props: ChatViewProps = {}) {
       isDm,
       threadSummaries,
       openThread,
+      mentionNames,
+      selfName,
     ],
   );
 
@@ -510,6 +535,7 @@ function TextChat(props: ChatViewProps = {}) {
           onSend={onSend}
           sendPending={sendMessage.isPending}
           editable={!!kind && !!conversationId}
+          mentionCandidates={mentionCandidates}
         />
       )}
 
