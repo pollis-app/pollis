@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Privacy Policy</title>
+  <meta name="description"
+    content="What Pollis collects, what it cannot see by design, how long anything is kept, and what happens when you delete your account." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Privacy Policy" />
+  <meta property="og:description"
+    content="What Pollis collects, what it cannot see by design, and what deletion actually deletes." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="doc-page.css" />
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="doc-main reading-surface">
+      <a href="index.html" class="doc-back">&larr; Back to Pollis</a>
+
+      <div class="doc-header">
+        <h1 class="doc-title">Privacy Policy</h1>
+        <p class="doc-subtitle">
+          What Pollis collects, what it cannot see by design, and what happens when you leave.
+          Last updated 17 August 2026.
+        </p>
+      </div>
+
+      <div class="doc-explainer">
+        <strong>Message content is end-to-end encrypted and the operator cannot read it.</strong> That is a
+        cryptographic property of the MLS protocol (RFC 9420), not a policy promise — the servers store and
+        forward only ciphertext, and the keys never leave your devices. What follows is the honest account of
+        everything else: the metadata that <em>is</em> visible, why, and for how long.
+      </div>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Who runs Pollis</h2>
+        <p>
+          Pollis is operated by <strong>Daniel Kral</strong>, an individual developer — not a company. It is an
+          open preview of a proof-of-concept service. For anything in this policy, contact
+          <a href="mailto:dankral01@gmail.com">dankral01@gmail.com</a>.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What is collected</h2>
+        <p>
+          Pollis collects the minimum an account-based messenger needs to function. All of it is used for app
+          functionality only — never for advertising, profiling, or tracking.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-table">
+            <thead>
+              <tr><th>Data</th><th>Why</th><th>Visible to the operator?</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Email address</td>
+                <td class="doc-td-dim">The sole sign-in identifier. Signing in emails you a six-digit one-time
+                  code; that email is delivered by Resend, which sees the address and the code in plain text for
+                  the duration of the send.</td>
+                <td class="doc-td-dim">Yes, in the clear.</td>
+              </tr>
+              <tr>
+                <td>Username and optional display name</td>
+                <td class="doc-td-dim">Your account handle (directory-searchable, so people can find you) and an
+                  optional profile name.</td>
+                <td class="doc-td-dim">Yes, in the clear.</td>
+              </tr>
+              <tr>
+                <td>Account and device identifiers</td>
+                <td class="doc-td-dim">App-generated IDs plus an optional device name, so you can see and revoke
+                  your own devices.</td>
+                <td class="doc-td-dim">Yes, in the clear.</td>
+              </tr>
+              <tr>
+                <td>Membership and activity metadata</td>
+                <td class="doc-td-dim">Which groups and DMs your account is in, blocks, and conversation activity
+                  timestamps — the routing data delivery requires.</td>
+                <td class="doc-td-dim">Yes, in the clear. Since sealed sender landed, stored message rows no
+                  longer record who sent what.</td>
+              </tr>
+              <tr>
+                <td>Push token</td>
+                <td class="doc-td-dim">So a content-free notification can wake your phone. See the push section
+                  below.</td>
+                <td class="doc-td-dim">Yes.</td>
+              </tr>
+              <tr>
+                <td>Messages, attachments, reactions</td>
+                <td class="doc-td-dim">Your actual conversations.</td>
+                <td class="doc-td-dim"><strong>Ciphertext only.</strong> Encrypted on your device under MLS
+                  before anything leaves it.</td>
+              </tr>
+              <tr>
+                <td>Avatars and group icons</td>
+                <td class="doc-td-dim">Profile and group images.</td>
+                <td class="doc-td-dim"><strong>Yes — these are the exception.</strong> They are not encrypted and
+                  are public to anyone with the URL. Don't put anything sensitive in an avatar.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Your IP address is <strong>not stored</strong> anywhere. It is read in memory for rate-limiting and
+          discarded; it does not survive a server restart. The network edge (Cloudflare) necessarily sees it in
+          transit, as any edge does.
+        </p>
+        <p>
+          Your device PIN never leaves your device — it locks the local keystore and is not sent to any server.
+          The local message database on your device is encrypted at rest.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">What is not collected</h2>
+        <p>
+          No location, no contacts, no calendar, no photo-library scanning, no health or financial data, no
+          browsing or search history, no advertising identifiers. <strong>There is no analytics, telemetry,
+          crash-reporting, or advertising SDK in the apps</strong> — that is verifiable in the
+          <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">source
+          code</a>, not just stated here. Nothing is sold, and nothing is shared with third parties for
+          advertising or marketing. No tracking, in Apple's sense of the word or anyone else's.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Push notifications are content-free</h2>
+        <p>
+          A push notification carries a fixed string ("New message"), the conversation ID, and whether it is a
+          channel or a DM. <strong>No message content, no sender, no preview.</strong> Pushes are routed through
+          Expo's push service to Apple (APNs) or Google (FCM); those providers see the token and that your device
+          had activity in some conversation at some time, never what was said.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Who else touches the data</h2>
+        <p>
+          A small set of infrastructure providers process data on Pollis's behalf — the database host (Turso),
+          the edge and storage host (Cloudflare), the login-email sender (Resend), the push relay (Expo, then
+          APNs/FCM), and a leased server for realtime media. None of them can read message content. The
+          <a href="subprocessors.html">subprocessors page</a> lists every one of them, exactly what each can see,
+          and where it runs — including the uncomfortable rows.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">How long things are kept</h2>
+        <p>
+          Encrypted message envelopes are kept on the server <strong>until every current member device has
+          fetched them</strong>, then garbage-collected — retention is a delivery watermark, not a time-to-live,
+          because dropping undelivered mail is worse than storing it. One bound keeps that from meaning
+          "forever": a device that has not checked in for <strong>12 months</strong> stops holding messages back,
+          and starts holding them again the moment it reappears. Messages you delete are removed from the server
+          immediately. Account and directory metadata lives for the life of the account. Call signalling is not
+          written to any database.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section" id="deletion">
+        <h2 class="doc-section-title">Your data, your rights</h2>
+        <p>
+          <strong>See it:</strong> everything the server holds about you in the clear — email, username, display
+          name, devices, memberships — is visible and editable in the app's settings.
+        </p>
+        <p>
+          <strong>Delete it:</strong> account deletion is built into the app (Settings → Security → Delete
+          account). It rotates the encryption keys of every conversation you were in so your old key material is
+          useless going forward, purges your account row, devices, key packages, memberships, reactions, and
+          pending envelopes from the server, and wipes the local database and keystore on your device. You can
+          also request deletion by emailing <a href="mailto:dankral01@gmail.com">dankral01@gmail.com</a> from
+          your account's address.
+        </p>
+
+        <div class="doc-limit">
+          <span class="doc-limit-title">What deletion cannot reach</span>
+          <p>
+            <strong>Messages already delivered to other people</strong> live in their devices' local encrypted
+            databases. There is no mechanism to reach into someone else's device, and no honest messenger can
+            claim otherwise.
+          </p>
+          <p>
+            <strong>The public transparency log is append-only by design.</strong> It records your account's key
+            history and group-membership change fingerprints — identifiers and timestamps, never content — so
+            that key-substitution attacks are detectable. Append-only means entries are never rewritten,
+            including after account deletion. That trade-off is deliberate and documented on the
+            <a href="transparency.html">transparency page</a>.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Children</h2>
+        <p>
+          Pollis is not directed at children under 13, and you may not create an account if you are under the
+          minimum age required for your jurisdiction.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────────────────────────────────────── -->
+      <section class="doc-section">
+        <h2 class="doc-section-title">Changes</h2>
+        <p>
+          If this policy changes, the new version is posted at this address with an updated date, and the edit
+          history is public in the
+          <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">repository</a>.
+        </p>
+      </section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <a href="terms.html" class="footer-link">Terms</a>
+        <a href="faq.html" class="footer-link">FAQ</a>
+        <a href="transparency.html" class="footer-link">Transparency</a>
+        <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="device-security.html" class="footer-link">Lost device</a>
+        <a href="assurance.html" class="footer-link">Assurance</a>
+        <a href="learn.html" class="footer-link">Learn</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>
