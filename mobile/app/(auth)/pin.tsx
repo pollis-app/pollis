@@ -31,6 +31,12 @@ function AuthPIN() {
   useEffect(() => {
     unlockState.mutate(undefined, {
       onSuccess: (snapshot) => {
+        // Keep the store's lock flag honest for the auto-lock engine
+        // (lib/autolock.tsx): landing here needing an unlock means locked,
+        // whether we arrived via auto-lock or a cold start.
+        if (snapshot.pin_set && !snapshot.is_unlocked) {
+          appStore.setLocked(true);
+        }
         setStage(snapshot.pin_set ? "unlock" : "create-first");
       },
       onError: () => {
@@ -74,7 +80,10 @@ function AuthPIN() {
       unlockMutation.mutate(
         { userId: currentUser.id, pin: entered },
         {
-          onSuccess: () => router.replace("/(auth)/initializing"),
+          onSuccess: () => {
+            appStore.setLocked(false);
+            router.replace("/(auth)/initializing");
+          },
           onError: (e) => {
             setError((e as Error).message || "Invalid PIN.");
             setPin("");
@@ -101,6 +110,7 @@ function AuthPIN() {
         { newPin: entered },
         {
           onSuccess: () => {
+            appStore.setLocked(false);
             // First-device signup has a one-time recovery key stashed in
             // the store by `verify_otp`. Show it before initializing so
             // the user can save it before we drop it from memory.

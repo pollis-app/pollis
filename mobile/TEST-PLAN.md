@@ -78,7 +78,10 @@ capturing **iPhone + iPad + Android** screenshots:
 The `security` flow additionally covers the in-app account-deletion entry
 (`row-delete-account` → typed-DELETE confirm screen, `btn-delete-account`
 disabled until armed) — assert the disabled state only; never run the actual
-deletion against a shared seed account.
+deletion against a shared seed account. It also covers auto-lock (#899):
+select a window via `chip-autolock-1`, tap `row-lock-now`, assert the PIN
+unlock screen appears, unlock with the fixed PIN, and assert the app restores
+to Security.
 
 Media flows are **excluded by decision**.
 
