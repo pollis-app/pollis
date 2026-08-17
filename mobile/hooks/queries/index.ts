@@ -18,3 +18,4 @@ export * from "./useBlocks";
 export * from "./useReactions";
 export * from "./useEmoji";
 export * from "./useReceipts";
+export * from "./useBookmarks";

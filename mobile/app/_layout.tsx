@@ -137,6 +137,11 @@ export default function RootLayout() {
                 name="self/change-email"
                 options={{ animation: "slide_from_bottom" }}
               />
+              <Stack.Screen
+                name="self/saved"
+                options={{ animation: "slide_from_bottom" }}
+              />
+              <Stack.Screen name="m/[...permalink]" />
             </Stack>
           </ThemeProvider>
         </QueryClientProvider>
