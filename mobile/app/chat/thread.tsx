@@ -15,6 +15,7 @@ import {
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
+import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -53,6 +54,27 @@ function ThreadScreen() {
   const { data: replies = [], isLoading } = useThreadMessages(threadId);
   const sendMessage = useSendMessage(conversationId, kind);
 
+  // Mentions (#886) — same roster-only pool as the parent conversation.
+  // Channels resolve the group from the store (set when the channel opened).
+  const mentionGroupId =
+    kind === "channel" ? appStore.selectedGroupId ?? null : null;
+  const mentionCandidates = useMentionCandidates(
+    kind,
+    conversationId,
+    mentionGroupId,
+  );
+  const selfName = currentUser?.username?.toLowerCase() ?? null;
+  const mentionNames = useMemo(() => {
+    const set = new Set<string>(["all"]);
+    for (const c of mentionCandidates) {
+      set.add(c.username.toLowerCase());
+    }
+    if (selfName) {
+      set.add(selfName);
+    }
+    return set;
+  }, [mentionCandidates, selfName]);
+
   const onSend = () => {
     const text = draft.trim();
     if (!text || !threadId || sendMessage.isPending) {
@@ -88,6 +110,8 @@ function ThreadScreen() {
           text={m.content}
           pending={m.pending}
           edited={!!m.edited_at}
+          mentionNames={mentionNames}
+          selfName={selfName}
           onPressAvatar={
             mine
               ? undefined
@@ -118,6 +142,8 @@ function ThreadScreen() {
           time={timeLabel(root.created_at)}
           text={root.content}
           edited={!!root.edited_at}
+          mentionNames={mentionNames}
+          selfName={selfName}
         />
       ) : null}
       <View
@@ -226,6 +252,7 @@ function ThreadScreen() {
         onSend={onSend}
         sendPending={sendMessage.isPending}
         editable={!!threadId && !!conversationId && !!kind}
+        mentionCandidates={mentionCandidates}
       />
     </Screen>
   );

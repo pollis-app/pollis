@@ -1,7 +1,7 @@
 import { View, Text, Pressable } from "react-native";
 import { Avatar } from "../ui";
 import { semantic, type as ty } from "../../theme/tokens";
-import { EmojiText } from "../emoji/EmojiText";
+import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator } from "./ReceiptIndicator";
 import type { Reaction } from "../../hooks/queries/useReactions";
@@ -23,6 +23,8 @@ export function MessageRow({
   showReceipt = false,
   threadCount = 0,
   onOpenThread,
+  mentionNames,
+  selfName,
   onPressAvatar,
   onLongPress,
   testID,
@@ -43,6 +45,8 @@ export function MessageRow({
   showReceipt?: boolean;
   threadCount?: number;
   onOpenThread?: () => void;
+  mentionNames?: ReadonlySet<string>;
+  selfName?: string | null;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
   testID?: string;
@@ -101,7 +105,11 @@ export function MessageRow({
               marginTop: 2,
             }}
           >
-            <EmojiText text={text} />
+            <MessageBodyInline
+              text={text}
+              mentionNames={mentionNames}
+              selfName={selfName}
+            />
             {edited ? (
               <Text
                 style={{

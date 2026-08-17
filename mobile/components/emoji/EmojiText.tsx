@@ -3,6 +3,32 @@ import { splitEmojiSegments } from "./emojiTokens";
 import { CustomEmojiImage } from "./CustomEmojiImage";
 
 /**
+ * Inline fragments for a slice of text with `<:name:hash>` custom-emoji
+ * tokens rendered as images. Returned as an array so callers composing
+ * larger bodies (mention highlighting, etc.) can nest them inside their own
+ * <Text>.
+ */
+export function renderEmojiSegments(
+  text: string,
+  keyPrefix: string,
+  emojiSize: number,
+): React.ReactNode[] {
+  const segments = splitEmojiSegments(text);
+  return segments.map((seg, i) =>
+    seg.kind === "text" ? (
+      <Text key={`${keyPrefix}-${i}`}>{seg.text}</Text>
+    ) : (
+      <CustomEmojiImage
+        key={`${keyPrefix}-${i}`}
+        shortcode={seg.shortcode}
+        contentHash={seg.contentHash}
+        size={emojiSize}
+      />
+    ),
+  );
+}
+
+/**
  * Message text with `<:name:hash>` custom-emoji tokens rendered as inline
  * images (port of desktop's EmojiText.tsx). Plain text renders through a
  * single fast path.
@@ -28,18 +54,7 @@ export function EmojiText({
   }
   return (
     <Text style={style} numberOfLines={numberOfLines}>
-      {segments.map((seg, i) =>
-        seg.kind === "text" ? (
-          <Text key={i}>{seg.text}</Text>
-        ) : (
-          <CustomEmojiImage
-            key={i}
-            shortcode={seg.shortcode}
-            contentHash={seg.contentHash}
-            size={emojiSize}
-          />
-        ),
-      )}
+      {renderEmojiSegments(text, "seg", emojiSize)}
     </Text>
   );
 }
