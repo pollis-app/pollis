@@ -1,7 +1,7 @@
 # Pollis Security Whitepaper
 
 **Audience:** independent security auditors evaluating the cryptographic protocol design and surrounding flows.
-**Scope:** the desktop application in this repository, its remote services (Turso, Cloudflare R2, LiveKit, Resend), and the trust boundaries between them. Web-app concerns (XSS, CSP, SOP) are out of scope; this document covers cryptographic protocol design, key custody, identity, group membership, and the data-flow paths that move plaintext or key material across trust boundaries.
+**Scope:** the desktop application in this repository, its Delivery Service (`pollis-delivery`), its remote services (Turso, Cloudflare R2, LiveKit, Resend), and the trust boundaries between them. Web-app concerns (XSS, CSP, SOP) are out of scope; this document covers cryptographic protocol design, key custody, identity, group membership, and the data-flow paths that move plaintext or key material across trust boundaries.
 **Status:** authoritative. `ARCHITECTURE.md` at the repo root and the wiki under `.codesight/wiki/` are also authoritative for implementation specifics. Where this document disagrees with those sources on cryptographic claims, this document wins.
 
 ---
@@ -17,6 +17,7 @@
 | The signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the version the user installed | Cloudflare R2 — object storage for attachments |
 | The local SQLCipher database file | LiveKit — SFU and signalling for voice and realtime events |
 | The user-held Secret Key (printed once, expected to be stored offline) | Resend — outbound email transit for OTPs |
+| — | The Delivery Service (`pollis-delivery`) — the sole writer to the remote database, and the broker that now holds the Resend, R2 and LiveKit credentials on the client's behalf (§4, §9.3, §10.1) |
 | The user-held PIN (in the user's head) | Anyone with read access to a copy of `accounts.json` or the keystore who does not also have the PIN |
 
 The application is built and shipped by the operators of the Pollis services. The trust delegation is the same as Signal Desktop or WhatsApp Desktop: the binary is trusted at install time, after which the cryptographic protocol is what defends against the *server* side of the same operator. Binary integrity now rests on two layers. The first is platform code-signing (Apple Developer ID + notarization on macOS, Azure Trusted Signing on Windows — see `.codesight/wiki/windows-signing.md`); the auto-update path verifies the same OS-native signature on every downloaded installer before launch (Gatekeeper on macOS, Authenticode on Windows), so an attacker who tampers with a release artifact in transit cannot get the running binary to install it.
@@ -201,15 +202,16 @@ start finishes the job.
 
 ## 4. Authentication Flow (OTP)
 
-Source: `pollis-core/src/commands/auth.rs::request_otp`, `verify_otp`.
+Source: `pollis-delivery/src/otp.rs` (the OTP machinery) and `pollis-core/src/commands/auth.rs::request_otp`, `verify_otp` (thin clients of it).
 
 The OTP factor exists only to prove control of an email address. It is *not* the device unlock factor (that's the PIN) and it is *not* the account-recovery factor (that's the Secret Key).
 
-- 6-digit numeric, generated via `rand::thread_rng` with `gen_range(0..1_000_000u32)` and zero-padded.
-- Stored in-memory on the Pollis Rust process as `SHA-256(otp)` (not the plaintext) inside `state.otp_store: HashMap<email, OtpEntry>`. TTL: 10 minutes. Entry is removed on first successful verification (single-shot).
-- Email transit: HTTPS POST to Resend's `api.resend.com`, with the bearer `RESEND_API_KEY` baked into the binary's environment.
-- Comparison on `verify_otp` uses string equality on hex-encoded SHA-256 digests, after trimming user input. Constant-time comparison is not used at this site; the secret being compared is a 6-digit code with 20-bit entropy and is wiped on first successful match, so timing analysis is not a meaningful attack surface, but a future hardening pass could swap to `subtle::ConstantTimeEq`.
-- **No application-layer rate limit on `request_otp`.** Rate limiting at email send time is the responsibility of Resend (provider-level) and DNS-level reputation. This is a known gap relative to Signal's own SMS quotas; mitigations are noted in §13.
+- Generated, stored, verified and emailed **server-side, by the Delivery Service** (`pollis-delivery/src/otp.rs`). The client calls `POST /v1/auth/request-otp` and `POST /v1/auth/verify-otp` (`pollis-core/src/commands/auth.rs::request_otp`, `verify_otp`) and never handles a code it did not receive from the user.
+- 6-digit numeric, drawn from `OsRng` with `gen_range(0..1_000_000u32)` and zero-padded.
+- Held in DS memory as a **salted** hash — `SHA-256(salt ‖ code)` with a fresh 16-byte `OsRng` salt — never the plaintext. TTL: 10 minutes, single-shot: deleted on first successful verification.
+- Email transit: HTTPS POST from the **DS** to Resend's `api.resend.com`, with the bearer `RESEND_API_KEY` supplied to the DS by its environment. **The client does not hold a Resend key.** It once did; that moved off-client with the rest of the credentials (§9.3, §10.1), so extracting a Pollis binary yields no ability to send mail as Pollis.
+- Comparison is **constant-time** (`pollis-delivery/src/otp.rs::constant_time_eq`) against the stored hash. Earlier versions of this document noted that constant-time comparison was *not* used and argued the 20-bit secret made it immaterial; the server-side rewrite took the hardening anyway, so the caveat is obsolete rather than merely tolerable.
+- **Rate limiting is now application-layer, at the DS.** `OtpConfig` enforces a resend throttle (30 s between sends for one address, `PrepareOutcome::Throttled`) and an attempt cap (5 wrong codes, after which the entry is locked out and deleted) — `pollis-delivery/src/otp.rs`. Earlier versions of this document said there was no application-layer limit and deferred entirely to Resend and DNS reputation; that was true of the client-side implementation and is no longer true of the DS. A per-client-IP window over the same endpoints (`pollis-delivery/src/ratelimit.rs`) bounds the cross-address case; provider-level limits remain a third layer rather than the only one. See §11.1.
 
 OTP is consumed in two scenarios:
 1. First-time signup (user has no `users` row). `verify_otp` creates the row, calls `generate_account_identity` to mint the account-identity ML-DSA-44 keypair and a Secret Key, and seeds `AppState.unlock` with the freshly-generated material. The frontend then transitions to the PIN-create screen, which is what causes that material to be persisted to disk (as ciphertext under the PIN-derived KEK).
@@ -420,7 +422,7 @@ Source: `pollis-core/src/db/local.rs`.
 
 ### 7.2 What's deliberately not local
 
-User profile rows, group/channel metadata, membership, blocks: those live on Turso and are fetched at read time. The argument for this separation is partial-trust: a stolen device with the SQLCipher key cannot enumerate the user's social graph without also being authenticated to Turso (via `TURSO_TOKEN`, baked into the binary — see §13 for trust caveats).
+User profile rows, group/channel metadata, membership, blocks: those live on Turso and are fetched at read time. The argument for this separation is partial-trust: a stolen device with the SQLCipher key cannot enumerate the user's social graph without also being authenticated to Turso (via the read-only `TURSO_TOKEN`, baked into the binary — see §13 for trust caveats).
 
 ---
 
@@ -429,7 +431,7 @@ User profile rows, group/channel metadata, membership, blocks: those live on Tur
 Source: `pollis-core/src/db/remote.rs`.
 
 - **Library:** `libsql` 0.6 with the `remote` feature, which uses Turso's **Hrana over HTTP/2** (the libSQL native protocol). The connection URL scheme is `libsql://...`. TLS is mandatory; `libsql` 0.6's `remote` feature uses `rustls` under the hood with the system trust store.
-- **Authentication:** a long-lived bearer `TURSO_TOKEN` baked into the desktop binary's environment (`pollis-core/src/config.rs::Config::load`). Per-user authentication is **not** layered on top of this — every Pollis client signs into the same Turso database with the same token. Row-level security is enforced at the *application* layer, in Rust commands, not by Turso.
+- **Authentication:** a **read-only** bearer `TURSO_TOKEN` baked into the desktop binary's environment (`pollis-core/src/config.rs::Config::from_env`). It is read-only because the client has no write path to Turso at all — every write goes through the Delivery Service, which holds the writing credential. Since #393 the baked token is additionally only a *fallback*: on unlock the client asks the DS to mint a **short-TTL read-only** token and moves `remote_db` onto it, keeping the baked one only if the DS cannot be reached (`pollis-core/src/commands/turso_token.rs`). Per-user authentication is **not** layered on top of either token — every Pollis client reads the same Turso database with the same *class* of credential, and the token is whole-DB rather than row-scoped. Row-level security is enforced at the *application* layer, in Rust commands and in the DS, not by Turso.
 - **Resilience:** `RemoteDb::with_retry` handles transient Hrana stream eviction (libsql idle-stream GC) by reconnecting and retrying once. Non-transient errors surface.
 
 ### 8.1 Threat consequence of a single shared token
@@ -437,14 +439,16 @@ Source: `pollis-core/src/db/remote.rs`.
 A reverse-engineer who extracts `TURSO_TOKEN` from a built binary can open a libSQL connection equivalent to any Pollis client. They can:
 
 - Read every public-metadata table (which is the same threat surface as a server-side database compromise).
-- Insert rows into tables not protected by application-level checks. The application enforces:
+- **Not** insert, update or delete anything: the token is read-only, and every write goes through the Delivery Service, which re-derives the actor from a device signature. (This bullet previously described inserting into tables "not protected by application-level checks".) The application-layer rules the DS enforces are:
   - Per-actor permission on group/channel CRUD inside the backend commands (the actor's `user_id` is supplied by the frontend and trusted because the frontend got it from the unlocked `account_id_key`).
   - Atomic claim semantics on `mls_key_package`.
   - `device_cert` cryptographic verification *on the read path*.
 - They cannot decrypt any message — those are MLS-encrypted.
 - They cannot forge a device into a user's MLS group without that device's cert verifying against the user's `account_id_pub`. The cross-signing check is the floor.
 
-The general shape — a desktop client carrying a credential to talk to backing services, with the cryptographic protocol (not the token) acting as the defence against server compromise — is similar to Signal Desktop, but with a meaningful difference: Signal Desktop holds a *per-account* auth token issued at registration, while Pollis ships a *single shared* `TURSO_TOKEN` baked into every binary. The shared-token simplification compared to per-account tokens is a known cost; mitigations are in §13.
+The general shape — a desktop client carrying a credential to talk to backing services, with the cryptographic protocol (not the token) acting as the defence against server compromise — is similar to Signal Desktop, but with a meaningful difference: Signal Desktop holds a *per-account* auth token issued at registration, while Pollis ships a *single shared* read-only `TURSO_TOKEN` in every binary. The shared-token simplification compared to per-account tokens is a known cost; mitigations are in §13.
+
+What that extracted token is **not** is a set of keys to the backing services. It reads Turso and nothing else: it cannot write a row, send an email, read or write an R2 object, or mint a LiveKit token, because the client no longer carries the credentials for any of those (§4, §9.3, §10.1). Every one of those capabilities sits behind the Delivery Service, which re-derives the caller's identity from a device signature rather than trusting the request. Earlier versions of this document described a client that held all four credentials and a `TURSO_TOKEN` that was the smallest of the problems; that is the architecture as it was, not as it ships.
 
 ---
 
@@ -467,7 +471,9 @@ This is the same shape as MEGA's "Convergent Encrypted" layer (without its block
 
 ### 9.3 R2 transport
 
-R2 is reached over HTTPS with **AWS SigV4** (`sigv4_headers`): canonical request → string-to-sign → date-region-service-derived signing key (HMAC-SHA256) → signature in the `Authorization` header. The `R2_ACCESS_KEY_ID` and `R2_SECRET_KEY` are baked into the binary, like `TURSO_TOKEN`. Same shared-credential trust model (§8.1).
+**The client holds no R2 credentials.** It asks the Delivery Service for a short-lived **presigned URL** (`POST /v1/r2/presign`, via `pollis-core/src/commands/r2.rs::presign_r2`) and then does a plain HTTPS `PUT`/`GET`/`DELETE` against that URL. The SigV4 signing — canonical request → string-to-sign → date-region-service-derived signing key (HMAC-SHA256) → signature — happens **in the DS**, which is where `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` live (`pollis-delivery/src/broker.rs`). Only `R2_S3_ENDPOINT` and `R2_PUBLIC_URL` — endpoint URLs, not secrets — are compiled into the client (`pollis-core/src/config.rs`).
+
+This is a real reduction, not a relocation: a presigned URL authorises **one operation on one key for a short window**, so extracting a Pollis binary no longer yields the ability to enumerate, overwrite or delete the bucket. For `emoji/…` uploads the DS additionally signs `content-length` into the URL, so R2 itself rejects a body of any other size — a cap the client merely honoured was not a cap (#848). Earlier versions of this document described the R2 keys as baked into the binary under the same shared-credential trust model as `TURSO_TOKEN`; that stopped being true at the #506 secrets-broker cutover, which §1 already recorded and these sections did not.
 
 The `upload_media` command reads files from disk by path inside `pollis-core` (in the Tauri host process), rather than marshalling bytes across the `invoke` IPC boundary, so arbitrary-size attachments do not hit IPC framing limits.
 
@@ -483,10 +489,11 @@ Source: `pollis-core/src/commands/livekit/`, `voice/`, `realtime.rs`.
 
 ### 10.1 Authentication
 
-LiveKit uses room-scoped JWT tokens (`make_token`, `make_admin_token`):
+LiveKit uses room-scoped JWT tokens, **minted by the Delivery Service**:
 
 - HS256, 1-hour validity for participant tokens, 5-minute for admin tokens used by RoomService.
-- The signing secret (`LIVEKIT_API_SECRET`) is baked into the desktop binary. Same caveat as §8.1: any client can mint any token. Authorisation to join a particular room is therefore enforced at the *Pollis application* layer (`get_livekit_token` is only called for rooms the user has demonstrated membership of), not by LiveKit.
+- **The client holds no LiveKit credential.** `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` are DS environment (`pollis-delivery/src/broker.rs`); only `LIVEKIT_URL` is compiled into the client. The on-device `livekit_jwt` module that once held the secret has been **deleted**, and the client now calls `POST /v1/livekit/token` (`pollis-core/src/commands/mls/ds_client.rs::ds_livekit_token`).
+- This closes the caveat this section used to carry. It is no longer true that "any client can mint any token": the token's `user_id` and `device_id` are derived **server-side from the verified request signature**, so a client cannot mint a token as another user or device, and a reverse-engineer with the binary cannot mint one at all. Room authorisation is still re-derived by the DS rather than by LiveKit, which remains the enforcement point for *which* room a caller may join.
 
 ### 10.2 Voice frame-level E2EE
 
@@ -526,11 +533,13 @@ LiveKit data packets carry application-level events: `new_message` (a wake-up; t
 
 ### 11.1 OTP request rate limiting
 
-The Pollis Rust process does not throttle `request_otp`. Throttling lives at:
-- Resend (per-domain reputation, per-API-key limits).
-- The application token: a single shared `RESEND_API_KEY` that any client can use through the path described above.
+Throttling is enforced by the Delivery Service, at two independent scopes:
 
-This is a known gap. A future hardening pass could add an in-process token bucket keyed by email address; doing so requires careful UX on legitimate reattempts because the app is local-first.
+- **Per email address** (`pollis-delivery/src/otp.rs`): a 30-second resend throttle, and a 5-attempt cap on wrong codes after which the entry is locked out and deleted.
+- **Per client IP** (`pollis-delivery/src/ratelimit.rs`): fixed windows over the unauthenticated `request-otp` / `verify-otp` endpoints, keyed on `CF-Connecting-IP`. The per-email limit alone bounds abuse of *one* address; it does nothing about a client spraying requests across thousands of addresses to email-bomb arbitrary mailboxes or burn Resend quota, which is what this second scope covers.
+- Resend's own per-domain reputation and per-key limits sit underneath both, as a third layer rather than the only one.
+
+This section previously described the absence of any application-layer throttle as a known gap. That gap closed when the OTP flow moved server-side: the client had no durable, shared place to keep a counter, which is precisely why it could not enforce one.
 
 ### 11.2 PIN attempt rate limiting
 
@@ -590,13 +599,14 @@ The audit-relevant property is: an attacker who compromises only the user's emai
 | DB encryption key (SQLCipher) | 32 random bytes | Device keystore (`db_key_wrapped_{uid}`, AEAD under PIN-derived KEK, §3.5); `AppState.unlock` | Anywhere unwrapped on disk |
 | PIN | 4 ASCII digits | User's head | Stored anywhere on disk or wire |
 | KEK (PIN-derived) | Argon2id → 32 B | Ephemeral, derived from PIN at unwrap time | Stored anywhere |
-| OTP | 6-digit numeric | In-memory on Pollis Rust process as SHA-256 hash, 10-min TTL | Stored on disk |
+| OTP | 6-digit numeric | In-memory **on the Delivery Service** as a salted hash, 10-min TTL, attempt-capped | Stored on disk; held by the client |
 | Device enrollment ephemeral X25519 private | X25519 (32 B) | `AppState.enrollment_ephemeral_keys` (in-memory) | Disk, server, anywhere persistent |
 | Attachment AEAD key | HKDF-SHA256 over content-hash → 32 B | Derived on-demand from content-hash | Persisted; transmitted to R2 |
-| `TURSO_TOKEN` | bearer | Baked into desktop binary; not user-scoped | — |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_KEY` | AWS SigV4 creds | Baked into desktop binary | — |
-| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | JWT signing key | Baked into desktop binary | — |
-| `RESEND_API_KEY` | bearer | Baked into desktop binary | — |
+| `TURSO_TOKEN` | bearer, **read-only** | Baked into the desktop binary as a fallback; superseded at runtime by a DS-minted short-TTL read-only token (#393). Not user-scoped | Any write capability |
+| `LOG_DB_TOKEN` | bearer, read-only | **Optional** observability / commit-log token; baked only when a release supplies one | — |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | AWS SigV4 creds | **Delivery Service environment only** | The client binary |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | JWT signing key | **Delivery Service environment only** | The client binary |
+| `RESEND_API_KEY` | bearer | **Delivery Service environment only** | The client binary |
 
 ---
 
@@ -606,9 +616,9 @@ Items below are ordered by adversary cost — easiest first.
 
 1. **Voice E2EE has no end-to-end integration test.** Section 10.2. The frame cryptor wiring (key derivation, key rotation on MLS epoch advance, KeyProvider lifecycle) is covered only by unit-level assertions and manual two-client testing. There is no automated test that spins up a real LiveKit server, sends audio between two harness clients, and asserts the SFU cannot decode the frames. Standing up that harness is the right next step before a third-party audit.
 2. **Cross-signing verification is advisory on inbound MLS commits.** Section 5.3 / 6.4 (search for "Inbound cert verification (advisory)" in `mls.rs::process_pending_commits`). A server able to write `user_device` and `mls_commit_log` rows can attempt to insert a rogue device and rely on the warning being unread. The fix requires a quarantine-and-resync state machine for commits with failed cert verification. **Partial mitigation since the group-reconcile TOFU work (refs #277):** the batch `account_id_pub` check (`batch_check_and_pin_account_keys` in `pollis-core/src/commands/safety.rs`) now runs on every reconcile *before* roster devices are added to the MLS tree. A combined attack — fake `user_device` row plus a server-swapped `account_id_pub` — surfaces inline via the `KeyChanged` event (in groups as well as DMs). The advisory state on the device cert itself is unchanged; the new check covers the orthogonal account-key axis. **Further backstopped since the account-key transparency work (#330):** that account-key axis is now also covered by a publicly-auditable, append-only log of every key version (§6.9), so a swap is not only caught live by TOFU but is permanently visible to anyone running `pollis-verify account` — see the residual limits in item 10.
-3. **Single shared Turso/R2/LiveKit/Resend tokens baked into the binary.** Section 8.1. Reverse-engineering the binary yields a database connection equivalent to any client. Mitigated by application-layer enforcement, MLS-layer cryptographic floors, and cross-signing — but the operator could mint a new client at will, and a leaked binary reveals the same secret. Per-user / per-device tokens with a small auth service is the standard fix.
-4. **No server-side rate limiting on `request_otp`.** Section 11.1. Resend is the de-facto throttle.
-5. **Avatars and group icons are public R2 objects.** Section 9.4. Anyone who guesses or scrapes `avatar_url` / `icon_url` from Turso (not directly exposed but available to any client with the bearer token) can read them.
+3. **A single shared read-only Turso token is baked into the binary.** Section 8.1. Reverse-engineering the binary yields *read* access to the metadata tables equivalent to any client — not write access, and not the R2, LiveKit or Resend credentials, none of which the client carries any more (#393/#506). Mitigated further by the DS-minted short-TTL token that supersedes it at runtime, by application-layer enforcement in the DS, by MLS-layer cryptographic floors, and by cross-signing. The residual is real: the token is whole-DB rather than row-scoped, so it reads any group's metadata. Row-scoped tokens are the standard fix and are not built. *(This item previously read "single shared Turso/R2/LiveKit/Resend tokens"; three of those four moved off-client, and it is narrowed accordingly.)*
+4. **~~No server-side rate limiting on `request_otp`.~~ Closed.** Section 11.1. The DS throttles per email address and per client IP.
+5. **Avatars and group icons are public R2 objects.** Section 9.4. Anyone who guesses or scrapes `avatar_url` / `icon_url` from Turso (not directly exposed, but available to any client holding the read-only bearer token) can read them.
 6. **PCS healing is launch-driven, not timer-driven.** Section 6.7. Self-updates now fire on join and from the cold-launch sweep at a 7-day (+ up to 2 days jitter) interval, capped at 3 groups per sweep, so idle groups do heal — but only when some member launches the app. A group whose entire membership stays offline does not rotate while they are gone; there is nobody to issue the commit. The per-sweep cap also means a device returning from a very long absence takes several launches to work through a large group list.
 7. **No Megolm-style key backup is by design.** Section 6.8. New devices and historical messages from before a member's join are not recoverable. Auditors should *not* report this as a gap unless the requirement statement they're auditing against asks for it; the product principle (`CLAUDE.md`) explicitly accepts it.
 8. **Soft-recovery via OTP + email match alone (`reset_identity_and_recover`).** Section 11.5. Compromise of email account ⇒ ability to nuke the user's identity. Visible in the security event log; not preventable with the current factor set.
@@ -633,7 +643,7 @@ Items below are ordered by adversary cost — easiest first.
 - IRTF CFRG draft `draft-irtf-cfrg-xchacha` — *XChaCha: eXtended-nonce ChaCha and AEAD_XChaCha20_Poly1305*. Arciszewski, current.
 - NIST SP 800-38D — *Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode (GCM) and GMAC*. Dworkin, 2007.
 - RFC 5763 / RFC 5764 — DTLS-SRTP. Rescorla, McGrew, 2010.
-- AWS SigV4 — *Signing AWS API Requests*. https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html.
+- AWS SigV4 — *Signing AWS API Requests*. Used by the Delivery Service's presigner (§9.3), not by the client. https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html.
 
 **Implementations relied upon**
 - OpenMLS — https://github.com/openmls/openmls. RustCrypto-backed reference implementation of RFC 9420.

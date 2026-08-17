@@ -122,8 +122,10 @@ media/realtime commands the TUI never calls. No sink wiring needed.
 `Config` (`pollis-core/src/config.rs:3-25`) fields:
 `turso_url, turso_token, log_db_url?, log_db_token?, r2_* , livekit_*, pollis_delivery_url?`.
 
-`Config::from_env` (`config.rs:27-70`) requires `TURSO_URL, TURSO_TOKEN,
-R2_S3_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_KEY, R2_PUBLIC_URL`; the rest default.
+`Config::from_env` requires `TURSO_URL, TURSO_TOKEN, R2_S3_ENDPOINT,
+R2_PUBLIC_URL`; the rest default. It does **not** read `R2_ACCESS_KEY_ID` or
+`R2_SECRET_KEY` — the client holds no R2 credentials since #393/#506, and the two
+R2 values it does read are endpoint URLs, not secrets.
 
 **For a text-only TUI:** `turso_url`/`turso_token` and `pollis_delivery_url` are
 the real requirements. R2/LiveKit fields are unused in v1 and may be empty

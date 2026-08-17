@@ -176,12 +176,15 @@ reproducible, and pretending otherwise would be dishonest to auditors.
 > **`docs/reproducible-builds-residuals.md`** and an independent, fork-runnable
 > reproducer lives in **`.github/workflows/rebuild-verify.yml`**. The items below
 > remain best-effort exactly as this section describes; the residual doc is their
-> canonical, per-release-auditable form. **Biggest residual (call it out):** the
-> client still bakes some build-recipe inputs as *secrets* via `option_env!`
-> (`R2_SECRET_KEY`, `LIVEKIT_API_SECRET`), so a *fully secretless* third party
-> cannot yet bit-reproduce even the Linux payload — only a party holding the
-> published recipe can. Stripping secrets from the client binary is the next
-> reproducibility milestone.
+> canonical, per-release-auditable form. **Biggest residual (call it out):**
+> since the #506 secrets-broker cutover the client bakes **no** R2 or LiveKit
+> credentials — those moved behind the Delivery Service — so the two secrets this
+> paragraph used to name are gone from the binary. What remains is the
+> publishable **read-only** Turso token and an **optional** observability log-DB
+> token; it is the latter that still stops a *fully secretless* third party
+> bit-reproducing even the Linux payload, while a party holding the published
+> recipe can. Dropping that last optional token is the next reproducibility
+> milestone.
 
 1. **Code-signing is non-reproducible *by construction*.** A notarized `.dmg`
    embeds an Apple timestamp + a CMS signature; an Authenticode `.exe` embeds an
