@@ -13,10 +13,12 @@ import {
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import {
+  useDMChannels,
   useSearchMessages,
   useUserGroupsWithChannels,
   useUserSearch,
 } from "../../hooks/queries";
+import { appStore } from "../../stores/appStore";
 
 export default function Search() {
   const router = useRouter();
@@ -25,23 +27,62 @@ export default function Search() {
   const messages = useSearchMessages(trimmed);
   const user = useUserSearch(trimmed);
   const { data: groups = [] } = useUserGroupsWithChannels();
+  const { data: dms = [] } = useDMChannels();
+
+  // `search_messages` rows carry only a conversation_id — no kind — so a DM
+  // hit navigated as kind:"channel" opened the wrong conversation type.
+  // Resolve the kind by cross-referencing the id against the cached channel
+  // and DM lists (the same sources the tabs render from).
+  const conversationKinds = useMemo(() => {
+    const kinds = new Map<
+      string,
+      { kind: "channel" | "dm"; name?: string; groupId?: string }
+    >();
+    for (const g of groups) {
+      for (const c of g.channels) {
+        kinds.set(c.id, { kind: "channel", name: c.name, groupId: g.id });
+      }
+    }
+    for (const d of dms) {
+      kinds.set(d.id, { kind: "dm", name: d.user2_identifier });
+    }
+    return kinds;
+  }, [groups, dms]);
 
   // Client-side filter of cached groups/channels. The Rust DB doesn't
   // expose a single "search everything" command — desktop also stitches
   // these on the frontend.
   const filtered = useMemo(() => {
     if (trimmed.length < 2) {
-      return { groups: [], channels: [] as { id: string; name: string; groupName: string }[] };
+      return {
+        groups: [],
+        channels: [] as {
+          id: string;
+          name: string;
+          groupName: string;
+          groupId: string;
+        }[],
+      };
     }
     const lower = trimmed.toLowerCase();
     const matchingGroups = groups.filter((g) =>
       g.name.toLowerCase().includes(lower),
     );
-    const matchingChannels: { id: string; name: string; groupName: string }[] = [];
+    const matchingChannels: {
+      id: string;
+      name: string;
+      groupName: string;
+      groupId: string;
+    }[] = [];
     for (const g of groups) {
       for (const c of g.channels) {
         if (c.name.toLowerCase().includes(lower)) {
-          matchingChannels.push({ id: c.id, name: c.name, groupName: g.name });
+          matchingChannels.push({
+            id: c.id,
+            name: c.name,
+            groupName: g.name,
+            groupId: g.id,
+          });
         }
       }
     }
@@ -128,12 +169,16 @@ export default function Search() {
                 glyph={<Icon.hash color={semantic.mute} />}
                 name={c.name}
                 sub={c.groupName}
-                onPress={() =>
+                onPress={() => {
+                  // Mirror the groups-tab rows: select + clear unread on open.
+                  appStore.setSelectedGroupId(c.groupId);
+                  appStore.setSelectedChannelId(c.id);
+                  appStore.markRead(c.id);
                   router.push({
                     pathname: "/chat/[id]",
                     params: { id: c.id, kind: "channel", name: c.name },
-                  })
-                }
+                  });
+                }}
               />
             ))}
           </View>
@@ -185,12 +230,31 @@ export default function Search() {
                       .toUpperCase()}
                   </Text>
                 }
-                onPress={() =>
+                onPress={() => {
+                  const info = conversationKinds.get(m.conversation_id);
+                  // Unknown id (e.g. a conversation we've since left): fall
+                  // back to channel, the pre-fix behaviour.
+                  const kind = info?.kind ?? "channel";
+                  // Mirror the list rows: opening a conversation selects it
+                  // (suppresses its realtime unread) and clears its count.
+                  if (kind === "dm") {
+                    appStore.setSelectedConversationId(m.conversation_id);
+                  } else {
+                    if (info?.groupId) {
+                      appStore.setSelectedGroupId(info.groupId);
+                    }
+                    appStore.setSelectedChannelId(m.conversation_id);
+                  }
+                  appStore.markRead(m.conversation_id);
                   router.push({
                     pathname: "/chat/[id]",
-                    params: { id: m.conversation_id, kind: "channel" },
-                  })
-                }
+                    params: {
+                      id: m.conversation_id,
+                      kind,
+                      ...(info?.name ? { name: info.name } : {}),
+                    },
+                  });
+                }}
               />
             ))}
           </View>
