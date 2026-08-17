@@ -14,12 +14,14 @@
     },
     "ios": {
       "supportsTablet": true,
+      "buildNumber": "1",
       "icon": {
         "light": "./assets/ios-light.png",
         "dark": "./assets/ios-dark.png",
         "tinted": "./assets/ios-tinted.png"
       },
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": true,
         "NSCameraUsageDescription": "Pollis needs your camera to scan the pairing QR code from your desktop.",
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationPortrait"
@@ -79,6 +81,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.pollis.mobile",
+      "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA"
       ]
@@ -87,6 +90,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withReleaseSigning",
       "expo-secure-store",
       "expo-router",
       "expo-image",
