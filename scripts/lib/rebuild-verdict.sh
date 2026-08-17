@@ -60,6 +60,17 @@ rebuild_logged_linux_payload() {
 # tag predates #939's toolchain capture (the field is absent, or present and
 # literally "unknown"), which is a different state from "recorded and equal" and
 # is treated as such by rebuild_classify.
+#
+# TWO ways this legitimately reads empty, and neither is a bug:
+#   1. The leaf itself says "unknown" — every tag through v1.9.7, since #939 only
+#      fixed it going forward and the tree is append-only.
+#   2. The `pollis-verify` that produced the report predates #944 and so does not
+#      emit `toolchain` at all. rebuild-verify.yml deliberately builds the
+#      verifier FROM THE TAG'S OWN SOURCE, so that the verifier is part of what
+#      is being verified — which means a tag cut before this change reports no
+#      recipe even if its leaf carries one. That trade is worth keeping: a
+#      verifier shipped as a trusted prebuilt binary would be a far worse hole
+#      than an extra `recipe_unrecorded` on a handful of old tags.
 rebuild_logged_runner_image() {
   local report="${1:-}" image
   [ -n "$report" ] && [ -f "$report" ] || return 0

@@ -427,11 +427,22 @@ URLs are not pinned to a release at all:
 
 `master` and `continuous` can change between a release and its rebuild, and
 neither is recorded in the leaf. This did **not** cause the `v1.9.3` divergence
-(the release and the rebuild were 36 minutes apart), but it is a live hole in the
-claim for any rebuild attempted later — which is the normal case for a third
-party auditing an old tag. Pinning it requires the bundler to accept an override
-for these URLs; until then, treat a Linux payload rebuild of an *old* tag as
-best-effort for this reason as well as for the runner image.
+(the release and the rebuild were 36 minutes apart, and the differing bytes are
+fully accounted for above), but it is a live hole in the claim for any rebuild
+attempted later — which is the normal case for a third party auditing an old tag.
+
+The URLs are hardcoded in `tauri-bundler`
+(`bundle/linux/appimage/linuxdeploy.rs`, confirmed by inspecting the shipped
+`@tauri-apps/cli` 2.11.4 binary), so there is no per-URL override. The only lever
+the bundler exposes is `TAURI_BUNDLER_TOOLS_GITHUB_MIRROR` /
+`TAURI_BUNDLER_TOOLS_GITHUB_MIRROR_TEMPLATE`, which rewrites
+`github.com/<owner>/<repo>/releases/download/<version>/<asset>` — enough to pin
+`AppRun`, `linuxdeploy` and `linuxdeploy-plugin-appimage` behind a mirror we
+control, but **not** the two `raw.githubusercontent.com/…/master/…` plugin
+scripts, which do not match that pattern. Closing this properly therefore means
+either hosting a mirror and vendoring the two shell scripts, or moving the Linux
+release into a pinned container. Until then, treat a Linux payload rebuild of an
+*old* tag as best-effort for this reason as well as for the runner image.
 
 ### 7. Native C/C++ dependencies (`webrtc-sys` / `libwebrtc`, `webrtc-audio-processing-sys`) — best-effort
 These vendored C/C++ builds (clang, meson, ninja, VAAPI wrappers) are the
