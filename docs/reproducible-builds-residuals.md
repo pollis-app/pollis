@@ -358,8 +358,21 @@ ids — different `.text` sizes and shifted symbol addresses, i.e. genuinely
 different upstream builds (`libsqlite3.so.0`'s `.text` went `0xeaf9d` →
 `0xeaf3d`).
 
+**Confirmed by controlled experiment, not by argument.** Re-running the identical
+rebuild on 2026-08-17 (`gh workflow run rebuild-verify.yml -f tag=v1.9.3`, run
+`32036282718`) landed on `ubuntu22@20260810.260.1` — the same image the release
+built on — and reproduced
+`07bccca82cd4b16a57899bc2f18b81ba69595984d2c417b36289a9be278eebd3`,
+**byte-identical** to the logged payload. Same tag, same public source, same
+recipe; the only variable was the runner image, and holding it constant makes the
+bytes match exactly. **v1.9.3 reproduces.**
+
+That result also settles §6a: the CSP hash order is not re-rolled on every
+compile, it tracks the build host's directory layout, so it too was downstream of
+the image change.
+
 Because a squashfs is compressed, one differing input file smears across the
-whole archive: the AppImage reported **105,863,272 differing bytes** out of
+whole archive: the August rebuild reported **105,863,272 differing bytes** out of
 107,297,272. That number measures compression, not damage, and reading it as
 "the binary is wholly different" is a mistake the diagnostic now pre-empts by
 splitting differing paths into vendored (`usr/lib/`) and Pollis-built.
