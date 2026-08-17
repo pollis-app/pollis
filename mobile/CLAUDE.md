@@ -177,6 +177,77 @@ Two things worth knowing:
 now unconditional defaults in SDK 55 / RN 0.83 and were dropped from the config
 schema, so listing them fails doctor's schema check for no behavioural gain.
 
+## Store builds (no EAS — local `expo prebuild` + native tooling)
+
+Published as a private individual account, Apple team `9JF7WWYMU2`. Version
+bookkeeping is **local and explicit** in `app.json`: `ios.buildNumber` (string)
+and `android.versionCode` (int) — bump both by hand for every store upload
+(stores reject a re-used number), bump `version` for user-facing releases.
+
+**Environment first.** `EXPO_PUBLIC_*` vars inline into the shipped JS bundle,
+so before any store build check `mobile/.env`:
+
+- `EXPO_PUBLIC_POLLIS_DELIVERY_URL` **must** be `https://api.pollis.com` (prod
+  DS), not api-dev.
+- `EXPO_PUBLIC_LIVEKIT_API_KEY` / `EXPO_PUBLIC_LIVEKIT_API_SECRET` /
+  `EXPO_PUBLIC_RESEND_API_KEY` must **not** exist in `.env` — the code stopped
+  reading them in #393, but a stale var would still be inlined into the bundle
+  as plaintext. Delete them.
+
+### iOS
+
+```bash
+cd mobile
+pnpm expo prebuild -p ios
+cd ios && pod install && cd ..
+xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
+  -configuration Release -destination 'generic/platform=iOS' \
+  archive -archivePath build/Pollis.xcarchive \
+  DEVELOPMENT_TEAM=9JF7WWYMU2 -allowProvisioningUpdates
+xcodebuild -exportArchive -archivePath build/Pollis.xcarchive \
+  -exportOptionsPlist store/ExportOptions.plist -exportPath build/export \
+  -allowProvisioningUpdates
+```
+
+`store/ExportOptions.plist` (committed — `ios/` is generated, so it can't live
+there) sets `method: app-store-connect`, `teamID: 9JF7WWYMU2`,
+`uploadSymbols: true`. Upload the resulting `.ipa` with Xcode Organizer or
+`xcrun altool`/Transporter.
+
+**Encryption export compliance:** `app.json` sets
+`ITSAppUsesNonExemptEncryption: true` deliberately. `false` means "no
+encryption, or only Apple-exempt encryption (auth, DRM, HTTPS-only)" — Pollis
+uses standard-algorithm E2EE (MLS RFC 9420: AES-GCM, ML-DSA-44) for content
+confidentiality in its own protocol, which is **not** on the exempt list, so
+`false` would be a false export declaration. `true` is the honest answer; it
+skips the per-build compliance interruption in App Store Connect and instead
+requires (one-time/annual, operational not code): answering ASC's export
+compliance questions (standard algorithms → mass-market self-classification,
+annual self-classification report to the U.S. BIS by Feb 1), and the French
+encryption declaration to ANSSI if distributing in France. Do not flip this to
+`false` to silence ASC.
+
+### Android
+
+```bash
+cd mobile
+pnpm expo prebuild -p android
+cd android && ./gradlew :app:bundleRelease
+# → android/app/build/outputs/bundle/release/app-release.aab
+```
+
+Release signing is wired by `plugins/withReleaseSigning.js` (registered in
+`app.json`), a local Expo config plugin that patches the generated
+`android/app/build.gradle` at prebuild: `signingConfigs.release` reads
+`POLLIS_UPLOAD_STORE_FILE` / `POLLIS_UPLOAD_STORE_PASSWORD` /
+`POLLIS_UPLOAD_KEY_ALIAS` / `POLLIS_UPLOAD_KEY_PASSWORD` from gradle
+properties (`~/.gradle/gradle.properties`) or the environment, and **falls back
+to the debug keystore when unset** — so CI's `assembleRelease` keeps working
+with zero config. Generate the upload keystore once with
+`scripts/generate-upload-keystore.sh` (RSA-4096 at `~/.pollis/pollis-upload.jks`,
+refuses to overwrite); it prints the gradle.properties lines. Never commit a
+keystore (`*.jks` is gitignored) or its passwords.
+
 ---
 
 ## Rough edges — technical

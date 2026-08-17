@@ -21,6 +21,12 @@ import {
   useApproveEnrollment,
   useRejectEnrollment,
 } from "../../hooks/queries";
+import {
+  AUTO_LOCK_OPTIONS_MINUTES,
+  autoLockLabel,
+  useAutoLockMinutes,
+  useLockNow,
+} from "../../lib/autolock";
 
 function formatRelative(iso: string): string {
   const d = new Date(iso);
@@ -56,6 +62,9 @@ export default function Security() {
   const approveEnrollment = useApproveEnrollment();
   const rejectEnrollment = useRejectEnrollment();
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
+  const { minutes: autoLockMinutes, setMinutes: setAutoLockMinutes } =
+    useAutoLockMinutes();
+  const lockNow = useLockNow();
 
   const onRevoke = (deviceId: string) => {
     if (confirmRevoke !== deviceId) {
@@ -251,6 +260,44 @@ export default function Security() {
           end={<Icon.fwd color={semantic.mute} />}
         />
 
+        <SectionTitle>AUTO-LOCK</SectionTitle>
+        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 10 }}>
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 12,
+              color: semantic.mute,
+              lineHeight: 17,
+            }}
+          >
+            Lock Pollis behind your device PIN after a period of inactivity.
+            This setting stays on this phone.
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {AUTO_LOCK_OPTIONS_MINUTES.map((opt) => (
+              <Chip
+                key={opt === null ? "off" : String(opt)}
+                testID={`chip-autolock-${opt === null ? "off" : opt}`}
+                accessibilityLabel={`Auto-lock ${autoLockLabel(opt)}`}
+                variant={autoLockMinutes === opt ? "on" : "default"}
+                onPress={() => setAutoLockMinutes(opt)}
+              >
+                {autoLockLabel(opt)}
+              </Chip>
+            ))}
+          </View>
+        </View>
+        <ListRow
+          testID="row-lock-now"
+          minHeight={48}
+          glyph={<Icon.lock color={semantic.mute} />}
+          name="Lock now"
+          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+          sub="Require your PIN to reopen Pollis"
+          onPress={() => void lockNow()}
+          end={<Icon.fwd color={semantic.mute} />}
+        />
+
         <SectionTitle>RECOVERY</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
           <Text
@@ -266,6 +313,27 @@ export default function Security() {
             walks you through enrollment.
           </Text>
         </View>
+
+        <SectionTitle>ACCOUNT</SectionTitle>
+        <ListRow
+          testID="row-delete-account"
+          minHeight={48}
+          glyph={<Icon.shield color={semantic.danger} />}
+          name={
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 14,
+                color: semantic.danger,
+              }}
+            >
+              Delete account
+            </Text>
+          }
+          sub="Permanently delete your account and wipe this device"
+          onPress={() => router.push("/self/delete-account")}
+          end={<Icon.fwd color={semantic.mute} />}
+        />
 
         <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
           <Button
