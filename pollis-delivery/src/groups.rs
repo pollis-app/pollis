@@ -47,7 +47,7 @@ use libsql::Connection;
 
 use crate::error::AppError;
 use crate::writes::{
-    bad_request, claim_conversation_id, conversation_id_taken, gate, ok_json, outcome_response,
+    bad_request, claim_conversation_id, conversation_id_taken, gate, outcome_response,
     resolve_actor, ConversationKind, WriteOutcome,
 };
 use crate::AppState;
@@ -195,7 +195,7 @@ pub async fn create_group(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_create_group(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<CreateGroupBody>(apply_create_group(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// INSERT the group, its creator's admin `group_member`, and any default
@@ -303,7 +303,7 @@ pub async fn update_group(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_update_group(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<UpdateGroupBody>(apply_update_group(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Update a group's mutable settings. Authz: the actor is a re-derived admin.
@@ -367,7 +367,7 @@ pub async fn delete_group(
         let log_conn = state.log_db.conn().await?;
         crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
     }
-    outcome_response(outcome)
+    outcome_response::<DeleteGroupBody>(outcome)
 }
 
 /// Delete a group and everything belonging to it, in one transaction. Authz:
@@ -424,7 +424,7 @@ pub async fn leave_group(
         let log_conn = state.log_db.conn().await?;
         crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
     }
-    outcome_response(outcome)
+    outcome_response::<LeaveGroupBody>(outcome)
 }
 
 /// Remove the actor's own membership; if the group is now empty, tear it down.
@@ -495,7 +495,7 @@ pub async fn create_channel(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_create_channel(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<CreateChannelBody>(apply_create_channel(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// INSERT a channel. Authz: the actor is a current member of the owning group.
@@ -554,7 +554,7 @@ pub async fn update_channel(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_update_channel(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<UpdateChannelBody>(apply_update_channel(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Update a channel's name/description. Authz: admin of the owning group.
@@ -618,7 +618,7 @@ pub async fn delete_channel(
         )
         .await?;
     }
-    outcome_response(outcome)
+    outcome_response::<DeleteChannelBody>(outcome)
 }
 
 /// Delete a channel and its whole message history in one transaction. Authz:
@@ -673,7 +673,7 @@ pub async fn remove_member(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_remove_member(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<RemoveMemberBody>(apply_remove_member(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Remove a member. Authz: the actor removes themselves (leave) OR is a
@@ -729,7 +729,7 @@ pub async fn set_member_role(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_set_member_role(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<SetMemberRoleBody>(apply_set_member_role(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Promote/demote a member. Authz: the actor is a re-derived admin, the target
@@ -782,7 +782,7 @@ pub async fn create_invite(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_create_invite(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<CreateInviteBody>(apply_create_invite(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// INSERT a pending invite. Authz: the inviter is a re-derived admin. (Invitee
@@ -830,7 +830,7 @@ pub async fn accept_invite(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_accept_invite(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<AcceptInviteBody>(apply_accept_invite(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Accept an invite: add the actor as a member and delete the invite, in one
@@ -889,7 +889,7 @@ pub async fn decline_invite(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_decline_invite(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<DeclineInviteBody>(apply_decline_invite(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Decline an invite. The DELETE is scoped `invitee_id = :actor`, so a signer can
@@ -929,7 +929,7 @@ pub async fn create_join_request(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_create_join_request(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<CreateJoinRequestBody>(apply_create_join_request(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// UPSERT a pending join request (or reset a prior rejected/approved row back to
@@ -1010,7 +1010,7 @@ pub async fn approve_join_request(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_approve_join_request(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<ApproveJoinRequestBody>(apply_approve_join_request(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Approve a pending join request: add the requester as a member and flip the row
@@ -1069,7 +1069,7 @@ pub async fn reject_join_request(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_reject_join_request(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<RejectJoinRequestBody>(apply_reject_join_request(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Reject a pending join request. Authz: the approver is a re-derived admin.
@@ -1176,7 +1176,7 @@ pub async fn create_invite_link(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_create_invite_link(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<CreateInviteLinkBody>(apply_create_invite_link(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// INSERT an invite link. Authz: the creator is a re-derived admin — the same bar
@@ -1243,7 +1243,7 @@ pub async fn revoke_invite_link(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_revoke_invite_link(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<RevokeInviteLinkBody>(apply_revoke_invite_link(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Revoke a link. Authz: the actor is a re-derived admin OF THE LINK'S OWN GROUP
@@ -1323,9 +1323,9 @@ pub async fn redeem_invite_link(
     let conn = state.db.conn().await?;
     Ok(
         match apply_redeem_invite_link(&conn, authed.as_deref(), &parsed).await? {
-            RedeemOutcome::Joined { group_id } => {
-                ok_json(serde_json::json!({ "status": "ok", "group_id": group_id }))
-            }
+            RedeemOutcome::Joined { group_id } => crate::writes::ok_response::<
+                RedeemInviteLinkBody,
+            >(RedeemInviteLinkResponse::Ok { group_id }),
             RedeemOutcome::Rejected => redeem_rejected(),
             RedeemOutcome::RateLimited => redeem_rate_limited(),
         },

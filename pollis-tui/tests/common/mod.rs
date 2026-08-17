@@ -307,12 +307,13 @@ struct DsState {
     otp_config: pollis_delivery::otp::OtpConfig,
 }
 
+/// The shared `{"status":"ok"}` success body.
+///
+/// Typed through `pollis-api` (#922) rather than a `json!{}` literal: this file
+/// is a SECOND implementation of the DS's responses, so it is exactly the place
+/// a hand-written literal drifts from the real server without anything noticing.
 fn ds_ok() -> Response {
-    (
-        StatusCode::OK,
-        axum::Json(serde_json::json!({ "status": "ok" })),
-    )
-        .into_response()
+    (StatusCode::OK, axum::Json(pollis_api::StatusOk::Ok)).into_response()
 }
 
 fn ds_bad_request() -> Response {
@@ -674,7 +675,7 @@ async fn delivery_key_packages_claim(
         Err(e) => return ds_internal_error(format!("conn: {e}")),
     };
     match pollis_delivery::devices::apply_claim_key_package(&conn, &parsed).await {
-        Ok(o) => pollis_delivery::devices::claim_outcome_response(o),
+        Ok(o) => pollis_delivery::devices::claim_outcome_response::<pollis_delivery::devices::ClaimKeyPackageBody>(o),
         Err(e) => ds_internal_error(format!("key-packages/claim: {e}")),
     }
 }

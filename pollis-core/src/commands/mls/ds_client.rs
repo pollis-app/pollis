@@ -28,7 +28,7 @@ use openmls::prelude::Ciphersuite;
 use openmls_traits::signatures::Signer;
 use sha2::{Digest, Sha256};
 
-use pollis_api::DsRequest;
+use pollis_api::{ClientRequest, DsRequest};
 
 use crate::error::{Error, Result};
 use crate::state::AppState;
@@ -86,7 +86,7 @@ pub(crate) async fn current_user_id(state: &Arc<AppState>) -> Result<String> {
 ///
 /// Returns the raw [`reqwest::Response`] so callers map status codes themselves
 /// (e.g. 409 → `LostRace` on the commit path).
-pub async fn ds_post<B: DsRequest>(
+pub async fn ds_post<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
 ) -> Result<reqwest::Response> {
@@ -207,14 +207,7 @@ pub async fn ds_claim_key_package(
             "ds_claim_key_package {status}: {txt}"
         )));
     }
-    #[derive(serde::Deserialize)]
-    struct ClaimResp {
-        key_package: String,
-    }
-    let parsed: ClaimResp = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("ds_claim_key_package decode: {e}")))?;
+    let parsed = decode_response::<pollis_api::devices::ClaimKeyPackageBody>(resp).await?;
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&parsed.key_package)
@@ -244,21 +237,7 @@ pub async fn ds_livekit_token(
         user_id: Some(current_user_id(state).await?),
         device_id,
     };
-    let resp = ds_post(state, &body).await?;
-    let status = resp.status();
-    if !status.is_success() {
-        let txt = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!("ds_livekit_token {status}: {txt}")));
-    }
-    #[derive(serde::Deserialize)]
-    struct Resp {
-        token: String,
-        url: String,
-    }
-    let parsed: Resp = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("ds_livekit_token decode: {e}")))?;
+    let parsed = ds_post_json(state, &body).await?;
 
     // Resolve the fallback HERE, not at the call sites. The DS's URL is
     // authoritative — it is the server that will accept this JWT — but every one
@@ -376,41 +355,21 @@ pub async fn ds_livekit_participants(
             "ds_livekit_participants {status}: {txt}"
         )));
     }
-    let parsed: IdentityResp = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("ds_livekit_participants decode: {e}")))?;
+    let parsed =
+        decode_response::<pollis_api::broker::LivekitParticipantsBody>(resp).await?;
     Ok(parsed.participants)
 }
 
 /// One participant identity resolved back to a Pollis user (#836).
 ///
-/// `identity` is the opaque per-room pseudonym LiveKit sees; the rest is what
-/// only the DS can recover from it. `kind` is absent on the roster endpoint
-/// (which already filters to real voice participants) and present when
-/// resolving raw identities off the SDK event stream.
+/// Re-exported from `pollis-api` rather than declared here (#922). It used to be
+/// a local `#[derive(Deserialize)]` mirror alongside an `IdentityResp` that
+/// carried BOTH a `participants` and an `identities` field so one struct could
+/// decode two endpoints — which is precisely the shape #922 exists to remove: it
+/// decodes either response, so it also decodes the WRONG one, silently, as an
+/// empty vec. Each endpoint now names its own response type.
 #[cfg(feature = "media")]
-#[derive(Clone, Debug, serde::Deserialize)]
-pub struct ResolvedIdentity {
-    pub identity: String,
-    pub user_id: String,
-    /// Display name. Since #836 the LiveKit JWT carries no `name` claim — it was
-    /// the user's username, which made pseudonymising the identity pointless —
-    /// so this comes from the DS's own DB rather than off the SFU.
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub kind: Option<String>,
-}
-
-#[cfg(feature = "media")]
-#[derive(serde::Deserialize)]
-struct IdentityResp {
-    #[serde(default)]
-    participants: Vec<ResolvedIdentity>,
-    #[serde(default)]
-    identities: Vec<ResolvedIdentity>,
-}
+pub use pollis_api::broker::ResolvedIdentity;
 
 /// Ask the DS to resolve opaque LiveKit participant identities back to users
 /// (#836).
@@ -440,18 +399,7 @@ pub async fn ds_livekit_identities(
         identities,
         user_id: Some(current_user_id(state).await?),
     };
-    let resp = ds_post(state, &body).await?;
-    let status = resp.status();
-    if !status.is_success() {
-        let txt = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!(
-            "ds_livekit_identities {status}: {txt}"
-        )));
-    }
-    let parsed: IdentityResp = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("ds_livekit_identities decode: {e}")))?;
+    let parsed = ds_post_json(state, &body).await?;
     Ok(parsed.identities)
 }
 
@@ -460,22 +408,53 @@ pub async fn ds_livekit_identities(
 /// Turso Platform credentials) lets the caller fall back to the baked read-only
 /// token, so an unconfigured deploy still reads. See #393.
 pub async fn ds_turso_token(state: &Arc<AppState>) -> Result<(String, u64)> {
-    let resp = ds_post(state, &pollis_api::broker::TursoTokenBody {}).await?;
+    let parsed = ds_post_json(state, &pollis_api::broker::TursoTokenBody {}).await?;
+    Ok((parsed.token, parsed.expires_in))
+}
+
+/// [`ds_post`] plus decoding the ONE response body this endpoint declares (#922).
+///
+/// The mirror image of what `ds_post` does for the request. Callers used to
+/// declare a private `#[derive(Deserialize)] struct Resp { … }` at each call
+/// site and hand-match it against a `json!{}` literal in the DS — two lists,
+/// nothing forcing them to agree, and a failure mode quieter than the request
+/// side's: a field the server renames does not error here, it simply arrives
+/// absent and becomes a default the caller cannot tell from a real answer.
+///
+/// `B::Response` is the SAME associated type `pollis-delivery` hands to
+/// `writes::ok_response::<B>`, so reading a field the server does not send is a
+/// compile error rather than a `None`.
+///
+/// Any non-2xx is an `Err` carrying the status and body — a caller that needs to
+/// branch on a specific status (404 on key-package claim, 409 on commit submit)
+/// uses [`ds_post`] and reads the status itself.
+pub async fn ds_post_json<B: ClientRequest>(
+    state: &Arc<AppState>,
+    body: &B,
+) -> Result<B::Response> {
+    let resp = ds_post(state, body).await?;
     let status = resp.status();
     if !status.is_success() {
+        let path = B::PATH;
         let txt = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!("ds_turso_token {status}: {txt}")));
+        return Err(Error::Other(anyhow::anyhow!("ds_post {path} {status}: {txt}")));
     }
-    #[derive(serde::Deserialize)]
-    struct Resp {
-        token: String,
-        expires_in: u64,
-    }
-    let parsed: Resp = resp
-        .json()
+    decode_response::<B>(resp).await
+}
+
+/// Decode a 2xx body into the endpoint's declared response type.
+///
+/// Split out of [`ds_post_json`] so the handful of callers that must inspect the
+/// status FIRST (a 404 that means "skip this device", a 409 that means "lost the
+/// race") still decode through the one declaration rather than re-deriving a
+/// local mirror of it.
+pub(crate) async fn decode_response<B: DsRequest>(
+    resp: reqwest::Response,
+) -> Result<B::Response> {
+    let path = B::PATH;
+    resp.json::<B::Response>()
         .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("ds_turso_token decode: {e}")))?;
-    Ok((parsed.token, parsed.expires_in))
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path} decode: {e}")))
 }
 
 /// [`ds_post`] for writes that must NOT silently fail: any non-2xx becomes an
@@ -483,7 +462,7 @@ pub async fn ds_turso_token(state: &Arc<AppState>) -> Result<(String, u64)> {
 /// replaces propagated its error (`conn.execute(...).await?`). For best-effort
 /// writes (the direct path logged and continued) call [`ds_post`] and log
 /// instead.
-pub async fn ds_post_ok<B: DsRequest>(state: &Arc<AppState>, body: &B) -> Result<()> {
+pub async fn ds_post_ok<B: ClientRequest>(state: &Arc<AppState>, body: &B) -> Result<()> {
     let resp = ds_post(state, body).await?;
     if !resp.status().is_success() {
         let s = resp.status();
@@ -501,7 +480,7 @@ pub async fn ds_post_ok<B: DsRequest>(state: &Arc<AppState>, body: &B) -> Result
 /// where no signing key exists yet and the user's authorization is the email
 /// OTP they just verified. The DS accepts either credential on these endpoints
 /// (`gate_or_session`).
-pub async fn ds_post_signed_or_session<B: DsRequest>(
+pub async fn ds_post_signed_or_session<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
 ) -> Result<reqwest::Response> {
@@ -519,7 +498,7 @@ pub async fn ds_post_signed_or_session<B: DsRequest>(
 
 /// [`ds_post_signed_or_session`] for writes that must NOT silently fail: any
 /// non-2xx becomes an `Err` carrying the status + body.
-pub async fn ds_post_signed_or_session_ok<B: DsRequest>(
+pub async fn ds_post_signed_or_session_ok<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
 ) -> Result<()> {
@@ -613,7 +592,7 @@ fn delivery_base(state: &Arc<AppState>) -> Result<String> {
 /// pre-identity OTP endpoints (`request-otp` / `verify-otp`), which the DS gates
 /// by the OTP itself, not a device signature or a session. Returns the raw
 /// [`reqwest::Response`] so the caller reads the body / maps the status.
-pub async fn ds_post_plain<B: DsRequest>(
+pub async fn ds_post_plain<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
 ) -> Result<reqwest::Response> {
@@ -644,7 +623,7 @@ async fn ds_post_plain_bytes(
 /// the device has no MLS signing key yet, so these carry the OTP-session bearer
 /// token in `X-Pollis-Session` instead of the four `X-Pollis-*` signature headers.
 /// Returns the raw [`reqwest::Response`] so the caller maps the status.
-pub async fn ds_post_session<B: DsRequest>(
+pub async fn ds_post_session<B: ClientRequest>(
     state: &Arc<AppState>,
     session_token: &str,
     body: &B,
@@ -675,7 +654,7 @@ async fn ds_post_session_bytes(
 
 /// [`ds_post_session`] for bootstrap writes that must NOT silently fail: any
 /// non-2xx becomes an `Err` carrying the status + body.
-pub async fn ds_post_session_ok<B: DsRequest>(
+pub async fn ds_post_session_ok<B: ClientRequest>(
     state: &Arc<AppState>,
     session_token: &str,
     body: &B,

@@ -43,3 +43,18 @@ pub struct RemoveEmojiBody {
 /// a loose `json!({})` at the call site.
 #[derive(Serialize, Deserialize)]
 pub struct EmojiGcBody {}
+
+/// `POST /v1/emoji/gc` — what the sweep collected.
+///
+/// The caller deletes the R2 blobs behind `r2_keys`: the Turso row is the only
+/// record of where a blob lives, so the sweep has to hand them over as it drops
+/// the rows or the object is stranded forever.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmojiGcResponse {
+    /// How many objects were collected — `r2_keys.len()`, sent explicitly
+    /// because it is what an operator reads out of a `curl`.
+    pub collected: usize,
+    /// The R2 keys whose rows are now gone. Empty when nothing was unreferenced.
+    #[serde(default)]
+    pub r2_keys: Vec<String>,
+}

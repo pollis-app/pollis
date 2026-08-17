@@ -800,21 +800,8 @@ pub async fn remove_group_emoji(
 /// blobs it collected. Safe to call at any time: it is idempotent and can only
 /// touch objects no group references.
 pub async fn collect_orphaned_emoji(state: &Arc<AppState>) -> Result<()> {
-    let resp = crate::commands::mls::ds_post(state, &pollis_api::emoji::EmojiGcBody {}).await?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!("emoji gc {status}: {text}")));
-    }
-    #[derive(Deserialize)]
-    struct GcResp {
-        #[serde(default)]
-        r2_keys: Vec<String>,
-    }
-    let parsed: GcResp = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("emoji gc decode: {e}")))?;
+    let parsed =
+        crate::commands::mls::ds_post_json(state, &pollis_api::emoji::EmojiGcBody {}).await?;
 
     for key in parsed.r2_keys {
         // Best-effort. The Turso row is already gone, so a failure here strands

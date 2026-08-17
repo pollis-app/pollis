@@ -967,22 +967,7 @@ pub(crate) async fn presign_r2_with_length(
         // per-object authz, so this only ever satisfies the gate.
         user_id: Some(crate::commands::mls::current_user_id(state).await?),
     };
-    let resp = crate::commands::mls::ds_post(state, &body).await?;
-    let status = resp.status();
-    if !status.is_success() {
-        let txt = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!(
-            "r2 presign {operation} {status}: {txt}"
-        )));
-    }
-    #[derive(Deserialize)]
-    struct PresignResp {
-        url: String,
-    }
-    let parsed: PresignResp = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("r2 presign decode: {e}")))?;
+    let parsed = crate::commands::mls::ds_post_json(state, &body).await?;
     Ok(parsed.url)
 }
 

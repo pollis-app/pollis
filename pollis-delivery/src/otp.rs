@@ -477,18 +477,16 @@ pub fn verify_otp_response(result: VerifyOtpResult) -> Response {
             has_identity,
             session_token,
             session_expires_at,
-        } => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "user_id": user_id,
-                "username": username,
-                "is_new_account": is_new_account,
-                "has_identity": has_identity,
-                "session_token": session_token,
-                "session_expires_at": session_expires_at,
-            })),
-        )
-            .into_response(),
+        } => crate::writes::ok_response::<VerifyOtpBody>(VerifyOtpResponse {
+            user_id,
+            username,
+            is_new_account,
+            has_identity,
+            session_token,
+            // Unix seconds. `i64` on the wire type, matching every other
+            // timestamp in the API; the DS computes it as `u64`.
+            session_expires_at: session_expires_at as i64,
+        }),
         VerifyOtpResult::LockedOut => (
             StatusCode::TOO_MANY_REQUESTS,
             Json(serde_json::json!({ "error": "too many attempts" })),
@@ -504,8 +502,11 @@ pub fn verify_otp_response(result: VerifyOtpResult) -> Response {
 
 // ── small response helpers ───────────────────────────────────────────────────
 
+/// `POST /v1/auth/request-otp` answers the shared `{"status":"ok"}` — and
+/// answers it whether or not an account exists, which is the point (an OTP
+/// request must not be an account-existence oracle).
 fn ok_200() -> Response {
-    (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
+    crate::writes::ok_response::<RequestOtpBody>(pollis_api::StatusOk::Ok)
 }
 
 fn internal(e: anyhow::Error) -> Response {

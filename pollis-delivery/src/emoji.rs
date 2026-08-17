@@ -63,7 +63,7 @@ use axum::{
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, ok_json, resolve_actor, WriteOutcome};
+use crate::writes::{bad_request, gate, resolve_actor, WriteOutcome};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -177,9 +177,18 @@ pub enum EmojiOutcome {
     ShortcodeTaken,
 }
 
-fn emoji_outcome_response(outcome: EmojiOutcome) -> Result<Response, AppError> {
+/// Map an [`EmojiOutcome`] to its HTTP response.
+///
+/// Generic over the endpoint's request type (#922) for the same reason
+/// [`crate::writes::outcome_response`] is: the success arm is the shared
+/// `{"status":"ok"}`, and the bound is what proves THIS endpoint is declared to
+/// answer that rather than something richer.
+fn emoji_outcome_response<B>(outcome: EmojiOutcome) -> Result<Response, AppError>
+where
+    B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
+{
     Ok(match outcome {
-        EmojiOutcome::Ok => ok_json(serde_json::json!({ "status": "ok" })),
+        EmojiOutcome::Ok => crate::writes::ok_response::<B>(pollis_api::StatusOk::Ok),
         EmojiOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
         EmojiOutcome::Invalid(why) => bad_request(why),
         EmojiOutcome::QuotaExceeded => (
@@ -303,7 +312,7 @@ pub async fn create_emoji(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    emoji_outcome_response(apply_create_emoji(&conn, authed.as_deref(), &parsed).await?)
+    emoji_outcome_response::<CreateEmojiBody>(apply_create_emoji(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Register the shared object (idempotent) and bind it to `(group_id,
@@ -421,7 +430,7 @@ pub async fn remove_emoji(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    emoji_outcome_response(apply_remove_emoji(&conn, authed.as_deref(), &parsed).await?)
+    emoji_outcome_response::<RemoveEmojiBody>(apply_remove_emoji(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Remove `(group_id, shortcode)` and collect the shared object if that was its
@@ -510,10 +519,10 @@ pub async fn emoji_gc(
     }
     let conn = state.db.conn().await?;
     let collected = sweep_unreferenced_emoji(&conn).await?;
-    Ok(ok_json(serde_json::json!({
-        "collected": collected.len(),
-        "r2_keys": collected,
-    })))
+    Ok(crate::writes::ok_response::<EmojiGcBody>(EmojiGcResponse {
+        collected: collected.len(),
+        r2_keys: collected,
+    }))
 }
 
 /// Collect every unreferenced object, returning their R2 keys. Reads the keys

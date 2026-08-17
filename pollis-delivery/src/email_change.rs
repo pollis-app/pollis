@@ -90,8 +90,12 @@ impl EmailChangeStore {
     }
 }
 
-fn ok_status() -> Response {
-    (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
+/// The shared `{"status":"ok"}`, generic over the endpoint (#922).
+fn ok_status<B>() -> Response
+where
+    B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
+{
+    crate::writes::ok_response::<B>(pollis_api::StatusOk::Ok)
 }
 
 fn internal(e: anyhow::Error) -> Response {
@@ -140,7 +144,7 @@ pub async fn request_email_change_otp(
             .request(&state.otp_config, &requester, &new_email)
             .await;
     }
-    Ok(ok_status())
+    Ok(ok_status::<RequestEmailChangeBody>())
 }
 
 // ── POST /v1/auth/verify-email-change ────────────────────────────────────────
@@ -273,7 +277,7 @@ pub async fn apply_verify_email_change(
 /// handler and the in-process harness so both speak the same status codes.
 pub fn email_change_response(outcome: EmailChangeOutcome) -> Response {
     match outcome {
-        EmailChangeOutcome::Updated => ok_status(),
+        EmailChangeOutcome::Updated => ok_status::<VerifyEmailChangeBody>(),
         EmailChangeOutcome::InvalidCode => (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({ "error": "invalid code" })),

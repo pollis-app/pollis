@@ -185,24 +185,17 @@ async fn verify_otp_ds(
         let txt = resp.text().await.unwrap_or_default();
         return Err(anyhow::anyhow!("verify-otp failed ({status}): {txt}").into());
     }
-    let v: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| anyhow::anyhow!("verify-otp response: {e}"))?;
+    // Typed through `pollis-api` (#922) rather than indexed out of a
+    // `serde_json::Value`. `v["session_token"]` compiled whatever the DS chose
+    // to call that field, so a rename reached users as "response missing
+    // session_token" on every sign-in; now it does not build.
+    let v =
+        crate::commands::mls::decode_response::<pollis_api::otp::VerifyOtpBody>(resp).await?;
 
-    let user_id = v["user_id"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("verify-otp response missing user_id"))?
-        .to_string();
-    let username = v["username"]
-        .as_str()
-        .unwrap_or_else(|| email.split('@').next().unwrap_or("user"))
-        .to_string();
-    let has_identity = v["has_identity"].as_bool().unwrap_or(false);
-    let session_token = v["session_token"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("verify-otp response missing session_token"))?
-        .to_string();
+    let user_id = v.user_id;
+    let username = v.username;
+    let has_identity = v.has_identity;
+    let session_token = v.session_token;
 
     // Orphan-detection for a returning device whose server identity no longer
     // matches the local key (a reset elsewhere). Mirrors the direct path.
@@ -855,19 +848,11 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
         let txt = resp.text().await.unwrap_or_default();
         return Err(anyhow::anyhow!("dev verify-otp failed ({status}): {txt}").into());
     }
-    let v: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| anyhow::anyhow!("dev verify-otp response: {e}"))?;
-    let username = v["username"]
-        .as_str()
-        .unwrap_or_else(|| email.split('@').next().unwrap_or("user"))
-        .to_string();
-    let has_identity = v["has_identity"].as_bool().unwrap_or(false);
-    let session_token = v["session_token"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("dev verify-otp response missing session_token"))?
-        .to_string();
+    let v =
+        crate::commands::mls::decode_response::<pollis_api::otp::VerifyOtpBody>(resp).await?;
+    let username = v.username;
+    let has_identity = v.has_identity;
+    let session_token = v.session_token;
 
     // Persist + publish the bound device_id into state.
     let device_id = ensure_device_id(state, &user_id, &bound_device_id).await?;

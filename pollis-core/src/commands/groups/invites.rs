@@ -443,15 +443,13 @@ pub async fn redeem_group_invite_link(
         return Err(Error::Other(anyhow::anyhow!(INVITE_LINK_ERR)));
     }
 
-    let payload: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("invalid redeem response: {e}")))?;
-    let group_id = payload
-        .get("group_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("redeem response missing group_id")))?
-        .to_string();
+    // Typed through `pollis-api` (#922): the group id is the ONE thing a
+    // successful redemption tells the caller, and reading it out of an untyped
+    // `Value` meant a server-side rename degraded into "redeem response missing
+    // group_id" rather than failing to build.
+    let pollis_api::groups::RedeemInviteLinkResponse::Ok { group_id } =
+        crate::commands::mls::decode_response::<pollis_api::groups::RedeemInviteLinkBody>(resp)
+            .await?;
 
     // Self-heal into the MLS tree — see the note above. Skipped when this device
     // already holds the group (an idempotent re-redemption, or a second device

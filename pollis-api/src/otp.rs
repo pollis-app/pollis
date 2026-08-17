@@ -22,3 +22,24 @@ pub struct VerifyOtpBody {
     #[serde(default)]
     pub account_id_pub: Option<String>,
 }
+
+/// `POST /v1/auth/verify-otp` — the minted session and the account it belongs
+/// to.
+///
+/// Typed rather than read out of a `serde_json::Value` by string key, which is
+/// what `pollis-core` did on both of its call sites: `v["session_token"]`
+/// compiles whatever the server calls that field, so a rename would have turned
+/// into a runtime "response missing session_token" on every sign-in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerifyOtpResponse {
+    pub user_id: String,
+    pub username: String,
+    /// True when THIS verify created the account row.
+    pub is_new_account: bool,
+    /// Whether the account already has a published `account_id_pub`. Drives the
+    /// client's "establish identity" vs "enroll this device" branch.
+    pub has_identity: bool,
+    pub session_token: String,
+    /// Unix seconds.
+    pub session_expires_at: i64,
+}

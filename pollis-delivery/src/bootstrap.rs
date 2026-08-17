@@ -39,8 +39,13 @@ fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
     Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
 }
 
-fn ok_status() -> Response {
-    (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
+/// The shared `{"status":"ok"}`, generic over the endpoint (#922) so each of
+/// this module's four handlers names the row it is answering for.
+fn ok_status<B>() -> Response
+where
+    B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
+{
+    crate::writes::ok_response::<B>(pollis_api::StatusOk::Ok)
 }
 
 fn conflict(msg: &str) -> Response {
@@ -100,7 +105,7 @@ pub async fn establish_identity(
     };
     match apply_establish_identity(&conn, &claims.user_id, &pub_bytes, &salt, &nonce, &wrapped).await
     {
-        Ok(EstablishOutcome::Applied) => ok_status(),
+        Ok(EstablishOutcome::Applied) => ok_status::<EstablishIdentityBody>(),
         Ok(EstablishOutcome::Conflict) => conflict("identity already established"),
         Err(e) => internal(e),
     }
@@ -203,7 +208,7 @@ pub async fn register_device(
             state
                 .device_keys
                 .invalidate_device(&claims.user_id, &device_id);
-            ok_status()
+            ok_status::<RegisterDeviceBody>()
         }
         Err(e) => internal(e),
     }
@@ -370,7 +375,7 @@ pub async fn publish_device_cert(
             // the device's new signatures would be rejected until the TTL lapsed
             // (#658). Evict so the next request re-reads the key just written.
             state.device_keys.invalidate_device(&user_id, &device_id);
-            ok_status()
+            ok_status::<PublishCertBody>()
         }
         Ok(PublishCertOutcome::IdentityNotEstablished) => {
             conflict("account identity not established")
@@ -530,7 +535,7 @@ pub async fn enrollment_request(
             if let Err(e) = crate::broker::room_send_data(&state, &inbox, &event).await {
                 tracing::warn!("enrollment-request inbox notify failed (non-fatal): {e}");
             }
-            ok_status()
+            ok_status::<EnrollmentRequestBody>()
         }
         Err(e) => internal(e),
     }

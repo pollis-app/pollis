@@ -637,7 +637,13 @@ async fn submit(
     // The MLS control-plane tables live on the commit-log DB (== main DB when no
     // separate log DB is configured).
     let conn = state.log_db.conn().await?;
-    let outcome = commit::submit_commit(&conn, &parsed).await?;
+    // Bound to the endpoint's DECLARED response type (#922), not merely to
+    // whatever `submit_commit` happens to return: `SubmitResponse` now lives in
+    // `pollis-api` next to `SubmitBody`, and this annotation is what makes a
+    // drift between the two a compile error here rather than a decode surprise
+    // on a client.
+    let outcome: <SubmitBody as DsRequest>::Response =
+        commit::submit_commit(&conn, &parsed).await?;
 
     // Retention floor (#539, I4): a landed commit advanced the head, so run an
     // EVENT-DRIVEN prune (no timer — repo rule). Best-effort: a prune failure must
@@ -769,7 +775,7 @@ async fn report_commit_since(
         None => match (parsed.user_id.clone(), parsed.device_id.clone()) {
             (Some(u), Some(d)) if !u.is_empty() && !d.is_empty() => (u, d),
             // No identity to attribute the report to → nothing to record.
-            _ => return Ok(StatusCode::OK.into_response()),
+            _ => return Ok(crate::writes::ok_empty::<CommitSinceReport>()),
         },
     };
     if let Some((authed_user, _)) = &authed {
@@ -801,7 +807,7 @@ async fn report_commit_since(
         }
     }
 
-    Ok(StatusCode::OK.into_response())
+    Ok(crate::writes::ok_empty::<CommitSinceReport>())
 }
 
 #[cfg(test)]

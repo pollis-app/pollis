@@ -40,9 +40,9 @@ pub use device::{
 
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────
 pub(crate) use ds_client::{
-    current_user_id, ds_claim_key_package, ds_livekit_send_data, ds_livekit_token, ds_post,
-    ds_post_ok, ds_post_plain, ds_post_session_ok, ds_post_signed_or_session,
-    ds_post_signed_or_session_ok, ds_turso_token,
+    current_user_id, decode_response, ds_claim_key_package, ds_livekit_send_data,
+    ds_livekit_token, ds_post, ds_post_json, ds_post_ok, ds_post_plain, ds_post_session_ok,
+    ds_post_signed_or_session, ds_post_signed_or_session_ok, ds_turso_token,
 };
 // Desktop-only (voice roster); mobile has no Rust-side participants path.
 #[cfg(feature = "media")]

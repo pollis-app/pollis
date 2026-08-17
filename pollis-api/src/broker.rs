@@ -122,3 +122,85 @@ pub struct R2PresignBody {
 /// [`crate::ENDPOINTS`] table rather than a loose `json!({})`.
 #[derive(Serialize, Deserialize)]
 pub struct TursoTokenBody {}
+
+// ── Responses (#922) ─────────────────────────────────────────────────────────
+
+/// `POST /v1/livekit/token` — the participant JWT and the SFU to present it to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LivekitTokenResponse {
+    pub token: String,
+    /// The DS's LiveKit address. EMPTY is the documented self-host case (a DS
+    /// with no `LIVEKIT_URL`), which the client resolves against its compiled-in
+    /// fallback — see `pollis_core`'s `resolve_livekit_url`. It is a `String`
+    /// rather than an `Option` because that is what the wire has always carried.
+    pub url: String,
+}
+
+/// `POST /v1/livekit/send-data` — the fan-out was accepted upstream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LivekitSendDataResponse {
+    pub ok: bool,
+}
+
+/// One opaque LiveKit participant identity, resolved back to a Pollis user
+/// (#836).
+///
+/// `identity` is the per-room pseudonym the SFU sees; everything else is what
+/// only the DS can recover from it under that room's key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedIdentity {
+    pub identity: String,
+    pub user_id: String,
+    /// Display name. Since #836 the LiveKit JWT carries no `name` claim — it was
+    /// the username, which made pseudonymising the identity pointless — so this
+    /// comes from the DS's own DB rather than off the SFU. It is not a key.
+    #[serde(default)]
+    pub name: String,
+    /// `voice` / `view` / `realtime`. Absent on the roster endpoint, which has
+    /// already filtered to real voice participants; present when resolving raw
+    /// identities off the SDK event stream.
+    ///
+    /// `skip_serializing_if` so the roster's bytes stay exactly what they were
+    /// before this type existed — the DS emitted no `kind` key there at all, and
+    /// serializing an explicit `null` would be a wire change on a live endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// `POST /v1/livekit/participants` — the room's voice roster, internal
+/// participants and screenshare receivers already filtered out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LivekitParticipantsResponse {
+    #[serde(default)]
+    pub participants: Vec<ResolvedIdentity>,
+}
+
+/// `POST /v1/livekit/identities` — the identities the caller asked about, minus
+/// any the DS could not resolve (internal participants, forgeries, another
+/// room's).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LivekitIdentitiesResponse {
+    #[serde(default)]
+    pub identities: Vec<ResolvedIdentity>,
+}
+
+/// `POST /v1/turso/token` — a short-TTL READ-ONLY Turso token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TursoTokenResponse {
+    pub token: String,
+    /// Seconds until the token expires.
+    pub expires_in: u64,
+}
+
+/// `POST /v1/r2/presign` — the presigned URL and how it must be used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct R2PresignResponse {
+    /// Self-contained: the SigV4 signature is in the query string, so the caller
+    /// attaches no auth headers.
+    pub url: String,
+    /// The HTTP method the signature is bound to. Using any other method against
+    /// this URL is a 403 from R2, so it is not decorative.
+    pub method: String,
+    /// Seconds until the signature expires.
+    pub expires_in: u64,
+}

@@ -558,11 +558,14 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
                 "DS rotate-identity {status}: {txt}"
             )));
         }
-        let v: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("rotate-identity response: {e}")))?;
-        v["identity_version"].as_i64().unwrap_or(based_on_version + 1)
+        // Typed through `pollis-api` (#922). The old `.as_i64().unwrap_or(…)`
+        // silently substituted a GUESSED version whenever the field was absent
+        // or renamed — and the guess is the transparency log's leaf index, so a
+        // wrong one is not a cosmetic default.
+        let pollis_api::account::RotateIdentityResponse::Ok { identity_version } =
+            crate::commands::mls::decode_response::<pollis_api::account::RotateIdentityBody>(resp)
+                .await?;
+        identity_version
     };
 
     // 4. Install the new private key in AppState.unlock so the calling

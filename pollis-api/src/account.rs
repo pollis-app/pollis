@@ -90,3 +90,15 @@ pub struct DeleteAccountBody {
     #[serde(default)]
     pub user_id: Option<String>,
 }
+
+/// `POST /v1/account/rotate-identity` — the `identity_version` the rotation
+/// landed on.
+///
+/// A lost CAS race answers 409 (with the current head) rather than this type:
+/// the client must re-read and retry, and conflating "applied" with "rejected"
+/// in one body is how a caller ends up treating a refusal as a success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum RotateIdentityResponse {
+    Ok { identity_version: i64 },
+}

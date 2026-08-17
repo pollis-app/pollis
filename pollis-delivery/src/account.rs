@@ -96,7 +96,7 @@ use axum::{
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, gate_or_session, ok_json, outcome_response, resolve_actor, WriteOutcome};
+use crate::writes::{bad_request, gate, gate_or_session, outcome_response, resolve_actor, WriteOutcome};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -156,15 +156,18 @@ pub async fn rotate_identity(
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         state.device_keys.invalidate_user(&owner);
     }
-    rotate_outcome_response(outcome)
+    rotate_outcome_response::<RotateIdentityBody>(outcome)
 }
 
 /// Map a [`RotateOutcome`] to its HTTP response (200 / 403 / 409).
-pub(crate) fn rotate_outcome_response(outcome: RotateOutcome) -> Result<Response, AppError> {
+pub(crate) fn rotate_outcome_response<B>(outcome: RotateOutcome) -> Result<Response, AppError>
+where
+    B: pollis_api::DsRequest<Response = RotateIdentityResponse>,
+{
     Ok(match outcome {
-        RotateOutcome::Applied { new_version } => {
-            ok_json(serde_json::json!({ "status": "ok", "identity_version": new_version }))
-        }
+        RotateOutcome::Applied { new_version } => crate::writes::ok_response::<B>(
+            RotateIdentityResponse::Ok { identity_version: new_version },
+        ),
         RotateOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
         RotateOutcome::Conflict { head_version } => (
             StatusCode::CONFLICT,
@@ -297,7 +300,7 @@ pub async fn record_security_event(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_record_security_event(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<SecurityEventBody>(apply_record_security_event(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// INSERT a `security_event` with `user_id = actor`. The row is always
@@ -350,7 +353,7 @@ pub async fn approve_enrollment(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_approve_enrollment(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<ApproveEnrollmentBody>(apply_approve_enrollment(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// UPDATE the request `WHERE id = ? AND user_id = actor`. The `user_id = actor`
@@ -406,7 +409,7 @@ pub async fn reject_enrollment(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_reject_enrollment(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<RejectEnrollmentBody>(apply_reject_enrollment(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// UPDATE the request to `rejected` `WHERE id = ? AND user_id = actor`.
@@ -472,7 +475,7 @@ pub async fn revoke_device(
             crate::teardown::purge_device_log_rows(&log_conn, &owner, &parsed.device_id).await?;
         }
     }
-    outcome_response(outcome)
+    outcome_response::<RevokeDeviceBody>(outcome)
 }
 
 /// DELETE the revoked device's unclaimed key packages and its conversation
@@ -555,7 +558,7 @@ pub async fn logout_device(
             crate::teardown::purge_device_log_rows(&log_conn, &owner, &parsed.device_id).await?;
         }
     }
-    outcome_response(outcome)
+    outcome_response::<LogoutDeviceBody>(outcome)
 }
 
 /// DELETE the device row `WHERE device_id = ? AND user_id = actor`, together
@@ -637,7 +640,7 @@ pub async fn reset_recover(
         let log_conn = state.log_db.conn().await?;
         crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
     }
-    outcome_response(outcome)
+    outcome_response::<ResetRecoverBody>(outcome)
 }
 
 /// All of identity-reset's main-DB cleanup, in one transaction. Self-scoped: the
@@ -807,7 +810,7 @@ pub async fn delete_account(
             crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
         }
     }
-    outcome_response(outcome)
+    outcome_response::<DeleteAccountBody>(outcome)
 }
 
 /// Every remote-data delete of account deletion, in one transaction. Self-scoped
