@@ -50,7 +50,7 @@ pollis-core/src/
   commands/          # Real command implementations (auth, groups, messages, mls, voice, ...)
   db/                # Turso + local SQLite connections + numbered migrations
   config.rs          # Env var config
-  keystore.rs        # OS keystore (keyring crate)
+  keystore.rs        # Device keystore: OS keychain, else encrypted file
   state.rs           # AppState shared across commands
   realtime.rs        # LiveKit room manager + event dispatch
   sink.rs            # EventSink trait (frontend-channel abstraction)
@@ -110,11 +110,59 @@ other; a genuinely shared home needs a crate below both, which does not exist ye
 |-------|----------|--------------|
 | **Turso** (remote) | Users, groups, channels, membership, public keys, encrypted message envelopes, MLS commit log, MLS welcomes, GroupInfo | Message plaintext, private keys |
 | **SQLite** (local, per-user, encrypted) | Decrypted messages, MLS group state (`mls_kv`), preferences cache | User profiles, groups, channels (fetched from remote) |
-| **OS Keystore** | ML-DSA-44 account identity key pair (private half is its 32-byte seed, so the wrapped blob is the same size it was under Ed25519), session token, device ID, DB encryption key | |
+| **Device keystore** | ML-DSA-44 account identity key pair (private half is its 32-byte seed, so the wrapped blob is the same size it was under Ed25519), session token, device ID, DB encryption key | Anything in plaintext — see below |
+
+### The device keystore has two backends (#882)
+
+`keystore.rs` picks one **at runtime**, once per process, and never switches
+mid-session (a store split across two backends is worse than either):
+
+| Backend | Used when | What guards the bytes |
+|---|---|---|
+| **OS keychain** | A credential store answers a read probe — macOS Keychain, Windows Credential Manager, Linux Secret Service. Preferred always. | The OS |
+| **Encrypted file** | No credential store answers (a server over SSH), or a debug build (no dev-loop prompts), or mobile | AES-256-GCM under a machine-bound KEK (desktop) / an OS-held key (Android Keystore, iOS Keychain) |
+
+There is no third backend. `BackendKind` has exactly two variants and neither
+writes plaintext; before #882 the file backend was plaintext JSON and reachable
+by turning one Cargo feature off.
+
+**Desktop KEK:** `HKDF-SHA256(ikm = platform machine ID, salt = fresh 16 B per
+write)`. The machine ID is `/etc/machine-id` (Linux), IOPlatformUUID (macOS) or
+MachineGuid (Windows) — a 128-bit host value that lives *outside* the data
+directory. `POLLIS_KEYSTORE_MACHINE_ID` overrides it for hosts that have none;
+with no source at all the keystore **errors** rather than degrading.
+
+**What that buys, precisely.** It defeats the file *leaving the machine*: a
+home-dir backup, an `scp` of the data dir, a synced folder, a resold disk read
+on other hardware. It does **not** defend against a local attacker running as
+the same UID (they can derive the same KEK), nor against a full-disk image or
+VM snapshot (`/etc/machine-id` is on the same disk and world-readable), nor
+against forensic recovery of the pre-migration plaintext blocks.
+
+It is one of **two** layers. The secrets in that file — `db_key_wrapped_{uid}`,
+`account_id_key_wrapped_{uid}` — are already Argon2id + XChaCha20-Poly1305
+ciphertext under a PIN-derived KEK (`commands/pin.rs`). The PIN is *not* mixed
+into the file KEK: the file is read before the PIN exists (boot reads
+`pin_meta_{uid}` to decide which screen to show), and the PIN's own layer is
+already inside. Each layer covers the other's gap — a 4-digit PIN alone is
+~40 minutes of offline sweep at the tuned Argon2id cost once the file is
+copied, and machine binding alone stops nothing local.
+
+A TPM/Secure Enclave would improve this (a sealed key is in no backup and no
+disk image). Deliberately not integrated: `tss-esapi` is a heavy C dependency,
+needs a TPM *and* a reachable resource manager, and needs three platform
+integrations — a half-integration with a silent fallback would look stronger
+than it is.
+
+**Migration.** A pre-#882 plaintext file is still readable, and the next read or
+write replaces it with ciphertext through the existing tempfile + fsync +
+rename. Every interruption leaves either the complete old file or the complete
+new one. A file that cannot be decrypted is **never** rewritten or backed away —
+those bytes are someone's identity key.
 
 ## Security Model
 
-**Trusted:** User's device, local database, the signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the installed version, OS keystore.
+**Trusted:** User's device, local database, the signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the installed version, and the device keystore — the OS keychain where one exists, otherwise the machine-bound encrypted file at the reduced strength described above.
 **Untrusted:** Network, Turso, server operators.
 
 ## Network egress & the closed-overlay relay

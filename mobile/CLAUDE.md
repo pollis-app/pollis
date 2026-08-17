@@ -292,11 +292,13 @@ Current state:
   (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, since
   OTP bootstrap + all remote writes go through the DS, not direct Turso. Full
   sign-in verified end-to-end on an Android emulator against the live dev DS.
-- **Keystore-at-rest (Android + iOS):** the file-backed keystore (used in place of
-  desktop's OS keychain when built `--no-default-features`, i.e. no `os-keystore`)
-  envelope-encrypts its contents with an AES-256-GCM master key held in the
-  platform secure store — same on-disk blob (`iv(12)||gcm-ct`, `dev-keystore.json`)
-  on both platforms:
+- **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only
+  backend on mobile) envelope-encrypts its contents with an AES-256-GCM master
+  key held in the platform secure store — same on-disk blob (`iv(12)||gcm-ct`,
+  `dev-keystore.json`) on both platforms. #882 gave desktop the same treatment
+  under a machine-bound key, so mobile is no longer the only encrypted backend;
+  the desktop file prefixes a `magic(4)||salt(16)` header ahead of the identical
+  envelope, and mobile's format is unchanged.
   - **Android** — `android_kek` in `pollis-core/src/keystore.rs`: non-exportable
     key in the **AndroidKeyStore** (JNI-from-Rust: `JNI_OnLoad` captures the
     `JavaVM`; system `KeyStore`/`KeyGenerator`/`Cipher`, alias `pollis_keystore_kek`).

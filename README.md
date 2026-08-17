@@ -36,8 +36,8 @@ encrypted at rest.
   `FrameCryptor`, keyed from the MLS group's exporter secret, so the LiveKit SFU
   forwards ciphertext only.
 - **Remote DB**: Turso (libSQL) — reads direct from the Rust core; writes via the Delivery Service
-- **Local DB**: SQLite via rusqlite (encrypted at rest, key in OS keystore)
-- **Auth**: Email OTP, session stored in the OS keystore
+- **Local DB**: SQLite via rusqlite (encrypted at rest, key in the device keystore)
+- **Auth**: Email OTP, session stored in the device keystore
 - **Real-time**: LiveKit (voice calls via Rust `livekit` crate, real-time presence)
 - **File storage**: Cloudflare R2
 
@@ -47,8 +47,9 @@ Message content, file attachments, and voice audio are encrypted on your device
 before they ever leave it. The server stores ciphertext it can never read — your
 messages, files, and voice calls are inaccessible to anyone operating the
 infrastructure. Private keys never leave the device. Session tokens live in the OS
-keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not
-on disk.
+keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service); on
+a host with no keychain — a server over SSH — they go to a file whose bytes are
+encrypted under a key bound to that machine, never to plaintext.
 
 - **What the server can never see:** message text, file contents, and voice audio.
   It only ever holds ciphertext and public metadata (who is in a channel, when

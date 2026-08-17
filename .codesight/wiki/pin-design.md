@@ -61,7 +61,13 @@ Out of scope for this doc (one-liners):
 
 What is stored, where, after this change lands.
 
-### OS keychain (release) / `dev-keystore.json` (debug)
+### Device keystore (OS keychain, or `dev-keystore.json`)
+
+> Updated by #882: the backend is chosen at **runtime**, not by build profile —
+> the OS keychain wherever one exists, otherwise `dev-keystore.json`, whose
+> bytes are now AES-256-GCM ciphertext under a machine-bound KEK rather than
+> plaintext JSON. See `.codesight/wiki/overview.md` and
+> `docs/security-whitepaper.md` §3.5.
 
 Per-user slots, keyed by `{slot}_{user_id}`:
 
@@ -281,7 +287,7 @@ All in `pollis-core/src/accounts.rs`.
 
 3. **Add `pin_set: bool`** to `AccountInfo`. Updated on every successful `set_pin` or on the rate-limit nuke.
 
-4. **Same fixes to the dev keystore JSON** (`keystore.rs:66-83`): atomic write, loud parse failure, backup on corruption. Release builds use the OS keychain and are already safe.
+4. **Same fixes to the dev keystore JSON** (`keystore.rs:66-83`): atomic write, loud parse failure, backup on corruption. (Shipped. #882 later added at-rest encryption on top, and narrowed the backup-on-corruption path so it can never fire for a file that merely failed to decrypt.)
 
 ## Migration
 

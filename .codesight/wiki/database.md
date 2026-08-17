@@ -643,7 +643,7 @@ Backfilled-then-stale, unread tables. Created by migration `000009` as the direc
 
 Source: `pollis-core/src/db/local_schema.sql`
 
-File path: `pollis_{user_id}.db`, encrypted with a key from the OS keystore.
+File path: `pollis_{user_id}.db`, encrypted with a key from the device keystore.
 
 ### kv
 - `key` TEXT PK

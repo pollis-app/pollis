@@ -72,7 +72,8 @@ them:
 - Social engineering, phishing, or physical access against Pollis, its
   contributors, or any provider.
 - Findings that require an already-compromised device or OS. The device, its
-  local database, the signed binary and the OS keystore are inside the trust
+  local database, the signed binary and the device keystore (the OS keychain,
+  or a machine-bound encrypted file where no keychain exists) are inside the trust
   boundary by design (see the security model in `CLAUDE.md`); "malware on the
   machine can read the plaintext" is a documented property, not a bug.
 - Metadata that Pollis states it exposes to the server. Servers see who talks to

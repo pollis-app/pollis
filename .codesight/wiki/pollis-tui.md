@@ -70,10 +70,15 @@ pollis-tui (binary `pollis`)
 - **Multi-thread runtime is mandatory.** `pollis-core`'s DB/keystore paths use
   `spawn_blocking`; a current-thread runtime deadlocks. Hence
   `#[tokio::main(flavor = "multi_thread")]`.
-- **No `media` feature anywhere.** The crate depends on `pollis-core` with
-  `default-features = false`, so `media` (livekit/libwebrtc/cpal) and
-  `os-keystore` (keyring/dbus) are both **off**. Voice/screenshare/camera are out
-  of scope; the keystore is the file-backed JSON store.
+- **No `media` feature; `os-keystore` ON.** The crate depends on `pollis-core`
+  with `default-features = false`, so `media` (livekit/libwebrtc/cpal) is **off**
+  — voice/screenshare/camera are out of scope. `os-keystore` is deliberately
+  **on** (#879): the shipped `pollis` binary must prefer the OS keychain. Where
+  no keychain answers — the server-over-SSH case that is this client's likely
+  home — it falls back **at runtime** to the machine-bound encrypted file store
+  (#882), so the same binary works on both without ever writing plaintext.
+  `pollis-tui/src/auth.rs` carries a guard test that fails if the feature is
+  dropped again.
 - **Reads go direct to Turso; writes go through the Delivery Service.** This is the
   post-#419 model — `POLLIS_DELIVERY_URL` is **mandatory** config. The TUI invents
   no new backend path.

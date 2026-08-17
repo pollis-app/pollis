@@ -154,11 +154,13 @@ with the multi-device model. See §7 for the enrollment implication.
 
 ## 5. Keystore
 
-`OsKeystore` (`keystore.rs:277-292`) resolves to a **file-backed JSON store**
-whenever the `os-keystore` feature is off (which it is under
-`--no-default-features`) — persistent, zero dbus dependency. Instantiate via
-`default_os_keystore()`; `AppState::new` already does this. No custom keystore
-code required. (`InMemoryKeystore` exists for a future ephemeral/burner mode — out
+`OsKeystore` picks its backend **at runtime** (#882): the OS keychain wherever
+one answers a read probe, otherwise a file whose bytes are AES-256-GCM
+ciphertext under a machine-bound KEK. The CLI ships with `os-keystore` on
+(#879), so a desktop host gets the keychain and a server over SSH — no
+secret-service — gets the encrypted file, from the same binary. Plaintext is not
+a reachable state. Instantiate via `default_os_keystore()`; `AppState::new`
+already does this. No custom keystore code required. (`InMemoryKeystore` exists for a future ephemeral/burner mode — out
 of scope here.)
 
 Keystore trait (`keystore.rs:255-272`): `store/load/delete` + `*_for_user`
@@ -286,8 +288,10 @@ join-request flow (`request_group_access`/`approve_join_request`/…).
 
 ## 9. Feature-flag scoping (what's IN vs OUT)
 
-Builds with `pollis-core` `--no-default-features` (drops `media` = livekit/
-libwebrtc/cpal/rodio/APM, and `os-keystore` = keyring/dbus → file keystore).
+Builds with `pollis-core` `--no-default-features` **plus `os-keystore`**: that
+drops `media` (livekit/libwebrtc/cpal/rodio/APM) but keeps the keyring backend
+(#879), which falls back to the encrypted file store at runtime on a host with
+no secret-service (#882).
 
 **OUT of v1** (behind `media`, `commands/mod.rs:14-60`): voice (`voice/*`),
 screenshare (`screenshare/*`), camera (`camera/*`), sfx, realtime LiveKit rooms
