@@ -31,6 +31,26 @@ export const groupInviteQueryKeys = {
   members: (groupId: string | null) => ["groups", groupId, "members"] as const,
 };
 
+const ROLE_RANK: Record<string, number> = { owner: 0, admin: 1 };
+
+/**
+ * Roster display order for member lists: role first (owner, admins, members),
+ * then alphabetical. Desktop's members panel orders online-first, but mobile
+ * has no presence source yet — presence ordering awaits one.
+ */
+export function sortMembersByRole(members: GroupMember[]): GroupMember[] {
+  return [...members].sort((a, b) => {
+    const ar = ROLE_RANK[a.role] ?? 2;
+    const br = ROLE_RANK[b.role] ?? 2;
+    if (ar !== br) {
+      return ar - br;
+    }
+    const an = a.username ?? a.user_id;
+    const bn = b.username ?? b.user_id;
+    return an.localeCompare(bn);
+  });
+}
+
 export function usePendingGroupInvites() {
   const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({

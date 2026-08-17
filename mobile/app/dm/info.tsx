@@ -14,24 +14,9 @@ import {
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
-import { useQuery } from "@tanstack/react-query";
-import { invoke } from "../../lib/native";
-import { useLeaveDM } from "../../hooks/queries";
+import { useDMChannel, useLeaveDM } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-
-interface DmMember {
-  user_id: string;
-  username?: string;
-  avatar_url?: string;
-}
-
-interface DmChannel {
-  id: string;
-  created_by: string;
-  created_at: string;
-  members: DmMember[];
-}
 
 function DMInfo() {
   const router = useRouter();
@@ -40,19 +25,10 @@ function DMInfo() {
   const currentUser = appStore.currentUser;
   const [confirmLeave, setConfirmLeave] = useState(false);
 
-  const channel = useQuery({
-    queryKey: ["dm", "channel", channelId],
-    queryFn: async (): Promise<DmChannel | null> => {
-      if (!channelId) {
-        return null;
-      }
-      return await invoke<DmChannel>("get_dm_channel", {
-        dmChannelId: channelId,
-      });
-    },
-    enabled: !!channelId,
-    staleTime: 1000 * 60,
-  });
+  // Same `get_dm_channel` source the DM list rows come from (#907) — the
+  // shared hook keys it under the ["dm"] prefix so realtime roster/DM events
+  // invalidate this roster along with the list.
+  const channel = useDMChannel(channelId);
 
   const leave = useLeaveDM();
 
@@ -73,9 +49,12 @@ function DMInfo() {
 
   return (
     <Screen testID="screen-dm-info">
-      <Crumb segs={[{ label: "DIRECT" }, { label: "Info", leaf: true }]} />
+      <Crumb
+        segs={[{ label: "DIRECT" }, { label: "Info", leaf: true }]}
+        end={members.length > 0 ? String(members.length) : undefined}
+      />
       <Body>
-        <SectionTitle>PARTICIPANTS</SectionTitle>
+        <SectionTitle>{`PARTICIPANTS${members.length > 0 ? ` · ${members.length}` : ""}`}</SectionTitle>
         {channel.isLoading ? (
           <Text
             style={{

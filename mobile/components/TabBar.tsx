@@ -1,8 +1,11 @@
 import { View, Pressable, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { observer } from "mobx-react-lite";
 import { palette, semantic, fonts } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { Icon } from "./icons";
+import { appStore } from "../stores/appStore";
+import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
 
 const TABS: {
   name: string;
@@ -23,9 +26,23 @@ const TABS: {
   { name: "self", label: "Self", glyph: (c) => <Icon.user size={16} color={c} /> },
 ];
 
-export function TabBar({ state, navigation }: any) {
+export const TabBar = observer(function TabBar({ state, navigation }: any) {
   useTheme();
   const insets = useSafeAreaInsets();
+  // Per-tab unread badge: sum the store's unread counts over the ids each tab
+  // lists. The same cached queries the tabs render from split the id space
+  // into channels (Groups) and DM conversations (Direct). Read `unreadCounts`
+  // directly (not via a store method — MobX actions run untracked, so a
+  // method call from render would not subscribe this observer).
+  const unreadCounts = appStore.unreadCounts;
+  const { data: groups = [] } = useUserGroupsWithChannels();
+  const { data: dms = [] } = useDMChannels();
+  const sumUnread = (items: { id: string }[]) =>
+    items.reduce((sum, x) => sum + (unreadCounts[x.id] ?? 0), 0);
+  const badgeByTab: Record<string, number> = {
+    groups: sumUnread(groups.flatMap((g) => g.channels)),
+    direct: sumUnread(dms),
+  };
   return (
     <View
       style={{
@@ -75,6 +92,33 @@ export function TabBar({ state, navigation }: any) {
               }}
             >
               {tab.glyph(color)}
+              {(badgeByTab[tab.name] ?? 0) > 0 ? (
+                <View
+                  testID={`badge-${tab.name}`}
+                  style={{
+                    position: "absolute",
+                    top: -4,
+                    right: -10,
+                    minWidth: 15,
+                    height: 15,
+                    paddingHorizontal: 3,
+                    borderRadius: 8,
+                    backgroundColor: semantic.accent,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontFamily: fonts.sora600,
+                      fontSize: 9,
+                      color: palette.bg,
+                    }}
+                  >
+                    {Math.min(badgeByTab[tab.name], 99)}
+                  </Text>
+                </View>
+              ) : null}
             </View>
             <Text
               style={{
@@ -92,4 +136,4 @@ export function TabBar({ state, navigation }: any) {
       })}
     </View>
   );
-}
+});

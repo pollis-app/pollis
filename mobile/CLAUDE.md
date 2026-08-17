@@ -368,7 +368,15 @@ Current state:
   restore via `get_session`); every tab/group/DM/chat/self screen consumes real
   React Query hooks (no hardcoded mock arrays); message send / receive / ingest /
   reactions / edit / delete; profile, devices, blocking, safety numbers,
-  preferences. `bridge.rs` covers ~every command the hooks call.
+  preferences. Self → Security additionally carries: in-app **account deletion**
+  (typed-DELETE full-screen confirm → `delete_account` + best-effort
+  `wipe_local_data` → sign-out; App Store 5.1.1(v)); **auto-lock** (#899,
+  `lib/autolock.tsx` — RN-layer deadline against the plain `lock` arm, since
+  core's autolock Tauri event can't reach mobile; device-local window in
+  expo-secure-store, Off/1/5/15/60 min, plus a manual "Lock now" row);
+  the **security-event audit list** (`list_security_events`) and the self
+  public-key line (`get_identity`, system mono). `bridge.rs` covers ~every
+  command the hooks call.
 - **Chat parity set (2026-08, stacked PRs; bridge arms land in PR #967):**
   load-older paging (`useMessages` is an infinite query over `next_cursor`;
   inverted FlatList, `onEndReached`); reaction pills + full emoji picker
@@ -469,8 +477,11 @@ Current state:
     On-device delivery test is the final gate (#344).
 - **webrtc Expo config plugin** + an AndroidManifest mic/camera **removal** rule
   so the data-only realtime path adds no voice/video permission.
-- **`device_revoked`** self-sign-out on the inbox connection (needs the local
-  device id + a sign-out path), and on-device testing of realtime + push.
+- ~~**`device_revoked`** self-sign-out on the inbox connection~~ — **DONE.**
+  `useInboxRealtime` treats the event payload as advisory, confirms with
+  `is_current_device_registered`, then signs out (`logout` + store reset +
+  navigation to `/(auth)/email`). On-device testing of realtime + push is
+  still pending.
 
 ## ⚠️ Secrets architecture — KNOWN CRITICAL ISSUE (do before any public release)
 

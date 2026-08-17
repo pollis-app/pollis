@@ -10,14 +10,15 @@ import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { DMConversation } from "../../types";
 
-interface RawDmMember {
+export interface RawDmMember {
   user_id: string;
   username?: string;
   avatar_url?: string;
 }
 
-interface RawDmChannel {
+export interface RawDmChannel {
   id: string;
+  created_by?: string;
   members: RawDmMember[];
   created_at: string;
 }
@@ -25,6 +26,7 @@ interface RawDmChannel {
 export const dmQueryKeys = {
   all: ["dm"] as const,
   channels: (userId: string | null) => ["dm", "channels", userId] as const,
+  channel: (dmChannelId: string | null) => ["dm", "channel", dmChannelId] as const,
   requests: (userId: string | null) => ["dm", "requests", userId] as const,
 };
 
@@ -60,6 +62,27 @@ export function useDMChannels() {
       return (channels ?? []).map((c) => transform(c, currentUser.id));
     },
     enabled: !!currentUser,
+    staleTime: 1000 * 60,
+  });
+}
+
+/**
+ * One DM channel with its full member roster — the same `get_dm_channel`
+ * source `list_dm_channels` rows come from (#907). Shared by the DM info and
+ * conversation info screens so the roster and count can never disagree with
+ * the list. Keyed under the `["dm"]` prefix, so the inbox realtime's
+ * `dm_created` / `roster_changed` invalidations refresh it too.
+ */
+export function useDMChannel(dmChannelId: string | null) {
+  return useQuery({
+    queryKey: dmQueryKeys.channel(dmChannelId),
+    queryFn: async (): Promise<RawDmChannel | null> => {
+      if (!dmChannelId) {
+        return null;
+      }
+      return await invoke<RawDmChannel>("get_dm_channel", { dmChannelId });
+    },
+    enabled: !!dmChannelId,
     staleTime: 1000 * 60,
   });
 }
