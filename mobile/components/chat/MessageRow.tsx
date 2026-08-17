@@ -1,6 +1,11 @@
 import { View, Text, Pressable } from "react-native";
 import { Avatar } from "../ui";
 import { semantic, type as ty } from "../../theme/tokens";
+import { MessageBodyInline } from "./MessageBody";
+import { ReactionPills } from "./ReactionPills";
+import { ReceiptIndicator } from "./ReceiptIndicator";
+import type { Reaction } from "../../hooks/queries/useReactions";
+import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 
 export function MessageRow({
   av,
@@ -10,9 +15,20 @@ export function MessageRow({
   text,
   pending,
   edited,
+  reactions,
+  currentUserId,
+  onToggleReaction,
+  receipt,
+  peerCount = 0,
+  showReceipt = false,
+  threadCount = 0,
+  onOpenThread,
+  mentionNames,
+  selfName,
   onPressAvatar,
   onLongPress,
   testID,
+  messageId,
 }: {
   av: string;
   amber?: boolean;
@@ -21,9 +37,20 @@ export function MessageRow({
   text?: string;
   pending?: boolean;
   edited?: boolean;
+  reactions?: Reaction[];
+  currentUserId?: string;
+  onToggleReaction?: (emoji: string, reacted: boolean) => void;
+  receipt?: MessageReceipts;
+  peerCount?: number;
+  showReceipt?: boolean;
+  threadCount?: number;
+  onOpenThread?: () => void;
+  mentionNames?: ReadonlySet<string>;
+  selfName?: string | null;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
   testID?: string;
+  messageId?: string;
 }) {
   return (
     <Pressable
@@ -62,6 +89,11 @@ export function MessageRow({
           >
             {pending ? "sending…" : time}
           </Text>
+          <ReceiptIndicator
+            receipts={receipt}
+            peerCount={peerCount}
+            visible={showReceipt && !pending}
+          />
         </View>
         {text ? (
           <Text
@@ -73,7 +105,11 @@ export function MessageRow({
               marginTop: 2,
             }}
           >
-            {text}
+            <MessageBodyInline
+              text={text}
+              mentionNames={mentionNames}
+              selfName={selfName}
+            />
             {edited ? (
               <Text
                 style={{
@@ -86,6 +122,39 @@ export function MessageRow({
               </Text>
             ) : null}
           </Text>
+        ) : null}
+        {reactions && reactions.length > 0 && onToggleReaction ? (
+          <ReactionPills
+            messageId={messageId ?? ""}
+            reactions={reactions}
+            currentUserId={currentUserId}
+            onToggle={onToggleReaction}
+          />
+        ) : null}
+        {threadCount > 0 && onOpenThread ? (
+          <Pressable
+            onPress={onOpenThread}
+            testID={`btn-thread-${messageId ?? ""}`}
+            accessibilityRole="button"
+            accessibilityLabel={`Open thread, ${threadCount} ${threadCount === 1 ? "reply" : "replies"}`}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              marginTop: 6,
+              alignSelf: "flex-start",
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 12,
+                color: semantic.accent,
+              }}
+            >
+              {threadCount} {threadCount === 1 ? "reply" : "replies"} ›
+            </Text>
+          </Pressable>
         ) : null}
       </View>
     </Pressable>

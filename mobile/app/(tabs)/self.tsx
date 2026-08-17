@@ -54,6 +54,13 @@ function Self() {
       to: "/self/security" as const,
       t: "row-self-security",
     },
+    {
+      g: <Icon.bookmark color={semantic.accent} />,
+      n: "Saved",
+      s: "Bookmarked messages",
+      to: "/self/saved" as const,
+      t: "row-self-saved",
+    },
   ];
 
   return (

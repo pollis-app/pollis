@@ -110,11 +110,13 @@ export default function RootLayout() {
               <Stack.Screen name="group/invite" />
               <Stack.Screen name="group/members" />
               <Stack.Screen name="group/settings" />
+              <Stack.Screen name="group/emoji" />
               <Stack.Screen name="group/requests" />
               <Stack.Screen name="group/discover" />
               <Stack.Screen name="dm/new" />
               <Stack.Screen name="dm/info" />
               <Stack.Screen name="chat/[id]" />
+              <Stack.Screen name="chat/thread" />
               <Stack.Screen name="user/[id]" />
               {/* Personal settings pages pop up from the bottom (pushing the
                   current screen off), and reverse on back — a full-screen push,
@@ -139,6 +141,11 @@ export default function RootLayout() {
                 name="self/change-email"
                 options={{ animation: "slide_from_bottom" }}
               />
+              <Stack.Screen
+                name="self/saved"
+                options={{ animation: "slide_from_bottom" }}
+              />
+              <Stack.Screen name="m/[...permalink]" />
               <Stack.Screen
                 name="self/delete-account"
                 options={{ animation: "slide_from_bottom" }}
