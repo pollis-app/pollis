@@ -65,7 +65,7 @@ done
 # The workflow has run ~30 times in total, so 100 covers its entire history in
 # one API page and keeps this cheap enough to run on a daily cron.
 runs="$(gh run list --workflow="$WORKFLOW" --limit 100 \
-  --json conclusion,createdAt,event,databaseId,displayTitle,headSha 2>/dev/null)"
+  --json conclusion,createdAt,event,databaseId,displayTitle,headSha,headBranch 2>/dev/null)"
 
 if [ -z "$runs" ] || [ "$runs" = "[]" ]; then
   echo "error: no runs returned for $WORKFLOW — is gh authenticated?" >&2
@@ -78,8 +78,29 @@ if [ -f "$OUT" ]; then
 fi
 
 resolved="[]"
-while IFS=$'\t' read -r run_id created_at conclusion event head_sha title; do
+while IFS=$'\t' read -r run_id created_at conclusion event head_sha head_branch title; do
   [ -n "$run_id" ] || continue
+
+  # 0. Only runs of the workflow AS SHIPPED count as verdicts about a release.
+  #
+  #    A run on a feature branch is the workflow being BUILT, not a judgement on
+  #    a release — but when it was dispatched against a real tag (which is how
+  #    you test a reproducer at all) the tag resolves and it used to be published
+  #    as that release's verdict. Fourteen such runs existed, thirteen of them
+  #    red: nine from `fix/build-recipe-drift`, three from `diag/rebuild-artifact`
+  #    and two from `feature/auto-verify-releases`, every one of them a red
+  #    belonging to a workflow that was still being debugged, all of them
+  #    attributed to v1.8.4. The existing "no tag means a development run"
+  #    exclusion below only catches the ones where nothing resolved, which is the
+  #    weaker half of the same rule.
+  #
+  #    Tag-triggered runs report the tag as the branch (`v1.9.3`), and
+  #    `workflow_run`/`workflow_dispatch` runs from the default branch report
+  #    `main`, so those two shapes are the whole of the legitimate set.
+  case "$head_branch" in
+    main|v[0-9]*) ;;
+    *) continue ;;
+  esac
 
   # 1. Already in the committed ledger — trust it and never re-fetch. This is
   #    what keeps verdicts readable long after their logs have expired.
@@ -131,19 +152,31 @@ while IFS=$'\t' read -r run_id created_at conclusion event head_sha title; do
        run_url: ("https://github.com/actuallydan/pollis/actions/runs/" + $run_id)
      }]')"
 done < <(printf '%s' "$runs" | jq -r '.[] | [
-  (.databaseId|tostring), .createdAt, .conclusion, .event, .headSha, (.displayTitle // "")
+  (.databaseId|tostring), .createdAt, .conclusion, .event, .headSha,
+  (.headBranch // ""), (.displayTitle // "")
 ] | @tsv')
 
 # Per-run classification of the pre-fix reds, established by reading the run
 # logs rather than inferred from the date. "Before the fix" is necessary but not
 # sufficient to call a red false — v1.9.3 was red before the fix AND genuinely
-# did not reproduce. Publishing a blanket "reds before this date may be false"
-# would quietly launder a real finding, so each one is classified individually
-# and the evidence is recorded next to it.
+# produced different bytes. Publishing a blanket "reds before this date may be
+# false" would quietly launder a real finding, so each one is classified
+# individually and the evidence is recorded next to it.
+#
+# Three classes, because two were not enough (#944):
+#   false_red          the run never performed the comparison (the #939 wait-loop
+#                      bug); the build in fact reproduced byte-identically.
+#   environment_drift  the comparison was performed and the bytes differed, but
+#                      the rebuild did not run in the environment the release
+#                      recorded, so the divergence is not attributable to the
+#                      source. Still red — inconclusive is not a pass.
+#   real               the bytes differed with the environment held constant.
+#                      The accusation. No run currently carries this class, and
+#                      that fact should be checked, not assumed.
 CLASSIFIED='{
   "31753766171": {
-    "class": "real",
-    "evidence": "The tag was published and the log verified (found: true); the rebuilt AppImage differed from the shipped one in 105,863,272 bytes, across the main binary and several bundled libraries. Still unexplained."
+    "class": "environment_drift",
+    "evidence": "Explained by #944, and not a finding against the shipped binary. The tag was published and the log verified (found: true), and the AppImage genuinely differed: logged 07bccca8…, rebuilt a6767a4c…. The cause is that the two builds ran on different CI machine images — the release on ubuntu22@20260810.260.1, the rebuild 36 minutes later on ubuntu22@20260720.234.2, because GitHub rolls a re-imaged ubuntu-22.04 label out gradually. (Both read from the two runs'"'"' own logs; this tag'"'"'s leaf predates #939 and records runner_image \"unknown\", which is why the workflow could not tell at the time.) An AppImage vendors the app'"'"'s system libraries off the build machine, and seven differed in real code — libgssapi_krb5, libk5crypto, libkrb5, libkrb5support, libsqlite3, libsystemd, libudev — with changed .text sizes and shifted symbol addresses, not merely new build ids. The 105,863,272 differing bytes are compression smear across a squashfs, not the size of the change. The only difference in anything built from Pollis source was the ORDER of the twelve CSP content hashes inside usr/bin/pollis: the same twelve values, permuted, because tauri-codegen emits them in filesystem readdir order. That the twelve digests are identical is itself proof the frontend bundle reproduced byte-for-byte. Nothing indicates the shipped binary differs from the tagged source. Proven, not merely argued: re-running the identical rebuild on 2026-08-17 landed on ubuntu22@20260810.260.1 — the exact image the release built on — and reproduced 07bccca8… byte-for-byte (run 32036282718). Same source, same tag, one variable changed, and the bytes match. Full write-up: docs/reproducible-builds-residuals.md §6 and §6a."
   },
   "31866040326": {
     "class": "false_red",

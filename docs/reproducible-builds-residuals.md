@@ -333,6 +333,137 @@ release to a digest-pinned container or self-hosted image — but a rebuilder ca
 now at least *tell* whether the image moved, which was impossible while the field
 held a floating label.
 
+**This residual is the one that actually bites, and #944 measured it.** The
+AppImage is not purely a function of Pollis source: `linuxdeploy` copies the
+app's transitively-linked system shared libraries **off the build runner** into
+`usr/lib/` inside the bundle. Those bytes are the runner image's, not ours. When
+the image moves, they move, and the payload hash moves with them for a completely
+unchanged source tree.
+
+`v1.9.3` is the worked example, and it was published as an unexplained "did not
+reproduce" for three days before anyone looked:
+
+| | |
+|---|---|
+| Release `build-linux` ran on | `ubuntu22@20260810.260.1` |
+| Rebuild ran on | `ubuntu22@20260720.234.2` |
+| Gap between the two jobs | **36 minutes** |
+
+GitHub rolls a new image out behind the `ubuntu-22.04` label *gradually*, so two
+jobs on the same evening landed on different images — and the rebuild got the
+**older** one. Seven vendored libraries differed as a result:
+`libgssapi_krb5.so.2`, `libk5crypto.so.3`, `libkrb5.so.3`, `libkrb5support.so.0`,
+`libsqlite3.so.0`, `libsystemd.so.0`, `libudev.so.1`. Not merely different build
+ids — different `.text` sizes and shifted symbol addresses, i.e. genuinely
+different upstream builds (`libsqlite3.so.0`'s `.text` went `0xeaf9d` →
+`0xeaf3d`).
+
+**Confirmed by controlled experiment, not by argument.** Re-running the identical
+rebuild on 2026-08-17 (`gh workflow run rebuild-verify.yml -f tag=v1.9.3`, run
+`32036282718`) landed on `ubuntu22@20260810.260.1` — the same image the release
+built on — and reproduced
+`07bccca82cd4b16a57899bc2f18b81ba69595984d2c417b36289a9be278eebd3`,
+**byte-identical** to the logged payload. Same tag, same public source, same
+recipe; the only variable was the runner image, and holding it constant makes the
+bytes match exactly. **v1.9.3 reproduces.**
+
+That result also settles §6a: the CSP hash order is not re-rolled on every
+compile, it tracks the build host's directory layout, so it too was downstream of
+the image change.
+
+Because a squashfs is compressed, one differing input file smears across the
+whole archive: the August rebuild reported **105,863,272 differing bytes** out of
+107,297,272. That number measures compression, not damage, and reading it as
+"the binary is wholly different" is a mistake the diagnostic now pre-empts by
+splitting differing paths into vendored (`usr/lib/`) and Pollis-built.
+
+Since #944 `rebuild-verify.yml` **checks this precondition instead of assuming
+it**: it reads `toolchain.runner_image` from the tag's own leaf (now surfaced by
+`pollis-verify release --json`), compares it against the image the rebuild
+actually ran on, and classifies the outcome as `environment_drift` rather than
+`did_not_reproduce` when they differ. Every non-reproducing outcome still fails
+the run — an inconclusive rebuild is not a passing one, and auto-greening drift
+would open a window for a genuine divergence every time GitHub re-images a
+runner — but the ledger can now say which kind of red it was, with the two image
+ids as evidence. `scripts/test-rebuild-verdict.sh` pins both directions,
+including that a same-image byte divergence still reports as the real finding.
+
+### 6a. `usr/bin/pollis` — CSP hash ordering in `tauri-codegen`
+Found while diagnosing `v1.9.3` (#944), and worth stating precisely because it
+is the only thing that has ever made the *Pollis-built* binary differ across an
+otherwise-clean rebuild.
+
+The two `usr/bin/pollis` binaries differed **only** in the order of the twelve
+`'sha256-…'` CSP hashes embedded in `.rodata` — same twelve values, permuted —
+plus the `NT_GNU_BUILD_ID` that necessarily follows from any content change.
+Nothing else in the binary differed. That the digests are *identical* is itself
+the proof that the frontend bundle is byte-for-byte reproducible; only the order
+of the list moved.
+
+The cause is upstream and mechanical: `tauri-codegen`'s
+`CspHashes::add_if_applicable` pushes one hash per `.js`/`.mjs` file into a
+`Vec<String>` in `WalkDir` order over `frontendDist`, and `WalkDir` yields
+`readdir(2)` order with no sort anywhere in the path
+(`embedded_assets.rs`, `RawEmbeddedAssets::new`). `to_tokens` then emits the
+`Vec` in that order, straight into the binary. So the byte layout of the shipped
+executable depends on the order the build host's filesystem happens to return
+directory entries in.
+
+**Not fixed here, deliberately.** The three available fixes are each worse than
+the defect: forking `tauri-codegen` behind `[patch.crates-io]` pins the whole
+Tauri build stack to one version and blocks routine updates (#750 vendored and
+patched this same crate once, and reverted it); setting
+`dangerousDisableAssetCspModification` removes the hashes by weakening CSP on a
+security product; collapsing the frontend to a single JS chunk trades app
+startup for byte layout. The list is a CSP allow-list, where order carries no
+meaning, so the divergence is cosmetic. The right resolution is an upstream sort;
+until then it is documented, and the rebuilder's diagnostic surfaces it by naming
+`usr/bin/pollis` as a Pollis-built path so it is never again mistaken for
+vendored drift.
+
+### 6b. AppImage top-level icon symlink — unordered, cosmetic
+Same rebuild, same class. The AppDir's root `pollis.png` is a symlink that
+pointed at `usr/share/icons/hicolor/32x32/apps/pollis.png` in the shipped
+AppImage and `…/512x512/…` in the rebuild. The bundler picks the target from an
+unordered icon listing. Cosmetic, outside our source, and recorded so the next
+reader does not spend time on it.
+
+### 6c. AppImage tooling fetched from floating refs — unpinned by construction
+Tauri's AppImage bundler downloads its tooling at build time, and two of the five
+URLs are not pinned to a release at all:
+
+```
+…/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh          ← branch
+…/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh  ← branch
+…/linuxdeploy-plugin-appimage/releases/download/continuous/…      ← rolling tag
+```
+
+`master` and `continuous` can change between a release and its rebuild, and
+neither is recorded in the leaf. This did **not** cause the `v1.9.3` divergence
+(the release and the rebuild were 36 minutes apart, and the differing bytes are
+fully accounted for above), but it is a live hole in the claim for any rebuild
+attempted later — which is the normal case for a third party auditing an old tag.
+
+This is not only a determinism concern — it is an availability one, and it was
+observed directly while working on #944: a rebuild of `v1.9.3` died after a
+14-minute compile with `failed to bundle project: http status: 429`, GitHub
+rate-limiting the tooling download. A reproducer that fetches five files from
+two hosts mid-build can fail for reasons that have nothing to do with the bytes
+it is checking, and it does so *after* paying the full build cost.
+
+The URLs are hardcoded in `tauri-bundler`
+(`bundle/linux/appimage/linuxdeploy.rs`, confirmed by inspecting the shipped
+`@tauri-apps/cli` 2.11.4 binary), so there is no per-URL override. The only lever
+the bundler exposes is `TAURI_BUNDLER_TOOLS_GITHUB_MIRROR` /
+`TAURI_BUNDLER_TOOLS_GITHUB_MIRROR_TEMPLATE`, which rewrites
+`github.com/<owner>/<repo>/releases/download/<version>/<asset>` — enough to pin
+`AppRun`, `linuxdeploy` and `linuxdeploy-plugin-appimage` behind a mirror we
+control, but **not** the two `raw.githubusercontent.com/…/master/…` plugin
+scripts, which do not match that pattern. Closing this properly therefore means
+either hosting a mirror and vendoring the two shell scripts, or moving the Linux
+release into a pinned container. Until then, treat a Linux payload rebuild of an
+*old* tag as best-effort for this reason as well as for the runner image.
+
 ### 7. Native C/C++ dependencies (`webrtc-sys` / `libwebrtc`, `webrtc-audio-processing-sys`) — best-effort
 These vendored C/C++ builds (clang, meson, ninja, VAAPI wrappers) are the
 least-controlled inputs: native compilers embed paths (mitigated by
@@ -360,3 +491,26 @@ promising more.
 4. **A divergence in an item above is expected, not tampering.** A divergence in
    the Linux payload with the full recipe supplied on a matching image, however,
    is exactly the signal this program exists to surface — investigate it.
+5. **Read the verdict token, not the red X.** Since #944 `rebuild-verify.yml`
+   ends in one of four states, and only one of them is a claim about the shipped
+   binary:
+
+   | Verdict | Means | Run |
+   |---|---|---|
+   | `reproduced` | The rebuilt payload hash is the logged one. | green |
+   | `did_not_reproduce` | Bytes differ **with the runner image held constant**. The real finding — treat as a security issue until diagnosed. | red |
+   | `environment_drift` | Bytes differ, but the rebuild ran on a different runner image than the release recorded. Item 6 applies; the check's precondition was not met. | red |
+   | `recipe_unrecorded` | Bytes differ and the leaf records no runner image (every tag ≤ v1.9.7), so the precondition cannot be evaluated at all. | red |
+
+   All three non-green states fail the run deliberately: an inconclusive rebuild
+   is not a passing one, and auto-greening drift would open a window for a real
+   divergence every time GitHub re-images a runner. The distinction lives in the
+   job title, the step summary, and `website/rebuild-ledger.json` — not in the
+   exit code.
+
+   The failure diagnostic also splits the differing paths by origin, because the
+   single most useful question is which side of the line they fall on:
+   `usr/lib/*` is vendored off the runner and tracks item 6, while
+   `usr/bin/pollis` is ours and — apart from item 6a's CSP-hash ordering — should
+   never differ. "Only vendored libraries differ" is printed explicitly when it
+   holds.

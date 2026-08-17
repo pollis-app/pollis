@@ -297,6 +297,22 @@ makes every user's full history auditable by anyone.
   rebuilders' reproducibility unit, and full payload reproduction off Linux is
   still Phase 5.
 
+  **The Linux payload reproduces only on a matching runner image, and since #944
+  the rebuilder checks that rather than assuming it.** An AppImage is not purely
+  a function of Pollis source: `linuxdeploy` copies the app's system shared
+  libraries off the build runner into the bundle, so a rebuild on a different
+  GitHub runner image legitimately yields different bytes from identical source.
+  `ReleaseArtifact` therefore carries the leaf's `toolchain` (hence
+  `pollis-verify release --json` does too), and `rebuild-verify.yml` compares the
+  recorded `runner_image` against the one it ran on before deciding what a byte
+  divergence means: `did_not_reproduce` (same image — the real finding),
+  `environment_drift` (images differ — inconclusive), or `recipe_unrecorded` (the
+  leaf predates #939 and records `unknown`). All three fail the run; only the
+  first accuses the shipped binary. `scripts/lib/rebuild-verdict.sh` holds the
+  decision and `scripts/test-rebuild-verdict.sh` pins both directions. v1.9.3 was
+  published as an unexplained non-reproduction for three days before this
+  existed — see `docs/reproducible-builds-residuals.md` §6.
+
 Statuses are `ok` / `pending` / `alarm` / `unavailable`. The log's public key is
 pinned in the client; a served key ≠ the pin is a hard `alarm` (any key can sign
 a self-consistent forged tree). All checks are **advisory** — they alert, they

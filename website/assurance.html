@@ -97,9 +97,35 @@
             <code>564353ae</code> (16 August 2026) the workflow could report "did not reproduce" for a release
             that was merely not yet published into the log — the underlying check exits cleanly over an empty
             artifact set, so the wait loop gave up immediately and compared the rebuild against nothing. Two runs
-            failed exactly that way (v1.9.4 and v1.9.5) and both in fact reproduced byte-identically. The
-            <strong>v1.9.3 failure was real</strong>, is still unexplained, and is not being reclassified.
+            failed exactly that way (v1.9.4 and v1.9.5) and both in fact reproduced byte-identically.
             The reds are left in the table rather than deleted.
+          </p>
+          <p>
+            <strong>v1.9.3 reproduces.</strong> Its August 13 rebuild did not, and sat unexplained. Re-running
+            exactly the same check on 17 August — same tag, same public source, no other change — landed on the
+            same CI machine image the release had used and produced a payload
+            <strong>byte-identical</strong> to the one in the log
+            (<code>07bccca8…</code>,
+            <a href="https://github.com/actuallydan/pollis/actions/runs/32036282718">run 32036282718</a>).
+            One variable was different in August; holding it constant makes the bytes match.
+          </p>
+          <p>
+            <strong>What that variable was.</strong> A Linux AppImage is not purely a function of our source:
+            the bundler copies the app's system libraries off the build machine into the bundle. GitHub rebuilds
+            the machine image behind its <code>ubuntu-22.04</code> label every few weeks and rolls it out
+            gradually, so the release build and its rebuild — 36 minutes apart — landed on <em>different</em>
+            images, and seven vendored libraries (Kerberos, SQLite, systemd, udev) came out different. Nothing
+            built from Pollis source changed except the order of a list of content hashes inside the executable,
+            which a compile-time dependency emits in filesystem order and which carries no meaning.
+          </p>
+          <p>
+            The August run stays in the table, still red, rather than being deleted or quietly recoloured: it
+            genuinely could not perform the comparison it reported on. What changed is that the workflow now
+            reads the machine image the release recorded, compares it against its own, and says which situation
+            it is in — <em>did not reproduce</em>, <em>build environment drifted</em>, or <em>no recorded
+            recipe</em>. All three still fail, because an inconclusive rebuild is not a passing one; only the
+            first is a claim about the shipped binary. The full write-up, with the byte evidence, is in
+            <code>docs/reproducible-builds-residuals.md</code>.
           </p>
         </div>
       </section>
