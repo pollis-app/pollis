@@ -276,43 +276,6 @@ export function useSendMessage(
   });
 }
 
-/** React (toggle) helper. Returns a mutation that toggles a single emoji
- *  on a message — checks the current reaction state by sending
- *  add_reaction or remove_reaction. The caller is responsible for
- *  tracking whether they already reacted; this hook just dispatches the
- *  intent. */
-export function useToggleReaction(
-  conversationId: string | null,
-  kind: ConversationKind | null,
-) {
-  const queryClient = useQueryClient();
-  const currentUser = useObserver(() => appStore.currentUser);
-  return useMutation({
-    mutationFn: async (vars: {
-      messageId: string;
-      emoji: string;
-      mode: "add" | "remove";
-    }) => {
-      if (!currentUser) {
-        throw new Error("No current user");
-      }
-      const cmd = vars.mode === "add" ? "add_reaction" : "remove_reaction";
-      await invoke(cmd, {
-        messageId: vars.messageId,
-        userId: currentUser.id,
-        emoji: vars.emoji,
-      });
-    },
-    onSuccess: () => {
-      if (conversationId && kind) {
-        queryClient.invalidateQueries({
-          queryKey: messageQueryKeys.conversation(conversationId, kind),
-        });
-      }
-    },
-  });
-}
-
 export function useEditMessage(
   conversationId: string | null,
   kind: ConversationKind | null,

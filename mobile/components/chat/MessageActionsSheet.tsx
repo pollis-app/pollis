@@ -14,6 +14,7 @@ export function MessageActionsSheet({
   target,
   isOwn,
   onReact,
+  onOpenPicker,
   onEdit,
   onDelete,
   onClose,
@@ -21,6 +22,7 @@ export function MessageActionsSheet({
   target: Message;
   isOwn: boolean;
   onReact: (emoji: string) => void;
+  onOpenPicker: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -55,6 +57,23 @@ export function MessageActionsSheet({
             <Text style={{ fontSize: 22 }}>{emoji}</Text>
           </Pressable>
         ))}
+        <Pressable
+          testID="btn-react-more"
+          accessibilityRole="button"
+          accessibilityLabel="More reactions"
+          onPress={onOpenPicker}
+          style={{
+            width: 44,
+            height: 44,
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: 1,
+            borderColor: semantic.hairStrong,
+            borderRadius: r.sm,
+          }}
+        >
+          <Icon.plus color={semantic.ink} />
+        </Pressable>
       </View>
 
       {isOwn ? (

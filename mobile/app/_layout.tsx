@@ -106,6 +106,7 @@ export default function RootLayout() {
               <Stack.Screen name="group/invite" />
               <Stack.Screen name="group/members" />
               <Stack.Screen name="group/settings" />
+              <Stack.Screen name="group/emoji" />
               <Stack.Screen name="group/requests" />
               <Stack.Screen name="group/discover" />
               <Stack.Screen name="dm/new" />

@@ -1,6 +1,9 @@
 import { View, Text, Pressable } from "react-native";
 import { Avatar } from "../ui";
 import { semantic, type as ty } from "../../theme/tokens";
+import { EmojiText } from "../emoji/EmojiText";
+import { ReactionPills } from "./ReactionPills";
+import type { Reaction } from "../../hooks/queries/useReactions";
 
 export function MessageRow({
   av,
@@ -10,9 +13,13 @@ export function MessageRow({
   text,
   pending,
   edited,
+  reactions,
+  currentUserId,
+  onToggleReaction,
   onPressAvatar,
   onLongPress,
   testID,
+  messageId,
 }: {
   av: string;
   amber?: boolean;
@@ -21,9 +28,13 @@ export function MessageRow({
   text?: string;
   pending?: boolean;
   edited?: boolean;
+  reactions?: Reaction[];
+  currentUserId?: string;
+  onToggleReaction?: (emoji: string, reacted: boolean) => void;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
   testID?: string;
+  messageId?: string;
 }) {
   return (
     <Pressable
@@ -73,7 +84,7 @@ export function MessageRow({
               marginTop: 2,
             }}
           >
-            {text}
+            <EmojiText text={text} />
             {edited ? (
               <Text
                 style={{
@@ -86,6 +97,14 @@ export function MessageRow({
               </Text>
             ) : null}
           </Text>
+        ) : null}
+        {reactions && reactions.length > 0 && onToggleReaction ? (
+          <ReactionPills
+            messageId={messageId ?? ""}
+            reactions={reactions}
+            currentUserId={currentUserId}
+            onToggle={onToggleReaction}
+          />
         ) : null}
       </View>
     </Pressable>

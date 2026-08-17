@@ -15,3 +15,5 @@ export * from "./useEnrollment";
 export * from "./useSearch";
 export * from "./useSafety";
 export * from "./useBlocks";
+export * from "./useReactions";
+export * from "./useEmoji";
