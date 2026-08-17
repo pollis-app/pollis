@@ -6,6 +6,29 @@ Pollis has four tiers of automated tests:
 2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end against a disposable test Turso database. Most of this document covers the harness.
 3. **WebDriver E2E tests** (`e2e/*.js`) — drives the real shipped Tauri app (native WebKitGTK WebView, real Rust core) via `tauri-driver`. See [WebDriver E2E tests](#webdriver-e2e-tests-e2e) below.
 4. **Playwright UI specs** (`e2e/*.spec.js`) — front-end interaction only, against the browser build with `VITE_PLAYWRIGHT=true` (Tauri IPC mocked in `frontend/src/__mocks__/`). No backend, seconds to run. See [Playwright UI specs](#playwright-ui-specs-e2especjs) below.
+5. **Renderer unit tests** (`frontend/tests/*.test.ts`, `pnpm --filter frontend test`) — plain `node --test` over the renderer's pure functions, plus the source-scan guards. Milliseconds, no browser, no build step; Node's type stripping runs the TypeScript directly, so imports need the `.ts` extension.
+
+### Source-scan guards, and when one is honest
+
+Several of the renderer's tests read source files instead of driving the app.
+That is the right shape when the thing being asserted is a rule **about the
+code** rather than about what the code renders — where the symptom is invisible
+to any behavioural test, or where the offending call sits somewhere no test can
+reach:
+
+| guard | the rule |
+|---|---|
+| `no-periodic-polling.test.ts` | no `setInterval` outside a reasoned allowlist (#874) |
+| `query-store-boundary.test.ts` | no `queryFn` writes to a MobX store; the exports #929 deleted stay deleted |
+| `message-window.test.ts` | no px load-more constant in `MessageList` (#934) |
+| `ui-inventory.test.ts` | `.codesight/wiki/ui.md`'s inventory is regenerated, not hand-patched (#933) |
+| `commands::r2::tests` (Rust) | the media-cache sweep never returns to window focus (#930) |
+
+A guard is a poor substitute for a behavioural test and a good complement to
+one. Each of the above is paired with something that exercises the real
+behaviour — the rem threshold's arithmetic, the cap's actual eviction, the
+inventory's round-trip — so a guard passing on broken code is not enough to
+make the suite green.
 
 > The harness is built on top of Tauri's test machinery (`tauri::test::get_ipc_response` + `MockRuntime`). Tauri is the shipping shell, so the harness drives the real command logic through the same dispatch path the app uses, headlessly — `pollis-core` is the unit under test, reached through the `#[tauri::command]` shims exactly as at runtime.
 

@@ -1,15 +1,24 @@
 # UI
 
-> **Navigation aid, regenerated — not hand-maintained.** Component inventory and prop
-> signatures extracted from the source. Read the source files before adding props or
-> modifying component logic.
+> **Two halves, and they are maintained differently.**
 >
-> This inventory had drifted badly (it listed 14 components that no longer existed and
-> omitted roughly 50 that did — #804), so treat the filesystem as the authority and
-> **regenerate rather than patch** when it disagrees. Prop lists come from each file's
-> `*Props` type and are omitted where a component takes none or builds its props inline.
-
-**147 `.tsx` files** under `frontend/src`
+> Everything down to [Components](#components) is **prose, written by hand** — the
+> conventions, the token rules, why the log is windowed the way it is. Change the
+> code, change the paragraph.
+>
+> [Components](#components) is a **generated inventory**: `node scripts/ui-inventory.mjs`
+> reads `frontend/src` and rewrites it, and `--check` fails when it is stale.
+> Never hand-patch a name, a path or a count there — regenerate. Per-component
+> notes written after the path DO survive regeneration, and are the right place
+> for anything an extractor could not know.
+>
+> The article told readers to "regenerate rather than patch" for a long time
+> with no generator in the repo, which is how the count drifted by a third —
+> 111 claimed against 147 real, with an entire directory (`components/Emoji`)
+> missing. That instruction is executable now (#933).
+>
+> Read the source before adding props or modifying component logic; the
+> inventory is for finding the file, not for understanding it.
 
 ## Conventions
 
@@ -269,7 +278,42 @@ offline while they're still in another. Two properties are load-bearing:
   ours) so it cannot cycle. Don't paper over this at a call site with a
   hardcoded `presence="online"`.
 
+### The right panel (#824, #904)
+
+The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay — opening it reflows the message list.
+
+**Open/closed and shape are two different pieces of state (#904).**
+
+| State | Where it lives | Reacts to the route? |
+| --- | --- | --- |
+| Is the panel open? | `stores/rightPanelStore` → `localStorage` key `pollis-right-panel-open:<userId>` | **No.** Only the user toggling it moves it. |
+| Which shape, and whose data? | `?thread=<ULID>` for a thread; otherwise the members roster, scoped by `appStore` selection | **Yes.** That is what the panel is for. |
+
+Open/closed used to be a `?panel=` search param, which is what broke it: nothing in the app carries search params across a navigation (every `router.navigate({ to })` produces a bare URL), so the param was dropped on every sidebar click and the panel fell back to a SKIN default — shut in `terminal`, open in `refined`. One bug, two faces: a terminal panel that would not stay open, a refined one that would not stay shut. It is now device-local and **keyed by user id**, the same scheme as the device-local language (`i18n/storage.ts`) and font size (`loadDeviceFontSize`), so a shared OS account never leaks one person's layout to the next.
+
+**Seeding.** A device with nothing remembered falls back to the synced `right_panel_open_by_default` preference, else the skin's historical default — and then **writes that answer down**, once the preferences query has settled (the skin is read from that same query, so an earlier seed would record the loading placeholder). The write is what keeps the skin out of it: after seeding, the skin is never consulted again, so switching between `terminal` and `refined` cannot open or close the panel. The Preferences switch writes BOTH halves — device-local (so it actually moves the panel you are looking at) and synced (so the next new device seeds from it).
+
+`validatePanelSearch` (`frontend/src/types/panel.ts`) is declared on the **root** route, because the panel is AppShell's chrome rather than any one page's. It drops unrecognised values instead of throwing, so a stale or hand-edited link falls back to a plain conversation view rather than blanking the app. `useRightPanel` owns the only write path for both halves.
+
+**`useRightPanel` navigates with an explicit `to: pathname`** — a relative `to: "."` would resolve against `/` (AppShell renders at the root route) and throw the user out of their conversation, and omitting `to` leaves the search type unresolved. It navigates *only* when a thread id actually needs clearing; plain open/close touches the URL not at all.
+
+Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
+
+**Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-bar border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, refined re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; refined keeps the airier avatar rows.
+
+**Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?thread=` on such a route falls back to the roster rather than rendering an empty thread.
+
 ## Components
+
+> Generated from `frontend/src` by `scripts/ui-inventory.mjs` — the article said
+> "regenerate rather than patch" for a long time before anything could (#933).
+> Everything a line carries **after** its backticked path is a hand-written note
+> and survives regeneration; everything before it does not, so prose belongs
+> there or in a section above.
+
+<!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
+**147 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+`node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
 
@@ -296,64 +340,69 @@ offline while they're still in another. Two properties are load-bearing:
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`
 
-### `components/Layout` (14)
+### `components/Emoji` (8)
+
+- **CustomEmojiImage** — props: contentHash, shortcode, sizeRem, className — `frontend/src/components/Emoji/CustomEmojiImage.tsx`
+- **EmojiCategoryRail** — props: entries, activeId, onJump — `frontend/src/components/Emoji/EmojiCategoryRail.tsx`
+- **EmojiCell** — props: item, toneIndex, index, onSelect, onPreview — `frontend/src/components/Emoji/EmojiCell.tsx`
+- **EmojiPicker** — props: onSelect, onClose, closeOnSelect, className — `frontend/src/components/Emoji/EmojiPicker.tsx`
+- **EmojiPickerButton** — props: onSelect, closeOnSelect, placement, align, className, ariaLabel — `frontend/src/components/Emoji/EmojiPickerButton.tsx`
+- **EmojiSection** — props: id, title, items, toneIndex, baseIndex, onSelect, onPreview, scrollRoot — `frontend/src/components/Emoji/EmojiSection.tsx`
+- **EmojiText** — props: text, renderText, jumbo — `frontend/src/components/Emoji/EmojiText.tsx`
+- **SkinTonePicker** — props: toneIndex, onChange — `frontend/src/components/Emoji/SkinTonePicker.tsx`
+
+### `components/Invites` (3)
+
+- **CreatedInviteLinkCard** — props: link — `frontend/src/components/Invites/CreatedInviteLinkCard.tsx`
+- **InviteLinkManager** — props: groupId — `frontend/src/components/Invites/InviteLinkManager.tsx`
+- **InviteLinkRow** — props: link, onRevoke, isRevoking — `frontend/src/components/Invites/InviteLinkRow.tsx`
+
+### `components/Layout` (9)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`
 - **MainContent** — props: pendingDmRequest — `frontend/src/components/Layout/MainContent.tsx`
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
-- **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`
-- **SidebarProfilePanel** — refined only; identity row + the persistent voice strip (channel, mic, deafen, screenshare, disconnect) that replaces terminal's `VoiceBar` — `frontend/src/components/Layout/SidebarProfilePanel.tsx`
-- **StatusBarSummary** — props: icon, count, to, label, color, testId — `frontend/src/components/Layout/StatusBarSummary.tsx`
+- **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`. Its settings rows carry `sidebar-row-*` testids like `SectionHeader`'s, so navigation tests never match on a translated label (#932).
+- **SidebarProfilePanel** — `frontend/src/components/Layout/SidebarProfilePanel.tsx`. Refined only; identity row + the persistent voice strip (channel, mic, deafen, screenshare, disconnect) that replaces terminal's `VoiceBar`.
+- **StatusBarSummary** — props: color — `frontend/src/components/Layout/StatusBarSummary.tsx`
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
 - **WindowResizeEdges** — `frontend/src/components/Layout/WindowResizeEdges.tsx`
 
-#### `components/Layout/RightPanel` — right-hand context panel (#824)
+### `components/Layout/RightPanel` (7)
 
-- **RightPanel** — the generic slot — `frontend/src/components/Layout/RightPanel/RightPanel.tsx`
-- **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
-- **ThreadPanel** — props: threadId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/ThreadPanel.tsx`
-- **ThreadMessageRow** — props: message, isRoot — `frontend/src/components/Layout/RightPanel/ThreadMessageRow.tsx`
-- **MemberRow** — props: userId, label, avatarKey, isAdmin — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
 - **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
 - **MediaTile** — props: attachment — `frontend/src/components/Layout/RightPanel/MediaTile.tsx`
+- **MemberRow** — props: userId, label, avatarKey, isAdmin — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
+- **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
+- **RightPanel** — `frontend/src/components/Layout/RightPanel/RightPanel.tsx`. The generic slot.
+- **ThreadMessageRow** — props: message, isRoot — `frontend/src/components/Layout/RightPanel/ThreadMessageRow.tsx`
+- **ThreadPanel** — props: threadId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/ThreadPanel.tsx`
 
-The panel is a **flex sibling of `<Outlet />`** in `AppShell`, never an overlay — opening it reflows the message list.
-
-**Open/closed and shape are two different pieces of state (#904).**
-
-| State | Where it lives | Reacts to the route? |
-| --- | --- | --- |
-| Is the panel open? | `stores/rightPanelStore` → `localStorage` key `pollis-right-panel-open:<userId>` | **No.** Only the user toggling it moves it. |
-| Which shape, and whose data? | `?thread=<ULID>` for a thread; otherwise the members roster, scoped by `appStore` selection | **Yes.** That is what the panel is for. |
-
-Open/closed used to be a `?panel=` search param, which is what broke it: nothing in the app carries search params across a navigation (every `router.navigate({ to })` produces a bare URL), so the param was dropped on every sidebar click and the panel fell back to a SKIN default — shut in `terminal`, open in `refined`. One bug, two faces: a terminal panel that would not stay open, a refined one that would not stay shut. It is now device-local and **keyed by user id**, the same scheme as the device-local language (`i18n/storage.ts`) and font size (`loadDeviceFontSize`), so a shared OS account never leaks one person's layout to the next.
-
-**Seeding.** A device with nothing remembered falls back to the synced `right_panel_open_by_default` preference, else the skin's historical default — and then **writes that answer down**, once the preferences query has settled (the skin is read from that same query, so an earlier seed would record the loading placeholder). The write is what keeps the skin out of it: after seeding, the skin is never consulted again, so switching between `terminal` and `refined` cannot open or close the panel. The Preferences switch writes BOTH halves — device-local (so it actually moves the panel you are looking at) and synced (so the next new device seeds from it).
-
-`validatePanelSearch` (`frontend/src/types/panel.ts`) is declared on the **root** route, because the panel is AppShell's chrome rather than any one page's. It drops unrecognised values instead of throwing, so a stale or hand-edited link falls back to a plain conversation view rather than blanking the app. `useRightPanel` owns the only write path for both halves.
-
-**`useRightPanel` navigates with an explicit `to: pathname`** — a relative `to: "."` would resolve against `/` (AppShell renders at the root route) and throw the user out of their conversation, and omitting `to` leaves the search type unresolved. It navigates *only* when a thread id actually needs clearing; plain open/close touches the URL not at all.
-
-Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
-
-**Chrome mirrors the left sidebar.** The panel's close affordance is a **footer**, not a header: a full-width `min-h-bar border-t border-line` button with the label on the left and a `<kbd>` on the right carrying the live `useShortcutLabel("app.toggleRightPanel")` combo (default `mod+shift+b`, the shifted twin of the sidebar's `mod+b`). AppShell binds the same command id, so the chip and the key can't drift. Width tracks `--side-w` and the aside carries `font-mono`, which is the entire skin switch — terminal renders DM Mono, refined re-points `.font-mono:not(.font-machine)` at the sans face. Terminal additionally borrows the sidebar's `SectionHeader` chrome (sticky `h-bar` strip, hairline under, a second hairline above every section after the first) and its one-text-line rows with a bare `PresenceDot`; refined keeps the airier avatar rows.
-
-**Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?thread=` on such a route falls back to the roster rather than rendering an empty thread.
-
-### `components/Message` (10)
+### `components/Message` (13)
 
 - **AttachmentDisplay** — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`
+- **MentionToken** — props: name, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`
 - **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, copyLinkState, onReply, onOpenThread, onToggleSave, onCopyLink, onEdit, onDelete — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut.
 - **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
 - **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, copyLinkState, isSaved, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed.
-- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `messageWindow.ts` is the only door from a message id to a live row.
-- **messageWindow** (not a component) — `frontend/src/components/Message/messageWindow.ts`. Row-height estimates in rem, the overscan, and `findRow`/`revealRow`, the only sanctioned way to get from a message id to a rendered row now that the log is windowed.
+- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
+- **ReceiptIndicator** — props: receipts, peerCount, visible — `frontend/src/components/Message/ReceiptIndicator.tsx`
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`
+- **ThreadReplyCount** — props: count, onOpen — `frontend/src/components/Message/ThreadReplyCount.tsx`
+
+### `components/Preferences` (2)
+
+- **LanguageSection** — props: userId — `frontend/src/components/Preferences/LanguageSection.tsx`
+- **RelayServingSection** — props: config, status, applyError, onChange — `frontend/src/components/Preferences/RelayServingSection.tsx`
+
+### `components/Saved` (1)
+
+- **SavedMessageRow** — props: item, conversationLabel, senderLabel — `frontend/src/components/Saved/SavedMessageRow.tsx`
 
 ### `components/Search` (1)
 
@@ -365,46 +414,52 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **BuildVerifyLine** — props: status, detail, testId — `frontend/src/components/Security/BuildVerifyLine.tsx`
 - **KeyChangeBanner** — props: peerUserId, peerLabel — `frontend/src/components/Security/KeyChangeBanner.tsx`
 
-### `components/Voice` (9)
-
-- **CameraPicker** — `frontend/src/components/Voice/CameraPicker.tsx`
-- **SidebarVoiceControls** — mic (four-state) + deafen for refined's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage` — `frontend/src/components/Voice/SidebarVoiceControls.tsx`
-- **RemoteUserVolumeSlider** — props: identity, participantName — `frontend/src/components/Voice/RemoteUserVolumeSlider.tsx`
-- **RemoteVideoTile** — props: trackKey, className, initialWidth, initialHeight, preview, mirror — `frontend/src/components/Voice/RemoteVideoTile.tsx`
-- **ScreenSharePicker** — props: disabled, onPick, title, subtitle, thumbnail, icon — `frontend/src/components/Voice/ScreenSharePicker.tsx`
-- **ScreenShareViewer** — `frontend/src/components/Voice/ScreenShareViewer.tsx`
-- **VoiceBar** — props: channelId, channelName — `frontend/src/components/Voice/VoiceBar.tsx`
-- **StageTile** — props: participant, mode, focused, onFocus, onView — `frontend/src/components/Voice/stage/StageTile.tsx`
-- **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
-
-### `components/ui` (22)
+### `components/ui` (26)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
 - **Button** — props: children, onClick, disabled, isLoading, loadingText, className, variant, size, type, onKeyDown, autoFocus — `frontend/src/components/ui/Button.tsx`
 - **Card** — props: children, className, style, padding — `frontend/src/components/ui/Card.tsx`
-- **ChatInput** — props: onSend, placeholder, disabled, autoFocus, className, maxAttachments, onValueChange, draftKey, canNotifyAll — `frontend/src/components/ui/ChatInput.tsx`
+- **ChatInput** — props: onSend, placeholder, disabled, autoFocus, className, maxAttachments, onValueChange, draftKey, canNotifyAll, onHistoryUp — `frontend/src/components/ui/ChatInput.tsx`
 - **Checkbox** — props: label, checked, onChange, disabled, className — `frontend/src/components/ui/Checkbox.tsx`
-- **ALL_ALGORITHMS** — props: algorithm, dotSize, spacing, speed, className, style — `frontend/src/components/ui/DotMatrix.tsx`
+- **DotMatrix** — props: algorithm, dotSize, spacing, speed, className, style — `frontend/src/components/ui/DotMatrix.tsx`
+- **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The centred "nothing here" line; hand-rolled a dozen times before it existed (#874). Not a loading state.
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick — `frontend/src/components/ui/InlineAudioPlayer.tsx`
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
-- **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The centred "nothing here" line; hand-rolled a dozen times before it existed (#874). Not a loading state.
 - **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874).
 - **LoadingSpinner** — props: size, className — `frontend/src/components/ui/LoaderSpinner.tsx`
-- **NavigableGrid** — `frontend/src/components/ui/NavigableGrid.tsx`
-- **NavigableList** — `frontend/src/components/ui/NavigableList.tsx`
+- **MentionGhost** — props: value, ghost, focused, scrollTop — `frontend/src/components/ui/MentionGhost.tsx`
+- **MentionSuggestList** — props: candidates, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/MentionSuggestList.tsx`
+- **NavigableGrid** — props: items, getKey, renderCell, onActivate, minCellWidth, maxCellWidth, aspect, gap, autoFocus, emptyLabel, testId — `frontend/src/components/ui/NavigableGrid.tsx`
+- **NavigableList** — props: items, getKey, renderRow, controls, trailing, onEnterRow, onClickRow, isLoading, loadingLabel, emptyLabel, rowTestId, testId, autoFocus — `frontend/src/components/ui/NavigableList.tsx`
 - **PillButton** — props: accent, onClick, title, square, children — `frontend/src/components/ui/PillButton.tsx`
 - **PollisLogo** — props: size, color — `frontend/src/components/ui/PollisLogo.tsx`
 - **PresenceAvatar** — props: userId, avatarKey, size, alt, testId, variant — `frontend/src/components/ui/PresenceAvatar.tsx`
-- **PresenceDot** — props: userId, testId — bare online/offline dot for rows with no avatar to anchor it (terminal sidebar DMs, right-panel members) — `frontend/src/components/ui/PresenceDot.tsx`
+- **PresenceDot** — props: userId, testId — `frontend/src/components/ui/PresenceDot.tsx`. Bare online/offline dot for rows with no avatar to anchor it (terminal sidebar DMs, right-panel members).
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
 - **Switch** — props: label, checked, onChange, disabled, className, id, description — `frontend/src/components/ui/Switch.tsx`
 - **TerminalMenu** — props: items, onEsc, className, autoFocus — `frontend/src/components/ui/TerminalMenu.tsx`
-- **TextArea** — props: label, value, onChange, placeholder, description, error, disabled, rows, className, id — `frontend/src/components/ui/TextArea.tsx`
+- **TextArea** — props: label, value, onChange, placeholder, description, error, disabled, rows, className, id, onKeyDown — `frontend/src/components/ui/TextArea.tsx`
 - **TextInput** — props: label, value, onChange, placeholder, description, error, disabled, type, className, id, required, autoFocus, autoComplete — `frontend/src/components/ui/TextInput.tsx`
 
-### `pages` (43)
+### `components/Voice` (8)
+
+- **CameraPicker** — `frontend/src/components/Voice/CameraPicker.tsx`
+- **RemoteUserVolumeSlider** — props: identity, participantName — `frontend/src/components/Voice/RemoteUserVolumeSlider.tsx`
+- **RemoteVideoTile** — `frontend/src/components/Voice/RemoteVideoTile.tsx`
+- **ScreenSharePicker** — `frontend/src/components/Voice/ScreenSharePicker.tsx`
+- **ScreenShareViewer** — `frontend/src/components/Voice/ScreenShareViewer.tsx`
+- **SidebarVoiceControls** — `frontend/src/components/Voice/SidebarVoiceControls.tsx`. Mic (four-state) + deafen for refined's sidebar voice strip; shares `micIndicatorOf` and `voiceControlLabels` with `VoiceBar` / `VoiceStage`.
+- **VoiceBar** — props: channelId, channelName — `frontend/src/components/Voice/VoiceBar.tsx`
+- **VoiceInputModeSelect** — props: value, onChange — `frontend/src/components/Voice/VoiceInputModeSelect.tsx`
+
+### `components/Voice/stage` (2)
+
+- **StageTile** — `frontend/src/components/Voice/stage/StageTile.tsx`
+- **VoiceStage** — props: channelName, isInCall, onJoin, onLeave, onBack, onOpenSettings, observerParticipants, headerActions, footer, callMode — `frontend/src/components/Voice/stage/VoiceStage.tsx`
+
+### `pages` (48)
 
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`
 - **ArcadePage** — `frontend/src/pages/ArcadePage.tsx`
@@ -419,11 +474,16 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **DMPage** — `frontend/src/pages/DM.tsx`
 - **DMSettingsPage** — `frontend/src/pages/DMSettings.tsx`
 - **DMsPage** — `frontend/src/pages/DMs.tsx`
+- **GroupEmoji** — props: groupId — `frontend/src/pages/GroupEmoji.tsx`
+- **GroupEmojiPage** — `frontend/src/pages/GroupEmojiPage.tsx`
 - **GroupPage** — `frontend/src/pages/Group.tsx`
 - **GroupsPage** — `frontend/src/pages/Groups.tsx`
+- **InviteLinkLandingPage** — `frontend/src/pages/InviteLinkLandingPage.tsx`
 - **InviteMember** — props: groupId, groupName — `frontend/src/pages/InviteMember.tsx`
 - **InviteMemberPage** — `frontend/src/pages/InviteMemberPage.tsx`
 - **InvitesPage** — `frontend/src/pages/InvitesPage.tsx`
+- **JoinByInvite** — props: initialToken, autoRedeem — `frontend/src/pages/JoinByInvite.tsx`
+- **JoinByInvitePage** — `frontend/src/pages/JoinByInvitePage.tsx`
 - **JoinRequests** — props: groupId, groupName — `frontend/src/pages/JoinRequests.tsx`
 - **JoinRequestsPage** — `frontend/src/pages/JoinRequestsPage.tsx`
 - **KeyboardShortcutsPage** — `frontend/src/pages/KeyboardShortcutsPage.tsx`
@@ -433,12 +493,13 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **MembersPage** — `frontend/src/pages/MembersPage.tsx`
 - **PreferencesPage** — `frontend/src/pages/PreferencesPage.tsx`
 - **RenameChannelPage** — `frontend/src/pages/RenameChannelPage.tsx`
-- **RenameEntity** — props: kind, groupId, channelId, onSuccess — `frontend/src/pages/RenameEntity.tsx`. One form for both routes; `RenameGroup`/`RenameChannel` were eleven normalised lines apart and are gone (#874).
+- **RenameEntity** — props: kind — `frontend/src/pages/RenameEntity.tsx`. One form for both routes; `RenameGroup`/`RenameChannel` were eleven normalised lines apart and are gone (#874).
 - **RenameGroupPage** — `frontend/src/pages/RenameGroupPage.tsx`
 - **RequestsPage** — `frontend/src/pages/RequestsPage.tsx`
 - **RootPage** — `frontend/src/pages/Root.tsx`
-- **SearchPage** — `frontend/src/pages/Search.tsx`
+- **SavedPage** — `frontend/src/pages/SavedPage.tsx`
 - **SearchGroupPage** — `frontend/src/pages/SearchGroupPage.tsx`
+- **SearchPage** — `frontend/src/pages/Search.tsx`
 - **SecurityPage** — `frontend/src/pages/SecurityPage.tsx`
 - **SettingsHubPage** — `frontend/src/pages/SettingsHub.tsx`
 - **SettingsPage** — `frontend/src/pages/SettingsPage.tsx`
@@ -447,7 +508,8 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **UpdatePage** — `frontend/src/pages/UpdatePage.tsx`
 - **UserProfilePage** — `frontend/src/pages/UserProfile.tsx`
 - **VoiceChannelPage** — `frontend/src/pages/VoiceChannel.tsx`
-- **VoiceSettingsPage** — props: label, devices, value, onChange, fallbackLabel — `frontend/src/pages/VoiceSettingsPage.tsx`
+- **VoiceSettingsPage** — `frontend/src/pages/VoiceSettingsPage.tsx`
+<!-- END GENERATED: component inventory -->
 
 ---
 
