@@ -32,11 +32,15 @@ const SWATCHES = [
   { n: "Rust", c: "#d68f5a" },
 ];
 
+// NOTE: read receipts are deliberately NOT in this list — they are not a
+// mobile-local behavior toggle but the synced, desktop-shared top-level
+// `send_read_receipts` key the Rust receipt chokepoints read (default true).
+// The old `mobile_behavior.read_receipts` entry was a no-op: nested under a
+// namespace the core never looks at, with an inverted default.
 const BEHAVIOR_KEYS = [
   { key: "show_inline_timestamps", n: "Show inline timestamps", defaultOn: true },
   { key: "show_member_avatars", n: "Show member avatars", defaultOn: true },
   { key: "mark_verified_peers", n: "Mark verified peers with ◆", defaultOn: true },
-  { key: "read_receipts", n: "Read receipts", defaultOn: false },
   { key: "reduce_motion", n: "Reduce motion", defaultOn: false },
 ] as const;
 
@@ -110,6 +114,10 @@ export default function Preferences() {
   const theme = prefs?.mobile_theme ?? "Coal";
   const density = prefs?.mobile_density ?? "Compact";
   const behavior = prefs?.mobile_behavior ?? {};
+  const sendReadReceipts =
+    typeof prefs?.send_read_receipts === "boolean"
+      ? prefs.send_read_receipts
+      : true;
 
   const isBehaviorOn = (key: string, fallback: boolean): boolean => {
     const v = behavior[key];
@@ -228,6 +236,20 @@ export default function Preferences() {
             }
           />
         ))}
+        <ListRow
+          minHeight={46}
+          name="Read receipts"
+          sub="Reciprocal — turning this off also hides others' receipts from you"
+          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+          end={
+            <Toggle
+              on={sendReadReceipts}
+              onPress={() => update({ send_read_receipts: !sendReadReceipts })}
+              testID="toggle-read-receipts"
+              accessibilityLabel="Read receipts"
+            />
+          }
+        />
 
         <SectionTitle>NOTIFICATIONS</SectionTitle>
         <NotificationsSetting />

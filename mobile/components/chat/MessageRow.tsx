@@ -3,7 +3,9 @@ import { Avatar } from "../ui";
 import { semantic, type as ty } from "../../theme/tokens";
 import { EmojiText } from "../emoji/EmojiText";
 import { ReactionPills } from "./ReactionPills";
+import { ReceiptIndicator } from "./ReceiptIndicator";
 import type { Reaction } from "../../hooks/queries/useReactions";
+import type { MessageReceipts } from "../../hooks/queries/useReceipts";
 
 export function MessageRow({
   av,
@@ -16,6 +18,9 @@ export function MessageRow({
   reactions,
   currentUserId,
   onToggleReaction,
+  receipt,
+  peerCount = 0,
+  showReceipt = false,
   onPressAvatar,
   onLongPress,
   testID,
@@ -31,6 +36,9 @@ export function MessageRow({
   reactions?: Reaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string, reacted: boolean) => void;
+  receipt?: MessageReceipts;
+  peerCount?: number;
+  showReceipt?: boolean;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
   testID?: string;
@@ -73,6 +81,11 @@ export function MessageRow({
           >
             {pending ? "sending…" : time}
           </Text>
+          <ReceiptIndicator
+            receipts={receipt}
+            peerCount={peerCount}
+            visible={showReceipt && !pending}
+          />
         </View>
         {text ? (
           <Text

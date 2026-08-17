@@ -25,6 +25,13 @@ export interface MobilePreferencesPatch {
   mobile_theme?: "Coal" | "Paper" | "System";
   mobile_density?: "Compact" | "Comfortable";
   mobile_behavior?: Record<string, boolean>;
+  /**
+   * Synced, desktop-shared key (NOT `mobile_`-namespaced on purpose): the
+   * Rust receipt chokepoints read exactly `send_read_receipts` from the
+   * blob's top level, defaulting to true. See
+   * pollis-core/src/commands/messages/receipts.rs::receipts_enabled.
+   */
+  send_read_receipts?: boolean;
 }
 
 /** The full blob as it lives in Turso. Mobile fields are typed; desktop
@@ -105,4 +112,15 @@ export function usePreferences() {
   );
 
   return { ...query, save, update };
+}
+
+/**
+ * The user's read-receipts choice — reciprocal by design (the core gates
+ * both emitting and recording on the same flag). Missing key reads as true,
+ * matching the Rust default.
+ */
+export function useSendReadReceipts(): boolean {
+  const { data } = usePreferences();
+  const value = data?.send_read_receipts;
+  return typeof value === "boolean" ? value : true;
 }

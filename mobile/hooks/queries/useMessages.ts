@@ -387,6 +387,12 @@ export function useIngestConversation() {
         queryClient.invalidateQueries({
           queryKey: messageQueryKeys.conversation(conversationId, kind),
         });
+        // Receipt frames ride the same envelope stream — refresh the
+        // conversation's receipt map alongside the messages (event-driven;
+        // the receipts query itself never polls).
+        queryClient.invalidateQueries({
+          queryKey: ["receipts", conversationId],
+        });
       } catch (e) {
         // Best-effort — ingest is advisory. The next refetch will retry.
         console.warn("[useIngestConversation] ingest failed:", e);
