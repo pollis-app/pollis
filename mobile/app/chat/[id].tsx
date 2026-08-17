@@ -11,11 +11,13 @@ import { Composer } from "../../components/chat/Composer";
 import { EditBar } from "../../components/chat/EditBar";
 import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
 import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
+import { EmojiPickerSheet } from "../../components/emoji/EmojiPickerSheet";
 import {
   useMessages,
   useSendMessage,
   useIngestConversation,
   useToggleReaction,
+  useConversationReactions,
   useEditMessage,
   useDeleteMessage,
   flattenPages,
@@ -61,6 +63,7 @@ function TextChat(props: ChatViewProps = {}) {
 
   const [draft, setDraft] = useState("");
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
+  const [pickerTarget, setPickerTarget] = useState<Message | null>(null);
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -76,6 +79,15 @@ function TextChat(props: ChatViewProps = {}) {
   } = useMessages(conversationId, kind);
   // Newest-first (matches the inverted list's render order).
   const messages = useMemo(() => flattenPages(data), [data]);
+  const messageIds = useMemo(
+    () => messages.filter((m) => !m.pending).map((m) => m.id),
+    [messages],
+  );
+  const { data: reactionsByMessage } = useConversationReactions(
+    conversationId,
+    kind,
+    messageIds,
+  );
   const sendMessage = useSendMessage(conversationId, kind);
   const ingest = useIngestConversation();
   const toggleReaction = useToggleReaction(conversationId, kind);
@@ -180,6 +192,25 @@ function TextChat(props: ChatViewProps = {}) {
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+  // Toggle a reaction by its CURRENT state — tapping a pill you're in
+  // removes, anything else adds (desktop's toggle semantics).
+  const reactWithEmoji = useCallback(
+    (messageId: string, emoji: string) => {
+      const existing = reactionsByMessage
+        ?.get(messageId)
+        ?.find((reaction) => reaction.emoji === emoji);
+      const reacted = currentUser
+        ? existing?.user_ids.includes(currentUser.id) ?? false
+        : false;
+      toggleReaction.mutate({
+        messageId,
+        emoji,
+        mode: reacted ? "remove" : "add",
+      });
+    },
+    [reactionsByMessage, currentUser, toggleReaction],
+  );
+
   const ctxLabel = kind === "dm" ? "DIRECT" : "CHANNEL";
 
   // Header title: prefer the human name passed in by the opener (channel name
@@ -210,6 +241,7 @@ function TextChat(props: ChatViewProps = {}) {
       return (
         <MessageRow
           testID={`row-message-${m.id}`}
+          messageId={m.id}
           av={name.slice(0, 2)}
           amber={mine}
           name={name}
@@ -217,6 +249,15 @@ function TextChat(props: ChatViewProps = {}) {
           text={m.content}
           pending={m.pending}
           edited={!!m.edited_at}
+          reactions={reactionsByMessage?.get(m.id)}
+          currentUserId={currentUser?.id}
+          onToggleReaction={(emoji, reacted) =>
+            toggleReaction.mutate({
+              messageId: m.id,
+              emoji,
+              mode: reacted ? "remove" : "add",
+            })
+          }
           onPressAvatar={
             mine
               ? undefined
@@ -230,7 +271,7 @@ function TextChat(props: ChatViewProps = {}) {
         />
       );
     },
-    [currentUser?.id, router],
+    [currentUser?.id, router, reactionsByMessage, toggleReaction],
   );
 
   const content = (
@@ -414,11 +455,11 @@ function TextChat(props: ChatViewProps = {}) {
           target={actionTarget}
           isOwn={actionTarget.sender_id === currentUser?.id}
           onReact={(emoji) => {
-            toggleReaction.mutate({
-              messageId: actionTarget.id,
-              emoji,
-              mode: "add",
-            });
+            reactWithEmoji(actionTarget.id, emoji);
+            setActionTarget(null);
+          }}
+          onOpenPicker={() => {
+            setPickerTarget(actionTarget);
             setActionTarget(null);
           }}
           onEdit={() => {
@@ -431,6 +472,16 @@ function TextChat(props: ChatViewProps = {}) {
             setActionTarget(null);
           }}
           onClose={() => setActionTarget(null)}
+        />
+      ) : null}
+
+      {pickerTarget ? (
+        <EmojiPickerSheet
+          onSelect={(emoji) => {
+            reactWithEmoji(pickerTarget.id, emoji);
+            setPickerTarget(null);
+          }}
+          onClose={() => setPickerTarget(null)}
         />
       ) : null}
 

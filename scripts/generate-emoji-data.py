@@ -100,6 +100,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 OUTPUT_PATH = REPO_ROOT / "frontend" / "src" / "components" / "Emoji" / "emojiData.ts"
 
+# The mobile app carries an identical copy (it cannot import across the
+# frontend/mobile boundary — mobile is a standalone Expo project). Both are
+# written on every run so they cannot drift.
+MOBILE_OUTPUT_PATH = REPO_ROOT / "mobile" / "components" / "emoji" / "emojiData.ts"
+
 # Category ids and their human-readable labels, in picker order.
 CATEGORY_LABELS: list[tuple[str, str]] = [
     ("people", "People"),
@@ -756,8 +761,10 @@ def render(entries: list[dict[str, object]], counts: dict[str, int], source: str
 
 def main() -> None:
     entries, counts, source = build_entries()
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(render(entries, counts, source), encoding="utf-8")
+    rendered = render(entries, counts, source)
+    for out_path in (OUTPUT_PATH, MOBILE_OUTPUT_PATH):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(rendered, encoding="utf-8")
 
     tonable_total = sum(1 for entry in entries if entry["tonable"])
     print(f"unicodedata {unicodedata.unidata_version}")

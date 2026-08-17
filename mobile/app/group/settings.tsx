@@ -186,6 +186,24 @@ function GroupSettings() {
           </Text>
         ) : null}
 
+        <SectionTitle>EMOJI</SectionTitle>
+        <ListRow
+          testID="row-group-emoji"
+          minHeight={48}
+          glyph={<Icon.plus color={semantic.mute} />}
+          name="Custom emoji"
+          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+          sub="This group's emoji set"
+          onPress={() =>
+            id
+              ? router.push({
+                  pathname: "/group/emoji",
+                  params: { groupId: id },
+                })
+              : undefined
+          }
+        />
+
         {iAmOwner ? (
           <View>
             <SectionTitle>DANGER</SectionTitle>
