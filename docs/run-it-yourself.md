@@ -244,10 +244,15 @@ messages, and start a voice call between them.
 
 The device keystore picks its backend at runtime: the OS keychain (macOS
 Keychain, Windows Credential Manager, Linux Secret Service) wherever one
-answers, otherwise `<data dir>/dev-keystore.json`, whose bytes are AES-256-GCM
+answers, otherwise `<data dir>/keystore.pks`, whose bytes are AES-256-GCM
 ciphertext under a key derived from this machine's identity. Debug builds always
 use the file so the dev loop never triggers a credential prompt. Plaintext is
 not a reachable state (#882).
+
+That file was called `dev-keystore.json` before #950. If you have one, the next
+start writes `keystore.pks`, checks it reads back, and only then removes the old
+name — so an interrupted upgrade leaves both files rather than neither. Do not
+delete either by hand while both are present.
 
 Running the terminal client on a box with no secret-service — a server over SSH
 — therefore works: it falls back to the encrypted file.

@@ -168,14 +168,28 @@ Android Keystore or the iOS Keychain. Desktop was the outlier until #882.
 
 ### 3.6 Migrating an existing plaintext keystore
 
-Installs predating #882 have a plaintext `dev-keystore.json`. It stays readable —
-locking a user out of their identity key is unrecoverable and worse than one more
-session of plaintext — and the first read or write re-encrypts it in place
-through the existing tempfile + fsync + rename. Because the encoding completes
-before the old file is touched, every interruption leaves either the complete old
-file or the complete new one, never a mixture. A file that fails to *decrypt* is
-never rewritten, never backed away, and never treated as empty: those bytes are
+Installs predating #882 have a plaintext keystore. It stays readable — locking a
+user out of their identity key is unrecoverable and worse than one more session
+of plaintext — and the first read or write re-encrypts it in place through the
+existing tempfile + fsync + rename. Because the encoding completes before the old
+file is touched, every interruption leaves either the complete old file or the
+complete new one, never a mixture. A file that fails to *decrypt* is never
+rewritten, never backed away, and never treated as empty: those bytes are
 somebody's identity key, and starting fresh would orphan it.
+
+The same reasoning governs a file that decrypts but does not *parse*. Until #950
+that case renamed the file to a timestamped sidecar, which reads like a backup
+and behaves like a wipe: the next operation finds no store, treats the device as
+new, and the first write establishes an empty one. It now leaves the bytes exactly
+where they are and reports a stable error, so the content stays recoverable and
+the only way to start over is the user's explicit "wipe this computer".
+
+#950 also renamed the file itself, from `dev-keystore.json` to `keystore.pks`.
+Both halves of the old name had become false — it is the production store on
+every headless install and its contents are ciphertext, not JSON — but a rename
+is a delete of live key material, so it runs as write-new, read-the-new-one-back,
+then unlink-old. An interruption leaves both files, never neither, and the next
+start finishes the job.
 
 ### 3.7 Comparable systems
 

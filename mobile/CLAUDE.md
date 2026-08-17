@@ -406,7 +406,7 @@ Current state:
 - **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only
   backend on mobile) envelope-encrypts its contents with an AES-256-GCM master
   key held in the platform secure store — same on-disk blob (`iv(12)||gcm-ct`,
-  `dev-keystore.json`) on both platforms. #882 gave desktop the same treatment
+  `keystore.pks`, `dev-keystore.json` before #950) on both platforms. #882 gave desktop the same treatment
   under a machine-bound key, so mobile is no longer the only encrypted backend;
   the desktop file prefixes a `magic(4)||salt(16)` header ahead of the identical
   envelope, and mobile's format is unchanged.

@@ -62,13 +62,22 @@ Out of scope for this doc (one-liners):
 
 What is stored, where, after this change lands.
 
-### Device keystore (OS keychain, or `dev-keystore.json`)
+### Device keystore (OS keychain, or `keystore.pks`)
 
 > Updated by #882: the backend is chosen at **runtime**, not by build profile —
-> the OS keychain wherever one exists, otherwise `dev-keystore.json`, whose
-> bytes are now AES-256-GCM ciphertext under a machine-bound KEK rather than
-> plaintext JSON. See `.codesight/wiki/overview.md` and
-> `docs/security-whitepaper.md` §3.5.
+> the OS keychain wherever one exists, otherwise the file store, whose bytes are
+> now AES-256-GCM ciphertext under a machine-bound KEK rather than plaintext
+> JSON. See `.codesight/wiki/overview.md` and `docs/security-whitepaper.md`
+> §3.5.
+>
+> Updated by #950: that file is `keystore.pks`. It was `dev-keystore.json`, a
+> name that was wrong twice over once #882 made it the production store on
+> headless installs and made its contents ciphertext. The rename runs as
+> write-new → read-back → unlink-old, so no interruption can leave the device
+> without a store. #950 also fixed the backend choice: a host that later gains a
+> Secret Service **stays** on the file while the file holds keys for the current
+> namespace, instead of flipping to an empty keychain and asking the user to sign
+> in again.
 
 Per-user slots, keyed by `{slot}_{user_id}`:
 

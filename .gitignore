@@ -83,6 +83,8 @@ src-tauri/target/
 /target/
 # Built screen-capture sidecar, staged by scripts/build-capture-helper.sh
 src-tauri/binaries/
+# The device keystore (pre-#950 name: dev-keystore.json). Never committed.
+keystore.pks
 dev-keystore.json
 
 test-results/

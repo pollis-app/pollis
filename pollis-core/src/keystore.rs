@@ -10,8 +10,20 @@ use tokio::sync::Mutex;
 /// session/identity keys. A build that chose no directory — every shipped
 /// desktop install — is unaffected and keeps its unprefixed keys.
 fn namespaced(key: &str) -> String {
+    format!("{}{key}", namespace_prefix())
+}
+
+/// The prefix [`namespaced`] puts in front of every key this process touches.
+///
+/// Split out so the backend-selection probe can ask "does the file store hold
+/// keys belonging to **me**" without re-deriving the rule (#950). It is `""` for
+/// a shipped desktop release, `"DEV:"` for a debug build, and gains a
+/// `"{label}:"` segment when an explicit data dir is chosen.
+fn namespace_prefix() -> String {
     #[cfg(debug_assertions)]
-    let key = format!("DEV:{key}");
+    let base = "DEV:".to_string();
+    #[cfg(not(debug_assertions))]
+    let base = String::new();
 
     match crate::db::local::explicit_data_dir() {
         Some(dir) => {
@@ -19,9 +31,32 @@ fn namespaced(key: &str) -> String {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("dev2");
-            format!("{label}:{key}")
+            format!("{label}:{base}")
         }
-        None => key.to_string(),
+        None => base,
+    }
+}
+
+/// True if `stored_key` is one of THIS process's keys rather than a sibling
+/// instance's.
+///
+/// The prefix test alone is not enough: every real slot name (`db_key`,
+/// `account_id_key_wrapped`, `pin_meta`, `device_id`, `session`) is free of
+/// `:`, and the unprefixed release namespace would otherwise match a second
+/// instance's `dev2:db_key_u1` too. Requiring the remainder to carry no further
+/// `:` segment makes the match exact in every one of the four namespace shapes.
+#[cfg(any(feature = "os-keystore", test))]
+fn is_current_namespace(stored_key: &str) -> bool {
+    key_is_in_namespace(&namespace_prefix(), stored_key)
+}
+
+/// The pure rule behind [`is_current_namespace`], split out so it can be tested
+/// against all four namespace shapes without touching the process-wide data dir.
+#[cfg(any(feature = "os-keystore", test))]
+fn key_is_in_namespace(prefix: &str, stored_key: &str) -> bool {
+    match stored_key.strip_prefix(prefix) {
+        Some(rest) => !rest.contains(':'),
+        None => false,
     }
 }
 
@@ -589,6 +624,13 @@ mod file_backend {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
+    /// The store's real name, since #950.
+    ///
+    /// `dev-keystore.json` was a fossil from when this file was genuinely
+    /// debug-only. After #882 it is the PRODUCTION store on every headless
+    /// install, and it is not JSON — it is `PKS\x01` + salt + AES-256-GCM
+    /// ciphertext. A name that says "dev" and "json" about a file that is
+    /// neither is the kind of thing that gets someone to delete it.
     fn store_path() -> PathBuf {
         // The same directory the local DB and `accounts.json` resolve to. This
         // used to be a hand-copied per-OS duplicate of `dirs_path()`; the two
@@ -596,13 +638,127 @@ mod file_backend {
         // drift — a keystore looking in a different directory from the database
         // it unlocks is exactly the failure that would not show up until a
         // platform default changed on one side.
-        let base = crate::db::local::dirs_path();
-        // The name is a fossil from when this file really was debug-only. It is
-        // deliberately NOT renamed: a rename means writing the new file and
-        // then deleting the old one, and the delete is a delete of live key
-        // material. Keeping the name lets the atomic rename overwrite the
-        // plaintext bytes in place instead.
-        base.join("dev-keystore.json")
+        crate::db::local::dirs_path().join("keystore.pks")
+    }
+
+    /// Where the store lived before #950. Read (and migrated away from) but
+    /// never written.
+    fn legacy_store_path() -> PathBuf {
+        crate::db::local::dirs_path().join("dev-keystore.json")
+    }
+
+    /// Decide which file this process operates on, performing the #950 rename
+    /// if it has not happened yet.
+    ///
+    /// The rename is a delete of live key material, which is why #882 declined
+    /// to do it inline. So it runs as an explicit three-step, in the order that
+    /// makes every interruption survivable:
+    ///
+    ///   1. **write the new file** (atomically, via `write_map_at` — tempfile,
+    ///      fsync, rename);
+    ///   2. **read it back** and check it reproduces the same map;
+    ///   3. **only then unlink the old one.**
+    ///
+    /// A crash between 1 and 3 leaves both files present, and the next start
+    /// takes the "new file exists" branch and simply retries the unlink — so the
+    /// window is idempotent rather than lossy. The one state that must never
+    /// exist is "old file gone, new file bad", and no ordering here can produce
+    /// it.
+    ///
+    /// Every failure falls back to the legacy path rather than erroring. That is
+    /// deliberate: a rename is housekeeping, and housekeeping must never be the
+    /// reason a user cannot reach their keys. An undecryptable or corrupt file
+    /// therefore surfaces through the normal read path, with the normal message,
+    /// exactly as it did before this function existed.
+    fn resolve_store(codec: &FileCodec) -> PathBuf {
+        resolve_store_at(&store_path(), &legacy_store_path(), codec)
+    }
+
+    /// [`resolve_store`] with both paths supplied, so the tests drive the SAME
+    /// migration the runtime does against a temp dir.
+    fn resolve_store_at(new: &Path, old: &Path, codec: &FileCodec) -> PathBuf {
+        let new = new.to_path_buf();
+        let old = old.to_path_buf();
+
+        if new.exists() {
+            // Step 3 retry: a previous run wrote and verified `new` but did not
+            // manage to unlink `old`. `new` is authoritative either way, so the
+            // stale copy is redundant key material sitting on disk under a
+            // misleading name — remove it, but never at the cost of failing.
+            if old.exists() {
+                match std::fs::remove_file(&old) {
+                    Ok(()) => eprintln!(
+                        "[keystore] removed the superseded {} (#950)",
+                        old.display()
+                    ),
+                    Err(e) => eprintln!(
+                        "[keystore] could not remove the superseded {}: {e}",
+                        old.display()
+                    ),
+                }
+            }
+            return new;
+        }
+
+        if !old.exists() {
+            // Fresh install, or one already migrated and tidied.
+            return new;
+        }
+
+        // 1. Read the old store. A failure here is "wrong machine" or "corrupt";
+        //    both must reach the caller through the ordinary path so the user
+        //    gets the ordinary (accurate) error, and neither may delete anything.
+        let (map, _) = match read_map_at(&old, codec) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!(
+                    "[keystore] cannot read {} ({e}); leaving it exactly where it is",
+                    old.display()
+                );
+                return old;
+            }
+        };
+
+        // 2. Write the new file, then prove it reads back as the same map.
+        if let Err(e) = write_map_at(&new, codec, &map) {
+            eprintln!(
+                "[keystore] could not write {} ({e}); staying on {}",
+                new.display(),
+                old.display()
+            );
+            return old;
+        }
+        match read_map_at(&new, codec) {
+            Ok((got, false)) if got == map => {}
+            other => {
+                // Do NOT unlink the old file, and do not adopt the new one.
+                // Deliberately not printing `other` — it can hold decrypted key
+                // material.
+                let _ = other;
+                eprintln!(
+                    "[keystore] {} did not read back correctly; staying on {}",
+                    new.display(),
+                    old.display()
+                );
+                let _ = std::fs::remove_file(&new);
+                return old;
+            }
+        }
+
+        // 3. The new file is real and complete. The old one may go.
+        match std::fs::remove_file(&old) {
+            Ok(()) => eprintln!(
+                "[keystore] renamed the keystore to {} (#950)",
+                new.display()
+            ),
+            Err(e) => eprintln!(
+                "[keystore] wrote {} but could not remove {}: {e} — the next \
+                 start will retry",
+                new.display(),
+                old.display()
+            ),
+        }
+        new
     }
 
     /// Desktop at-rest layout, written by [`FileCodec::encode`]:
@@ -672,6 +828,18 @@ mod file_backend {
         fn that_cannot_seal() -> Self {
             Self {
                 machine_secret: b"unused".to_vec(),
+                fail_seal: true,
+            }
+        }
+
+        /// Can DECODE `machine_secret`'s files but cannot encode. The
+        /// distinction matters for the #950 rename: `that_cannot_seal` above
+        /// also carries the wrong secret, so a test using it fails at the READ
+        /// and never reaches the write it meant to exercise.
+        #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+        fn with_secret_but_cannot_seal(machine_secret: &[u8]) -> Self {
+            Self {
+                machine_secret: machine_secret.to_vec(),
                 fail_seal: true,
             }
         }
@@ -775,7 +943,12 @@ mod file_backend {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Ok((HashMap::new(), false))
             }
-            Err(e) => return Err(Error::Keystore(format!("read dev-keystore.json: {e}"))),
+            Err(e) => {
+                return Err(Error::Keystore(format!(
+                    "read {}: {e}",
+                    path.display()
+                )))
+            }
         };
         // A decode failure propagates untouched — see `FileCodec::decode`. Only
         // a *parse* failure after a successful decrypt is treated as corruption.
@@ -786,27 +959,56 @@ mod file_backend {
         match serde_json::from_str(&data) {
             Ok(m) => Ok((m, legacy)),
             Err(parse_err) => {
-                // Refuse to silently replace a corrupt keystore with an empty
-                // one — the next write would erase every stored key for every
-                // user on this device. Back it up loud and bail.
-                let ts = chrono::Utc::now().timestamp();
-                let backup = path.with_file_name(format!("dev-keystore.bad-{ts}.json"));
-                if let Err(rename_err) = std::fs::rename(path, &backup) {
-                    eprintln!(
-                        "[keystore] failed to rename corrupt dev-keystore.json to {}: {rename_err}",
-                        backup.display()
-                    );
-                }
+                // #950 — the file is LEFT WHERE IT IS.
+                //
+                // This used to rename the file to `dev-keystore.bad-{ts}.json`
+                // and return an error. That reads like a careful backup, and it
+                // is not: the very next operation finds no store at all, treats
+                // the device as brand new, and the first write establishes an
+                // empty one. The user is silently signed out, and their account
+                // identity key — unrecoverable without the one-time Secret Key —
+                // is orphaned in a file named after a timestamp that nothing
+                // will ever read again. "Start over" is the wrong default for
+                // material that cannot be regenerated.
+                //
+                // Leaving the bytes in place converts that into a loud, stable,
+                // recoverable failure: every subsequent operation reports the
+                // same error against the same file, the content is still there
+                // for a human (or a later format-tolerant reader) to salvage,
+                // and nothing overwrites it. The deliberate escape hatch is
+                // `commands::auth::wipe_local_data` — the login screen's "wipe
+                // this computer" — which is a decision the user makes, not one
+                // a parse error makes for them.
+                //
+                // Note this is only reachable AFTER a successful decrypt (#882),
+                // so it means genuinely malformed plaintext, never wrong-machine
+                // ciphertext.
                 eprintln!(
-                    "[keystore] dev-keystore.json was corrupt ({parse_err}); backed up to {}",
-                    backup.display()
+                    "[keystore] {} decrypted but did not parse ({parse_err}); \
+                     leaving it untouched — it may still hold recoverable keys",
+                    path.display()
                 );
                 Err(Error::Keystore(format!(
-                    "keystore corrupt; backed up to {}",
-                    backup.display()
+                    "the keystore at {} is unreadable ({parse_err}). It has been \
+                     left untouched in case its contents can be recovered; \
+                     nothing has been deleted. To start over on this device and \
+                     re-authenticate, use \"wipe this computer\" on the login \
+                     screen.",
+                    path.display()
                 )))
             }
         }
+    }
+
+    /// The atomic-write staging file: the store's own name with `.tmp`
+    /// appended, so it is unmistakably a sibling of this exact store rather
+    /// than of any other file that happens to share a stem.
+    fn tmp_path(path: &Path) -> PathBuf {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("keystore.pks");
+        path.with_file_name(format!("{name}.tmp"))
     }
 
     fn write_map_at(
@@ -834,17 +1036,17 @@ mod file_backend {
         // encrypted bytes only become the store in one atomic step, so every
         // interruption leaves EITHER the complete old plaintext file OR the
         // complete new encrypted one, and never a partial mix of the two.
-        let tmp = path.with_extension("json.tmp");
+        let tmp = tmp_path(path);
         {
             let mut f = std::fs::File::create(&tmp)
-                .map_err(|e| Error::Keystore(format!("open dev-keystore.json.tmp: {e}")))?;
+                .map_err(|e| Error::Keystore(format!("open {}: {e}", tmp.display())))?;
             f.write_all(&data)
-                .map_err(|e| Error::Keystore(format!("write dev-keystore.json.tmp: {e}")))?;
+                .map_err(|e| Error::Keystore(format!("write {}: {e}", tmp.display())))?;
             f.sync_all()
-                .map_err(|e| Error::Keystore(format!("fsync dev-keystore.json.tmp: {e}")))?;
+                .map_err(|e| Error::Keystore(format!("fsync {}: {e}", tmp.display())))?;
         }
         std::fs::rename(&tmp, path)
-            .map_err(|e| Error::Keystore(format!("rename dev-keystore.json.tmp: {e}")))?;
+            .map_err(|e| Error::Keystore(format!("rename {}: {e}", tmp.display())))?;
         Ok(())
     }
 
@@ -907,7 +1109,8 @@ mod file_backend {
             // No codec, no write. This is the invariant that makes "plaintext
             // never" true: a host we cannot derive a KEK for gets a loud error,
             // not a plaintext fallback.
-            store_at(&store_path(), &FileCodec::detect()?, key, encoded)
+            let codec = FileCodec::detect()?;
+            store_at(&resolve_store(&codec), &codec, key, encoded)
         })
         .await
         .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
@@ -916,7 +1119,8 @@ mod file_backend {
     pub async fn load(key: &str) -> Result<Option<Vec<u8>>> {
         let key = namespaced(key);
         tokio::task::spawn_blocking(move || {
-            load_at(&store_path(), &FileCodec::detect()?, &key)
+            let codec = FileCodec::detect()?;
+            load_at(&resolve_store(&codec), &codec, &key)
         })
         .await
         .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
@@ -925,10 +1129,47 @@ mod file_backend {
     pub async fn delete(key: &str) -> Result<()> {
         let key = namespaced(key);
         tokio::task::spawn_blocking(move || {
-            delete_at(&store_path(), &FileCodec::detect()?, &key)
+            let codec = FileCodec::detect()?;
+            delete_at(&resolve_store(&codec), &codec, &key)
         })
         .await
         .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
+    }
+
+    /// The predicate half of [`holds_current_namespace_keys`], over an
+    /// already-read map.
+    #[cfg(any(feature = "os-keystore", test))]
+    fn map_holds_current_namespace_keys(map: &HashMap<String, String>) -> bool {
+        map.keys().any(|k| super::is_current_namespace(k))
+    }
+
+    /// Does the file store already hold keys belonging to THIS namespace?
+    ///
+    /// The question [`super::backend`] asks before handing a box that has just
+    /// grown a Secret Service over to the keychain (#950). Answering it needs
+    /// the file read anyway, so it reuses the ordinary read path — including the
+    /// #950 rename — rather than sniffing the raw bytes.
+    ///
+    /// **An unreadable store answers `false`, deliberately.** If the file cannot
+    /// be decrypted or parsed then staying on it buys nothing: every read would
+    /// fail. The keychain is empty, which costs one re-enrolment and leaves the
+    /// file bytes on disk untouched for salvage — strictly better than a device
+    /// that cannot start at all.
+    #[cfg(feature = "os-keystore")]
+    pub fn holds_current_namespace_keys() -> bool {
+        let Ok(codec) = FileCodec::detect() else {
+            return false;
+        };
+        match read_map_at(&resolve_store(&codec), &codec) {
+            Ok((map, _)) => map_holds_current_namespace_keys(&map),
+            Err(e) => {
+                eprintln!(
+                    "[keystore] could not inspect the file store while choosing a \
+                     backend ({e}); treating it as empty"
+                );
+                false
+            }
+        }
     }
 
     // ── Tests ───────────────────────────────────────────────────────────────
@@ -957,7 +1198,7 @@ mod file_backend {
                 "pollis-ks-rt-{}",
                 ulid::Ulid::new()
             ));
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
             let codec = FileCodec::with_secret(MACHINE_A);
 
             let want = map_of(&[("account_id_key_wrapped_u1", "c2VjcmV0")]);
@@ -977,7 +1218,7 @@ mod file_backend {
                 "pollis-ks-guard-{}",
                 ulid::Ulid::new()
             ));
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
             let codec = FileCodec::with_secret(MACHINE_A);
 
             let secret_slot = "account_id_key_wrapped_u1";
@@ -1063,7 +1304,7 @@ mod file_backend {
                 "pollis-ks-untouched-{}",
                 ulid::Ulid::new()
             ));
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
 
             let codec_a = FileCodec::with_secret(MACHINE_A);
             write_map_at(&path, &codec_a, &map_of(&[("k", "v")])).unwrap();
@@ -1075,7 +1316,7 @@ mod file_backend {
             let after = std::fs::read(&path).unwrap();
             assert_eq!(before, after, "an undecryptable store must not be rewritten");
             assert!(
-                !dir.join("dev-keystore.json.tmp").exists(),
+                !tmp_path(&path).exists(),
                 "no partial file should be left behind"
             );
             std::fs::remove_dir_all(&dir).ok();
@@ -1090,7 +1331,7 @@ mod file_backend {
                 ulid::Ulid::new()
             ));
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
 
             let legacy = map_of(&[
                 ("device_id_u1", "ZGV2aWNl"),
@@ -1124,7 +1365,7 @@ mod file_backend {
                 ulid::Ulid::new()
             ));
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
 
             let legacy = map_of(&[("account_id_key_wrapped_u1", "a2V5")]);
             std::fs::write(&path, serde_json::to_string(&legacy).unwrap()).unwrap();
@@ -1133,7 +1374,7 @@ mod file_backend {
             // temp file next to an intact original.
             let codec = FileCodec::with_secret(MACHINE_A);
             let partial = codec.encode(r#"{"account_id_key_wrapped_u1":"a2V5"}"#).unwrap();
-            std::fs::write(path.with_extension("json.tmp"), &partial[..10]).unwrap();
+            std::fs::write(tmp_path(&path), &partial[..10]).unwrap();
 
             // The store still reads, from the untouched original.
             let (recovered, is_legacy) = read_map_at(&path, &codec).unwrap();
@@ -1157,7 +1398,7 @@ mod file_backend {
                 ulid::Ulid::new()
             ));
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
 
             let legacy = map_of(&[("account_id_key_wrapped_u1", "a2V5")]);
             let bytes = serde_json::to_string(&legacy).unwrap();
@@ -1171,7 +1412,7 @@ mod file_backend {
             // Untouched, because `write_map_at` encodes before it opens the
             // temp file at all — there is no plaintext fallback to fall into.
             assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
-            assert!(!path.with_extension("json.tmp").exists());
+            assert!(!tmp_path(&path).exists());
             std::fs::remove_dir_all(&dir).ok();
         }
 
@@ -1190,7 +1431,7 @@ mod file_backend {
         #[test]
         fn store_load_delete_roundtrip_through_the_real_operations() {
             let dir = std::env::temp_dir().join(format!("pollis-ks-ops-{}", ulid::Ulid::new()));
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
             let codec = FileCodec::with_secret(MACHINE_A);
 
             let encoded =
@@ -1215,7 +1456,7 @@ mod file_backend {
         fn a_read_migrates_the_plaintext_file_in_place() {
             let dir = std::env::temp_dir().join(format!("pollis-ks-readmig-{}", ulid::Ulid::new()));
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
 
             let encoded =
                 base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"identity");
@@ -1246,7 +1487,7 @@ mod file_backend {
         fn a_failed_migration_does_not_fail_the_read() {
             let dir = std::env::temp_dir().join(format!("pollis-ks-migfail-{}", ulid::Ulid::new()));
             std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("dev-keystore.json");
+            let path = dir.join("keystore.pks");
 
             let encoded =
                 base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"identity");
@@ -1267,6 +1508,233 @@ mod file_backend {
                 "the unmigrated file must be left exactly as it was"
             );
             std::fs::remove_dir_all(&dir).ok();
+        }
+
+        // ── #950 ────────────────────────────────────────────────────────────
+
+        /// A temp dir plus the two store paths inside it.
+        fn migration_dir(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+            let dir = std::env::temp_dir()
+                .join(format!("pollis-ks-{tag}-{}", ulid::Ulid::new()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let new = dir.join("keystore.pks");
+            let old = dir.join("dev-keystore.json");
+            (dir, new, old)
+        }
+
+        /// #950(a) — the rename, done as write-new → verify-readable → unlink.
+        /// The old name goes away and not one key goes with it.
+        #[test]
+        fn the_store_is_renamed_without_losing_a_key() {
+            let (dir, new, old) = migration_dir("rename");
+            let codec = FileCodec::with_secret(MACHINE_A);
+
+            let keys = map_of(&[
+                ("account_id_key_wrapped_u1", "a2V5"),
+                ("device_id_u1", "ZGV2"),
+            ]);
+            write_map_at(&old, &codec, &keys).unwrap();
+
+            let resolved = resolve_store_at(&new, &old, &codec);
+
+            assert_eq!(resolved, new, "the new name must become the store");
+            assert!(new.exists(), "the new file must have been written");
+            assert!(
+                !old.exists(),
+                "the misleading name must be gone once the new one is proven"
+            );
+            let (got, legacy) = read_map_at(&new, &codec).unwrap();
+            assert_eq!(got, keys, "every key must survive the rename");
+            assert!(!legacy, "the migrated file is sealed, not plaintext");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// The ordering property. If the new file cannot be written, the old one
+        /// — which is the only copy of an unrecoverable identity key — must
+        /// still be there, still readable, and still the store in use.
+        #[test]
+        fn a_rename_that_cannot_complete_keeps_the_old_file() {
+            let (dir, new, old) = migration_dir("rename-fail");
+            let codec = FileCodec::with_secret(MACHINE_A);
+            let keys = map_of(&[("account_id_key_wrapped_u1", "a2V5")]);
+            write_map_at(&old, &codec, &keys).unwrap();
+            let before = std::fs::read(&old).unwrap();
+
+            // Reads the old file perfectly, cannot write the new one — so the
+            // rename fails at step 2, with the old file already read and the
+            // delete one step away. `that_cannot_seal()` would NOT do: it also
+            // carries the wrong machine secret, so it fails at step 1 and this
+            // test would silently duplicate the wrong-machine case above.
+            let broken = FileCodec::with_secret_but_cannot_seal(MACHINE_A);
+            let resolved = resolve_store_at(&new, &old, &broken);
+
+            assert_eq!(resolved, old, "a failed rename must keep serving the old file");
+            assert!(!new.exists(), "no half-made new store may be left behind");
+            assert_eq!(
+                std::fs::read(&old).unwrap(),
+                before,
+                "the old file must be byte-identical"
+            );
+            assert_eq!(read_map_at(&old, &codec).unwrap().0, keys);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// An undecryptable old file (wrong machine) must not be migrated,
+        /// deleted, or replaced by an empty new one — the caller sees the
+        /// ordinary wrong-machine error against the ordinary path.
+        #[test]
+        fn a_rename_never_touches_a_file_it_cannot_read() {
+            let (dir, new, old) = migration_dir("rename-foreign");
+            let codec_a = FileCodec::with_secret(MACHINE_A);
+            write_map_at(&old, &codec_a, &map_of(&[("k", "v")])).unwrap();
+            let before = std::fs::read(&old).unwrap();
+
+            let codec_b = FileCodec::with_secret(MACHINE_B);
+            let resolved = resolve_store_at(&new, &old, &codec_b);
+
+            assert_eq!(resolved, old);
+            assert!(!new.exists(), "an unreadable store must not spawn an empty one");
+            assert_eq!(std::fs::read(&old).unwrap(), before);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// The interrupted window: new file written and verified, crash before
+        /// the unlink. Both files exist. The next start must take the new one
+        /// and finish the job, not resurrect the old one.
+        #[test]
+        fn a_rename_interrupted_before_the_unlink_finishes_on_the_next_start() {
+            let (dir, new, old) = migration_dir("rename-resume");
+            let codec = FileCodec::with_secret(MACHINE_A);
+
+            let current = map_of(&[("account_id_key_wrapped_u1", "bmV3")]);
+            let stale = map_of(&[("account_id_key_wrapped_u1", "b2xk")]);
+            write_map_at(&new, &codec, &current).unwrap();
+            write_map_at(&old, &codec, &stale).unwrap();
+
+            let resolved = resolve_store_at(&new, &old, &codec);
+
+            assert_eq!(resolved, new, "the completed new store wins");
+            assert!(!old.exists(), "the unlink is retried and completes");
+            assert_eq!(
+                read_map_at(&new, &codec).unwrap().0,
+                current,
+                "the new store must not be overwritten by the stale one"
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// A fresh install has neither file and must simply use the new name.
+        #[test]
+        fn a_fresh_install_uses_the_new_name_directly() {
+            let (dir, new, old) = migration_dir("rename-fresh");
+            let codec = FileCodec::with_secret(MACHINE_A);
+            assert_eq!(resolve_store_at(&new, &old, &codec), new);
+            assert!(!new.exists(), "resolving must not create anything");
+            assert!(!old.exists());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// #950(c) — a store that decrypts but does not parse is LEFT ALONE.
+        ///
+        /// The old behaviour renamed it to `dev-keystore.bad-{ts}.json`, which
+        /// looks like a backup and functions as a wipe: the very next operation
+        /// finds no store, treats the device as new, and the first write
+        /// establishes an empty one. This asserts both halves of the fix — the
+        /// file stays, and the failure is stable rather than self-clearing.
+        #[test]
+        fn a_corrupt_store_is_never_moved_aside_or_started_over() {
+            let (dir, path, _) = migration_dir("corrupt");
+            let codec = FileCodec::with_secret(MACHINE_A);
+
+            // Valid ciphertext, valid UTF-8 inside, not a JSON object.
+            std::fs::write(&path, codec.encode("this is not the store").unwrap()).unwrap();
+            let before = std::fs::read(&path).unwrap();
+
+            let err = read_map_at(&path, &codec).unwrap_err();
+            assert!(
+                err.to_string().contains("left untouched"),
+                "the error must say the file was kept, got: {err}"
+            );
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                before,
+                "a corrupt store must not be moved, renamed or truncated"
+            );
+            assert!(
+                std::fs::read_dir(&dir).unwrap().count() == 1,
+                "no `.bad-<ts>` sidecar may be created"
+            );
+
+            // The load-bearing half: the NEXT operation must still refuse.
+            // Under the old behaviour the file was gone by now, so this write
+            // would have quietly created a brand-new store holding only `k` —
+            // every other user's keys on this device silently discarded.
+            let store_err = store_at(&path, &codec, "k".into(), "dg==".into()).unwrap_err();
+            assert!(store_err.to_string().contains("unreadable"));
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                before,
+                "a corrupt store must not be replaced by a fresh empty one"
+            );
+            assert!(load_at(&path, &codec, "k").is_err());
+            assert!(delete_at(&path, &codec, "k").is_err());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// #950(b) — the namespace rule that decides whether a box which just
+        /// grew a keychain stays on the file. Driven over the pure predicate so
+        /// all four namespace shapes are covered in one process.
+        #[test]
+        fn namespace_matching_is_exact_in_every_shape() {
+            use super::super::key_is_in_namespace as in_ns;
+
+            // Release, no explicit data dir: the unprefixed namespace.
+            assert!(in_ns("", "account_id_key_wrapped_u1"));
+            assert!(
+                !in_ns("", "dev2:account_id_key_wrapped_u1"),
+                "a second instance's key must not pin the default namespace"
+            );
+
+            // Debug build.
+            assert!(in_ns("DEV:", "DEV:db_key_u1"));
+            assert!(!in_ns("DEV:", "db_key_u1"));
+            assert!(!in_ns("DEV:", "dev2:DEV:db_key_u1"));
+
+            // Explicit data dir, release and debug.
+            assert!(in_ns("dev2:", "dev2:db_key_u1"));
+            assert!(!in_ns("dev2:", "dev3:db_key_u1"));
+            assert!(!in_ns("dev2:", "db_key_u1"));
+            assert!(in_ns("dev2:DEV:", "dev2:DEV:db_key_u1"));
+            assert!(!in_ns("dev2:DEV:", "dev3:DEV:db_key_u1"));
+
+            // And the rule agrees with the generator it mirrors, whatever
+            // namespace this test process happens to be running in.
+            assert!(super::super::is_current_namespace(&super::super::namespaced(
+                "account_id_key_wrapped_u1"
+            )));
+            assert!(!super::super::is_current_namespace(&format!(
+                "dev2:{}",
+                super::super::namespaced("account_id_key_wrapped_u1")
+            )));
+        }
+
+        /// The backend-selection input itself: a file holding this namespace's
+        /// keys reports true; one holding only a sibling instance's reports
+        /// false, so a second dev instance never pins the first's backend.
+        #[test]
+        fn only_this_namespace_s_keys_pin_the_backend() {
+            let mine = super::super::namespaced("account_id_key_wrapped_u1");
+            let theirs = format!("dev2:{mine}");
+
+            assert!(!map_holds_current_namespace_keys(&HashMap::new()));
+            assert!(map_holds_current_namespace_keys(&map_of(&[(
+                mine.as_str(),
+                "a2V5"
+            )])));
+            assert!(
+                !map_holds_current_namespace_keys(&map_of(&[(theirs.as_str(), "a2V5")])),
+                "another instance's keys must not keep this one off the keychain"
+            );
         }
 
         /// The derivation is a pure function of (secret, salt) — same inputs
@@ -1442,15 +1910,52 @@ mod backend {
     /// and "the CLI does not start".
     #[cfg(feature = "os-keystore")]
     fn keychain_or_file() -> BackendKind {
-        if super::keychain_backend::available() {
-            BackendKind::OsKeychain
-        } else {
+        if !super::keychain_backend::available() {
             eprintln!(
                 "[keystore] no usable OS keychain on this host; \
                  falling back to the machine-bound encrypted file store"
             );
-            BackendKind::EncryptedFile
+            return BackendKind::EncryptedFile;
         }
+
+        // A keychain answers. That does NOT settle it (#950).
+        //
+        // A headless box that later grows a Secret Service — someone installs a
+        // desktop session, or a container image starts shipping gnome-keyring —
+        // would otherwise flip backends on the next launch, find the keychain
+        // empty, and present the user with PIN-setup or an OTP prompt as if the
+        // device had never been enrolled. Nothing is destroyed and re-enrolling
+        // heals it, but "your messenger forgot you because a package landed" is
+        // not an acceptable way to learn that.
+        //
+        // So the rule is: whoever already holds this namespace's keys keeps
+        // serving them. Only a namespace with no file-side state is free to
+        // adopt the keychain.
+        //
+        // Three consequences worth stating rather than discovering:
+        //
+        //   * It is one-way in practice. Once a device is on the file it stays
+        //     there until that state is deliberately removed (`wipe_local_data`,
+        //     or signing out and deleting the data dir), at which point the next
+        //     start picks the keychain. That is the correct direction for the
+        //     trap to point: never silently abandon keys, always re-evaluate
+        //     from clean.
+        //   * If BOTH stores hold keys — a box that ran on the keychain, lost it,
+        //     re-enrolled onto the file, then got it back — the file wins, and it
+        //     should: it holds the more recent enrolment. The keychain's entries
+        //     are stale and inert.
+        //   * The check is namespace-scoped, so a second dev instance's keys in
+        //     the shared file never pin the first instance's backend.
+        if super::file_backend::holds_current_namespace_keys() {
+            eprintln!(
+                "[keystore] an OS keychain is available, but this install's keys \
+                 already live in the encrypted file store; staying there so the \
+                 device is not treated as new (#950)"
+            );
+            return BackendKind::EncryptedFile;
+        }
+
+        BackendKind::OsKeychain
     }
 
     #[cfg(not(feature = "os-keystore"))]
@@ -1588,6 +2093,18 @@ impl Keystore for InMemoryKeystore {
         self.inner.lock().await.remove(key);
         Ok(())
     }
+}
+
+/// The exact name a per-user slot resolves to for THIS process — the
+/// [`Keystore::store_for_user`] key composition followed by the instance
+/// namespacing.
+///
+/// Exposed so `tests/keystore_at_rest.rs` can seed a pre-migration store the
+/// shipped `OsKeystore` will actually find, without reaching into the module's
+/// internals or hand-copying the naming rule (which is precisely the kind of
+/// copy that drifts).
+pub fn slot_name(key: &str, user_id: &str) -> String {
+    namespaced(&format!("{key}_{user_id}"))
 }
 
 /// Convenience: construct the default production keystore wrapped in the Arc
