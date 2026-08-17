@@ -9,6 +9,7 @@ import {
   rankMentionCandidates,
   type MentionCandidate,
 } from "../../lib/mentions";
+import type { PickedAttachment } from "../../lib/attachments";
 
 /**
  * Bottom composer bar: attach button, text input, send button. When
@@ -23,6 +24,10 @@ export function Composer({
   sendPending,
   editable,
   mentionCandidates,
+  onAttach,
+  pendingAttachments,
+  onRemoveAttachment,
+  canSendEmptyText = false,
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
@@ -30,6 +35,11 @@ export function Composer({
   sendPending: boolean;
   editable: boolean;
   mentionCandidates?: MentionCandidate[];
+  onAttach?: () => void;
+  pendingAttachments?: PickedAttachment[];
+  onRemoveAttachment?: (id: string) => void;
+  /** True when attachments alone make the message sendable. */
+  canSendEmptyText?: boolean;
 }) {
   const [caret, setCaret] = useState(0);
 
@@ -98,6 +108,51 @@ export function Composer({
           </ScrollView>
         </View>
       ) : null}
+      {pendingAttachments && pendingAttachments.length > 0 ? (
+        <View
+          testID="strip-attachments"
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: 6,
+            paddingHorizontal: 12,
+            paddingBottom: 4,
+          }}
+        >
+          {pendingAttachments.map((att) => (
+            <Pressable
+              key={att.id}
+              testID={`chip-attachment-${att.id}`}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove attachment ${att.name}`}
+              onPress={() => onRemoveAttachment?.(att.id)}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingHorizontal: 8,
+                paddingVertical: 5,
+                borderWidth: 1,
+                borderColor: semantic.hairStrong,
+                borderRadius: r.sm,
+              }}
+            >
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily: ty.body.fontFamily,
+                  fontSize: 12,
+                  color: semantic.ink,
+                  maxWidth: 160,
+                }}
+              >
+                {att.name}
+              </Text>
+              <Icon.exit color={semantic.mute} size={12} />
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
       <View
         style={{
           flexDirection: "row",
@@ -113,6 +168,7 @@ export function Composer({
           testID="btn-attach"
           accessibilityRole="button"
           accessibilityLabel="Add attachment"
+          onPress={onAttach}
           style={{
             width: 38,
             height: 38,
@@ -151,7 +207,7 @@ export function Composer({
         />
         <Pressable
           onPress={onSend}
-          disabled={!draft.trim() || sendPending}
+          disabled={(!draft.trim() && !canSendEmptyText) || sendPending}
           testID="btn-send"
           accessibilityRole="button"
           accessibilityLabel="Send"
@@ -162,7 +218,8 @@ export function Composer({
             justifyContent: "center",
             backgroundColor: semantic.accent,
             borderRadius: r.sm,
-            opacity: !draft.trim() || sendPending ? 0.4 : 1,
+            opacity:
+              (!draft.trim() && !canSendEmptyText) || sendPending ? 0.4 : 1,
           }}
         >
           <Icon.send color="#0a0907" />

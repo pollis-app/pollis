@@ -4,8 +4,24 @@ import { semantic, type as ty } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
 import { ReactionPills } from "./ReactionPills";
 import { ReceiptIndicator } from "./ReceiptIndicator";
+import { MediaImage } from "../Media";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
+import type { MessageAttachment } from "../../types";
+
+// Image sizing: fixed max width, height follows the aspect ratio within
+// sane bounds; unknown dimensions get a square fallback.
+const IMAGE_MAX_W = 220;
+function imageSize(att: MessageAttachment): { width: number; height: number } {
+  if (att.width && att.height) {
+    const height = Math.min(
+      Math.max(Math.round((IMAGE_MAX_W * att.height) / att.width), 80),
+      260,
+    );
+    return { width: IMAGE_MAX_W, height };
+  }
+  return { width: 160, height: 160 };
+}
 
 export function MessageRow({
   av,
@@ -25,6 +41,7 @@ export function MessageRow({
   onOpenThread,
   mentionNames,
   selfName,
+  attachments,
   onPressAvatar,
   onLongPress,
   testID,
@@ -47,6 +64,7 @@ export function MessageRow({
   onOpenThread?: () => void;
   mentionNames?: ReadonlySet<string>;
   selfName?: string | null;
+  attachments?: MessageAttachment[];
   onPressAvatar?: () => void;
   onLongPress?: () => void;
   testID?: string;
@@ -122,6 +140,62 @@ export function MessageRow({
               </Text>
             ) : null}
           </Text>
+        ) : null}
+        {attachments && attachments.length > 0 ? (
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              gap: 6,
+              marginTop: 6,
+            }}
+          >
+            {attachments.map((att) => {
+              if (att.content_type.startsWith("image/")) {
+                return (
+                  <MediaImage
+                    key={att.id}
+                    attachment={att}
+                    contentFit="cover"
+                    style={{
+                      ...imageSize(att),
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      borderColor: semantic.hair,
+                    }}
+                  />
+                );
+              }
+              // Non-image attachments: named chip (no inline preview yet).
+              return (
+                <View
+                  key={att.id}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingHorizontal: 8,
+                    paddingVertical: 6,
+                    borderWidth: 1,
+                    borderColor: semantic.hair,
+                    borderRadius: 4,
+                  }}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily: ty.body.fontFamily,
+                      fontSize: 12,
+                      color: semantic.ink2,
+                      maxWidth: 200,
+                    }}
+                  >
+                    {att.filename}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         ) : null}
         {reactions && reactions.length > 0 && onToggleReaction ? (
           <ReactionPills

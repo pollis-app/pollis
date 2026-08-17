@@ -297,7 +297,29 @@ Current state:
   restore via `get_session`); every tab/group/DM/chat/self screen consumes real
   React Query hooks (no hardcoded mock arrays); message send / receive / ingest /
   reactions / edit / delete; profile, devices, blocking, safety numbers,
-  preferences. `bridge.rs` covers ~every command the hooks call. The DS base URL
+  preferences. `bridge.rs` covers ~every command the hooks call.
+- **Chat parity set (2026-08, stacked PRs; bridge arms land in PR #967):**
+  load-older paging (`useMessages` is an infinite query over `next_cursor`;
+  inverted FlatList, `onEndReached`); reaction pills + full emoji picker
+  (`get_reactions` batched per conversation in one queryFn; generated
+  `components/emoji/emojiData.ts` — regenerate with
+  `scripts/generate-emoji-data.py`, which writes frontend + mobile together);
+  custom group emoji (`list_usable_emoji` / `list_group_emoji` /
+  `upload_group_emoji` / `remove_group_emoji`; rendering via `get_emoji_path`
+  → cached `file://`, see `lib/emojiCache.ts`; management at
+  `app/group/emoji.tsx`); DM receipts (`get_conversation_receipts` +
+  `mark_messages_read` via FlatList viewability 60%/600ms + AppState gate;
+  synced top-level `send_read_receipts` key, default true); threads
+  (`read_thread_messages` / `list_thread_summaries`, `send_message` with
+  `threadId`, screen at `app/chat/thread.tsx`, replies filtered out of the
+  main timeline); mentions (`lib/mentions.ts` port, roster-only candidates,
+  composer autocomplete + MentionToken rendering); saved + permalinks
+  (`toggle_saved_message` / `list_saved_messages` /
+  `resolve_message_permalink`, `pollis://m/<conv>/<msg>` deep link at
+  `app/m/[...permalink].tsx`, Saved screen at `app/self/saved.tsx`, verified
+  clipboard copy via expo-clipboard); attachments (picker → `upload_media`
+  path arg → desktop's exact `_att`/`_txt` envelope from `lib/attachments.ts`;
+  inbound images render via `components/Media.tsx` + `get_media_path`). The DS base URL
   is threaded through `initializeNativeBridge` as `pollis_delivery_url`
   (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, since
   OTP bootstrap + all remote writes go through the DS, not direct Turso. Full

@@ -108,6 +108,7 @@ function ThreadScreen() {
           name={name}
           time={timeLabel(m.created_at)}
           text={m.content}
+          attachments={m.attachments}
           pending={m.pending}
           edited={!!m.edited_at}
           mentionNames={mentionNames}
@@ -141,6 +142,7 @@ function ThreadScreen() {
           }
           time={timeLabel(root.created_at)}
           text={root.content}
+          attachments={root.attachments}
           edited={!!root.edited_at}
           mentionNames={mentionNames}
           selfName={selfName}

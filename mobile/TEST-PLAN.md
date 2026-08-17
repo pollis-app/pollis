@@ -75,6 +75,13 @@ capturing **iPhone + iPad + Android** screenshots:
 `profile-prefs` (+ accent + change-email) · `security` (devices/safety-numbers) ·
 `blocking` · `realtime` (two-client live) · `push-tap`.
 
+Chat-parity additions (2026-08 stack) extend the `messaging` flow family:
+load-older paging, reaction pills + emoji picker (incl. custom group emoji +
+the `group/emoji` management screen), DM receipts (indicator + mark-read on
+dwell), threads (`chat/thread`), mention autocomplete + rendering, saved
+messages (`self/saved`) + `pollis://m/…` permalink deep link (incl. the
+non-oracle miss state), and image attachments (send + inbound render).
+
 Media flows are **excluded by decision**.
 
 ### 4. iPadOS adaptive layouts — #622
