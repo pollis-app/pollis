@@ -135,6 +135,10 @@ export default function RootLayout() {
                 name="self/change-email"
                 options={{ animation: "slide_from_bottom" }}
               />
+              <Stack.Screen
+                name="self/delete-account"
+                options={{ animation: "slide_from_bottom" }}
+              />
             </Stack>
           </ThemeProvider>
         </QueryClientProvider>

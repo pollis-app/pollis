@@ -267,6 +267,27 @@ export default function Security() {
           </Text>
         </View>
 
+        <SectionTitle>ACCOUNT</SectionTitle>
+        <ListRow
+          testID="row-delete-account"
+          minHeight={48}
+          glyph={<Icon.shield color={semantic.danger} />}
+          name={
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 14,
+                color: semantic.danger,
+              }}
+            >
+              Delete account
+            </Text>
+          }
+          sub="Permanently delete your account and wipe this device"
+          onPress={() => router.push("/self/delete-account")}
+          end={<Icon.fwd color={semantic.mute} />}
+        />
+
         <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
           <Button
             full
