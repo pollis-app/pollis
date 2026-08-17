@@ -46,7 +46,8 @@ use libsql::Connection;
 
 use crate::error::AppError;
 use crate::writes::{
-    bad_request, conversation_id_taken, gate, outcome_response, resolve_actor, WriteOutcome,
+    bad_request, claim_conversation_id, conversation_id_taken, gate, outcome_response,
+    resolve_actor, ConversationKind, WriteOutcome,
 };
 use crate::AppState;
 
@@ -331,6 +332,9 @@ pub async fn apply_create_dm(
         return Ok(WriteOutcome::Forbidden);
     }
     let tx = conn.transaction().await?;
+    // Claim the id in the SAME transaction as the DM it names, so a claim the
+    // registry refuses rolls the DM back with it (#880).
+    claim_conversation_id(&tx, &body.id, ConversationKind::Dm).await?;
     tx.execute(
         "INSERT INTO dm_channel (id, created_by, created_at) VALUES (?1, ?2, ?3)",
         libsql::params![body.id.clone(), creator.clone(), body.created_at.clone()],

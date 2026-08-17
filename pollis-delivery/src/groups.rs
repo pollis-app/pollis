@@ -47,8 +47,8 @@ use libsql::Connection;
 
 use crate::error::AppError;
 use crate::writes::{
-    bad_request, conversation_id_taken, gate, ok_json, outcome_response, resolve_actor,
-    WriteOutcome,
+    bad_request, claim_conversation_id, conversation_id_taken, gate, ok_json, outcome_response,
+    resolve_actor, ConversationKind, WriteOutcome,
 };
 use crate::AppState;
 
@@ -201,13 +201,45 @@ pub async fn apply_create_group(
         Ok(o) => o,
         Err(o) => return Ok(o),
     };
-    // Refuse an id already in use as any other kind of conversation. See
-    // `conversation_id_taken` — `is_member` ORs across dm/group/channel on one
-    // id, so reusing another conversation's id grants membership of it.
-    if conversation_id_taken(conn, &body.id).await? {
-        return Ok(WriteOutcome::Forbidden);
+    // Every id this one request would register: the group, plus whichever
+    // default channels it asks for. All three are taken straight from the
+    // request body, so all three are attacker-chosen — #879 checked `body.id`
+    // alone, which left the two default-channel ids as an unguarded route to the
+    // same attack (#880).
+    let mut claims: Vec<(&str, ConversationKind)> =
+        vec![(body.id.as_str(), ConversationKind::Group)];
+    for channel_id in [
+        body.default_text_channel_id.as_deref(),
+        body.default_voice_channel_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        claims.push((channel_id, ConversationKind::Channel));
     }
+    for (i, (id, _)) in claims.iter().enumerate() {
+        // Refuse an id already in use as any other kind of conversation. See
+        // `conversation_id_taken` — `is_member` ORs across dm/group/channel on
+        // one id, so reusing another conversation's id grants membership of it.
+        if conversation_id_taken(conn, id).await? {
+            return Ok(WriteOutcome::Forbidden);
+        }
+        // And refuse one request that names the same id twice (a group that is
+        // also its own channel, or two default channels sharing an id). Nothing
+        // exists yet, so no lookup of existing rows can see this one; the
+        // registry's primary key would catch it below, but a 403 is the honest
+        // answer to a malformed request.
+        if claims[..i].iter().any(|(seen, _)| seen == id) {
+            return Ok(WriteOutcome::Forbidden);
+        }
+    }
+
     let tx = conn.transaction().await?;
+    // Claim the ids in the SAME transaction as the rows they name, so a claim
+    // the registry refuses takes the whole creation with it.
+    for (id, kind) in &claims {
+        claim_conversation_id(&tx, id, *kind).await?;
+    }
     tx.execute(
         "INSERT INTO groups (id, name, description, owner_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         libsql::params![
@@ -455,7 +487,11 @@ pub async fn apply_create_channel(
     if conversation_id_taken(conn, &body.id).await? {
         return Ok(WriteOutcome::Forbidden);
     }
-    conn.execute(
+    // One transaction, so the registry claim and the channel it names commit
+    // together or not at all (#880).
+    let tx = conn.transaction().await?;
+    claim_conversation_id(&tx, &body.id, ConversationKind::Channel).await?;
+    tx.execute(
         "INSERT INTO channels (id, group_id, name, description, channel_type) VALUES (?1, ?2, ?3, ?4, ?5)",
         libsql::params![
             body.id.clone(),
@@ -466,6 +502,7 @@ pub async fn apply_create_channel(
         ],
     )
     .await?;
+    tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
 
