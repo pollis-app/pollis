@@ -471,3 +471,26 @@ promising more.
 4. **A divergence in an item above is expected, not tampering.** A divergence in
    the Linux payload with the full recipe supplied on a matching image, however,
    is exactly the signal this program exists to surface — investigate it.
+5. **Read the verdict token, not the red X.** Since #944 `rebuild-verify.yml`
+   ends in one of four states, and only one of them is a claim about the shipped
+   binary:
+
+   | Verdict | Means | Run |
+   |---|---|---|
+   | `reproduced` | The rebuilt payload hash is the logged one. | green |
+   | `did_not_reproduce` | Bytes differ **with the runner image held constant**. The real finding — treat as a security issue until diagnosed. | red |
+   | `environment_drift` | Bytes differ, but the rebuild ran on a different runner image than the release recorded. Item 6 applies; the check's precondition was not met. | red |
+   | `recipe_unrecorded` | Bytes differ and the leaf records no runner image (every tag ≤ v1.9.7), so the precondition cannot be evaluated at all. | red |
+
+   All three non-green states fail the run deliberately: an inconclusive rebuild
+   is not a passing one, and auto-greening drift would open a window for a real
+   divergence every time GitHub re-images a runner. The distinction lives in the
+   job title, the step summary, and `website/rebuild-ledger.json` — not in the
+   exit code.
+
+   The failure diagnostic also splits the differing paths by origin, because the
+   single most useful question is which side of the line they fall on:
+   `usr/lib/*` is vendored off the runner and tracks item 6, while
+   `usr/bin/pollis` is ours and — apart from item 6a's CSP-hash ordering — should
+   never differ. "Only vendored libraries differ" is printed explicitly when it
+   holds.
