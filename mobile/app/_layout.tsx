@@ -18,6 +18,7 @@ import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge } from "../lib/native";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import { useInboxRealtime } from "../hooks/useInboxRealtime";
+import { AutoLockProvider } from "../lib/autolock";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -84,6 +85,9 @@ export default function RootLayout() {
           <ThemeProvider>
             <StatusBar style="light" />
             <SignedInServicesGate />
+            {/* Auto-lock (#899): captures touch starts to refresh the idle
+                deadline and locks on background-elapsed / foreground-idle. */}
+            <AutoLockProvider>
             <Stack
               screenOptions={{
                 headerShown: false,
@@ -136,7 +140,12 @@ export default function RootLayout() {
                 name="self/change-email"
                 options={{ animation: "slide_from_bottom" }}
               />
+              <Stack.Screen
+                name="self/delete-account"
+                options={{ animation: "slide_from_bottom" }}
+              />
             </Stack>
+            </AutoLockProvider>
           </ThemeProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
