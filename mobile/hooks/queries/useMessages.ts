@@ -15,6 +15,7 @@ import { useCallback } from "react";
 import {
   useInfiniteQuery,
   useMutation,
+  useQuery,
   useQueryClient,
   type InfiniteData,
 } from "@tanstack/react-query";
@@ -32,9 +33,18 @@ export interface RawChannelMessage {
   ciphertext?: string;
   content?: string;
   reply_to_id?: string | null;
+  /** ULID of the thread root this message replies into (#825). */
+  thread_id?: string | null;
   sent_at: string;
   edited_at?: string;
   deleted_at?: string;
+}
+
+/** Mirror of `pollis_core::commands::messages::ThreadSummary`. */
+export interface ThreadSummary {
+  thread_id: string;
+  reply_count: number;
+  last_reply_at?: string | null;
 }
 
 export interface MessageCursor {
@@ -54,6 +64,7 @@ export interface Message {
   sender_username?: string;
   content: string;
   reply_to_id?: string | null;
+  thread_id?: string | null;
   created_at: number;
   edited_at?: number;
   deleted_at?: number;
@@ -98,6 +109,7 @@ function transform(raw: RawChannelMessage): Message {
     sender_username: raw.sender_username,
     content: parseContent(raw.content),
     reply_to_id: raw.reply_to_id ?? null,
+    thread_id: raw.thread_id ?? null,
     created_at: new Date(raw.sent_at).getTime(),
     edited_at: raw.edited_at ? new Date(raw.edited_at).getTime() : undefined,
     deleted_at: raw.deleted_at ? new Date(raw.deleted_at).getTime() : undefined,
@@ -133,6 +145,12 @@ export const messageQueryKeys = {
     conversationId: string | null,
     kind: ConversationKind | null,
   ) => ["messages", kind, conversationId] as const,
+  thread: (threadId: string | null) =>
+    ["messages", "thread", threadId] as const,
+  /** Prefix covering every open thread (invalidation on ingest). */
+  threads: ["messages", "thread"] as const,
+  threadSummaries: (conversationId: string | null) =>
+    ["messages", "thread-summaries", conversationId] as const,
 };
 
 /**
@@ -207,7 +225,11 @@ export function useSendMessage(
   const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
-    mutationFn: async (vars: { content: string; replyToId?: string }) => {
+    mutationFn: async (vars: {
+      content: string;
+      replyToId?: string;
+      threadId?: string;
+    }) => {
       if (!conversationId || !currentUser) {
         throw new Error("No active conversation");
       }
@@ -216,6 +238,7 @@ export function useSendMessage(
         senderId: currentUser.id,
         content: vars.content,
         replyToId: vars.replyToId ?? null,
+        threadId: vars.threadId ?? null,
         senderUsername: currentUser.username ?? null,
       });
       return transform(raw);
@@ -234,6 +257,7 @@ export function useSendMessage(
         sender_username: currentUser.username,
         content: vars.content,
         reply_to_id: vars.replyToId ?? null,
+        thread_id: vars.threadId ?? null,
         created_at: Date.now(),
         pending: true,
       };
@@ -254,7 +278,15 @@ export function useSendMessage(
           pageParams: [null],
         });
       }
-      return { previous, optimisticId, key };
+      // Thread replies also land optimistically in the open thread's list
+      // (an array cache, unlike the paged conversation cache).
+      if (vars.threadId) {
+        queryClient.setQueryData<Message[]>(
+          messageQueryKeys.thread(vars.threadId),
+          (cache) => [...(cache ?? []), optimistic],
+        );
+      }
+      return { previous, optimisticId, key, threadId: vars.threadId };
     },
     onSuccess: (confirmed, _vars, ctx) => {
       if (!ctx) {
@@ -265,14 +297,83 @@ export function useSendMessage(
           msgs.map((m) => (m.id === ctx.optimisticId ? confirmed : m)),
         ),
       );
+      if (ctx.threadId) {
+        queryClient.setQueryData<Message[]>(
+          messageQueryKeys.thread(ctx.threadId),
+          (cache) =>
+            (cache ?? []).map((m) =>
+              m.id === ctx.optimisticId ? confirmed : m,
+            ),
+        );
+        // Reply-count chips on the parent rows.
+        queryClient.invalidateQueries({
+          queryKey: messageQueryKeys.threadSummaries(conversationId),
+        });
+      }
     },
     onError: (_e, _vars, ctx) => {
-      if (!ctx?.previous) {
+      if (!ctx) {
         return;
       }
-      // Roll back the optimistic stub on failure.
-      queryClient.setQueryData(ctx.key, ctx.previous);
+      // Roll back the optimistic stubs on failure.
+      if (ctx.previous) {
+        queryClient.setQueryData(ctx.key, ctx.previous);
+      }
+      if (ctx.threadId) {
+        queryClient.setQueryData<Message[]>(
+          messageQueryKeys.thread(ctx.threadId),
+          (cache) => (cache ?? []).filter((m) => m.id !== ctx.optimisticId),
+        );
+      }
     },
+  });
+}
+
+/**
+ * Replies in one thread, oldest-first — `read_thread_messages` is a local
+ * read over already-ingested rows (the conversation fetch ingests) and
+ * returns them chronologically, so unlike the conversation pages this is
+ * NOT reversed. The root message is not included; the thread screen takes
+ * it from the conversation cache.
+ */
+export function useThreadMessages(threadId: string | null) {
+  return useQuery({
+    queryKey: messageQueryKeys.thread(threadId),
+    queryFn: async (): Promise<Message[]> => {
+      if (!threadId) {
+        return [];
+      }
+      const raw =
+        (await invoke<RawChannelMessage[]>("read_thread_messages", {
+          threadId,
+        })) ?? [];
+      return raw.map(transform);
+    },
+    enabled: !!threadId,
+    staleTime: 1000 * 30,
+  });
+}
+
+/** Reply-count summaries for a conversation, keyed by thread root id. */
+export function useThreadSummaries(conversationId: string | null) {
+  return useQuery({
+    queryKey: messageQueryKeys.threadSummaries(conversationId),
+    queryFn: async (): Promise<Map<string, ThreadSummary>> => {
+      const map = new Map<string, ThreadSummary>();
+      if (!conversationId) {
+        return map;
+      }
+      const rows =
+        (await invoke<ThreadSummary[]>("list_thread_summaries", {
+          conversationId,
+        })) ?? [];
+      for (const row of rows) {
+        map.set(row.thread_id, row);
+      }
+      return map;
+    },
+    enabled: !!conversationId,
+    staleTime: 1000 * 30,
   });
 }
 
@@ -392,6 +493,14 @@ export function useIngestConversation() {
         // the receipts query itself never polls).
         queryClient.invalidateQueries({
           queryKey: ["receipts", conversationId],
+        });
+        // Freshly ingested envelopes may be thread replies — refresh every
+        // open thread and this conversation's reply-count chips.
+        queryClient.invalidateQueries({
+          queryKey: messageQueryKeys.threads,
+        });
+        queryClient.invalidateQueries({
+          queryKey: messageQueryKeys.threadSummaries(conversationId),
         });
       } catch (e) {
         // Best-effort — ingest is advisory. The next refetch will retry.
