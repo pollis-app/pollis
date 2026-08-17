@@ -53,21 +53,11 @@ export function useUserGroups() {
   });
 }
 
-export function useGroupChannels(groupId: string | null) {
-  const currentUser = useObserver(() => appStore.currentUser);
-
-  return useQuery({
-    queryKey: groupQueryKeys.channels(groupId ?? ""),
-    queryFn: async (): Promise<Channel[]> => {
-      if (!groupId || !currentUser) {
-        throw new Error("No group ID provided");
-      }
-      return await api.listChannels(groupId, currentUser.id);
-    },
-    enabled: !!groupId && !!currentUser,
-    staleTime: 1000 * 60,
-  });
-}
+// There is deliberately no `useGroupChannels` (#929). The sidebar — the only
+// surface that ever wanted a group's channel list — reads
+// `list_user_groups_with_channels` instead, so the per-group hook had zero
+// callers. `groupQueryKeys.channels` stays: it is still the invalidation
+// target for channel create / rename / delete and for `membership_changed`.
 
 export function useCreateGroup() {
   const queryClient = useQueryClient();

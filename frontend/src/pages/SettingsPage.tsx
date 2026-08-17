@@ -30,7 +30,6 @@ export const SettingsPage: React.FC = observer(() => {
   const [username, setUsername] = useState("");
   const [preferredName, setPreferredName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
 
   // Email-change flow lives entirely in this component:
   //   'idle'    → display current email + "Change" button
@@ -56,7 +55,6 @@ export const SettingsPage: React.FC = observer(() => {
       setUsername(userData.username || "");
       setPreferredName(userData.preferred_name || "");
       setEmail(userData.email || "");
-      setPhone(userData.phone || "");
     }
   }, [userData]);
 
@@ -140,7 +138,6 @@ export const SettingsPage: React.FC = observer(() => {
       await updateProfileMutation.mutateAsync({
         username: username.trim(),
         preferredName: preferredName.trim() || undefined,
-        phone: phone.trim() || undefined,
       });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -245,19 +242,6 @@ export const SettingsPage: React.FC = observer(() => {
                     id="settings-preferred-name"
                   />
                   <input data-testid="settings-preferred-name-input" type="hidden" value={preferredName} readOnly />
-
-                  {/* Phone field hidden — not currently surfaced as a feature.
-                      State and backend wiring are intentionally left in place
-                      so re-enabling is a one-uncomment change.
-                  <TextInput
-                    label="Phone"
-                    value={phone}
-                    onChange={setPhone}
-                    placeholder="+1 555 000 0000"
-                    id="settings-phone"
-                  />
-                  <input data-testid="settings-phone-input" type="hidden" value={phone} readOnly />
-                  */}
                 </div>
               )}
 

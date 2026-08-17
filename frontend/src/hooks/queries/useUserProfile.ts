@@ -7,11 +7,20 @@ import { useObserver } from "mobx-react-lite";
 import { messageQueryKeys } from "./useMessages";
 import { groupQueryKeys } from "./useGroups";
 
+/**
+ * The signed-in user's own profile, as the settings form needs it.
+ *
+ * No `phone` (#929): the desktop settings page's phone field had been
+ * commented out for a long time while its state, this field and the mutation
+ * argument stayed live — a control the user could not see, still writing to
+ * the profile on every save. The `update_user_profile` command still accepts a
+ * phone (mobile surfaces one), so `api.updateUserProfile` keeps the argument;
+ * nothing in this renderer sends it.
+ */
 export interface ServiceUserData {
   username: string;
   preferred_name?: string;
   email: string;
-  phone: string;
   avatar_url?: string;
 }
 
@@ -40,7 +49,7 @@ export function useOtherUserProfile(userId: string | null | undefined) {
       if (!userId) {
         return null;
       }
-      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; phone?: string; avatar_url?: string } | null>(
+      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; avatar_url?: string } | null>(
         'get_user_profile',
         { userId },
       );
@@ -175,7 +184,7 @@ export function useUserProfile() {
         throw new Error("No current user");
       }
 
-      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; phone?: string; avatar_url?: string } | null>(
+      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; avatar_url?: string } | null>(
         'get_user_profile',
         { userId: currentUser.id },
       );
@@ -184,7 +193,6 @@ export function useUserProfile() {
         username: profile?.username || currentUser.username || '',
         preferred_name: profile?.preferred_name,
         email: currentUser.email || '',
-        phone: profile?.phone || '',
         avatar_url: profile?.avatar_url,
       };
     },
@@ -226,12 +234,12 @@ export function useUpdateProfile() {
   const setUsername = appStore.setUsername;
 
   return useMutation({
-    mutationFn: async ({ username, preferredName, phone }: { username: string; preferredName?: string; phone?: string }) => {
+    mutationFn: async ({ username, preferredName }: { username: string; preferredName?: string }) => {
       if (!currentUser) {
         throw new Error("No current user");
       }
 
-      await api.updateUserProfile(currentUser.id, username, preferredName, phone);
+      await api.updateUserProfile(currentUser.id, username, preferredName);
       return { username };
     },
     onSuccess: (data) => {
