@@ -63,8 +63,9 @@ coverage:
   dependency, which is exactly the #879 regression.
 
 `pollis-core/tests/keystore_at_rest.rs` drives the shipped `OsKeystore` against a
-real `POLLIS_DATA_DIR` and inspects the resulting file. It is its own test binary
-so it can set that env var without racing another test.
+real data directory and inspects the resulting file. It is its own test binary
+because pointing the process at a directory is a whole-process act (see [the
+data-dir section](#the-process-wide-data-dir--never-set_var)).
 
 ### What `mls-tests.yml` runs, in order
 
@@ -109,7 +110,7 @@ Lazy, process-wide singleton (`tokio::sync::OnceCell`) that owns:
 
 - `Arc<RemoteDb>` — one libsql connection pool shared across all clients in the process.
 - `Config` — test config loaded from `.env.test`.
-- A tempdir used for per-user SQLCipher files, exposed via `POLLIS_DATA_DIR`.
+- A tempdir used for per-user SQLCipher files, installed with `db::local::set_data_dir`.
 
 ### `TestClient`
 
