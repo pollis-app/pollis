@@ -21,6 +21,7 @@
     "expo": "~55.0.29",
     "expo-build-properties": "~55.0.17",
     "expo-camera": "~55.0.22",
+    "expo-clipboard": "~55.0.16",
     "expo-constants": "~55.0.17",
     "expo-dev-client": "~55.0.38",
     "expo-file-system": "~55.0.25",
