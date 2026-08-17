@@ -1,161 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView, TextInput, Pressable } from "react-native";
+import { View, Text, FlatList } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { Screen, Crumb, Avatar, Ctx, CtxAct } from "../../components/ui";
+import { Screen, Crumb, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
+import { palette, semantic, type as ty } from "../../theme/tokens";
+import { dayKey, dayLabel, timeLabel } from "../../components/chat/dates";
+import { DaySeparator } from "../../components/chat/DaySeparator";
+import { MessageRow } from "../../components/chat/MessageRow";
+import { Composer } from "../../components/chat/Composer";
+import { EditBar } from "../../components/chat/EditBar";
+import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
+import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
+import { EmojiPickerSheet } from "../../components/emoji/EmojiPickerSheet";
 import {
   useMessages,
   useSendMessage,
   useIngestConversation,
   useToggleReaction,
+  useConversationReactions,
   useEditMessage,
   useDeleteMessage,
+  useConversationReceipts,
+  useSendReadReceipts,
+  useThreadSummaries,
+  useSavedMessageIds,
+  useToggleSavedMessage,
+  flattenPages,
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
+import { useReadReceipts } from "../../hooks/useReadReceipts";
+import { useMentionCandidates } from "../../hooks/useMentionCandidates";
+import * as Clipboard from "expo-clipboard";
+import { formatMessagePermalink } from "../../lib/permalinks";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-
-const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
-
-function dayKey(ts: number): string {
-  return new Date(ts).toDateString();
-}
-
-function dayLabel(ts: number): string {
-  const d = new Date(ts);
-  const today = new Date();
-  if (d.toDateString() === today.toDateString()) {
-    return "TODAY";
-  }
-  const yest = new Date(today);
-  yest.setDate(today.getDate() - 1);
-  if (d.toDateString() === yest.toDateString()) {
-    return "YESTERDAY";
-  }
-  return d
-    .toLocaleDateString(undefined, { month: "short", day: "numeric" })
-    .toUpperCase();
-}
-
-function timeLabel(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function Day({ label }: { label: string }) {
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        paddingHorizontal: 18,
-        paddingTop: 14,
-        paddingBottom: 8,
-      }}
-    >
-      <View style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }} />
-      <Text style={[ty.label, { letterSpacing: 2.2 }]}>{label}</Text>
-      <View style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }} />
-    </View>
-  );
-}
-
-function Msg({
-  av,
-  amber,
-  name,
-  time,
-  text,
-  pending,
-  edited,
-  onPressAvatar,
-  onLongPress,
-  testID,
-}: {
-  av: string;
-  amber?: boolean;
-  name: string;
-  time: string;
-  text?: string;
-  pending?: boolean;
-  edited?: boolean;
-  onPressAvatar?: () => void;
-  onLongPress?: () => void;
-  testID?: string;
-}) {
-  return (
-    <Pressable
-      onLongPress={onLongPress}
-      delayLongPress={350}
-      testID={testID}
-      accessibilityLabel={text ? `${name}: ${text}` : name}
-      style={{
-        flexDirection: "row",
-        gap: 12,
-        paddingHorizontal: 18,
-        paddingVertical: 8,
-        opacity: pending ? 0.55 : 1,
-      }}
-    >
-      <Pressable onPress={onPressAvatar} disabled={!onPressAvatar}>
-        <Avatar label={av} variant={amber ? "amber" : "default"} />
-      </Pressable>
-      <View style={{ flex: 1 }}>
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-          <Text
-            style={{
-              fontFamily: ty.h1.fontFamily,
-              fontSize: 14,
-              color: semantic.ink,
-            }}
-          >
-            {name}
-          </Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-            }}
-          >
-            {pending ? "sending…" : time}
-          </Text>
-        </View>
-        {text ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 14,
-              lineHeight: 20,
-              color: semantic.ink,
-              marginTop: 2,
-            }}
-          >
-            {text}
-            {edited ? (
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 11,
-                  color: semantic.mute,
-                }}
-              >
-                {"  (edited)"}
-              </Text>
-            ) : null}
-          </Text>
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
 
 // Props let this screen double as an embedded right-pane conversation on the
 // two-pane (regular/iPad) layout. Route usage passes NO props, so every value
@@ -167,6 +48,12 @@ type ChatViewProps = {
   name?: string;
   embedded?: boolean;
 };
+
+// Rows for the inverted timeline list — messages interleaved with day
+// separators, newest first.
+type ChatListItem =
+  | { type: "sep"; key: string; label: string }
+  | { type: "msg"; key: string; message: Message };
 
 function TextChat(props: ChatViewProps = {}) {
   const router = useRouter();
@@ -185,13 +72,48 @@ function TextChat(props: ChatViewProps = {}) {
 
   const [draft, setDraft] = useState("");
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
+  const [pickerTarget, setPickerTarget] = useState<Message | null>(null);
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
-  const scrollRef = useRef<ScrollView>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const currentUser = appStore.currentUser;
 
-  const { data, isLoading, isError } = useMessages(conversationId, kind);
-  const messages = data?.messages ?? [];
+  const {
+    data,
+    isLoading,
+    isError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useMessages(conversationId, kind);
+  // Newest-first (matches the inverted list's render order).
+  const messages = useMemo(() => flattenPages(data), [data]);
+  const messageIds = useMemo(
+    () => messages.filter((m) => !m.pending).map((m) => m.id),
+    [messages],
+  );
+  const { data: reactionsByMessage } = useConversationReactions(
+    conversationId,
+    kind,
+    messageIds,
+  );
+
+  // DM receipts (#892): one fetch per open conversation; mark-read reporting
+  // via the list's viewability config, gated on the reciprocal synced
+  // preference. Channels render nothing and report nothing.
+  const isDm = kind === "dm";
+  const sendReadReceipts = useSendReadReceipts();
+  const { data: receiptsByMessage } = useConversationReceipts(
+    isDm ? conversationId : null,
+  );
+  const { viewabilityConfigCallbackPairs } = useReadReceipts(
+    conversationId,
+    currentUser?.id ?? null,
+    isDm && sendReadReceipts,
+  );
+  // Mobile DMs are strictly 1:1 (desktop derives from member_count with the
+  // same 2-member fallback).
+  const peerCount = 1;
   const sendMessage = useSendMessage(conversationId, kind);
   const ingest = useIngestConversation();
   const toggleReaction = useToggleReaction(conversationId, kind);
@@ -232,16 +154,20 @@ function TextChat(props: ChatViewProps = {}) {
     }, [conversationId, kind, ingest]),
   );
 
-  // Auto-scroll to bottom whenever the message list grows (new arrival or
-  // optimistic send).
+  // Auto-scroll to bottom when a NEW newest message lands (arrival or
+  // optimistic send). Keyed on the newest id rather than the array length so
+  // loading an older page never yanks the reader away from the history they
+  // are reading.
+  const listRef = useRef<FlatList<ChatListItem>>(null);
+  const newestId = messages[0]?.id;
   useEffect(() => {
-    if (messages.length === 0) {
+    if (!newestId) {
       return;
     }
     requestAnimationFrame(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
-  }, [messages.length]);
+  }, [newestId]);
 
   const onSend = () => {
     const text = draft.trim();
@@ -252,19 +178,106 @@ function TextChat(props: ChatViewProps = {}) {
     sendMessage.mutate({ content: text });
   };
 
-  const sections = useMemo(() => {
-    const out: { label: string; messages: Message[] }[] = [];
+  const onSaveEdit = () => {
+    const text = editDraft.trim();
+    if (!text || !editTarget) {
+      return;
+    }
+    editMessage.mutate(
+      { messageId: editTarget.id, newContent: text },
+      {
+        onSuccess: () => {
+          setEditTarget(null);
+          setEditDraft("");
+        },
+      },
+    );
+  };
+
+  // Reply-count chips for thread roots (#831).
+  const { data: threadSummaries } = useThreadSummaries(conversationId);
+
+  // Mention candidates come from the visible roster only (#886); the
+  // resolution set for rendering adds `all` and the reader's own name so
+  // self-mentions highlight.
+  const mentionCandidates = useMentionCandidates(
+    kind,
+    conversationId,
+    groupId ?? null,
+  );
+  // Saved messages (#887): one query feeds every row's saved state.
+  const savedIds = useSavedMessageIds();
+  const toggleSaved = useToggleSavedMessage();
+
+  // #897: copy is VERIFIED — the boolean comes from the clipboard call, and
+  // a thrown write reads as failure, never assumed success.
+  const copyToClipboard = useCallback(async (text: string) => {
+    try {
+      return await Clipboard.setStringAsync(text);
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const selfName = currentUser?.username?.toLowerCase() ?? null;
+  const mentionNames = useMemo(() => {
+    const set = new Set<string>(["all"]);
+    for (const c of mentionCandidates) {
+      set.add(c.username.toLowerCase());
+    }
+    if (selfName) {
+      set.add(selfName);
+    }
+    return set;
+  }, [mentionCandidates, selfName]);
+
+  // Inverted-list items: build chronologically (day separator before the
+  // first message of each day), then reverse so index 0 is the newest row.
+  // Thread replies stay out of the main timeline — they render only in the
+  // thread screen (#837's isolation fix; same filter as desktop's
+  // `!m.thread_id || m.thread_id === m.id` render boundary).
+  const items = useMemo(() => {
+    const chrono = [...messages]
+      .reverse()
+      .filter((m) => !m.thread_id || m.thread_id === m.id);
+    const out: ChatListItem[] = [];
     let lastKey = "";
-    for (const m of messages) {
+    for (const m of chrono) {
       const k = dayKey(m.created_at);
       if (k !== lastKey) {
-        out.push({ label: dayLabel(m.created_at), messages: [] });
+        out.push({ type: "sep", key: `sep-${k}`, label: dayLabel(m.created_at) });
         lastKey = k;
       }
-      out[out.length - 1].messages.push(m);
+      out.push({ type: "msg", key: m.id, message: m });
     }
+    out.reverse();
     return out;
   }, [messages]);
+
+  const onEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Toggle a reaction by its CURRENT state — tapping a pill you're in
+  // removes, anything else adds (desktop's toggle semantics).
+  const reactWithEmoji = useCallback(
+    (messageId: string, emoji: string) => {
+      const existing = reactionsByMessage
+        ?.get(messageId)
+        ?.find((reaction) => reaction.emoji === emoji);
+      const reacted = currentUser
+        ? existing?.user_ids.includes(currentUser.id) ?? false
+        : false;
+      toggleReaction.mutate({
+        messageId,
+        emoji,
+        mode: reacted ? "remove" : "add",
+      });
+    },
+    [reactionsByMessage, currentUser, toggleReaction],
+  );
 
   const ctxLabel = kind === "dm" ? "DIRECT" : "CHANNEL";
 
@@ -285,102 +298,175 @@ function TextChat(props: ChatViewProps = {}) {
     peerName ||
     (kind === "dm" ? "Direct message" : "Channel");
 
+  const openThread = useCallback(
+    (rootId: string) => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      router.push({
+        pathname: "/chat/thread",
+        params: {
+          threadId: rootId,
+          id: conversationId,
+          kind,
+          name: title,
+        },
+      });
+    },
+    [conversationId, kind, router, title],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: ChatListItem }) => {
+      if (item.type === "sep") {
+        return <DaySeparator label={item.label} />;
+      }
+      const m = item.message;
+      const mine = currentUser?.id === m.sender_id;
+      const name = m.sender_username || (mine ? "you" : "user");
+      return (
+        <MessageRow
+          testID={`row-message-${m.id}`}
+          messageId={m.id}
+          av={name.slice(0, 2)}
+          amber={mine}
+          name={name}
+          time={timeLabel(m.created_at)}
+          text={m.content}
+          pending={m.pending}
+          edited={!!m.edited_at}
+          reactions={reactionsByMessage?.get(m.id)}
+          currentUserId={currentUser?.id}
+          receipt={receiptsByMessage?.get(m.id)}
+          peerCount={peerCount}
+          showReceipt={mine && isDm}
+          threadCount={threadSummaries?.get(m.id)?.reply_count ?? 0}
+          onOpenThread={() => openThread(m.id)}
+          mentionNames={mentionNames}
+          selfName={selfName}
+          onToggleReaction={(emoji, reacted) =>
+            toggleReaction.mutate({
+              messageId: m.id,
+              emoji,
+              mode: reacted ? "remove" : "add",
+            })
+          }
+          onPressAvatar={
+            mine
+              ? undefined
+              : () =>
+                  router.push({
+                    pathname: "/user/[id]",
+                    params: { id: m.sender_id },
+                  })
+          }
+          onLongPress={m.pending ? undefined : () => setActionTarget(m)}
+        />
+      );
+    },
+    [
+      currentUser?.id,
+      router,
+      reactionsByMessage,
+      toggleReaction,
+      receiptsByMessage,
+      peerCount,
+      isDm,
+      threadSummaries,
+      openThread,
+      mentionNames,
+      selfName,
+    ],
+  );
+
   const content = (
     <>
       <Crumb segs={[{ label: ctxLabel, leaf: true }]} />
-      <ScrollView
-        ref={scrollRef}
+      {isLoading && messages.length === 0 ? (
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 13,
+            color: semantic.mute,
+            paddingHorizontal: 18,
+            paddingTop: 12,
+          }}
+        >
+          Loading messages…
+        </Text>
+      ) : null}
+      {isError ? (
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 13,
+            color: semantic.danger,
+            paddingHorizontal: 18,
+            paddingTop: 12,
+          }}
+        >
+          Couldn't load messages.
+        </Text>
+      ) : null}
+      {!isLoading && !isError && items.length === 0 ? (
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 13,
+            color: semantic.mute,
+            paddingHorizontal: 18,
+            paddingTop: 12,
+          }}
+        >
+          No messages yet. Be the first to say something.
+        </Text>
+      ) : null}
+      <FlatList
+        ref={listRef}
+        testID="list-messages"
+        inverted
+        data={items}
+        keyExtractor={(item) => item.key}
+        renderItem={renderItem}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingVertical: 4 }}
-      >
-        {isLoading && messages.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            Loading messages…
-          </Text>
-        ) : null}
-        {isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            Couldn't load messages.
-          </Text>
-        ) : null}
-        {!isLoading && !isError && sections.length === 0 ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 13,
-              color: semantic.mute,
-              paddingHorizontal: 18,
-              paddingTop: 12,
-            }}
-          >
-            No messages yet. Be the first to say something.
-          </Text>
-        ) : null}
-        {sections.map((section, sIdx) => (
-          <View key={`${section.label}-${sIdx}`}>
-            <Day label={section.label} />
-            {section.messages.map((m) => {
-              const mine = currentUser?.id === m.sender_id;
-              const name = m.sender_username || (mine ? "you" : "user");
-              return (
-                <Msg
-                  key={m.id}
-                  testID={`row-message-${m.id}`}
-                  av={name.slice(0, 2)}
-                  amber={mine}
-                  name={name}
-                  time={timeLabel(m.created_at)}
-                  text={m.content}
-                  pending={m.pending}
-                  edited={!!m.edited_at}
-                  onPressAvatar={
-                    mine
-                      ? undefined
-                      : () =>
-                          router.push({
-                            pathname: "/user/[id]",
-                            params: { id: m.sender_id },
-                          })
-                  }
-                  onLongPress={
-                    m.pending ? undefined : () => setActionTarget(m)
-                  }
-                />
-              );
-            })}
-          </View>
-        ))}
-        {sendMessage.isError ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 12,
-              color: semantic.danger,
-              paddingHorizontal: 18,
-              paddingTop: 8,
-              paddingBottom: 4,
-            }}
-          >
-            {(sendMessage.error as Error).message || "Couldn't send message."}
-          </Text>
-        ) : null}
-      </ScrollView>
+        // With `inverted`, the "end" is the visual top — the oldest loaded
+        // message. RN re-evaluates onEndReached on content-size changes as
+        // well as scroll, so a prepend that leaves no scroll offset still
+        // advances (desktop PR #958's dead-end shape).
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.4}
+        viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs}
+        ListFooterComponent={
+          isFetchingNextPage ? (
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 12,
+                color: semantic.mute,
+                paddingHorizontal: 18,
+                paddingVertical: 10,
+              }}
+            >
+              Loading older messages…
+            </Text>
+          ) : null
+        }
+      />
+      {sendMessage.isError ? (
+        <Text
+          style={{
+            fontFamily: ty.body.fontFamily,
+            fontSize: 12,
+            color: semantic.danger,
+            paddingHorizontal: 18,
+            paddingTop: 8,
+            paddingBottom: 4,
+          }}
+        >
+          {(sendMessage.error as Error).message || "Couldn't send message."}
+        </Text>
+      ) : null}
 
       <Ctx
         hideBack={embedded}
@@ -416,6 +502,15 @@ function TextChat(props: ChatViewProps = {}) {
               testID="btn-members"
               accessibilityLabel="Members"
               icon={<Icon.people color={semantic.ink2} />}
+              onPress={
+                kind === "channel" && groupId
+                  ? () =>
+                      router.push({
+                        pathname: "/group/members",
+                        params: { groupId },
+                      })
+                  : undefined
+              }
             />
             <CtxAct
               testID="btn-chat-menu"
@@ -430,6 +525,10 @@ function TextChat(props: ChatViewProps = {}) {
                     pathname: "/dm/info",
                     params: { id: conversationId },
                   });
+                  return;
+                }
+                if (kind === "channel") {
+                  setMenuOpen(true);
                 }
               }}
             />
@@ -437,339 +536,103 @@ function TextChat(props: ChatViewProps = {}) {
         }
       />
       {editTarget ? (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            borderTopWidth: 1,
-            borderTopColor: semantic.accent,
-            backgroundColor: semantic.accentSoft,
+        <EditBar
+          draft={editDraft}
+          onChangeDraft={setEditDraft}
+          onCancel={() => {
+            setEditTarget(null);
+            setEditDraft("");
           }}
-        >
-          <Pressable
-            onPress={() => {
-              setEditTarget(null);
-              setEditDraft("");
-            }}
-            testID="btn-edit-cancel"
-            accessibilityRole="button"
-            accessibilityLabel="Cancel edit"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              borderWidth: 1,
-              borderColor: semantic.hairStrong,
-              borderRadius: r.sm,
-            }}
-          >
-            <Icon.exit color={semantic.ink} />
-          </Pressable>
-          <TextInput
-            testID="input-edit-composer"
-            accessibilityLabel="Edit message"
-            value={editDraft}
-            onChangeText={setEditDraft}
-            autoFocus
-            placeholder="Edit message…"
-            placeholderTextColor={semantic.mute}
-            onSubmitEditing={() => {
-              const text = editDraft.trim();
-              if (!text || !editTarget) {
-                return;
-              }
-              editMessage.mutate(
-                { messageId: editTarget.id, newContent: text },
-                {
-                  onSuccess: () => {
-                    setEditTarget(null);
-                    setEditDraft("");
-                  },
-                },
-              );
-            }}
-            returnKeyType="send"
-            style={{
-              flex: 1,
-              borderWidth: 1,
-              borderColor: semantic.accent,
-              borderRadius: r.sm,
-              paddingVertical: 10,
-              paddingHorizontal: 12,
-              fontFamily: ty.body.fontFamily,
-              fontSize: 14,
-              color: semantic.ink,
-              backgroundColor: semantic.fieldBg,
-            }}
-          />
-          <Pressable
-            onPress={() => {
-              const text = editDraft.trim();
-              if (!text || !editTarget) {
-                return;
-              }
-              editMessage.mutate(
-                { messageId: editTarget.id, newContent: text },
-                {
-                  onSuccess: () => {
-                    setEditTarget(null);
-                    setEditDraft("");
-                  },
-                },
-              );
-            }}
-            disabled={!editDraft.trim() || editMessage.isPending}
-            testID="btn-edit-save"
-            accessibilityRole="button"
-            accessibilityLabel="Save edit"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: semantic.accent,
-              borderRadius: r.sm,
-              opacity:
-                !editDraft.trim() || editMessage.isPending ? 0.4 : 1,
-            }}
-          >
-            <Icon.check color="#0a0907" />
-          </Pressable>
-        </View>
+          onSave={onSaveEdit}
+          savePending={editMessage.isPending}
+        />
       ) : (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            borderTopWidth: 1,
-            borderTopColor: semantic.hairSoft,
-          }}
-        >
-          <Pressable
-            testID="btn-attach"
-            accessibilityRole="button"
-            accessibilityLabel="Add attachment"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              borderWidth: 1,
-              borderColor: semantic.hairStrong,
-              borderRadius: r.sm,
-            }}
-          >
-            <Icon.plus color={semantic.ink} />
-          </Pressable>
-          <TextInput
-            testID="input-composer"
-            accessibilityLabel="Message"
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Type a message…"
-            placeholderTextColor={semantic.mute}
-            onSubmitEditing={onSend}
-            returnKeyType="send"
-            editable={!!kind && !!conversationId}
-            style={{
-              flex: 1,
-              borderWidth: 1,
-              borderColor: semantic.hairStrong,
-              borderRadius: r.sm,
-              paddingVertical: 10,
-              paddingHorizontal: 12,
-              fontFamily: ty.body.fontFamily,
-              fontSize: 14,
-              color: semantic.ink,
-              backgroundColor: semantic.fieldBg,
-            }}
-          />
-          <Pressable
-            onPress={onSend}
-            disabled={!draft.trim() || sendMessage.isPending}
-            testID="btn-send"
-            accessibilityRole="button"
-            accessibilityLabel="Send"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: semantic.accent,
-              borderRadius: r.sm,
-              opacity: !draft.trim() || sendMessage.isPending ? 0.4 : 1,
-            }}
-          >
-            <Icon.send color="#0a0907" />
-          </Pressable>
-        </View>
+        <Composer
+          draft={draft}
+          onChangeDraft={setDraft}
+          onSend={onSend}
+          sendPending={sendMessage.isPending}
+          editable={!!kind && !!conversationId}
+          mentionCandidates={mentionCandidates}
+        />
       )}
 
       {actionTarget ? (
-        <Pressable
-          onPress={() => setActionTarget(null)}
-          // Neither wrapper has its own accessibilityLabel, so leaving them
-          // `accessible` (Pressable's default) makes iOS collapse every
-          // child button below into ONE opaque compound element — a
-          // VoiceOver user could never reach Edit/Delete/react individually.
-          accessible={false}
-          style={{
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            left: 0,
-            right: 0,
-            backgroundColor: "rgba(0,0,0,0.55)",
-            justifyContent: "flex-end",
+        <MessageActionsSheet
+          target={actionTarget}
+          isOwn={actionTarget.sender_id === currentUser?.id}
+          isSaved={savedIds.has(actionTarget.id)}
+          onToggleSave={() => {
+            toggleSaved.mutate(actionTarget.id);
+            setActionTarget(null);
           }}
-        >
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
-            accessible={false}
-            style={{
-              backgroundColor: semantic.cardBg,
-              borderTopWidth: 1,
-              borderTopColor: semantic.hair,
-              paddingHorizontal: 18,
-              paddingTop: 14,
-              paddingBottom: 30,
-              gap: 10,
-            }}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                gap: 8,
-                paddingVertical: 6,
-              }}
-            >
-              {QUICK_EMOJI.map((emoji, ei) => (
-                <Pressable
-                  key={emoji}
-                  testID={`btn-react-${ei}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`React ${emoji}`}
-                  onPress={() => {
-                    if (!actionTarget) {
-                      return;
-                    }
-                    toggleReaction.mutate({
-                      messageId: actionTarget.id,
-                      emoji,
-                      mode: "add",
-                    });
-                    setActionTarget(null);
-                  }}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderWidth: 1,
-                    borderColor: semantic.hair,
-                    borderRadius: r.sm,
-                  }}
-                >
-                  <Text style={{ fontSize: 22 }}>{emoji}</Text>
-                </Pressable>
-              ))}
-            </View>
+          onCopyText={() => copyToClipboard(actionTarget.content)}
+          onCopyLink={() =>
+            copyToClipboard(
+              formatMessagePermalink(
+                actionTarget.conversation_id,
+                actionTarget.id,
+              ),
+            )
+          }
+          onReact={(emoji) => {
+            reactWithEmoji(actionTarget.id, emoji);
+            setActionTarget(null);
+          }}
+          onOpenPicker={() => {
+            setPickerTarget(actionTarget);
+            setActionTarget(null);
+          }}
+          onReplyInThread={() => {
+            const rootId = actionTarget.id;
+            setActionTarget(null);
+            openThread(rootId);
+          }}
+          onEdit={() => {
+            setEditTarget(actionTarget);
+            setEditDraft(actionTarget.content);
+            setActionTarget(null);
+          }}
+          onDelete={() => {
+            deleteMessage.mutate(actionTarget.id);
+            setActionTarget(null);
+          }}
+          onClose={() => setActionTarget(null)}
+        />
+      ) : null}
 
-            {actionTarget.sender_id === currentUser?.id ? (
-              <>
-                <Pressable
-                  onPress={() => {
-                    setEditTarget(actionTarget);
-                    setEditDraft(actionTarget.content);
-                    setActionTarget(null);
-                  }}
-                  testID="btn-edit"
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit message"
-                  style={{
-                    paddingVertical: 14,
-                    paddingHorizontal: 12,
-                    borderWidth: 1,
-                    borderColor: semantic.hairStrong,
-                    borderRadius: r.sm,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <Icon.edit color={semantic.ink} />
-                  <Text
-                    style={{
-                      fontFamily: ty.body.fontFamily,
-                      fontSize: 14,
-                      color: semantic.ink,
-                    }}
-                  >
-                    Edit message
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (!actionTarget) {
-                      return;
-                    }
-                    deleteMessage.mutate(actionTarget.id);
-                    setActionTarget(null);
-                  }}
-                  testID="btn-delete"
-                  accessibilityRole="button"
-                  accessibilityLabel="Delete message"
-                  style={{
-                    paddingVertical: 14,
-                    paddingHorizontal: 12,
-                    borderWidth: 1,
-                    borderColor: "rgba(196,106,46,0.4)",
-                    borderRadius: r.sm,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <Icon.exit color={semantic.danger} />
-                  <Text
-                    style={{
-                      fontFamily: ty.body.fontFamily,
-                      fontSize: 14,
-                      color: semantic.danger,
-                    }}
-                  >
-                    Delete message
-                  </Text>
-                </Pressable>
-              </>
-            ) : null}
+      {pickerTarget ? (
+        <EmojiPickerSheet
+          onSelect={(emoji) => {
+            reactWithEmoji(pickerTarget.id, emoji);
+            setPickerTarget(null);
+          }}
+          onClose={() => setPickerTarget(null)}
+        />
+      ) : null}
 
-            <Pressable
-              onPress={() => setActionTarget(null)}
-              testID="btn-action-cancel"
-              accessibilityRole="button"
-              accessibilityLabel="Cancel"
-              style={{
-                paddingVertical: 14,
-                alignItems: "center",
-              }}
-            >
-              <Text
-                style={[ty.label, { color: semantic.mute }]}
-              >
-                CANCEL
-              </Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
+      {menuOpen && conversationId ? (
+        <ChannelMenuSheet
+          onInfo={() => {
+            setMenuOpen(false);
+            router.push({
+              pathname: "/conversation/info",
+              params: { id: conversationId, kind: "channel" },
+            });
+          }}
+          onGroupSettings={
+            groupId
+              ? () => {
+                  setMenuOpen(false);
+                  router.push({
+                    pathname: "/group/settings",
+                    params: { groupId },
+                  });
+                }
+              : undefined
+          }
+          onClose={() => setMenuOpen(false)}
+        />
       ) : null}
     </>
   );

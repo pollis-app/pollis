@@ -51,6 +51,12 @@ class AppStore implements AppState {
   // Unread message counts keyed by conversation_id or channel_id
   unreadCounts: Record<string, number> = {};
 
+  // True while the session is PIN-locked (manual "Lock now" or auto-lock,
+  // see lib/autolock.tsx). Cleared when the PIN screen unlocks or a fresh
+  // PIN is set. Guards against double-locking; NOT persisted — a cold start
+  // re-derives lock state from `get_unlock_state`.
+  isLocked = false;
+
   // Transient first-signup state. The Rust side returns `new_secret_key`
   // once on `verify_otp` — we shuttle it through the PIN setup screen to
   // the Emergency Kit display, then drop it on the floor. Stored in memory
@@ -150,6 +156,10 @@ class AppStore implements AppState {
     this.pendingSecretKey = key;
   }
 
+  setLocked(locked: boolean) {
+    this.isLocked = locked;
+  }
+
   setLoading(loading: boolean) {
     this.isLoading = loading;
   }
@@ -191,6 +201,7 @@ class AppStore implements AppState {
     this.isLoading = false;
     this.error = null;
     this.unreadCounts = {};
+    this.isLocked = false;
   }
 }
 

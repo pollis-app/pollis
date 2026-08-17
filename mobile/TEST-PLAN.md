@@ -73,7 +73,23 @@ capturing **iPhone + iPad + Android** screenshots:
 `auth` · `auth-restore` (keystore unlock) · `enrollment` (+ recovery) · `groups` ·
 `group-members` · `dms` · `messaging` (edit/delete/reactions/reply) · `search` ·
 `profile-prefs` (+ accent + change-email) · `security` (devices/safety-numbers) ·
-`blocking` · `realtime` (two-client live) · `push-tap`.
+`blocking` · `realtime` (two-client live) · `push-tap` · `invite-links` (#847
+parity: mint on the invite screen with expiry/uses presets, one-time card with
+verified copy + share sheet, list/revoke on `group/invite-links`, and
+`pollis://invite/<token>` deep-link redemption on `app/invite/[token]` —
+including a cold-start tap, which expo-router routes via the initial URL; the
+`https://pollis.com/invite/<token>` form additionally needs universal/app-links
+config, deliberately not yet added).
+
+The `security` flow additionally covers the in-app account-deletion entry
+(`row-delete-account` → typed-DELETE confirm screen, `btn-delete-account`
+disabled until armed) — assert the disabled state only; never run the actual
+deletion against a shared seed account. It also covers auto-lock (#899):
+select a window via `chip-autolock-1`, tap `row-lock-now`, assert the PIN
+unlock screen appears, unlock with the fixed PIN, and assert the app restores
+to Security. The screen further surfaces the security-event audit list
+(`row-security-event-*`, `btn-show-older-events`) and the self public-key
+line (`text-identity-key`) — assert presence, not contents.
 
 Media flows are **excluded by decision**.
 
@@ -85,9 +101,11 @@ Maestro flows assert the adaptive layout, not a stretched phone.
 
 ### 5. Residual parity gaps — #623
 Wire `dm/info` actions; handle the realtime events currently decoded-but-ignored
-(`all_mention`, `member_role_changed`, `roster_changed`); `device_revoked`
-self-sign-out on the inbox connection; purge stale "not implemented" comments;
-add iOS keystore on-device verification to the checklist.
+(`all_mention`, `member_role_changed`, `roster_changed`); ~~`device_revoked`
+self-sign-out on the inbox connection~~ (done — authoritative
+`is_current_device_registered` check, sign-out, and navigation to the auth
+screen); purge stale "not implemented" comments; add iOS keystore on-device
+verification to the checklist.
 
 **Landed since lock (inbox-parity set):** `dm/info` actions, the
 decoded-but-ignored realtime events, and `device_revoked` self-sign-out are all

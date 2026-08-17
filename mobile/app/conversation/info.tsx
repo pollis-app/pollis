@@ -23,6 +23,7 @@ import {
   useDMChannel,
   useGroupMembers,
   useMessages,
+  flattenPages,
   sortMembersByRole,
   type ConversationKind,
 } from "../../hooks/queries";
@@ -87,12 +88,12 @@ function ConversationInfo() {
   // capped at MEDIA_LIMIT.
   const { data: messagesData } = useMessages(conversationId, kind);
   const attachments = useMemo(() => {
-    const messages = messagesData?.messages ?? [];
+    // `flattenPages` yields newest-first, so a forward walk leads the grid
+    // with the most recent media.
+    const messages = flattenPages(messagesData);
     const seen = new Set<string>();
     const out: NonNullable<(typeof messages)[number]["attachments"]> = [];
-    // `messages` is oldest-first; walk backwards so the grid leads with the
-    // most recent media.
-    for (let i = messages.length - 1; i >= 0 && out.length < MEDIA_LIMIT; i--) {
+    for (let i = 0; i < messages.length && out.length < MEDIA_LIMIT; i++) {
       const message = messages[i];
       if (message.deleted_at) {
         continue;

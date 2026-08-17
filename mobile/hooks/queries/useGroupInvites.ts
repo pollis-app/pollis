@@ -447,6 +447,130 @@ export function useGroupBySlug(slug: string | null) {
   });
 }
 
+// ── #847 shareable invite links (desktop parity: frontend useGroups.ts) ──────
+
+// A freshly minted invite link. Mirrors `CreatedInviteLink` in
+// `pollis-core/src/commands/groups/types.rs`. `token`/`url` arrive exactly
+// once, from the create call — the server stores only `sha256(secret)`, so
+// once this value is discarded the link can never be displayed again.
+export interface CreatedInviteLink {
+  id: string;
+  token: string;
+  url: string;
+  expires_at?: string | null;
+  max_uses?: number | null;
+}
+
+// An existing link as shown in the management list. Mirrors
+// `InviteLinkSummary` — deliberately has no token field; the server has no
+// token to give back.
+export interface InviteLinkSummary {
+  id: string;
+  created_at: string;
+  creator_username?: string | null;
+  expires_at?: string | null;
+  max_uses?: number | null;
+  uses: number;
+  revoked_at?: string | null;
+  is_live: boolean;
+}
+
+// Mirrors `RedeemedInvite`.
+export interface RedeemedInvite {
+  group_id: string;
+  group_name?: string | null;
+}
+
+export const inviteLinkQueryKeys = {
+  byGroup: (groupId: string | null) =>
+    ["group-invite-links", groupId] as const,
+};
+
+export function useGroupInviteLinks(groupId: string | null) {
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useQuery({
+    queryKey: inviteLinkQueryKeys.byGroup(groupId),
+    queryFn: async (): Promise<InviteLinkSummary[]> => {
+      if (!currentUser || !groupId) {
+        return [];
+      }
+      return await invoke<InviteLinkSummary[]>("list_group_invite_links", {
+        groupId,
+        userId: currentUser.id,
+      });
+    },
+    enabled: !!(currentUser && groupId),
+  });
+}
+
+export function useCreateGroupInviteLink(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useMutation({
+    mutationFn: async (vars: {
+      expiresInHours: number | null;
+      maxUses: number | null;
+    }): Promise<CreatedInviteLink> => {
+      if (!currentUser || !groupId) {
+        throw new Error("No active group");
+      }
+      return await invoke<CreatedInviteLink>("create_group_invite_link", {
+        groupId,
+        creatorId: currentUser.id,
+        expiresInHours: vars.expiresInHours,
+        maxUses: vars.maxUses,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: inviteLinkQueryKeys.byGroup(groupId),
+      });
+    },
+  });
+}
+
+export function useRevokeGroupInviteLink(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useMutation({
+    mutationFn: async (linkId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("revoke_group_invite_link", {
+        linkId,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: inviteLinkQueryKeys.byGroup(groupId),
+      });
+    },
+  });
+}
+
+export function useRedeemGroupInviteLink() {
+  const queryClient = useQueryClient();
+  const currentUser = useObserver(() => appStore.currentUser);
+  return useMutation({
+    mutationFn: async (token: string): Promise<RedeemedInvite> => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      return await invoke<RedeemedInvite>("redeem_group_invite_link", {
+        token,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      // The redeemer just crossed into a group they could not see before, so
+      // most group-scoped caches are stale. Invalidate broadly, like desktop.
+      queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
+    },
+  });
+}
+
 export function useLeaveGroup() {
   const queryClient = useQueryClient();
   const currentUser = useObserver(() => appStore.currentUser);
