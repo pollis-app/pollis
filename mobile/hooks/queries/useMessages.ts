@@ -11,7 +11,7 @@
 // from page data makes that state unrepresentable: a new conversation key
 // starts from a fresh first page.
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -193,6 +193,12 @@ export const messageQueryKeys = {
   threads: ["messages", "thread"] as const,
   threadSummaries: (conversationId: string | null) =>
     ["messages", "thread-summaries", conversationId] as const,
+};
+
+export const lastMessageQueryKeys = {
+  all: ["last-message"] as const,
+  batch: (conversationIds: string[]) =>
+    ["last-message", "batch", conversationIds.join(",")] as const,
 };
 
 /**
@@ -571,4 +577,71 @@ export function useIngestConversation() {
     },
     [currentUser, queryClient],
   );
+}
+
+
+/** Newest message per conversation, keyed by conversation id. */
+export type LastMessageMap = Record<string, Message>;
+
+/**
+ * The newest message for every conversation in `conversationIds`, in ONE
+ * bridge call — mirrors desktop's `useLastMessages` (#874/#936): one batched
+ * `read_last_messages` per list, never one call per row, and no focus/interval
+ * polling — realtime events invalidate `lastMessageQueryKeys.all` instead.
+ *
+ * Previews come from the LOCAL store (the message table only holds what this
+ * device has ingested and decrypted), so a conversation with no local
+ * messages is simply absent from the map — callers treat "no entry" as "no
+ * preview" and render the row without one.
+ */
+export function useLastMessages(conversationIds: string[]) {
+  const currentUser = useObserver(() => appStore.currentUser);
+
+  // Sorted + de-duplicated so the cache key is a property of the SET, not of
+  // the render order the caller happened to produce.
+  const idsKey = conversationIds.join(",");
+  const ids = useMemo(
+    () => Array.from(new Set(conversationIds)).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [idsKey],
+  );
+
+  return useQuery({
+    queryKey: lastMessageQueryKeys.batch(ids),
+    queryFn: async (): Promise<LastMessageMap> => {
+      if (ids.length === 0) {
+        return {};
+      }
+      const rows = await invoke<RawChannelMessage[]>("read_last_messages", {
+        conversationIds: ids,
+      });
+      const out: LastMessageMap = {};
+      for (const row of rows ?? []) {
+        out[row.conversation_id] = transform(row);
+      }
+      return out;
+    },
+    enabled: ids.length > 0 && !!currentUser,
+    staleTime: 1000 * 30,
+  });
+}
+
+/**
+ * One-line preview text for a conversation row. Deleted messages and
+ * attachment-only messages get placeholders instead of raw envelope JSON.
+ */
+export function previewText(message: Message | undefined): string | null {
+  if (!message) {
+    return null;
+  }
+  if (message.deleted_at) {
+    return "Message deleted";
+  }
+  if (message.content) {
+    return message.content;
+  }
+  if (message.attachments && message.attachments.length > 0) {
+    return "Attachment";
+  }
+  return null;
 }
