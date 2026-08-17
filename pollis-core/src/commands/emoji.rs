@@ -866,51 +866,8 @@ pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Resul
         return Ok(url);
     }
 
-    let (r2_key, content_type) = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn
-            .query(
-                "SELECT r2_key, content_type FROM custom_emoji_object WHERE content_hash = ?1",
-                libsql::params![content_hash.clone()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => (row.get::<String>(0)?, row.get::<String>(1)?),
-            None => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "no such emoji object: {content_hash}"
-                )))
-            }
-        }
-    };
-    // Re-derive the key rather than trusting the stored string: the DS derives
-    // it the same way, so a disagreement is a bug worth failing on, not
-    // something to follow into an arbitrary bucket path.
-    let expected_key = emoji_r2_key(&content_hash, &content_type)?;
-    if r2_key != expected_key {
-        return Err(Error::Other(anyhow::anyhow!(
-            "emoji {content_hash} has an unexpected object key; refusing to fetch it"
-        )));
-    }
+    let (bytes, content_type) = download_verified_emoji(&content_hash, state).await?;
     let target = r2::cache_file_path(&content_hash, &content_type)?;
-
-    let get_url = r2::presign_r2_with_length(state, "get", &expected_key, None).await?;
-    let overlay = state.overlay_handle();
-    let bytes = r2::r2_get_url(overlay.as_deref(), &get_url).await?;
-
-    if bytes.len() > EMOJI_MAX_BYTES {
-        return Err(Error::Other(anyhow::anyhow!(
-            "emoji object {content_hash} is {} bytes, over the ceiling — refusing it",
-            bytes.len()
-        )));
-    }
-    let actual = sha256_hex(&bytes);
-    if actual != content_hash {
-        return Err(Error::Other(anyhow::anyhow!(
-            "emoji object {content_hash} failed its content-hash check (got {actual}); \
-             refusing to render substituted bytes"
-        )));
-    }
 
     let db_key = {
         let guard = state.unlock.lock().await;
@@ -938,6 +895,70 @@ pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Resul
         return Err(Error::Other(anyhow::anyhow!("rename emoji cache: {e}")));
     }
     Ok(url)
+}
+
+/// Fetch an emoji object from R2 and verify the bytes against their content
+/// hash. The shared fetch core of [`get_emoji_url`] (desktop: cache-encrypts
+/// the bytes and serves them over the loopback media server) and the mobile
+/// bridge's `get_emoji_path` arm (no loopback server in a sandboxed RN app,
+/// so the verified plaintext is materialised to a sandbox file instead).
+///
+/// An emoji object is stored in the clear, so the hash check here is the ONLY
+/// thing attesting that these bytes are the emoji that was registered — every
+/// consumer must go through it, which is why the check lives here and not in
+/// the callers. Returns the verified bytes plus the row's content type.
+pub async fn download_verified_emoji(
+    content_hash: &str,
+    state: &Arc<AppState>,
+) -> Result<(Vec<u8>, String)> {
+    if !content_hash_is_valid(content_hash) {
+        return Err(Error::Other(anyhow::anyhow!("malformed emoji content hash")));
+    }
+    let (r2_key, content_type) = {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn
+            .query(
+                "SELECT r2_key, content_type FROM custom_emoji_object WHERE content_hash = ?1",
+                libsql::params![content_hash.to_string()],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => (row.get::<String>(0)?, row.get::<String>(1)?),
+            None => {
+                return Err(Error::Other(anyhow::anyhow!(
+                    "no such emoji object: {content_hash}"
+                )))
+            }
+        }
+    };
+    // Re-derive the key rather than trusting the stored string: the DS derives
+    // it the same way, so a disagreement is a bug worth failing on, not
+    // something to follow into an arbitrary bucket path.
+    let expected_key = emoji_r2_key(content_hash, &content_type)?;
+    if r2_key != expected_key {
+        return Err(Error::Other(anyhow::anyhow!(
+            "emoji {content_hash} has an unexpected object key; refusing to fetch it"
+        )));
+    }
+
+    let get_url = r2::presign_r2_with_length(state, "get", &expected_key, None).await?;
+    let overlay = state.overlay_handle();
+    let bytes = r2::r2_get_url(overlay.as_deref(), &get_url).await?;
+
+    if bytes.len() > EMOJI_MAX_BYTES {
+        return Err(Error::Other(anyhow::anyhow!(
+            "emoji object {content_hash} is {} bytes, over the ceiling — refusing it",
+            bytes.len()
+        )));
+    }
+    let actual = sha256_hex(&bytes);
+    if actual != content_hash {
+        return Err(Error::Other(anyhow::anyhow!(
+            "emoji object {content_hash} failed its content-hash check (got {actual}); \
+             refusing to render substituted bytes"
+        )));
+    }
+    Ok((bytes, content_type))
 }
 
 /// Strip any custom-emoji token `user_id` is not permitted to use from outgoing
