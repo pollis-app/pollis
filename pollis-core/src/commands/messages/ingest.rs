@@ -59,10 +59,7 @@ struct ConvIngest {
 /// rather than a bound id, which is what keeps "strictly past THAT
 /// conversation's own watermark" true now that one query serves all of them.
 fn envelope_fetch_sql(n: usize) -> String {
-    let placeholders = (0..n)
-        .map(|i| format!("?{}", i + 3))
-        .collect::<Vec<_>>()
-        .join(",");
+    let placeholders = crate::db::chunk::placeholders(n, 3);
     format!(
         "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
          FROM message_envelope
@@ -269,35 +266,39 @@ pub async fn catch_up_mls_group_interleaved(
         .map(|cid| (cid.clone(), Vec::new()))
         .collect();
     if !conversation_ids.is_empty() {
-        let sql = envelope_fetch_sql(conversation_ids.len());
-        let mut params: Vec<libsql::Value> = Vec::with_capacity(conversation_ids.len() + 2);
-        params.push(user_id.to_string().into());
-        params.push(did_param.clone().into());
-        for cid in &conversation_ids {
-            params.push(cid.clone().into());
-        }
-        let mut rows = conn.query(&sql, params).await?;
         // Index by conversation id so a row lands in the right bucket regardless
-        // of the order the ids were listed in.
+        // of the order the ids were listed in — and, since #916, regardless of
+        // which chunk it came back in.
         let slot: HashMap<&str, usize> = conversation_ids
             .iter()
             .enumerate()
             .map(|(i, cid)| (cid.as_str(), i))
             .collect();
-        while let Some(row) = rows.next().await? {
-            let cid: String = row.get::<String>(0)?;
-            let Some(&i) = slot.get(cid.as_str()) else {
-                continue;
-            };
-            per_conv[i].1.push((
-                row.get::<String>(1)?,
-                row.get::<String>(2)?,
-                row.get::<String>(3)?,
-                row.get::<Option<String>>(4)?,
-                row.get::<Option<String>>(5)?,
-                row.get::<String>(6)?,
-                row.get::<String>(7)?,
-            ));
+        // TWO slots reserved: `?1` user, `?2` device (see `envelope_fetch_sql`).
+        for chunk in crate::db::chunk::bind_chunks(&conversation_ids, 2) {
+            let sql = envelope_fetch_sql(chunk.len());
+            let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 2);
+            params.push(user_id.to_string().into());
+            params.push(did_param.clone().into());
+            for cid in chunk {
+                params.push(cid.clone().into());
+            }
+            let mut rows = conn.query(&sql, params).await?;
+            while let Some(row) = rows.next().await? {
+                let cid: String = row.get::<String>(0)?;
+                let Some(&i) = slot.get(cid.as_str()) else {
+                    continue;
+                };
+                per_conv[i].1.push((
+                    row.get::<String>(1)?,
+                    row.get::<String>(2)?,
+                    row.get::<String>(3)?,
+                    row.get::<Option<String>>(4)?,
+                    row.get::<Option<String>>(5)?,
+                    row.get::<String>(6)?,
+                    row.get::<String>(7)?,
+                ));
+            }
         }
     }
 

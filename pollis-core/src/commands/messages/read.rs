@@ -202,32 +202,36 @@ async fn attach_sender_usernames_local(
     let missing: Vec<String> = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        let placeholders = (1..=ids_vec.len())
-            .map(|i| format!("?{i}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!("SELECT id, username FROM user_cache WHERE id IN ({placeholders})");
-        let mut stmt = db.conn().prepare(&sql)?;
-        let mapped = stmt.query_map(rusqlite::params_from_iter(ids_vec.iter()), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for (id, name) in mapped.flatten() {
-            found.insert(id, name);
+        // Chunked (#916): one sender per message in the page, so this list is
+        // bounded by the page size — but by nothing that says so.
+        for chunk in crate::db::chunk::bind_chunks(&ids_vec, 0) {
+            let sql = format!(
+                "SELECT id, username FROM user_cache WHERE id IN ({})",
+                crate::db::chunk::placeholders(chunk.len(), 1)
+            );
+            let mut stmt = db.conn().prepare(&sql)?;
+            let mapped = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for (id, name) in mapped.flatten() {
+                found.insert(id, name);
+            }
         }
         ids_vec.iter().filter(|i| !found.contains_key(*i)).cloned().collect()
     };
 
     if !missing.is_empty() {
-        let placeholders = (1..=missing.len())
-            .map(|i| format!("?{i}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!("SELECT id, username FROM users WHERE id IN ({placeholders})");
-        let params: Vec<libsql::Value> = missing
+        let conn = state.remote_db.conn().await?;
+        // Chunked (#916).
+        for chunk in crate::db::chunk::bind_chunks(&missing, 0) {
+        let sql = format!(
+            "SELECT id, username FROM users WHERE id IN ({})",
+            crate::db::chunk::placeholders(chunk.len(), 1)
+        );
+        let params: Vec<libsql::Value> = chunk
             .iter()
             .map(|s| libsql::Value::Text(s.clone()))
             .collect();
-        let conn = state.remote_db.conn().await?;
         match conn.query(&sql, libsql::params_from_iter(params)).await {
             Ok(mut rows) => {
                 let mut fetched: Vec<(String, String)> = Vec::new();
@@ -256,6 +260,7 @@ async fn attach_sender_usernames_local(
                 // Next ingest / read while online will fill them in.
                 eprintln!("[messages] attach_sender_usernames_local: remote fallback failed: {e}");
             }
+        }
         }
     }
 

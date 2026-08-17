@@ -158,13 +158,6 @@ pub(super) async fn enrich_participants_with_avatars(
     if user_ids.is_empty() {
         return participants;
     }
-    // Build a parameterised IN clause: `?,?,?,...`.
-    let placeholders = std::iter::repeat_n("?", user_ids.len())
-        .collect::<Vec<_>>()
-        .join(",");
-    let sql = format!(
-        "SELECT id, avatar_url FROM users WHERE id IN ({placeholders})"
-    );
     let conn = match state.remote_db.conn().await {
         Ok(c) => c,
         Err(e) => {
@@ -172,26 +165,35 @@ pub(super) async fn enrich_participants_with_avatars(
             return participants;
         }
     };
-    let params: Vec<libsql::Value> = user_ids
-        .iter()
-        .map(|id| libsql::Value::Text(id.clone()))
-        .collect();
-    let mut rows = match conn.query(&sql, params).await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[voice] avatar enrich: query failed: {e}");
-            return participants;
-        }
-    };
     let mut by_id: std::collections::HashMap<String, Option<String>> =
         std::collections::HashMap::new();
-    while let Ok(Some(row)) = rows.next().await {
-        let id: String = match row.get(0) {
-            Ok(v) => v,
-            Err(_) => continue,
+    // Chunked (#916): bounded by the voice roster today, but nothing enforces
+    // that, and this path already degrades gracefully — so a chunk that fails
+    // costs the avatars it would have carried, not the roster.
+    for chunk in crate::db::chunk::bind_chunks(&user_ids, 0) {
+        let sql = format!(
+            "SELECT id, avatar_url FROM users WHERE id IN ({})",
+            crate::db::chunk::placeholders(chunk.len(), 1)
+        );
+        let params: Vec<libsql::Value> = chunk
+            .iter()
+            .map(|id| libsql::Value::Text(id.clone()))
+            .collect();
+        let mut rows = match conn.query(&sql, params).await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[voice] avatar enrich: query failed: {e}");
+                return participants;
+            }
         };
-        let url: Option<String> = row.get(1).ok();
-        by_id.insert(id, url);
+        while let Ok(Some(row)) = rows.next().await {
+            let id: String = match row.get(0) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let url: Option<String> = row.get(1).ok();
+            by_id.insert(id, url);
+        }
     }
     for p in participants.iter_mut() {
         if let Some(uid) = user_id_from_identity(&p.identity) {

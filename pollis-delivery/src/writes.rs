@@ -543,21 +543,29 @@ pub async fn ack_welcomes(
 
     // `id IN (?2, ?3, …)` with the recipient bound first so the filter can never
     // touch another user's Welcomes.
-    let placeholders = (2..=welcome_ids.len() + 1)
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let sql = format!(
-        "UPDATE mls_welcome SET delivered = 1 \
-         WHERE recipient_id = ?1 AND id IN ({placeholders})"
-    );
-    let mut params: Vec<libsql::Value> = Vec::with_capacity(welcome_ids.len() + 1);
-    params.push(libsql::Value::Text(recipient.to_string()));
-    for id in welcome_ids {
-        params.push(libsql::Value::Text(id.clone()));
+    //
+    // Chunked (#916) with ONE slot reserved for `recipient`. This list comes off
+    // the wire — a device acking a long backlog, or a caller sending an
+    // arbitrarily long one — so it is the batched query in the workspace most
+    // able to exceed SQLite's parameter limit, and going over does not degrade:
+    // the statement fails to prepare and the Welcomes never get marked
+    // delivered.
+    let mut updated: u64 = 0;
+    for chunk in crate::util::bind_chunks(welcome_ids, 1) {
+        let sql = format!(
+            "UPDATE mls_welcome SET delivered = 1 \
+             WHERE recipient_id = ?1 AND id IN ({})",
+            crate::util::placeholders(chunk.len(), 2)
+        );
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 1);
+        params.push(libsql::Value::Text(recipient.to_string()));
+        for id in chunk {
+            params.push(libsql::Value::Text(id.clone()));
+        }
+        updated += log_conn.execute(&sql, libsql::params_from_iter(params)).await?;
     }
 
-    Ok(log_conn.execute(&sql, libsql::params_from_iter(params)).await?)
+    Ok(updated)
 }
 
 // ── W6/W7 — POST /v1/welcomes/reset ──────────────────────────────────────────

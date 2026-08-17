@@ -636,18 +636,19 @@ pub async fn registered_devices(
         return Ok(devices);
     }
     let ids: Vec<String> = roster.iter().cloned().collect();
-    let placeholders = (1..=ids.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let query = format!(
-        "SELECT user_id, device_id FROM user_device \
-         WHERE revoked_at IS NULL AND user_id IN ({placeholders})"
-    );
-    let params: Vec<libsql::Value> = ids.into_iter().map(libsql::Value::from).collect();
-    let mut rows = conn.query(&query, params).await?;
-    while let Some(row) = rows.next().await? {
-        devices.insert((row.get::<String>(0)?, row.get::<String>(1)?));
+    // Chunked (#916): `roster` is a whole group's membership.
+    for chunk in crate::db::chunk::bind_chunks(&ids, 0) {
+        let query = format!(
+            "SELECT user_id, device_id FROM user_device \
+             WHERE revoked_at IS NULL AND user_id IN ({})",
+            crate::db::chunk::placeholders(chunk.len(), 1)
+        );
+        let params: Vec<libsql::Value> =
+            chunk.iter().cloned().map(libsql::Value::from).collect();
+        let mut rows = conn.query(&query, params).await?;
+        while let Some(row) = rows.next().await? {
+            devices.insert((row.get::<String>(0)?, row.get::<String>(1)?));
+        }
     }
     Ok(devices)
 }
@@ -880,20 +881,19 @@ pub async fn reconcile_group_mls_impl(
         // a character filter, matching `registered_devices`. libsql has no array
         // binding, so the placeholder list is generated but the values are not.
         let ids: Vec<String> = roster_user_ids.iter().cloned().collect();
-        if !ids.is_empty() {
-            let placeholders = (1..=ids.len())
-                .map(|i| format!("?{i}"))
-                .collect::<Vec<_>>()
-                .join(",");
+        // Chunked (#916), same reason as `registered_devices` above.
+        for chunk in crate::db::chunk::bind_chunks(&ids, 0) {
             let query = format!(
                 "SELECT d.user_id, d.device_id FROM user_device d \
-                 WHERE d.revoked_at IS NULL AND d.user_id IN ({placeholders}) \
+                 WHERE d.revoked_at IS NULL AND d.user_id IN ({}) \
                  AND EXISTS ( \
                      SELECT 1 FROM mls_key_package kp \
                      WHERE kp.user_id = d.user_id AND kp.device_id = d.device_id AND kp.claimed = 0 \
-                 )"
+                 )",
+                crate::db::chunk::placeholders(chunk.len(), 1)
             );
-            let params: Vec<libsql::Value> = ids.into_iter().map(libsql::Value::from).collect();
+            let params: Vec<libsql::Value> =
+                chunk.iter().cloned().map(libsql::Value::from).collect();
             let mut rows = conn.query(&query, params).await?;
             while let Some(row) = rows.next().await? {
                 device_pairs.push((row.get::<String>(0)?, row.get::<String>(1)?));

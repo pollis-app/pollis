@@ -217,22 +217,26 @@ pub async fn list_peer_verifications(
     // cryptographic root of trust, so its lookup does not go near string-built
     // SQL.
     let conn = state.remote_db.conn().await?;
-    let placeholders = (1..=pinned.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let query = format!("SELECT id, account_id_pub FROM users WHERE id IN ({placeholders})");
-    let params: Vec<libsql::Value> = pinned
-        .iter()
-        .map(|(id, _, _)| libsql::Value::Text(id.clone()))
-        .collect();
     let mut server_keys: std::collections::HashMap<String, Vec<u8>> =
         std::collections::HashMap::new();
-    let mut rows = conn.query(&query, params).await?;
-    while let Some(row) = rows.next().await? {
-        let id: String = row.get(0)?;
-        if let Some(p) = row.get::<Option<Vec<u8>>>(1).ok().flatten() {
-            server_keys.insert(id, p);
+    // Chunked (#916): the list is as long as the user's pinned-contact list, and
+    // an `IN (…)` past SQLite's bound-parameter ceiling does not degrade, it
+    // fails to prepare.
+    for chunk in crate::db::chunk::bind_chunks(&pinned, 0) {
+        let query = format!(
+            "SELECT id, account_id_pub FROM users WHERE id IN ({})",
+            crate::db::chunk::placeholders(chunk.len(), 1)
+        );
+        let params: Vec<libsql::Value> = chunk
+            .iter()
+            .map(|(id, _, _)| libsql::Value::Text(id.clone()))
+            .collect();
+        let mut rows = conn.query(&query, params).await?;
+        while let Some(row) = rows.next().await? {
+            let id: String = row.get(0)?;
+            if let Some(p) = row.get::<Option<Vec<u8>>>(1).ok().flatten() {
+                server_keys.insert(id, p);
+            }
         }
     }
 
@@ -389,26 +393,28 @@ pub async fn batch_check_and_pin_account_keys(
     //    via input scrubbing; we're stricter here because account_id_pub
     //    is the cryptographic root of trust).
     let conn = state.remote_db.conn().await?;
-    let placeholders = (1..=peer_user_ids.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let query = format!(
-        "SELECT id, account_id_pub, identity_version FROM users WHERE id IN ({placeholders})"
-    );
-    let params: Vec<libsql::Value> = peer_user_ids
-        .iter()
-        .map(|id| libsql::Value::Text(id.clone()))
-        .collect();
     let mut server_keys: std::collections::HashMap<String, (Vec<u8>, i64)> =
         std::collections::HashMap::new();
-    let mut rows = conn.query(&query, params).await?;
-    while let Some(row) = rows.next().await? {
-        let id: String = row.get(0)?;
-        let pubkey: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(1).ok().flatten();
-        let version: i64 = row.get(2).unwrap_or(0);
-        if let Some(p) = pubkey {
-            server_keys.insert(id, (p, version));
+    // Chunked (#916). This is the site #916 names as the one the newer batched
+    // reads copied their shape from, so it is the one that most needed fixing:
+    // its list is a whole group roster.
+    for chunk in crate::db::chunk::bind_chunks(peer_user_ids, 0) {
+        let query = format!(
+            "SELECT id, account_id_pub, identity_version FROM users WHERE id IN ({})",
+            crate::db::chunk::placeholders(chunk.len(), 1)
+        );
+        let params: Vec<libsql::Value> = chunk
+            .iter()
+            .map(|id| libsql::Value::Text(id.clone()))
+            .collect();
+        let mut rows = conn.query(&query, params).await?;
+        while let Some(row) = rows.next().await? {
+            let id: String = row.get(0)?;
+            let pubkey: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(1).ok().flatten();
+            let version: i64 = row.get(2).unwrap_or(0);
+            if let Some(p) = pubkey {
+                server_keys.insert(id, (p, version));
+            }
         }
     }
 

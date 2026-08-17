@@ -625,18 +625,16 @@ pub(super) async fn verify_added_devices(
         revoked_at: Option<String>,
         mls_sig_pub_pq: Option<Vec<u8>>,
     }
-    // `?1` is the user; devices occupy `?2..`. Bound by position — a device id
-    // is attacker-influenced and never goes near string-built SQL.
-    let placeholders = (0..device_ids.len())
-        .map(|i| format!("?{}", i + 2))
-        .collect::<Vec<_>>()
-        .join(",");
     let mut by_device: std::collections::HashMap<String, DeviceRow> =
         std::collections::HashMap::with_capacity(device_ids.len());
-    {
-        let mut params: Vec<libsql::Value> = Vec::with_capacity(device_ids.len() + 1);
+    // `?1` is the user; devices occupy `?2..`. Bound by position — a device id
+    // is attacker-influenced and never goes near string-built SQL. Chunked
+    // (#916) with ONE slot reserved for the user id, so the two halves of that
+    // arithmetic stay adjacent.
+    for chunk in crate::db::chunk::bind_chunks(device_ids, 1) {
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 1);
         params.push(target_user_id.to_string().into());
-        for did in device_ids {
+        for did in chunk {
             params.push(did.clone().into());
         }
         let mut rows = conn
@@ -644,7 +642,8 @@ pub(super) async fn verify_added_devices(
                 &format!(
                     "SELECT device_id, device_cert, cert_issued_at, cert_identity_version, \
                             mls_signature_pub, revoked_at, mls_signature_pub_pq \
-                     FROM user_device WHERE user_id = ?1 AND device_id IN ({placeholders})"
+                     FROM user_device WHERE user_id = ?1 AND device_id IN ({})",
+                    crate::db::chunk::placeholders(chunk.len(), 2)
                 ),
                 params,
             )
