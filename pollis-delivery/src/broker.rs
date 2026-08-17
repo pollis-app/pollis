@@ -222,10 +222,18 @@ struct VideoGrants {
 }
 
 /// POST /v1/livekit/token — mint a LiveKit access token for the authenticated
-/// user. Identity + display name are derived SERVER-SIDE from the verified
-/// signer (a client cannot mint a token as someone else). Authorizes the room:
-/// the user's own inbox room (`inbox-<user_id>`) is always allowed; any other
-/// room requires current membership.
+/// user. Identity is derived SERVER-SIDE from the verified signer (a client
+/// cannot mint a token as someone else). Authorizes the room: the user's own
+/// inbox room (`inbox-<user_id>`) is always allowed; any other room requires
+/// current membership.
+///
+/// #836: the identity that reaches LiveKit is an opaque per-room pseudonym, and
+/// the JWT carries no display name. Both used to be raw account data — the
+/// identity was `{user_id}:{device_id}` and `name` was the username — which
+/// handed the SFU the membership of every room and a stable handle to cluster
+/// rooms by. Deriving the pseudonym here, from the signer, is what keeps
+/// "a client cannot mint a token as another user" true while the value itself
+/// becomes meaningless to the SFU.
 pub async fn livekit_token(
     State(state): State<AppState>,
     method: Method,
@@ -266,23 +274,9 @@ pub async fn livekit_token(
     //     voice is MLS/E2EE'd so the room ACL isn't the confidentiality boundary,
     //   - any conversation the user is a current member of (`is_member` covers
     //     groups, DMs, and channels — the latter being the voice-room case).
-    if authed.is_some() {
-        let inbox = format!("inbox-{user_id}");
-        let is_call = parsed.room.starts_with("call-");
-        if parsed.room != inbox && !is_call {
-            let conn = state.db.conn().await?;
-            if !is_member(&conn, &parsed.room, &user_id).await? {
-                return Ok(AuthRejection::Forbidden.into_response());
-            }
-        }
+    if !authorize_room(&state, &authed, &parsed.room, &user_id).await? {
+        return Ok(AuthRejection::Forbidden.into_response());
     }
-
-    // Display name = the user's username (LiveKit `name`), looked up server-side.
-    // Falls back to the user_id when the row is absent (no-auth path / unknown).
-    let display_name = {
-        let conn = state.db.conn().await?;
-        lookup_username(&conn, &user_id).await?.unwrap_or_else(|| user_id.clone())
-    };
 
     // Device half: on the signed path it's the header the signature was verified
     // against (gate proved the key registered for THIS device signed the request),
@@ -296,20 +290,23 @@ pub async fn livekit_token(
     } else {
         parsed.device_id.clone().unwrap_or_default()
     };
-    // `{user}:{device}` when a device is known, else the legacy bare `{user}`.
-    let base = if device_id.is_empty() {
-        user_id.clone()
-    } else {
-        format!("{user_id}:{device_id}")
-    };
-    // `view` is the screenshare-receive variant: identity suffixed `:view`, no
-    // data channel (mirrors pollis-core's old `make_view_token`). `voice` gets
-    // the `voice-` prefix (mirrors `voice_identity`). Everything else is realtime.
-    let (identity, can_publish_data) = match parsed.kind.as_deref() {
-        Some("voice") => (format!("voice-{base}"), true),
-        Some("view") => (format!("{base}:view"), false),
-        _ => (base, true),
-    };
+    // `view` is the screenshare-receive variant: no data channel (mirrors
+    // pollis-core's old `make_view_token`). The kind also picks the identity's
+    // capability prefix — the only structure left in it.
+    let kind = crate::participant_id::ParticipantKind::from_wire(parsed.kind.as_deref());
+    let can_publish_data = kind != crate::participant_id::ParticipantKind::View;
+
+    // #836: the user and device are encrypted into the identity under a key
+    // scoped to the LOGICAL room, so nothing relates this participant to the
+    // same user in another room. `device_id` keeps a user's devices distinct
+    // (#140) without appearing in the output.
+    let identity = crate::participant_id::participant_pseudonym(
+        api_secret,
+        &parsed.room,
+        &user_id,
+        &device_id,
+        kind,
+    );
 
     // #828: membership was authorized on the LOGICAL room above; what reaches
     // LiveKit is the pseudonym. The room travels inside the JWT grant and
@@ -323,7 +320,6 @@ pub async fn livekit_token(
         api_secret,
         &wire_room,
         &identity,
-        &display_name,
         can_publish_data,
         crate::util::now_unix(),
     )?;
@@ -331,29 +327,73 @@ pub async fn livekit_token(
     Ok(ok_json(serde_json::json!({ "token": token, "url": url })))
 }
 
-/// Look up a user's username for the LiveKit display name.
-async fn lookup_username(conn: &Connection, user_id: &str) -> anyhow::Result<Option<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT username FROM users WHERE id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    match rows.next().await? {
-        Some(row) => Ok(row.get::<String>(0).ok()),
-        None => Ok(None),
+/// Look up usernames for a batch of resolved user ids, in one query.
+///
+/// Display names used to ride along in the LiveKit JWT (`name`) and come back
+/// off the SFU with each participant; since #836 stopped sending them, this is
+/// where the roster and the identity resolver get them instead. Ids are BOUND,
+/// never interpolated.
+async fn lookup_usernames(
+    conn: &Connection,
+    user_ids: &[String],
+) -> anyhow::Result<std::collections::HashMap<String, String>> {
+    let mut out = std::collections::HashMap::new();
+    if user_ids.is_empty() {
+        return Ok(out);
     }
+    let placeholders = std::iter::repeat_n("?", user_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("SELECT id, username FROM users WHERE id IN ({placeholders})");
+    let params: Vec<libsql::Value> = user_ids
+        .iter()
+        .map(|id| libsql::Value::Text(id.clone()))
+        .collect();
+    let mut rows = conn.query(&sql, params).await?;
+    while let Some(row) = rows.next().await? {
+        if let (Ok(id), Ok(name)) = (row.get::<String>(0), row.get::<String>(1)) {
+            out.insert(id, name);
+        }
+    }
+    Ok(out)
 }
 
-/// Sign an HS256 LiveKit JWT. `can_publish_data` is `false` for the `:view`
+/// Authorize `user_id` to act on `room`, with the rule shared by every LiveKit
+/// broker endpoint: your own inbox is always yours; a `call-<ulid>` room is an
+/// unguessable capability handed out through an inbox and has no membership row;
+/// anything else needs current membership. Only enforced on the signed path,
+/// mirroring the other handlers.
+async fn authorize_room(
+    state: &AppState,
+    authed: &Authed,
+    room: &str,
+    user_id: &str,
+) -> Result<bool, AppError> {
+    if authed.is_none() {
+        return Ok(true);
+    }
+    if room == format!("inbox-{user_id}") || room.starts_with("call-") {
+        return Ok(true);
+    }
+    let conn = state.db.conn().await?;
+    Ok(is_member(&conn, room, user_id).await?)
+}
+
+/// Sign an HS256 LiveKit JWT. `can_publish_data` is `false` for the `view`
 /// variant. `now` is injected so the claim times are testable. Pure (no I/O) so
 /// it's directly unit-testable.
+///
+/// There is no display-name parameter, deliberately (#836). The `name` claim
+/// used to carry the user's Pollis username, which made pseudonymising the
+/// identity pointless — the SFU could read the account straight off the
+/// participant. Peers resolve display names through
+/// [`livekit_identities`] instead, and the claim is sent empty. Removing the
+/// argument rather than passing `""` is what stops it coming back.
 pub fn sign_livekit_token(
     api_key: &str,
     api_secret: &str,
     room: &str,
     identity: &str,
-    display_name: &str,
     can_publish_data: bool,
     now: u64,
 ) -> anyhow::Result<String> {
@@ -363,7 +403,7 @@ pub fn sign_livekit_token(
         iat: now,
         nbf: now,
         exp: now + 3600,
-        name: display_name.to_string(),
+        name: String::new(),
         video: VideoGrants {
             room: room.to_string(),
             room_join: true,
@@ -660,8 +700,6 @@ pub async fn livekit_participants(
     struct RsParticipant {
         #[serde(default)]
         identity: String,
-        #[serde(default)]
-        name: String,
     }
 
     match listed {
@@ -673,18 +711,37 @@ pub async fn livekit_participants(
                 Ok(p) => p,
                 Err(e) => return Ok(bad_gateway(format!("ListParticipants decode: {e}"))),
             };
-            let out: Vec<serde_json::Value> = parsed_resp
+            // #836: identities off the SFU are opaque, so the filtering that used
+            // to read them as strings (`ends_with(":view")`, the internal names)
+            // now falls out of decryption: anything that doesn't resolve to a
+            // real user under THIS room's key is not a roster entry, and the
+            // `view` kind is a screenshare receiver rather than a person.
+            let resolved: Vec<(String, String)> = parsed_resp
                 .participants
                 .into_iter()
-                .filter(|p| {
-                    p.identity != "server"
-                        && p.identity != "pollis-backend"
-                        && p.identity != "pollis-ds"
-                        && !p.identity.ends_with(":view")
+                .filter_map(|p| {
+                    let (user_id, kind) = crate::participant_id::resolve_participant(
+                        api_secret,
+                        &parsed.room,
+                        &p.identity,
+                    )?;
+                    (kind != crate::participant_id::ParticipantKind::View)
+                        .then_some((p.identity, user_id))
                 })
-                .map(|p| {
-                    let name = if p.name.is_empty() { p.identity.clone() } else { p.name.clone() };
-                    serde_json::json!({ "identity": p.identity, "name": name })
+                .collect();
+
+            // Display names no longer ride in on the LiveKit `name` claim — the
+            // roster is where they get re-attached, from the DS's own DB.
+            let names = {
+                let ids: Vec<String> = resolved.iter().map(|(_, u)| u.clone()).collect();
+                let conn = state.db.conn().await?;
+                lookup_usernames(&conn, &ids).await.unwrap_or_default()
+            };
+            let out: Vec<serde_json::Value> = resolved
+                .into_iter()
+                .map(|(identity, uid)| {
+                    let name = names.get(&uid).cloned().unwrap_or_else(|| uid.clone());
+                    serde_json::json!({ "identity": identity, "user_id": uid, "name": name })
                 })
                 .collect();
             Ok(ok_json(serde_json::json!({ "participants": out })))
@@ -700,6 +757,89 @@ pub async fn livekit_participants(
             &e,
         )),
     }
+}
+
+// ── POST /v1/livekit/identities ───────────────────────────────────────────────
+
+/// POST /v1/livekit/identities — resolve opaque LiveKit participant identities
+/// back to Pollis users (#836).
+///
+/// A client learns peer identities from the LiveKit event stream, where they are
+/// per-room pseudonyms it has no key for. This is the resolver. Same room authz
+/// as minting a token, so it discloses nothing the caller could not learn by
+/// joining the room and reading the roster.
+///
+/// Unresolvable entries are omitted rather than erroring: an internal
+/// participant (`pollis-ds`), an identity from another room, and a hostile SFU's
+/// forgery are all simply "not a Pollis user here", and a roster with one
+/// unattributed tile is a better outcome than a failed batch.
+pub async fn livekit_identities(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+
+    let parsed: LivekitIdentitiesBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    if parsed.room.trim().is_empty() {
+        return Ok(bad_request("room required"));
+    }
+
+    let (_, api_secret, _) = match state.broker.livekit_ready() {
+        Some(t) => t,
+        None => return Ok(not_configured("livekit")),
+    };
+
+    let user_id = match resolve_user(&authed, parsed.user_id.as_deref()) {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    if !authorize_room(&state, &authed, &parsed.room, &user_id).await? {
+        return Ok(AuthRejection::Forbidden.into_response());
+    }
+
+    let resolved: Vec<(String, String, crate::participant_id::ParticipantKind)> = parsed
+        .identities
+        .iter()
+        .filter_map(|identity| {
+            let (uid, kind) =
+                crate::participant_id::resolve_participant(api_secret, &parsed.room, identity)?;
+            Some((identity.clone(), uid, kind))
+        })
+        .collect();
+
+    let names = {
+        let ids: Vec<String> = resolved.iter().map(|(_, u, _)| u.clone()).collect();
+        let conn = state.db.conn().await?;
+        lookup_usernames(&conn, &ids).await.unwrap_or_default()
+    };
+
+    let out: Vec<serde_json::Value> = resolved
+        .into_iter()
+        .map(|(identity, uid, kind)| {
+            let name = names.get(&uid).cloned().unwrap_or_else(|| uid.clone());
+            serde_json::json!({
+                "identity": identity,
+                "user_id": uid,
+                "name": name,
+                "kind": match kind {
+                    crate::participant_id::ParticipantKind::Voice => "voice",
+                    crate::participant_id::ParticipantKind::View => "view",
+                    crate::participant_id::ParticipantKind::Realtime => "realtime",
+                },
+            })
+        })
+        .collect();
+
+    Ok(ok_json(serde_json::json!({ "identities": out })))
 }
 
 // ── POST /v1/turso/token ──────────────────────────────────────────────────────

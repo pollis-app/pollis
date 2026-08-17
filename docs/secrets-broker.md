@@ -97,18 +97,30 @@ Request:
 ```
 
 - `room` (required) — the LiveKit room to mint for.
-- `kind` (optional, default `realtime`) — identity scheme: `realtime` →
-  `{user}:{device}`; `voice` → `voice-{user}:{device}`; `view` →
-  `{user}:{device}:view` (screenshare receive, `canPublishData=false`).
+- `kind` (optional, default `realtime`) — the identity's **capability class**,
+  which is the only structure left in it (#836): `realtime` → `d-…`; `voice` →
+  `v-…`; `view` → `w-…` (screenshare receive, `canPublishData=false`).
 - `user_id` / `device_id` (optional) — **no-auth path only**; both ignored when
   auth is enforced (taken from the signer/header).
 
 Response `200`: `{ "token": "<HS256 JWT>", "url": "wss://<livekit-host>" }`.
 
-The JWT is HS256 (`typ=JWT`), byte-compatible with the old on-device
-`make_token`: `iss` = API key, `sub` = identity, `iat`/`nbf` = now, `exp` = now +
-3600, `name` = username, `video` grants `roomJoin`/`canPublish`/`canSubscribe` =
-true (`canPublishData` = false only for `view`).
+The JWT is HS256 (`typ=JWT`): `iss` = API key, `sub` = identity, `iat`/`nbf` =
+now, `exp` = now + 3600, `name` = **empty**, `video` grants
+`roomJoin`/`canPublish`/`canSubscribe` = true (`canPublishData` = false only for
+`view`).
+
+**Identity is an opaque per-room pseudonym (#836).** `sub` used to be the raw
+`{user}:{device}` and `name` the user's username, which handed the SFU the
+membership of every room. It is now `{prefix}{base64url(siv ‖ ct ‖ tag)}` — the
+user id encrypted under a key derived from `LIVEKIT_API_SECRET` and the
+**logical** room, with the device id folded into the synthetic IV so a user's
+devices stay distinct participants (#140) without either id reaching the wire.
+Deriving it here, from the verified signer, is what keeps "a client cannot mint a
+token as another user" true while the value becomes meaningless to LiveKit.
+Display names are resolved through `/v1/livekit/identities` instead. See
+`pollis-delivery/src/participant_id.rs` for the construction and for exactly what
+the SFU can and cannot still correlate.
 
 Env: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` — all three required,
 else `503`. The secret is never logged.
@@ -125,9 +137,31 @@ a refetch / dismissable ring; per-room authz is possible future hardening). Body
 
 ### `POST /v1/livekit/participants`
 
-Return a voice room's roster via server-side `RoomService/ListParticipants`
-(internal `server` / `pollis-*` / `:view` identities filtered). Membership-gated
-like the token endpoint. Body `{ room }` → `{ participants: [{ identity, name }] }`.
+Return a voice room's roster via server-side `RoomService/ListParticipants`.
+Membership-gated like the token endpoint. Body `{ room }` →
+`{ participants: [{ identity, user_id, name }] }`.
+
+Since #836 the DS resolves each identity itself — it holds the per-room key — and
+attaches `user_id` plus the username. The old string filtering (`ends_with(":view")`,
+the internal `server` / `pollis-*` names) falls out of that: an identity that does
+not decrypt under this room's key is not a roster entry, and the `view` kind is a
+screenshare receiver rather than a person.
+
+### `POST /v1/livekit/identities`
+
+Resolve opaque participant pseudonyms back to users (#836). A client learns peer
+identities from the LiveKit event stream and has no key for them; this is the
+resolver. Same room authz as minting a token, so it discloses nothing the caller
+could not learn by joining the room.
+
+Body `{ room, identities: [...] }` → `{ identities: [{ identity, user_id, name, kind }] }`.
+`room` is the **logical** room, not the LiveKit pseudonym. Unresolvable entries
+(internal participants, another room's identities, forgeries) are **omitted**
+rather than erroring the batch — one unattributed tile beats a failed roster.
+
+The key stays server-side deliberately: a per-room key shipped in a release binary
+could be extracted, and one that resolved every room would hand back the whole
+social graph.
 
 ### `POST /v1/turso/token`
 

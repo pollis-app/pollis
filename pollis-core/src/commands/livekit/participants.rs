@@ -6,7 +6,7 @@ use crate::commands::mls::ds_livekit_participants;
 use crate::error::Result;
 use crate::state::AppState;
 
-use super::identity::enrich_participants_with_avatars;
+use super::identity::{enrich_participants_with_avatars, internal_identity, ParticipantKind};
 
 // ── Voice participant listing ──────────────────────────────────────────────
 
@@ -21,14 +21,23 @@ pub struct VoiceParticipantInfo {
 /// Fetch a voice room's roster via the DS broker (`ListParticipants`
 /// server-side; the LiveKit admin secret is no longer on the client, #393) and
 /// shape it into `VoiceParticipantInfo`. Avatars are enriched by the caller.
+///
+/// The DS answers with each participant already resolved (#836) — it holds the
+/// per-room identity key — so the only work here is turning the opaque wire
+/// identity into the internal one the renderer keys tiles on, which must match
+/// what the voice event path emits for the same peer or the roster and the live
+/// session disagree about who is in the room.
 async fn ds_room_roster(state: &Arc<AppState>, room: &str) -> Result<Vec<VoiceParticipantInfo>> {
-    let pairs = ds_livekit_participants(state, room).await?;
-    Ok(pairs
+    let resolved = ds_livekit_participants(state, room).await?;
+    Ok(resolved
         .into_iter()
-        .map(|(identity, name)| VoiceParticipantInfo {
-            identity,
-            name,
-            avatar_url: None,
+        .map(|r| {
+            let kind = ParticipantKind::from_wire(r.kind.as_deref().unwrap_or("voice"));
+            VoiceParticipantInfo {
+                identity: internal_identity(&r.user_id, &r.identity, kind),
+                name: r.name,
+                avatar_url: None,
+            }
         })
         .collect())
 }

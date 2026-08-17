@@ -9,7 +9,8 @@
 // the same room (the inbox hook holds every group/DM room for unread badges
 // while the open chat's hook holds its own room for liveness) without
 // opening two LiveKit connections — that matters because the DS mints one
-// `{user_id}:{device_id}` identity per device, and LiveKit evicts the
+// identity per device per room (an opaque pseudonym since #836, but still a
+// deterministic function of room + user + device), and LiveKit evicts the
 // existing session when the same identity joins a room twice. The first
 // subscriber opens the room, later subscribers attach a listener, and the
 // room disconnects when the last subscriber closes.

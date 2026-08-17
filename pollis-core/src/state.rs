@@ -43,6 +43,30 @@ pub struct AppState {
     pub keystore: Arc<dyn Keystore>,
     pub otp_store: Arc<Mutex<HashMap<String, OtpEntry>>>,
     pub livekit: Arc<Mutex<LiveKitState>>,
+    /// #836 identity translations, keyed `(logical_room, wire_identity)` and
+    /// valued `(internal_identity, display_name)`.
+    ///
+    /// LiveKit participant identities are opaque per-room pseudonyms that only
+    /// the DS can open, so every peer seen on the SDK event stream costs one
+    /// `/v1/livekit/identities` round trip — once. This is that memo.
+    ///
+    /// It lives in its own lock rather than on `LiveKitState` or `VoiceState` so
+    /// the voice and realtime paths, which already hold one of those, never have
+    /// to nest two locks to attribute a participant.
+    ///
+    /// It stores the finished internal identity rather than the DS's answer,
+    /// because one entry is not derived at all: the LOCAL participant's, which is
+    /// pinned at join to the identity the renderer independently builds from
+    /// `get_device_id`. LiveKit reports the local participant's own events (every
+    /// push-to-talk `TrackMuted`) under its wire identity, and those have to land
+    /// on the local tile.
+    ///
+    /// Never invalidated: a pseudonym is a deterministic function of the room,
+    /// the user and the device, so an entry cannot go stale — it can only stop
+    /// being asked about. Bounded by the number of distinct participants seen
+    /// this process.
+    #[cfg(feature = "media")]
+    pub livekit_identities: Arc<Mutex<crate::commands::livekit_identity::IdentityCache>>,
     #[cfg(feature = "media")]
     pub voice: Arc<Mutex<VoiceState>>,
     #[cfg(feature = "media")]
@@ -199,6 +223,8 @@ impl AppState {
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
+            #[cfg(feature = "media")]
+            livekit_identities: Arc::new(Mutex::new(Default::default())),
             #[cfg(feature = "media")]
             voice: Arc::new(Mutex::new(VoiceState::new())),
             #[cfg(feature = "media")]

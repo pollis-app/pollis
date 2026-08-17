@@ -5,8 +5,8 @@
  * subsequent one gets a ` (1)`, ` (2)`, … suffix in list (join) order.
  *
  * Purely presentational: the underlying participant `identity` is always the
- * stable `voice-{userId}:{deviceId}` and is never touched. Returns a map keyed
- * by participant identity → the label to render.
+ * stable internal `voice-{userId}:{device}` (see `./identity`) and is never
+ * touched. Returns a map keyed by participant identity → the label to render.
  */
 export function disambiguateVoiceNames(
   participants: ReadonlyArray<{ identity: string; name: string }>,

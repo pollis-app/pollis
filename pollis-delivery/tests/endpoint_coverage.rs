@@ -99,7 +99,10 @@ async fn an_unrouted_path_is_observably_404() {
 fn the_endpoint_table_covers_the_whole_write_surface() {
     assert_eq!(
         pollis_api::ENDPOINTS.len(),
-        72,
+        // 73 since #836 added `/v1/livekit/identities`, the resolver that turns
+        // an opaque per-room participant pseudonym back into a user for the
+        // clients authorized to be in that room.
+        73,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

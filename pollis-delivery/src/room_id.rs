@@ -40,12 +40,13 @@
 //! key, `r-<hex>` is opaque, and the input space (ULIDs) is far too large to
 //! enumerate.
 //!
-//! **Does not:** LiveKit participant identity is still `{user_id}:{device_id}`,
-//! so the operator continues to see *which users* share a room even when it
-//! cannot tell which conversation that room is. Co-membership clustering
-//! therefore survives this change. Pseudonymising identity is a larger change
-//! (it is load-bearing for voice roster matching and speaking indicators) and is
-//! deliberately out of scope here — see #828.
+//! **Does not, on its own:** room names say nothing about *who* is in a room.
+//! That was the residual #828 left and #836 closed — participant identity was
+//! still the raw `{user_id}:{device_id}`, so the operator saw which users share
+//! a room and could cluster the social graph by co-membership even without
+//! being able to name the conversations. Identity is now a per-room pseudonym
+//! too; see [`crate::participant_id`], which is the other half of this and
+//! explains why it is reversible where room names are not.
 //!
 //! **Not rotated.** These are stable pseudonyms, not unlinkable ones: a given
 //! conversation keeps one room name for the life of the API secret. Rotating per

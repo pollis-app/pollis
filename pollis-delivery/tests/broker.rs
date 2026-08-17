@@ -56,8 +56,7 @@ fn assert_hs256_signature(token: &str, secret: &str) {
 #[test]
 fn livekit_token_header_is_hs256_typ_jwt() {
     let token =
-        sign_livekit_token(LK_KEY, LK_SECRET, "room-1", "alice", "Alice", true, 1_700_000_000)
-            .unwrap();
+        sign_livekit_token(LK_KEY, LK_SECRET, "room-1", "alice", true, 1_700_000_000).unwrap();
     let (header, _, _) = split_jwt(&token);
     assert_eq!(header["alg"], "HS256");
     assert_eq!(header["typ"], "JWT");
@@ -67,13 +66,16 @@ fn livekit_token_header_is_hs256_typ_jwt() {
 fn livekit_token_claim_shape_and_signature() {
     let now = 1_700_000_000u64;
     let token =
-        sign_livekit_token(LK_KEY, LK_SECRET, "room-1", "alice", "Alice", true, now).unwrap();
+        sign_livekit_token(LK_KEY, LK_SECRET, "room-1", "alice", true, now).unwrap();
     let (_, payload, _) = split_jwt(&token);
 
     // iss = api key; sub = identity; times pinned off the injected clock.
     assert_eq!(payload["iss"], LK_KEY);
     assert_eq!(payload["sub"], "alice");
-    assert_eq!(payload["name"], "Alice");
+    // #836: the display name is gone. It used to be the user's Pollis username,
+    // which handed the SFU the account behind every participant regardless of
+    // what the identity said.
+    assert_eq!(payload["name"], "");
     assert_eq!(payload["iat"], now);
     assert_eq!(payload["nbf"], now);
     assert_eq!(payload["exp"], now + 3600);
@@ -97,7 +99,6 @@ fn livekit_view_variant_disables_publish_data() {
         LK_SECRET,
         "room-1",
         "alice:view",
-        "Alice",
         false,
         1_700_000_000,
     )
@@ -258,7 +259,7 @@ fn minted_grant_never_carries_the_raw_conversation_id() {
     let wire = pollis_delivery::room_id::room_pseudonym(LK_SECRET, conv);
 
     let token =
-        sign_livekit_token(LK_KEY, LK_SECRET, &wire, "alice", "Alice", true, 1_700_000_000).unwrap();
+        sign_livekit_token(LK_KEY, LK_SECRET, &wire, "alice", true, 1_700_000_000).unwrap();
     let (_h, payload, _s) = split_jwt(&token);
     let granted = payload["video"]["room"].as_str().expect("room grant");
 
@@ -285,4 +286,90 @@ fn inbox_rooms_do_not_expose_the_user_id() {
     let uid = "01KZT7RW4RXQGT943Q05C7NW8A";
     let wire = pollis_delivery::room_id::room_pseudonym(LK_SECRET, &format!("inbox-{uid}"));
     assert!(!wire.contains(uid), "inbox pseudonym must not embed the user id");
+}
+
+// ─── #836: pseudonymous participant identities ───────────────────────────────
+
+use pollis_delivery::participant_id::{
+    participant_pseudonym, resolve_participant, ParticipantKind,
+};
+
+/// The acceptance criterion, asserted on the **decoded JWT** rather than the
+/// helper — the `sub` claim is the thing LiveKit actually reads, so a
+/// pseudonym applied anywhere short of it would still leak the account.
+#[test]
+fn minted_sub_never_carries_the_raw_user_or_device_id() {
+    let user = "01KZT7RW4RXQGT943Q05C7NW8A";
+    let device = "01KZT7RW4RXQGT943Q05C7NW8B";
+    let conv = "01KZVDFR5Z9DKJ27YN91S3KS6N";
+
+    for kind in [ParticipantKind::Realtime, ParticipantKind::Voice, ParticipantKind::View] {
+        let identity = participant_pseudonym(LK_SECRET, conv, user, device, kind);
+        let wire = pollis_delivery::room_id::room_pseudonym(LK_SECRET, conv);
+        let token =
+            sign_livekit_token(LK_KEY, LK_SECRET, &wire, &identity, true, 1_700_000_000).unwrap();
+        let (_h, payload, _s) = split_jwt(&token);
+        let sub = payload["sub"].as_str().expect("sub claim");
+
+        assert!(!sub.contains(user), "sub must not embed the user id: {sub}");
+        assert!(!sub.contains(device), "sub must not embed the device id: {sub}");
+        assert!(!sub.contains(conv), "sub must not embed the room: {sub}");
+        assert!(sub.starts_with(kind.prefix()), "sub should keep its capability prefix: {sub}");
+        // And the whole token — header, claims, signature — carries neither id.
+        assert!(!token.contains(user));
+        assert!(!token.contains(device));
+    }
+}
+
+/// The residual #836 was filed for: the SFU could cluster the social graph by
+/// co-membership because one user carried one identity into every room. Two
+/// rooms must now give unrelated identities, and one room's key must not open
+/// the other's.
+#[test]
+fn one_user_is_unlinkable_across_two_rooms() {
+    let user = "01KZT7RW4RXQGT943Q05C7NW8A";
+    let device = "01KZT7RW4RXQGT943Q05C7NW8B";
+    let a = participant_pseudonym(LK_SECRET, "conv-a", user, device, ParticipantKind::Voice);
+    let b = participant_pseudonym(LK_SECRET, "conv-b", user, device, ParticipantKind::Voice);
+
+    assert_ne!(a, b, "the same user must not reuse an identity across rooms");
+    assert_eq!(resolve_participant(LK_SECRET, "conv-a", &b), None);
+    assert_eq!(
+        resolve_participant(LK_SECRET, "conv-a", &a).map(|(u, _)| u),
+        Some(user.to_string()),
+    );
+}
+
+/// #140 must survive: a user's two devices stay distinct participants (or the
+/// second evicts the first on the SFU) while still resolving to one person.
+#[test]
+fn two_devices_of_one_user_coexist_and_resolve_to_the_same_user() {
+    let user = "01KZT7RW4RXQGT943Q05C7NW8A";
+    let room = "01KZVDFR5Z9DKJ27YN91S3KS6N";
+    let a = participant_pseudonym(LK_SECRET, room, user, "dev-a", ParticipantKind::Voice);
+    let b = participant_pseudonym(LK_SECRET, room, user, "dev-b", ParticipantKind::Voice);
+
+    assert_ne!(a, b);
+    assert_eq!(resolve_participant(LK_SECRET, room, &a).unwrap().0, user);
+    assert_eq!(resolve_participant(LK_SECRET, room, &b).unwrap().0, user);
+}
+
+/// A client cannot obtain a token identifying as another user. The identity is
+/// a pure function of the room, the VERIFIED signer and the signer's device —
+/// there is no input a caller controls that moves it — so the property is
+/// pinned here as "nothing a client sends can produce Bob's identity except
+/// being Bob".
+#[test]
+fn identity_is_determined_by_the_signer_not_the_request() {
+    let room = "01KZVDFR5Z9DKJ27YN91S3KS6N";
+    let alice = participant_pseudonym(LK_SECRET, room, "alice", "dev-a", ParticipantKind::Voice);
+    let bob = participant_pseudonym(LK_SECRET, room, "bob", "dev-a", ParticipantKind::Voice);
+    assert_ne!(alice, bob);
+    // Alice cannot reach Bob's identity by varying the one thing she supplies
+    // (`kind`) — every kind she can ask for still resolves to Alice.
+    for kind in [ParticipantKind::Realtime, ParticipantKind::Voice, ParticipantKind::View] {
+        let id = participant_pseudonym(LK_SECRET, room, "alice", "dev-a", kind);
+        assert_ne!(id, bob);
+        assert_eq!(resolve_participant(LK_SECRET, room, &id).unwrap().0, "alice");
+    }
 }

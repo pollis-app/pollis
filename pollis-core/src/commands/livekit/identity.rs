@@ -1,24 +1,111 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use crate::state::AppState;
 
 use super::participants::VoiceParticipantInfo;
 
-/// Extract a Pollis user_id from a LiveKit participant identity. Voice room
-/// participants use `voice-{user_id}`; realtime room participants use
-/// `{user_id}:{device_id}`. Returns `None` for internal participants
-/// ("server", "pollis-backend") and any other unrecognised shape.
-pub(crate) fn user_id_from_identity(identity: &str) -> Option<&str> {
-    if let Some(rest) = identity.strip_prefix("voice-") {
-        return Some(rest);
+pub(crate) use crate::commands::livekit_identity::{
+    internal_identity, is_view_identity, user_id_from_identity, ParticipantKind,
+};
+
+/// Translate the opaque LiveKit identities in `wire` into the internal
+/// identities the rest of the app speaks (#836).
+///
+/// Returns a map from wire identity to `(internal_identity, display_name)`, with
+/// an entry for EVERY input. Identities already translated this process are
+/// answered from `state.livekit_identities`; the rest go to the DS in one
+/// batched request, because it holds the per-room key and no client does.
+///
+/// Resolution is best-effort by design. If the DS is unreachable the caller
+/// still gets a usable identity for every input — the pseudonym itself, which is
+/// stable, unique and perfectly good as a UI key — so an unresolvable peer shows
+/// up as an unattributed tile rather than not showing up at all. That ordering
+/// matters: this sits on the participant-joined path, and "you cannot see who
+/// that is" is a far better failure than "they did not join".
+pub(crate) async fn resolve_participants(
+    state: &Arc<AppState>,
+    logical_room: &str,
+    wire: &[String],
+) -> HashMap<String, (String, String)> {
+    let missing: Vec<String> = {
+        let cache = state.livekit_identities.lock().await;
+        wire.iter()
+            .filter(|id| !cache.contains_key(&(logical_room.to_string(), (*id).clone())))
+            .cloned()
+            .collect()
+    };
+
+    if !missing.is_empty() {
+        match crate::commands::mls::ds_livekit_identities(state, logical_room, missing).await {
+            Ok(resolved) => {
+                let mut cache = state.livekit_identities.lock().await;
+                for r in resolved {
+                    let kind = ParticipantKind::from_wire(r.kind.as_deref().unwrap_or("voice"));
+                    cache.insert(
+                        (logical_room.to_string(), r.identity.clone()),
+                        (internal_identity(&r.user_id, &r.identity, kind), r.name),
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("[livekit] identity resolve for {logical_room} failed: {e}");
+            }
+        }
     }
-    if let Some((user_id, _device)) = identity.split_once(':') {
-        return Some(user_id);
-    }
-    // Bare user_id (no device id) is also valid — the realtime path falls
-    // back to that when there's no device id available yet.
-    if identity == "server" || identity == "pollis-backend" {
-        return None;
-    }
-    Some(identity)
+
+    let cache = state.livekit_identities.lock().await;
+    wire.iter()
+        .map(|id| {
+            let translated = cache
+                .get(&(logical_room.to_string(), id.clone()))
+                .cloned()
+                .unwrap_or_else(|| (id.clone(), String::new()));
+            (id.clone(), translated)
+        })
+        .collect()
+}
+
+/// Single-identity convenience over [`resolve_participants`].
+pub(crate) async fn resolve_participant(
+    state: &Arc<AppState>,
+    logical_room: &str,
+    wire: &str,
+) -> (String, String) {
+    resolve_participants(state, logical_room, std::slice::from_ref(&wire.to_string()))
+        .await
+        .remove(wire)
+        .unwrap_or_else(|| (wire.to_string(), String::new()))
+}
+
+/// Pin the LOCAL participant's translation for `logical_room`, reading its wire
+/// identity straight out of the token the DS just minted for us.
+///
+/// LiveKit reports our own participant's events under its wire pseudonym —
+/// `TrackMuted` fires on every push-to-talk keypress — and those must land on the
+/// local tile, which the renderer keys by the `voice-{user}:{device}` string it
+/// builds from `get_device_id`. Resolving our own pseudonym through the DS would
+/// hand back a *synthetic*-device identity instead (the device id is deliberately
+/// not recoverable from a pseudonym), quietly detaching the local tile from its
+/// own mute state. So the mapping is pinned, not derived.
+///
+/// No-ops if the token has no readable `sub`, in which case the local
+/// participant simply resolves like anyone else.
+pub(crate) async fn pin_local_identity(
+    state: &Arc<AppState>,
+    logical_room: &str,
+    token: &str,
+    local_identity: &str,
+    display_name: &str,
+) {
+    let Some(wire) = crate::commands::livekit_identity::jwt_subject(token) else {
+        return;
+    };
+    let mut cache = state.livekit_identities.lock().await;
+    cache.insert(
+        (logical_room.to_string(), wire),
+        (local_identity.to_string(), display_name.to_string()),
+    );
 }
 
 /// Look up the avatar_url for a single user_id from the remote DB.
@@ -42,9 +129,10 @@ pub(crate) async fn lookup_avatar_url(state: &AppState, user_id: &str) -> Option
     row.get::<Option<String>>(0).ok().flatten()
 }
 
-/// Look up the avatar_url for a participant identity (voice-{user_id} or
-/// {user_id}:{device_id}). Returns None if the identity has no recognised
-/// user or the lookup fails.
+/// Look up the avatar_url for an INTERNAL participant identity
+/// (`voice-{user}:{device}` / `{user}:{device}`). Returns None if the identity
+/// has no recognised user — which since #836 also covers a wire pseudonym that
+/// could not be resolved — or if the lookup fails.
 pub(crate) async fn lookup_avatar_url_for_identity(
     state: &AppState,
     identity: &str,

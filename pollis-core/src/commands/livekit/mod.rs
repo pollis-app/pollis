@@ -38,7 +38,10 @@ mod realtime;
 
 // ── Public surface ───────────────────────────────────────────────────────
 
-pub(crate) use identity::{lookup_avatar_url, lookup_avatar_url_for_identity};
+pub(crate) use identity::{
+    is_view_identity, lookup_avatar_url, lookup_avatar_url_for_identity, pin_local_identity,
+    resolve_participant, resolve_participants,
+};
 
 pub use legacy::{get_livekit_token, get_livekit_url, get_livekit_view_token, LivekitCredential};
 pub use participants::{
@@ -59,7 +62,26 @@ pub use realtime::{connect_rooms, subscribe_realtime};
 /// Parses a raw DataReceived payload and forwards it to the frontend channel.
 /// Returns a conversation_id when a `membership_changed` event indicates
 /// MLS reconcile should be triggered by the caller.
-pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink<RealtimeEvent>) -> Option<String> {
+/// The publisher of a data packet, already resolved from its opaque LiveKit
+/// identity (#836). `None` when the packet came from a server-side emitter (the
+/// DS's own `SendData`) or from a participant we could not resolve.
+///
+/// This is what shared-room broadcasts are attributed from now. Previously the
+/// actor rode inside the payload as a raw `user_id`, which both violated the §5
+/// routing-only rule for shared rooms and — after #836 — pointed straight back
+/// at the account behind the pseudonym that published it. Taking it from the
+/// sender is also the stronger claim: a self-declared id in the body is
+/// unauthenticated, this one is at least what the SFU saw connect.
+pub(super) struct PacketSender {
+    pub user_id: String,
+    pub username: Option<String>,
+}
+
+pub(super) fn dispatch_data(
+    payload: &[u8],
+    sender: Option<&PacketSender>,
+    channel: &dyn crate::sink::EventSink<RealtimeEvent>,
+) -> Option<String> {
     let text = match std::str::from_utf8(payload) {
         Ok(s) => s,
         Err(_) => return None,
@@ -132,30 +154,31 @@ pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink
             }
         }
         Some("voice_joined") => {
-            if let (Some(channel_id), Some(user_id)) = (
+            // §5/#836: the actor is the sender, not a field in the packet. An old
+            // client's `user_id`/`display_name` are simply ignored — the same
+            // tolerance `new_message` applies to `sender_id`.
+            if let (Some(channel_id), Some(who)) = (
                 data.get("channel_id").and_then(|v| v.as_str()),
-                data.get("user_id").and_then(|v| v.as_str()),
+                sender,
             ) {
-                let display_name = data
-                    .get("display_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(user_id)
-                    .to_owned();
                 let _ = channel.send(RealtimeEvent::VoiceJoined {
                     channel_id: channel_id.to_owned(),
-                    user_id: user_id.to_owned(),
-                    display_name,
+                    user_id: who.user_id.clone(),
+                    display_name: who
+                        .username
+                        .clone()
+                        .unwrap_or_else(|| who.user_id.clone()),
                 });
             }
         }
         Some("voice_left") => {
-            if let (Some(channel_id), Some(user_id)) = (
+            if let (Some(channel_id), Some(who)) = (
                 data.get("channel_id").and_then(|v| v.as_str()),
-                data.get("user_id").and_then(|v| v.as_str()),
+                sender,
             ) {
                 let _ = channel.send(RealtimeEvent::VoiceLeft {
                     channel_id: channel_id.to_owned(),
-                    user_id: user_id.to_owned(),
+                    user_id: who.user_id.clone(),
                 });
             }
         }
@@ -256,12 +279,15 @@ pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink
             }
         }
         Some("typing") => {
-            if let Some(user_id) = data.get("user_id").and_then(|v| v.as_str()) {
+            // §5/#836: the typist is the sender. A packet we cannot attribute is
+            // dropped rather than shown as "someone is typing" — an indicator
+            // with no name is not worth an unattributed event.
+            if let Some(who) = sender {
                 let _ = channel.send(RealtimeEvent::Typing {
                     channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
                     conversation_id: data.get("conversation_id").and_then(|v| v.as_str()).map(str::to_owned),
-                    user_id: user_id.to_owned(),
-                    username: data.get("username").and_then(|v| v.as_str()).map(str::to_owned),
+                    user_id: who.user_id.clone(),
+                    username: who.username.clone(),
                     is_typing: data.get("is_typing").and_then(|v| v.as_bool()).unwrap_or(false),
                 });
             }
