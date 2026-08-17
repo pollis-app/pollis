@@ -27,6 +27,10 @@ import {
   Smartphone,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Link2,
+  Share2,
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
   Diamond,
@@ -75,6 +79,10 @@ export const Icon = {
   mail: wrap(Mail),
   key: wrap(Key),
   device: wrap(Smartphone),
+  copy: wrap(Copy),
+  link: wrap(Link2),
+  share: wrap(Share2),
+  alert: wrap(AlertCircle),
   diamond: wrap(Diamond, 16),
 };
 
