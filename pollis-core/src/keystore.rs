@@ -319,11 +319,13 @@ mod ios_kek {
     }
 }
 
-// AES-256-GCM envelope shared by the iOS path. Platform-neutral on purpose:
-// compiled (and unit-tested) on every target so the blob layout — iv(12) ||
-// ciphertext(+16 tag), byte-compatible with `android_kek`'s Java output — is
-// pinned by host tests instead of only exercised on a device.
-#[cfg(any(target_os = "ios", test))]
+// AES-256-GCM envelope shared by the iOS path and, since #882, by the desktop
+// file store. Platform-neutral on purpose: compiled (and unit-tested) on every
+// target so the blob layout — iv(12) || ciphertext(+16 tag), byte-compatible
+// with `android_kek`'s Java output — is pinned by host tests instead of only
+// exercised on a device. Android is the one target that never calls it (its
+// seal/unseal runs inside the JVM against a non-exportable key).
+#[cfg(not(target_os = "android"))]
 mod kek_envelope {
     use crate::error::{Error, Result};
     use aes_gcm::aead::{Aead, KeyInit};
@@ -356,19 +358,234 @@ mod kek_envelope {
     }
 }
 
-// ── File-backed keystore: plain JSON file (no keychain, no OS prompts) ──────
-//
-// Selected for debug builds (no OS prompts during dev/test) AND whenever the
-// `os-keystore` feature is off — the latter drops the `keyring` dependency
-// entirely so a headless build with no `dbus-1` can link. A release build with
-// default features on uses the OS keychain backend below, unchanged.
 
-#[cfg(any(debug_assertions, not(feature = "os-keystore")))]
-mod backend {
+// ── Desktop: the machine-bound key that encrypts the file store ─────────────
+//
+// #882. The file store below used to be plaintext JSON on desktop. Mobile
+// already sealed the same file under an OS-held key (`android_kek` /
+// `ios_kek`); desktop was the outlier, and #879 showed the cost of leaving it
+// that way — the only way to keep the shipped CLI's keys off disk in the clear
+// was to require a secret-service, which a headless box (the CLI's likely home)
+// does not have.
+//
+// WHAT THIS DEFENDS AGAINST — be precise, because the honest answer is narrow.
+//
+// The realistic threat an at-rest file cipher addresses is **the file leaving
+// the machine**: a home-directory backup, an `scp` of the data dir, a synced
+// folder, a stolen or resold disk that is later read on other hardware, a
+// container image built over a live data dir. The KEK is derived from a secret
+// that lives OUTSIDE the data directory and does not travel with it — the
+// systemd/D-Bus machine ID on Linux, IOPlatformUUID on macOS, MachineGuid on
+// Windows — so the copied bytes are undecryptable on any other machine.
+//
+// WHAT IT DOES NOT DEFEND AGAINST — equally important:
+//
+//   * A local attacker running as the SAME UID. Whatever this process can
+//     derive to decrypt, that attacker can derive too. Nothing done in
+//     userspace changes that; the OS keychain backend is what raises this bar,
+//     which is why it stays the preferred backend wherever one exists.
+//   * A FULL-DISK image or whole-VM snapshot. `/etc/machine-id` is on the same
+//     disk as the keystore, and is world-readable. Machine binding defeats
+//     *selective* exfiltration of the data dir, not an image of everything.
+//   * Forensic recovery of the pre-migration plaintext. Replacing the file
+//     atomically unlinks the old inode; its blocks are not securely erased,
+//     and no userspace API can promise that on a modern SSD/CoW filesystem.
+//
+// WHY THE PIN IS NOT MIXED INTO THIS KEK. It is tempting — the PIN is the one
+// secret the machine does not hold. Two reasons it is the wrong layer:
+//
+//   1. It cannot work. The keystore is read BEFORE the PIN exists: boot reads
+//      `pin_meta_{uid}` (to decide whether to show "enter PIN" or "set PIN")
+//      and `device_id_{uid}`. A PIN-derived file KEK would make the file
+//      unreadable until after the thing stored in the file had been read.
+//   2. It is already done, one layer in. Since the PIN work (#194) the actual
+//      secrets in this file — `db_key_wrapped_{uid}`, `account_id_key_wrapped_
+//      {uid}` — are Argon2id(64 MiB, t=3) + XChaCha20-Poly1305 ciphertext under
+//      a PIN-derived KEK (`commands/pin.rs`). Wrapping them a second time under
+//      the same PIN adds nothing.
+//
+// So the two layers are complementary, and each covers the other's gap:
+//
+//   * The PIN layer alone is weak against an exfiltrated file: 4 digits is
+//     10^4 candidates, and at the tuned ~250 ms/guess a full offline sweep is
+//     roughly 40 minutes on one core. That is the hole #882 exists to close.
+//   * The machine-bound layer alone is weak against a same-UID local attacker.
+//   * Together, an attacker needs the machine's identity AND the PIN, and the
+//     file on its own is inert.
+//
+// A TPM (or Secure Enclave) would genuinely improve the first bullet — a
+// sealed key is absent from every backup and every disk image. It is NOT used
+// here: `tss-esapi` is a heavy C dependency on `tpm2-tss`, needs a TPM present
+// AND a resource manager reachable by the invoking user, and would need three
+// separate platform integrations. Half-integrating one would mean a silent
+// fallback path that looks stronger than it is. Recorded as a deliberate
+// omission rather than pretended.
+//
+// The KEK is HKDF-SHA256, not Argon2id: the machine ID is a 128-bit random
+// value, so there is nothing for a slow KDF to slow down. The Argon2id cost
+// belongs on the PIN, and that is where it already is.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod machine_kek {
+    use crate::error::{Error, Result};
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    use std::sync::OnceLock;
+    use zeroize::Zeroizing;
+
+    /// HKDF domain separator. Bump the suffix if the derivation ever changes
+    /// meaning — the file's magic byte carries the format version separately.
+    const HKDF_INFO: &[u8] = b"pollis-keystore-file-kek-v1";
+
+    /// Per-file HKDF salt length. Fresh on every write, stored in the clear in
+    /// the file header, so two Pollis installs on one machine (a second dev
+    /// instance under `POLLIS_DATA_DIR`) never share a KEK.
+    pub const SALT_LEN: usize = 16;
+
+    pub const KEK_LEN: usize = 32;
+
+    /// Escape hatch for hosts with no machine ID of their own — some minimal
+    /// containers ship an empty `/etc/machine-id`. Also what the unit tests
+    /// would use if they needed the real accessor; they drive the pure
+    /// derivation instead. Setting this to a fixed value on every host would
+    /// reduce the file to "encrypted under a public constant", so it is
+    /// documented as a last resort in `docs/run-it-yourself.md`, not a knob.
+    const MACHINE_ID_ENV: &str = "POLLIS_KEYSTORE_MACHINE_ID";
+
+    static SECRET: OnceLock<Option<Zeroizing<Vec<u8>>>> = OnceLock::new();
+
+    /// The machine-bound secret, read once per process.
+    ///
+    /// Hard error when no source yields one. The alternative — falling back to
+    /// a constant, or to a random file living next to the keystore — would
+    /// either be encryption in name only or would add a way to permanently
+    /// lose an identity key by deleting one extra file. Neither is acceptable,
+    /// so an exotic host is told exactly which variable to set.
+    pub fn machine_secret() -> Result<&'static [u8]> {
+        SECRET
+            .get_or_init(read_machine_secret)
+            .as_deref()
+            .map(|s| &s[..])
+            .ok_or_else(|| {
+                Error::Keystore(format!(
+                    "no stable machine identity found for at-rest keystore encryption \
+                     (tried the platform machine ID); set {MACHINE_ID_ENV} to a \
+                     stable, private, host-specific value to proceed"
+                ))
+            })
+    }
+
+    fn read_machine_secret() -> Option<Zeroizing<Vec<u8>>> {
+        if let Ok(v) = std::env::var(MACHINE_ID_ENV) {
+            let v = v.trim().to_string();
+            if !v.is_empty() {
+                return Some(Zeroizing::new(v.into_bytes()));
+            }
+        }
+        platform_machine_id().map(|v| Zeroizing::new(v.into_bytes()))
+    }
+
+    /// systemd's machine ID, falling back to D-Bus's. Both are a 128-bit
+    /// host-unique value that survives reboots and does not travel with a copy
+    /// of the home directory.
+    #[cfg(target_os = "linux")]
+    fn platform_machine_id() -> Option<String> {
+        for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+            if let Ok(s) = std::fs::read_to_string(path) {
+                let s = s.trim().to_string();
+                if !s.is_empty() {
+                    return Some(s);
+                }
+            }
+        }
+        None
+    }
+
+    /// IOPlatformUUID — the hardware UUID the OS reports for this Mac. Read via
+    /// `ioreg` rather than linking IOKit: this path only runs when the macOS
+    /// Keychain is unavailable (in practice, dev builds), so a one-off
+    /// subprocess at startup is cheaper than another native dependency.
+    #[cfg(target_os = "macos")]
+    fn platform_machine_id() -> Option<String> {
+        let out = std::process::Command::new("/usr/sbin/ioreg")
+            .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if line.contains("IOPlatformUUID") {
+                if let Some(value) = line.split('=').nth(1) {
+                    let value = value.trim().trim_matches('"').trim().to_string();
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// MachineGuid — written by Windows at install time. `/reg:64` so a 32-bit
+    /// process is not silently redirected to the WOW6432Node view, which holds
+    /// a different value. `creation_flags(CREATE_NO_WINDOW)` keeps a console
+    /// from flashing over the app.
+    #[cfg(target_os = "windows")]
+    fn platform_machine_id() -> Option<String> {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let out = std::process::Command::new("reg")
+            .args([
+                "query",
+                r"HKLM\SOFTWARE\Microsoft\Cryptography",
+                "/v",
+                "MachineGuid",
+                "/reg:64",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if line.contains("MachineGuid") {
+                if let Some(value) = line.split_whitespace().last() {
+                    let value = value.trim().to_string();
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Pure derivation, split out from the accessor so the tests can exercise
+    /// "same machine" and "file copied to another machine" without touching —
+    /// or needing — the real host identity.
+    pub fn derive_kek(machine_secret: &[u8], salt: &[u8; SALT_LEN]) -> Zeroizing<[u8; KEK_LEN]> {
+        let hk = Hkdf::<Sha256>::new(Some(salt), machine_secret);
+        let mut out = Zeroizing::new([0u8; KEK_LEN]);
+        // HKDF-SHA256 only fails for an output longer than 255*32 bytes.
+        hk.expand(HKDF_INFO, &mut *out)
+            .expect("32-byte HKDF output is always in range");
+        out
+    }
+}
+
+// ── File-backed keystore: an encrypted file (no keychain, no OS prompts) ────
+//
+// Selected for debug builds (no OS prompts during dev/test), whenever the
+// `os-keystore` feature is off, and — since #882 — at RUNTIME whenever a
+// release build finds no usable OS keychain (the headless-server case that
+// #879 traded away). On mobile it is the only backend.
+//
+// The file's bytes are ciphertext on every platform. There is no plaintext
+// encode path left in this module to reach, by feature, by cfg, or by mistake.
+
+mod file_backend {
     use super::namespaced;
     use crate::error::{Error, Result};
     use std::collections::HashMap;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn store_path() -> PathBuf {
         #[cfg(target_os = "macos")]
@@ -398,10 +615,7 @@ mod backend {
                 PathBuf::from(appdata).join("pollis")
             }
         };
-        // Mobile: this file IS the store, but its bytes are AES-GCM ciphertext
-        // under an OS-secured master key (AndroidKeyStore / iOS Keychain — see
-        // `android_kek` / `ios_kek`, issue #185 Section A). The bridge passes
-        // POLLIS_DATA_DIR (app sandbox).
+        // Mobile: the bridge passes POLLIS_DATA_DIR (app sandbox).
         #[cfg(any(target_os = "ios", target_os = "android"))]
         let base = {
             if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
@@ -410,57 +624,201 @@ mod backend {
                 std::env::temp_dir().join("pollis")
             }
         };
+        // The name is a fossil from when this file really was debug-only. It is
+        // deliberately NOT renamed: a rename means writing the new file and
+        // then deleting the old one, and the delete is a delete of live key
+        // material. Keeping the name lets the atomic rename overwrite the
+        // plaintext bytes in place instead.
         base.join("dev-keystore.json")
     }
 
-    // On mobile the file holds AES-GCM ciphertext (see `super::android_kek` /
-    // `super::ios_kek`); on desktop it's plaintext JSON (debug builds only —
-    // release desktop uses the OS keychain backend below). These convert
-    // between the on-disk bytes and the JSON string.
-    #[cfg(target_os = "android")]
-    fn decode_file(raw: &[u8]) -> Result<String> {
-        let plain = super::android_kek::unseal(raw)?;
-        String::from_utf8(plain).map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))
-    }
-    #[cfg(target_os = "ios")]
-    fn decode_file(raw: &[u8]) -> Result<String> {
-        let plain = super::ios_kek::unseal(raw)?;
-        String::from_utf8(plain).map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))
-    }
+    /// Desktop at-rest layout, written by [`FileCodec::encode`]:
+    ///
+    /// ```text
+    /// magic  (4)  = b"PKS\x01"   — 'P' also rules out a legacy '{' JSON start
+    /// salt   (16) = HKDF salt, fresh every write
+    /// body   (..) = kek_envelope blob: iv(12) || AES-256-GCM(json) || tag(16)
+    /// ```
+    ///
+    /// The header needs no AEAD associated data: the salt is an *input* to the
+    /// KEK, so substituting it changes the key and the GCM tag check fails.
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    fn decode_file(raw: &[u8]) -> Result<String> {
-        String::from_utf8(raw.to_vec()).map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))
-    }
-    #[cfg(target_os = "android")]
-    fn encode_file(json: &str) -> Result<Vec<u8>> {
-        super::android_kek::seal(json.as_bytes())
-    }
-    #[cfg(target_os = "ios")]
-    fn encode_file(json: &str) -> Result<Vec<u8>> {
-        super::ios_kek::seal(json.as_bytes())
-    }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    fn encode_file(json: &str) -> Result<Vec<u8>> {
-        Ok(json.as_bytes().to_vec())
+    const FILE_MAGIC: [u8; 4] = *b"PKS\x01";
+
+    /// What a successful read found on disk. `LegacyPlaintext` is the
+    /// pre-#882 desktop file; it is readable exactly so that upgraders are
+    /// never locked out, and the first write that follows replaces it.
+    enum Decoded {
+        Encrypted(String),
+        #[cfg_attr(
+            any(target_os = "android", target_os = "ios"),
+            allow(dead_code)
+        )]
+        LegacyPlaintext(String),
     }
 
-    fn read_map() -> Result<HashMap<String, String>> {
-        let path = store_path();
-        let raw = match std::fs::read(&path) {
+    /// The at-rest codec for the file store. Desktop derives a machine-bound
+    /// KEK; mobile defers to the OS-held key. Constructed once per operation
+    /// and passed down so tests can supply an explicit secret.
+    struct FileCodec {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        machine_secret: Vec<u8>,
+        /// Test-only: simulate "this host has no derivable KEK" so the real
+        /// `write_map_at` can be driven through its seal-failure path.
+        #[cfg(test)]
+        fail_seal: bool,
+    }
+
+    impl FileCodec {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        fn detect() -> Result<Self> {
+            Ok(Self {
+                machine_secret: super::machine_kek::machine_secret()?.to_vec(),
+                #[cfg(test)]
+                fail_seal: false,
+            })
+        }
+
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        fn detect() -> Result<Self> {
+            Ok(Self {
+                #[cfg(test)]
+                fail_seal: false,
+            })
+        }
+
+        #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+        fn with_secret(machine_secret: &[u8]) -> Self {
+            Self {
+                machine_secret: machine_secret.to_vec(),
+                fail_seal: false,
+            }
+        }
+
+        #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+        fn that_cannot_seal() -> Self {
+            Self {
+                machine_secret: b"unused".to_vec(),
+                fail_seal: true,
+            }
+        }
+
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        fn encode(&self, json: &str) -> Result<Vec<u8>> {
+            use super::machine_kek::SALT_LEN;
+
+            #[cfg(test)]
+            if self.fail_seal {
+                return Err(Error::Keystore("no machine identity (test)".into()));
+            }
+
+            let mut salt = [0u8; SALT_LEN];
+            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut salt);
+            let kek = super::machine_kek::derive_kek(&self.machine_secret, &salt);
+            let body = super::kek_envelope::seal_with(&kek, json.as_bytes())?;
+
+            let mut out = Vec::with_capacity(FILE_MAGIC.len() + SALT_LEN + body.len());
+            out.extend_from_slice(&FILE_MAGIC);
+            out.extend_from_slice(&salt);
+            out.extend_from_slice(&body);
+            Ok(out)
+        }
+
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        fn decode(&self, raw: &[u8]) -> Result<Decoded> {
+            use super::machine_kek::SALT_LEN;
+
+            const HEADER: usize = 4 + SALT_LEN;
+            if raw.len() >= FILE_MAGIC.len() && raw[..FILE_MAGIC.len()] == FILE_MAGIC {
+                if raw.len() < HEADER {
+                    return Err(Error::Keystore(
+                        "keystore file header truncated; refusing to treat it as empty".into(),
+                    ));
+                }
+                let mut salt = [0u8; SALT_LEN];
+                salt.copy_from_slice(&raw[4..HEADER]);
+                let kek = super::machine_kek::derive_kek(&self.machine_secret, &salt);
+                // A failure here is "wrong machine", not "corrupt": the caller
+                // must surface it and leave the file alone. Silently starting
+                // over would orphan the identity key sitting in these bytes.
+                let plain = super::kek_envelope::unseal_with(&kek, &raw[HEADER..]).map_err(|_| {
+                    Error::Keystore(
+                        "keystore file could not be decrypted on this machine — it is \
+                         encrypted under a machine-bound key and was written by a \
+                         different host (or the host identity changed). The file has \
+                         been left untouched."
+                            .into(),
+                    )
+                })?;
+                let json = String::from_utf8(plain)
+                    .map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))?;
+                return Ok(Decoded::Encrypted(json));
+            }
+
+            // Pre-#882 desktop file: plaintext JSON. Read it so upgraders are
+            // never locked out; the next write re-encrypts in place.
+            let json = String::from_utf8(raw.to_vec())
+                .map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))?;
+            Ok(Decoded::LegacyPlaintext(json))
+        }
+
+        // Mobile: the same file, sealed under a key the OS holds. Unchanged by
+        // #882 — this is the shape desktop is being brought in line with.
+        #[cfg(target_os = "android")]
+        fn encode(&self, json: &str) -> Result<Vec<u8>> {
+            super::android_kek::seal(json.as_bytes())
+        }
+
+        #[cfg(target_os = "android")]
+        fn decode(&self, raw: &[u8]) -> Result<Decoded> {
+            let plain = super::android_kek::unseal(raw)?;
+            let json = String::from_utf8(plain)
+                .map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))?;
+            Ok(Decoded::Encrypted(json))
+        }
+
+        #[cfg(target_os = "ios")]
+        fn encode(&self, json: &str) -> Result<Vec<u8>> {
+            super::ios_kek::seal(json.as_bytes())
+        }
+
+        #[cfg(target_os = "ios")]
+        fn decode(&self, raw: &[u8]) -> Result<Decoded> {
+            let plain = super::ios_kek::unseal(raw)?;
+            let json = String::from_utf8(plain)
+                .map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))?;
+            Ok(Decoded::Encrypted(json))
+        }
+    }
+
+    /// Reads the store. The bool is "this file is still pre-#882 plaintext",
+    /// which the callers use to trigger the in-place re-encryption.
+    fn read_map_at(
+        path: &Path,
+        codec: &FileCodec,
+    ) -> Result<(HashMap<String, String>, bool)> {
+        let raw = match std::fs::read(path) {
             Ok(d) => d,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((HashMap::new(), false))
+            }
             Err(e) => return Err(Error::Keystore(format!("read dev-keystore.json: {e}"))),
         };
-        let data = decode_file(&raw)?;
+        // A decode failure propagates untouched — see `FileCodec::decode`. Only
+        // a *parse* failure after a successful decrypt is treated as corruption.
+        let (data, legacy) = match codec.decode(&raw)? {
+            Decoded::Encrypted(json) => (json, false),
+            Decoded::LegacyPlaintext(json) => (json, true),
+        };
         match serde_json::from_str(&data) {
-            Ok(m) => Ok(m),
+            Ok(m) => Ok((m, legacy)),
             Err(parse_err) => {
                 // Refuse to silently replace a corrupt keystore with an empty
                 // one — the next write would erase every stored key for every
                 // user on this device. Back it up loud and bail.
                 let ts = chrono::Utc::now().timestamp();
                 let backup = path.with_file_name(format!("dev-keystore.bad-{ts}.json"));
-                if let Err(rename_err) = std::fs::rename(&path, &backup) {
+                if let Err(rename_err) = std::fs::rename(path, &backup) {
                     eprintln!(
                         "[keystore] failed to rename corrupt dev-keystore.json to {}: {rename_err}",
                         backup.display()
@@ -471,29 +829,38 @@ mod backend {
                     backup.display()
                 );
                 Err(Error::Keystore(format!(
-                    "dev keystore corrupt; backed up to {}",
+                    "keystore corrupt; backed up to {}",
                     backup.display()
                 )))
             }
         }
     }
 
-    fn write_map(map: &HashMap<String, String>) -> Result<()> {
+    fn write_map_at(
+        path: &Path,
+        codec: &FileCodec,
+        map: &HashMap<String, String>,
+    ) -> Result<()> {
         use std::io::Write;
 
-        let path = store_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| Error::Keystore(format!("create dir: {e}")))?;
         }
         let json = serde_json::to_string(map)
             .map_err(|e| Error::Keystore(format!("serialize: {e}")))?;
-        // Plaintext bytes on desktop; AES-GCM ciphertext on Android.
-        let data = encode_file(&json)?;
+        // Ciphertext on every platform. Encoding happens BEFORE the old file is
+        // touched, so a codec failure cannot leave a half-written store.
+        let data = codec.encode(&json)?;
 
         // Atomic write: tempfile + fsync + rename. A crash before the rename
         // leaves the old file intact. Without this, a crash mid-write turned
         // the keystore into a zero-byte file and bounced every user to OTP.
+        //
+        // This is also what makes the plaintext→encrypted migration safe: the
+        // encrypted bytes only become the store in one atomic step, so every
+        // interruption leaves EITHER the complete old plaintext file OR the
+        // complete new encrypted one, and never a partial mix of the two.
         let tmp = path.with_extension("json.tmp");
         {
             let mut f = std::fs::File::create(&tmp)
@@ -503,18 +870,71 @@ mod backend {
             f.sync_all()
                 .map_err(|e| Error::Keystore(format!("fsync dev-keystore.json.tmp: {e}")))?;
         }
-        std::fs::rename(&tmp, &path)
+        std::fs::rename(&tmp, path)
             .map_err(|e| Error::Keystore(format!("rename dev-keystore.json.tmp: {e}")))?;
         Ok(())
+    }
+
+    // The three operations, factored to take an explicit path + codec so the
+    // tests below drive the SAME code the runtime does — including the
+    // migration branch — against a temp dir, with no env-var juggling and no
+    // dependence on the host's real machine identity.
+
+    fn store_at(
+        path: &Path,
+        codec: &FileCodec,
+        key: String,
+        encoded: String,
+    ) -> Result<()> {
+        let (mut map, _) = read_map_at(path, codec)?;
+        map.insert(key, encoded);
+        write_map_at(path, codec, &map)
+    }
+
+    fn load_at(path: &Path, codec: &FileCodec, key: &str) -> Result<Option<Vec<u8>>> {
+        let (map, legacy) = read_map_at(path, codec)?;
+
+        // Opportunistic migration: a read-only session must not leave pre-#882
+        // plaintext lying on disk. Best-effort on purpose — a failure here must
+        // never fail the read, because the read is how the user gets to their
+        // keys at all.
+        if legacy {
+            match write_map_at(path, codec, &map) {
+                Ok(()) => eprintln!(
+                    "[keystore] re-wrote the plaintext keystore encrypted at rest (#882)"
+                ),
+                Err(e) => eprintln!(
+                    "[keystore] could not re-encrypt the plaintext keystore ({e}); \
+                     it is unchanged and still readable"
+                ),
+            }
+        }
+
+        match map.get(key) {
+            None => Ok(None),
+            Some(encoded) => {
+                let bytes =
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+                        .map_err(|e| Error::Keystore(format!("base64 decode: {e}")))?;
+                Ok(Some(bytes))
+            }
+        }
+    }
+
+    fn delete_at(path: &Path, codec: &FileCodec, key: &str) -> Result<()> {
+        let (mut map, _) = read_map_at(path, codec)?;
+        map.remove(key);
+        write_map_at(path, codec, &map)
     }
 
     pub async fn store(key: &str, value: &[u8]) -> Result<()> {
         let key = namespaced(key);
         let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, value);
         tokio::task::spawn_blocking(move || {
-            let mut map = read_map()?;
-            map.insert(key, encoded);
-            write_map(&map)
+            // No codec, no write. This is the invariant that makes "plaintext
+            // never" true: a host we cannot derive a KEK for gets a loud error,
+            // not a plaintext fallback.
+            store_at(&store_path(), &FileCodec::detect()?, key, encoded)
         })
         .await
         .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
@@ -523,18 +943,7 @@ mod backend {
     pub async fn load(key: &str) -> Result<Option<Vec<u8>>> {
         let key = namespaced(key);
         tokio::task::spawn_blocking(move || {
-            let map = read_map()?;
-            match map.get(&key) {
-                None => Ok(None),
-                Some(encoded) => {
-                    let bytes = base64::Engine::decode(
-                        &base64::engine::general_purpose::STANDARD,
-                        encoded,
-                    )
-                    .map_err(|e| Error::Keystore(format!("base64 decode: {e}")))?;
-                    Ok(Some(bytes))
-                }
-            }
+            load_at(&store_path(), &FileCodec::detect()?, &key)
         })
         .await
         .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
@@ -543,28 +952,403 @@ mod backend {
     pub async fn delete(key: &str) -> Result<()> {
         let key = namespaced(key);
         tokio::task::spawn_blocking(move || {
-            let mut map = read_map()?;
-            map.remove(&key);
-            write_map(&map)
+            delete_at(&store_path(), &FileCodec::detect()?, &key)
         })
         .await
         .map_err(|e| Error::Keystore(format!("spawn_blocking: {e}")))?
     }
+
+    // ── Tests ───────────────────────────────────────────────────────────────
+    //
+    // Everything here drives the codec and the on-disk file directly with an
+    // EXPLICIT machine secret, so nothing depends on (or disturbs) the host's
+    // real identity, and "the file was copied to another machine" is a first-
+    // class case rather than something only reachable on real hardware.
+    #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+    mod tests {
+        use super::*;
+
+        const MACHINE_A: &[u8] = b"machine-a-11111111111111111111111111";
+        const MACHINE_B: &[u8] = b"machine-b-22222222222222222222222222";
+
+        fn map_of(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        }
+
+        #[test]
+        fn file_roundtrips_through_the_encrypted_format() {
+            let dir = std::env::temp_dir().join(format!(
+                "pollis-ks-rt-{}",
+                ulid::Ulid::new()
+            ));
+            let path = dir.join("dev-keystore.json");
+            let codec = FileCodec::with_secret(MACHINE_A);
+
+            let want = map_of(&[("account_id_key_wrapped_u1", "c2VjcmV0")]);
+            write_map_at(&path, &codec, &want).unwrap();
+            let (got, legacy) = read_map_at(&path, &codec).unwrap();
+
+            assert_eq!(got, want);
+            assert!(!legacy, "a file we just wrote is not legacy plaintext");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// GUARD (#882) — the whole point of the ticket. If someone reinstates
+        /// a plaintext encode path, this fails loudly.
+        #[test]
+        fn guard_written_bytes_are_never_plaintext() {
+            let dir = std::env::temp_dir().join(format!(
+                "pollis-ks-guard-{}",
+                ulid::Ulid::new()
+            ));
+            let path = dir.join("dev-keystore.json");
+            let codec = FileCodec::with_secret(MACHINE_A);
+
+            let secret_slot = "account_id_key_wrapped_u1";
+            let secret_value = "VEhJUy1JUy1BLUtFWQ";
+            write_map_at(&path, &codec, &map_of(&[(secret_slot, secret_value)])).unwrap();
+
+            let raw = std::fs::read(&path).unwrap();
+            assert_eq!(&raw[..4], &FILE_MAGIC, "file must carry the sealed-format magic");
+            let text = String::from_utf8_lossy(&raw);
+            assert!(
+                !text.contains(secret_slot),
+                "slot names must not be readable on disk"
+            );
+            assert!(
+                !text.contains(secret_value),
+                "stored values must not be readable on disk"
+            );
+            // Not "contains no '{'" — ciphertext is random and will hit 0x7b
+            // by chance. The load-bearing checks are the two above and the
+            // parse below; this one pins that it is not a JSON document.
+            assert_ne!(raw[0], b'{', "the file must not start a JSON object");
+            assert!(
+                serde_json::from_slice::<HashMap<String, String>>(&raw).is_err(),
+                "the file must not parse as the plaintext store"
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// The machine binding is the property that makes an exfiltrated file
+        /// useless. Same bytes, different host secret → refuses, and says so.
+        #[test]
+        fn file_copied_to_another_machine_does_not_decrypt() {
+            let codec_a = FileCodec::with_secret(MACHINE_A);
+            let codec_b = FileCodec::with_secret(MACHINE_B);
+
+            let raw = codec_a.encode(r#"{"k":"v"}"#).unwrap();
+            assert!(matches!(
+                codec_a.decode(&raw).unwrap(),
+                Decoded::Encrypted(_)
+            ));
+
+            // Matched rather than `unwrap_err`d on purpose: `Decoded` holds
+            // decrypted key material and must never gain a `Debug` impl.
+            let err = match codec_b.decode(&raw) {
+                Ok(_) => panic!("a foreign machine must not be able to decrypt the store"),
+                Err(e) => e,
+            };
+            assert!(
+                err.to_string().contains("different host"),
+                "wrong-machine error should name the cause, got: {err}"
+            );
+        }
+
+        /// AES-GCM must REJECT a tampered file, not hand back garbage.
+        #[test]
+        fn tampered_ciphertext_is_rejected_not_silently_accepted() {
+            let codec = FileCodec::with_secret(MACHINE_A);
+            let raw = codec.encode(r#"{"k":"v"}"#).unwrap();
+
+            // Flip a bit in the ciphertext body.
+            let mut body_flip = raw.clone();
+            let last = body_flip.len() - 1;
+            body_flip[last] ^= 1;
+            assert!(codec.decode(&body_flip).is_err(), "GCM tag must catch a body flip");
+
+            // Flip a bit in the salt: the KEK changes, so the tag fails too.
+            let mut salt_flip = raw.clone();
+            salt_flip[5] ^= 1;
+            assert!(codec.decode(&salt_flip).is_err(), "header must be bound to the body");
+
+            // Truncated to just the header.
+            assert!(codec.decode(&raw[..20]).is_err(), "truncation must not panic");
+
+            // Magic present but nothing after it.
+            assert!(codec.decode(&FILE_MAGIC).is_err(), "short header must error");
+        }
+
+        /// A file we cannot decrypt must be left exactly as it was — the bytes
+        /// are someone's identity key, and "start over" would orphan them.
+        #[test]
+        fn undecryptable_file_is_left_on_disk_untouched() {
+            let dir = std::env::temp_dir().join(format!(
+                "pollis-ks-untouched-{}",
+                ulid::Ulid::new()
+            ));
+            let path = dir.join("dev-keystore.json");
+
+            let codec_a = FileCodec::with_secret(MACHINE_A);
+            write_map_at(&path, &codec_a, &map_of(&[("k", "v")])).unwrap();
+            let before = std::fs::read(&path).unwrap();
+
+            let codec_b = FileCodec::with_secret(MACHINE_B);
+            assert!(read_map_at(&path, &codec_b).is_err());
+
+            let after = std::fs::read(&path).unwrap();
+            assert_eq!(before, after, "an undecryptable store must not be rewritten");
+            assert!(
+                !dir.join("dev-keystore.json.tmp").exists(),
+                "no partial file should be left behind"
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// The upgrade path: a pre-#882 plaintext file is readable, and the
+        /// next write replaces it with ciphertext holding the SAME keys.
+        #[test]
+        fn plaintext_file_migrates_to_encrypted_without_losing_keys() {
+            let dir = std::env::temp_dir().join(format!(
+                "pollis-ks-migrate-{}",
+                ulid::Ulid::new()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("dev-keystore.json");
+
+            let legacy = map_of(&[
+                ("device_id_u1", "ZGV2aWNl"),
+                ("account_id_key_wrapped_u1", "a2V5"),
+            ]);
+            std::fs::write(&path, serde_json::to_string(&legacy).unwrap()).unwrap();
+
+            let codec = FileCodec::with_secret(MACHINE_A);
+            let (got, is_legacy) = read_map_at(&path, &codec).unwrap();
+            assert_eq!(got, legacy, "plaintext must still be readable");
+            assert!(is_legacy, "a plaintext file must be reported as legacy");
+
+            // The re-write the load path performs.
+            write_map_at(&path, &codec, &got).unwrap();
+
+            let raw = std::fs::read(&path).unwrap();
+            assert_eq!(&raw[..4], &FILE_MAGIC, "migrated file must be sealed");
+            let (after, still_legacy) = read_map_at(&path, &codec).unwrap();
+            assert_eq!(after, legacy, "migration must preserve every key");
+            assert!(!still_legacy, "migration must not need to run twice");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// A crash between "temp file written" and "rename" — the only window
+        /// the atomic write has. The original file must still hold every key,
+        /// and re-running the migration must succeed.
+        #[test]
+        fn interrupted_migration_keeps_every_key() {
+            let dir = std::env::temp_dir().join(format!(
+                "pollis-ks-interrupt-{}",
+                ulid::Ulid::new()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("dev-keystore.json");
+
+            let legacy = map_of(&[("account_id_key_wrapped_u1", "a2V5")]);
+            std::fs::write(&path, serde_json::to_string(&legacy).unwrap()).unwrap();
+
+            // Exactly what a crash before the rename leaves behind: a partial
+            // temp file next to an intact original.
+            let codec = FileCodec::with_secret(MACHINE_A);
+            let partial = codec.encode(r#"{"account_id_key_wrapped_u1":"a2V5"}"#).unwrap();
+            std::fs::write(path.with_extension("json.tmp"), &partial[..10]).unwrap();
+
+            // The store still reads, from the untouched original.
+            let (recovered, is_legacy) = read_map_at(&path, &codec).unwrap();
+            assert_eq!(recovered, legacy, "an interrupted migration loses nothing");
+            assert!(is_legacy, "the original is still the pre-#882 file");
+
+            // And the retry completes, overwriting the stale temp file.
+            write_map_at(&path, &codec, &recovered).unwrap();
+            let (after, still_legacy) = read_map_at(&path, &codec).unwrap();
+            assert_eq!(after, legacy);
+            assert!(!still_legacy);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// If no KEK can be derived we must fail the WRITE rather than fall
+        /// back to plaintext — and the existing file must survive that failure.
+        #[test]
+        fn a_write_that_cannot_seal_leaves_the_old_file_intact() {
+            let dir = std::env::temp_dir().join(format!(
+                "pollis-ks-noseal-{}",
+                ulid::Ulid::new()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("dev-keystore.json");
+
+            let legacy = map_of(&[("account_id_key_wrapped_u1", "a2V5")]);
+            let bytes = serde_json::to_string(&legacy).unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+
+            // The real write path, on a host with no derivable KEK.
+            let codec = FileCodec::that_cannot_seal();
+            let err = write_map_at(&path, &codec, &legacy).unwrap_err();
+            assert!(err.to_string().contains("no machine identity"));
+
+            // Untouched, because `write_map_at` encodes before it opens the
+            // temp file at all — there is no plaintext fallback to fall into.
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
+            assert!(!path.with_extension("json.tmp").exists());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// Two writes of identical content must not produce identical bytes —
+        /// fresh salt AND fresh nonce every time.
+        #[test]
+        fn every_write_uses_fresh_salt_and_nonce() {
+            let codec = FileCodec::with_secret(MACHINE_A);
+            let a = codec.encode(r#"{"k":"v"}"#).unwrap();
+            let b = codec.encode(r#"{"k":"v"}"#).unwrap();
+            assert_ne!(a[4..20], b[4..20], "salt must be fresh per write");
+            assert_ne!(a[20..32], b[20..32], "nonce must be fresh per write");
+        }
+
+        /// The real store/load/delete triple, end to end.
+        #[test]
+        fn store_load_delete_roundtrip_through_the_real_operations() {
+            let dir = std::env::temp_dir().join(format!("pollis-ks-ops-{}", ulid::Ulid::new()));
+            let path = dir.join("dev-keystore.json");
+            let codec = FileCodec::with_secret(MACHINE_A);
+
+            let encoded =
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"identity");
+            store_at(&path, &codec, "account_id_key_wrapped_u1".into(), encoded).unwrap();
+
+            assert_eq!(
+                load_at(&path, &codec, "account_id_key_wrapped_u1").unwrap(),
+                Some(b"identity".to_vec())
+            );
+            assert_eq!(load_at(&path, &codec, "absent").unwrap(), None);
+
+            delete_at(&path, &codec, "account_id_key_wrapped_u1").unwrap();
+            assert_eq!(load_at(&path, &codec, "account_id_key_wrapped_u1").unwrap(), None);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// A plain READ of a pre-#882 file must both return the key and leave
+        /// the file encrypted behind it — an upgrader who only ever unlocks
+        /// must not keep their keys in the clear.
+        #[test]
+        fn a_read_migrates_the_plaintext_file_in_place() {
+            let dir = std::env::temp_dir().join(format!("pollis-ks-readmig-{}", ulid::Ulid::new()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("dev-keystore.json");
+
+            let encoded =
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"identity");
+            let legacy = map_of(&[("account_id_key_wrapped_u1", encoded.as_str())]);
+            std::fs::write(&path, serde_json::to_string(&legacy).unwrap()).unwrap();
+
+            let codec = FileCodec::with_secret(MACHINE_A);
+            assert_eq!(
+                load_at(&path, &codec, "account_id_key_wrapped_u1").unwrap(),
+                Some(b"identity".to_vec()),
+                "the pre-migration key must still be readable"
+            );
+
+            let raw = std::fs::read(&path).unwrap();
+            assert_eq!(&raw[..4], &FILE_MAGIC, "the read must have re-encrypted the file");
+            assert_eq!(
+                load_at(&path, &codec, "account_id_key_wrapped_u1").unwrap(),
+                Some(b"identity".to_vec()),
+                "and the key must survive the migration"
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// If the migration write fails, the READ must still succeed — losing
+        /// access to keys is strictly worse than leaving the plaintext one more
+        /// session.
+        #[test]
+        fn a_failed_migration_does_not_fail_the_read() {
+            let dir = std::env::temp_dir().join(format!("pollis-ks-migfail-{}", ulid::Ulid::new()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("dev-keystore.json");
+
+            let encoded =
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"identity");
+            let bytes =
+                serde_json::to_string(&map_of(&[("account_id_key_wrapped_u1", encoded.as_str())]))
+                    .unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+
+            let codec = FileCodec::that_cannot_seal();
+            assert_eq!(
+                load_at(&path, &codec, "account_id_key_wrapped_u1").unwrap(),
+                Some(b"identity".to_vec()),
+                "a read must never be failed by a migration problem"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                bytes,
+                "the unmigrated file must be left exactly as it was"
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// The derivation is a pure function of (secret, salt) — same inputs
+        /// give the same key, either input changing gives a different one.
+        #[test]
+        fn kek_derivation_binds_both_secret_and_salt() {
+            use super::super::machine_kek::derive_kek;
+
+            let salt1 = [1u8; 16];
+            let salt2 = [2u8; 16];
+            assert_eq!(*derive_kek(MACHINE_A, &salt1), *derive_kek(MACHINE_A, &salt1));
+            assert_ne!(*derive_kek(MACHINE_A, &salt1), *derive_kek(MACHINE_A, &salt2));
+            assert_ne!(*derive_kek(MACHINE_A, &salt1), *derive_kek(MACHINE_B, &salt1));
+        }
+    }
 }
 
-// ── Release builds: OS keychain ──────────────────────────────────────────────
+// ── OS keychain backend ──────────────────────────────────────────────────────
 //
-// Requires BOTH a release build AND the `os-keystore` feature (on by default),
-// so the default desktop release path is unchanged. `--no-default-features`
-// drops `keyring` and falls back to the file-backed backend above.
+// Requires the `os-keystore` feature (on by default). Compiled independently of
+// `debug_assertions` since #882 — which backend a build USES is now decided at
+// runtime by `backend::kind()`, so this module being present no longer implies
+// it is selected.
 
-#[cfg(all(not(debug_assertions), feature = "os-keystore"))]
-mod backend {
+#[cfg(feature = "os-keystore")]
+mod keychain_backend {
     use super::namespaced;
     use crate::error::{Error, Result};
     use keyring::Entry;
 
     const SERVICE: &str = "pollis";
+
+    /// Read-only probe for "is there a usable credential store on this host".
+    ///
+    /// Reading an entry that does not exist is the cheapest question that still
+    /// exercises the whole platform path: on Linux it round-trips to the
+    /// secret-service over D-Bus, which is exactly what is missing on a server
+    /// over SSH. No write, and no prompt on any platform.
+    ///
+    /// `NoEntry` is the healthy answer. Anything else — `PlatformFailure`
+    /// (D-Bus refused / no service), `NoStorageAccess` (store locked) — means
+    /// this process cannot rely on the keychain.
+    pub fn available() -> bool {
+        match Entry::new(SERVICE, &namespaced("backend-probe")).map(|e| e.get_password()) {
+            Ok(Ok(_)) | Ok(Err(keyring::Error::NoEntry)) => true,
+            Ok(Err(e)) => {
+                eprintln!("[keystore] OS keychain unavailable ({e})");
+                false
+            }
+            Err(e) => {
+                eprintln!("[keystore] OS keychain unavailable ({e})");
+                false
+            }
+        }
+    }
 
     pub async fn store(key: &str, value: &[u8]) -> Result<()> {
         let key = namespaced(key);
@@ -614,11 +1398,147 @@ mod backend {
     }
 }
 
+// ── Backend selection ────────────────────────────────────────────────────────
+
+/// Which at-rest backend this process uses.
+///
+/// There is deliberately **no `Plaintext` variant**. Before #882 the third
+/// state existed and was reachable by turning one Cargo feature off; encoding
+/// the two acceptable outcomes as the only two representable ones is what stops
+/// that from being a security cliff again (`CLAUDE.md` — invalid states
+/// unrepresentable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendKind {
+    /// The OS keychain guards the key: macOS Keychain, Windows Credential
+    /// Manager, Linux Secret Service. Preferred wherever it exists.
+    OsKeychain,
+    /// A file whose bytes are AES-256-GCM ciphertext under a machine-bound KEK
+    /// (desktop) or an OS-held key (mobile). Used where no keychain exists.
+    EncryptedFile,
+}
+
+impl std::fmt::Display for BackendKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OsKeychain => write!(f, "OS keychain"),
+            Self::EncryptedFile => write!(f, "encrypted file"),
+        }
+    }
+}
+
+/// Whether this build has the OS keychain backend compiled in at all.
+///
+/// A build with this `false` can still only reach `EncryptedFile`, never
+/// plaintext — but it can never reach the keychain either, which is what #879
+/// discovered the hard way about the shipped CLI. `pollis-tui`'s test suite
+/// asserts this is `true` so the feature cannot be dropped again in silence.
+pub const fn os_keychain_compiled() -> bool {
+    cfg!(feature = "os-keystore")
+}
+
+mod backend {
+    use super::{file_backend, BackendKind};
+    use crate::error::Result;
+    use std::sync::OnceLock;
+
+    static KIND: OnceLock<BackendKind> = OnceLock::new();
+
+    /// Decided ONCE per process and then frozen.
+    ///
+    /// Freezing matters: a keychain that answers on one call and errors on the
+    /// next (a D-Bus hiccup — the failure class behind #184) must not move this
+    /// process's writes to a different store mid-session. Half the slots in the
+    /// keychain and half in the file is the one outcome worse than either.
+    fn detect() -> BackendKind {
+        // Mobile has no keyring path — the file IS the store, sealed by the
+        // Android Keystore / iOS Keychain.
+        if cfg!(any(target_os = "android", target_os = "ios")) {
+            return BackendKind::EncryptedFile;
+        }
+        // Debug builds keep using the file so the dev loop never triggers an OS
+        // credential prompt. Since #882 that file is encrypted like any other.
+        if cfg!(debug_assertions) {
+            return BackendKind::EncryptedFile;
+        }
+        keychain_or_file()
+    }
+
+    /// The #882 runtime fallback: the SAME shipped binary uses the keychain on
+    /// a desktop and the encrypted file on a headless server, instead of the
+    /// build-time coin-flip that forced #879's choice between "plaintext keys"
+    /// and "the CLI does not start".
+    #[cfg(feature = "os-keystore")]
+    fn keychain_or_file() -> BackendKind {
+        if super::keychain_backend::available() {
+            BackendKind::OsKeychain
+        } else {
+            eprintln!(
+                "[keystore] no usable OS keychain on this host; \
+                 falling back to the machine-bound encrypted file store"
+            );
+            BackendKind::EncryptedFile
+        }
+    }
+
+    #[cfg(not(feature = "os-keystore"))]
+    fn keychain_or_file() -> BackendKind {
+        BackendKind::EncryptedFile
+    }
+
+    /// The probe blocks (D-Bus round trip), so it runs on the blocking pool.
+    pub async fn kind() -> BackendKind {
+        if let Some(k) = KIND.get() {
+            return *k;
+        }
+        let detected = tokio::task::spawn_blocking(detect)
+            .await
+            .unwrap_or(BackendKind::EncryptedFile);
+        *KIND.get_or_init(|| detected)
+    }
+
+    pub async fn store(key: &str, value: &[u8]) -> Result<()> {
+        match kind().await {
+            BackendKind::EncryptedFile => file_backend::store(key, value).await,
+            #[cfg(feature = "os-keystore")]
+            BackendKind::OsKeychain => super::keychain_backend::store(key, value).await,
+            #[cfg(not(feature = "os-keystore"))]
+            BackendKind::OsKeychain => unreachable!("no keychain backend compiled in"),
+        }
+    }
+
+    pub async fn load(key: &str) -> Result<Option<Vec<u8>>> {
+        match kind().await {
+            BackendKind::EncryptedFile => file_backend::load(key).await,
+            #[cfg(feature = "os-keystore")]
+            BackendKind::OsKeychain => super::keychain_backend::load(key).await,
+            #[cfg(not(feature = "os-keystore"))]
+            BackendKind::OsKeychain => unreachable!("no keychain backend compiled in"),
+        }
+    }
+
+    pub async fn delete(key: &str) -> Result<()> {
+        match kind().await {
+            BackendKind::EncryptedFile => file_backend::delete(key).await,
+            #[cfg(feature = "os-keystore")]
+            BackendKind::OsKeychain => super::keychain_backend::delete(key).await,
+            #[cfg(not(feature = "os-keystore"))]
+            BackendKind::OsKeychain => unreachable!("no keychain backend compiled in"),
+        }
+    }
+}
+
+/// Which backend this process settled on. Diagnostic only — the choice is made
+/// on first use and never changes for the life of the process.
+pub async fn backend_kind() -> BackendKind {
+    backend::kind().await
+}
+
 // ── Trait abstraction (production + in-memory test impls) ────────────────────
 
-/// Abstraction over secret storage. Production uses [`OsKeystore`] which wraps
-/// the OS keychain (release) or a JSON file under the data dir (debug). Tests
-/// use [`InMemoryKeystore`] so every [`TestClient`] gets its own isolated
+/// Abstraction over secret storage. Production uses [`OsKeystore`], which
+/// wraps whichever backend [`backend_kind`] selected: the OS keychain where
+/// one exists, otherwise the machine-bound encrypted file under the data dir.
+/// Tests use [`InMemoryKeystore`] so every [`TestClient`] gets its own isolated
 /// keystore without touching real user credentials.
 #[async_trait]
 pub trait Keystore: Send + Sync {
@@ -639,9 +1559,9 @@ pub trait Keystore: Send + Sync {
     }
 }
 
-/// Production keystore. Byte-for-byte identical to the pre-trait behaviour —
-/// this is a thin delegation to the existing `backend` module which writes to
-/// the OS keychain in release builds and a JSON file in debug.
+/// Production keystore. A thin delegation to the `backend` dispatcher, which
+/// picks the OS keychain or the machine-bound encrypted file once per process.
+/// Neither branch can write plaintext — see [`BackendKind`].
 pub struct OsKeystore;
 
 #[async_trait]
@@ -725,7 +1645,47 @@ mod tests {
         assert_eq!(ks.load_for_user("session", "bob").await.unwrap().as_deref(), Some(&b"b"[..]));
     }
 
-    // ── kek_envelope (the iOS at-rest cipher) — host-testable on purpose ────
+    // ── Backend selection guards (#882) ─────────────────────────────────────
+
+    /// GUARD — the backend this process picks is always one that encrypts.
+    ///
+    /// The `Plaintext` third state that existed before #882 is gone from the
+    /// type, so this is really a statement about the enum: adding a plaintext
+    /// variant back would have to break this test to compile past it.
+    #[tokio::test]
+    async fn guard_selected_backend_is_never_plaintext() {
+        let kind = backend_kind().await;
+        assert!(
+            matches!(kind, BackendKind::OsKeychain | BackendKind::EncryptedFile),
+            "the only representable backends must both encrypt at rest, got {kind}"
+        );
+    }
+
+    /// The choice is frozen for the process — a keychain that flakes mid-session
+    /// must not split this process's slots across two stores (#184's failure
+    /// class).
+    #[tokio::test]
+    async fn guard_backend_choice_is_stable_within_a_process() {
+        let first = backend_kind().await;
+        for _ in 0..5 {
+            assert_eq!(backend_kind().await, first);
+        }
+    }
+
+    /// GUARD — a debug build must never reach for the OS keychain; that is what
+    /// keeps credential prompts out of the dev loop.
+    ///
+    /// Only discriminating when `os-keystore` is compiled in (otherwise the
+    /// file backend is the only branch there is), which is the case for CI's
+    /// `cargo test -p pollis-core`. Gated on `debug_assertions` because
+    /// `cargo test --release` legitimately takes the other branch.
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn debug_builds_use_the_file_backend() {
+        assert_eq!(backend_kind().await, BackendKind::EncryptedFile);
+    }
+
+    // ── kek_envelope (the iOS + desktop at-rest cipher) — host-testable ─────
 
     #[test]
     fn kek_envelope_roundtrip() {

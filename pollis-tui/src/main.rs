@@ -31,9 +31,11 @@ const UI_REFRESH: Duration = Duration::from_millis(750);
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     // Build the client the same way AppState::new does for the desktop app:
-    // Config::from_env + connect both DBs + file-backed keystore (os-keystore
-    // off → JSON store). POLLIS_DELIVERY_URL is required for writes; TURSO_*
-    // for reads. Set POLLIS_DATA_DIR so the TUI enrolls as its own device.
+    // Config::from_env + connect both DBs + the device keystore, which picks
+    // the OS keychain or the machine-bound encrypted file at runtime (#882) —
+    // so this works over SSH with no secret-service. POLLIS_DELIVERY_URL is
+    // required for writes; TURSO_* for reads. Set POLLIS_DATA_DIR so the TUI
+    // enrolls as its own device.
     let config = Config::from_env().context(
         "loading config from env (need TURSO_URL, TURSO_TOKEN, POLLIS_DELIVERY_URL, R2_* placeholders)",
     )?;

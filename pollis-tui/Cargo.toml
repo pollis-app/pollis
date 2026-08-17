@@ -20,21 +20,20 @@ path = "src/lib.rs"
 # Media OFF (the TUI is headless — no LiveKit/libwebrtc/cpal); auth/pin/mls/
 # messages all compile media-off. See docs/pollis-tui-spec.md §9.
 #
-# os-keystore ON, deliberately re-enabled. Backend selection is compile-time
-# (`keystore.rs:366` vs `:561`): without this feature the RELEASE `pollis`
-# binary shipped by cli-release.yml falls to the file backend, whose own comment
-# says "debug builds only — release desktop uses the OS keychain backend".
-# That put the identity keypair and session token on disk as plaintext JSON,
-# removing one of the four components the threat model calls trusted and
-# reducing protection to a 4-digit PIN that is offline-exhaustible once the file
-# is copied. It was switched off alongside media because `keyring` wants
-# dbus/secret-service, but that is a runtime dependency, not a media one.
+# os-keystore ON, deliberately (#879). It was switched off alongside media
+# because `keyring` wants dbus/secret-service, but that is a runtime dependency,
+# not a media one, and dropping it meant the RELEASE `pollis` binary shipped by
+# cli-release.yml wrote the identity keypair and session token to a plaintext
+# JSON file.
 #
-# Consequence to know: on a box with no secret-service (a bare server over SSH)
-# the keyring backend fails at runtime with a clear error rather than silently
-# writing plaintext. For a security tool that is the right way round. Encrypting
-# the file backend at rest — as mobile already does via android_kek/ios_kek —
-# is the durable fix that would serve both.
+# Since #882 the feature no longer decides plaintext-vs-not — the file backend
+# is encrypted at rest either way, and backend selection happens at RUNTIME. It
+# decides whether this binary can *prefer* the OS keychain at all: with the
+# feature on, a desktop host uses the keychain and a box with no secret-service
+# (a bare server over SSH — this client's likely home) falls back to the
+# machine-bound encrypted file, from the same binary. Turning it off would
+# silently downgrade every desktop CLI user to the weaker of the two, so
+# `pollis-tui/src/auth.rs` carries a guard test that fails if it is dropped.
 pollis-core = { path = "../pollis-core", default-features = false, features = ["os-keystore"] }
 # Multi-thread runtime is REQUIRED: pollis-core's DB/keystore paths use
 # spawn_blocking, so a current-thread runtime deadlocks (spec §2).

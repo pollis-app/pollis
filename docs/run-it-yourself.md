@@ -233,6 +233,31 @@ POLLIS_DATA_DIR=/tmp/pollis-2 DEV_EMAIL=other@example.com pnpm dev
 Both hit your Turso DB and your LiveKit SFU, so you can create a group, exchange
 messages, and start a voice call between them.
 
+### Where the keys are kept
+
+The device keystore picks its backend at runtime: the OS keychain (macOS
+Keychain, Windows Credential Manager, Linux Secret Service) wherever one
+answers, otherwise `<data dir>/dev-keystore.json`, whose bytes are AES-256-GCM
+ciphertext under a key derived from this machine's identity. Debug builds always
+use the file so the dev loop never triggers a credential prompt. Plaintext is
+not a reachable state (#882).
+
+Running the terminal client on a box with no secret-service — a server over SSH
+— therefore works: it falls back to the encrypted file.
+
+If the keystore refuses to start with *"no stable machine identity found"*, this
+host has no readable machine ID (some minimal containers ship an empty
+`/etc/machine-id`). Set `POLLIS_KEYSTORE_MACHINE_ID` to a stable, private,
+host-specific value:
+
+```bash
+POLLIS_KEYSTORE_MACHINE_ID=$(head -c 32 /dev/urandom | base64) pollis
+```
+
+Keep it stable and keep it out of the data directory — it must be the same on
+every launch or the keystore will not decrypt, and putting it *next to* the
+keystore would defeat the point, which is that the file alone is useless.
+
 ## 8. Build a real installer
 
 ```bash

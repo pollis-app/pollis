@@ -47,7 +47,24 @@ server, no ALSA, and no dbus — a bare CI runner or headless box. The harness
 never touches the shell or media surface, so coverage is identical; the
 `[[bin]]` is `required-features = ["native-shell"]` and simply isn't built.
 `pollis-core` has the matching `media`/`os-keystore` features (headless builds
-use the file-backed keystore automatically).
+use the file-backed keystore automatically — encrypted at rest since #882, never
+plaintext).
+
+**Keystore guard tests (#882).** Three of them, and they are guards, not
+coverage:
+- `keystore::file_backend::tests::guard_written_bytes_are_never_plaintext` — the
+  bytes written to the store file must not contain the slot name or the value,
+  and must not parse as the plaintext JSON store.
+- `keystore::tests::guard_selected_backend_is_never_plaintext` /
+  `guard_backend_choice_is_stable_within_a_process` — the runtime backend choice
+  is one of two encrypting backends and is frozen per process.
+- `pollis_tui::auth::tests::guard_cli_keeps_the_os_keychain_backend` — fails the
+  TUI's own test run if `os-keystore` is dropped from its `pollis-core`
+  dependency, which is exactly the #879 regression.
+
+`pollis-core/tests/keystore_at_rest.rs` drives the shipped `OsKeystore` against a
+real `POLLIS_DATA_DIR` and inspects the resulting file. It is its own test binary
+so it can set that env var without racing another test.
 
 ### pollis-tui in CI (#487)
 

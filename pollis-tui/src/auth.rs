@@ -74,3 +74,28 @@ pub async fn unlock(state: &Arc<AppState>, user_id: &str, pin_code: &str) -> Res
     pin::unlock(state, user_id.to_string(), pin_code.to_string()).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    /// GUARD (#879 / #882) — the shipped `pollis` binary must keep the OS
+    /// keychain backend compiled in.
+    ///
+    /// #879 found the released CLI writing identity keys to a plaintext file
+    /// because this crate had `os-keystore` switched off alongside `media`.
+    /// #882 removed the plaintext fallback, so dropping the feature is no
+    /// longer a confidentiality cliff — but it would still silently downgrade
+    /// every desktop user of the CLI from "the OS guards the key" to "a
+    /// machine-bound file", which is the weaker of the two. Deleting
+    /// `os-keystore` from this crate's `pollis-core` dependency fails here.
+    #[test]
+    fn guard_cli_keeps_the_os_keychain_backend() {
+        assert!(
+            pollis_core::keystore::os_keychain_compiled(),
+            "pollis-tui must depend on pollis-core with the `os-keystore` feature: \
+             the shipped CLI has to prefer the OS keychain wherever one exists. \
+             On a host without one it now falls back to the machine-bound \
+             encrypted file at runtime (#882) — that fallback is not a reason to \
+             drop the feature."
+        );
+    }
+}

@@ -13,7 +13,7 @@
 | Trusted | Untrusted |
 |---|---|
 | The user's device | Network (any path between the device and any remote service) |
-| The OS keystore (Keychain / Secret Service / Credential Manager) | Turso (libSQL) — the remote relational database |
+| The device keystore — the OS keychain (Keychain / Secret Service / Credential Manager) where one exists, otherwise a machine-bound encrypted file (§3.5), which is weaker | Turso (libSQL) — the remote relational database |
 | The signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the version the user installed | Cloudflare R2 — object storage for attachments |
 | The local SQLCipher database file | LiveKit — SFU and signalling for voice and realtime events |
 | The user-held Secret Key (printed once, expected to be stored offline) | Resend — outbound email transit for OTPs |
@@ -105,7 +105,79 @@ There is no time-based backoff. The Argon2id ~250 ms-per-attempt cost combined w
 
 After PIN setup, raw `db_key` and raw `account_id_key` exist on disk only inside AEAD ciphertext. In-process they live in `Zeroizing<Vec<u8>>` containers (`AppState.unlock`) which scrub on drop (`zeroize` crate). `lock()` drops the unlock state and closes the SQLCipher handle, returning the device to a "needs PIN" state without forcing a full sign-out.
 
-### 3.5 Comparable systems
+### 3.5 Where the wrapped blobs physically sit (#882)
+
+The keystore backend is selected **at runtime**, once per process, and frozen for
+that process's lifetime (a store split across two backends is worse than either):
+
+1. **OS keychain** — macOS Keychain, Windows Credential Manager, Linux Secret
+   Service — wherever a credential store answers a read probe. Preferred always;
+   the OS guards the key.
+2. **Machine-bound encrypted file** — where none answers. This is the headless
+   case: a server reached over SSH has no secret-service, and before #882 the
+   only options were "the client refuses to start" or "the keys go to disk in
+   the clear" (#879 chose the former).
+
+The file's bytes are AES-256-GCM under a KEK derived as
+`HKDF-SHA256(ikm = platform machine ID, salt = fresh 16 bytes per write)`. The
+machine ID is `/etc/machine-id` or `/var/lib/dbus/machine-id` (Linux),
+IOPlatformUUID (macOS), MachineGuid (Windows) — a 128-bit host-unique value that
+does **not** travel with a copy of the data directory. HKDF and not Argon2id
+because the input is already high-entropy; the memory-hard cost belongs on the
+PIN, where §3.1 already puts it. Where no machine ID exists, the keystore errors
+and names `POLLIS_KEYSTORE_MACHINE_ID` rather than degrading to a constant.
+
+**What the machine binding defends against:** the keystore file *leaving the
+machine* — a home-directory backup, an `scp` of the data dir, a synced folder, a
+container image built over a live data dir, a resold disk read on other hardware.
+Those bytes are inert elsewhere.
+
+**What it does not:**
+
+- A local attacker running as the **same UID**. Whatever this process derives to
+  decrypt, they derive too. No userspace design changes that; the OS keychain is
+  what raises this bar, which is why it stays preferred.
+- A **full-disk image or VM snapshot** — `/etc/machine-id` is on the same disk
+  and world-readable. This defeats selective exfiltration, not an image of
+  everything.
+- **Forensic recovery** of the pre-migration plaintext blocks. The migration
+  replaces the file atomically; the old inode's blocks are not securely erased,
+  and no userspace API can promise that on a modern SSD or CoW filesystem.
+
+This is one of two layers, and each covers the other's gap. The PIN layer (§3.1)
+alone is weak against an exfiltrated file — 4 digits is 10⁴ candidates, roughly
+40 minutes of single-core offline sweep at the tuned ~250 ms/guess. The machine
+layer alone is weak against a same-UID local attacker. Together an attacker needs
+both the host's identity and the PIN.
+
+The PIN is deliberately **not** mixed into the file KEK. It cannot be: the
+keystore is read before the PIN exists (boot reads `pin_meta_{uid}` to choose
+between the "enter PIN" and "set PIN" screens, and `device_id_{uid}` to identify
+the device). And it need not be — the secrets inside the file are already
+PIN-wrapped one layer down.
+
+A TPM or Secure Enclave would strictly improve the first bullet, since a sealed
+key appears in no backup and no disk image. It is **not** used: `tss-esapi` is a
+heavy C dependency on `tpm2-tss`, requires both a TPM and a resource manager
+reachable by the invoking user, and would need three separate platform
+integrations. A partial integration with a silent fallback would advertise a
+protection the deployment might not have.
+
+Mobile has always worked this way — the same file, sealed under a key held by the
+Android Keystore or the iOS Keychain. Desktop was the outlier until #882.
+
+### 3.6 Migrating an existing plaintext keystore
+
+Installs predating #882 have a plaintext `dev-keystore.json`. It stays readable —
+locking a user out of their identity key is unrecoverable and worse than one more
+session of plaintext — and the first read or write re-encrypts it in place
+through the existing tempfile + fsync + rename. Because the encoding completes
+before the old file is touched, every interruption leaves either the complete old
+file or the complete new one, never a mixture. A file that fails to *decrypt* is
+never rewritten, never backed away, and never treated as empty: those bytes are
+somebody's identity key, and starting fresh would orphan it.
+
+### 3.7 Comparable systems
 
 - **Signal Desktop** uses an OS-keystore-stored randomly generated key to encrypt its local SQLCipher store, with no user PIN. Pollis adds the PIN factor; the consequence is that an attacker who clones the keystore but not the PIN cannot decrypt local data, at the cost of requiring the user to enter a PIN to unlock. This is closer to iOS message-cache encryption (PIN/biometric) than to Signal Desktop.
 - **1Password / Bitwarden** use Argon2id with comparable parameters as their master-password KDF; the difference is that they have a high-entropy master password to begin with, while Pollis has a 4-digit PIN. The 10-attempt nuke-and-recover policy is what closes that gap.
@@ -490,7 +562,7 @@ The audit-relevant property is: an attacker who compromises only the user's emai
 
 | Material | Algorithm | Where it lives | Where it does not live |
 |---|---|---|---|
-| Account identity private | ML-DSA-44 seed (32 B) | OS keystore (`account_id_key_wrapped_{uid}`, AEAD under PIN-derived KEK); `AppState.unlock` (Zeroizing, in-process) | Anywhere unwrapped on disk; any server endpoint as plaintext |
+| Account identity private | ML-DSA-44 seed (32 B) | Device keystore (`account_id_key_wrapped_{uid}`, AEAD under PIN-derived KEK — and, on the file backend, inside a second AES-256-GCM layer under a machine-bound KEK, §3.5); `AppState.unlock` (Zeroizing, in-process) | Anywhere unwrapped on disk; any server endpoint as plaintext |
 | Account identity public | ML-DSA-44 (1312 B) | `users.account_id_pub` (Turso); local `mls_kv` indirectly via leaf nodes | — |
 | Secret Key (recovery) | 150-bit Crockford base32 | User's offline backup | Any Pollis-operated system |
 | Account recovery wrap key | HKDF-SHA256 → 32 B | Derived on-demand from Secret Key + per-user salt | Stored anywhere |
@@ -501,7 +573,7 @@ The audit-relevant property is: an attacker who compromises only the user's emai
 | MLS HPKE init private | X-Wing = X25519 + ML-KEM-768 decapsulation key | Local `mls_kv` (under SQLCipher) | Off-device |
 | Published KeyPackages | Public halves only, one pool in `CS_PQ` | `mls_key_package` (Turso), tagged with its suite and claimed once each | Any private half, ever |
 | MLS application secrets | RFC 9420 | Ephemeral, per epoch | Persisted past their epoch |
-| DB encryption key (SQLCipher) | 32 random bytes | OS keystore (`db_key_wrapped_{uid}`, AEAD under PIN-derived KEK); `AppState.unlock` | Anywhere unwrapped on disk |
+| DB encryption key (SQLCipher) | 32 random bytes | Device keystore (`db_key_wrapped_{uid}`, AEAD under PIN-derived KEK, §3.5); `AppState.unlock` | Anywhere unwrapped on disk |
 | PIN | 4 ASCII digits | User's head | Stored anywhere on disk or wire |
 | KEK (PIN-derived) | Argon2id → 32 B | Ephemeral, derived from PIN at unwrap time | Stored anywhere |
 | OTP | 6-digit numeric | In-memory on Pollis Rust process as SHA-256 hash, 10-min TTL | Stored on disk |

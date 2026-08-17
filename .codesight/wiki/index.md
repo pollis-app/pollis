@@ -38,5 +38,5 @@ Start here. Navigate to the article you need.
 | Encryption | OpenMLS (RFC 9420) | `pollis-core/src/commands/mls.rs` |
 | Media | LiveKit (Rust crate) | `pollis-core/src/commands/voice/`, `livekit/` |
 | Storage | Cloudflare R2 | `pollis-core/src/commands/r2.rs` |
-| Auth | Email OTP + OS keystore | `pollis-core/src/commands/auth.rs` |
+| Auth | Email OTP + device keystore (OS keychain, else machine-bound encrypted file) | `pollis-core/src/commands/auth.rs`, `pollis-core/src/keystore.rs` |
 | Secrets | Doppler → GitHub Actions | `.env.development` for local dev |

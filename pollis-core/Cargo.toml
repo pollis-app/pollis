@@ -15,14 +15,18 @@ default = ["media", "os-keystore"]
 # When enabled, emits a `uniffi-bindgen` bin target so we can run the
 # binding generator without installing a separate crate.
 cli = ["uniffi/cli"]
-# OS keychain backend (release desktop: macOS Keychain / Windows Credential
-# Manager / Linux Secret Service). ON by default. Pulls in `keyring`, which
+# OS keychain backend (macOS Keychain / Windows Credential Manager / Linux
+# Secret Service). ON by default. Since #882 this feature decides whether the
+# keychain is *available* to prefer, not whether keys are encrypted: the file
+# backend is AES-256-GCM at rest under a machine-bound key either way, and the
+# runtime picks the keychain wherever one answers a probe. Pulls in `keyring`, which
 # unconditionally links `dbus-secret-service -> dbus -> libdbus-sys` (the
 # system `dbus-1` C lib) even in debug/test builds where the runtime backend
 # is the file store — so a headless box with no `dbus-1` still fails to link.
 # Turning this OFF (`--no-default-features`) drops the `keyring` dependency and
-# forces the file-backed keystore everywhere. A normal RELEASE desktop build
-# keeps default features, so its OS-keychain path is bit-for-bit unchanged.
+# forces the encrypted file keystore everywhere — never plaintext (#882). A
+# normal RELEASE desktop build keeps default features, so its OS-keychain path
+# is bit-for-bit unchanged.
 os-keystore = ["dep:keyring"]
 # Exposes test helpers (Config::for_test, InMemoryKeystore) for the
 # integration harness in src-tauri/tests/flows.rs.

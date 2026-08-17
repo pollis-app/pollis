@@ -32,7 +32,7 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 1. **End-to-end encrypted messaging, files, and voice.** All message content is MLS-encrypted on the device before it leaves; the server never sees plaintext. Files are convergent-encrypted with the key delivered inside the MLS-encrypted message. Voice frames are AES-128-GCM-encrypted by libwebrtc's `FrameCryptor`, keyed by the channel's MLS-exporter secret, so the LiveKit SFU forwards ciphertext only.
 2. **Zero-knowledge servers.** Turso stores ciphertext envelopes, public MLS material, and metadata; the Delivery Service handles the writes. Neither can read messages or recover any private key — both are untrusted parties in the security model below.
 3. **Reads direct, writes through the Delivery Service.** The Rust backend runs inside the Tauri host process (`src-tauri` over `pollis-core`) and reads directly from Turso over libSQL with a read-only token. **Every remote write goes through `pollis-delivery`** (`api.pollis.com`), an axum service in this repo — it is the single writer that serializes MLS commits (#419/#420), and it also brokers the credentials the client no longer holds: R2 presigned uploads, LiveKit room tokens, and the Turso token itself. Crypto stays client-side; the DS sees ciphertext and metadata, never plaintext or a private key. There is no client-side remote `INSERT`/`UPDATE`/`DELETE` anywhere in the codebase.
-4. **Local-first secrets.** Private keys, MLS group state, and decrypted plaintext only exist on the user's device. Disk copies are protected by SQLCipher (local DB) and Argon2id-derived AEAD wrapping (keystore).
+4. **Local-first secrets.** Private keys, MLS group state, and decrypted plaintext only exist on the user's device. Disk copies are protected by SQLCipher (local DB) and Argon2id-derived AEAD wrapping (keystore). Where no OS keychain exists, the keystore file itself is AES-256-GCM ciphertext under a machine-bound key (#882) — never plaintext.
 5. **Bounded but reliable history.** Members joining at MLS epoch N cannot decrypt messages from epoch < N (an MLS property), and new devices for an existing user start empty (no Megolm-style key backup). Within those limits, every message that was sent while a member was a member must be deliverable and decryptable on every device that user owns. See `CLAUDE.md` § "Messages must work" for the product principle.
 
 ---
@@ -114,7 +114,7 @@ Media stays in Rust by design. The renderer's Chromium does have WebRTC availabl
 |---|---|---|
 | **Turso** (remote) | Identity and devices (`users`, `user_device` with its cross-signing `device_cert` and PQ signature key, `account_recovery` holding the *wrapped* account-identity key, `account_key_log`); the social graph (groups, channels, DM membership, invites, blocks); delivery state (`message_envelope` — MLS ciphertext, reactions, per-device `conversation_watermark`, push tokens); public MLS material (`mls_key_package`, `mls_commit_log`, `mls_welcome`, `mls_group_info`); and `attachment_object`/`attachment_ref` mapping content hashes to R2 keys | Message plaintext, private keys |
 | **Local SQLite (SQLCipher)** | Decrypted message plaintext (`message.content`), MLS group state (`mls_kv`), preferences cache, UI state | User profiles, groups, channels (fetched from Turso) |
-| **OS Keystore** (Keychain / Secret Service / Credential Manager) | `device_id_{uid}`, `db_key_wrapped_{uid}` (SQLCipher key, AEAD-wrapped under PIN-derived KEK), `account_id_key_wrapped_{uid}` (Ed25519 account-identity private, same wrapping), `pin_meta_{uid}` (Argon2 params + verifier blob + attempt counter) | The unwrapped DB key or account-identity key (after PIN setup) |
+| **Device keystore** — the OS keychain (Keychain / Secret Service / Credential Manager) where one exists, otherwise a machine-bound encrypted file (#882) | `device_id_{uid}`, `db_key_wrapped_{uid}` (SQLCipher key, AEAD-wrapped under PIN-derived KEK), `account_id_key_wrapped_{uid}` (Ed25519 account-identity private, same wrapping), `pin_meta_{uid}` (Argon2 params + verifier blob + attempt counter) | The unwrapped DB key or account-identity key (after PIN setup) |
 
 Turso is two databases, not one. The main DB holds user/device metadata and message
 envelopes; a separate **commit-log DB** (`LOG_DB_URL`) holds the MLS control plane —
@@ -122,7 +122,9 @@ envelopes; a separate **commit-log DB** (`LOG_DB_URL`) holds the MLS control pla
 writer. Splitting them means the tables whose ordering the whole protocol depends on have
 exactly one writer and their own migration series (`pollis-schema/migrations-log/`).
 
-The local DB file is encrypted under a 32-byte random key sourced from the OS keystore, which itself only exists on disk as ciphertext under a key derived from the user's PIN via Argon2id.
+The local DB file is encrypted under a 32-byte random key sourced from the device keystore, which itself only exists on disk as ciphertext under a key derived from the user's PIN via Argon2id.
+
+The keystore backend is chosen at runtime, once per process: the OS keychain wherever one answers, otherwise a file whose bytes are AES-256-GCM ciphertext under `HKDF-SHA256(platform machine ID, fresh per-write salt)`. Plaintext is not a reachable state in any build. The machine binding is what makes a *copied* keystore useless — a backup, an `scp`, a resold disk — and it is honestly weaker than a keychain: it does not stop a local attacker running as the same UID, nor a full-disk image, since the machine ID sits on the same disk. See `.codesight/wiki/overview.md` for the full statement of what it does and does not defend against.
 
 For the full schema with column-by-column annotations see `.codesight/wiki/database.md`.
 
@@ -250,7 +252,7 @@ backend; the Signal protocol itself is long gone and the directory name is a fos
 
 | | Trusted | Untrusted |
 |---|---|---|
-| | User's device, OS keystore, the SQLCipher local DB, the signed Tauri binary (host + WebView renderer + `pollis-core`) at the installed version, the user-held Secret Key, the user-held PIN | Network, Turso, **`pollis-delivery` (the Delivery Service)**, Cloudflare R2, LiveKit, Resend, server operators |
+| | User's device, the device keystore (the OS keychain, or — where none exists — a machine-bound encrypted file, which is weaker: see `.codesight/wiki/overview.md`), the SQLCipher local DB, the signed Tauri binary (host + WebView renderer + `pollis-core`) at the installed version, the user-held Secret Key, the user-held PIN | Network, Turso, **`pollis-delivery` (the Delivery Service)**, Cloudflare R2, LiveKit, Resend, server operators |
 
 The Delivery Service is ours and it is still untrusted. It authenticates devices, orders MLS
 commits, and brokers credentials — all over material it cannot read. A fully compromised DS
