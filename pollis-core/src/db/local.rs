@@ -255,6 +255,75 @@ pub fn evict_old_messages(conn: &Connection) -> Result<usize> {
     Ok(deleted)
 }
 
+/// In-process data-dir override. `None` (the production state) means "resolve
+/// from `POLLIS_DATA_DIR` / the platform default", so nothing changes for a
+/// shipped build, a dev instance, or the mobile bridge.
+///
+/// Exists because the alternative — having test rigs point the process at a
+/// scratch directory with `std::env::set_var` — is a **data race**: `setenv`
+/// mutates a process-global array that any other thread's `getenv` may be
+/// reading at the same moment, which is why Rust 2024 made `set_var` `unsafe`.
+/// A rig that flips it between simulated devices while background tasks are live
+/// (the pollis-tui smokes + UI driver do exactly that) can therefore fail under
+/// load with nothing broken — see #923. This cell is the same knob with a lock
+/// around it: a swap is atomic and a reader always sees one whole path.
+static DATA_DIR: std::sync::RwLock<Option<std::path::PathBuf>> = std::sync::RwLock::new(None);
+
+/// Point every data-dir-derived path — the local SQLCipher DB, `accounts.json`,
+/// the file keystore, the overlay guard book — at `dir` for the rest of this
+/// process. Overrides `POLLIS_DATA_DIR`.
+///
+/// Intended for test rigs that need a scratch directory (and, for a multi-device
+/// rig, need to swap between per-device ones). Production leaves it unset.
+pub fn set_data_dir(dir: impl Into<std::path::PathBuf>) {
+    *DATA_DIR.write().expect("data-dir lock") = Some(dir.into());
+}
+
+/// The explicitly-chosen data dir, if there is one: the in-process override, else
+/// `POLLIS_DATA_DIR`. `None` means "nobody asked for a specific directory", which
+/// is what a shipped desktop build sees — and is why the keystore's keyring
+/// namespacing keys off THIS rather than off [`dirs_path`], which always has a
+/// value.
+pub(crate) fn explicit_data_dir() -> Option<std::path::PathBuf> {
+    if let Some(dir) = DATA_DIR.read().expect("data-dir lock").clone() {
+        return Some(dir);
+    }
+    // POLLIS_DATA_DIR lets a second dev instance use a separate local DB
+    // without having to override $HOME (which breaks rustup/cargo). It is also
+    // how the mobile bridge scopes state into the app sandbox.
+    std::env::var("POLLIS_DATA_DIR").ok().map(Into::into)
+}
+
+pub fn dirs_path() -> std::path::PathBuf {
+    if let Some(dir) = explicit_data_dir() {
+        return dir;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        std::path::PathBuf::from(home)
+            .join("Library/Application Support/com.pollis.app")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        std::path::PathBuf::from(home).join(".local/share/pollis")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        std::path::PathBuf::from(appdata).join("pollis")
+    }
+    // Mobile passes POLLIS_DATA_DIR (app sandbox / Documents) once the bridge
+    // is wired (issue #185); temp_dir is a compile-complete fallback so the
+    // function is total on iOS/Android.
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        std::env::temp_dir().join("pollis")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,37 +619,5 @@ mod tests {
         insert_message(conn, "m1", "datetime('now','-100 days')");
         conn.execute("DELETE FROM message", []).unwrap();
         reclaim(conn).expect("reclaim should succeed after a delete");
-    }
-}
-
-pub fn dirs_path() -> std::path::PathBuf {
-    // POLLIS_DATA_DIR lets a second dev instance use a separate local DB
-    // without having to override $HOME (which breaks rustup/cargo).
-    if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
-        return std::path::PathBuf::from(dir);
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let home = std::env::var("HOME").unwrap_or_default();
-        std::path::PathBuf::from(home)
-            .join("Library/Application Support/com.pollis.app")
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let home = std::env::var("HOME").unwrap_or_default();
-        std::path::PathBuf::from(home).join(".local/share/pollis")
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let appdata = std::env::var("APPDATA").unwrap_or_default();
-        std::path::PathBuf::from(appdata).join("pollis")
-    }
-    // Mobile passes POLLIS_DATA_DIR (app sandbox / Documents) once the bridge
-    // is wired (issue #185); temp_dir is a compile-complete fallback so the
-    // function is total on iOS/Android.
-    #[cfg(any(target_os = "ios", target_os = "android"))]
-    {
-        std::env::temp_dir().join("pollis")
     }
 }

@@ -44,7 +44,7 @@ pub async fn initialize_identity(
     let device_id = state.device_id.lock().await.clone()
         .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
 
-    match crate::commands::mls::ensure_mls_key_package(&state, &user_id, &device_id).await {
+    match crate::commands::mls::ensure_mls_key_package(state, &user_id, &device_id).await {
         Ok(()) => eprintln!("[identity] MLS key package ensured for {user_id} device {device_id}"),
         Err(e) => eprintln!("[identity] MLS key package error (non-fatal): {e}"),
     }
@@ -576,7 +576,7 @@ pub async fn dev_login(
 
     #[cfg(debug_assertions)]
     {
-        let profile = dev_login_dispatch(&_state, _email).await?;
+        let profile = dev_login_dispatch(_state, _email).await?;
         eprintln!("[auth] dev_login: logged in as {}", profile.username);
         Ok(profile)
     }
@@ -606,7 +606,7 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         let dev_email = dev_email.trim().to_string();
         if !dev_email.is_empty() {
             eprintln!("[auth] DEV_EMAIL active — auto-logging in as {dev_email}");
-            let profile = dev_login_dispatch(&state, dev_email).await?;
+            let profile = dev_login_dispatch(state, dev_email).await?;
             return Ok(Some(profile));
         }
     }

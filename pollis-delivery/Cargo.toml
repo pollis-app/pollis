@@ -81,3 +81,8 @@ pollis-schema = { path = "../pollis-schema", features = ["libsql"] }
 # The endpoint table, so the route-coverage test walks the same list the client
 # posts to rather than a copy of it.
 pollis-api = { path = "../pollis-api" }
+
+# Picks up `[workspace.lints]` from the root Cargo.toml, which declares the
+# `kani` cfg the proof harnesses in this crate are gated on.
+[lints]
+workspace = true

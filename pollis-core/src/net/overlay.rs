@@ -270,6 +270,50 @@ struct RealRelayFactory {
     /// Path length to aim for. [`path::TARGET_HOPS`] in production; tests inject
     /// a longer target to exercise middle-hop selection.
     target_hops: usize,
+    /// How a planned path becomes a connected stream. [`CircuitDialer`] in
+    /// production; the selection tests inject a deterministic in-memory dialer so
+    /// endpoint *ordering* can be exercised with no socket in the loop (#953).
+    dialer: Arc<dyn PathDialer>,
+}
+
+/// The dial step of a `connect`, isolated behind a trait.
+///
+/// Ordering (health → latency band → explore) and the dial are two separable
+/// concerns, and only the first is what most of the selection tests are about.
+/// Leaving them fused meant those tests asserted an ordering *through* real
+/// loopback QUIC dials, whose outcome feeds straight back into the thing under
+/// test — a slow dial moves the EWMA, a failed one marks the endpoint dead — so
+/// a loaded runner could flip the result with nothing broken (#953). With the
+/// dial injectable, a test drives the ordering directly and a red run means the
+/// ordering is wrong.
+#[async_trait::async_trait]
+trait PathDialer: Send + Sync {
+    async fn dial(
+        &self,
+        path: &RelayPath,
+        identity: &Arc<ClientIdentity>,
+        host: &str,
+        port: u16,
+    ) -> anyhow::Result<BoxedStream>;
+}
+
+/// The production dialer: resolve every hop → build the circuit → CONNECT to the
+/// target through it.
+struct CircuitDialer;
+
+#[async_trait::async_trait]
+impl PathDialer for CircuitDialer {
+    async fn dial(
+        &self,
+        path: &RelayPath,
+        identity: &Arc<ClientIdentity>,
+        host: &str,
+        port: u16,
+    ) -> anyhow::Result<BoxedStream> {
+        let hops = path.resolve_hops().await?;
+        let circuit = Circuit::build(hops, identity.clone())?;
+        circuit.connect(host, port).await
+    }
 }
 
 impl RealRelayFactory {
@@ -304,7 +348,15 @@ impl RealRelayFactory {
             admission,
             guards,
             target_hops,
+            dialer: Arc::new(CircuitDialer),
         }
+    }
+
+    /// Swap the dial step out. Test-only seam (#953) — see [`PathDialer`].
+    #[cfg(test)]
+    fn with_dialer(mut self, dialer: Arc<dyn PathDialer>) -> Self {
+        self.dialer = dialer;
+        self
     }
 
     /// The order to try endpoints in for the next dial: healthy endpoints first
@@ -400,7 +452,8 @@ impl RealRelayFactory {
         self.health.lock().unwrap()[idx] = None;
     }
 
-    /// Dial along `path`: resolve every hop → build the circuit → connect to the
+    /// Dial along `path` via this factory's [`PathDialer`] — in production
+    /// [`CircuitDialer`]: resolve every hop → build the circuit → connect to the
     /// target through it. A one-hop path is byte-for-byte the v0 exchange
     /// (`Circuit::connect` special-cases `n == 1`), so a small pool is unchanged.
     async fn dial_path(
@@ -410,9 +463,7 @@ impl RealRelayFactory {
         host: &str,
         port: u16,
     ) -> anyhow::Result<BoxedStream> {
-        let hops = path.resolve_hops().await?;
-        let circuit = Circuit::build(hops, identity.clone())?;
-        circuit.connect(host, port).await
+        self.dialer.dial(path, identity, host, port).await
     }
 
     /// The relays this connect may use at all, in try order:
@@ -2039,35 +2090,121 @@ mod tests {
         );
     }
 
+    // ── (e) #812 latency ordering — driven through an injected dial (#953) ─────
+    //
+    // These three tests are about WHICH endpoint a `connect` picks, given a set of
+    // measurements. They used to prove that through real loopback QUIC dials to
+    // in-process relays, which put the outcome of the dial inside the input of the
+    // thing under test: `connect` folds each successful dial's own elapsed time
+    // into the latency EWMA and marks a failed one dead for the cooldown. On a
+    // loaded runner one slow or failed dial therefore re-ordered the pool and the
+    // exact-count assertions went red with nothing broken (#953 — `... got 5 of
+    // 6`, green on re-run). They now inject a [`RecordingDialer`], so the ordering
+    // is exercised with no socket and no clock in the loop and the assertions are
+    // exact by construction. The dial path itself stays covered end-to-end by the
+    // failover / cooldown / fail-open tests above, which are about the dial.
+
+    /// A [`PathDialer`] that dials nothing: it records the index of each path's
+    /// EXIT endpoint (the hop the health/latency model is about) and hands back an
+    /// empty in-memory pipe.
+    struct RecordingDialer {
+        addrs: Vec<String>,
+        exits: Mutex<Vec<usize>>,
+    }
+
+    impl RecordingDialer {
+        fn new(endpoints: &[RelayEndpoint]) -> Arc<Self> {
+            Arc::new(RecordingDialer {
+                addrs: endpoints.iter().map(|e| e.addr.clone()).collect(),
+                exits: Mutex::new(Vec::new()),
+            })
+        }
+
+        /// The exit endpoint index each `connect` chose, in call order.
+        fn exits(&self) -> Vec<usize> {
+            self.exits.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PathDialer for RecordingDialer {
+        async fn dial(
+            &self,
+            path: &RelayPath,
+            _identity: &Arc<ClientIdentity>,
+            _host: &str,
+            _port: u16,
+        ) -> anyhow::Result<BoxedStream> {
+            let addr = &path.exit().endpoint().addr;
+            let idx = self
+                .addrs
+                .iter()
+                .position(|a| a == addr)
+                .expect("the exit must be one of the pool's endpoints");
+            self.exits.lock().unwrap().push(idx);
+            // Nothing in these tests reads or writes the returned stream; the far
+            // half is dropped immediately.
+            let (near, _far) = tokio::io::duplex(1);
+            Ok(BoxedStream::new(near))
+        }
+    }
+
+    /// A pool of `n` endpoints that are never dialed: no `AppState`, no relay
+    /// servers, no sockets. The device identity is pre-cached so `connect` never
+    /// reaches through the (deliberately dangling) `Weak<AppState>`.
+    fn ordering_factory(n: usize) -> (RealRelayFactory, Arc<RecordingDialer>) {
+        let cert = pollis_relay::tls::generate_self_signed("pollis-relay")
+            .unwrap()
+            .cert_der;
+        let endpoints: Vec<RelayEndpoint> = (0..n)
+            .map(|i| endpoint(format!("relay-{i}.invalid:443"), cert.clone()))
+            .collect();
+        let dialer = RecordingDialer::new(&endpoints);
+        let mut factory = RealRelayFactory::new(
+            Weak::new(),
+            endpoints,
+            Duration::from_secs(30),
+            Duration::from_secs(2),
+            Arc::new(RelayAdmission::unenforced()),
+            Arc::new(GuardBook::ephemeral()),
+        )
+        .with_dialer(dialer.clone());
+        *factory.identity.get_mut() = Some(identity());
+        (factory, dialer)
+    }
+
+    /// Pin each endpoint's measured latency in milliseconds, bypassing the EWMA.
+    /// Called before every `connect` in these tests: a successful dial folds its
+    /// own elapsed time into the EWMA, and what is under test is the ordering a
+    /// given measurement produces — not what the host clock did during the test.
+    fn seed_latency(factory: &RealRelayFactory, millis: &[u64]) {
+        let mut latency = factory.latency.lock().unwrap();
+        for (i, ms) in millis.iter().enumerate() {
+            latency[i] = Some(Duration::from_millis(*ms));
+        }
+    }
+
     /// #812: a relay measurably slower than the band is NOT dialed while a fast
     /// one is healthy. This is the invariant the live measurement showed missing —
     /// health-order rotation sent a US-East client to the 69 ms us-west-2 node on
-    /// every other dial. Both test relays are loopback-fast, so the latencies are
-    /// seeded directly; what is under test is the ordering, not the clock.
+    /// every other dial.
     #[tokio::test]
     async fn pool_prefers_the_lower_latency_relay() {
-        let origin = spawn_plain_http("latency-target").await;
-        let fast = spawn_pool_relay();
-        let slow = spawn_pool_relay();
-        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
-
-        let endpoints = vec![
-            endpoint(fast.addr.to_string(), fast.cert.clone()),
-            endpoint(slow.addr.to_string(), slow.cert.clone()),
-        ];
-        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
-        // Mirrors the measured pool: 15 ms same-region vs 69 ms cross-country,
-        // which is far outside RELAY_LATENCY_BAND.
-        factory.record_latency(0, Duration::from_millis(15));
-        factory.record_latency(1, Duration::from_millis(69));
+        let (factory, dialer) = ordering_factory(2);
 
         // Fewer than RELAY_EXPLORE_EVERY dials, so no explore dial intervenes.
-        const N: u64 = 6;
+        const N: usize = 6;
         for _ in 0..N {
-            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+            // Mirrors the measured pool: 15 ms same-region vs 69 ms
+            // cross-country, which is far outside RELAY_LATENCY_BAND.
+            seed_latency(&factory, &[15, 69]);
+            factory.connect(ORIGIN_NAME, 443).await.unwrap();
         }
-        assert_eq!(fast.stats.dials(), N, "every dial took the fast relay");
-        assert_eq!(slow.stats.dials(), 0, "the +54ms relay was never dialed");
+        assert_eq!(
+            dialer.exits(),
+            vec![0; N],
+            "every dial must take the fast relay; the +54ms one is never preferred"
+        );
     }
 
     /// #812: relays within `RELAY_LATENCY_BAND` of each other are equivalent and
@@ -2075,33 +2212,19 @@ mod tests {
     /// onto a single node — that is a load-spread and anonymity-set regression.
     #[tokio::test]
     async fn pool_rotates_within_the_latency_band() {
-        let origin = spawn_plain_http("band-target").await;
-        let relay0 = spawn_pool_relay();
-        let relay1 = spawn_pool_relay();
-        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+        let (factory, dialer) = ordering_factory(2);
 
-        let endpoints = vec![
-            endpoint(relay0.addr.to_string(), relay0.cert.clone()),
-            endpoint(relay1.addr.to_string(), relay1.cert.clone()),
-        ];
-        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
-        // 5 ms apart — well inside the 20 ms band, so neither wins outright.
-        factory.record_latency(0, Duration::from_millis(10));
-        factory.record_latency(1, Duration::from_millis(15));
-
-        const N: u64 = 6;
+        const N: usize = 6;
         for _ in 0..N {
-            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+            // 5 ms apart — well inside the 20 ms band, so neither wins outright
+            // and the rotating start index still deals the dials out.
+            seed_latency(&factory, &[10, 15]);
+            factory.connect(ORIGIN_NAME, 443).await.unwrap();
         }
         assert_eq!(
-            relay0.stats.dials(),
-            N / 2,
-            "in-band endpoint 0 keeps its share"
-        );
-        assert_eq!(
-            relay1.stats.dials(),
-            N / 2,
-            "in-band endpoint 1 keeps its share"
+            dialer.exits(),
+            vec![0, 1, 0, 1, 0, 1],
+            "in-band endpoints keep alternating"
         );
     }
 
@@ -2111,33 +2234,21 @@ mod tests {
     /// silently shrink to whichever node happened to win early.
     #[tokio::test]
     async fn pool_explores_the_slow_relay_periodically() {
-        let origin = spawn_plain_http("explore-target").await;
-        let fast = spawn_pool_relay();
-        let slow = spawn_pool_relay();
-        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
-
-        let endpoints = vec![
-            endpoint(fast.addr.to_string(), fast.cert.clone()),
-            endpoint(slow.addr.to_string(), slow.cert.clone()),
-        ];
-        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
-        factory.record_latency(0, Duration::from_millis(15));
-        factory.record_latency(1, Duration::from_millis(500));
+        let (factory, dialer) = ordering_factory(2);
 
         // Exactly one full explore period: seq 0..=RELAY_EXPLORE_EVERY-1, whose
         // last dial is the explore one and (n=2, seq odd) starts at endpoint 1.
         for _ in 0..RELAY_EXPLORE_EVERY {
-            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+            seed_latency(&factory, &[15, 500]);
+            factory.connect(ORIGIN_NAME, 443).await.unwrap();
         }
+        let mut expected = vec![0; RELAY_EXPLORE_EVERY - 1];
+        expected.push(1);
         assert_eq!(
-            slow.stats.dials(),
-            1,
-            "the slow relay is re-sampled exactly once per explore period"
-        );
-        assert_eq!(
-            fast.stats.dials(),
-            RELAY_EXPLORE_EVERY as u64 - 1,
-            "every other dial still took the fast relay"
+            dialer.exits(),
+            expected,
+            "the slow relay is re-sampled exactly once per explore period, and \
+             every other dial takes the fast one"
         );
     }
 

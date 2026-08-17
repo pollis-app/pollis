@@ -245,8 +245,8 @@ impl KeySetStatement {
         let want = String::from_utf8_lossy(context).to_string();
         self.signers
             .iter()
-            .filter(|s| !s.not_after_ms.is_some_and(|t| now_ms > t))
-            .filter(|s| s.trees.iter().any(|t| *t == want))
+            .filter(|s| s.not_after_ms.is_none_or(|t| now_ms <= t))
+            .filter(|s| s.trees.contains(&want))
             .collect()
     }
 }

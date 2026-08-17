@@ -14,7 +14,7 @@
 //!   new device:  enrollment_status(request_id) -> Approved   (installs account key)
 //!   new device:  set_pin -> finalize(user_id) -> initialize_identity
 //!
-//! Devices A and B are the SAME user, so each gets its OWN `POLLIS_DATA_DIR`
+//! Devices A and B are the SAME user, so each gets its OWN data dir
 //! (separate local SQLCipher DB + keystore + accounts index) but shares the
 //! world's DS + libsql. Carol is a third user — the independent decryptor that
 //! proves B's leaf works.

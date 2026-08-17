@@ -12,11 +12,13 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 use crate::error::Result;
+// The glob is the ONLY import from this module. Naming anything from it a
+// second time makes that private import shadow the public re-export, so the
+// name silently stops being visible to callers of this shim — the bug that
+// once hid RELAY_SERVING_EVENT (the constant the renderer's event name must
+// match) and, until clippy was armed (#912), was still hiding
+// `set_status_sink`. The glob already puts both in scope here.
 pub use pollis_core::commands::relay_serving::*;
-// Only `set_status_sink` is imported by name. Naming RELAY_SERVING_EVENT here
-// too made this private import SHADOW the glob re-export above, so the constant
-// the renderer's event name must match was silently not re-exported.
-use pollis_core::commands::relay_serving::set_status_sink;
 use pollis_core::net::peer::{RelayServingConfig, RelayServingStatus};
 use pollis_core::sink::EventSink;
 

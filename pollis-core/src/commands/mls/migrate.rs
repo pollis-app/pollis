@@ -308,6 +308,10 @@ pub(super) async fn migrate_to_current_suite_if_due(
     Ok(true)
 }
 
+/// What staging a successor's opening commit yields: `(welcomes, commit_bytes,
+/// group_info_bytes)`.
+type StagedSuccessor = (Vec<WelcomeOut>, Vec<u8>, Option<Vec<u8>>);
+
 /// Create the successor group and stage its opening commit, returning
 /// `(welcomes, commit_bytes, group_info_bytes)` — or `None` when there is
 /// nothing to commit at all.
@@ -326,7 +330,7 @@ fn stage_successor_commit<C>(
     kp_tuples: &[(String, String, Vec<u8>)],
     roster_user_ids: &HashSet<String>,
     valid_devices: &HashSet<(String, String)>,
-) -> Result<Option<(Vec<WelcomeOut>, Vec<u8>, Option<Vec<u8>>)>>
+) -> Result<Option<StagedSuccessor>>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {

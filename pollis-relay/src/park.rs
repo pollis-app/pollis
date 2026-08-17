@@ -130,10 +130,13 @@ impl ParkedPeers {
     ) -> Option<ParkRegistration> {
         let fingerprint = cert_fingerprint(&leaf_der);
         let mut map = self.lock();
-        if let Some(existing) = map.get(&fingerprint) {
-            if existing.connection.close_reason().is_none() {
-                return None;
-            }
+        // A live parked connection for this identity wins: the newcomer is
+        // refused rather than allowed to displace it.
+        let still_live = map
+            .get(&fingerprint)
+            .is_some_and(|existing| existing.connection.close_reason().is_none());
+        if still_live {
+            return None;
         }
         let registration = ParkRegistration {
             peers: self.clone(),

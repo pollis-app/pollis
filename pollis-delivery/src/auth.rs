@@ -43,10 +43,9 @@
 //!   - `PATH`            — the request path only, no query (e.g. `/v1/commits`).
 //!   - `TIMESTAMP`       — the exact ASCII of `X-Pollis-Timestamp`.
 //!   - `HEX_SHA256_BODY` — lowercase hex of `SHA-256(raw_request_body_bytes)`.
-//!                         For an empty body this is the hex SHA-256 of zero
-//!                         bytes. Binding the body hash stops a captured
-//!                         signature from being replayed over a *different*
-//!                         commit.
+//!     For an empty body this is the hex SHA-256 of zero bytes. Binding the
+//!     body hash stops a captured signature from being replayed over a
+//!     *different* commit.
 //!
 //! The signature is **ML-DSA-44** (deterministic, hedged variant disabled) over
 //! that message, produced by the device's PQ MLS signing private key; the

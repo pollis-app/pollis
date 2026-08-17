@@ -332,3 +332,8 @@ required-features = ["cli"]
 # 0.26 are already in the lockfile (reqwest + quinn); no new supply-chain crates.
 [dev-dependencies]
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+
+# Picks up `[workspace.lints]` from the root Cargo.toml, which declares the
+# `kani` cfg the proof harnesses in this crate are gated on.
+[lints]
+workspace = true

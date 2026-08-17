@@ -97,6 +97,10 @@ pub(crate) fn start_mic_stream(
     Ok((SendableStream(stream), sample_rate))
 }
 
+/// A running speaker stream: the stream handle, its sample rate, its channel
+/// count, and the shared ring the AEC render reference is read from.
+type SpeakerStream = (SendableStream, u32, u32, Arc<Mutex<VecDeque<f32>>>);
+
 /// Build a cpal output stream driven by a shared ring buffer.
 /// Returns the stream (kept alive by the caller) and the buffer to push into.
 ///
@@ -107,7 +111,7 @@ pub(crate) fn start_mic_stream(
 pub(crate) fn start_speaker_stream(
     device: &cpal::Device,
     preferred_rate: u32,
-) -> Result<(SendableStream, u32, u32, Arc<Mutex<VecDeque<f32>>>)> {
+) -> Result<SpeakerStream> {
     let config = device
         .default_output_config()
         .map_err(|e| anyhow::anyhow!("output config: {e}"))?;

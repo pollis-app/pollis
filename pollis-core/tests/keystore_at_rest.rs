@@ -2,11 +2,11 @@
 //!
 //! The unit tests in `keystore.rs` drive the codec and the file operations with
 //! an explicit machine secret. This one goes through the actual shipped type —
-//! `OsKeystore`, the same value `AppState` holds — with `POLLIS_DATA_DIR`
+//! `OsKeystore`, the same value `AppState` holds — with the process data dir
 //! pointed at a temp dir, and then reads the bytes that ended up on disk.
 //!
-//! It lives in its own test binary precisely so it can set `POLLIS_DATA_DIR`
-//! for the whole process without racing another test that reads it.
+//! It lives in its own test binary because the data dir is process-wide: pointing
+//! it somewhere is a whole-process act, so it gets a process of its own.
 
 use pollis_core::keystore::{backend_kind, BackendKind, Keystore, OsKeystore};
 
@@ -14,7 +14,7 @@ use pollis_core::keystore::{backend_kind, BackendKind, Keystore, OsKeystore};
 async fn the_production_keystore_never_leaves_plaintext_in_the_data_dir() {
     let dir = std::env::temp_dir().join(format!("pollis-ks-e2e-{}", ulid::Ulid::new()));
     std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("POLLIS_DATA_DIR", &dir);
+    pollis_core::db::local::set_data_dir(&dir);
 
     let kind = backend_kind().await;
     assert!(

@@ -218,10 +218,10 @@ pub struct World {
 }
 
 impl World {
-    /// Carve out a per-device `POLLIS_DATA_DIR` under the world's temp dir. Two
+    /// Carve out a per-device data dir under the world's temp dir. Two
     /// devices of the SAME user MUST NOT share a data dir — their local SQLCipher
     /// DB (`pollis_{user_id}.db`), file keystore, and `accounts.json` all key off
-    /// `POLLIS_DATA_DIR`, so a shared dir would have the second device clobber the
+    /// data dir, so a shared dir would have the second device clobber the
     /// first. Used by the multi-device enrollment + recovery smokes.
     pub fn device_dir(&self, name: &str) -> std::path::PathBuf {
         let dir = self._tmp.join(name);
@@ -235,10 +235,19 @@ impl World {
 pub async fn spawn_world() -> World {
     let tmp = tempfile::tempdir().expect("tempdir").keep();
     // The file keystore is bypassed (InMemoryKeystore per client), but the local
-    // SQLCipher DB path derives from POLLIS_DATA_DIR — keyed per user, so all
+    // SQLCipher DB path derives from the data dir — keyed per user, so all
     // clients can share one dir.
-    std::env::set_var("POLLIS_DATA_DIR", &tmp);
-    std::env::set_var("DEV_OTP", DEV_OTP);
+    //
+    // `set_data_dir`, never `std::env::set_var`: this rig runs background sync
+    // tasks and an in-process DS on other threads, and mutating the process
+    // environment while any of them might be reading it is a data race that
+    // shows up as a rare load-dependent failure and nothing else (#923).
+    //
+    // There is no `DEV_OTP` here either. The DS half takes the code as an
+    // explicit `OtpConfig { dev_otp }` (see `spawn_in_process_delivery`) and the
+    // client half is handed `DEV_OTP` literally at every `verify_otp` call, so
+    // the environment was never actually in the loop — only in the race.
+    pollis_core::db::local::set_data_dir(&tmp);
 
     let main = Arc::new(
         RemoteDb::connect_local(tmp.join("test_turso.db"))
@@ -1190,7 +1199,7 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
 pub struct TestClient {
     pub state: Arc<AppState>,
     pub profile: Option<auth::UserProfile>,
-    /// When set, this device's `POLLIS_DATA_DIR` — repointed (via [`use_dir`])
+    /// When set, this device's own data dir — repointed (via [`use_dir`])
     /// before any keystore/local-DB/`accounts.json` touch. `None` means "use the
     /// world's shared dir" (the single-device smokes). Two devices of the SAME
     /// user MUST each set their own, or they collide on disk.
@@ -1220,21 +1229,23 @@ impl TestClient {
         }
     }
 
-    /// Point `POLLIS_DATA_DIR` at this client's own dir, if it has one. Called at
+    /// Point the process's data dir at this client's own, if it has one. Called at
     /// the start of every keystore/DB-touching path so a second device of the same
     /// user reads/writes its OWN on-disk state. No-op for shared-dir clients.
     ///
-    /// Safe because a single test runs its clients sequentially (device A does its
-    /// work, then device B does its), and each integration-test file is its own
-    /// process — so this process-global swap never races another test.
+    /// Which device is current is still one process-wide value — two devices of
+    /// one user genuinely cannot share a directory — but it is swapped through
+    /// [`pollis_core::db::local::set_data_dir`], which is a locked write, rather
+    /// than through `std::env::set_var`, which is a data race against every other
+    /// thread's `getenv` and was the suspected cause of #923.
     fn use_dir(&self) {
         if let Some(dir) = &self.data_dir {
-            std::env::set_var("POLLIS_DATA_DIR", dir);
+            pollis_core::db::local::set_data_dir(dir);
         }
     }
 
     /// Build a fresh, signed-out client whose keystore is the **file-backed**
-    /// `default_os_keystore` (persistent under `POLLIS_DATA_DIR`) rather than the
+    /// `default_os_keystore` (persistent under the data dir) rather than the
     /// in-memory one. Needed by the restart/resync gate: the identity + session
     /// must survive a `drop` of the `AppState`, which only a file keystore does.
     /// Media/os-keystore are off under pollis-tui's build, so `default_os_keystore`
@@ -1253,16 +1264,16 @@ impl TestClient {
         }
     }
 
-    /// Like [`new_persistent`], but pinned to its OWN `POLLIS_DATA_DIR` (a subdir
+    /// Like [`new_persistent`], but pinned to its OWN data dir (a subdir
     /// `name` under the world's temp dir). Required whenever two clients belong to
     /// the SAME user (the multi-device enrollment + Secret-Key recovery smokes):
     /// each device needs an isolated local DB + keystore + accounts index. The dir
     /// is repointed just-in-time by [`use_dir`] before every on-disk touch.
     pub fn new_persistent_in(world: &World, name: &str) -> Self {
         let dir = world.device_dir(name);
-        // Build the keystore under THIS device's dir (default_os_keystore reads
-        // POLLIS_DATA_DIR eagerly at construction).
-        std::env::set_var("POLLIS_DATA_DIR", &dir);
+        // Build the keystore under THIS device's dir (the file keystore resolves
+        // the data dir on every operation).
+        pollis_core::db::local::set_data_dir(&dir);
         let state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
             Arc::new(world.main.query_only_view()),
@@ -1277,7 +1288,7 @@ impl TestClient {
     }
 
     /// Simulate a quit→relaunch: drop the current `AppState` and rebuild a NEW
-    /// one on the SAME `POLLIS_DATA_DIR` + same libsql handles, with a FRESH
+    /// one on the SAME data dir + same libsql handles, with a FRESH
     /// `default_os_keystore`. The profile is retained in-memory only as the
     /// test's record of "who this device is" — the rebuilt state knows nothing
     /// until `auth::boot` rehydrates it from the persisted accounts index +
@@ -1286,8 +1297,8 @@ impl TestClient {
     /// have moved it), which is what `get_session` keys off.
     pub fn restart(&mut self, world: &World) {
         self.activate();
-        // Rebuild the keystore against THIS device's dir (default_os_keystore reads
-        // POLLIS_DATA_DIR eagerly); `activate` already repointed it via `use_dir`.
+        // Rebuild the keystore against THIS device's dir; `activate` already
+        // repointed the process at it via `use_dir`.
         // Replace the Arc: the old AppState (and its file keystore handle) drops
         // when the last reference goes. The rebuilt state reads the same on-disk
         // keystore + local SQLCipher DB the previous instance wrote.
@@ -1308,7 +1319,7 @@ impl TestClient {
     /// signing already works after signup; this keeps the shared fallback honest
     /// for any path that consults it.
     fn activate(&self) {
-        // Repoint POLLIS_DATA_DIR FIRST so the accounts-index write below (and
+        // Repoint the data dir FIRST so the accounts-index write below (and
         // every subsequent DB/keystore touch) lands in THIS device's dir.
         self.use_dir();
         if let Some(p) = &self.profile {
@@ -1320,7 +1331,7 @@ impl TestClient {
     /// (request_otp → verify_otp → set_pin → initialize_identity). Everything
     /// routes through the in-process DS.
     pub async fn sign_up(&mut self, email: &str) -> auth::UserProfile {
-        // Repoint POLLIS_DATA_DIR before verify_otp generates identity material +
+        // Repoint the data dir before verify_otp generates identity material +
         // writes the device id to the keystore (both key off the data dir).
         self.use_dir();
         pollis_tui::auth::request_otp(&self.state, email)

@@ -472,7 +472,7 @@ mod tests {
         // Everything up to MIN_BUCKET - HEADER collapses to MIN_BUCKET.
         let a = pad(b"");
         let b = pad(b"ok");
-        let c = pad(&vec![b'x'; 100]);
+        let c = pad(&[b'x'; 100]);
         let d = pad(&vec![b'y'; MIN_BUCKET - HEADER]);
         assert_eq!(a.len(), MIN_BUCKET);
         assert_eq!(a.len(), b.len());

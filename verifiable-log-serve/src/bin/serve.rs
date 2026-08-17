@@ -182,12 +182,12 @@ fn main() -> ExitCode {
 }
 
 fn run_generate(
-    bundle_path: &PathBuf,
+    bundle_path: &std::path::Path,
     account_bundle_path: Option<&std::path::Path>,
     binaries_bundle_path: Option<&std::path::Path>,
     key_set_path: Option<&std::path::Path>,
     root_key_hex: Option<&str>,
-    out: &PathBuf,
+    out: &std::path::Path,
 ) -> Result<()> {
     let bundle = layout::load_bundle(bundle_path)?;
     let manifest = layout::generate(&bundle, out)?;

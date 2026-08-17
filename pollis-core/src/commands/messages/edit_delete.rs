@@ -293,10 +293,7 @@ pub async fn delete_message(
             )));
         }
 
-        let raw = match content {
-            Some(r) => r,
-            None => String::new(),
-        };
+        let raw = content.unwrap_or_default();
         let attachments = parse_attachment_refs(&raw);
         if attachments.is_empty() {
             Vec::new()

@@ -35,7 +35,7 @@ pub async fn subscribe_screen_share_frames(
 
 #[tauri::command]
 pub async fn screenshare_ws_url(state: State<'_, Arc<AppState>>) -> Result<Option<String>> {
-    Ok(pollis_core::commands::screenshare::screenshare_ws_url(&state).await?)
+    pollis_core::commands::screenshare::screenshare_ws_url(&state).await
 }
 
 #[tauri::command]

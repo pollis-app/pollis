@@ -243,7 +243,7 @@ fn presign_canonical_query_is_sorted() {
     sorted.sort_unstable();
     assert_eq!(names, sorted, "canonical query params must be name-sorted");
     // And the signature is genuinely last (never part of what was signed).
-    assert!(query.split('&').last().unwrap().starts_with("X-Amz-Signature="));
+    assert!(query.split('&').next_back().unwrap().starts_with("X-Amz-Signature="));
 }
 
 // ─── #828: pseudonymous room names ───────────────────────────────────────────

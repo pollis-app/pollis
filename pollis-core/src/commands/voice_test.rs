@@ -60,6 +60,12 @@ pub struct VoiceTestState {
     pub playback_task: Option<tokio::task::JoinHandle<()>>,
 }
 
+impl Default for VoiceTestState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VoiceTestState {
     pub fn new() -> Self {
         Self {

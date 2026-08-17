@@ -598,7 +598,7 @@ async fn ingest_group_envelopes_interleaved(
     // pre-parsed `epoch_of`; `&str` keys avoid cloning every `sent_at`.
     let mut out: Vec<ConvIngest> = Vec::with_capacity(per_conv.len());
     for (ci, (cid, envs)) in per_conv.iter().enumerate() {
-        let items: Vec<(&str, super::watermark::EnvKind, Option<(i64, u64)>)> = envs
+        let items: Vec<super::watermark::EnvView<&str, (i64, u64)>> = envs
             .iter()
             .enumerate()
             .map(|(ei, env)| {
@@ -780,9 +780,7 @@ fn decrypt_and_persist_one(
                 // authorship is proven here, cryptographically — neither the
                 // server nor another member can edit a message they did not write.
                 // A mismatched or unknown-target edit is silently dropped.
-                let Some((plain, cred_sender)) = decryptor.decrypt(bytes) else {
-                    return None;
-                };
+                let (plain, cred_sender) = decryptor.decrypt(bytes)?;
                 let author: Option<String> = conn
                     .query_row(
                         "SELECT sender_id FROM message WHERE id = ?1",

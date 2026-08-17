@@ -169,9 +169,13 @@ impl BrokerConfig {
 /// Resolve the user the broker acts as.
 ///
 ///   - auth ON  → the verified signer; any client-supplied identity is ignored
-///                (the whole point — a signed request can only act as itself).
+///     (the whole point — a signed request can only act as itself).
 ///   - auth OFF → the body's `user_id` (no signed identity on the no-auth path).
-///                Missing/empty → 400. Mirrors [`crate::writes`]' resolvers.
+///     Missing/empty → 400. Mirrors [`crate::writes`]' resolvers.
+// The `Err` is the axum `Response` handed straight back to the client; boxing it
+// would only move those bytes to the heap on a path taken once per rejected
+// request.
+#[allow(clippy::result_large_err)]
 fn resolve_user(authed: &Authed, body_user_id: Option<&str>) -> Result<String, Response> {
     match authed {
         Some(u) => Ok(u.clone()),

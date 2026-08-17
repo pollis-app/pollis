@@ -67,7 +67,7 @@ pub fn inclusion_path(index: usize, leaves: &[Hash]) -> Vec<Hash> {
 /// size-`second` tree (RFC 6962 §2.1.2, `PROOF`). Requires
 /// `0 < first <= second <= leaves.len()`.
 pub fn consistency_path(first: usize, leaves: &[Hash]) -> Vec<Hash> {
-    subproof(first, &leaves[..], true)
+    subproof(first, leaves, true)
 }
 
 /// RFC 6962 `SUBPROOF`. `b` tracks whether the current subtree is the older

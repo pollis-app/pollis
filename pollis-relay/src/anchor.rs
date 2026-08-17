@@ -286,11 +286,12 @@ impl std::fmt::Debug for AnchorVerifier {
 /// The ladder is deliberately three-rung, and [`AnchorPolicy::Require`] cannot
 /// be constructed without a verifier — "require an anchor but have no key to
 /// check it with" is not a representable state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum AnchorPolicy {
     /// No transparency-log key configured. This node makes **no anchoring
     /// claim**: it neither requires an anchor nor pretends to have checked one.
     /// It must not reject a presented anchor either — it has no basis to.
+    #[default]
     Ignore,
     /// Verify every anchor presented; a bad one is an authentication failure.
     /// A client that presents none is still served (the shipped fleet, and any
@@ -328,12 +329,6 @@ impl AnchorPolicy {
     /// Is a client obliged to present an anchor?
     pub fn is_required(&self) -> bool {
         matches!(self, AnchorPolicy::Require(_))
-    }
-}
-
-impl Default for AnchorPolicy {
-    fn default() -> AnchorPolicy {
-        AnchorPolicy::Ignore
     }
 }
 

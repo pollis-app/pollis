@@ -147,7 +147,7 @@ pub fn signers_from_key_set(
 ) -> KeySetOutcome {
     let live: Vec<&PinnedRoot> = roots
         .iter()
-        .filter(|r| !r.not_after.is_some_and(|exp| now_ms > exp))
+        .filter(|r| r.not_after.is_none_or(|exp| now_ms <= exp))
         .collect();
     if live.is_empty() {
         return KeySetOutcome::NoRootPinned;

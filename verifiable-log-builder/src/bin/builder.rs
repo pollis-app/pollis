@@ -311,6 +311,8 @@ fn parse_retired_keys(specs: &[String]) -> Result<Vec<RetiredKey>> {
 }
 
 #[tokio::main(flavor = "current_thread")]
+// One parameter per CLI flag this subcommand accepts.
+#[allow(clippy::too_many_arguments)]
 async fn run_build(
     db: Option<String>,
     log_db: Option<String>,
@@ -359,7 +361,7 @@ async fn run_build(
         None
     };
     // "Absent" (not requested) counts the same as "empty" for the all-empty check.
-    let account_empty = account_rows.as_ref().map_or(true, |r| r.is_empty());
+    let account_empty = account_rows.as_ref().is_none_or(|r| r.is_empty());
 
     // Only hard-fail when there is nothing to publish from EITHER tenant. With at
     // least one non-empty source we go on to write a bundle for each — an empty

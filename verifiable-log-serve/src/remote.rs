@@ -144,7 +144,6 @@ impl Report {
 /// problem (a bad signature, a tampered entry, a missing or forged proof) is
 /// recorded as a failed check and folded into [`Report::ok`], so a tampered
 /// artifact yields `Ok(Report { ok: false, .. })` rather than an error.
-
 pub fn verify_remote(base_url: &str) -> Result<Report> {
     let base = base_url.trim_end_matches('/');
     let agent = build_agent(None)?;

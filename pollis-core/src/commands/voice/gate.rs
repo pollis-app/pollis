@@ -550,6 +550,10 @@ mod tests {
     /// can produce `deafened && !self_muted`, or `transmitting` while
     /// deafened.
     #[test]
+    // The three assertions below are each written as "never (A and B)" because
+    // that is the invariant; De Morgan'ing one of them would break the set's
+    // parallel shape for no gain.
+    #[allow(clippy::nonminimal_bool)]
     fn invariant_holds_over_all_short_transition_sequences() {
         #[derive(Clone, Copy)]
         enum Op {

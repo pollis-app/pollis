@@ -397,6 +397,9 @@ pub enum PublishCertOutcome {
 /// `mls_signature_pub`. Extracted from the handler so the in-process integration
 /// harness drives the identical verify + write against the shared main DB.
 /// Does NOT touch the session — the caller invalidates it on `Applied`.
+// The full cert-publication tuple as it arrives on the wire; the handler and the
+// integration harness must both pass exactly this, so it stays flat.
+#[allow(clippy::too_many_arguments)]
 pub async fn apply_publish_device_cert(
     conn: &libsql::Connection,
     user_id: &str,

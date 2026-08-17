@@ -14,10 +14,10 @@ use super::{RawSink, ScreenShareEvent};
 
 /// A connected capture-helper session — the spawned child plus the two
 /// halves of its Unix-socket connection. We split the stream because the
-/// parent both **writes** (Select message on macOS) and **reads** (Format
-/// + Frames). Owning both halves lets us park the writer in state while
-/// the reader task drains frames; dropping the writer would signal EOF
-/// to the helper's reader and risk an early exit.
+/// parent both **writes** (Select message on macOS) and **reads**
+/// (Format + Frames). Owning both halves lets us park the writer in state
+/// while the reader task drains frames; dropping the writer would signal
+/// EOF to the helper's reader and risk an early exit.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub struct HelperSession {
     pub child: tokio::process::Child,
@@ -80,6 +80,12 @@ pub struct ScreenShareState {
 
     /// Per-remote-track drain task. Key = "{identity}-{sid}".
     pub remote_drain_tasks: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
+}
+
+impl Default for ScreenShareState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ScreenShareState {

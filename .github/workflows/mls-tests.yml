@@ -153,7 +153,17 @@ jobs:
           sudo docker image prune --all --force || true
           df -h /
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The PINNED toolchain, not `@stable`. The action exports
+      # `RUSTUP_TOOLCHAIN`, which OVERRIDES `rust-toolchain.toml` — so this job
+      # was silently testing on whatever stable happened to be that week while
+      # releases build on 1.96.0, and it would ignore the pin's new `clippy`
+      # component. Pinning here makes the lint gate below deterministic (a new
+      # stable's new lints cannot turn an untouched PR red on their own) and
+      # makes the gate test what actually ships. Bump in lockstep with
+      # rust-toolchain.toml and the desktop-release refs.
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -206,11 +216,25 @@ jobs:
           TURSO_TOKEN=placeholder
           EOF
 
-      # The client/server wire contract (#875). Runs FIRST because it is the
-      # cheapest signal and the most load-bearing: its `compile_fail` doctests ARE
+      # The remote schema itself (#924). Runs FIRST — it is seconds-cheap, it has
+      # no system deps, and it is the definition every other job here stamps its
+      # databases from. Its tests are the only automatic check that a migration
+      # file on disk is actually LISTED (an unlisted file is applied by
+      # `db-apply.sh` in production and by no harness — a test passing against a
+      # schema no deploy has), that versions are unique and ascending, and that
+      # `single_db_scripts()` keeps main-then-log order, which is what a single-DB
+      # deploy depends on to get migrations-log/000004's `generation` column.
+      # Nothing ran these before, so the constraint every deployment relies on was
+      # pinned only by a test nobody executed.
+      - name: Remote schema + migration ordering (pollis-schema)
+        run: cargo test -p pollis-schema
+
+      # The client/server wire contract (#875). Runs early because it is a cheap
+      # signal and the most load-bearing: its `compile_fail` doctests ARE
       # the guarantee that a client body missing or misspelling a field cannot
       # compile, so a contract that CI never exercises would be worth nothing.
       - name: DS write-API contract (pollis-api)
+        if: ${{ !cancelled() }}
         run: cargo test -p pollis-api
 
       # Cheap and media-free — fast signal that the DS serializer holds. Includes
@@ -239,6 +263,23 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: src-tauri
         run: cargo test --features test-harness --test flows
+
+      # The Rust lint gate (#912). Until now `cargo clippy` was not even
+      # installed for the pinned toolchain, so thousands of lines merged without
+      # one lint pass ever running — including the work whose own audit found
+      # duplication drifting into divergence, which is exactly what these lints
+      # catch. `rust-toolchain.toml` now lists the component, so nothing has to
+      # install it here.
+      #
+      # It lives in THIS job rather than its own: the toolchain, the ~10 apt
+      # packages pollis-core/src-tauri need, and the warm cargo cache are already
+      # here, and a separate job would duplicate all three plus a cache entry
+      # (the repo has been over GitHub's 10 GiB budget before — #759). Placed
+      # last so the merge-blocking test signal lands first; `-D warnings` makes a
+      # new lint fail the job, which the `gate` check below already reports.
+      - name: Rust lints (clippy)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Marathon soak: ONE crazy-long generated sequence (hundreds of ops, larger
       # actor pool, messages + churn + faults) through the shadow-oracle

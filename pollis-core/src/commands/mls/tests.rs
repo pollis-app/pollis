@@ -1486,7 +1486,7 @@ fn reconcile_remove_multi_device_user() {
 }
 
 /// 10. End-to-end: reconcile removes a stale leaf, remaining members apply
-/// the commit, and the removed member cannot decrypt new messages.
+///     the commit, and the removed member cannot decrypt new messages.
 #[test]
 fn reconcile_e2e_remove_then_communicate() {
     let conv_id = "01JTEST00000000000RECONCILEA";
@@ -2465,7 +2465,7 @@ fn pq_payloads_stay_under_their_ceilings() {
 // local group so the caller's external-rejoin backstop rebuilds it.
 
 use super::group_state::{
-    apply_one_commit, build_external_commit, classify_process_message_error, export_group_info_blob,
+    apply_one_commit, build_external_commit, export_group_info_blob,
     CommitApply, RecoverReason,
 };
 use openmls::prelude::group_info::VerifiableGroupInfo;

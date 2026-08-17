@@ -124,10 +124,11 @@ pub(crate) async fn gate_or_session(
 /// Resolve the recipient/owner a welcome op targets.
 ///
 ///   - auth ON  → the authenticated user. If the body also carries `user_id`,
-///                it must equal the authenticated user (else 403).
+///     it must equal the authenticated user (else 403).
 ///   - auth OFF → the body's `user_id` (the no-auth path has no signed identity,
-///                so the recipient must be supplied explicitly). Missing/empty
-///                → 400.
+///     so the recipient must be supplied explicitly). Missing/empty → 400.
+// As in `broker::resolve_user`: the `Err` IS the response returned to the client.
+#[allow(clippy::result_large_err)]
 fn resolve_recipient(authed: Authed, body_user_id: Option<String>) -> Result<String, Response> {
     match authed {
         Some(user) => {
@@ -184,9 +185,9 @@ pub(crate) fn outcome_response(outcome: WriteOutcome) -> Result<Response, AppErr
 /// Resolve the actor a write is performed as.
 ///
 ///   - auth ON  → the authenticated user. If the body also carries an actor id,
-///                it must equal the authenticated user (else `Forbidden`).
+///     it must equal the authenticated user (else `Forbidden`).
 ///   - auth OFF → the body's actor id (no signed identity on the no-auth path).
-///                Missing/empty → `Forbidden`.
+///     Missing/empty → `Forbidden`.
 ///
 /// Returns the actor or [`WriteOutcome::Forbidden`] so `apply_*` fns can `?`-bail
 /// uniformly. (Distinct from [`resolve_recipient`], which returns an HTTP

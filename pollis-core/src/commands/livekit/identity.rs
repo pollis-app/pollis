@@ -71,8 +71,7 @@ pub(super) async fn enrich_participants_with_avatars(
         return participants;
     }
     // Build a parameterised IN clause: `?,?,?,...`.
-    let placeholders = std::iter::repeat("?")
-        .take(user_ids.len())
+    let placeholders = std::iter::repeat_n("?", user_ids.len())
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(

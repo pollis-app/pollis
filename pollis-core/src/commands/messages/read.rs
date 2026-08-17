@@ -157,10 +157,8 @@ async fn read_local_channel_page(
                  LIMIT ?2"
             )?;
             let mapped = stmt.query_map(rusqlite::params![conversation_id, limit], row_to_channel_message)?;
-            for r in mapped {
-                if let Ok(m) = r {
-                    rows.push(m);
-                }
+            for m in mapped.flatten() {
+                rows.push(m);
             }
         }
         Some(c) => {
@@ -173,10 +171,8 @@ async fn read_local_channel_page(
                  LIMIT ?4"
             )?;
             let mapped = stmt.query_map(rusqlite::params![conversation_id, c.sent_at, c.id, limit], row_to_channel_message)?;
-            for r in mapped {
-                if let Ok(m) = r {
-                    rows.push(m);
-                }
+            for m in mapped.flatten() {
+                rows.push(m);
             }
         }
     }
@@ -215,10 +211,8 @@ async fn attach_sender_usernames_local(
         let mapped = stmt.query_map(rusqlite::params_from_iter(ids_vec.iter()), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
-        for r in mapped {
-            if let Ok((id, name)) = r {
-                found.insert(id, name);
-            }
+        for (id, name) in mapped.flatten() {
+            found.insert(id, name);
         }
         ids_vec.iter().filter(|i| !found.contains_key(*i)).cloned().collect()
     };
@@ -393,10 +387,8 @@ pub async fn read_last_messages(
             let mut stmt = db.conn().prepare(&sql)?;
             let mapped =
                 stmt.query_map(rusqlite::params_from_iter(chunk.iter()), row_to_channel_message)?;
-            for r in mapped {
-                if let Ok(m) = r {
-                    out.push(m);
-                }
+            for m in mapped.flatten() {
+                out.push(m);
             }
         }
         out

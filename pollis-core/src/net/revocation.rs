@@ -49,21 +49,12 @@ use super::directory::{Directory, DirectoryError};
 use super::path::RelayEndpoint;
 
 /// What the currently-held signed directory says about revocation.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct AnchorState {
     /// The sequence the directory anchors; a held list below this is stale.
     seq: u64,
     /// Whether inability to evaluate revocation must empty the pool.
     required: bool,
-}
-
-impl Default for AnchorState {
-    fn default() -> Self {
-        AnchorState {
-            seq: 0,
-            required: false,
-        }
-    }
 }
 
 /// The client's revocation admission gate for the relay pool.
