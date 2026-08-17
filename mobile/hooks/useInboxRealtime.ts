@@ -11,6 +11,7 @@
 // the lists still refresh on their normal query lifecycle / screen focus.
 
 import { useEffect, useRef } from "react";
+import { router } from "expo-router";
 import type { Room } from "livekit-client";
 import { useObserver } from "mobx-react-lite";
 import { useQueryClient } from "@tanstack/react-query";
@@ -94,6 +95,9 @@ export function useInboxRealtime() {
                 .catch((e) => console.warn("[realtime] logout failed:", e))
                 .then(() => {
                   appStore.logout();
+                  // Without this the user is stranded on a dead signed-in
+                  // screen after the self-sign-out (every command now fails).
+                  router.replace("/(auth)/email");
                 });
             })
             .catch((e) => {

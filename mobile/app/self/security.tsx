@@ -20,6 +20,9 @@ import {
   usePendingEnrollmentRequests,
   useApproveEnrollment,
   useRejectEnrollment,
+  useIdentity,
+  useSecurityEvents,
+  type SecurityEvent,
 } from "../../hooks/queries";
 import {
   AUTO_LOCK_OPTIONS_MINUTES,
@@ -53,6 +56,84 @@ function formatRelative(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function shortId(id: string): string {
+  if (id.length <= 10) {
+    return id;
+  }
+  return `${id.slice(0, 6)}…${id.slice(-4)}`;
+}
+
+// Human-readable summary per `security_event.kind` — mirrors desktop's
+// SecurityPage `describe()`. Unknown kinds fall through to the raw string so
+// new event types are never silently dropped.
+function describeEvent(event: SecurityEvent): {
+  heading: string;
+  detail: string;
+} {
+  switch (event.kind) {
+    case "device_enrolled":
+      return {
+        heading: "Device enrolled",
+        detail: event.device_id
+          ? `A new device (${shortId(event.device_id)}) was approved for your account.`
+          : "A new device was approved for your account.",
+      };
+    case "device_rejected":
+      return {
+        heading: "Enrollment rejected",
+        detail: event.device_id
+          ? `A pairing request from device ${shortId(event.device_id)} was rejected.`
+          : "A device pairing request was rejected.",
+      };
+    case "device_revoked": {
+      if (!event.device_id) {
+        return {
+          heading: "Device revoked",
+          detail: "A device was removed from your account.",
+        };
+      }
+      // `name=<device name>` when the revoked row carried one (#947). This
+      // event is the last place the revoked device's name is readable — the
+      // device row itself is deleted on revoke.
+      const name = event.metadata?.startsWith("name=")
+        ? event.metadata.slice("name=".length)
+        : null;
+      return {
+        heading: "Device revoked",
+        detail: name
+          ? `"${name}" (${shortId(event.device_id)}) was removed from your account.`
+          : `Device ${shortId(event.device_id)} was removed from your account.`,
+      };
+    }
+    case "identity_reset":
+      return {
+        heading: "Identity reset",
+        detail:
+          "Your account identity was reset with the recovery key. Prior devices were signed out.",
+      };
+    case "secret_key_rotated":
+      return {
+        heading: "Recovery key rotated",
+        detail: "A new recovery key was generated. Older keys no longer work.",
+      };
+    default:
+      return {
+        heading: event.kind,
+        detail: event.metadata ?? "",
+      };
+  }
+}
+
+// How many events to render before "Show older events" — the fetch is capped
+// at 100 newest-first in the hook, so this is a display slice, not a query.
+const SECURITY_EVENTS_PAGE_SIZE = 20;
+
+// Group a key string into 4-char blocks so the mono line wraps at readable
+// boundaries instead of mid-token.
+function groupKey(key: string): string {
+  return key.replace(/(.{4})/g, "$1 ").trim();
+}
+
 export default function Security() {
   const router = useRouter();
   const { data: devices = [], isLoading, isError } = useUserDevices();
@@ -65,6 +146,9 @@ export default function Security() {
   const { minutes: autoLockMinutes, setMinutes: setAutoLockMinutes } =
     useAutoLockMinutes();
   const lockNow = useLockNow();
+  const { data: identity } = useIdentity();
+  const { data: events = [], isError: eventsError } = useSecurityEvents();
+  const [visibleEvents, setVisibleEvents] = useState(SECURITY_EVENTS_PAGE_SIZE);
 
   const onRevoke = (deviceId: string) => {
     if (confirmRevoke !== deviceId) {
@@ -172,6 +256,45 @@ export default function Security() {
           </View>
         ) : null}
 
+        <SectionTitle>IDENTITY</SectionTitle>
+        <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 8 }}>
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 12,
+              color: semantic.mute,
+              lineHeight: 17,
+            }}
+          >
+            Your public identity key. Peers you talk to can compare this
+            against what their device sees to verify it's really you.
+          </Text>
+          {identity && identity.public_key ? (
+            <Text
+              testID="text-identity-key"
+              selectable
+              style={{
+                fontFamily: fonts.mono400,
+                fontSize: 12,
+                lineHeight: 18,
+                color: semantic.ink,
+              }}
+            >
+              {groupKey(identity.public_key)}
+            </Text>
+          ) : (
+            <Text
+              style={{
+                fontFamily: fonts.mono400,
+                fontSize: 12,
+                color: semantic.mute2,
+              }}
+            >
+              No identity key published from this device yet.
+            </Text>
+          )}
+        </View>
+
         <SectionTitle>DEVICES</SectionTitle>
         {isLoading ? (
           <Text
@@ -247,6 +370,110 @@ export default function Security() {
           >
             {(revoke.error as Error).message || "Couldn't revoke device."}
           </Text>
+        ) : null}
+
+        <SectionTitle>SECURITY EVENTS</SectionTitle>
+        {eventsError ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.danger,
+              paddingHorizontal: 18,
+              paddingVertical: 12,
+            }}
+          >
+            Couldn't load security events.
+          </Text>
+        ) : null}
+        {!eventsError && events.length === 0 ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 12,
+              color: semantic.mute,
+              paddingHorizontal: 18,
+              paddingVertical: 12,
+            }}
+          >
+            No security events yet. Device pairings, revocations, and identity
+            resets will show up here.
+          </Text>
+        ) : null}
+        {events.slice(0, visibleEvents).map((ev) => {
+          const { heading, detail } = describeEvent(ev);
+          return (
+            <View
+              key={ev.id}
+              testID={`row-security-event-${ev.id}`}
+              style={{
+                paddingHorizontal: 18,
+                paddingVertical: 10,
+                gap: 2,
+                borderBottomWidth: 1,
+                borderBottomColor: semantic.hairSoft,
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: ty.rowN.fontFamily,
+                    fontSize: 13,
+                    color: semantic.ink,
+                    flex: 1,
+                  }}
+                >
+                  {heading}
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: ty.body.fontFamily,
+                    fontSize: 11,
+                    color: semantic.mute2,
+                  }}
+                >
+                  {formatRelative(ev.created_at)}
+                </Text>
+              </View>
+              {detail ? (
+                <Text
+                  style={{
+                    fontFamily: ty.body.fontFamily,
+                    fontSize: 12,
+                    lineHeight: 17,
+                    color: semantic.mute,
+                  }}
+                >
+                  {detail}
+                </Text>
+              ) : null}
+            </View>
+          );
+        })}
+        {events.length > visibleEvents ? (
+          <View
+            style={{
+              paddingHorizontal: 18,
+              paddingTop: 10,
+              flexDirection: "row",
+            }}
+          >
+            <Chip
+              testID="btn-show-older-events"
+              accessibilityLabel="Show older events"
+              onPress={() =>
+                setVisibleEvents((n) => n + SECURITY_EVENTS_PAGE_SIZE)
+              }
+            >
+              Show older events
+            </Chip>
+          </View>
         ) : null}
 
         <SectionTitle>SAFETY</SectionTitle>
