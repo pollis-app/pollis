@@ -266,6 +266,13 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-24.04
+    outputs:
+      # Half of the environment this rebuild actually ran in (#944). The release
+      # records `<app image>+helper:<helper image>` in its leaf precisely because
+      # the AppImage embeds this job's output, so the rebuilder has to report the
+      # same pair or it cannot tell whether it met the precondition for
+      # bit-identity.
+      runner_image: ${{ steps.helper_image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -312,6 +319,17 @@ jobs:
           cp target/x86_64-unknown-linux-gnu/release/pollis-capture-linux \
              src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
           chmod +x src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
+
+      # Mirrors the release's "Record the capture-helper runner image" step, with
+      # the SAME helper, so the two strings are comparable by construction rather
+      # than by two hand-written formats that agree until one of them is edited.
+      - name: Record this job's runner image (#944)
+        id: helper_image
+        run: |
+          set -euo pipefail
+          . scripts/lib/attest-helpers.sh
+          echo "image=$(runner_image_id)" >> "$GITHUB_OUTPUT"
+          echo "capture helper rebuilt on $(runner_image_id)"
 
       - name: Upload screen-capture helper
         uses: actions/upload-artifact@v4
@@ -549,15 +567,30 @@ jobs:
         env:
           # `gh release download` in the failure diagnostic needs a token; contents:read suffices.
           GH_TOKEN: ${{ github.token }}
+          HELPER_RUNNER_IMAGE: ${{ needs.rebuild-capture-helper.outputs.runner_image }}
         run: |
           set -euo pipefail
+          . scripts/lib/attest-helpers.sh
+          . scripts/lib/rebuild-verdict.sh
           HASH="${{ steps.rehash.outputs.hash }}"
-          match="$(jq -r --arg h "$HASH" \
-            '[.artifacts[]
-               | select(.platform == "linux" and .bundle == "appimage"
-                        and .layer == "payload" and .payload_sha256 == $h)]
-             | length' release-report.json)"
-          if [ "${match}" -ge 1 ]; then
+
+          # The environment this rebuild actually ran in, composed exactly as
+          # write_toolchain_manifest composes the value the release recorded.
+          OWN_IMAGE=""
+          if app_image="$(runner_image_id 2>/dev/null)" && [ -n "${HELPER_RUNNER_IMAGE:-}" ]; then
+            OWN_IMAGE="${app_image}+helper:${HELPER_RUNNER_IMAGE}"
+          fi
+          LOGGED="$(rebuild_logged_linux_payload release-report.json)"
+          LOGGED_IMAGE="$(rebuild_logged_runner_image release-report.json)"
+          VERDICT="$(rebuild_classify "$HASH" "$LOGGED" "$LOGGED_IMAGE" "$OWN_IMAGE")"
+
+          echo "reproduced payload : ${HASH}"
+          echo "logged payload     : ${LOGGED:-<none>}"
+          echo "release ran on     : ${LOGGED_IMAGE:-<not recorded in the leaf>}"
+          echo "this rebuild ran on: ${OWN_IMAGE:-<unidentifiable>}"
+          echo "verdict            : ${VERDICT}"
+
+          if [ "${VERDICT}" = "reproduced" ]; then
             echo "✅ REPRODUCED: ${HASH}"
             echo "   is present in the public transparency log as the Linux"
             echo "   AppImage payload for ${{ env.TAG }}, verified against the"
@@ -580,22 +613,79 @@ jobs:
               echo "| Reproduced payload SHA-256 | \`${HASH}\` |"
               echo "| Verified against | \`${VERIFY_BASE_URL}\` (binaries tree) |"
               echo "| Trusting | one pinned ML-DSA-44 key, no Pollis secrets |"
+              if [ -n "${LOGGED_IMAGE}" ] && [ "${LOGGED_IMAGE}" != "${OWN_IMAGE}" ]; then
+                echo "| Runner image | reproduced **despite** drift: released on \`${LOGGED_IMAGE}\`, rebuilt on \`${OWN_IMAGE}\` |"
+              fi
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::error title=Did not reproduce::rebuilt Linux payload does not match the logged one"
-            echo "::error::reproduced Linux AppImage payload hash ${HASH} is NOT the"
-            echo "::error::logged payload for ${{ env.TAG }}. Either the build did not"
-            echo "::error::reproduce (see docs/reproducible-builds-residuals.md — e.g. a"
-            echo "::error::build-recipe var left unset) or the shipped payload diverges"
-            echo "::error::from this source. Logged Linux payload hashes for the tag:"
+            # Three distinguishable reds (#944). All of them fail the run — an
+            # inconclusive rebuild is not a passing rebuild, and greening the
+            # environment cases would open a window for a real divergence every
+            # time GitHub re-images a runner. What differs is what the run is
+            # entitled to SAY, because only one of the three is an accusation.
+            case "${VERDICT}" in
+              did_not_reproduce)
+                echo "::error title=Did not reproduce::rebuilt Linux payload does not match the logged one"
+                echo "::error::reproduced Linux AppImage payload hash ${HASH} is NOT the"
+                echo "::error::logged payload for ${{ env.TAG }}, and BOTH builds ran on the"
+                echo "::error::same recorded runner image (${OWN_IMAGE})."
+                echo "::error::"
+                echo "::error::Nothing in the documented residual list explains this. Either the"
+                echo "::error::build did not reproduce for a recipe reason (see"
+                echo "::error::docs/reproducible-builds-residuals.md — e.g. a build-recipe var"
+                echo "::error::left unset) or the shipped payload diverges from this source."
+                echo "::error::That second possibility is why this workflow exists. Treat it as"
+                echo "::error::a security finding until the diff below says otherwise."
+                ;;
+              environment_drift)
+                echo "::error title=Inconclusive — build environment drifted::rebuilt on a different runner image than the release"
+                echo "::error::reproduced Linux AppImage payload hash ${HASH} is NOT the logged"
+                echo "::error::payload for ${{ env.TAG }} — but this rebuild did not run in the"
+                echo "::error::environment the release recorded:"
+                echo "::error::  release recorded: ${LOGGED_IMAGE}"
+                echo "::error::  this rebuild ran: ${OWN_IMAGE}"
+                echo "::error::"
+                echo "::error::THIS IS NOT AN ACCUSATION ABOUT THE SHIPPED BINARY. The AppImage is"
+                echo "::error::not purely a function of Pollis source: linuxdeploy copies system"
+                echo "::error::shared libraries (libkrb5, libsqlite3, libsystemd, libudev, …) off"
+                echo "::error::the build runner into the bundle, so a different runner image"
+                echo "::error::vendors different bytes for identical source. Bit-identity is"
+                echo "::error::claimed only on a matching image — docs/reproducible-builds-residuals.md §6."
+                echo "::error::"
+                echo "::error::GitHub re-images the ubuntu-22.04 label every few weeks and rolls it"
+                echo "::error::out gradually, so two jobs half an hour apart can land on different"
+                echo "::error::images. That is exactly what happened to v1.9.3 (#944)."
+                echo "::error::"
+                echo "::error::Check the diff below: if the ONLY differing paths are vendored"
+                echo "::error::system libraries, this is drift and nothing more. Any difference in"
+                echo "::error::usr/bin/pollis beyond the documented residuals is a real finding and"
+                echo "::error::must be escalated regardless of the image mismatch."
+                ;;
+              recipe_unrecorded)
+                echo "::error title=Inconclusive — the release recorded no build recipe::cannot evaluate the reproduction precondition"
+                echo "::error::reproduced Linux AppImage payload hash ${HASH} is NOT the logged"
+                echo "::error::payload for ${{ env.TAG }}, and the leaf for this tag records no"
+                echo "::error::usable runner image (${LOGGED_IMAGE:-absent or \"unknown\"})."
+                echo "::error::"
+                echo "::error::Every leaf through v1.9.7 published runner_image \"unknown\" —"
+                echo "::error::#939 fixed that going forward only, and the tree is append-only, so"
+                echo "::error::those tags cannot be re-attested with a true recipe. Without it the"
+                echo "::error::precondition for bit-identity (a matching runner image) cannot be"
+                echo "::error::checked, so this run CANNOT distinguish a real divergence from the"
+                echo "::error::runner-image drift documented in"
+                echo "::error::docs/reproducible-builds-residuals.md §6. Read the diff below and"
+                echo "::error::classify it by hand; do not read this as a reproducibility failure"
+                echo "::error::and do not read it as a pass."
+                ;;
+            esac
+            echo "::error::Logged Linux payload hashes for the tag:"
             jq -r '.artifacts[] | select(.platform=="linux" and .layer=="payload")
                    | "  \(.bundle): \(.payload_sha256)"' release-report.json || true
             echo "::error::"
-            echo "::error::This message now means what it says. The verify-log-inclusion job"
-            echo "::error::will not reach this point unless the tag is genuinely published in"
-            echo "::error::the tree AND the tree verifies, so an unpublished release can no"
-            echo "::error::longer surface here as a byte divergence — it fails earlier with its"
-            echo "::error::own message. A red run at THIS step is a real reproducibility finding."
+            echo "::error::The verify-log-inclusion job will not reach this point unless the tag"
+            echo "::error::is genuinely published in the tree AND the tree verifies, so an"
+            echo "::error::unpublished release can no longer surface here as a byte divergence —"
+            echo "::error::it fails earlier with its own message."
 
             # Name the differing files rather than leaving a bare hash mismatch.
             #
@@ -633,6 +723,32 @@ jobs:
                 echo "--- differing files ---"
                 diff -rq /tmp/xa/squashfs-root /tmp/xb/squashfs-root 2>&1 | head -30
 
+                # Split the differing paths into the two categories that mean
+                # completely different things (#944), because the previous output
+                # left that entirely to the reader — and the reader concluded
+                # "several bundled libraries differ, still unexplained" and
+                # published it.
+                #
+                # usr/lib/* in an AppImage is NOT ours. linuxdeploy copies those
+                # off the build runner, so they track the runner image, not the
+                # source. usr/bin/pollis IS ours, and a difference there is the
+                # thing worth looking at.
+                echo "--- differing files, by origin ---"
+                diff -rq /tmp/xa/squashfs-root /tmp/xb/squashfs-root 2>/dev/null \
+                  | sed -n 's|^Files /tmp/xa/squashfs-root/\(.*\) and .* differ$|\1|p' \
+                  > /tmp/differing-paths.txt || true
+                vendored="$(grep -cE '^usr/lib/' /tmp/differing-paths.txt || true)"
+                ours="$(grep -vE '^usr/lib/' /tmp/differing-paths.txt | grep -c . || true)"
+                echo "vendored host libraries (usr/lib/, copied off the runner by linuxdeploy): ${vendored:-0}"
+                echo "everything else (built from Pollis source):                              ${ours:-0}"
+                if [ "${ours:-0}" -eq 0 ] && [ "${vendored:-0}" -gt 0 ]; then
+                  echo
+                  echo "ONLY vendored host libraries differ. Nothing built from Pollis source"
+                  echo "changed. This is runner-image drift (residuals §6), not a divergence"
+                  echo "between the shipped binary and the tagged source."
+                fi
+                grep -vE '^usr/lib/' /tmp/differing-paths.txt | sed 's/^/  ours: /' || true
+
                 # diffoscope is the standard tool for exactly this question and names the
                 # cause where a hash comparison only says "different" — an embedded path,
                 # a build id, a differing debug section, reordered symbols. Installed only
@@ -661,20 +777,55 @@ jobs:
             # unexplained — and a page that publishes verdicts has to be able to
             # link a reader to the finding, not just to the word "failure".
             {
-              echo "### ❌ Did not reproduce — \`${{ env.TAG }}\`"
-              echo
-              echo "The Linux AppImage payload rebuilt from public source at this tag does"
-              echo "**not** match the payload recorded in the transparency log. The tag is"
-              echo "published and the log verifies — this is a reproducibility finding, not"
-              echo "a publishing delay."
+              case "${VERDICT}" in
+                did_not_reproduce)
+                  echo "### ❌ Did not reproduce — \`${{ env.TAG }}\`"
+                  echo
+                  echo "The Linux AppImage payload rebuilt from public source at this tag does"
+                  echo "**not** match the payload recorded in the transparency log, and both"
+                  echo "builds ran on the **same** recorded runner image. The tag is published"
+                  echo "and the log verifies, so this is a genuine reproducibility finding —"
+                  echo "not a publishing delay and not environment drift."
+                  ;;
+                environment_drift)
+                  echo "### ⚠️ Inconclusive — build environment drifted — \`${{ env.TAG }}\`"
+                  echo
+                  echo "The rebuilt payload differs from the logged one, but this rebuild did"
+                  echo "**not** run on the runner image the release recorded. The AppImage"
+                  echo "vendors system libraries copied off the build runner, so a different"
+                  echo "image legitimately yields different bytes from identical source."
+                  echo "Bit-identity is claimed only on a matching image"
+                  echo "(\`docs/reproducible-builds-residuals.md\` §6)."
+                  echo
+                  echo "**This says nothing against the shipped binary.** It says the check"
+                  echo "could not be performed under the conditions it requires."
+                  ;;
+                recipe_unrecorded)
+                  echo "### ⚠️ Inconclusive — no recorded build recipe — \`${{ env.TAG }}\`"
+                  echo
+                  echo "The rebuilt payload differs from the logged one, and the leaf for this"
+                  echo "tag records no usable runner image, so the precondition for"
+                  echo "bit-identity cannot be checked at all. Every leaf through \`v1.9.7\`"
+                  echo "published \`runner_image: \"unknown\"\`; #939 fixed that going forward"
+                  echo "only, and the tree is append-only."
+                  echo
+                  echo "**This is neither a pass nor a reproducibility failure.** Classify the"
+                  echo "diff by hand."
+                  ;;
+              esac
               echo
               echo "| | |"
               echo "|---|---|"
               echo "| Tag | \`${{ env.TAG }}\` |"
+              echo "| Verdict | \`${VERDICT}\` |"
               echo "| Reproduced payload SHA-256 | \`${HASH}\` |"
+              echo "| Logged payload SHA-256 | \`${LOGGED:-none}\` |"
+              echo "| Release runner image | \`${LOGGED_IMAGE:-not recorded}\` |"
+              echo "| Rebuild runner image | \`${OWN_IMAGE:-unidentifiable}\` |"
               echo
               echo "See the **What actually differs** group in the job log for the"
-              echo "byte offsets, the differing paths and the diffoscope output."
+              echo "byte offsets, the differing paths split by origin, and the diffoscope"
+              echo "output."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

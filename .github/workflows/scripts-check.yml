@@ -96,6 +96,16 @@ jobs:
       - name: Attest helper + payload-hash tests
         run: ./scripts/test-attest-helpers.sh
 
+      # #944: the rebuilder's verdict logic. v1.9.3 was published as an
+      # unexplained "did not reproduce" when the actual cause was that the
+      # rebuild landed on a different runner image than the release, and the
+      # AppImage vendors system libraries off that image. The classifier that
+      # tells those apart is only worth having if the case it must still catch —
+      # same image, differing bytes — provably still fails, so both directions
+      # are asserted here.
+      - name: Rebuild verdict classification (#944)
+        run: ./scripts/test-rebuild-verdict.sh
+
       # Syntax-check every shell script in scripts/, so a typo in a release-path
       # script is caught on the PR rather than mid-release.
       - name: Shell syntax check
