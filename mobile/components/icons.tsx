@@ -28,8 +28,6 @@ import {
   Bookmark,
   CheckCheck,
   ChevronLeft,
-  Copy,
-  Link,
   ChevronRight,
   Copy,
   Link2,
@@ -86,16 +84,14 @@ export const Icon = {
   mail: wrap(Mail),
   key: wrap(Key),
   device: wrap(Smartphone),
-  copy: wrap(Copy),
-  link: wrap(Link2),
+  copy: wrap(Copy, 14),
+  link: wrap(Link2, 14),
   share: wrap(Share2),
   alert: wrap(AlertCircle),
   diamond: wrap(Diamond, 16),
   info: wrap(Info, 16),
   thread: wrap(MessagesSquare, 14),
   bookmark: wrap(Bookmark, 14),
-  copy: wrap(Copy, 14),
-  link: wrap(Link, 14),
 };
 
 export type IconName = keyof typeof Icon;
