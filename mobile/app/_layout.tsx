@@ -142,6 +142,11 @@ export default function RootLayout() {
                 options={{ animation: "slide_from_bottom" }}
               />
               <Stack.Screen
+                name="self/saved"
+                options={{ animation: "slide_from_bottom" }}
+              />
+              <Stack.Screen name="m/[...permalink]" />
+              <Stack.Screen
                 name="self/delete-account"
                 options={{ animation: "slide_from_bottom" }}
               />

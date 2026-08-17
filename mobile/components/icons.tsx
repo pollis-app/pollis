@@ -25,8 +25,11 @@ import {
   Mail,
   Key,
   Smartphone,
+  Bookmark,
   CheckCheck,
   ChevronLeft,
+  Copy,
+  Link,
   ChevronRight,
   Copy,
   Link2,
@@ -90,6 +93,9 @@ export const Icon = {
   diamond: wrap(Diamond, 16),
   info: wrap(Info, 16),
   thread: wrap(MessagesSquare, 14),
+  bookmark: wrap(Bookmark, 14),
+  copy: wrap(Copy, 14),
+  link: wrap(Link, 14),
 };
 
 export type IconName = keyof typeof Icon;

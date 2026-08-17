@@ -23,6 +23,8 @@ import {
   useConversationReceipts,
   useSendReadReceipts,
   useThreadSummaries,
+  useSavedMessageIds,
+  useToggleSavedMessage,
   flattenPages,
   type ConversationKind,
   type Message,
@@ -30,6 +32,8 @@ import {
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
+import * as Clipboard from "expo-clipboard";
+import { formatMessagePermalink } from "../../lib/permalinks";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -201,6 +205,20 @@ function TextChat(props: ChatViewProps = {}) {
     conversationId,
     groupId ?? null,
   );
+  // Saved messages (#887): one query feeds every row's saved state.
+  const savedIds = useSavedMessageIds();
+  const toggleSaved = useToggleSavedMessage();
+
+  // #897: copy is VERIFIED — the boolean comes from the clipboard call, and
+  // a thrown write reads as failure, never assumed success.
+  const copyToClipboard = useCallback(async (text: string) => {
+    try {
+      return await Clipboard.setStringAsync(text);
+    } catch {
+      return false;
+    }
+  }, []);
+
   const selfName = currentUser?.username?.toLowerCase() ?? null;
   const mentionNames = useMemo(() => {
     const set = new Set<string>(["all"]);
@@ -543,6 +561,20 @@ function TextChat(props: ChatViewProps = {}) {
         <MessageActionsSheet
           target={actionTarget}
           isOwn={actionTarget.sender_id === currentUser?.id}
+          isSaved={savedIds.has(actionTarget.id)}
+          onToggleSave={() => {
+            toggleSaved.mutate(actionTarget.id);
+            setActionTarget(null);
+          }}
+          onCopyText={() => copyToClipboard(actionTarget.content)}
+          onCopyLink={() =>
+            copyToClipboard(
+              formatMessagePermalink(
+                actionTarget.conversation_id,
+                actionTarget.id,
+              ),
+            )
+          }
           onReact={(emoji) => {
             reactWithEmoji(actionTarget.id, emoji);
             setActionTarget(null);
