@@ -283,21 +283,44 @@ pub async fn catch_up_mls_group_interleaved(
             for cid in chunk {
                 params.push(cid.clone().into());
             }
-            let mut rows = conn.query(&sql, params).await?;
-            while let Some(row) = rows.next().await? {
-                let cid: String = row.get::<String>(0)?;
+            // Through `with_retry` (#914), not a bare `conn`: this is the
+            // receive path, and it is what runs first when a laptop wakes up —
+            // exactly when libsql has GC'd the idle Hrana stream. Failing here
+            // does not surface as an error the user can act on, it surfaces as
+            // messages that did not arrive, so one transparent reconnect is
+            // worth more here than anywhere else in the crate. The closure is a
+            // pure SELECT, so running it twice is safe.
+            let fetched: Vec<(String, EnvelopeRow)> = state
+                .remote_db
+                .with_retry(|conn| {
+                    let sql = sql.clone();
+                    let params = params.clone();
+                    async move {
+                        let mut rows = conn.query(&sql, params).await?;
+                        let mut out = Vec::new();
+                        while let Some(row) = rows.next().await? {
+                            out.push((
+                                row.get::<String>(0)?,
+                                (
+                                    row.get::<String>(1)?,
+                                    row.get::<String>(2)?,
+                                    row.get::<String>(3)?,
+                                    row.get::<Option<String>>(4)?,
+                                    row.get::<Option<String>>(5)?,
+                                    row.get::<String>(6)?,
+                                    row.get::<String>(7)?,
+                                ),
+                            ));
+                        }
+                        Ok(out)
+                    }
+                })
+                .await?;
+            for (cid, env) in fetched {
                 let Some(&i) = slot.get(cid.as_str()) else {
                     continue;
                 };
-                per_conv[i].1.push((
-                    row.get::<String>(1)?,
-                    row.get::<String>(2)?,
-                    row.get::<String>(3)?,
-                    row.get::<Option<String>>(4)?,
-                    row.get::<Option<String>>(5)?,
-                    row.get::<String>(6)?,
-                    row.get::<String>(7)?,
-                ));
+                per_conv[i].1.push(env);
             }
         }
     }

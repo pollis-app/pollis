@@ -894,10 +894,27 @@ pub async fn reconcile_group_mls_impl(
             );
             let params: Vec<libsql::Value> =
                 chunk.iter().cloned().map(libsql::Value::from).collect();
-            let mut rows = conn.query(&query, params).await?;
-            while let Some(row) = rows.next().await? {
-                device_pairs.push((row.get::<String>(0)?, row.get::<String>(1)?));
-            }
+            // Through `with_retry` (#914): this read decides WHICH devices get
+            // added to the tree. A dropped stream here does not fail loudly —
+            // it yields a shorter list, the reconcile commits without those
+            // devices, and they stay out of the group until something triggers
+            // another reconcile. Pure SELECT, so the retry is safe.
+            let found: Vec<(String, String)> = state
+                .remote_db
+                .with_retry(|conn| {
+                    let query = query.clone();
+                    let params = params.clone();
+                    async move {
+                        let mut rows = conn.query(&query, params).await?;
+                        let mut out = Vec::new();
+                        while let Some(row) = rows.next().await? {
+                            out.push((row.get::<String>(0)?, row.get::<String>(1)?));
+                        }
+                        Ok(out)
+                    }
+                })
+                .await?;
+            device_pairs.extend(found);
         }
     }
 

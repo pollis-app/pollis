@@ -15,10 +15,13 @@
 //! a structural lockstep, not just an outage-recovery one.
 //!
 //! Deliberately NOT a full retry helper. `RemoteDb::with_retry` is the repo's
-//! retry seam and the schedules that don't use it don't use it for real reasons
-//! (see the survey in #875): they retry different error types, on different
-//! delays, some forever. What they all genuinely share is this — spread the
-//! wake-up — so this is the piece that gets factored out, and nothing else.
+//! ONE retry seam, and it is narrow on purpose: it reconnects a dropped libsql
+//! stream and retries a single idempotent statement once (its four call sites
+//! are listed on the function). The schedules that don't use it don't use it for
+//! real reasons (see the survey in #875): they retry different error types, on
+//! different delays, some forever. What they all genuinely share is this —
+//! spread the wake-up — so this is the piece that gets factored out, and nothing
+//! else.
 
 use std::time::Duration;
 
