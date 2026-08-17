@@ -444,6 +444,13 @@ neither is recorded in the leaf. This did **not** cause the `v1.9.3` divergence
 fully accounted for above), but it is a live hole in the claim for any rebuild
 attempted later — which is the normal case for a third party auditing an old tag.
 
+This is not only a determinism concern — it is an availability one, and it was
+observed directly while working on #944: a rebuild of `v1.9.3` died after a
+14-minute compile with `failed to bundle project: http status: 429`, GitHub
+rate-limiting the tooling download. A reproducer that fetches five files from
+two hosts mid-build can fail for reasons that have nothing to do with the bytes
+it is checking, and it does so *after* paying the full build cost.
+
 The URLs are hardcoded in `tauri-bundler`
 (`bundle/linux/appimage/linuxdeploy.rs`, confirmed by inspecting the shipped
 `@tauri-apps/cli` 2.11.4 binary), so there is no per-URL override. The only lever
