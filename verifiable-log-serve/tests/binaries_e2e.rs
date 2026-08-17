@@ -15,11 +15,11 @@
 //!   artifacts + hashes, and the STH size/root are all correct.
 //! * NEGATIVE (the teeth):
 //!   (a) an STH signed under the WRONG domain context (the account-key tree's)
-//!       is rejected as an untrustworthy head;
+//!   is rejected as an untrustworthy head;
 //!   (b) a tampered leaf is rejected;
 //!   (c) a tag with no artifacts reports `found == false`;
 //!   (d) a forked tree (same released unit, different bytes) is caught on the
-//!       verifier's independent invariant replay.
+//!   verifier's independent invariant replay.
 
 use std::path::Path;
 

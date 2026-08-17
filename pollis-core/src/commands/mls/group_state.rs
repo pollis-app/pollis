@@ -1060,11 +1060,16 @@ pub async fn process_pending_commits_inner_with_hook(
 /// far beyond any real fleet — a conversation migrates once per suite era.
 const MAX_GENERATION_HOPS: usize = 4;
 
+/// The per-epoch hook a replay pass may carry: called with the open connection,
+/// the generation and the epoch each time a commit is applied. Named because the
+/// bare `dyn FnMut(..) + Send + 'h` was spelled out at every level of the replay.
+type EpochHook<'h> = dyn FnMut(&rusqlite::Connection, i64, u64) + Send + 'h;
+
 async fn process_pending_commits_locked_impl(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
-    mut on_epoch: Option<&mut (dyn FnMut(&rusqlite::Connection, i64, u64) + Send)>,
+    mut on_epoch: Option<&mut EpochHook<'_>>,
 ) -> crate::error::Result<()> {
     for _hop in 0..MAX_GENERATION_HOPS {
         let advanced =
@@ -1087,7 +1092,7 @@ async fn process_one_generation<'h>(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
-    mut on_epoch: Option<&mut (dyn FnMut(&rusqlite::Connection, i64, u64) + Send + 'h)>,
+    mut on_epoch: Option<&mut EpochHook<'h>>,
 ) -> crate::error::Result<bool> {
     // 1. Get the current lineage + epoch from the local group.
     let (generation, has_group) = {
@@ -1354,8 +1359,7 @@ async fn process_one_generation<'h>(
                     // party add.
                     let is_self_add = commit
                         .sender_id
-                        .as_deref()
-                        .map_or(false, |s| s == added_user_id.as_str());
+                        .as_deref() == Some(added_user_id.as_str());
                     if is_self_add {
                         eprintln!(
                             "[mls] process_pending_commits: deferring self-add seq {} epoch {} for {mls_group_id} — added device {added_user_id} not yet visible (issue #372)",
@@ -1495,7 +1499,7 @@ async fn process_one_generation<'h>(
     // be silently mistaken for "caught up".
     let group_exists = {
         let guard = state.local_db.lock().await;
-        guard.as_ref().map_or(false, |db| {
+        guard.as_ref().is_some_and(|db| {
             load_stored_group_at(db.conn(), mls_group_id, generation).is_some()
         })
     };

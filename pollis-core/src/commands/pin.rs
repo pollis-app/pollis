@@ -723,10 +723,10 @@ mod tests {
     use std::sync::Arc as StdArc;
 
     async fn seed_legacy(ks: &dyn crate::keystore::Keystore, uid: &str) {
-        ks.store_for_user(DB_KEY_SLOT_LEGACY, uid, &vec![7u8; 32])
+        ks.store_for_user(DB_KEY_SLOT_LEGACY, uid, &[7u8; 32])
             .await
             .unwrap();
-        ks.store_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, uid, &vec![42u8; 32])
+        ks.store_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, uid, &[42u8; 32])
             .await
             .unwrap();
     }

@@ -108,6 +108,13 @@ pub(crate) fn is_handled<E: Ord + Copy>(
     }
 }
 
+/// One envelope as the watermark rule sees it: its sort key (`sent_at`), what
+/// kind of envelope it is, and — for a message — the `(generation, epoch)`
+/// position it needs before it can be decrypted. Both halves are generic for the
+/// reason spelled out on [`next_watermark`]; the alias exists so the shape is
+/// named once instead of respelled at every call and every proof.
+pub type EnvView<S, E> = (S, EnvKind, Option<E>);
+
 /// Compute the `sent_at` a conversation's watermark may advance to, given its
 /// `sent_at`-ordered envelopes and the highest MLS epoch this pass reached.
 ///
@@ -140,7 +147,7 @@ pub(crate) fn is_handled<E: Ord + Copy>(
 /// `docs/machine-checked-correctness-design.md` §3). Keep the "stop strictly
 /// below the first un-handled envelope" rule here in sync with that spec.
 pub fn next_watermark<S: Ord + Clone, E: Ord + Copy>(
-    envs: &[(S, EnvKind, Option<E>)],
+    envs: &[EnvView<S, E>],
     max_fired_epoch: Option<E>,
 ) -> Option<S> {
     // The `sent_at` of the first envelope we must retry is an EXCLUSIVE ceiling
@@ -190,7 +197,7 @@ mod delete_consumption_tests {
     //! the DS-side delivery is proven flake-free offline (`pollis_delivery`'s
     //! `admin_delete_visibility_tests`).
 
-    use super::{next_watermark, EnvKind};
+    use super::{next_watermark, EnvKind, EnvView};
 
     /// An APPLIED delete tombstone (`EnvKind::Delete`) is CONSUMED on the first
     /// pass regardless of group state — the cursor jumps to its `sent_at`, because
@@ -199,7 +206,7 @@ mod delete_consumption_tests {
     #[test]
     fn a_delete_tombstone_is_consumed_unconditionally() {
         // No group state reached this pass (`max_fired_epoch = None`).
-        let envs: [(&str, EnvKind, Option<(i64, u64)>); 1] = [("t1", EnvKind::Delete, None)];
+        let envs: [EnvView<&str, (i64, u64)>; 1] = [("t1", EnvKind::Delete, None)];
         assert_eq!(
             next_watermark(&envs, None),
             Some("t1"),
@@ -217,7 +224,7 @@ mod delete_consumption_tests {
     /// consumed and lost.
     #[test]
     fn a_pending_delete_is_retried_not_consumed() {
-        let envs: [(&str, EnvKind, Option<(i64, u64)>); 1] = [("t1", EnvKind::DeletePending, None)];
+        let envs: [EnvView<&str, (i64, u64)>; 1] = [("t1", EnvKind::DeletePending, None)];
         assert_eq!(
             next_watermark(&envs, None),
             None,
@@ -233,7 +240,7 @@ mod delete_consumption_tests {
     /// shape but with two tombstones.
     #[test]
     fn a_pending_delete_holds_the_cursor_below_itself() {
-        let envs: [(&str, EnvKind, Option<(i64, u64)>); 2] = [
+        let envs: [EnvView<&str, (i64, u64)>; 2] = [
             ("t1", EnvKind::Delete, None),
             ("t2", EnvKind::DeletePending, None),
         ];
@@ -251,7 +258,7 @@ mod delete_consumption_tests {
     /// get.
     #[test]
     fn a_message_at_an_unreached_epoch_is_retried_not_consumed() {
-        let envs: [(&str, EnvKind, Option<(i64, u64)>); 1] =
+        let envs: [EnvView<&str, (i64, u64)>; 1] =
             [("t1", EnvKind::Message, Some((0, 5)))];
         assert_eq!(
             next_watermark(&envs, None),
@@ -269,7 +276,7 @@ mod delete_consumption_tests {
     /// discarding the redaction outcome, not from the cursor.
     #[test]
     fn a_tombstone_above_an_unreached_message_does_not_advance_past_the_message() {
-        let envs: [(&str, EnvKind, Option<(i64, u64)>); 2] = [
+        let envs: [EnvView<&str, (i64, u64)>; 2] = [
             ("t1", EnvKind::Message, Some((0, 5))),
             ("t2", EnvKind::Delete, None),
         ];
@@ -327,7 +334,7 @@ mod proofs {
     /// harnesses (P2/P3) whose statement is only clean without `sent_at` ties;
     /// with keys in `0..=3` and `MAX_LEN == 4` a distinct fill is exactly
     /// `[0,1,2,3]` (satisfiable — do not raise MAX_LEN past the key domain).
-    fn symbolic_envs(distinct_keys: bool) -> ([(u8, EnvKind, Option<u64>); MAX_LEN], usize) {
+    fn symbolic_envs(distinct_keys: bool) -> ([EnvView<u8, u64>; MAX_LEN], usize) {
         let len: usize = kani::any();
         kani::assume(len <= MAX_LEN);
 
@@ -455,7 +462,7 @@ mod proofs {
     // asserts P1 on it; Kani must find a counterexample (see the report). This is
     // test-only and unreachable from any runtime code.
     fn next_watermark_mutant<S: Ord + Clone, E: Ord + Copy>(
-        envs: &[(S, EnvKind, Option<E>)],
+        envs: &[EnvView<S, E>],
         max_fired_epoch: Option<E>,
     ) -> Option<S> {
         let stop_at: Option<&S> = envs
@@ -518,7 +525,7 @@ mod proofs {
     // while the full slice — which sees the un-handled envelope — collapses to
     // `None`, making `wm_prefix > wm_full`. Test-only, unreachable from runtime.
     fn next_watermark_p2_mutant<S: Ord + Clone, E: Ord + Copy>(
-        envs: &[(S, EnvKind, Option<E>)],
+        envs: &[EnvView<S, E>],
         max_fired_epoch: Option<E>,
     ) -> Option<S> {
         let mut candidate: Option<S> = None;
@@ -564,7 +571,7 @@ mod proofs {
     // the watermark must equal the max `sent_at`, but the mutant returns the
     // second-to-last (or `None` for a single element). Test-only.
     fn next_watermark_p3_mutant<S: Ord + Clone, E: Ord + Copy>(
-        envs: &[(S, EnvKind, Option<E>)],
+        envs: &[EnvView<S, E>],
         max_fired_epoch: Option<E>,
     ) -> Option<S> {
         let stop_at: Option<&S> = envs

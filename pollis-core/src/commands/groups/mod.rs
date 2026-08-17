@@ -5,6 +5,9 @@
 
 pub mod authz;
 mod channels;
+// `groups::groups` holds the group CRUD proper, the others its neighbours;
+// renaming it would churn every `pub use` below for no reader's benefit.
+#[allow(clippy::module_inception)]
 mod groups;
 mod invite_token;
 mod invites;

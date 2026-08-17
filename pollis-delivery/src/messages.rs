@@ -1030,24 +1030,6 @@ pub struct SweepReport {
     pub metrics: RetentionSnapshot,
 }
 
-/// The server-side envelope-GC trigger (#689): sweep every conversation that
-/// still has envelopes and run the watermark-gated cleanup for each. `stale` is
-/// the device-liveness window (`?2`, #720). Returns a [`SweepReport`] — the count
-/// visited plus the identity-free growth metrics gathered on the SAME walk (#720
-/// checkbox 1), so no second full scan is needed to emit them.
-///
-/// This replaces the old trigger — "whichever member device happens to ingest
-/// calls `/v1/envelopes/gc`" — which never fired for a conversation whose members
-/// all went quiet and fired far more often than needed for a chatty one. Nothing
-/// about *which rows qualify* changes here beyond the #720 liveness bound;
-/// retention stays bounded by the slowest LIVE member device (invariant I3), only
-/// *what drives* GC moves off the member ingest path.
-///
-/// A conversation is a DM iff its id appears in `dm_channel_member` (mirroring
-/// [`is_member`]); every other id is a group/channel. Running the wrong predicate
-/// is a no-op — its roster join yields zero rows, `COUNT(ud) = COUNT(cw) = 0`, the
-/// CASE returns NULL and `sent_at < NULL` deletes nothing — so a misclassified id
-/// can never over-delete.
 // ── Aged-out records (#762) ──────────────────────────────────────────────────
 //
 // Three tables inherited "indefinite" retention — not because anyone chose it,
@@ -1136,6 +1118,24 @@ pub async fn sweep_aged_records(
     Ok((events, tokens))
 }
 
+/// The server-side envelope-GC trigger (#689): sweep every conversation that
+/// still has envelopes and run the watermark-gated cleanup for each. `stale` is
+/// the device-liveness window (`?2`, #720). Returns a [`SweepReport`] — the count
+/// visited plus the identity-free growth metrics gathered on the SAME walk (#720
+/// checkbox 1), so no second full scan is needed to emit them.
+///
+/// This replaces the old trigger — "whichever member device happens to ingest
+/// calls `/v1/envelopes/gc`" — which never fired for a conversation whose members
+/// all went quiet and fired far more often than needed for a chatty one. Nothing
+/// about *which rows qualify* changes here beyond the #720 liveness bound;
+/// retention stays bounded by the slowest LIVE member device (invariant I3), only
+/// *what drives* GC moves off the member ingest path.
+///
+/// A conversation is a DM iff its id appears in `dm_channel_member` (mirroring
+/// [`is_member`]); every other id is a group/channel. Running the wrong predicate
+/// is a no-op — its roster join yields zero rows, `COUNT(ud) = COUNT(cw) = 0`, the
+/// CASE returns NULL and `sent_at < NULL` deletes nothing — so a misclassified id
+/// can never over-delete.
 pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result<SweepReport> {
     // Only conversations that still hold envelopes are worth visiting; steady
     // state this set is small.

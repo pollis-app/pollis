@@ -20,14 +20,14 @@
 //!
 //!   3. User confirms the code matches and taps approve. The approving
 //!      device calls `approve_device_enrollment`:
-//!        a. Verifies the verification code against the request row.
-//!        b. Generates its own ephemeral X25519 keypair.
-//!        c. ECDH(approver_priv, requester_pub) → HKDF → wrap key.
-//!        d. AES-256-GCM wraps `account_id_key.private` and writes
-//!           `approver_pub || nonce || ciphertext` into the request row.
-//!        e. Signs a `device_cert` for the new device.
-//!        f. Adds the new device to every group/DM the user is in.
-//!        g. Marks the request `status = 'approved'`.
+//!      a. Verifies the verification code against the request row.
+//!      b. Generates its own ephemeral X25519 keypair.
+//!      c. ECDH(approver_priv, requester_pub) → HKDF → wrap key.
+//!      d. AES-256-GCM wraps `account_id_key.private` and writes
+//!      `approver_pub || nonce || ciphertext` into the request row.
+//!      e. Signs a `device_cert` for the new device.
+//!      f. Adds the new device to every group/DM the user is in.
+//!      g. Marks the request `status = 'approved'`.
 //!
 //!   4. New device polls `poll_enrollment_status`. When it sees
 //!      `approved`, it unwraps the blob with its stored ephemeral private
@@ -1058,6 +1058,7 @@ pub async fn reject_device_enrollment(
 ///      GroupInfo. This is the critical step for the Secret Key path
 ///      where no welcomes exist — but it's also safe for the approval
 ///      path because it short-circuits when `has_local_group` is true.
+///
 /// Tauri-exposed wrapper around `finalize_enrollment`. Frontend invokes
 /// this after `set_pin` (or change-PIN flow) completes for an enrollment
 /// path: device approval, Secret-Key recovery, or identity reset. By
@@ -1101,12 +1102,12 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
     let conn = state.remote_db.conn().await?;
     let group_ids = fetch_user_group_ids(&conn, user_id).await?;
     let dm_ids = fetch_user_dm_ids(&conn, user_id).await?;
-    let candidate_ids: Vec<String> = group_ids.into_iter().chain(dm_ids.into_iter()).collect();
+    let candidate_ids: Vec<String> = group_ids.into_iter().chain(dm_ids).collect();
 
     for conv_id in candidate_ids {
         let already_joined = {
             let guard = state.local_db.lock().await;
-            guard.as_ref().map_or(false, |db| {
+            guard.as_ref().is_some_and(|db| {
                 crate::commands::mls::has_local_group(db.conn(), &conv_id)
             })
         };

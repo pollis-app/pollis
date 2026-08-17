@@ -29,12 +29,20 @@ use std::time::Duration;
 use common::{spawn_world, Driver};
 use crossterm::event::{KeyCode, KeyModifiers};
 
+// These two bounds are HANG GUARDS, not latency assertions. `wait_for` returns
+// the instant the text appears — a healthy run reaches both in a second or two —
+// so the only thing a tighter bound buys is a red run on a busy machine. At 25s
+// this test failed ~2 runs in 15 with every test binary and 40 spinners sharing
+// the box (the whole run took 36s), which is precisely the "re-run and it's
+// green" signal that teaches people to stop reading CI (#923). Sized instead so
+// that reaching them means the message genuinely never surfaced; a real hang is
+// caught by the job timeout, and the panic still dumps the rendered buffer.
+
 /// Message pane surfacing can need several MLS sync rounds (welcome + commit +
-/// ingest), so give it a generous bound; `wait_for` returns as soon as the text
-/// appears, so a healthy run finishes well under this.
-const SURFACE_TIMEOUT: Duration = Duration::from_secs(25);
+/// ingest).
+const SURFACE_TIMEOUT: Duration = Duration::from_secs(120);
 /// The DM row appearing in the sidebar is a single sync round away.
-const SIDEBAR_TIMEOUT: Duration = Duration::from_secs(15);
+const SIDEBAR_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[tokio::test(flavor = "multi_thread")]
 async fn message_typed_on_one_ui_surfaces_on_the_others_rendered_screen() {

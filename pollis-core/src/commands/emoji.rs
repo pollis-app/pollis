@@ -398,11 +398,9 @@ fn decode_frames(input: &[u8], format: image::ImageFormat) -> Result<Vec<RawFram
             let (numer, denom) = frame.delay().numer_denom_ms();
             // A zero or absurd delay is normalised, not trusted: GIFs in the
             // wild carry 0 to mean "as fast as possible", and browsers clamp.
-            let delay_ms = if denom == 0 {
-                100
-            } else {
-                (numer / denom).clamp(20, 10_000)
-            };
+            let delay_ms = numer
+                .checked_div(denom)
+                .map_or(100, |ms| ms.clamp(20, 10_000));
             out.push(RawFrame {
                 image: frame.into_buffer(),
                 delay_ms,

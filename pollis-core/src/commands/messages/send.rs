@@ -475,7 +475,7 @@ pub(crate) fn mention_audience(
     let mut ids: Vec<String> = Vec::new();
     for (user_id, username) in members {
         let uname = username.to_lowercase();
-        if !uname.is_empty() && tokens.iter().any(|t| *t == uname) && !ids.contains(user_id) {
+        if !uname.is_empty() && tokens.contains(&uname) && !ids.contains(user_id) {
             ids.push(user_id.clone());
         }
     }

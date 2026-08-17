@@ -456,7 +456,7 @@ pub async fn start_screen_share(
                     // PREVIEW_MIN_INTERVAL gate to bound IPC cost if anything
                     // still listens on it.
                     let show_preview = last_preview
-                        .map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL);
+                        .is_none_or(|t| t.elapsed() >= PREVIEW_MIN_INTERVAL);
                     if show_preview {
                         last_preview = Some(std::time::Instant::now());
                     }
@@ -522,6 +522,9 @@ pub async fn start_screen_share(
     Ok(())
 }
 
+// A frame's geometry, timing and two optional sinks — a per-frame hot path where
+// packing these into a struct would allocate or copy on every frame.
+#[allow(clippy::too_many_arguments)]
 fn push_frame(
     source: &NativeVideoSource,
     width: u32,

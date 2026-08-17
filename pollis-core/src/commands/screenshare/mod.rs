@@ -20,8 +20,9 @@
 //!     `std::terminate` and aborts the whole app. Isolating SCK in a
 //!     helper means the terminate kills only the helper; the parent
 //!     observes the socket close and surfaces a structured error.
-//!   Isolating capture in its own process makes the linkage soup / the
-//!   uncatchable-throw the kernel's problem on both platforms.
+//!
+//! Isolating capture in its own process makes the linkage soup / the
+//! uncatchable-throw the kernel's problem on both platforms.
 //!
 //! Windows still captures in-process via `windows-capture` — WGC is a
 //! clean in-proc linkage with no analogous uncatchable-exception hazard.

@@ -257,6 +257,10 @@ pub async fn self_update_group(
     }
 }
 
+/// What staging a self-update yields: `(epoch_before, commit_bytes,
+/// group_info_bytes)`.
+type StagedSelfUpdate = (u64, Vec<u8>, Option<Vec<u8>>);
+
 /// Stage a path-bearing commit that carries no proposals: the MLS "update" that
 /// replaces this member's leaf key and refreshes every node on its direct path.
 ///
@@ -271,7 +275,7 @@ pub(super) fn stage_self_update<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
     generation: i64,
-) -> Result<Option<(u64, Vec<u8>, Option<Vec<u8>>)>>
+) -> Result<Option<StagedSelfUpdate>>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {

@@ -272,12 +272,9 @@ pub async fn terminal_open(
     std::thread::Builder::new()
         .name(format!("pty-agg-{id}"))
         .spawn(move || {
-            loop {
-                // Blocks; returns immediately for interactive output.
-                let first = match rx.recv() {
-                    Ok(c) => c,
-                    Err(_) => break,
-                };
+            // Blocks; returns immediately for interactive output. `recv` erroring
+            // means the producer hung up, which ends the aggregator.
+            while let Ok(first) = rx.recv() {
                 let mut buf = first;
                 let mut disconnected = false;
                 while buf.len() < MAX_BATCH {

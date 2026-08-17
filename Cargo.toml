@@ -27,7 +27,22 @@ exclude = [
 [workspace.package]
 version = "1.1.0"
 edition = "2021"
-rust-version = "1.77"
+# The toolchain this repo pins (rust-toolchain.toml) and the ONLY one anything is
+# built or tested with — releases are byte-reproducible against that exact rustc,
+# so there is no second supported version for this floor to describe. It said
+# 1.77 while the tree had been using 1.82+ APIs (`Option::is_none_or`,
+# `slice::split_at_checked`) for some time; nothing caught it because clippy — the
+# thing that checks a declared MSRV — was not installed (#912). Bump this in
+# lockstep with rust-toolchain.toml.
+rust-version = "1.96"
+
+# Lints applied to every workspace crate that opts in with `lints.workspace =
+# true`. `kani` is a cfg the proof harnesses are gated on and the Kani driver
+# sets; declaring it here stops `unexpected_cfgs` firing on a build that has no
+# Kani, WITHOUT the blanket `--cfg` escape that would also swallow a genuinely
+# misspelled cfg name.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 
 [profile.dev]
 incremental = true

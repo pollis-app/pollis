@@ -81,9 +81,7 @@ async fn run_drain_task(
             }
         } else {
             onset_frames = 0;
-            if speak_hold > 0 {
-                speak_hold -= 1;
-            }
+            speak_hold = speak_hold.saturating_sub(1);
         }
         let now_speaking = speak_hold > 0;
         if now_speaking != is_speaking {
@@ -103,7 +101,7 @@ async fn run_drain_task(
         }
 
         let mut buffers = track_buffers.lock().unwrap();
-        let buf = buffers.entry(track_key.clone()).or_insert_with(VecDeque::new);
+        let buf = buffers.entry(track_key.clone()).or_default();
         buf.extend(frame.data.iter().map(|&s| s as f32 / 32_768.0));
         while buf.len() > TRACK_BUFFER_CAP_SAMPLES {
             buf.pop_front();
@@ -121,6 +119,8 @@ async fn run_drain_task(
 /// to APM as the AEC render reference, and push the frame (channel-duplicated)
 /// onto the cpal output ring. Runs at 100 Hz for the duration of the voice
 /// session; aborted on `leave_voice_channel` or output-device switch.
+// The mixer's whole working set, moved into the task once at spawn.
+#[allow(clippy::too_many_arguments)]
 async fn run_mixer_task(
     track_buffers: TrackBuffers,
     user_volumes: Arc<Mutex<HashMap<String, f32>>>,

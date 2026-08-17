@@ -254,6 +254,23 @@ jobs:
         working-directory: src-tauri
         run: cargo test --features test-harness --test flows
 
+      # The Rust lint gate (#912). Until now `cargo clippy` was not even
+      # installed for the pinned toolchain, so thousands of lines merged without
+      # one lint pass ever running — including the work whose own audit found
+      # duplication drifting into divergence, which is exactly what these lints
+      # catch. `rust-toolchain.toml` now lists the component, so nothing has to
+      # install it here.
+      #
+      # It lives in THIS job rather than its own: the toolchain, the ~10 apt
+      # packages pollis-core/src-tauri need, and the warm cargo cache are already
+      # here, and a separate job would duplicate all three plus a cache entry
+      # (the repo has been over GitHub's 10 GiB budget before — #759). Placed
+      # last so the merge-blocking test signal lands first; `-D warnings` makes a
+      # new lint fail the job, which the `gate` check below already reports.
+      - name: Rust lints (clippy)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       # Marathon soak: ONE crazy-long generated sequence (hundreds of ops, larger
       # actor pool, messages + churn + faults) through the shadow-oracle
       # convergence check. Runs on manual dispatch AND on the nightly `schedule:`

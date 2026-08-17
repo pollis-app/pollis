@@ -67,7 +67,7 @@ pub async fn get_preferences(
     // Remote is authoritative so changes made on another device are visible
     // immediately on this one. The local row is a last-known-good cache used
     // only when the remote read fails (offline / flaky connection).
-    match fetch_remote_preferences(&state, &user_id).await {
+    match fetch_remote_preferences(state, &user_id).await {
         Ok(Some(prefs)) => {
             upsert_local_preferences(state, &prefs).await;
             Ok(prefs)

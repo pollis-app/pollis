@@ -50,7 +50,7 @@ fn client_identity() -> Arc<ClientIdentity> {
         &account,
         DEVICE,
         &DEVICE_ED_PUB,
-        &device.verifying_key().encode().to_vec(),
+        &device.verifying_key().encode(),
         1,
         1_700_000_000,
     );

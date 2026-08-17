@@ -126,6 +126,7 @@ pub async fn subscribe_voice_events(
 ///       - the TLS session ticket cache used by `rustls` (rustls keeps a
 ///         per-process cache that the LiveKit WS handshake can reuse),
 ///       - reqwest's HTTPS connection pool, used for the same host's API.
+///
 ///     The body of the response is irrelevant; we want the network plumbing
 ///     to be primed.
 ///
@@ -247,6 +248,9 @@ pub async fn prepare_voice_connection(
 /// concurrently with `tokio::join!` so total join latency is ~max(net, mic)
 /// rather than net+mic. If `prepare_voice_connection` was called for this
 /// channel, DNS/TLS is already warm and we reuse the precomputed token.
+// Mirrors the `#[tauri::command]` shim's signature, which is the IPC contract the
+// renderer calls by argument name — it cannot be regrouped on this side alone.
+#[allow(clippy::too_many_arguments)]
 pub async fn join_voice_channel(
     channel_id: String,
     user_id: String,
@@ -600,9 +604,7 @@ pub async fn join_voice_channel(
                         }
                     } else {
                         onset_frames = 0;
-                        if speak_hold > 0 {
-                            speak_hold -= 1;
-                        }
+                        speak_hold = speak_hold.saturating_sub(1);
                     }
                     let now_speaking = speak_hold > 0;
                     if now_speaking != is_speaking {
@@ -670,7 +672,7 @@ pub async fn join_voice_channel(
     // Do NOT attach tracks here — TrackSubscribed fires for pre-existing
     // subscribed tracks once the event loop drains buffered events, and
     // attaching twice creates competing draining tasks.
-    let local_avatar_url = lookup_avatar_url(&state, &user_id).await;
+    let local_avatar_url = lookup_avatar_url(state, &user_id).await;
     let existing_remote: Vec<(String, String, bool)> = room
         .remote_participants()
         .into_iter()
@@ -691,7 +693,7 @@ pub async fn join_voice_channel(
     let mut existing_with_avatars: Vec<(String, String, bool, Option<String>)> =
         Vec::with_capacity(existing_remote.len());
     for (identity, name, is_muted) in existing_remote {
-        let avatar = lookup_avatar_url_for_identity(&state, &identity).await;
+        let avatar = lookup_avatar_url_for_identity(state, &identity).await;
         existing_with_avatars.push((identity, name, is_muted, avatar));
     }
     {

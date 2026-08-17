@@ -73,5 +73,5 @@ pub async fn list_voice_participants(
     state: &Arc<AppState>,
 ) -> Result<Vec<VoiceParticipantInfo>> {
     let participants = ds_room_roster(state, &channel_id).await?;
-    Ok(enrich_participants_with_avatars(&state, participants).await)
+    Ok(enrich_participants_with_avatars(state, participants).await)
 }

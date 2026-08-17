@@ -44,6 +44,12 @@ pub struct DenoiserStage {
     out_buf: Vec<f32>,
 }
 
+impl Default for DenoiserStage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DenoiserStage {
     pub fn new() -> Self {
         Self {

@@ -188,10 +188,7 @@ async fn recorded_since(db: &Db, conv: &str, device_id: &str) -> Option<(i64, i6
         )
         .await
         .unwrap();
-    match rows.next().await.unwrap() {
-        Some(r) => Some((r.get::<i64>(0).unwrap(), r.get::<i64>(1).unwrap())),
-        None => None,
-    }
+    rows.next().await.unwrap().map(|r| (r.get::<i64>(0).unwrap(), r.get::<i64>(1).unwrap()))
 }
 
 async fn status_of(router: axum::Router, req: Request<Body>) -> StatusCode {

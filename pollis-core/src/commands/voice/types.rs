@@ -321,6 +321,12 @@ pub struct VoiceState {
     pub e2ee_epoch: u64,
 }
 
+impl Default for VoiceState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VoiceState {
     pub fn new() -> Self {
         Self {

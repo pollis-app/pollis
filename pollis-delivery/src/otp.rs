@@ -77,13 +77,16 @@ impl OtpConfig {
     /// Build from DS environment. `RESEND_API_KEY` (the key the client no longer
     /// ships), `DEV_OTP` (harness/local override), `OTP_TTL_SECS` (optional).
     pub fn from_env() -> Self {
-        let mut cfg = Self::default();
-        cfg.resend_api_key = std::env::var("RESEND_API_KEY").ok().filter(|s| !s.is_empty());
-        cfg.dev_otp = std::env::var("DEV_OTP").ok().filter(|s| !s.is_empty());
-        if let Some(ttl) = std::env::var("OTP_TTL_SECS").ok().and_then(|s| s.parse().ok()) {
-            cfg.ttl_secs = ttl;
+        let defaults = Self::default();
+        Self {
+            resend_api_key: std::env::var("RESEND_API_KEY").ok().filter(|s| !s.is_empty()),
+            dev_otp: std::env::var("DEV_OTP").ok().filter(|s| !s.is_empty()),
+            ttl_secs: std::env::var("OTP_TTL_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(defaults.ttl_secs),
+            ..defaults
         }
-        cfg
     }
 }
 

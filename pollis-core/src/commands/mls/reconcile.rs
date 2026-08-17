@@ -383,6 +383,9 @@ fn desired_set<'a>(
 /// post to Turso. On the returned `ReconcileOutcome`, `epoch_after` reflects
 /// the epoch the commit WILL produce when merged (i.e. `epoch_before + 1`
 /// when a commit is staged, equal to `epoch_before` on no-op).
+// Each argument is a distinct piece of MLS state the caller already holds
+// separately; bundling them into a struct would only move the same list.
+#[allow(clippy::too_many_arguments)]
 pub fn reconcile_group_mls_core_staged<C>(
     provider: &MlsProvider<'_, C>,
     signer: &SignatureKeyPair,
@@ -480,7 +483,7 @@ where
     let bundle = group
         .commit_builder()
         .propose_removals(remove_indices.iter().copied())
-        .propose_adds(add_kps_only.into_iter())
+        .propose_adds(add_kps_only)
         .load_psks(provider.storage())
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile load_psks: {e}")))?
         .create_group_info(true)
@@ -1274,7 +1277,7 @@ mod tests {
     /// `to_remove`, and re-added if its leaf were already gone.
     #[test]
     fn a_revoked_device_with_a_key_package_is_not_desired() {
-        let tree = vec![key("alice", "a1"), key("bob", "b1")];
+        let tree = [key("alice", "a1"), key("bob", "b1")];
         let kps = vec![key("bob", "b1")];
 
         let got = desired_set(
@@ -1302,7 +1305,7 @@ mod tests {
     /// actor.
     #[test]
     fn the_committers_own_leaf_is_retained_without_a_key_package() {
-        let tree = vec![key("alice", "a1")];
+        let tree = [key("alice", "a1")];
 
         let got = desired_set(
             &[],
@@ -1322,7 +1325,7 @@ mod tests {
     /// or validity — the plain removal case, which must keep working.
     #[test]
     fn a_leaf_whose_user_left_the_roster_is_not_desired() {
-        let tree = vec![key("alice", "a1"), key("bob", "b1")];
+        let tree = [key("alice", "a1"), key("bob", "b1")];
 
         let got = desired_set(
             &[],
@@ -1363,7 +1366,7 @@ mod tests {
     /// the user out everywhere.
     #[test]
     fn revoking_one_device_spares_its_live_sibling() {
-        let tree = vec![key("alice", "a1"), key("alice", "a2")];
+        let tree = [key("alice", "a1"), key("alice", "a2")];
 
         let got = desired_set(
             &[],
@@ -1385,7 +1388,7 @@ mod tests {
     /// empty the group.
     #[test]
     fn a_missing_snapshot_disables_the_gate_rather_than_emptying_the_group() {
-        let tree = vec![key("alice", "a1"), key("bob", "b1")];
+        let tree = [key("alice", "a1"), key("bob", "b1")];
         let kps = vec![key("bob", "b1")];
 
         let unguarded = desired_set(&kps, tree.iter(), &roster(&["alice", "bob"]), None);

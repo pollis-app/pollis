@@ -10,16 +10,16 @@
 //!
 //! Submodules:
 //!   - `identity`      — parse a LiveKit identity into a Pollis user_id +
-//!                       avatar lookups against the remote DB.
+//!     avatar lookups against the remote DB.
 //!   - `participants`  — `list_voice_participants` / `list_voice_room_counts`.
 //!   - `publish`       — every outbound data-packet helper
-//!                       (`publish_to_user_inbox`, `publish_to_room_server`,
-//!                       per-event publishers, typing, voice presence,
-//!                       ping, 1:1 call invite/cancel).
+//!     (`publish_to_user_inbox`, `publish_to_room_server`,
+//!     per-event publishers, typing, voice presence,
+//!     ping, 1:1 call invite/cancel).
 //!   - `realtime`      — `subscribe_realtime` + `connect_rooms` connect /
-//!                       reconnect loop and presence emission.
+//!     reconnect loop and presence emission.
 //!   - `legacy`        — thin `get_livekit_token` / `get_livekit_view_token`
-//!                       / `get_livekit_url` shims kept for the frontend.
+//!     / `get_livekit_url` shims kept for the frontend.
 //!
 //! `dispatch_data` (defined here in `mod.rs`) parses an inbound DataReceived
 //! payload and forwards it as a typed `RealtimeEvent` on the frontend

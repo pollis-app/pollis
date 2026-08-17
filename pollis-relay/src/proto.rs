@@ -286,7 +286,7 @@ const NONCE_LEN: usize = 32;
 /// Map an ALPN token (`pollis-relay/N`) to its numeric generation, or `None` if
 /// it is not a generation this build supports.
 pub fn version_from_alpn(alpn: &[u8]) -> Option<u8> {
-    if !SUPPORTED_ALPNS.iter().any(|candidate| *candidate == alpn) {
+    if !SUPPORTED_ALPNS.contains(&alpn) {
         return None;
     }
     let text = std::str::from_utf8(alpn).ok()?;

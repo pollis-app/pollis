@@ -202,9 +202,9 @@ fn seal(
 
     // Inclusion proof for every entry, checked against the final STH.
     let mut inclusion = Vec::with_capacity(n);
-    for i in 0..n {
+    for (i, entry) in entries.iter().enumerate().take(n) {
         inclusion.push(InclusionCheck {
-            entry: entries[i].clone(),
+            entry: entry.clone(),
             proof: log.inclusion_proof(i)?,
             sth_index: final_index,
         });

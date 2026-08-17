@@ -603,7 +603,7 @@ async fn setup_registered_device(
         state,
         "/v1/auth/establish-identity",
         serde_json::json!({
-            "account_id_pub": b64(&pub_of(&account)),
+            "account_id_pub": b64(&pub_of(account)),
             "salt": b64(&[1u8; 32]),
             "nonce": b64(&[2u8; 12]),
             "wrapped_key": b64(&[3u8; 48]),

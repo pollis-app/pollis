@@ -90,12 +90,12 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                     return get_device(host, None, is_input);
                 }
             }
-            let iter = if is_input {
+            let mut iter = if is_input {
                 host.input_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             } else {
                 host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             };
-            let found = iter.filter(|d| d.name().ok().as_deref() == Some(n)).next();
+            let found = iter.find(|d| d.name().ok().as_deref() == Some(n));
             // macOS-only fallback: AirPods (and other Bluetooth duplex devices)
             // in HFP/SCO mode sometimes drop out of host.output_devices() while
             // their mic is captured, even though the device DOES support output.
