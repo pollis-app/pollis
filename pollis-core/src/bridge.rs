@@ -242,7 +242,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
     };
 
     use crate::commands::{
-        auth, blocks, device_enrollment, dm, groups, messages, pin, safety, user,
+        auth, blocks, bookmarks, device_enrollment, dm, emoji, groups, messages, pin, safety,
+        user,
     };
 
     match cmd.as_str() {
@@ -345,6 +346,20 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         "is_current_device_registered" => {
             let user_id: String = arg(&args, "userId")?;
             ok(auth::is_current_device_registered(&state()?, user_id).await?)
+        }
+        "list_security_events" => {
+            let user_id: String = arg(&args, "userId")?;
+            let limit: Option<i64> = arg_opt(&args, "limit")?;
+            ok(device_enrollment::list_security_events(&state()?, user_id, limit).await?)
+        }
+        "delete_account" => {
+            let user_id: String = arg(&args, "userId")?;
+            auth::delete_account(&state()?, user_id).await?;
+            ok(())
+        }
+        "wipe_local_data" => {
+            auth::wipe_local_data(&state()?).await?;
+            ok(())
         }
 
         // ----- pin -----
@@ -583,6 +598,37 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             )
             .await?)
         }
+        // ----- invite links -----
+        "create_group_invite_link" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let creator_id: String = arg(&args, "creatorId")?;
+            let expires_in_hours: Option<i64> = arg_opt(&args, "expiresInHours")?;
+            let max_uses: Option<i64> = arg_opt(&args, "maxUses")?;
+            ok(groups::create_group_invite_link(
+                group_id,
+                creator_id,
+                expires_in_hours,
+                max_uses,
+                &state()?,
+            )
+            .await?)
+        }
+        "list_group_invite_links" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(groups::list_group_invite_links(group_id, user_id, &state()?).await?)
+        }
+        "revoke_group_invite_link" => {
+            let link_id: String = arg(&args, "linkId")?;
+            let user_id: String = arg(&args, "userId")?;
+            groups::revoke_group_invite_link(link_id, user_id, &state()?).await?;
+            ok(())
+        }
+        "redeem_group_invite_link" => {
+            let token: String = arg(&args, "token")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(groups::redeem_group_invite_link(token, user_id, &state()?).await?)
+        }
 
         // ----- messages -----
         "list_messages" => {
@@ -639,6 +685,46 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             )
             .await?)
         }
+        // Local-first batched reads (#936): pages come straight from the local
+        // DB; the caller fires ingest separately, exactly as desktop does.
+        "read_channel_messages" => {
+            let channel_id: String = arg(&args, "channelId")?;
+            let limit: Option<i64> = arg_opt(&args, "limit")?;
+            let cursor: Option<messages::MessageCursor> = arg_opt(&args, "cursor")?;
+            ok(messages::read_channel_messages(channel_id, limit, cursor, &state()?).await?)
+        }
+        "read_dm_messages" => {
+            let dm_channel_id: String = arg(&args, "dmChannelId")?;
+            let limit: Option<i64> = arg_opt(&args, "limit")?;
+            let cursor: Option<messages::MessageCursor> = arg_opt(&args, "cursor")?;
+            ok(messages::read_dm_messages(dm_channel_id, limit, cursor, &state()?).await?)
+        }
+        "read_last_messages" => {
+            let conversation_ids: Vec<String> = arg(&args, "conversationIds")?;
+            ok(messages::read_last_messages(conversation_ids, &state()?).await?)
+        }
+        // ----- threads -----
+        "read_thread_messages" => {
+            let thread_id: String = arg(&args, "threadId")?;
+            ok(messages::read_thread_messages(thread_id, &state()?).await?)
+        }
+        "list_thread_summaries" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            ok(messages::list_thread_summaries(conversation_id, &state()?).await?)
+        }
+        // ----- read receipts -----
+        "get_conversation_receipts" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            ok(messages::get_conversation_receipts(conversation_id, &state()?).await?)
+        }
+        "mark_messages_read" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let message_ids: Vec<String> = arg(&args, "messageIds")?;
+            messages::mark_messages_read(conversation_id, user_id, message_ids, &state()?)
+                .await?;
+            ok(())
+        }
         "ingest_channel_envelopes" => {
             let user_id: String = arg(&args, "userId")?;
             let channel_id: String = arg(&args, "channelId")?;
@@ -689,6 +775,30 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let dm_channel_id: String = arg(&args, "dmChannelId")?;
             messages::ingest_dm_envelopes(user_id, dm_channel_id, &state()?).await?;
             ok(())
+        }
+
+        // ----- saved messages + permalinks (#854) -----
+        // Device-local, exactly as on desktop: no DS endpoint backs any of
+        // these, and resolve_message_permalink only ever consults the local DB.
+        "list_saved_messages" => ok(bookmarks::list_saved_messages(&state()?).await?),
+        "save_message" => {
+            let message_id: String = arg(&args, "messageId")?;
+            bookmarks::save_message(message_id, &state()?).await?;
+            ok(())
+        }
+        "toggle_saved_message" => {
+            let message_id: String = arg(&args, "messageId")?;
+            ok(bookmarks::toggle_saved_message(message_id, &state()?).await?)
+        }
+        "unsave_message" => {
+            let message_id: String = arg(&args, "messageId")?;
+            ok(bookmarks::unsave_message(message_id, &state()?).await?)
+        }
+        "resolve_message_permalink" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let message_id: String = arg(&args, "messageId")?;
+            ok(bookmarks::resolve_message_permalink(conversation_id, message_id, &state()?)
+                .await?)
         }
 
         // ----- dm -----
@@ -812,7 +922,72 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             ok(serde_json::json!({ "token": token, "url": url }))
         }
 
+        // ----- custom emoji (#890, #940) -----
+        "list_usable_emoji" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(emoji::list_usable_emoji(user_id, &state()?).await?)
+        }
+        "list_group_emoji" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(emoji::list_group_emoji(group_id, requester_id, &state()?).await?)
+        }
+        "upload_group_emoji" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let shortcode: String = arg(&args, "shortcode")?;
+            let path: String = arg(&args, "path")?;
+            // Expo hands out `file://` URIs; the Rust side reads a bare path
+            // (same strip as `get_media_path`'s destDir).
+            let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
+            ok(emoji::upload_group_emoji(group_id, shortcode, path, &state()?).await?)
+        }
+        "remove_group_emoji" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let shortcode: String = arg(&args, "shortcode")?;
+            emoji::remove_group_emoji(group_id, shortcode, &state()?).await?;
+            ok(())
+        }
+        "prepare_emoji_text" => {
+            let user_id: String = arg(&args, "userId")?;
+            let text: String = arg(&args, "text")?;
+            ok(emoji::prepare_emoji_text(user_id, text, &state()?).await?)
+        }
+        // Mobile counterpart of desktop's `get_emoji_url`: no loopback media
+        // server exists inside a sandboxed RN app, so instead of an
+        // http://127.0.0.1 URL this materialises the hash-verified emoji bytes
+        // to a file in the app's sandbox and hands back a `file://` path that
+        // expo-image can load — the same shape as `get_media_path` below, and
+        // the JS side manages the file's lifetime the same way.
+        "get_emoji_path" => {
+            let content_hash: String = arg(&args, "contentHash")?;
+            let dest_dir: String = arg(&args, "destDir")?;
+            let dir = dest_dir.strip_prefix("file://").unwrap_or(&dest_dir);
+            let (bytes, _content_type) =
+                emoji::download_verified_emoji(&content_hash, &state()?).await?;
+            tokio::fs::create_dir_all(dir)
+                .await
+                .map_err(|e| BridgeError::Bridge(format!("create emoji dir: {e}")))?;
+            let path = std::path::Path::new(dir).join(&content_hash);
+            tokio::fs::write(&path, &bytes)
+                .await
+                .map_err(|e| BridgeError::Bridge(format!("write emoji file: {e}")))?;
+            ok(format!("file://{}", path.display()))
+        }
+
         // ----- media -----
+        // The attachment send path: reads the file from the sandbox path (no
+        // bytes over the JSON bridge), convergent-encrypts, uploads via a
+        // DS-minted presign, and returns the metadata the JS side folds into
+        // the message's `_att` envelope — identical to desktop.
+        "upload_media" => {
+            let path: String = arg(&args, "path")?;
+            let filename: String = arg(&args, "filename")?;
+            let content_type: String = arg(&args, "contentType")?;
+            // Expo pickers hand out `file://` URIs; strip to a bare path.
+            let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
+            ok(crate::commands::r2::upload_media(path, filename, content_type, &state()?)
+                .await?)
+        }
         // Mobile can't run the desktop's loopback media server inside a
         // sandboxed RN app, so instead of returning an http://127.0.0.1 URL
         // we decrypt the R2 object straight to a file in the app's sandbox
@@ -844,5 +1019,62 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         _ => Err(BridgeError::Bridge(format!(
             "unknown command: {cmd} (add it to pollis-core/src/bridge.rs)"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Distinguishes "the dispatcher has an arm for this name" from "it fell
+    /// through to the unknown-command default". These tests never call
+    /// `init_pollis`, so a registered arm fails with the not-initialized
+    /// error (or an arg error for arms that parse args first) — anything but
+    /// the unknown-command message — which pins arm registration without
+    /// needing a live AppState.
+    async fn is_registered(cmd: &str) -> bool {
+        match invoke(cmd.to_string(), "{}".to_string()).await {
+            Ok(_) => true,
+            Err(BridgeError::Bridge(msg)) => !msg.starts_with("unknown command:"),
+        }
+    }
+
+    #[tokio::test]
+    async fn new_parity_arms_are_registered() {
+        for cmd in [
+            "create_group_invite_link",
+            "list_group_invite_links",
+            "revoke_group_invite_link",
+            "redeem_group_invite_link",
+            "list_saved_messages",
+            "save_message",
+            "toggle_saved_message",
+            "unsave_message",
+            "resolve_message_permalink",
+            "list_usable_emoji",
+            "list_group_emoji",
+            "upload_group_emoji",
+            "remove_group_emoji",
+            "get_emoji_path",
+            "prepare_emoji_text",
+            "get_conversation_receipts",
+            "mark_messages_read",
+            "read_thread_messages",
+            "list_thread_summaries",
+            "read_channel_messages",
+            "read_dm_messages",
+            "read_last_messages",
+            "list_security_events",
+            "delete_account",
+            "wipe_local_data",
+            "upload_media",
+        ] {
+            assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_command_still_falls_through() {
+        assert!(!is_registered("definitely_not_a_command").await);
     }
 }

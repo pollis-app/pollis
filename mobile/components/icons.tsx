@@ -27,10 +27,15 @@ import {
   Smartphone,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Link2,
+  Share2,
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
   Diamond,
   Volume2,
+  Info,
   type LucideIcon,
 } from "lucide-react-native";
 import { semantic } from "../theme/tokens";
@@ -75,7 +80,12 @@ export const Icon = {
   mail: wrap(Mail),
   key: wrap(Key),
   device: wrap(Smartphone),
+  copy: wrap(Copy),
+  link: wrap(Link2),
+  share: wrap(Share2),
+  alert: wrap(AlertCircle),
   diamond: wrap(Diamond, 16),
+  info: wrap(Info, 16),
 };
 
 export type IconName = keyof typeof Icon;

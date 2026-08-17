@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView, TextInput, Pressable } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { Screen, Crumb, Avatar, Ctx, CtxAct } from "../../components/ui";
+import { Screen, Crumb, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
+import { palette, semantic, type as ty } from "../../theme/tokens";
+import { dayKey, dayLabel, timeLabel } from "../../components/chat/dates";
+import { DaySeparator } from "../../components/chat/DaySeparator";
+import { MessageRow } from "../../components/chat/MessageRow";
+import { Composer } from "../../components/chat/Composer";
+import { EditBar } from "../../components/chat/EditBar";
+import { MessageActionsSheet } from "../../components/chat/MessageActionsSheet";
+import { ChannelMenuSheet } from "../../components/chat/ChannelMenuSheet";
 import {
   useMessages,
   useSendMessage,
@@ -18,144 +25,6 @@ import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
-
-const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
-
-function dayKey(ts: number): string {
-  return new Date(ts).toDateString();
-}
-
-function dayLabel(ts: number): string {
-  const d = new Date(ts);
-  const today = new Date();
-  if (d.toDateString() === today.toDateString()) {
-    return "TODAY";
-  }
-  const yest = new Date(today);
-  yest.setDate(today.getDate() - 1);
-  if (d.toDateString() === yest.toDateString()) {
-    return "YESTERDAY";
-  }
-  return d
-    .toLocaleDateString(undefined, { month: "short", day: "numeric" })
-    .toUpperCase();
-}
-
-function timeLabel(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function Day({ label }: { label: string }) {
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        paddingHorizontal: 18,
-        paddingTop: 14,
-        paddingBottom: 8,
-      }}
-    >
-      <View style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }} />
-      <Text style={[ty.label, { letterSpacing: 2.2 }]}>{label}</Text>
-      <View style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }} />
-    </View>
-  );
-}
-
-function Msg({
-  av,
-  amber,
-  name,
-  time,
-  text,
-  pending,
-  edited,
-  onPressAvatar,
-  onLongPress,
-  testID,
-}: {
-  av: string;
-  amber?: boolean;
-  name: string;
-  time: string;
-  text?: string;
-  pending?: boolean;
-  edited?: boolean;
-  onPressAvatar?: () => void;
-  onLongPress?: () => void;
-  testID?: string;
-}) {
-  return (
-    <Pressable
-      onLongPress={onLongPress}
-      delayLongPress={350}
-      testID={testID}
-      accessibilityLabel={text ? `${name}: ${text}` : name}
-      style={{
-        flexDirection: "row",
-        gap: 12,
-        paddingHorizontal: 18,
-        paddingVertical: 8,
-        opacity: pending ? 0.55 : 1,
-      }}
-    >
-      <Pressable onPress={onPressAvatar} disabled={!onPressAvatar}>
-        <Avatar label={av} variant={amber ? "amber" : "default"} />
-      </Pressable>
-      <View style={{ flex: 1 }}>
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-          <Text
-            style={{
-              fontFamily: ty.h1.fontFamily,
-              fontSize: 14,
-              color: semantic.ink,
-            }}
-          >
-            {name}
-          </Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-            }}
-          >
-            {pending ? "sending…" : time}
-          </Text>
-        </View>
-        {text ? (
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 14,
-              lineHeight: 20,
-              color: semantic.ink,
-              marginTop: 2,
-            }}
-          >
-            {text}
-            {edited ? (
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 11,
-                  color: semantic.mute,
-                }}
-              >
-                {"  (edited)"}
-              </Text>
-            ) : null}
-          </Text>
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
 
 // Props let this screen double as an embedded right-pane conversation on the
 // two-pane (regular/iPad) layout. Route usage passes NO props, so every value
@@ -187,6 +56,7 @@ function TextChat(props: ChatViewProps = {}) {
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const currentUser = appStore.currentUser;
 
@@ -250,6 +120,22 @@ function TextChat(props: ChatViewProps = {}) {
     }
     setDraft("");
     sendMessage.mutate({ content: text });
+  };
+
+  const onSaveEdit = () => {
+    const text = editDraft.trim();
+    if (!text || !editTarget) {
+      return;
+    }
+    editMessage.mutate(
+      { messageId: editTarget.id, newContent: text },
+      {
+        onSuccess: () => {
+          setEditTarget(null);
+          setEditDraft("");
+        },
+      },
+    );
   };
 
   const sections = useMemo(() => {
@@ -334,12 +220,12 @@ function TextChat(props: ChatViewProps = {}) {
         ) : null}
         {sections.map((section, sIdx) => (
           <View key={`${section.label}-${sIdx}`}>
-            <Day label={section.label} />
+            <DaySeparator label={section.label} />
             {section.messages.map((m) => {
               const mine = currentUser?.id === m.sender_id;
               const name = m.sender_username || (mine ? "you" : "user");
               return (
-                <Msg
+                <MessageRow
                   key={m.id}
                   testID={`row-message-${m.id}`}
                   av={name.slice(0, 2)}
@@ -416,6 +302,15 @@ function TextChat(props: ChatViewProps = {}) {
               testID="btn-members"
               accessibilityLabel="Members"
               icon={<Icon.people color={semantic.ink2} />}
+              onPress={
+                kind === "channel" && groupId
+                  ? () =>
+                      router.push({
+                        pathname: "/group/members",
+                        params: { groupId },
+                      })
+                  : undefined
+              }
             />
             <CtxAct
               testID="btn-chat-menu"
@@ -430,6 +325,10 @@ function TextChat(props: ChatViewProps = {}) {
                     pathname: "/dm/info",
                     params: { id: conversationId },
                   });
+                  return;
+                }
+                if (kind === "channel") {
+                  setMenuOpen(true);
                 }
               }}
             />
@@ -437,339 +336,73 @@ function TextChat(props: ChatViewProps = {}) {
         }
       />
       {editTarget ? (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            borderTopWidth: 1,
-            borderTopColor: semantic.accent,
-            backgroundColor: semantic.accentSoft,
+        <EditBar
+          draft={editDraft}
+          onChangeDraft={setEditDraft}
+          onCancel={() => {
+            setEditTarget(null);
+            setEditDraft("");
           }}
-        >
-          <Pressable
-            onPress={() => {
-              setEditTarget(null);
-              setEditDraft("");
-            }}
-            testID="btn-edit-cancel"
-            accessibilityRole="button"
-            accessibilityLabel="Cancel edit"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              borderWidth: 1,
-              borderColor: semantic.hairStrong,
-              borderRadius: r.sm,
-            }}
-          >
-            <Icon.exit color={semantic.ink} />
-          </Pressable>
-          <TextInput
-            testID="input-edit-composer"
-            accessibilityLabel="Edit message"
-            value={editDraft}
-            onChangeText={setEditDraft}
-            autoFocus
-            placeholder="Edit message…"
-            placeholderTextColor={semantic.mute}
-            onSubmitEditing={() => {
-              const text = editDraft.trim();
-              if (!text || !editTarget) {
-                return;
-              }
-              editMessage.mutate(
-                { messageId: editTarget.id, newContent: text },
-                {
-                  onSuccess: () => {
-                    setEditTarget(null);
-                    setEditDraft("");
-                  },
-                },
-              );
-            }}
-            returnKeyType="send"
-            style={{
-              flex: 1,
-              borderWidth: 1,
-              borderColor: semantic.accent,
-              borderRadius: r.sm,
-              paddingVertical: 10,
-              paddingHorizontal: 12,
-              fontFamily: ty.body.fontFamily,
-              fontSize: 14,
-              color: semantic.ink,
-              backgroundColor: semantic.fieldBg,
-            }}
-          />
-          <Pressable
-            onPress={() => {
-              const text = editDraft.trim();
-              if (!text || !editTarget) {
-                return;
-              }
-              editMessage.mutate(
-                { messageId: editTarget.id, newContent: text },
-                {
-                  onSuccess: () => {
-                    setEditTarget(null);
-                    setEditDraft("");
-                  },
-                },
-              );
-            }}
-            disabled={!editDraft.trim() || editMessage.isPending}
-            testID="btn-edit-save"
-            accessibilityRole="button"
-            accessibilityLabel="Save edit"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: semantic.accent,
-              borderRadius: r.sm,
-              opacity:
-                !editDraft.trim() || editMessage.isPending ? 0.4 : 1,
-            }}
-          >
-            <Icon.check color="#0a0907" />
-          </Pressable>
-        </View>
+          onSave={onSaveEdit}
+          savePending={editMessage.isPending}
+        />
       ) : (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            borderTopWidth: 1,
-            borderTopColor: semantic.hairSoft,
-          }}
-        >
-          <Pressable
-            testID="btn-attach"
-            accessibilityRole="button"
-            accessibilityLabel="Add attachment"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              borderWidth: 1,
-              borderColor: semantic.hairStrong,
-              borderRadius: r.sm,
-            }}
-          >
-            <Icon.plus color={semantic.ink} />
-          </Pressable>
-          <TextInput
-            testID="input-composer"
-            accessibilityLabel="Message"
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Type a message…"
-            placeholderTextColor={semantic.mute}
-            onSubmitEditing={onSend}
-            returnKeyType="send"
-            editable={!!kind && !!conversationId}
-            style={{
-              flex: 1,
-              borderWidth: 1,
-              borderColor: semantic.hairStrong,
-              borderRadius: r.sm,
-              paddingVertical: 10,
-              paddingHorizontal: 12,
-              fontFamily: ty.body.fontFamily,
-              fontSize: 14,
-              color: semantic.ink,
-              backgroundColor: semantic.fieldBg,
-            }}
-          />
-          <Pressable
-            onPress={onSend}
-            disabled={!draft.trim() || sendMessage.isPending}
-            testID="btn-send"
-            accessibilityRole="button"
-            accessibilityLabel="Send"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: semantic.accent,
-              borderRadius: r.sm,
-              opacity: !draft.trim() || sendMessage.isPending ? 0.4 : 1,
-            }}
-          >
-            <Icon.send color="#0a0907" />
-          </Pressable>
-        </View>
+        <Composer
+          draft={draft}
+          onChangeDraft={setDraft}
+          onSend={onSend}
+          sendPending={sendMessage.isPending}
+          editable={!!kind && !!conversationId}
+        />
       )}
 
       {actionTarget ? (
-        <Pressable
-          onPress={() => setActionTarget(null)}
-          // Neither wrapper has its own accessibilityLabel, so leaving them
-          // `accessible` (Pressable's default) makes iOS collapse every
-          // child button below into ONE opaque compound element — a
-          // VoiceOver user could never reach Edit/Delete/react individually.
-          accessible={false}
-          style={{
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            left: 0,
-            right: 0,
-            backgroundColor: "rgba(0,0,0,0.55)",
-            justifyContent: "flex-end",
+        <MessageActionsSheet
+          target={actionTarget}
+          isOwn={actionTarget.sender_id === currentUser?.id}
+          onReact={(emoji) => {
+            toggleReaction.mutate({
+              messageId: actionTarget.id,
+              emoji,
+              mode: "add",
+            });
+            setActionTarget(null);
           }}
-        >
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
-            accessible={false}
-            style={{
-              backgroundColor: semantic.cardBg,
-              borderTopWidth: 1,
-              borderTopColor: semantic.hair,
-              paddingHorizontal: 18,
-              paddingTop: 14,
-              paddingBottom: 30,
-              gap: 10,
-            }}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                gap: 8,
-                paddingVertical: 6,
-              }}
-            >
-              {QUICK_EMOJI.map((emoji, ei) => (
-                <Pressable
-                  key={emoji}
-                  testID={`btn-react-${ei}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`React ${emoji}`}
-                  onPress={() => {
-                    if (!actionTarget) {
-                      return;
-                    }
-                    toggleReaction.mutate({
-                      messageId: actionTarget.id,
-                      emoji,
-                      mode: "add",
-                    });
-                    setActionTarget(null);
-                  }}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderWidth: 1,
-                    borderColor: semantic.hair,
-                    borderRadius: r.sm,
-                  }}
-                >
-                  <Text style={{ fontSize: 22 }}>{emoji}</Text>
-                </Pressable>
-              ))}
-            </View>
+          onEdit={() => {
+            setEditTarget(actionTarget);
+            setEditDraft(actionTarget.content);
+            setActionTarget(null);
+          }}
+          onDelete={() => {
+            deleteMessage.mutate(actionTarget.id);
+            setActionTarget(null);
+          }}
+          onClose={() => setActionTarget(null)}
+        />
+      ) : null}
 
-            {actionTarget.sender_id === currentUser?.id ? (
-              <>
-                <Pressable
-                  onPress={() => {
-                    setEditTarget(actionTarget);
-                    setEditDraft(actionTarget.content);
-                    setActionTarget(null);
-                  }}
-                  testID="btn-edit"
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit message"
-                  style={{
-                    paddingVertical: 14,
-                    paddingHorizontal: 12,
-                    borderWidth: 1,
-                    borderColor: semantic.hairStrong,
-                    borderRadius: r.sm,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <Icon.edit color={semantic.ink} />
-                  <Text
-                    style={{
-                      fontFamily: ty.body.fontFamily,
-                      fontSize: 14,
-                      color: semantic.ink,
-                    }}
-                  >
-                    Edit message
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (!actionTarget) {
-                      return;
-                    }
-                    deleteMessage.mutate(actionTarget.id);
-                    setActionTarget(null);
-                  }}
-                  testID="btn-delete"
-                  accessibilityRole="button"
-                  accessibilityLabel="Delete message"
-                  style={{
-                    paddingVertical: 14,
-                    paddingHorizontal: 12,
-                    borderWidth: 1,
-                    borderColor: "rgba(196,106,46,0.4)",
-                    borderRadius: r.sm,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <Icon.exit color={semantic.danger} />
-                  <Text
-                    style={{
-                      fontFamily: ty.body.fontFamily,
-                      fontSize: 14,
-                      color: semantic.danger,
-                    }}
-                  >
-                    Delete message
-                  </Text>
-                </Pressable>
-              </>
-            ) : null}
-
-            <Pressable
-              onPress={() => setActionTarget(null)}
-              testID="btn-action-cancel"
-              accessibilityRole="button"
-              accessibilityLabel="Cancel"
-              style={{
-                paddingVertical: 14,
-                alignItems: "center",
-              }}
-            >
-              <Text
-                style={[ty.label, { color: semantic.mute }]}
-              >
-                CANCEL
-              </Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
+      {menuOpen && conversationId ? (
+        <ChannelMenuSheet
+          onInfo={() => {
+            setMenuOpen(false);
+            router.push({
+              pathname: "/conversation/info",
+              params: { id: conversationId, kind: "channel" },
+            });
+          }}
+          onGroupSettings={
+            groupId
+              ? () => {
+                  setMenuOpen(false);
+                  router.push({
+                    pathname: "/group/settings",
+                    params: { groupId },
+                  });
+                }
+              : undefined
+          }
+          onClose={() => setMenuOpen(false)}
+        />
       ) : null}
     </>
   );
