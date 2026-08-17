@@ -75,6 +75,11 @@ capturing **iPhone + iPad + Android** screenshots:
 `profile-prefs` (+ accent + change-email) · `security` (devices/safety-numbers) ·
 `blocking` · `realtime` (two-client live) · `push-tap`.
 
+The `security` flow additionally covers the in-app account-deletion entry
+(`row-delete-account` → typed-DELETE confirm screen, `btn-delete-account`
+disabled until armed) — assert the disabled state only; never run the actual
+deletion against a shared seed account.
+
 Media flows are **excluded by decision**.
 
 ### 4. iPadOS adaptive layouts — #622
