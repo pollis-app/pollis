@@ -33,7 +33,9 @@ import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import * as Clipboard from "expo-clipboard";
+import * as ImagePicker from "expo-image-picker";
 import { formatMessagePermalink } from "../../lib/permalinks";
+import type { PickedAttachment } from "../../lib/attachments";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -71,6 +73,9 @@ function TextChat(props: ChatViewProps = {}) {
     props.name ?? (typeof params.name === "string" ? params.name : undefined);
 
   const [draft, setDraft] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<
+    PickedAttachment[]
+  >([]);
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
   const [pickerTarget, setPickerTarget] = useState<Message | null>(null);
   const [editTarget, setEditTarget] = useState<Message | null>(null);
@@ -171,12 +176,35 @@ function TextChat(props: ChatViewProps = {}) {
 
   const onSend = () => {
     const text = draft.trim();
-    if (!text || sendMessage.isPending) {
+    if ((!text && pendingAttachments.length === 0) || sendMessage.isPending) {
       return;
     }
     setDraft("");
-    sendMessage.mutate({ content: text });
+    setPendingAttachments([]);
+    sendMessage.mutate({ content: text, attachments: pendingAttachments });
   };
+
+  // Attach images from the library (#894-adjacent; same upload flow as
+  // desktop — Rust encrypts + uploads on send).
+  const onAttach = useCallback(async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images",
+      allowsMultipleSelection: true,
+      quality: 1,
+    });
+    if (result.canceled) {
+      return;
+    }
+    const picked: PickedAttachment[] = result.assets.map((asset, i) => ({
+      id: asset.assetId ?? `${Date.now()}-${i}`,
+      uri: asset.uri,
+      name: asset.fileName ?? `image-${Date.now()}-${i}.jpg`,
+      mimeType: asset.mimeType ?? "image/jpeg",
+      width: asset.width,
+      height: asset.height,
+    }));
+    setPendingAttachments((prev) => [...prev, ...picked]);
+  }, []);
 
   const onSaveEdit = () => {
     const text = editDraft.trim();
@@ -333,6 +361,7 @@ function TextChat(props: ChatViewProps = {}) {
           name={name}
           time={timeLabel(m.created_at)}
           text={m.content}
+          attachments={m.attachments}
           pending={m.pending}
           edited={!!m.edited_at}
           reactions={reactionsByMessage?.get(m.id)}
@@ -554,6 +583,12 @@ function TextChat(props: ChatViewProps = {}) {
           sendPending={sendMessage.isPending}
           editable={!!kind && !!conversationId}
           mentionCandidates={mentionCandidates}
+          onAttach={() => void onAttach()}
+          pendingAttachments={pendingAttachments}
+          onRemoveAttachment={(id) =>
+            setPendingAttachments((prev) => prev.filter((a) => a.id !== id))
+          }
+          canSendEmptyText={pendingAttachments.length > 0}
         />
       )}
 
