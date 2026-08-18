@@ -669,10 +669,10 @@ pub(crate) async fn register_attachment_refs(
     content: &str,
 ) {
     for att in parse_attachment_refs(content) {
-        let body = pollis_api::messages::AttachmentRegisterBody {
+        let body = pollis_api::messages::AttachmentRegisterBody::ForMessage {
             content_hash: att.content_hash.clone(),
             r2_key: att.r2_key,
-            message_id: Some(message_id.to_string()),
+            message_id: message_id.to_string(),
         };
         if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
             eprintln!(

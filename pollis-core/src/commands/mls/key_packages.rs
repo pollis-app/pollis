@@ -133,63 +133,22 @@ pub async fn ensure_mls_key_package(
     }
     let all_packages = kp_packages_json(&pairs, current_suite());
 
-    // DS seam: the replenish endpoint clears this device's stale unclaimed
-    // packages and inserts the fresh pool in ONE transaction (owner-scoped to
-    // the signer); else do the equivalent delete-then-insert directly.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = pollis_api::devices::ReplenishKeyPackagesBody {
-                device_id: device_id.to_string(),
-                packages: all_packages,
-                user_id: Some(user_id.to_string()),
-            };
-            crate::commands::mls::ds_post_ok(state, &body).await?;
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            // Remove unclaimed packages for THIS device only — their private keys
-            // may no longer exist in the current local DB (e.g. after a wipe).
-            // Unscoped by suite on purpose: a package left over from a retired
-            // suite is unusable by definition, so a rotation should clear it out
-            // rather than preserve it. Also cleans up legacy NULL-device_id rows.
-            conn.execute(
-                "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
-                 AND (device_id = ?2 OR device_id IS NULL)",
-                libsql::params![user_id, device_id],
-            ).await?;
-            insert_packages_direct(&conn, user_id, device_id, &all_packages).await?;
-        }
-    }
+    // The replenish endpoint clears this device's stale unclaimed packages and
+    // inserts the fresh pool in ONE transaction, owner-scoped to the signer.
+    //
+    // There is no direct-to-Turso branch here any more (#910). It was the same
+    // shape as `dev_login_inner`'s: a "no DS configured" fallback that performed
+    // a client-side remote DELETE + INSERT, which `CLAUDE.md` bans outright. A
+    // client with no DS cannot publish a device cert, send a message, or join a
+    // group either, so writing key packages for it only produced a pool nothing
+    // could ever claim.
+    let body = pollis_api::devices::ReplenishKeyPackagesBody {
+        device_id: device_id.to_string(),
+        packages: all_packages,
+        user_id: Some(user_id.to_string()),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
-    Ok(())
-}
-
-/// Direct-path INSERT of a `kp_packages_json` array into the remote table,
-/// carrying each package's ciphersuite so a claim can still be narrowed by suite
-/// off the DS seam. Used only when `pollis_delivery_url` is unset (never in
-/// production).
-async fn insert_packages_direct(
-    conn: &libsql::Connection,
-    user_id: &str,
-    device_id: &str,
-    packages: &[pollis_api::devices::KeyPackageEntry],
-) -> Result<()> {
-    use base64::Engine as _;
-    for pkg in packages {
-        let ref_hex = pkg.ref_hash.clone();
-        let kp_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&pkg.key_package)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp b64: {e}")))?;
-        let suite = pkg
-            .ciphersuite
-            .unwrap_or(i64::from(u16::from(current_suite())));
-        conn.execute(
-            "INSERT OR IGNORE INTO mls_key_package \
-             (ref_hash, user_id, key_package, device_id, ciphersuite) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            libsql::params![ref_hex, user_id, kp_bytes, device_id, suite],
-        ).await?;
-    }
     Ok(())
 }
 
@@ -240,22 +199,14 @@ pub(super) async fn replenish_key_packages(
     }
     let all_packages = kp_packages_json(&pairs, current_suite());
 
-    // DS seam: a top-up is insert-only (no delete), so it routes through the
-    // owner-scoped publish endpoint; else INSERT OR IGNORE directly.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = pollis_api::devices::PublishKeyPackagesBody {
-                device_id: device_id.to_string(),
-                packages: all_packages,
-                user_id: Some(user_id.to_string()),
-            };
-            crate::commands::mls::ds_post_ok(state, &body).await?;
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            insert_packages_direct(&conn, user_id, device_id, &all_packages).await?;
-        }
-    }
+    // A top-up is insert-only (no delete), so it routes through the owner-scoped
+    // publish endpoint. As above, the direct-to-Turso fallback is gone (#910).
+    let body = pollis_api::devices::PublishKeyPackagesBody {
+        device_id: device_id.to_string(),
+        packages: all_packages,
+        user_id: Some(user_id.to_string()),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await?;
 
     Ok(())
 }

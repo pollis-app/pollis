@@ -93,7 +93,7 @@ data-dir section](#the-process-wide-data-dir--never-set_var)).
 ### What `mls-tests.yml` runs, in order
 
 1. `cargo test -p pollis-schema` — the remote schema itself (#924). Seconds-cheap, no system deps, and it is the definition every other job stamps its databases from: it is the only automatic check that every migration file on disk is *listed*, that versions are unique and ascending, and that `single_db_scripts()` keeps main-then-log order (what a single-DB deploy depends on).
-2. `cargo test -p pollis-api` — the client/server wire contract (#875), whose `compile_fail` doctests are the guarantee that a mistyped request body cannot compile.
+2. `cargo test -p pollis-api` — the client/server wire contract (#875, #922), whose `compile_fail` doctests are the guarantee that a mistyped request **or response** body cannot compile.
 3. `cargo test -p pollis-delivery` — DS serializer + route coverage.
 4. `cargo test -p pollis-core` — MLS unit tests.
 5. `cargo test -p pollis-tui` — see below.
@@ -261,6 +261,36 @@ directory in `/tmp` on every run, and nothing ever removed them. Ownership solve
 the same problem without the leak. `pollis-delivery/tests/fixtures.rs` asserts the
 directory really is removed on drop, so a regression to leaking fails a test rather
 than quietly filling the disk.
+
+## Contract tests that fail at COMPILE time
+
+Three of this repo's invariants are checked by code that must *fail to build*
+rather than by an assertion, which makes them cheap and impossible to skip.
+
+- **`pollis-api` `compile_fail` doctests (#875, #922).** A request body missing a
+  field is `E0063`; a misspelled one is `E0560`; a response field the server does
+  not send is `E0609`; answering an endpoint with another endpoint's body is
+  `E0308`; posting an operator-only endpoint from `pollis-core` is `E0277`.
+  Each has a matching *positive* doctest next to it — a `compile_fail` test whose
+  code could never compile for an unrelated reason proves nothing.
+- **`pollis-delivery`'s `ok_response` doctest (#922).** The same `E0308`, on the
+  real server-side helper rather than a stand-in.
+- **`pollis-core/tests/no_client_side_remote_writes.rs` (#910).** Not a compile
+  failure, but the same spirit: it parses the remote table list out of
+  `pollis-schema` and fails if any non-test code in `pollis-core` writes one.
+  `CLAUDE.md`'s "never add a client-side remote INSERT/UPDATE/DELETE" had one
+  live counter-example until #910; this is what keeps the count at zero.
+
+## Measuring memory, not guessing (#915)
+
+`pollis-core/tests/attachment_memory.rs` installs a counting `#[global_allocator]`
+and asserts how much `cache_encrypt` allocates for a 16 MiB payload. It needs its
+own process — which an integration test binary already is — so the allocator does
+not perturb anything else.
+
+Assertions are in multiples of the payload, never absolute bytes, so they keep
+meaning something as constants change. The pre-#915 implementation allocated two
+full payloads on the tight-buffer path and three on the real one; both are pinned.
 
 ## Performance guards (#875)
 

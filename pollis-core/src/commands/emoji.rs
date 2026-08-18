@@ -796,33 +796,41 @@ pub async fn remove_group_emoji(
     collect_orphaned_emoji(state).await
 }
 
+/// How many collected emoji blobs to delete at once (#915).
+///
+/// Each deletion costs a DS presign plus an R2 DELETE, so this is a concurrency
+/// bound on our OWN delivery service as much as on R2. Eight keeps a large sweep
+/// from serialising into hundreds of sequential round trips without turning it
+/// into a burst.
+const EMOJI_GC_DELETE_CONCURRENCY: usize = 8;
+
 /// Ask the DS to collect every unreferenced emoji object, then delete the R2
 /// blobs it collected. Safe to call at any time: it is idempotent and can only
 /// touch objects no group references.
 pub async fn collect_orphaned_emoji(state: &Arc<AppState>) -> Result<()> {
-    let resp = crate::commands::mls::ds_post(state, &pollis_api::emoji::EmojiGcBody {}).await?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!("emoji gc {status}: {text}")));
-    }
-    #[derive(Deserialize)]
-    struct GcResp {
-        #[serde(default)]
-        r2_keys: Vec<String>,
-    }
-    let parsed: GcResp = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("emoji gc decode: {e}")))?;
+    let parsed =
+        crate::commands::mls::ds_post_json(state, &pollis_api::emoji::EmojiGcBody {}).await?;
 
-    for key in parsed.r2_keys {
-        // Best-effort. The Turso row is already gone, so a failure here strands
-        // a <=48 KiB blob rather than breaking anything.
-        if let Err(e) = r2::delete_r2_object(state, &key).await {
-            eprintln!("[emoji] could not delete collected object {key}: {e}");
-        }
-    }
+    // Delete the collected blobs with bounded concurrency (#915).
+    //
+    // Each deletion is TWO sequential network round trips — a DS presign, then
+    // the R2 DELETE — and they were being issued strictly one after another, so
+    // a sweep that collected 200 objects took 400 serialised round trips for
+    // work with no ordering requirement between items. Bounded rather than
+    // unbounded: the presign half hits our own DS, and a sweep is exactly the
+    // kind of thing that should not look like a burst to it.
+    //
+    // Still best-effort per item. The Turso row is already gone, so a failure
+    // strands a <=48 KiB blob rather than breaking anything, and one failure
+    // must not abandon the rest of the sweep.
+    use futures_util::stream::StreamExt as _;
+    futures_util::stream::iter(parsed.r2_keys)
+        .for_each_concurrent(EMOJI_GC_DELETE_CONCURRENCY, |key| async move {
+            if let Err(e) = r2::delete_r2_object(state, &key).await {
+                eprintln!("[emoji] could not delete collected object {key}: {e}");
+            }
+        })
+        .await;
     Ok(())
 }
 
@@ -880,7 +888,7 @@ pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Resul
             }
         }
     };
-    let encrypted = r2::cache_encrypt(&bytes, &db_key, content_hash.as_bytes())?;
+    let encrypted = r2::cache_encrypt(bytes, &db_key, content_hash.as_bytes())?;
 
     // Atomic write, mirroring `get_media_url`: a half-written cache file would
     // be served as a corrupt image rather than re-fetched.
@@ -958,7 +966,9 @@ pub async fn download_verified_emoji(
              refusing to render substituted bytes"
         )));
     }
-    Ok((bytes, content_type))
+    // The public API owes an owned `Vec`; `Vec::from` moves the `Bytes`
+    // allocation rather than copying it when it uniquely owns one (#915).
+    Ok((Vec::from(bytes), content_type))
 }
 
 /// Strip any custom-emoji token `user_id` is not permitted to use from outgoing

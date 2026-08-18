@@ -199,6 +199,9 @@ const LOCAL_PRAGMAS: PerConnPragmas = &["PRAGMA busy_timeout=5000", "PRAGMA fore
 /// and it now does. With FKs off, a future teardown path that forgets a table
 /// leaves its rows behind in `flows` exactly as it would in production, which is
 /// the only way that class of bug is visible to a test.
+///
+/// Gated with [`Db::from_shared`], its only user (#925).
+#[cfg(any(test, feature = "test-harness"))]
 const SHARED_LOCAL_PRAGMAS: PerConnPragmas =
     &["PRAGMA busy_timeout=10000", "PRAGMA foreign_keys=OFF"];
 
@@ -241,6 +244,15 @@ impl Db {
     /// Being handed the handle does NOT mean inheriting the giver's connection
     /// state: this `Db` still builds its own connections out of it, so it needs
     /// its own per-connection PRAGMAs — see [`SHARED_LOCAL_PRAGMAS`].
+    ///
+    /// Gated behind `test-harness` (#925). Its counterpart on the giving side,
+    /// `pollis_core::db::remote::RemoteDb::shared_database`, always was; this
+    /// half was `pub` unconditionally purely because this crate had no such
+    /// feature to gate it behind. The risk was genuinely low — it is the normal
+    /// construction path (`connect_local` delegates to it) and the pool stays
+    /// exclusive either way — but a pair of functions that only make sense
+    /// together should not be reachable in different builds.
+    #[cfg(any(test, feature = "test-harness"))]
     pub fn from_shared(db: Arc<Database>) -> Self {
         Self::wrap(db, SHARED_LOCAL_PRAGMAS)
     }

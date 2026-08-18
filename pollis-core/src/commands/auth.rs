@@ -185,24 +185,17 @@ async fn verify_otp_ds(
         let txt = resp.text().await.unwrap_or_default();
         return Err(anyhow::anyhow!("verify-otp failed ({status}): {txt}").into());
     }
-    let v: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| anyhow::anyhow!("verify-otp response: {e}"))?;
+    // Typed through `pollis-api` (#922) rather than indexed out of a
+    // `serde_json::Value`. `v["session_token"]` compiled whatever the DS chose
+    // to call that field, so a rename reached users as "response missing
+    // session_token" on every sign-in; now it does not build.
+    let v =
+        crate::commands::mls::decode_response::<pollis_api::otp::VerifyOtpBody>(resp).await?;
 
-    let user_id = v["user_id"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("verify-otp response missing user_id"))?
-        .to_string();
-    let username = v["username"]
-        .as_str()
-        .unwrap_or_else(|| email.split('@').next().unwrap_or("user"))
-        .to_string();
-    let has_identity = v["has_identity"].as_bool().unwrap_or(false);
-    let session_token = v["session_token"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("verify-otp response missing session_token"))?
-        .to_string();
+    let user_id = v.user_id;
+    let username = v.username;
+    let has_identity = v.has_identity;
+    let session_token = v.session_token;
 
     // Orphan-detection for a returning device whose server identity no longer
     // matches the local key (a reset elsewhere). Mirrors the direct path.
@@ -738,17 +731,20 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
 
 /// DEV_EMAIL auto-login entry point.
 ///
-/// When a Delivery Service is configured it now OWNS auth/bootstrap (#419): the
-/// DS authorizes every write by the device's registered `mls_signature_pub`, so a
-/// device that never ran the DS bootstrap handshake (verify-otp → register-device
-/// → publish-device-cert) has no DS-recognized credential and every DS write 401s.
-/// The legacy `dev_login_inner` writes the account straight to Turso and skips
-/// that handshake entirely, so under a DS it produces a "logged in locally but not
-/// DS-enrolled" device — exactly the `publish-device-cert 401` + failed
-/// external-join symptoms. So when a DS is configured we drive the real DS
-/// enrollment ([`dev_login_ds`]); only the no-DS / self-host path keeps the
-/// Turso-direct shortcut. A DS enrollment failure (e.g. the DS isn't running with
-/// a matching `DEV_OTP`) falls back to the legacy path so startup still completes.
+/// The Delivery Service OWNS auth/bootstrap (#419): it authorizes every write by
+/// the device's registered `mls_signature_pub`, so a device that never ran the
+/// bootstrap handshake (verify-otp → register-device → publish-device-cert) has
+/// no DS-recognized credential and every DS write 401s. This drives that real
+/// handshake ([`dev_login_ds`]) and nothing else.
+///
+/// It used to have a second path: a `dev_login_inner` that INSERTed the `users`
+/// row straight into Turso, taken when no DS was configured and as a fall-back
+/// when DS enrollment failed. #910 removed it. It was the last client-side
+/// remote write in the codebase — the one live counter-example to a rule
+/// (`CLAUDE.md`: "Never add a client-side remote INSERT/UPDATE/DELETE — extend a
+/// DS endpoint") that everything else follows — and as a fall-back it actively
+/// hid the misconfiguration it warned about, producing a device that looked
+/// signed in and 401'd on every subsequent write.
 #[cfg(debug_assertions)]
 async fn dev_login_dispatch(state: &Arc<AppState>, email: String) -> Result<UserProfile> {
     // Canonicalize once, up front, so every downstream use — the `users`
@@ -756,20 +752,33 @@ async fn dev_login_dispatch(state: &Arc<AppState>, email: String) -> Result<User
     // sees the same address.
     let email = canonical_login_email(&email);
 
+    // No DS, no login (#910). The Turso-direct shortcut this replaces was the
+    // one client-side remote INSERT left in the codebase, and CLAUDE.md bans
+    // those outright — the DS is the sole writer.
+    //
+    // Nothing is lost by refusing. A DS-less client cannot send a message,
+    // create a group, or register a device either: every one of those is a
+    // `POST /v1/...`. So "logged in without a DS" was never a working state, it
+    // was a state that looked like one until the first write failed. Failing
+    // here, with the reason, is strictly more useful than a local account that
+    // 401s on everything.
     if state.config.pollis_delivery_url.is_none() {
-        return dev_login_inner(state, email).await;
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "DEV_EMAIL/dev_login needs a Delivery Service: set POLLIS_DELIVERY_URL \
+             (see docs/run-it-yourself.md). The DS owns auth and every remote write, \
+             so there is nothing a client can do without one."
+        )));
     }
-    match dev_login_ds(state, email.clone()).await {
-        Ok(profile) => Ok(profile),
-        Err(e) => {
-            eprintln!(
-                "[auth] DEV_EMAIL DS enrollment failed ({e}); falling back to direct dev login. \
-                 If you expect DS auth to work, ensure the Delivery Service is running with \
-                 DEV_OTP set to the same value as this client (default 000000)."
-            );
-            dev_login_inner(state, email).await
-        }
-    }
+    // A DS enrollment failure is now an ERROR, not a silent fall-back. The old
+    // fall-back masked exactly the misconfiguration it printed about — a DS
+    // running with a different DEV_OTP produced a device that looked signed in
+    // and 401'd on every write.
+    dev_login_ds(state, email).await.map_err(|e| {
+        crate::error::Error::Other(anyhow::anyhow!(
+            "DEV_EMAIL DS enrollment failed: {e}. Ensure the Delivery Service is running \
+             with DEV_OTP set to the same value as this client (default 000000)."
+        ))
+    })
 }
 
 /// The deterministic dev OTP code. Mirrors the DS's `DEV_OTP` (read server-side in
@@ -855,19 +864,11 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
         let txt = resp.text().await.unwrap_or_default();
         return Err(anyhow::anyhow!("dev verify-otp failed ({status}): {txt}").into());
     }
-    let v: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| anyhow::anyhow!("dev verify-otp response: {e}"))?;
-    let username = v["username"]
-        .as_str()
-        .unwrap_or_else(|| email.split('@').next().unwrap_or("user"))
-        .to_string();
-    let has_identity = v["has_identity"].as_bool().unwrap_or(false);
-    let session_token = v["session_token"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("dev verify-otp response missing session_token"))?
-        .to_string();
+    let v =
+        crate::commands::mls::decode_response::<pollis_api::otp::VerifyOtpBody>(resp).await?;
+    let username = v.username;
+    let has_identity = v.has_identity;
+    let session_token = v.session_token;
 
     // Persist + publish the bound device_id into state.
     let device_id = ensure_device_id(state, &user_id, &bound_device_id).await?;
@@ -945,163 +946,6 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
 #[doc(hidden)]
 pub fn canonical_login_email(email: &str) -> String {
     email.trim().to_string()
-}
-
-/// The `users` row for an email address, after resolve-or-create.
-///
-/// `pub` only so `tests/auth_account_creation.rs` can drive
-/// [`resolve_or_create_user_by_email`] in its own process — see that file for
-/// why the assertions cannot live in pollis-core's `--lib` test binary.
-#[cfg(debug_assertions)]
-#[doc(hidden)]
-pub struct ResolvedUser {
-    pub user_id: String,
-    pub username: String,
-    /// The account's published identity key, or `None` when it has none yet.
-    pub account_id_pub: Option<Vec<u8>>,
-    /// True when this call is what created the row.
-    pub is_new: bool,
-}
-
-/// Resolve the `users` row for `email`, creating it if absent, and report which
-/// happened.
-///
-/// This is the client-side twin of the Delivery Service's
-/// `pollis_delivery::otp::apply_verify_otp` — same query, same server-generated
-/// ULID id, same default username (`<email-prefix>_<last 4 of the ULID>`). The
-/// two used to be open-coded in their own crates and had already drifted apart;
-/// they are now written identically so a reader can diff them, and a shared
-/// implementation is a lift rather than a rewrite once a crate exists that both
-/// sides may depend on (`pollis-core` and `pollis-delivery` deliberately do not
-/// depend on each other).
-///
-/// `#[cfg(debug_assertions)]` because its one caller is the dev-only, no-DS
-/// login shortcut: this is a **client-side remote INSERT**, which the DS
-/// otherwise owns exclusively, and it must not exist in a shipped binary.
-#[cfg(debug_assertions)]
-#[doc(hidden)]
-pub async fn resolve_or_create_user_by_email(
-    conn: &libsql::Connection,
-    email: &str,
-) -> Result<ResolvedUser> {
-    // Canonicalize here too, not only at the caller: this is the function that
-    // performs the INSERT, so it is the lowest layer at which "one address, one
-    // row" can be made true regardless of who calls it.
-    let email = canonical_login_email(email);
-
-    let mut rows = conn
-        .query(
-            "SELECT id, username, account_id_pub FROM users WHERE email = ?1",
-            libsql::params![email.clone()],
-        )
-        .await?;
-    let existing = rows.next().await?;
-    // Release the statement before the INSERT below rather than leaving an
-    // exhausted cursor open across a write on the same connection.
-    drop(rows);
-
-    if let Some(row) = existing {
-        let user_id: String = row.get(0)?;
-        let username: String = row
-            .get(1)
-            .unwrap_or_else(|_| default_username_prefix(&email).to_string());
-        // Read through `Option` so a NULL key is None rather than riding on
-        // `Vec<u8>`'s NullValue error — same shape the DS uses.
-        let account_id_pub: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(2).ok().flatten();
-        return Ok(ResolvedUser {
-            user_id,
-            username,
-            account_id_pub,
-            is_new: false,
-        });
-    }
-
-    let user_id = Ulid::new().to_string();
-    let suffix = &user_id[user_id.len().saturating_sub(4)..];
-    let username = format!("{}_{}", default_username_prefix(&email), suffix);
-    conn.execute(
-        "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
-        libsql::params![user_id.clone(), email.clone(), username.clone()],
-    )
-    .await?;
-    Ok(ResolvedUser {
-        user_id,
-        username,
-        account_id_pub: None,
-        is_new: true,
-    })
-}
-
-/// The local part of an email address, or `"user"` when there isn't one.
-/// Matches the DS byte-for-byte, including the empty-local-part case
-/// (`"@x.com"` yields `""`, not `"user"` — `split` produces an empty first
-/// segment, never `None`).
-#[cfg(debug_assertions)]
-fn default_username_prefix(email: &str) -> &str {
-    email.split('@').next().unwrap_or("user")
-}
-
-// Helper shared by get_session (DEV_EMAIL) and dev_login.
-#[cfg(debug_assertions)]
-async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserProfile> {
-    let conn = state.remote_db.conn().await?;
-
-    let resolved = resolve_or_create_user_by_email(&conn, &email).await?;
-    if resolved.is_new {
-        eprintln!("[auth] dev_login: created account {} for {email}", resolved.user_id);
-    }
-    let (user_id, username, remote_pub) =
-        (resolved.user_id, resolved.username, resolved.account_id_pub);
-
-    // Orphan-detection: wipe any stale local key that doesn't match
-    // the server's current account_id_pub.
-    if let Some(ref pub_bytes) = remote_pub {
-        let matches = crate::commands::account_identity::has_matching_local_account_identity(
-            state,
-            &user_id,
-            pub_bytes,
-        )
-        .await
-        .unwrap_or(false);
-        if !matches {
-            if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(state, &user_id).await
-            {
-                eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
-            }
-        }
-    }
-
-    let has_identity = remote_pub.is_some();
-
-    let new_secret_key = if !has_identity {
-        match crate::commands::account_identity::generate_account_identity(state, &user_id).await {
-            Ok(sk) => Some(sk),
-            Err(e) => {
-                eprintln!("[auth] generate_account_identity failed: {e}");
-                return Err(e);
-            }
-        }
-    } else {
-        None
-    };
-
-    let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(state, &user_id)
-            .await
-            .unwrap_or(false);
-
-    let profile = UserProfile {
-        id: user_id,
-        email,
-        username,
-        new_secret_key,
-        enrollment_required,
-    };
-
-    register_device(state, &profile.id).await?;
-    crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
-    Ok(profile)
 }
 
 /// Register this device for the given user. Generates a stable device_id on first

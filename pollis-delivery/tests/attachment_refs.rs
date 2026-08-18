@@ -93,10 +93,10 @@ async fn delete_envelope(db: &Db, msg: &str) {
 /// creating the envelope so the declaration actually counts.
 async fn register_ref(db: &Db, hash: &str, key: &str, msg: &str) {
     add_envelope(db, msg).await;
-    let body = AttachmentRegisterBody {
+    let body = AttachmentRegisterBody::ForMessage {
         content_hash: hash.into(),
         r2_key: key.into(),
-        message_id: Some(msg.into()),
+        message_id: msg.into(),
     };
     let out = apply_register_attachment(&db.conn().await.unwrap(), Some("u1"), &body)
         .await

@@ -13,6 +13,15 @@ path = "src/lib.rs"
 name = "pollis-delivery"
 path = "src/main.rs"
 
+[features]
+default = []
+# Exposes the constructors that exist ONLY for the integration harnesses, so
+# they cannot be reached from a production build (#925). Mirrors pollis-core's
+# feature of the same name — `RemoteDb::shared_database` (the giving half of the
+# shared-handle pair) has always been gated this way, and `Db::from_shared` (the
+# receiving half) was not, purely by omission.
+test-harness = []
+
 [dependencies]
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }

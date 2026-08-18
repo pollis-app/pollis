@@ -200,71 +200,6 @@ pub fn unwrap_recovery_blob(
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/// Generate a fresh account identity for `user_id`. Writes:
-///   - `users.account_id_pub` and `users.identity_version = 1`
-///   - a new row in `account_recovery`
-///   - the private key + a freshly generated `db_key` into
-///     `AppState.unlock` (NOT the keystore — the only on-disk copy is
-///     the server-side `account_recovery` blob, which is wrapped under
-///     the Secret Key).
-///
-/// `set_pin` is the next step the frontend takes; it reads from
-/// `AppState.unlock` and writes the PIN-wrapped slots, at which point
-/// the keys exist on disk only as ciphertext.
-///
-/// Returns the formatted Secret Key to show the user exactly once.
-/// Caller is responsible for ensuring the user has no existing identity
-/// (`users.account_id_pub IS NULL`) before invoking this.
-pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> Result<String> {
-    let (secret_key_display, material) =
-        generate_account_identity_material(state, user_id).await?;
-
-    // BOOTSTRAP — DIRECT path (no DS configured). This is the version-1
-    // account-identity establishment at signup. It runs inside `verify_otp`
-    // BEFORE `register_device` / `ensure_device_cert`, so no device signing key
-    // is enrolled yet (`user_device.mls_signature_pub` is NULL) and the local DB
-    // isn't even open — the device cannot produce a signature the DS would
-    // accept. It is single-device, single-shot, with no concurrency, so the
-    // `UNIQUE (user_id, identity_version)` index on `account_key_log` is a
-    // sufficient guard. When a DS IS configured, `verify_otp` instead splits this:
-    // it calls `generate_account_identity_material` (the crypto above) and sends
-    // the public/wrapped material to the session-gated `/v1/auth/establish-identity`
-    // endpoint (see `docs/otp-server-bootstrap-design.md`). Rotations (version ≥ 2)
-    // route through the CAS-guarded `/v1/account/rotate-identity`.
-    let conn = state.remote_db.conn().await?;
-
-    conn.execute(
-        "UPDATE users SET account_id_pub = ?1, identity_version = 1 WHERE id = ?2",
-        libsql::params![material.account_id_pub.to_vec(), user_id.to_string()],
-    )
-    .await?;
-
-    // Append the version-1 row to the account-key transparency history. Kept in
-    // lock-step with the users UPDATE above; `?` propagation means the INSERT can
-    // never silently fail while the key change persists.
-    conn.execute(
-        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
-         VALUES (?1, ?2, 1)",
-        libsql::params![user_id.to_string(), material.account_id_pub.to_vec()],
-    )
-    .await?;
-
-    conn.execute(
-        "INSERT INTO account_recovery \
-         (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
-         VALUES (?1, 1, ?2, ?3, ?4, datetime('now'), datetime('now'))",
-        libsql::params![
-            user_id.to_string(),
-            material.salt.to_vec(),
-            material.nonce.to_vec(),
-            material.wrapped_key.clone()
-        ],
-    )
-    .await?;
-
-    Ok(secret_key_display)
-}
-
 /// The public/wrapped material the server persists for a fresh account identity.
 /// Everything here is safe to send to the server — the private `account_id_key`
 /// is held only locally (in `AppState.unlock`) and on the server only as
@@ -288,10 +223,10 @@ pub struct AccountIdentityMaterial {
 /// server-side `account_recovery` blob, which is wrapped under the Secret Key).
 ///
 /// Returns the formatted Secret Key to show the user once, plus the
-/// [`AccountIdentityMaterial`] the caller persists — either via the direct DB
-/// writes in [`generate_account_identity`] (no DS) or by POSTing it to the
-/// session-gated `/v1/auth/establish-identity` (DS configured). The caller is
-/// responsible for ensuring the user has no existing identity first.
+/// [`AccountIdentityMaterial`] the caller persists by POSTing it to the
+/// session-gated `/v1/auth/establish-identity`. That is now the ONLY way this
+/// material reaches the server: the direct-to-Turso variant went with #910. The
+/// caller is responsible for ensuring the user has no existing identity first.
 pub async fn generate_account_identity_material(
     state: &Arc<AppState>,
     user_id: &str,
@@ -558,11 +493,14 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
                 "DS rotate-identity {status}: {txt}"
             )));
         }
-        let v: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("rotate-identity response: {e}")))?;
-        v["identity_version"].as_i64().unwrap_or(based_on_version + 1)
+        // Typed through `pollis-api` (#922). The old `.as_i64().unwrap_or(…)`
+        // silently substituted a GUESSED version whenever the field was absent
+        // or renamed — and the guess is the transparency log's leaf index, so a
+        // wrong one is not a cosmetic default.
+        let pollis_api::account::RotateIdentityResponse::Ok { identity_version } =
+            crate::commands::mls::decode_response::<pollis_api::account::RotateIdentityBody>(resp)
+                .await?;
+        identity_version
     };
 
     // 4. Install the new private key in AppState.unlock so the calling

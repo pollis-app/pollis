@@ -317,11 +317,37 @@ impl RemoteDb {
     /// `Database` and invokes the closure again. Non-transient errors — and
     /// transient errors on the second attempt — are surfaced.
     ///
-    /// Use this at call sites where a single operation failing mid-flight
-    /// would force the user to restart the app (message send, list fetches
-    /// after wake-from-sleep). For multi-statement flows, either wrap each
-    /// statement individually or accept that a mid-flow reset aborts the
-    /// whole operation.
+    /// # Where this belongs (#914)
+    ///
+    /// Use it where a single operation failing mid-flight would cost the user
+    /// something they cannot retry themselves: an inbound message that does not
+    /// arrive, a device that does not get added to a group, a sign-in stuck on a
+    /// spinner. Those are the four production call sites it has:
+    ///
+    ///   - the ingest envelope fetch (`messages::ingest`) — the receive path,
+    ///     and the one most exposed to stream eviction, because it is what runs
+    ///     first after a laptop wakes up;
+    ///   - the available-key-package read in `mls::reconcile` — it decides
+    ///     which devices get added to the tree, and a dropped stream there
+    ///     yields a SHORTER list rather than an error, so the reconcile commits
+    ///     without those devices and they stay out of the group;
+    ///   - the enrollment poll (`device_enrollment`) — no local DB, no keystore,
+    ///     and no way for the user to do anything but restart sign-in.
+    ///
+    /// Do NOT reach for it where the caller already degrades gracefully. The
+    /// avatar enrich, the username backfill and the TOFU key pin all log and
+    /// carry on; wrapping those buys a duplicate round trip and hides a signal.
+    ///
+    /// It retries ONCE. That is deliberate — this recovers from a *stream* that
+    /// went away, which a reconnect fixes on the first attempt or does not fix
+    /// at all — and it is not a general backoff loop. `pollis-relay` has one of
+    /// those (`backoff.rs`) for a genuinely different problem, and the two are
+    /// not substitutes.
+    ///
+    /// For multi-statement flows, either wrap each statement individually or
+    /// accept that a mid-flow reset aborts the whole operation. The closure runs
+    /// twice on the retry path, so it must be idempotent — every current caller
+    /// is a `SELECT`.
     pub async fn with_retry<F, Fut, T>(&self, op: F) -> Result<T>
     where
         F: Fn(Connection) -> Fut,

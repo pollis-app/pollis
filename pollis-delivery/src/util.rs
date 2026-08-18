@@ -118,3 +118,42 @@ fn http_client() -> reqwest::Client {
         })
         .clone()
 }
+
+// ── Bounded `IN (…)` lists (#916) ────────────────────────────────────────────
+//
+// The DS's copy of `pollis_core::db::chunk`. It cannot share that one — the DS
+// deliberately does not depend on `pollis-core` — and one constant plus two
+// small functions is not worth a fourth leaf crate. **Keep the bound in step
+// with `pollis-core`'s.**
+//
+// This side matters more than it looks: `ack_welcomes` builds its `IN (…)` from
+// `AckBody::welcome_ids`, a list that arrives *in the request body*. So the
+// length is chosen by the caller, not by anything the server sizes — a device
+// returning from a long absence acks its whole backlog in one call, and a
+// hostile one can simply send 100k ids. Over the parameter limit the statement
+// fails to prepare, which turns an ack into a 500 and re-arms the same Welcomes
+// forever.
+
+/// Maximum number of values bound into a single statement. Mirrors
+/// `pollis_core::db::chunk::MAX_BIND_PARAMS`; see there for why it is this low.
+pub const MAX_BIND_PARAMS: usize = 500;
+
+/// Split `items` into chunks that fit within [`MAX_BIND_PARAMS`], leaving
+/// `reserved` slots for the statement's fixed (non-list) parameters.
+pub fn bind_chunks<T>(items: &[T], reserved: usize) -> std::slice::Chunks<'_, T> {
+    let per_chunk = MAX_BIND_PARAMS.saturating_sub(reserved).max(1);
+    items.chunks(per_chunk)
+}
+
+/// `?first,?first+1,…` for `count` values — the `IN (…)` body.
+pub fn placeholders(count: usize, first: usize) -> String {
+    let mut out = String::with_capacity(count * 5);
+    for i in 0..count {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('?');
+        out.push_str(&(first + i).to_string());
+    }
+    out
+}

@@ -424,6 +424,28 @@ To exercise the DS path **in-process** (no network, deterministic):
 
 ---
 
+## 6. Follow-ups that landed after the slice
+
+- **#875** made every REQUEST body a shared type in `pollis-api`, so a client
+  field that does not exist on the server fails to compile.
+- **#922** did the same for RESPONSES. Each endpoint declares
+  `DsRequest::Response`; `pollis-delivery` returns it via
+  `writes::ok_response::<B>` and `pollis-core` decodes it via `ds_post_json::<B>`,
+  so neither end writes the field list twice. Six private client-side mirrors
+  (`Resp`, `ClaimResp`, `PresignResp`, `GcResp`, …) and three `serde_json::Value`
+  readers are gone, and there is no untyped success-response builder left in the
+  DS — `ok_json` was deleted once nothing used it.
+- **#925** classified each endpoint by `Audience`. `/v1/welcomes/resubmit` and
+  `/v1/envelopes/gc` are `Operator`: deliberately caller-less recovery levers,
+  written up in `docs/ds-operator-endpoints.md`, and unreachable from
+  `pollis-core` because `ds_post` requires the `ClientRequest` marker the table
+  implements only for `Client` rows.
+- **#910** removed the last client-side remote writes — the dev-only
+  `dev_login_inner`, the no-DS key-package fallbacks, and the unused
+  `generate_account_identity`. The inventory in §1 is now empty of client
+  writers, and `pollis-core/tests/no_client_side_remote_writes.rs` keeps it that
+  way.
+
 ## 5. Top-3 risks
 
 1. **Account-lifecycle bulk ops (E3 `delete_account`, G8 `reset_identity_and_recover`).**

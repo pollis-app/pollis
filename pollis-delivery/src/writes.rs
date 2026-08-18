@@ -154,8 +154,50 @@ pub(crate) fn bad_request(msg: &str) -> Response {
         .into_response()
 }
 
-pub(crate) fn ok_json(value: serde_json::Value) -> Response {
-    (StatusCode::OK, Json(value)).into_response()
+/// 200 + the ONE success body `B`'s endpoint is declared to answer with (#922).
+///
+/// The response half of what `pollis-api` already did for requests. Until #922
+/// every handler built its answer as a `json!{}` literal and `pollis-core`
+/// declared a private `#[derive(Deserialize)]` mirror of it, which is the same
+/// two-hand-maintained-lists bug that produced the actor-field outage — only
+/// quieter, because a response field the server renames does not fail on the
+/// client, it just arrives absent and defaults.
+///
+/// Taking `B::Response` (not `impl Serialize`) is the whole point: the client
+/// decodes that same associated type through `ds_post_json::<B>`, so the two
+/// ends cannot name different shapes. Answering with another endpoint's body is
+/// `E0308` here, and reading a field the server does not send is `E0609` there.
+///
+/// `pub` rather than `pub(crate)` so the compile-fail doctest below — which is
+/// an external crate, as every doctest is — can prove that.
+///
+/// ```compile_fail,E0308
+/// use pollis_delivery::writes::ok_response;
+/// use pollis_api::{broker::TursoTokenBody, StatusOk};
+/// // `/v1/turso/token` answers a token, not `{"status":"ok"}`.
+/// let _ = ok_response::<TursoTokenBody>(StatusOk::Ok);
+/// ```
+///
+/// ```
+/// use pollis_delivery::writes::ok_response;
+/// use pollis_api::broker::{TursoTokenBody, TursoTokenResponse};
+/// let _ = ok_response::<TursoTokenBody>(TursoTokenResponse {
+///     token: "jwt".into(),
+///     expires_in: 600,
+/// });
+/// ```
+pub fn ok_response<B: pollis_api::DsRequest>(body: B::Response) -> Response {
+    (StatusCode::OK, Json(body)).into_response()
+}
+
+/// 200 with NO body, for the endpoints declared [`pollis_api::Empty`].
+///
+/// Separate from [`ok_response`] and bounded on `Response = Empty`, so "this
+/// endpoint answers a bare 200" is a checked fact rather than a convention. A
+/// handler cannot use this for an endpoint that owes a body, and cannot
+/// accidentally start sending `null` for one that does not.
+pub fn ok_empty<B: pollis_api::DsRequest<Response = pollis_api::Empty>>() -> Response {
+    StatusCode::OK.into_response()
 }
 
 // ── Shared write-result helpers (every domain reuses these) ──────────────────
@@ -175,9 +217,20 @@ pub enum WriteOutcome {
 }
 
 /// Map a [`WriteOutcome`] to the HTTP response (200 ok / 403 forbidden).
-pub(crate) fn outcome_response(outcome: WriteOutcome) -> Result<Response, AppError> {
+///
+/// Generic over the endpoint's request type since #922, which is what ties this
+/// shared success body to a specific route: `B::Response` must be
+/// [`pollis_api::StatusOk`] for `outcome_response::<B>` to typecheck, so an
+/// endpoint whose table row declares a richer body cannot silently answer a bare
+/// `{"status":"ok"}` through the shared helper. One turbofish per call site, and
+/// it is the only thing that makes the ~50 endpoints sharing this path as
+/// strongly typed as the handful that build their own body.
+pub(crate) fn outcome_response<B>(outcome: WriteOutcome) -> Result<Response, AppError>
+where
+    B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
+{
     Ok(match outcome {
-        WriteOutcome::Ok => ok_json(serde_json::json!({ "status": "ok" })),
+        WriteOutcome::Ok => ok_response::<B>(pollis_api::StatusOk::Ok),
         WriteOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
     })
 }
@@ -383,7 +436,7 @@ pub async fn group_info(
     )
     .await?;
 
-    Ok(ok_json(serde_json::json!({ "status": "ok" })))
+    Ok(ok_response::<GroupInfoBody>(pollis_api::StatusOk::Ok))
 }
 
 /// Decode a parsed [`GroupInfoBody`]'s base64 GroupInfo and UPSERT it (the W4
@@ -474,7 +527,7 @@ pub async fn welcomes_ack(
     let conn = state.log_db.conn().await?;
     let updated = ack_welcomes(&conn, &recipient, &parsed.welcome_ids).await?;
 
-    Ok(ok_json(serde_json::json!({ "status": "ok", "updated": updated })))
+    Ok(ok_response::<AckBody>(WelcomesUpdated::Ok { updated }))
 }
 
 /// Mark the given Welcomes `delivered = 1`, scoped to `recipient` so a user can
@@ -490,21 +543,29 @@ pub async fn ack_welcomes(
 
     // `id IN (?2, ?3, …)` with the recipient bound first so the filter can never
     // touch another user's Welcomes.
-    let placeholders = (2..=welcome_ids.len() + 1)
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let sql = format!(
-        "UPDATE mls_welcome SET delivered = 1 \
-         WHERE recipient_id = ?1 AND id IN ({placeholders})"
-    );
-    let mut params: Vec<libsql::Value> = Vec::with_capacity(welcome_ids.len() + 1);
-    params.push(libsql::Value::Text(recipient.to_string()));
-    for id in welcome_ids {
-        params.push(libsql::Value::Text(id.clone()));
+    //
+    // Chunked (#916) with ONE slot reserved for `recipient`. This list comes off
+    // the wire — a device acking a long backlog, or a caller sending an
+    // arbitrarily long one — so it is the batched query in the workspace most
+    // able to exceed SQLite's parameter limit, and going over does not degrade:
+    // the statement fails to prepare and the Welcomes never get marked
+    // delivered.
+    let mut updated: u64 = 0;
+    for chunk in crate::util::bind_chunks(welcome_ids, 1) {
+        let sql = format!(
+            "UPDATE mls_welcome SET delivered = 1 \
+             WHERE recipient_id = ?1 AND id IN ({})",
+            crate::util::placeholders(chunk.len(), 2)
+        );
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 1);
+        params.push(libsql::Value::Text(recipient.to_string()));
+        for id in chunk {
+            params.push(libsql::Value::Text(id.clone()));
+        }
+        updated += log_conn.execute(&sql, libsql::params_from_iter(params)).await?;
     }
 
-    Ok(log_conn.execute(&sql, libsql::params_from_iter(params)).await?)
+    Ok(updated)
 }
 
 // ── W6/W7 — POST /v1/welcomes/reset ──────────────────────────────────────────
@@ -536,7 +597,7 @@ pub async fn welcomes_reset(
     let conn = state.log_db.conn().await?;
     let updated = reset_welcomes(&conn, &recipient, parsed.device_id.as_deref()).await?;
 
-    Ok(ok_json(serde_json::json!({ "status": "ok", "updated": updated })))
+    Ok(ok_response::<ResetBody>(WelcomesUpdated::Ok { updated }))
 }
 
 /// Re-arm Welcomes for redelivery (`delivered = 0`) for `recipient` (W6/W7).
@@ -592,7 +653,7 @@ pub async fn welcomes_purge(
     let conn = state.log_db.conn().await?;
     let deleted = purge_welcomes(&conn, &recipient).await?;
 
-    Ok(ok_json(serde_json::json!({ "status": "ok", "deleted": deleted })))
+    Ok(ok_response::<PurgeBody>(WelcomesPurged::Ok { deleted }))
 }
 
 /// Delete all of `recipient`'s Welcomes (W8, identity-reset cleanup). Pure
@@ -656,7 +717,7 @@ pub async fn welcomes_resubmit(
     )
     .await?;
 
-    Ok(ok_json(serde_json::json!({ "status": "ok" })))
+    Ok(ok_response::<ResubmitBody>(pollis_api::StatusOk::Ok))
 }
 
 /// Idempotent (re)insert of a Welcome, keyed on the UNIQUE

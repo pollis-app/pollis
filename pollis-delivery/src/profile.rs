@@ -98,7 +98,7 @@ pub async fn update_profile(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_update_profile(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<UpdateProfileBody>(apply_update_profile(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// COALESCE-UPDATE the user's own profile row. Authz: the actor may only edit
@@ -149,7 +149,7 @@ pub async fn save_preferences(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_save_preferences(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<SavePreferencesBody>(apply_save_preferences(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// UPSERT the user's `user_preferences` row. Authz: the actor may only write
@@ -192,7 +192,7 @@ pub async fn block_user(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_block_user(&conn, authed.as_deref(), &parsed.0).await?)
+    outcome_response::<AddBlock>(apply_block_user(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
 /// Insert a block row and reset the blocker's `accepted_at` for every DM shared
@@ -249,7 +249,7 @@ pub async fn unblock_user(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_unblock_user(&conn, authed.as_deref(), &parsed.0).await?)
+    outcome_response::<RemoveBlock>(apply_unblock_user(&conn, authed.as_deref(), &parsed.0).await?)
 }
 
 /// Delete a block row. Authz: the blocker is the authenticated user — the DELETE
@@ -289,7 +289,7 @@ pub async fn create_dm(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_create_dm(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<CreateDmBody>(apply_create_dm(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Create a DM channel: insert `dm_channel`, the creator's auto-accepted
@@ -408,7 +408,7 @@ pub async fn accept_dm(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_accept_dm(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<AcceptDmBody>(apply_accept_dm(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Flip the actor's own `dm_channel_member.accepted_at` from NULL → now. Authz:
@@ -475,7 +475,7 @@ pub async fn add_dm_member(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_add_dm_member(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<AddDmMemberBody>(apply_add_dm_member(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Insert a `dm_channel_member` row for `user_id` and seed that member's
@@ -550,7 +550,7 @@ pub async fn remove_dm_member(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_remove_dm_member(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<RemoveDmMemberBody>(apply_remove_dm_member(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Delete a `dm_channel_member` row. Authz (replicates the client's current
@@ -631,7 +631,7 @@ pub async fn leave_dm(
         )
         .await?;
     }
-    outcome_response(outcome)
+    outcome_response::<LeaveDmBody>(outcome)
 }
 
 /// Remove the actor's own `dm_channel_member` row and, when the channel is left

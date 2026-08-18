@@ -132,7 +132,9 @@ rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
 # In-process MLS Delivery Service for the flows harness: the real DS router
 # (build_router) bound on a loopback port against the SAME test libsql file the
 # clients use, so flows exercise the deployed DS submission path end to end.
-pollis-delivery = { path = "../pollis-delivery" }
+# `test-harness` exposes `Db::from_shared`, which the flows harness needs to
+# hand the DS the SAME libsql handle its clients read from (#925).
+pollis-delivery = { path = "../pollis-delivery", features = ["test-harness"] }
 # The shared endpoint table + request types, so the harness routes on the same
 # `Body::PATH` constants the client posts to and can assert route coverage
 # against the one declaration instead of a hand-kept list (#875, #918).

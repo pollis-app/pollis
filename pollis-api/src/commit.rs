@@ -77,3 +77,68 @@ pub struct CommitSinceReport {
     #[serde(default)]
     pub device_id: Option<String>,
 }
+
+// ── Responses (#922) ─────────────────────────────────────────────────────────
+//
+// Moved here from `pollis-delivery::commit` so the submit response has ONE
+// declaration, like every request body already did. `pollis_delivery::commit`
+// re-exports this module wholesale, so `pollis_delivery::commit::SubmitResponse`
+// keeps resolving for its handlers, its tests and the `flows` harness.
+
+/// `POST /v1/commits` — accepted, or rejected with the head to re-base onto.
+///
+/// Both outcomes are this ONE type because they are one decision with two
+/// answers; the HTTP status (200 / 409) mirrors the variant so a client that
+/// only branches on the status is still correct.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum SubmitResponse {
+    /// The commit won its epoch. The lineage head is now `epoch + 1`.
+    Accepted { generation: i64, epoch: i64 },
+    /// The client wasn't at the head. Here's the current head and the commits
+    /// it's missing so it can re-base and resubmit — no fork possible.
+    ///
+    /// `head` and `missing` are scoped to the SUBMITTER's generation, so a
+    /// pre-hybrid client sees byte-for-byte the response it sees today (its
+    /// generation is 0 and `head_generation` is a field it ignores).
+    /// `head_generation` is the extra bit a hybrid-aware client needs: if it
+    /// exceeds the submitter's generation, the conversation has migrated and the
+    /// client must drain its lineage and pick up the Welcome rather than keep
+    /// re-basing.
+    Rejected {
+        head: i64,
+        head_generation: i64,
+        missing: Vec<CommitWire>,
+    },
+}
+
+/// One commit row as it crosses the wire (blobs base64).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CommitWire {
+    pub generation: i64,
+    pub epoch: i64,
+    pub seq: i64,
+    pub sender_id: String,
+    /// base64
+    pub commit: String,
+    pub added_user_id: Option<String>,
+    pub added_device_ids: Option<String>,
+    pub created_at: String,
+}
+
+/// `GET /v1/commits/:conversation_id` — the contiguous log from the requested
+/// epoch to the head.
+///
+/// A GET, so it has no request body and therefore no row in the `ENDPOINTS`
+/// table; it lives here anyway so all of the commit wire types are one place.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CommitsResponse {
+    /// Head epoch WITHIN `generation` — what a pre-hybrid client already reads.
+    pub head: i64,
+    /// The generation the returned commits belong to (the one that was asked for).
+    pub generation: i64,
+    /// The conversation's newest lineage. `head_generation > generation` is how a
+    /// client learns it has been migrated off the suite it is still running.
+    pub head_generation: i64,
+    pub commits: Vec<CommitWire>,
+}

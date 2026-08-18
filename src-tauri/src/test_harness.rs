@@ -353,7 +353,11 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
             // `--` line comment: skip to end of line.
             '-' if chars.peek() == Some(&'-') => {
                 chars.next();
-                while let Some(next) = chars.next() {
+                // `by_ref()` so the outer loop resumes from where this stops —
+                // the same semantics as the `while let` this replaces, which
+                // clippy rejects (`while_let_on_iterator`) under `-D warnings`
+                // whenever the crate is built with `test-harness`.
+                for next in chars.by_ref() {
                     if next == '\n' {
                         current.push('\n');
                         break;

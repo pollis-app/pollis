@@ -105,7 +105,7 @@ pub async fn publish_key_packages(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_publish_key_packages(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<PublishKeyPackagesBody>(apply_publish_key_packages(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// INSERT OR IGNORE each key package with `user_id = actor`. Authz: the actor is
@@ -165,7 +165,7 @@ pub async fn replenish_key_packages(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_replenish_key_packages(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<ReplenishKeyPackagesBody>(apply_replenish_key_packages(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// DELETE the actor's stale unclaimed packages for `device_id` (and legacy
@@ -279,24 +279,27 @@ pub async fn claim_key_package(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    Ok(claim_outcome_response(apply_claim_key_package(&conn, &parsed).await?))
+    Ok(claim_outcome_response::<ClaimKeyPackageBody>(apply_claim_key_package(&conn, &parsed).await?))
 }
 
 /// Map a [`ClaimOutcome`] to its HTTP response: 200 + `{ ref_hash, key_package }`
 /// (base64) on a claim, 404 + a typed error when the target has no unclaimed
 /// package. Shared by the production handler and the integration harness so both
 /// surface the same no-KP signal the client's control flow keys on.
-pub fn claim_outcome_response(outcome: ClaimOutcome) -> Response {
+pub fn claim_outcome_response<B>(outcome: ClaimOutcome) -> Response
+where
+    B: pollis_api::DsRequest<Response = ClaimKeyPackageResponse>,
+{
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use base64::Engine as _;
     match outcome {
         ClaimOutcome::Claimed { ref_hash, key_package } => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(key_package);
-            crate::writes::ok_json(serde_json::json!({
-                "ref_hash": ref_hash,
-                "key_package": b64,
-            }))
+            crate::writes::ok_response::<B>(ClaimKeyPackageResponse {
+                ref_hash,
+                key_package: b64,
+            })
         }
         ClaimOutcome::NoKeyPackage => (
             StatusCode::NOT_FOUND,
@@ -399,7 +402,7 @@ pub async fn resign_device_certs(
     if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
         state.device_keys.invalidate_user(&owner);
     }
-    outcome_response(outcome)
+    outcome_response::<ResignDeviceCertsBody>(outcome)
 }
 
 /// UPDATE each device's cert columns, every statement scoped
@@ -458,7 +461,7 @@ pub async fn register_push_token(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response(apply_register_push_token(&conn, authed.as_deref(), &parsed).await?)
+    outcome_response::<PushTokenBody>(apply_register_push_token(&conn, authed.as_deref(), &parsed).await?)
 }
 
 /// Upsert the push token with `user_id = actor`. Authz: owner-scoped — the token

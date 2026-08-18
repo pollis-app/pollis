@@ -122,3 +122,17 @@ impl KeyPackageEntry {
         self.ciphersuite.unwrap_or(CIPHERSUITE_PQ)
     }
 }
+
+/// `POST /v1/key-packages/claim` — the claimed KeyPackage.
+///
+/// A 404 (no unclaimed package for the target) carries no body and is NOT this
+/// type: it is the documented "skip this device" signal the add path branches
+/// on, and a status code is where that belongs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimKeyPackageResponse {
+    /// The claimed row's hash-ref, so a caller can correlate the claim with the
+    /// `mls_key_package` row it consumed.
+    pub ref_hash: String,
+    /// TLS-serialized MLS KeyPackage, base64 (STANDARD).
+    pub key_package: String,
+}

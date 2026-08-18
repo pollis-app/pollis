@@ -65,7 +65,7 @@ use libsql::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, is_member, ok_json, Authed};
+use crate::writes::{bad_request, gate, is_member, ok_response, Authed};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -324,7 +324,7 @@ pub async fn livekit_token(
         crate::util::now_unix(),
     )?;
 
-    Ok(ok_json(serde_json::json!({ "token": token, "url": url })))
+    Ok(ok_response::<LivekitTokenBody>(LivekitTokenResponse { token, url: url.to_string() }))
 }
 
 /// Look up usernames for a batch of resolved user ids, in one query.
@@ -566,7 +566,7 @@ pub async fn livekit_send_data(
         return Ok(not_configured("livekit"));
     }
     match room_send_data(&state, &parsed.room, &parsed.payload).await {
-        Ok(()) => Ok(ok_json(serde_json::json!({ "ok": true }))),
+        Ok(()) => Ok(ok_response::<LivekitSendDataBody>(LivekitSendDataResponse { ok: true })),
         Err(e) => Ok(bad_gateway(e)),
     }
 }
@@ -703,9 +703,11 @@ pub async fn livekit_participants(
     }
 
     match listed {
-        Ok(r) if r.status() == StatusCode::NOT_FOUND => {
-            Ok(ok_json(serde_json::json!({ "participants": [] })))
-        }
+        Ok(r) if r.status() == StatusCode::NOT_FOUND => Ok(ok_response::<
+            LivekitParticipantsBody,
+        >(
+            LivekitParticipantsResponse { participants: Vec::new() },
+        )),
         Ok(r) if r.status().is_success() => {
             let parsed_resp: RsResp = match r.json().await {
                 Ok(p) => p,
@@ -737,14 +739,17 @@ pub async fn livekit_participants(
                 let conn = state.db.conn().await?;
                 lookup_usernames(&conn, &ids).await.unwrap_or_default()
             };
-            let out: Vec<serde_json::Value> = resolved
+            let participants: Vec<ResolvedIdentity> = resolved
                 .into_iter()
                 .map(|(identity, uid)| {
                     let name = names.get(&uid).cloned().unwrap_or_else(|| uid.clone());
-                    serde_json::json!({ "identity": identity, "user_id": uid, "name": name })
+                    // No `kind` on the roster — it is already filtered to real
+                    // voice participants, and the field is skipped when absent
+                    // so these bytes are unchanged.
+                    ResolvedIdentity { identity, user_id: uid, name, kind: None }
                 })
                 .collect();
-            Ok(ok_json(serde_json::json!({ "participants": out })))
+            Ok(ok_response::<LivekitParticipantsBody>(LivekitParticipantsResponse { participants }))
         }
         Ok(r) => {
             let status = r.status();
@@ -822,24 +827,27 @@ pub async fn livekit_identities(
         lookup_usernames(&conn, &ids).await.unwrap_or_default()
     };
 
-    let out: Vec<serde_json::Value> = resolved
+    let identities: Vec<ResolvedIdentity> = resolved
         .into_iter()
         .map(|(identity, uid, kind)| {
             let name = names.get(&uid).cloned().unwrap_or_else(|| uid.clone());
-            serde_json::json!({
-                "identity": identity,
-                "user_id": uid,
-                "name": name,
-                "kind": match kind {
-                    crate::participant_id::ParticipantKind::Voice => "voice",
-                    crate::participant_id::ParticipantKind::View => "view",
-                    crate::participant_id::ParticipantKind::Realtime => "realtime",
-                },
-            })
+            ResolvedIdentity {
+                identity,
+                user_id: uid,
+                name,
+                kind: Some(
+                    match kind {
+                        crate::participant_id::ParticipantKind::Voice => "voice",
+                        crate::participant_id::ParticipantKind::View => "view",
+                        crate::participant_id::ParticipantKind::Realtime => "realtime",
+                    }
+                    .to_string(),
+                ),
+            }
         })
         .collect();
 
-    Ok(ok_json(serde_json::json!({ "identities": out })))
+    Ok(ok_response::<LivekitIdentitiesBody>(LivekitIdentitiesResponse { identities }))
 }
 
 // ── POST /v1/turso/token ──────────────────────────────────────────────────────
@@ -896,10 +904,10 @@ pub async fn turso_token(
                 Ok(p) => p,
                 Err(e) => return Ok(bad_gateway(format!("turso token decode: {e}"))),
             };
-            Ok(ok_json(serde_json::json!({
-                "token": parsed.jwt,
-                "expires_in": TURSO_TOKEN_EXPIRATION_SECS,
-            })))
+            Ok(ok_response::<TursoTokenBody>(TursoTokenResponse {
+                token: parsed.jwt,
+                expires_in: TURSO_TOKEN_EXPIRATION_SECS,
+            }))
         }
         Ok(r) => {
             let status = r.status();
@@ -1073,11 +1081,11 @@ pub async fn r2_presign(
         signed_content_length,
     );
 
-    Ok(ok_json(serde_json::json!({
-        "url": url,
-        "method": http_method,
-        "expires_in": PRESIGN_EXPIRES_SECS,
-    })))
+    Ok(ok_response::<R2PresignBody>(R2PresignResponse {
+        url,
+        method: http_method.to_string(),
+        expires_in: PRESIGN_EXPIRES_SECS,
+    }))
 }
 
 // ── SigV4 query-string presign ───────────────────────────────────────────────

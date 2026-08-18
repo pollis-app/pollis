@@ -58,3 +58,28 @@ pub struct ResubmitBody {
     /// TLS-serialized MLS Welcome, base64 (STANDARD).
     pub welcome: String,
 }
+
+// ── Responses (#922) ─────────────────────────────────────────────────────────
+
+/// `POST /v1/welcomes/ack` and `POST /v1/welcomes/reset` — how many
+/// `mls_welcome` rows the write touched.
+///
+/// One type for both because they answer the same bytes; the ENDPOINT is still
+/// distinguished by the request type, which is what carries the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum WelcomesUpdated {
+    Ok { updated: u64 },
+}
+
+/// `POST /v1/welcomes/purge` — how many `mls_welcome` rows were deleted.
+///
+/// Purge deletes where ack/reset update, so the count is named `deleted` rather
+/// than `updated`. A separate type rather than a shared "count" struct: the two
+/// numbers mean different things, and the wire has always spelled them
+/// differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum WelcomesPurged {
+    Ok { deleted: u64 },
+}

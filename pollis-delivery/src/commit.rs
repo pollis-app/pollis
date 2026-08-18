@@ -48,7 +48,6 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use libsql::Connection;
-use serde::Serialize;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -57,54 +56,13 @@ use serde::Serialize;
 // keeps resolving for handlers, tests and the flows harness.
 pub use pollis_api::commit::*;
 
-// ── Wire types (blobs are base64 over the wire) ─────────────────────────────
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "status", rename_all = "lowercase")]
-pub enum SubmitResponse {
-    /// The commit won its epoch. The lineage head is now `epoch + 1`.
-    Accepted { generation: i64, epoch: i64 },
-    /// The client wasn't at the head. Here's the current head and the commits
-    /// it's missing so it can re-base and resubmit — no fork possible.
-    ///
-    /// `head` and `missing` are scoped to the SUBMITTER's generation, so a
-    /// pre-hybrid client sees byte-for-byte the response it sees today (its
-    /// generation is 0 and `head_generation` is a field it ignores).
-    /// `head_generation` is the extra bit a hybrid-aware client needs: if it
-    /// exceeds the submitter's generation, the conversation has migrated and the
-    /// client must drain its lineage and pick up the Welcome rather than keep
-    /// re-basing.
-    Rejected {
-        head: i64,
-        head_generation: i64,
-        missing: Vec<CommitWire>,
-    },
-}
-
-#[derive(Debug, Serialize)]
-pub struct CommitWire {
-    pub generation: i64,
-    pub epoch: i64,
-    pub seq: i64,
-    pub sender_id: String,
-    /// base64
-    pub commit: String,
-    pub added_user_id: Option<String>,
-    pub added_device_ids: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CommitsResponse {
-    /// Head epoch WITHIN `generation` — what a pre-hybrid client already reads.
-    pub head: i64,
-    /// The generation the returned commits belong to (the one that was asked for).
-    pub generation: i64,
-    /// The conversation's newest lineage. `head_generation > generation` is how a
-    /// client learns it has been migrated off the suite it is still running.
-    pub head_generation: i64,
-    pub commits: Vec<CommitWire>,
-}
+// ── Wire types ───────────────────────────────────────────────────────────────
+//
+// `SubmitResponse`, `CommitWire` and `CommitsResponse` moved to `pollis-api`
+// (#922) and arrive through the `pub use` above, so this module's public
+// surface is unchanged. They live there for the same reason the request bodies
+// do: `pollis-core` decodes what this crate encodes, and a field declared twice
+// is a field that eventually disagrees.
 
 // ── Core logic ──────────────────────────────────────────────────────────────
 

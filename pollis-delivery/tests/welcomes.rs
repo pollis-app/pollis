@@ -170,3 +170,94 @@ async fn a_resubmit_refreshes_the_generation_too() {
     assert_eq!(data, b"hybrid");
     assert_eq!(generation, 1, "the upsert must carry the successor's lineage");
 }
+
+/// Acking more Welcome ids than SQLite will bind must still work (#916).
+///
+/// `ack_welcomes` builds `id IN (…)` from `AckBody::welcome_ids`, a list that
+/// arrives in the REQUEST BODY — so its length is chosen by the caller, not
+/// sized by anything on the server. Past `SQLITE_MAX_VARIABLE_NUMBER` the
+/// statement does not run slowly, it fails to prepare, and an ack that 500s
+/// leaves the Welcomes marked undelivered and redelivered forever.
+///
+/// The ids do not need to exist for this to bite: the limit applies to the
+/// statement, not the matching rows. So this drives one real Welcome plus a pile
+/// of ids that match nothing, which is both the cheap way to exceed the ceiling
+/// and a fair model of a client acking a long backlog.
+///
+/// Without the chunking this is an `Err` from `prepare`; with it, the real
+/// Welcome is acked and the rest are simply no-ops.
+#[tokio::test]
+async fn acking_more_ids_than_sqlite_can_bind_still_marks_them_delivered() {
+    let db = fresh_db().await;
+    let conn = db.conn().await.unwrap();
+
+    conn.execute(
+        "INSERT INTO mls_welcome \
+         (id, conversation_id, generation, recipient_id, recipient_device_id, welcome_data, delivered) \
+         VALUES ('w-real', 'c1', 0, 'alice', 'd1', X'00', 0)",
+        (),
+    )
+    .await
+    .expect("seed welcome");
+
+    // Comfortably past the bundled build's 32766 ceiling, so the test does not
+    // quietly stop testing anything if that limit is raised again.
+    let mut ids: Vec<String> = (0..40_000).map(|i| format!("w-absent-{i}")).collect();
+    ids.push("w-real".to_string());
+
+    let updated = pollis_delivery::writes::ack_welcomes(&conn, "alice", &ids)
+        .await
+        .expect("an oversized ack list must not fail to prepare");
+    assert_eq!(updated, 1, "exactly the one real Welcome should be acked");
+
+    let mut rows = conn
+        .query(
+            "SELECT delivered FROM mls_welcome WHERE id = 'w-real'",
+            (),
+        )
+        .await
+        .unwrap();
+    let delivered: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(delivered, 1, "the acked Welcome must not be redelivered");
+}
+
+/// Chunking must not let an ack cross the recipient scope (#916 + W5).
+///
+/// The recipient is bound as `?1` in every chunk. Rebuilding the statement per
+/// chunk is exactly where that binding could be dropped, and losing it would
+/// turn an ack into "mark any Welcome with this id delivered, whoever owns it".
+#[tokio::test]
+async fn a_chunked_ack_still_cannot_touch_another_users_welcomes() {
+    let db = fresh_db().await;
+    let conn = db.conn().await.unwrap();
+
+    for (id, who) in [("w-alice", "alice"), ("w-bob", "bob")] {
+        conn.execute(
+            &format!(
+                "INSERT INTO mls_welcome \
+                 (id, conversation_id, generation, recipient_id, recipient_device_id, welcome_data, delivered) \
+                 VALUES ('{id}', 'c1', 0, '{who}', 'd1', X'00', 0)"
+            ),
+            (),
+        )
+        .await
+        .unwrap();
+    }
+
+    // Long enough to span several chunks, and it names BOTH users' Welcomes.
+    let mut ids: Vec<String> = (0..1_200).map(|i| format!("w-absent-{i}")).collect();
+    ids.push("w-alice".to_string());
+    ids.push("w-bob".to_string());
+
+    let updated = pollis_delivery::writes::ack_welcomes(&conn, "alice", &ids)
+        .await
+        .unwrap();
+    assert_eq!(updated, 1, "only alice's Welcome is hers to ack");
+
+    let mut rows = conn
+        .query("SELECT delivered FROM mls_welcome WHERE id = 'w-bob'", ())
+        .await
+        .unwrap();
+    let delivered: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(delivered, 0, "bob's Welcome must be untouched");
+}

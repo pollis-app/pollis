@@ -105,28 +105,30 @@ pub async fn notify_new_message(
         return Ok(());
     }
 
-    // Fetch every registered token for those recipients in one query.
-    let placeholders = (0..user_ids.len())
-        .map(|i| format!("?{}", i + 1))
-        .collect::<Vec<_>>()
-        .join(",");
-    let token_sql = format!(
-        "SELECT token, platform FROM push_token WHERE user_id IN ({placeholders})"
-    );
-    let token_params: Vec<libsql::Value> = user_ids
-        .iter()
-        .map(|u| libsql::Value::Text(u.clone()))
-        .collect();
-    let mut token_rows = conn.query(&token_sql, token_params).await?;
+    // Fetch every registered token for those recipients — one query per chunk
+    // of recipients (#916), not one per recipient.
+    let mut tokens: Vec<(String, String)> = Vec::new();
+    for chunk in crate::db::chunk::bind_chunks(&user_ids, 0) {
+        let token_sql = format!(
+            "SELECT token, platform FROM push_token WHERE user_id IN ({})",
+            crate::db::chunk::placeholders(chunk.len(), 1)
+        );
+        let token_params: Vec<libsql::Value> = chunk
+            .iter()
+            .map(|u| libsql::Value::Text(u.clone()))
+            .collect();
+        let mut token_rows = conn.query(&token_sql, token_params).await?;
+        while let Some(row) = token_rows.next().await? {
+            tokens.push((row.get(0)?, row.get(1).unwrap_or_default()));
+        }
+    }
 
     // `kind` mirrors the values the mobile push router understands
     // (mobile/hooks/usePushNotifications.ts): "channel" | "dm".
     let kind = if is_channel { "channel" } else { "dm" };
 
     let mut messages: Vec<serde_json::Value> = Vec::new();
-    while let Some(row) = token_rows.next().await? {
-        let token: String = row.get(0)?;
-        let platform: String = row.get(1).unwrap_or_default();
+    for (token, platform) in tokens {
         // Generic, content-free alert — the data fields drive routing + a
         // local re-ingest; the body intentionally reveals nothing. This is
         // the same approach Signal/WhatsApp use when the server can't decrypt

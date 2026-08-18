@@ -194,7 +194,8 @@ identity).
 - **Mark-dead-on-failure + cooldown (no background poll).** Health is tracked
   inline: a failed dial marks that endpoint dead for a cooldown (30s), a success
   clears it. There is deliberately **no health-poll loop** (repo rule: no periodic
-  keepalives) — recovery is lazy, matching `RemoteDb::with_retry`: the cooldown
+  keepalives) — recovery is lazy, the same posture as `RemoteDb::with_retry`
+  (posture only; no libsql stream is involved here): the cooldown
   expires and the next connect that reaches the endpoint retries it.
 - **Fail-open.** Healthy endpoints are tried first, but if **all** are marked dead
   they are still tried — a transient outage that marked the whole pool dead must

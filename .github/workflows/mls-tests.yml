@@ -245,9 +245,17 @@ jobs:
         run: cargo test -p pollis-delivery
 
       # openmls-level MLS state-machine tests (mls/tests.rs, reconcile, etc.).
+      #
+      # `--features test-harness` (#914): the feature exists so integration tests
+      # can build a real `RemoteDb` over a local file (`RemoteDb::connect_local`,
+      # gated `#[cfg(any(test, feature = "test-harness"))]`). Without it every
+      # pollis-core integration test that needs one silently could not exist —
+      # `tests/remote_with_retry.rs` compiled to nothing here while passing
+      # locally. The feature only ADDS test-only constructors; it changes no
+      # production behaviour, and the flows step below already runs with it.
       - name: MLS unit tests (pollis-core)
         if: ${{ !cancelled() }}
-        run: cargo test -p pollis-core
+        run: cargo test -p pollis-core --features test-harness
 
       # pollis-tui unit + smoke tests (the headless in-process-DS rig — no
       # webkit/ALSA). Nothing ran these before, so DS-spine changes could regress

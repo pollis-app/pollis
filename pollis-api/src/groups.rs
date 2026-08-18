@@ -197,3 +197,14 @@ pub struct RedeemInviteLinkBody {
     /// RFC3339 "now", used for the expiry comparison and the audit stamp.
     pub now: String,
 }
+
+/// `POST /v1/invite-links/redeem` — the group the token admitted the caller to.
+///
+/// Every way a token can fail to be live answers with ONE indistinguishable
+/// rejection status, deliberately (#847), so this type describes the success
+/// case only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum RedeemInviteLinkResponse {
+    Ok { group_id: String },
+}

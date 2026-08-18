@@ -54,6 +54,11 @@ pollis-core = { path = "../pollis-core", default-features = false, features = ["
 # the flows harness does) and drives two clients through it — no Tauri, headless.
 # pollis-delivery is pure axum/libsql, so it links with no webkit/ALSA/dbus.
 pollis-delivery = { path = "../pollis-delivery" }
+# The wire types, so the in-box DS double answers with the DECLARED response
+# bodies rather than its own `json!{}` copies of them (#922). A test double is a
+# second implementation of the server, and therefore exactly the place a
+# hand-written literal drifts without anything noticing.
+pollis-api = { path = "../pollis-api" }
 axum = "0.7"
 base64 = "0.22"
 tempfile = "3"

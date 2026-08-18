@@ -324,7 +324,10 @@ pub async fn download_file(
 ) -> Result<Vec<u8>> {
     let get_url = presign_r2(state, "get", &key).await?;
     let overlay = state.overlay_handle();
-    r2_get_url(overlay.as_deref(), &get_url).await
+    // The public byte-returning command: this is the boundary that owes an owned
+    // `Vec`, so the conversion happens HERE rather than inside `r2_get_url`
+    // where it used to cost every caller a copy (#915).
+    Ok(r2_get_url(overlay.as_deref(), &get_url).await?.to_vec())
 }
 
 // ── Public objects (avatars, group icons) ─────────────────────────────────
@@ -439,7 +442,9 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
             }
         }
     };
-    let encrypted = cache_encrypt(&bytes, &db_key, content_hash.as_bytes())?;
+    // `Vec::from` moves the `Bytes` allocation when it uniquely owns one, so the
+    // plaintext is not copied on the way into the in-place encryption (#915).
+    let encrypted = cache_encrypt(Vec::from(bytes), &db_key, content_hash.as_bytes())?;
 
     let dir = media_cache_dir()?;
     std::fs::create_dir_all(&dir)
@@ -549,6 +554,12 @@ pub async fn upload_media(
         // Encrypt with chunked AES-256-GCM, then upload via a DS-minted
         // presigned PUT (the client holds no R2 credentials).
         let ciphertext = encrypt_chunked(&data, &enc_key, &enc_nonce);
+        // Release the plaintext BEFORE the presign round trip and the upload
+        // (#915). Everything derived from it — hash, key, blurhash, dimensions,
+        // size — was computed above, and the PUT is the longest-lived step in
+        // the function: holding both buffers across it doubled the resident cost
+        // of an upload for the entire duration of the transfer.
+        drop(data);
 
         let put_url = presign_r2(state, "put", &r2_key).await?;
         let overlay = state.overlay_handle();
@@ -556,13 +567,14 @@ pub async fn upload_media(
 
         // Register in Turso so future uploads of the same file skip R2 — route the
         // dedup-row write through the Delivery Service.
-        let body = pollis_api::messages::AttachmentRegisterBody {
+        // Upload-time dedup registration: no message carries this object yet,
+        // so there is no reference to count. The send path registers the
+        // `(content_hash, message_id)` reference separately (#690), and since
+        // #925 it is a different VARIANT rather than the same body with a field
+        // left `None`.
+        let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
             content_hash: content_hash.clone(),
             r2_key: r2_key.clone(),
-            // Upload-time dedup registration: no message carries this object
-            // yet, so there is no reference to count. The send path registers
-            // the `(content_hash, message_id)` reference separately (#690).
-            message_id: None,
         };
         crate::commands::mls::ds_post_ok(state, &body).await?;
     }
@@ -605,6 +617,10 @@ pub async fn download_media(
     let overlay = state.overlay_handle();
     let ciphertext = r2_get_url(overlay.as_deref(), &get_url).await?;
     let plaintext = decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)?;
+    // Explicit, not incidental (#915): without this the ciphertext stays alive
+    // until the function returns, so the hash check below — and the caller's
+    // first use of the result — run with two full-size copies resident.
+    drop(ciphertext);
 
     // The object is CONTENT-ADDRESSED, so verify it actually is its address.
     //
@@ -717,7 +733,10 @@ pub async fn get_media_url(
             }
         }
     };
-    let encrypted = match cache_encrypt(&bytes, &db_key, content_hash.as_bytes()) {
+    // `bytes` is MOVED into the encryption (#915): it is the decrypted
+    // attachment, and holding it alongside a freshly-allocated ciphertext was
+    // the second of the three full-size copies this path used to keep alive.
+    let encrypted = match cache_encrypt(bytes, &db_key, content_hash.as_bytes()) {
         Ok(c) => c,
         Err(e) => {
             in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
@@ -788,21 +807,50 @@ fn derive_cache_key(db_key: &[u8], info: &[u8]) -> [u8; 32] {
 }
 
 /// Encrypt cache bytes. Output layout: `[12-byte nonce][ciphertext+tag]`.
-pub fn cache_encrypt(plaintext: &[u8], db_key: &[u8], info: &[u8]) -> Result<Vec<u8>> {
-    use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Key, Nonce};
+///
+/// **Takes the plaintext by value and encrypts it in place (#915.)** The
+/// previous signature took `&[u8]`, produced a fresh ciphertext buffer, then
+/// copied nonce+ciphertext into a THIRD buffer — so caching a 100 MiB
+/// attachment briefly held ~300 MiB: the decrypted bytes the caller still owned,
+/// the `Vec` `encrypt` returned, and the concatenation. This reuses the caller's
+/// allocation instead: AES-GCM in place, the 16-byte tag appended, and the
+/// 12-byte nonce spliced onto the front by an in-place rotate.
+///
+/// On the real path that allocates NOTHING. `decrypt_chunked` sizes its output
+/// from the CIPHERTEXT length, so the plaintext it returns already carries spare
+/// capacity (one AEAD tag per chunk) — more than the 28 bytes needed here. A
+/// caller whose buffer is exactly full pays one reallocation, i.e. one extra
+/// copy in the worst case rather than two. Both bounds are asserted in
+/// `tests/attachment_memory.rs` against a counting allocator.
+///
+/// `pollis-core` ships to mobile via uniffi, and this is the largest single
+/// allocation the client makes — the difference between one copy and three is
+/// the difference between caching a large video and being killed for it.
+///
+/// The on-disk layout is byte-for-byte unchanged, so existing cache files (and
+/// [`cache_decrypt`]) are unaffected.
+pub fn cache_encrypt(mut plaintext: Vec<u8>, db_key: &[u8], info: &[u8]) -> Result<Vec<u8>> {
+    use aes_gcm::{aead::{AeadInPlace, KeyInit}, Aes256Gcm, Key, Nonce};
     use rand::RngCore;
 
     let key = derive_cache_key(db_key, info);
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
     let mut nonce_bytes = [0u8; CACHE_NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-    let ct = cipher
-        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext)
+
+    // Reserve the tag AND the nonce prefix up front, so neither the in-place
+    // encryption nor the splice below can trigger a reallocation — a realloc
+    // here would copy the whole buffer and put the second copy back.
+    plaintext.reserve_exact(CACHE_NONCE_LEN + 16);
+    cipher
+        .encrypt_in_place(Nonce::from_slice(&nonce_bytes), &[], &mut plaintext)
         .map_err(|_| Error::Other(anyhow::anyhow!("media cache encrypt failed")))?;
-    let mut out = Vec::with_capacity(CACHE_NONCE_LEN + ct.len());
-    out.extend_from_slice(&nonce_bytes);
-    out.extend_from_slice(&ct);
-    Ok(out)
+
+    // Prepend the nonce within the existing allocation: extend by 12, then
+    // rotate. `rotate_right` is an in-place memmove, not a second buffer.
+    plaintext.extend_from_slice(&nonce_bytes);
+    plaintext.rotate_right(CACHE_NONCE_LEN);
+    Ok(plaintext)
 }
 
 /// Decrypt a cache file produced by `cache_encrypt`.
@@ -967,22 +1015,7 @@ pub(crate) async fn presign_r2_with_length(
         // per-object authz, so this only ever satisfies the gate.
         user_id: Some(crate::commands::mls::current_user_id(state).await?),
     };
-    let resp = crate::commands::mls::ds_post(state, &body).await?;
-    let status = resp.status();
-    if !status.is_success() {
-        let txt = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!(
-            "r2 presign {operation} {status}: {txt}"
-        )));
-    }
-    #[derive(Deserialize)]
-    struct PresignResp {
-        url: String,
-    }
-    let parsed: PresignResp = resp
-        .json()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("r2 presign decode: {e}")))?;
+    let parsed = crate::commands::mls::ds_post_json(state, &body).await?;
     Ok(parsed.url)
 }
 
@@ -1010,14 +1043,24 @@ pub(crate) async fn r2_put_url(
 }
 
 /// GET the bytes at a presigned URL. Routes through the overlay when on.
-pub(crate) async fn r2_get_url(overlay: Option<&pollis_relay::OverlayHandle>, url: &str) -> Result<Vec<u8>> {
+///
+/// Returns [`bytes::Bytes`], not `Vec<u8>` (#915). `resp.bytes()` already owns
+/// the whole body; the `.to_vec()` this replaces allocated a SECOND full-size
+/// buffer and memcpy'd into it, so for a moment every download held two copies
+/// of the attachment. `Bytes` derefs to `[u8]`, so every reader is unchanged,
+/// and the one caller that genuinely needs an owned `Vec` converts at its own
+/// boundary.
+pub(crate) async fn r2_get_url(
+    overlay: Option<&pollis_relay::OverlayHandle>,
+    url: &str,
+) -> Result<bytes::Bytes> {
     let resp = crate::net::overlay::http_client(overlay).get(url).send().await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(Error::Other(anyhow::anyhow!("R2 download failed: {} — {}", status, body)));
     }
-    Ok(resp.bytes().await?.to_vec())
+    Ok(resp.bytes().await?)
 }
 
 /// DELETE the object at a presigned URL. A 404 counts as success (already gone).
