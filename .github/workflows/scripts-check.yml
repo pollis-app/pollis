@@ -127,6 +127,29 @@ jobs:
       - name: Pinned-key check catches divergence (#945)
         run: ./scripts/test-pinned-log-key.sh
 
+      # The e2e commit-log migration applier. Two silent failures shipped in it:
+      # a stale migrations path that made it apply ZERO statements and exit 0,
+      # and a naive `;` split that shredded every `CREATE TRIGGER` body. Both
+      # broke cross-client MLS delivery in the voice e2e without saying so. The
+      # self-test pins a trigger whose body carries its own semicolons, so the
+      # next trigger added to migrations-log/ cannot reintroduce either.
+      - name: e2e commit-log migration splitter
+        run: |
+          python3 ./e2e/scripts/apply-log-migrations.py --self-test
+          # And the real files: every statement the splitter emits must be a
+          # complete SQL statement.
+          python3 - <<'EOF'
+          import glob, importlib.util, os, sqlite3, sys
+          spec = importlib.util.spec_from_file_location("m", "e2e/scripts/apply-log-migrations.py")
+          m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          paths = sorted(glob.glob(os.path.join(m.MIG_DIR, "*.sql")))
+          assert paths, f"no migrations found under {m.MIG_DIR} — the path is stale again"
+          stmts = [st for p in paths for st in m.statements(open(p).read())]
+          bad = [st for st in stmts if not sqlite3.complete_statement(st + ";")]
+          assert not bad, f"{len(bad)} incomplete statement(s); first: {bad[0][:120]!r}"
+          print(f"ok: {len(paths)} file(s), {len(stmts)} complete statement(s)")
+          EOF
+
       - name: Attest helper + payload-hash tests
         run: ./scripts/test-attest-helpers.sh
 

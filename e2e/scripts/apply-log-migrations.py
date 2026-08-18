@@ -18,6 +18,7 @@ applied by statement directly over the Hrana pipeline API, bypassing
 import glob
 import json
 import os
+import sqlite3
 import sys
 import urllib.request
 
@@ -33,16 +34,103 @@ MIG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "pollis-schema", "
 
 
 def statements(sql: str):
-    # Strip `--` line comments, then split on `;`. The migration files are plain
-    # DDL with no `;` inside string literals, so a naive split is correct here.
+    """Split a migration file into individual statements.
+
+    Trigger-aware. A naive `split(";")` is WRONG here and was: a
+    `CREATE TRIGGER ... BEGIN <body>; <body>; END;` body contains semicolons, so
+    splitting on them shreds every trigger in `000005_mls_commit_log_triggers.sql`
+    into unparseable fragments — the server answers `unexpected end of input`,
+    and the orphaned `END` parses as `COMMIT`, hence
+    `cannot commit - no transaction is active`.
+
+    So `;` only terminates a statement when we are NOT inside a `BEGIN ... END`
+    block. `sqlite3.complete_statement` in the self-check below is what proves
+    the split is right rather than merely plausible.
+    """
     lines = [ln for ln in sql.splitlines() if not ln.strip().startswith("--")]
-    body = "\n".join(lines)
-    for stmt in body.split(";"):
-        if stmt.strip():
-            yield stmt.strip()
+    buf: list[str] = []
+    depth = 0
+    for ln in lines:
+        stripped = ln.strip()
+        upper = stripped.upper()
+        buf.append(ln)
+        # `BEGIN` opening a trigger body. Bare `BEGIN`/`BEGIN` + comment only —
+        # never `BEGIN TRANSACTION`, which these files do not use.
+        if upper == "BEGIN" or upper.startswith("BEGIN "):
+            depth += 1
+            continue
+        if depth:
+            if upper.startswith("END;") or upper == "END":
+                depth -= 1
+                if depth == 0 and stripped.endswith(";"):
+                    stmt = "\n".join(buf).strip().rstrip(";").strip()
+                    if stmt:
+                        yield stmt
+                    buf = []
+            continue
+        if stripped.endswith(";"):
+            stmt = "\n".join(buf).strip().rstrip(";").strip()
+            if stmt:
+                yield stmt
+            buf = []
+    tail = "\n".join(buf).strip().rstrip(";").strip()
+    if tail:
+        yield tail
+
+
+# A `CREATE TRIGGER` whose body carries its own `;` terminators — the exact
+# shape the previous naive `split(";")` shredded. Kept as an executable fixture
+# so the splitter cannot silently regress the next time someone adds a trigger:
+# under the naive split this parses as three broken fragments, under a correct
+# one it is a single statement.
+SELF_TEST_SQL = """
+-- a comment; with a semicolon
+CREATE TABLE t (a INTEGER);
+
+CREATE TRIGGER t_guard
+BEFORE INSERT ON t
+FOR EACH ROW
+BEGIN
+    SELECT RAISE(ABORT, 'nope') WHERE NEW.a < 0;
+    SELECT RAISE(ABORT, 'nope either') WHERE NEW.a > 10;
+END;
+
+CREATE INDEX t_a ON t(a);
+"""
+
+
+def check_complete(stmts, where):
+    """Every produced statement must be a COMPLETE SQL statement.
+
+    This is the guard that turns a bad split from a confusing server-side
+    `unexpected end of input` into a local, named failure — and it is what makes
+    the trigger handling in `statements` verified rather than assumed.
+    """
+    bad = [st for st in stmts if not sqlite3.complete_statement(st + ";")]
+    if bad:
+        print(
+            f"[apply-log-migrations] FAILED: {len(bad)} incomplete statement(s) "
+            f"from {where} — the splitter is wrong (a CREATE TRIGGER body's "
+            f"internal `;` is the usual cause). First: {bad[0][:120]!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def self_test():
+    got = list(statements(SELF_TEST_SQL))
+    check_complete(got, "the self-test fixture")
+    triggers = [st for st in got if "CREATE TRIGGER" in st.upper()]
+    assert len(got) == 3, f"expected 3 statements, got {len(got)}: {got}"
+    assert len(triggers) == 1, f"trigger body must stay one statement, got {triggers}"
+    assert "END" in triggers[0].upper(), "trigger statement must include its END"
+    print("[apply-log-migrations] self-test ok (3 statements, trigger intact)")
 
 
 def main():
+    if "--self-test" in sys.argv:
+        self_test()
+        return
     reqs = []
     paths = sorted(glob.glob(os.path.join(MIG_DIR, "*.sql")))
     if not paths:
@@ -54,10 +142,12 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+    collected = []
     for path in paths:
         with open(path) as f:
-            for stmt in statements(f.read()):
-                reqs.append({"type": "execute", "stmt": {"sql": stmt}})
+            collected.extend(statements(f.read()))
+    check_complete(collected, MIG_DIR)
+    reqs = [{"type": "execute", "stmt": {"sql": stmt}} for stmt in collected]
     reqs.append({"type": "close"})
 
     data = json.dumps({"requests": reqs}).encode()
