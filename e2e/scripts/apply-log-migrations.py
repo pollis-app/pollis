@@ -22,7 +22,14 @@ import sys
 import urllib.request
 
 TURSO_URL = os.environ.get("TURSO_URL", "http://127.0.0.1:8080").replace("libsql://", "https://")
-MIG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "pollis-core", "src", "db", "migrations-log")
+# `pollis-schema/migrations-log`, NOT `pollis-core/src/db/migrations-log`: the
+# migrations moved into the `pollis-schema` crate in #920 and this path was not
+# updated with them. The glob then matched nothing and this script "succeeded"
+# having applied 0 statements, so the commit-log tables silently stayed at their
+# baseline — reintroducing exactly the breakage the docstring above says this
+# script exists to prevent. The emptiness guard in `main` is what makes that
+# failure mode loud rather than silent if the path ever drifts again.
+MIG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "pollis-schema", "migrations-log")
 
 
 def statements(sql: str):
@@ -37,7 +44,17 @@ def statements(sql: str):
 
 def main():
     reqs = []
-    for path in sorted(glob.glob(os.path.join(MIG_DIR, "*.sql"))):
+    paths = sorted(glob.glob(os.path.join(MIG_DIR, "*.sql")))
+    if not paths:
+        print(
+            f"[apply-log-migrations] FAILED: no .sql files under {MIG_DIR} — "
+            "the migrations moved and this path is stale. Applying zero "
+            "commit-log migrations silently breaks cross-client MLS delivery, "
+            "so this is an error, not a no-op.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    for path in paths:
         with open(path) as f:
             for stmt in statements(f.read()):
                 reqs.append({"type": "execute", "stmt": {"sql": stmt}})
