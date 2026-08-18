@@ -4,7 +4,8 @@
 //! share no code by design (the DS does not depend on `pollis-core`, and it does
 //! not depend on the DS) — the same arrangement the repo uses for the device-cert
 //! wire format and for account-creation-from-email
-//! (`auth::resolve_or_create_user_by_email` ↔ `otp::apply_verify_otp`).
+//! (`otp::apply_verify_otp`, which since #910 is the only implementation —
+//! `pollis-core`'s client twin is gone).
 //! **A change to the token format must land in both files.**
 //!
 //! The server half is deliberately smaller than the client half: the DS never

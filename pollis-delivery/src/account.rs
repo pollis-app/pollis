@@ -66,7 +66,7 @@
 //!   - **Account creation** (`auth.rs` verify_otp INSERT `users`) — no device
 //!     key exists yet.
 //!   - **First account-identity establishment** (`account_identity.rs`
-//!     `generate_account_identity`, version 1) — runs at signup BEFORE
+//!     `/v1/auth/establish-identity`, version 1) — runs at signup BEFORE
 //!     `register_device` / `ensure_device_cert`, so no device signing key is
 //!     enrolled and the local DB isn't even open. Single-device, single-shot, no
 //!     concurrency: the `UNIQUE (user_id, identity_version)` index is its only

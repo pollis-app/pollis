@@ -72,7 +72,8 @@ fn internal(e: anyhow::Error) -> Response {
 /// :session AND account_id_pub IS NULL` (0 rows ⇒ 409, an existing identity is
 /// NEVER overwritten — reset has its own CAS-guarded path), plus the
 /// `account_key_log` v1 append and the `account_recovery` insert. Mirrors
-/// pollis-core `account_identity::generate_account_identity`'s writes.
+/// the writes pollis-core's `account_identity::generate_account_identity` used
+/// to perform directly (removed in #910 — this endpoint is now the only path).
 pub async fn establish_identity(
     State(state): State<AppState>,
     headers: HeaderMap,

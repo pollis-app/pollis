@@ -405,7 +405,10 @@ pub async fn apply_verify_otp(
     // Any error here `?`-propagates to a 5xx WITHOUT consuming the code (the
     // retry then heals).
     //
-    // `pollis-core`'s `auth::resolve_or_create_user_by_email` is the client twin
+    // `pollis-core` used to carry a client twin of this
+    // (`auth::resolve_or_create_user_by_email`); #910 deleted it along with the
+    // dev-only login that was its sole caller, so this is now the ONE
+    // implementation of resolve-or-create in the workspace
     // of this block (its dev-only, no-DS login shortcut). The two crates cannot
     // depend on each other, so they are kept deliberately identical instead —
     // diff them if you change either.

@@ -315,7 +315,7 @@ pub struct UnlockStateSnapshot {
 /// * If `old_pin` is `None`, this is first-time setup. The raw key
 ///   material to wrap is sourced in priority order from:
 ///     1. `AppState.unlock` — populated by `verify_otp` /
-///        `generate_account_identity`, by `reset_identity`, or by an
+///        `/v1/auth/establish-identity` at signup, by `reset_identity`, or by an
 ///        enrollment unwrap (the canonical path).
 ///     2. Legacy `db_key_{uid}` / `account_id_key_{uid}` keystore
 ///        slots — pre-PIN builds. Read once, then deleted after the
