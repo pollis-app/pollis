@@ -108,3 +108,13 @@ __pycache__/
 
 # Ad-hoc sourcemap build used for bundle attribution — never committed.
 frontend/dist-map/
+
+# Terraform state — the relay pool's state lives in R2 (`pollis-tfstate`,
+# see infra/relay-hydra/versions.tf). Nothing here should ever hold it: the
+# 2026-08-12 R2 migration left a 301K `terraform.tfstate.backup` and a
+# pre-migration snapshot sitting untracked in the tree for weeks, one
+# `git add -A` away from committing the whole infrastructure state.
+*.tfstate
+*.tfstate.*
+tfstate-*.json
+.terraform/
