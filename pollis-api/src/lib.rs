@@ -437,6 +437,32 @@ endpoints! {
 /// });
 /// ```
 ///
+/// A send-path attachment registration cannot omit the message it references
+/// (#925). It used to be one body with `message_id: Option<String>`, so the
+/// mistake that strands an object — registering it with no reference — was a
+/// `None` that typechecked:
+///
+/// ```compile_fail,E0063
+/// use pollis_api::messages::AttachmentRegisterBody;
+/// let _ = AttachmentRegisterBody::ForMessage {
+///     content_hash: "h".into(),
+///     r2_key: "media/h.enc".into(),
+///     // message_id omitted — the whole point of this variant. Does not compile.
+/// };
+/// ```
+///
+/// And the upload-time registration cannot invent one, because that variant has
+/// no such field ([E0559]):
+///
+/// ```compile_fail,E0559
+/// use pollis_api::messages::AttachmentRegisterBody;
+/// let _ = AttachmentRegisterBody::ObjectOnly {
+///     content_hash: "h".into(),
+///     r2_key: "media/h.enc".into(),
+///     message_id: "m".into(),
+/// };
+/// ```
+///
 /// An operator-only endpoint has no client half at all: `ds_post` requires
 /// [`ClientRequest`], which the table implements only for `Audience::Client`
 /// rows, so posting `/v1/welcomes/resubmit` from `pollis-core` is [E0277]
@@ -546,14 +572,31 @@ mod tests {
             },
             r#"{"collected":1,"r2_keys":["emoji/a"]}"#,
         );
+        // The roster carries no `kind` — asserted, because the field is
+        // `skip_serializing_if` precisely so these bytes did not change when
+        // #836's richer identity type replaced the old `{identity, name}` pair.
         round_trip(
             &broker::LivekitParticipantsResponse {
-                participants: vec![broker::LivekitParticipant {
+                participants: vec![broker::ResolvedIdentity {
                     identity: "d-x".into(),
+                    user_id: "u1".into(),
                     name: "alice".into(),
+                    kind: None,
                 }],
             },
-            r#"{"participants":[{"identity":"d-x","name":"alice"}]}"#,
+            r#"{"participants":[{"identity":"d-x","user_id":"u1","name":"alice"}]}"#,
+        );
+        // Resolving raw identities DOES carry it.
+        round_trip(
+            &broker::LivekitIdentitiesResponse {
+                identities: vec![broker::ResolvedIdentity {
+                    identity: "v-x".into(),
+                    user_id: "u1".into(),
+                    name: "alice".into(),
+                    kind: Some("voice".into()),
+                }],
+            },
+            r#"{"identities":[{"identity":"v-x","user_id":"u1","name":"alice","kind":"voice"}]}"#,
         );
         round_trip(
             &otp::VerifyOtpResponse {
@@ -581,6 +624,56 @@ mod tests {
         // And a counted response is not satisfied by a bare ok — the count is
         // part of the shape, not an optional extra.
         assert!(serde_json::from_str::<writes::WelcomesUpdated>(r#"{"status":"ok"}"#).is_err());
+    }
+
+    /// Splitting `AttachmentRegisterBody` must not change the wire (#925).
+    ///
+    /// This endpoint is DEPLOYED. Shipped clients send one of exactly two
+    /// shapes, and a pre-#690 client sends the object-only one — so the split
+    /// into two variants is only safe if both still encode and decode
+    /// byte-for-byte as before. `#[serde(untagged)]` is what buys that, and
+    /// variant ORDER is what makes it correct: a body carrying a `message_id`
+    /// must match `ForMessage`, not fall through to `ObjectOnly` with the field
+    /// silently dropped — which would strand the attachment reference and make
+    /// the object collectable.
+    #[test]
+    fn the_attachment_register_split_is_wire_compatible() {
+        use messages::AttachmentRegisterBody as B;
+
+        let for_message = B::ForMessage {
+            content_hash: "h".into(),
+            r2_key: "media/h.enc".into(),
+            message_id: "m1".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&for_message).unwrap(),
+            r#"{"content_hash":"h","r2_key":"media/h.enc","message_id":"m1"}"#
+        );
+
+        let object_only = B::ObjectOnly {
+            content_hash: "h".into(),
+            r2_key: "media/h.enc".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&object_only).unwrap(),
+            r#"{"content_hash":"h","r2_key":"media/h.enc"}"#
+        );
+
+        // What a current client sends on the send path.
+        let decoded: B =
+            serde_json::from_str(r#"{"content_hash":"h","r2_key":"k","message_id":"m1"}"#).unwrap();
+        assert_eq!(decoded.message_id(), Some("m1"), "the reference must survive");
+
+        // What the upload-time dedup path — and a pre-#690 client — sends.
+        let decoded: B = serde_json::from_str(r#"{"content_hash":"h","r2_key":"k"}"#).unwrap();
+        assert_eq!(decoded.message_id(), None);
+        assert_eq!(decoded.content_hash(), "h");
+        assert_eq!(decoded.r2_key(), "k");
+
+        // An explicit null is the old `Option`'s absent case, not a message id.
+        let decoded: B =
+            serde_json::from_str(r#"{"content_hash":"h","r2_key":"k","message_id":null}"#).unwrap();
+        assert_eq!(decoded.message_id(), None);
     }
 
     /// Every `Operator` endpoint is written down in the runbook (#925).

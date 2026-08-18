@@ -1382,13 +1382,17 @@ pub async fn apply_register_attachment(
     let tx = conn.transaction().await?;
     tx.execute(
         "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
-        libsql::params![body.content_hash.clone(), body.r2_key.clone()],
+        libsql::params![body.content_hash().to_string(), body.r2_key().to_string()],
     )
     .await?;
-    if let Some(message_id) = body.message_id.as_deref() {
+    // The reference row exists only on the send path, which is now a distinct
+    // VARIANT rather than a `Some` (#925) — so "registered an attachment for a
+    // message but recorded no reference to it" is not a state a caller can
+    // construct.
+    if let Some(message_id) = body.message_id() {
         tx.execute(
             "INSERT OR IGNORE INTO attachment_ref (content_hash, message_id) VALUES (?1, ?2)",
-            libsql::params![body.content_hash.clone(), message_id.to_string()],
+            libsql::params![body.content_hash().to_string(), message_id.to_string()],
         )
         .await?;
     }

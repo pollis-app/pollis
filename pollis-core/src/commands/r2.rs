@@ -567,13 +567,14 @@ pub async fn upload_media(
 
         // Register in Turso so future uploads of the same file skip R2 — route the
         // dedup-row write through the Delivery Service.
-        let body = pollis_api::messages::AttachmentRegisterBody {
+        // Upload-time dedup registration: no message carries this object yet,
+        // so there is no reference to count. The send path registers the
+        // `(content_hash, message_id)` reference separately (#690), and since
+        // #925 it is a different VARIANT rather than the same body with a field
+        // left `None`.
+        let body = pollis_api::messages::AttachmentRegisterBody::ObjectOnly {
             content_hash: content_hash.clone(),
             r2_key: r2_key.clone(),
-            // Upload-time dedup registration: no message carries this object
-            // yet, so there is no reference to count. The send path registers
-            // the `(content_hash, message_id)` reference separately (#690).
-            message_id: None,
         };
         crate::commands::mls::ds_post_ok(state, &body).await?;
     }

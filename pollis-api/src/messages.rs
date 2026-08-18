@@ -86,17 +86,64 @@ pub struct EnvelopeGcBody {
     pub actor_id: Option<String>,
 }
 
+/// `POST /v1/attachments/register` — the two things this endpoint is asked to do.
+///
+/// One body served both operations, with `message_id: Option<String>` as the
+/// only thing telling them apart (#925). That made the send path's failure mode
+/// — forgetting the message id, so the object is registered with no reference
+/// and is collectable the moment anything sweeps — a `None` that typechecks.
+/// Two variants make it unrepresentable instead: the send path cannot express
+/// "reference this message" without naming the message.
+///
+/// `#[serde(untagged)]`, so the WIRE FORM is unchanged in both directions: a
+/// send-path body still serializes as `{content_hash, r2_key, message_id}` and a
+/// dedup body as `{content_hash, r2_key}`. A pre-#690 client (object only) still
+/// deserializes, as [`ObjectOnly`](AttachmentRegisterBody::ObjectOnly) — which
+/// matters, because this is a deployed endpoint.
 #[derive(Serialize, Deserialize)]
-pub struct AttachmentRegisterBody {
-    pub content_hash: String,
-    pub r2_key: String,
-    /// The id of the message that carries this attachment (#690). Present on the
-    /// send path — it registers a `(content_hash, message_id)` reference so the
-    /// shared, convergent `attachment_object` row is reference-counted. Absent on
-    /// the upload-time dedup registration (no message exists yet) and on
-    /// pre-#690 clients, which register the object row only.
-    #[serde(default)]
-    pub message_id: Option<String>,
+#[serde(untagged)]
+pub enum AttachmentRegisterBody {
+    /// Send path: register the object AND a `(content_hash, message_id)`
+    /// reference, so the shared convergent object is reference-counted (#690).
+    ///
+    /// Declared FIRST because `untagged` tries variants in order: a body
+    /// carrying a `message_id` must match here, not fall through to
+    /// [`ObjectOnly`](AttachmentRegisterBody::ObjectOnly) with the field ignored.
+    ForMessage {
+        content_hash: String,
+        r2_key: String,
+        message_id: String,
+    },
+    /// Upload-time dedup registration: the object exists, no message carries it
+    /// yet, so there is no reference to count. Also what a pre-#690 client
+    /// sends.
+    ObjectOnly { content_hash: String, r2_key: String },
+}
+
+impl AttachmentRegisterBody {
+    /// The object hash, whichever operation this is.
+    pub fn content_hash(&self) -> &str {
+        match self {
+            Self::ForMessage { content_hash, .. } | Self::ObjectOnly { content_hash, .. } => {
+                content_hash
+            }
+        }
+    }
+
+    /// The R2 key, whichever operation this is.
+    pub fn r2_key(&self) -> &str {
+        match self {
+            Self::ForMessage { r2_key, .. } | Self::ObjectOnly { r2_key, .. } => r2_key,
+        }
+    }
+
+    /// The message this registration references, if it is the send path.
+    pub fn message_id(&self) -> Option<&str> {
+        match self {
+            Self::ForMessage { message_id, .. } => Some(message_id),
+            Self::ObjectOnly { .. } => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
