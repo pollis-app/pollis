@@ -18,20 +18,32 @@ pub struct BlockedUser {
 /// (create_dm_channel, send_message, send_group_invite) so either
 /// side's block silently halts delivery.
 pub async fn is_blocked_either_way(
-    conn: &libsql::Connection,
+    state: &Arc<AppState>,
     user_a: &str,
     user_b: &str,
 ) -> Result<bool> {
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM user_block
-             WHERE (blocker_id = ?1 AND blocked_id = ?2)
-                OR (blocker_id = ?2 AND blocked_id = ?1)
-             LIMIT 1",
-            libsql::params![user_a, user_b],
-        )
-        .await?;
-    Ok(rows.next().await?.is_some())
+    any_blocked_either_way(state, user_a, std::slice::from_ref(&user_b.to_string())).await
+}
+
+/// Whether ANY of `others` is in a block relationship with `me`, in either
+/// direction.
+///
+/// The batch form, because every caller has a set: a DM's other members, a
+/// multi-party DM's proposed roster. Before #987 this was a query per candidate,
+/// run inside a loop on the send path.
+///
+/// Direction-blind by construction — the DS answers which ids are blocked, never
+/// which way — because every caller reports the same generic refusal so neither
+/// side can infer who blocked whom. A helper that knew the direction would put
+/// that inference one log line away from leaking.
+pub async fn any_blocked_either_way(
+    state: &Arc<AppState>,
+    _me: &str,
+    others: &[String],
+) -> Result<bool> {
+    Ok(!crate::commands::ds_reads::blocked_among(state, others)
+        .await?
+        .is_empty())
 }
 
 pub async fn block_user(

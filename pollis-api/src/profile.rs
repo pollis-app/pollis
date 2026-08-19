@@ -36,6 +36,43 @@ pub struct BlockBody {
     pub blocked_id: String,
 }
 
+/// `POST /v1/dm/create` — the DM, whether it was created now or already existed
+/// (#987).
+///
+/// The client used to do the 2-person dedupe itself — scan `dm_channel_member`,
+/// find an existing pair, then re-read the channel — three reads and a race:
+/// two devices creating the same DM simultaneously each saw no existing pair and
+/// each created one. Deduping inside the write makes "one DM per pair" a
+/// property of the transaction rather than of the client's timing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum CreatedDm {
+    Ok {
+        id: String,
+        created_by: String,
+        created_at: String,
+        members: Vec<DmMember>,
+        /// `true` when an existing 2-person DM was returned instead of a new one
+        /// being created. The caller skips MLS group creation in that case — the
+        /// group already exists.
+        existing: bool,
+    },
+    /// A proposed pairing is blocked in either direction. One generic refusal for
+    /// every direction, so neither side can infer why their DM failed.
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DmMember {
+    pub user_id: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub accepted_at: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct CreateDmBody {
     /// The new channel id (a ULID the client generated).

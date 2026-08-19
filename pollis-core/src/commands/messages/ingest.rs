@@ -46,34 +46,6 @@ struct ConvIngest {
     newly_delivered: Vec<String>,
 }
 
-/// The un-ingested-envelope fetch for `n` conversations at once (#875).
-///
-/// Bound by POSITION, never by string interpolation of the ids: `?1` is the
-/// user, `?2` the device, and the conversations occupy `?3..?{n+2}` in the order
-/// the caller pushes them. Pure and separately tested (`envelope_fetch_sql_*`)
-/// because an off-by-one between the placeholders emitted here and the params
-/// pushed at the call site is a runtime SQL error on the receive path, and that
-/// arithmetic is exactly the kind that is wrong once and never again.
-///
-/// The watermark subquery correlates on `message_envelope.conversation_id`
-/// rather than a bound id, which is what keeps "strictly past THAT
-/// conversation's own watermark" true now that one query serves all of them.
-fn envelope_fetch_sql(n: usize) -> String {
-    let placeholders = crate::db::chunk::placeholders(n, 3);
-    format!(
-        "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
-         FROM message_envelope
-         WHERE conversation_id IN ({placeholders})
-           AND sent_at > COALESCE(
-               (SELECT last_fetched_at FROM conversation_watermark
-                WHERE conversation_id = message_envelope.conversation_id
-                  AND user_id = ?1 AND device_id = ?2),
-               ''
-           )
-         ORDER BY conversation_id ASC, sent_at ASC, id ASC"
-    )
-}
-
 /// Decide a delete tombstone's fate from its redaction outcome. Pure so the
 /// edge-case matrix is unit-testable offline (`delete_resolution_tests`) without
 /// a DB:
@@ -142,24 +114,17 @@ pub async fn ingest_channel_envelopes_inner(
     user_id: &str,
     channel_id: &str,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    // Single round-trip: resolve mls_group_id AND confirm membership. Returns
-    // a row only when the channel exists and the user is a member; otherwise
-    // short-circuit so the read path falls back to whatever is local.
-    let mls_group_id: String = {
-        let mut rows = conn.query(
-            "SELECT c.group_id FROM channels c
-             JOIN group_member gm ON gm.group_id = c.group_id
-             WHERE c.id = ?1 AND gm.user_id = ?2
-             LIMIT 1",
-            libsql::params![channel_id.to_string(), user_id.to_string()],
-        ).await?;
-        match rows.next().await? {
-            Some(row) => row.get::<String>(0)?,
-            None => return Ok(()),
-        }
-    };
+    // Single round-trip: resolve mls_group_id AND confirm membership. Answers
+    // `authorized: false` when the channel is absent or the user is not a
+    // member, and we short-circuit so the read path falls back to whatever is
+    // local — the same short-circuit the membership-joined SELECT gave by
+    // returning no row.
+    let resolved =
+        crate::commands::ds_reads::catch_up(state, channel_id, false, false).await?;
+    if !resolved.authorized {
+        return Ok(());
+    }
+    let mls_group_id = resolved.mls_group_id;
 
     let device_id = state.device_id.lock().await.clone();
 
@@ -214,36 +179,27 @@ pub async fn catch_up_mls_group_interleaved(
     mls_group_id: &str,
     user_id: &str,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    // Enumerate every conversation bound to this MLS group. Two shapes (mirrors
-    // `voice_e2ee::catch_up_mls_group`):
-    //   DM    → `mls_group_id` IS the dm_channel id (single conversation).
-    //   group → every `channels.id` where `group_id = mls_group_id`.
-    let is_dm: bool = {
-        let mut rows = conn.query(
-            "SELECT 1 FROM dm_channel WHERE id = ?1 LIMIT 1",
-            libsql::params![mls_group_id.to_string()],
-        ).await?;
-        rows.next().await?.is_some()
-    };
-
-    let conversation_ids: Vec<String> = if is_dm {
-        vec![mls_group_id.to_string()]
-    } else {
-        let mut out = Vec::new();
-        let mut rows = conn.query(
-            "SELECT id FROM channels WHERE group_id = ?1",
-            libsql::params![mls_group_id.to_string()],
-        ).await?;
-        while let Some(row) = rows.next().await? {
-            out.push(row.get::<String>(0)?);
-        }
-        out
-    };
+    // ONE request for a chain that used to be four dependent ones: enumerate the
+    // conversations bound to this MLS group (a DM is its own single
+    // conversation; a group is every one of its channels), and pull each one's
+    // un-ingested envelopes — strictly past THAT conversation's own watermark
+    // for this device — in the same answer. The composite
+    // `(conversation_id, sent_at, id)` ordering is preserved server-side, which
+    // is what lets one result set be partitioned into the same per-conversation
+    // lists the per-channel loop used to build.
+    //
+    // #875 removed the query-per-channel; #987 removes the round trip per step.
+    let resolved =
+        crate::commands::ds_reads::catch_up(state, mls_group_id, true, false).await?;
+    if !resolved.authorized {
+        // Not a member (any more). The direct read reached the same state as an
+        // empty conversation list and did nothing; so does this.
+        return Ok(());
+    }
+    let is_dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
+    let conversation_ids: Vec<String> = resolved.conversation_ids;
 
     let device_id = state.device_id.lock().await.clone();
-    let did_param = device_id.clone().unwrap_or_default();
 
     // Pull un-ingested envelopes for every bound conversation in ONE query
     // (strictly past THAT conversation's own watermark), then group per
@@ -265,63 +221,27 @@ pub async fn catch_up_mls_group_interleaved(
         .iter()
         .map(|cid| (cid.clone(), Vec::new()))
         .collect();
-    if !conversation_ids.is_empty() {
+    {
         // Index by conversation id so a row lands in the right bucket regardless
-        // of the order the ids were listed in — and, since #916, regardless of
-        // which chunk it came back in.
+        // of the order the ids were listed in.
         let slot: HashMap<&str, usize> = conversation_ids
             .iter()
             .enumerate()
             .map(|(i, cid)| (cid.as_str(), i))
             .collect();
-        // TWO slots reserved: `?1` user, `?2` device (see `envelope_fetch_sql`).
-        for chunk in crate::db::chunk::bind_chunks(&conversation_ids, 2) {
-            let sql = envelope_fetch_sql(chunk.len());
-            let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 2);
-            params.push(user_id.to_string().into());
-            params.push(did_param.clone().into());
-            for cid in chunk {
-                params.push(cid.clone().into());
-            }
-            // Through `with_retry` (#914), not a bare `conn`: this is the
-            // receive path, and it is what runs first when a laptop wakes up —
-            // exactly when libsql has GC'd the idle Hrana stream. Failing here
-            // does not surface as an error the user can act on, it surfaces as
-            // messages that did not arrive, so one transparent reconnect is
-            // worth more here than anywhere else in the crate. The closure is a
-            // pure SELECT, so running it twice is safe.
-            let fetched: Vec<(String, EnvelopeRow)> = state
-                .remote_db
-                .with_retry(|conn| {
-                    let sql = sql.clone();
-                    let params = params.clone();
-                    async move {
-                        let mut rows = conn.query(&sql, params).await?;
-                        let mut out = Vec::new();
-                        while let Some(row) = rows.next().await? {
-                            out.push((
-                                row.get::<String>(0)?,
-                                (
-                                    row.get::<String>(1)?,
-                                    row.get::<String>(2)?,
-                                    row.get::<String>(3)?,
-                                    row.get::<Option<String>>(4)?,
-                                    row.get::<Option<String>>(5)?,
-                                    row.get::<String>(6)?,
-                                    row.get::<String>(7)?,
-                                ),
-                            ));
-                        }
-                        Ok(out)
-                    }
-                })
-                .await?;
-            for (cid, env) in fetched {
-                let Some(&i) = slot.get(cid.as_str()) else {
-                    continue;
-                };
-                per_conv[i].1.push(env);
-            }
+        for env in resolved.envelopes {
+            let Some(&i) = slot.get(env.conversation_id.as_str()) else {
+                continue;
+            };
+            per_conv[i].1.push((
+                env.id,
+                env.sender_id,
+                env.ciphertext,
+                env.reply_to_id,
+                env.target_message_id,
+                env.sent_at,
+                env.kind,
+            ));
         }
     }
 
@@ -853,18 +773,12 @@ pub async fn ingest_dm_envelopes_inner(
     user_id: &str,
     dm_channel_id: &str,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    let is_member: bool = {
-        let mut rows = conn.query(
-            "SELECT 1 FROM dm_channel_member
-             WHERE dm_channel_id = ?1 AND user_id = ?2
-             LIMIT 1",
-            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
-        ).await?;
-        rows.next().await?.is_some()
-    };
-    if !is_member {
+    // Membership and the peer list in one request. The envelopes are NOT
+    // fetched here: the group-level catch-up below runs its own pass, and
+    // pulling them twice would double the transfer for nothing.
+    let resolved =
+        crate::commands::ds_reads::catch_up(state, dm_channel_id, false, true).await?;
+    if !resolved.authorized {
         return Ok(());
     }
 
@@ -881,18 +795,7 @@ pub async fn ingest_dm_envelopes_inner(
     // the key, this emits a `KeyChanged` realtime event so the conversation
     // gets an inline banner (Signal-style) the moment we observe the change,
     // not only when the user opens the peer's profile.
-    let peer_ids: Vec<String> = {
-        let mut out = Vec::new();
-        let mut rows = conn.query(
-            "SELECT user_id FROM dm_channel_member \
-             WHERE dm_channel_id = ?1 AND user_id <> ?2",
-            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
-        ).await?;
-        while let Some(row) = rows.next().await? {
-            out.push(row.get::<String>(0)?);
-        }
-        out
-    };
+    let peer_ids: Vec<String> = resolved.dm_peers;
     // Batched (#875): one Turso query for the whole peer set instead of one per
     // peer. Identical semantics — `batch_check_and_pin_account_keys` pins new
     // peers, updates and un-verifies a changed pin, and emits the same
@@ -981,60 +884,3 @@ mod delete_resolution_tests {
     }
 }
 
-#[cfg(test)]
-mod envelope_fetch_sql_tests {
-    use super::envelope_fetch_sql;
-
-    /// The invariant the call site depends on: exactly `n` conversation
-    /// placeholders, numbered `?3..?{n+2}`, leaving `?1`/`?2` for the user and
-    /// device. Off by one and the receive path takes a runtime SQL error.
-    #[test]
-    fn placeholders_start_at_three_and_are_contiguous() {
-        for n in 1..=25usize {
-            let sql = envelope_fetch_sql(n);
-            let list = sql
-                .split_once("conversation_id IN (")
-                .and_then(|(_, rest)| rest.split_once(')'))
-                .map(|(inner, _)| inner.to_string())
-                .expect("the IN list is present");
-            let got: Vec<&str> = list.split(',').collect();
-            let want: Vec<String> = (0..n).map(|i| format!("?{}", i + 3)).collect();
-            assert_eq!(got, want, "placeholder list wrong for n={n}");
-            assert!(sql.contains("user_id = ?1"), "?1 must stay the user");
-            assert!(sql.contains("device_id = ?2"), "?2 must stay the device");
-        }
-    }
-
-    /// One query, not one per conversation: the whole point of #875 here. A
-    /// re-introduced per-conversation loop would bind exactly one id, so a
-    /// 20-channel group producing a single-placeholder statement is the shape
-    /// this forbids.
-    #[test]
-    fn one_statement_covers_every_conversation() {
-        let sql = envelope_fetch_sql(20);
-        assert!(sql.contains("?22"), "all 20 conversations must be in ONE statement");
-        assert_eq!(sql.matches("FROM message_envelope").count(), 1);
-    }
-
-    /// The watermark must stay PER CONVERSATION. Correlating on the outer row's
-    /// own `conversation_id` is what preserves "strictly past THAT
-    /// conversation's watermark" — a bound id here would apply one
-    /// conversation's watermark to all of them and silently skip messages.
-    #[test]
-    fn the_watermark_subquery_correlates_per_conversation() {
-        let sql = envelope_fetch_sql(3);
-        assert!(
-            sql.contains("conversation_id = message_envelope.conversation_id"),
-            "the watermark must be resolved per row, not once for the batch:\n{sql}"
-        );
-    }
-
-    /// Rows come back grouped by conversation and, within one, in the exact
-    /// order the per-conversation query returned them — that ordering is what
-    /// the epoch interleave and the watermark advance both assume.
-    #[test]
-    fn ordering_groups_by_conversation_then_preserves_the_old_order() {
-        let sql = envelope_fetch_sql(2);
-        assert!(sql.contains("ORDER BY conversation_id ASC, sent_at ASC, id ASC"), "{sql}");
-    }
-}

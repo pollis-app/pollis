@@ -45,7 +45,7 @@ use axum::{
 };
 use libsql::Connection;
 
-use crate::error::AppError;
+use crate::error::{AppError, AuthRejection};
 use crate::writes::{
     bad_request, claim_conversation_id, conversation_id_taken, gate, outcome_response,
     resolve_actor, ConversationKind, WriteOutcome,
@@ -303,7 +303,28 @@ pub async fn update_group(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<UpdateGroupBody>(apply_update_group(&conn, authed.as_deref(), &parsed).await?)
+    // The updated ROW, not `{"status":"ok"}` (#987): the client used to SELECT
+    // the group straight back, which was a second round trip AND a read that
+    // could observe a later concurrent update and report it as the result of
+    // this one.
+    match apply_update_group(&conn, authed.as_deref(), &parsed).await? {
+        WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        WriteOutcome::Ok => match crate::directory::group_row(&conn, &parsed.group_id).await? {
+            Some(g) => Ok(crate::writes::ok_response::<UpdateGroupBody>(
+                UpdatedGroup::Ok {
+                    id: g.id,
+                    name: g.name,
+                    description: g.description,
+                    owner_id: g.owner_id,
+                    created_at: g.created_at,
+                },
+            )),
+            None => Err(AppError(anyhow::anyhow!(
+                "group {} vanished between its update and its read-back",
+                parsed.group_id
+            ))),
+        },
+    }
 }
 
 /// Update a group's mutable settings. Authz: the actor is a re-derived admin.
@@ -554,7 +575,41 @@ pub async fn update_channel(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<UpdateChannelBody>(apply_update_channel(&conn, authed.as_deref(), &parsed).await?)
+    match apply_update_channel(&conn, authed.as_deref(), &parsed).await? {
+        WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        WriteOutcome::Ok => match channel_row(&conn, &parsed.channel_id).await? {
+            Some(c) => Ok(crate::writes::ok_response::<UpdateChannelBody>(c)),
+            None => Err(AppError(anyhow::anyhow!(
+                "channel {} vanished between its update and its read-back",
+                parsed.channel_id
+            ))),
+        },
+    }
+}
+
+/// One channel row, in the shape `/v1/channels/update` answers with.
+async fn channel_row(
+    conn: &Connection,
+    channel_id: &str,
+) -> anyhow::Result<Option<UpdatedChannel>> {
+    let mut rows = conn
+        .query(
+            "SELECT id, group_id, name, description, channel_type FROM channels WHERE id = ?1",
+            libsql::params![channel_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(Some(UpdatedChannel::Ok {
+            id: row.get(0)?,
+            group_id: row.get(1)?,
+            name: row.get(2)?,
+            description: row.get(3)?,
+            channel_type: row
+                .get::<Option<String>>(4)?
+                .unwrap_or_else(|| "text".to_string()),
+        })),
+        None => Ok(None),
+    }
 }
 
 /// Update a channel's name/description. Authz: admin of the owning group.
@@ -830,7 +885,48 @@ pub async fn accept_invite(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<AcceptInviteBody>(apply_accept_invite(&conn, authed.as_deref(), &parsed).await?)
+    // Name the group the accept admitted the caller to (#987). The client used
+    // to read `group_invite` BEFORE posting, which was both a round trip and a
+    // TOCTOU: the invite it read could be revoked before the write landed.
+    // Read here, before `apply_accept_invite` consumes the row.
+    let group_id = accepted_invite_group(&conn, authed.as_deref(), &parsed).await?;
+    match apply_accept_invite(&conn, authed.as_deref(), &parsed).await? {
+        WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        WriteOutcome::Ok => match group_id {
+            Some(group_id) => Ok(crate::writes::ok_response::<AcceptInviteBody>(
+                AcceptedInvite::Ok { group_id },
+            )),
+            // `apply_accept_invite` re-resolves the same row and answers
+            // Forbidden when it is gone, so reaching here means the row
+            // disappeared between the two reads. An error, never an invented id.
+            None => Err(AppError(anyhow::anyhow!(
+                "invite {} resolved to no group",
+                parsed.invite_id
+            ))),
+        },
+    }
+}
+
+/// The group an invite addressed to the actor names, read BEFORE the accept
+/// consumes the row.
+async fn accepted_invite_group(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &AcceptInviteBody,
+) -> anyhow::Result<Option<String>> {
+    let Ok(user) = resolve_actor(authed, body.user_id.as_deref()) else {
+        return Ok(None);
+    };
+    let mut rows = conn
+        .query(
+            "SELECT group_id FROM group_invite WHERE id = ?1 AND invitee_id = ?2",
+            libsql::params![body.invite_id.clone(), user],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(Some(row.get::<String>(0)?)),
+        None => Ok(None),
+    }
 }
 
 /// Accept an invite: add the actor as a member and delete the invite, in one
@@ -1298,7 +1394,14 @@ pub async fn apply_revoke_invite_link(
 #[derive(Debug, PartialEq, Eq)]
 pub enum RedeemOutcome {
     /// The actor is now a member of this group.
-    Joined { group_id: String },
+    ///
+    /// `group_name` rides along (#987) because the confirmation UI needs it and
+    /// the DS has just read the row to authorize the redemption — the client
+    /// asking again was a second round trip for a string already in hand.
+    Joined {
+        group_id: String,
+        group_name: Option<String>,
+    },
     /// The token did not yield a live link. Indistinguishable by construction.
     Rejected,
     /// The actor has failed too many times recently.
@@ -1323,9 +1426,15 @@ pub async fn redeem_invite_link(
     let conn = state.db.conn().await?;
     Ok(
         match apply_redeem_invite_link(&conn, authed.as_deref(), &parsed).await? {
-            RedeemOutcome::Joined { group_id } => crate::writes::ok_response::<
-                RedeemInviteLinkBody,
-            >(RedeemInviteLinkResponse::Ok { group_id }),
+            RedeemOutcome::Joined {
+                group_id,
+                group_name,
+            } => crate::writes::ok_response::<RedeemInviteLinkBody>(
+                RedeemInviteLinkResponse::Ok {
+                    group_id,
+                    group_name,
+                },
+            ),
             RedeemOutcome::Rejected => redeem_rejected(),
             RedeemOutcome::RateLimited => redeem_rate_limited(),
         },
@@ -1470,7 +1579,11 @@ pub async fn apply_redeem_invite_link(
     let already_member = rows.next().await?.is_some();
     drop(rows);
     if already_member {
-        return Ok(RedeemOutcome::Joined { group_id });
+        let group_name = group_name(conn, &group_id).await?;
+        return Ok(RedeemOutcome::Joined {
+            group_id,
+            group_name,
+        });
     }
 
     let tx = conn.transaction().await?;
@@ -1510,7 +1623,26 @@ pub async fn apply_redeem_invite_link(
     .await?;
     tx.commit().await?;
 
-    Ok(RedeemOutcome::Joined { group_id })
+    let group_name = group_name(conn, &group_id).await?;
+    Ok(RedeemOutcome::Joined {
+        group_id,
+        group_name,
+    })
+}
+
+/// A group's display name, for the redeem confirmation. `None` if the row is
+/// gone — best-effort, and never a reason to fail a completed join.
+async fn group_name(conn: &Connection, group_id: &str) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT name FROM groups WHERE id = ?1",
+            libsql::params![group_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(Some(row.get::<String>(0)?)),
+        None => Ok(None),
+    }
 }
 
 /// Whether `expires_at` is at or before `now`, compared BY SQLITE via

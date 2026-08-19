@@ -40,11 +40,11 @@ use axum::{
     body::Bytes,
     extract::State,
     http::{HeaderMap, Method, Uri},
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use libsql::Connection;
 
-use crate::error::AppError;
+use crate::error::{AppError, AuthRejection};
 use crate::writes::{
     bad_request, claim_conversation_id, conversation_id_taken, gate, outcome_response,
     resolve_actor, ConversationKind, WriteOutcome,
@@ -289,22 +289,60 @@ pub async fn create_dm(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<CreateDmBody>(apply_create_dm(&conn, authed.as_deref(), &parsed).await?)
+    match apply_create_dm(&conn, authed.as_deref(), &parsed).await? {
+        DmOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        DmOutcome::Blocked => Ok(crate::writes::ok_response::<CreateDmBody>(
+            CreatedDm::Blocked,
+        )),
+        DmOutcome::Created { id, existing } => {
+            match crate::directory::dm_row(&conn, &id, existing).await? {
+                Some(dm) => Ok(crate::writes::ok_response::<CreateDmBody>(dm)),
+                None => Err(AppError(anyhow::anyhow!(
+                    "DM {id} vanished between its creation and its read-back"
+                ))),
+            }
+        }
+    }
+}
+
+/// What `apply_create_dm` decided.
+///
+/// Distinct from [`WriteOutcome`] because this write has THREE outcomes, not
+/// two: a block is not an authorization failure (the caller is perfectly
+/// entitled to try), and reporting it as one would let the client tell "you may
+/// not do this" from "this particular pairing is blocked" — which is exactly the
+/// inference the generic refusal exists to prevent.
+#[derive(Debug)]
+pub enum DmOutcome {
+    Created { id: String, existing: bool },
+    Blocked,
+    Forbidden,
 }
 
 /// Create a DM channel: insert `dm_channel`, the creator's auto-accepted
 /// membership, each other member as a pending request, and seed every member's
-/// per-device watermark — all in one transaction. Authz: the creator is the
-/// authenticated user, and no proposed pairing may be blocked in either
-/// direction (re-checked server-side; a blocked write is `Forbidden`).
+/// per-device watermark — all in one transaction.
+///
+/// Authz: the creator is the authenticated user, and no proposed pairing may be
+/// blocked in either direction (re-checked server-side).
+///
+/// # Dedupe moved here in #987
+///
+/// The 2-person dedupe used to run on the CLIENT: scan `dm_channel_member` for
+/// an existing pair, then re-read that channel. Two reads and a race — two
+/// devices creating the same DM at once each saw no existing pair and each
+/// created one, leaving the pair with two conversations and their messages split
+/// across both. Deciding it here makes "one DM per pair" a property of the write
+/// rather than of the client's timing. Multi-party DMs (3+ members) skip dedupe
+/// and always create fresh, unchanged.
 pub async fn apply_create_dm(
     conn: &Connection,
     authed: Option<&str>,
     body: &CreateDmBody,
-) -> anyhow::Result<WriteOutcome> {
+) -> anyhow::Result<DmOutcome> {
     let creator = match resolve_actor(authed, Some(body.creator_id.as_str())) {
         Ok(c) => c,
-        Err(o) => return Ok(o),
+        Err(_) => return Ok(DmOutcome::Forbidden),
     };
 
     // The other participants (everyone but the creator, de-duplicated).
@@ -314,14 +352,46 @@ pub async fn apply_create_dm(
             others.push(m.clone());
         }
     }
+    if others.is_empty() {
+        return Ok(DmOutcome::Forbidden);
+    }
 
     // Re-check blocks server-side: refuse if ANY pairing is blocked either way.
     // Skipped on the no-auth path (mirrors the membership skips in `messages`).
+    //
+    // Reported as `Blocked`, NOT as `Forbidden`: a block is not an authorization
+    // failure — the caller is perfectly entitled to try — and collapsing the two
+    // would let a client tell "you may not do this" from "this pairing is
+    // blocked", which is the inference the generic refusal exists to prevent.
     if authed.is_some() {
         for other in &others {
             if is_blocked_either_way(conn, &creator, other).await? {
-                return Ok(WriteOutcome::Forbidden);
+                return Ok(DmOutcome::Blocked);
             }
+        }
+    }
+
+    // 2-person dedupe: an existing channel whose membership is exactly
+    // {creator, target} (order-independent, regardless of accepted state) is
+    // returned instead of a duplicate being created.
+    if others.len() == 1 {
+        let mut rows = conn
+            .query(
+                "SELECT dm_channel_id \
+                 FROM dm_channel_member \
+                 GROUP BY dm_channel_id \
+                 HAVING COUNT(*) = 2 \
+                    AND SUM(CASE WHEN user_id = ?1 THEN 1 ELSE 0 END) = 1 \
+                    AND SUM(CASE WHEN user_id = ?2 THEN 1 ELSE 0 END) = 1 \
+                 LIMIT 1",
+                libsql::params![creator.clone(), others[0].clone()],
+            )
+            .await?;
+        if let Some(row) = rows.next().await? {
+            return Ok(DmOutcome::Created {
+                id: row.get::<String>(0)?,
+                existing: true,
+            });
         }
     }
 
@@ -329,7 +399,7 @@ pub async fn apply_create_dm(
     // `conversation_id_taken` — `is_member` ORs across dm/group/channel on one
     // id, so reusing another conversation's id grants membership of it.
     if conversation_id_taken(conn, &body.id).await? {
-        return Ok(WriteOutcome::Forbidden);
+        return Ok(DmOutcome::Forbidden);
     }
     let tx = conn.transaction().await?;
     // Claim the id in the SAME transaction as the DM it names, so a claim the
@@ -387,7 +457,10 @@ pub async fn apply_create_dm(
         .await?;
     }
     tx.commit().await?;
-    Ok(WriteOutcome::Ok)
+    Ok(DmOutcome::Created {
+        id: body.id.clone(),
+        existing: false,
+    })
 }
 
 // ── POST /v1/dm/accept ───────────────────────────────────────────────────────

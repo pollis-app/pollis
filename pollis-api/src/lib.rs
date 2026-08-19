@@ -252,16 +252,16 @@ endpoints! {
 
     // ── Domain B — groups, channels, membership, invites, join requests ──────
     Client   groups::CreateGroupBody            => "/v1/groups/create",                  StatusOk;
-    Client   groups::UpdateGroupBody            => "/v1/groups/update",                  StatusOk;
+    Client   groups::UpdateGroupBody            => "/v1/groups/update",                  groups::UpdatedGroup;
     Client   groups::DeleteGroupBody            => "/v1/groups/delete",                  StatusOk;
     Client   groups::LeaveGroupBody             => "/v1/groups/leave",                   StatusOk;
     Client   groups::CreateChannelBody          => "/v1/channels/create",                StatusOk;
-    Client   groups::UpdateChannelBody          => "/v1/channels/update",                StatusOk;
+    Client   groups::UpdateChannelBody          => "/v1/channels/update",                groups::UpdatedChannel;
     Client   groups::DeleteChannelBody          => "/v1/channels/delete",                StatusOk;
     Client   groups::RemoveMemberBody           => "/v1/members/remove",                 StatusOk;
     Client   groups::SetMemberRoleBody          => "/v1/members/role",                   StatusOk;
     Client   groups::CreateInviteBody           => "/v1/invites/create",                 StatusOk;
-    Client   groups::AcceptInviteBody           => "/v1/invites/accept",                 StatusOk;
+    Client   groups::AcceptInviteBody           => "/v1/invites/accept",                 groups::AcceptedInvite;
     Client   groups::DeclineInviteBody          => "/v1/invites/decline",                StatusOk;
     Client   groups::CreateInviteLinkBody       => "/v1/invite-links/create",            StatusOk;
     Client   groups::RevokeInviteLinkBody       => "/v1/invite-links/revoke",            StatusOk;
@@ -280,7 +280,7 @@ endpoints! {
     Client   profile::SavePreferencesBody       => "/v1/profile/preferences",            StatusOk;
     Client   profile::AddBlock                  => "/v1/blocks/add",                     StatusOk;
     Client   profile::RemoveBlock               => "/v1/blocks/remove",                  StatusOk;
-    Client   profile::CreateDmBody              => "/v1/dm/create",                      StatusOk;
+    Client   profile::CreateDmBody              => "/v1/dm/create",                      profile::CreatedDm;
     Client   profile::AcceptDmBody              => "/v1/dm/accept",                      StatusOk;
     Client   profile::AddDmMemberBody           => "/v1/dm/add",                         StatusOk;
     Client   profile::RemoveDmMemberBody        => "/v1/dm/remove",                      StatusOk;

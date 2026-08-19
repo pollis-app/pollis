@@ -169,14 +169,8 @@ pub(crate) fn record_receipt(
 /// scope restriction is a property of the chokepoint and not of everyone
 /// remembering to ask.
 async fn is_dm(state: &Arc<AppState>, conversation_id: &str) -> Result<bool> {
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM dm_channel WHERE id = ?1 LIMIT 1",
-            libsql::params![conversation_id.to_string()],
-        )
-        .await?;
-    Ok(rows.next().await?.is_some())
+    let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
+    Ok(resolved.kind == pollis_api::directory::ConversationKind::Dm)
 }
 
 /// THE emit chokepoint for both receipt kinds. Every receipt this client ever

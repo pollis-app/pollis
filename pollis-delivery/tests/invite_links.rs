@@ -37,6 +37,18 @@ mod common;
 
 
 const GROUP: &str = "grp-1";
+
+/// The success outcome for [`GROUP`].
+///
+/// `group_name` rides along since #987 so the redeem confirmation needs no
+/// follow-up read; asserting it here keeps that promise honest rather than
+/// letting the field quietly go `None`.
+fn joined() -> RedeemOutcome {
+    RedeemOutcome::Joined {
+        group_id: GROUP.to_string(),
+        group_name: Some("Group One".to_string()),
+    }
+}
 const ADMIN: &str = "admin-1";
 const JOINER: &str = "joiner-1";
 
@@ -271,9 +283,7 @@ async fn a_token_past_max_uses_is_rejected() {
     // First redemption consumes the single use.
     assert_eq!(
         redeem(&db, &link.token, "att-1", NOW).await,
-        RedeemOutcome::Joined {
-            group_id: GROUP.to_string()
-        }
+        joined()
     );
     assert!(is_member(&db, GROUP, JOINER).await);
 
@@ -358,9 +368,7 @@ async fn redemption_goes_through_the_normal_membership_path() {
 
     assert_eq!(
         redeem(&db, &link.token, "att-1", NOW).await,
-        RedeemOutcome::Joined {
-            group_id: GROUP.to_string()
-        }
+        joined()
     );
 
     let conn = db.conn().await.unwrap();
@@ -524,12 +532,19 @@ async fn every_failure_is_indistinguishable() {
         );
     }
 
-    // The outcome enum itself carries no discriminating payload — `Rejected` is
-    // a unit variant, so there is nothing for a handler to accidentally surface.
-    // This is what makes the property structural rather than a matter of care.
+    // The outcome enum itself carries no discriminating payload — `Rejected` and
+    // `RateLimited` are unit variants, so there is nothing for a handler to
+    // accidentally surface. Asserted as a size equality with the `Joined`
+    // payload alone: if either rejection variant grew a field, the enum would
+    // have to grow past it. This is what makes the property structural rather
+    // than a matter of care.
+    //
+    // The payload is `(group_id, group_name)` since #987 — the confirmation UI's
+    // name rides along with the join so it needs no follow-up read. Widening it
+    // is fine; what must never happen is a REJECTION carrying anything.
     assert_eq!(
         std::mem::size_of::<RedeemOutcome>(),
-        std::mem::size_of::<Option<String>>(),
+        std::mem::size_of::<(String, Option<String>)>(),
         "RedeemOutcome must carry a payload only on the Joined path"
     );
 }
@@ -574,9 +589,7 @@ async fn brute_force_is_rate_limited() {
     // Outside the window the actor recovers: the bound is a delay, not a ban.
     assert_eq!(
         redeem(&db, &link.token, "att-later", "2026-08-15T13:00:00Z").await,
-        RedeemOutcome::Joined {
-            group_id: GROUP.to_string()
-        }
+        joined()
     );
     assert!(is_member(&db, GROUP, JOINER).await);
 }
@@ -590,17 +603,13 @@ async fn successful_redemptions_do_not_consume_the_failure_budget() {
 
     assert_eq!(
         redeem(&db, &link.token, "att-1", NOW).await,
-        RedeemOutcome::Joined {
-            group_id: GROUP.to_string()
-        }
+        joined()
     );
     // Re-redeeming as an existing member is idempotent and still not a failure.
     for i in 0..5 {
         assert_eq!(
             redeem(&db, &link.token, &format!("att-re-{i}"), NOW).await,
-            RedeemOutcome::Joined {
-                group_id: GROUP.to_string()
-            }
+            joined()
         );
     }
     let conn = db.conn().await.unwrap();
@@ -678,9 +687,7 @@ async fn an_admin_of_another_group_cannot_revoke_this_groups_link() {
     // The link is still live.
     assert_eq!(
         redeem(&db, &link.token, "att-1", NOW).await,
-        RedeemOutcome::Joined {
-            group_id: GROUP.to_string()
-        }
+        joined()
     );
 }
 

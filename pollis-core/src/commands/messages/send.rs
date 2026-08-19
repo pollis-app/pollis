@@ -33,17 +33,14 @@ pub async fn send_message(
     // For group channels, all channels share the group's MLS group (keyed by group_id).
     // For DM conversations, the MLS group is keyed by conversation_id directly.
     // is_channel = true means conversation_id is a channel ID; group_id is the LiveKit room name.
-    let (mls_group_id, is_channel) = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![conversation_id.clone()],
-        ).await?;
-        match rows.next().await? {
-            Some(row) => (row.get::<String>(0)?, true),
-            None => (conversation_id.clone(), false),
-        }
-    };
+    //
+    // ONE request answers the resolve, the membership check and the DM peer list
+    // (which the block gate below consumes) — three dependent round trips before
+    // #987, and the peer list was itself a query per peer.
+    let resolved =
+        crate::commands::ds_reads::catch_up(state, &conversation_id, false, true).await?;
+    let is_channel = resolved.kind == pollis_api::directory::ConversationKind::Channel;
+    let mls_group_id = resolved.mls_group_id.clone();
 
     // Block enforcement for DMs: if any other participant in this DM
     // has a block relationship with the sender (either direction),
@@ -55,23 +52,8 @@ pub async fn send_message(
     // gated here; blocks in groups are purely render-side on the
     // blocker's client.
     let suppress_delivery = if !is_channel {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT user_id
-             FROM dm_channel_member
-             WHERE dm_channel_id = ?1
-               AND user_id <> ?2",
-            libsql::params![conversation_id.clone(), sender_id.clone()],
-        ).await?;
-        let mut blocked = false;
-        while let Some(row) = rows.next().await? {
-            let other: String = row.get(0)?;
-            if crate::commands::blocks::is_blocked_either_way(&conn, &sender_id, &other).await? {
-                blocked = true;
-                break;
-            }
-        }
-        blocked
+        crate::commands::blocks::any_blocked_either_way(state, &sender_id, &resolved.dm_peers)
+            .await?
     } else {
         false
     };
@@ -262,21 +244,17 @@ pub async fn send_message(
         // `(user_id, username)` for every other member. LEFT JOIN so a member
         // whose user row is missing still counts for `@all` — it just can't be
         // named individually.
-        let members: Vec<(String, String)> = {
-            let conn = state.remote_db.conn().await?;
-            let mut rows = conn.query(
-                "SELECT gm.user_id, COALESCE(u.username, '')
-                 FROM group_member gm
-                 LEFT JOIN users u ON u.id = gm.user_id
-                 WHERE gm.group_id = ?1 AND gm.user_id <> ?2",
-                libsql::params![mls_group_id.clone(), sender_id.clone()],
-            ).await?;
-            let mut out = Vec::new();
-            while let Some(row) = rows.next().await? {
-                out.push((row.get::<String>(0)?, row.get::<String>(1)?));
-            }
-            out
-        };
+        let members: Vec<(String, String)> =
+            crate::commands::ds_reads::group(state, &mls_group_id, &sender_id, false)
+                .await?
+                .members
+                .into_iter()
+                .filter(|m| m.user_id != sender_id)
+                // A member whose `users` row is missing still counts for `@all`
+                // — it just cannot be named individually, which is exactly what
+                // the LEFT JOIN's empty-string default expressed.
+                .map(|m| (m.user_id, m.username.unwrap_or_default()))
+                .collect();
         let audience = mention_audience(is_channel, &content, &members);
 
         // `@all` keeps its exact existing payload and fanout — every member.

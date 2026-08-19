@@ -483,6 +483,43 @@ pub async fn dm_channels(
     Ok(out)
 }
 
+/// One DM as `/v1/dm/create` answers with it.
+pub async fn dm_row(
+    conn: &Connection,
+    dm_id: &str,
+    existing: bool,
+) -> anyhow::Result<Option<pollis_api::profile::CreatedDm>> {
+    let mut rows = conn
+        .query(
+            "SELECT id, created_by, created_at FROM dm_channel WHERE id = ?1",
+            libsql::params![dm_id.to_string()],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let (id, created_by, created_at): (String, String, String) =
+        (row.get(0)?, row.get(1)?, row.get(2)?);
+    drop(rows);
+    let members = dm_members(conn, &id)
+        .await?
+        .into_iter()
+        .map(|m| pollis_api::profile::DmMember {
+            user_id: m.user_id,
+            username: m.username,
+            avatar_url: m.avatar_url,
+            accepted_at: m.accepted_at,
+        })
+        .collect();
+    Ok(Some(pollis_api::profile::CreatedDm::Ok {
+        id,
+        created_by,
+        created_at,
+        members,
+        existing,
+    }))
+}
+
 pub async fn dm_members(conn: &Connection, dm_id: &str) -> anyhow::Result<Vec<DmMemberWire>> {
     let mut rows = conn
         .query(
@@ -603,9 +640,32 @@ pub async fn group(
     };
 
     let conn = state.db.conn().await?;
-    let role = group_role(&conn, &parsed.group_id, &who).await?;
+    // The id may name a group or one of its channels. Resolving here is what
+    // lets the moderation preflight ask one question instead of two, and it
+    // matches `writes::is_member`'s tolerance of the shared id namespace.
+    let group_id = match resolve_conversation(&conn, &parsed.group_id).await? {
+        Some((id, ConversationKind::Group)) | Some((id, ConversationKind::Channel)) => id,
+        // A DM, or nothing at all. Neither is a group, and `exists: false` is
+        // the honest answer to "is this a group I could be in".
+        _ => {
+            return Ok(ok_response::<DirectoryGroupBody>(DirectoryGroupResponse {
+                exists: false,
+                authorized: false,
+                role: None,
+                group: None,
+                channels: Vec::new(),
+                members: Vec::new(),
+                invite_links: Vec::new(),
+                join_requests: Vec::new(),
+                emoji: Vec::new(),
+            }))
+        }
+    };
+
+    let role = group_role(&conn, &group_id, &who).await?;
     let Some(role) = role else {
         return Ok(ok_response::<DirectoryGroupBody>(DirectoryGroupResponse {
+            exists: true,
             authorized: false,
             role: None,
             group: None,
@@ -617,24 +677,38 @@ pub async fn group(
         }));
     };
     let admin = role == "admin";
+    if parsed.role_only {
+        return Ok(ok_response::<DirectoryGroupBody>(DirectoryGroupResponse {
+            exists: true,
+            authorized: true,
+            role: Some(role),
+            group: None,
+            channels: Vec::new(),
+            members: Vec::new(),
+            invite_links: Vec::new(),
+            join_requests: Vec::new(),
+            emoji: Vec::new(),
+        }));
+    }
 
     Ok(ok_response::<DirectoryGroupBody>(DirectoryGroupResponse {
+        exists: true,
         authorized: true,
-        group: group_row(&conn, &parsed.group_id).await?,
-        channels: channels_of(&conn, &parsed.group_id).await?,
-        members: group_members(&conn, &parsed.group_id).await?,
+        group: group_row(&conn, &group_id).await?,
+        channels: channels_of(&conn, &group_id).await?,
+        members: group_members(&conn, &group_id).await?,
         invite_links: if admin {
-            invite_links(&conn, &parsed.group_id).await?
+            invite_links(&conn, &group_id).await?
         } else {
             Vec::new()
         },
         join_requests: if admin {
-            join_requests(&conn, &parsed.group_id).await?
+            join_requests(&conn, &group_id).await?
         } else {
             Vec::new()
         },
         emoji: if parsed.want_emoji {
-            group_emoji(&conn, &parsed.group_id).await?
+            group_emoji(&conn, &group_id).await?
         } else {
             Vec::new()
         },
@@ -877,9 +951,13 @@ pub async fn users(
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    if let Err(resp) = authed_user(&state, &headers, &method, &uri, &body, None).await? {
-        return Ok(resp);
-    }
+    // The block check is answered for the AUTHENTICATED caller, never for a
+    // body-named one: "is A blocked by B" for arbitrary A and B would publish
+    // the block graph.
+    let who = match authed_user(&state, &headers, &method, &uri, &body, None).await? {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
 
     let conn = state.db.conn().await?;
     let mut out: Vec<UserWire> = Vec::new();
@@ -922,8 +1000,32 @@ pub async fn users(
         }
     }
 
+    let mut blocked = Vec::new();
+    for chunk in parsed.block_check.chunks(BIND_CHUNK) {
+        let sql = format!(
+            "SELECT CASE WHEN blocker_id = ?1 THEN blocked_id ELSE blocker_id END \
+             FROM user_block \
+             WHERE (blocker_id = ?1 AND blocked_id IN ({0})) \
+                OR (blocked_id = ?1 AND blocker_id IN ({0}))",
+            placeholders(chunk.len(), 2)
+        );
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 1);
+        params.push(who.clone().into());
+        for id in chunk {
+            params.push(id.clone().into());
+        }
+        let mut rows = conn.query(&sql, params).await?;
+        while let Some(row) = rows.next().await? {
+            let other: String = row.get(0)?;
+            if !blocked.contains(&other) {
+                blocked.push(other);
+            }
+        }
+    }
+
     Ok(ok_response::<DirectoryUsersBody>(DirectoryUsersResponse {
         users: out,
+        blocked,
     }))
 }
 

@@ -245,9 +245,18 @@ pub struct BlockedUserWire {
 /// membership, invite links and join requests need admin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryGroupBody {
+    /// A group id, or a CHANNEL id — resolved server-side, the same way
+    /// `writes::is_member` accepts either. That tolerance is what lets the
+    /// message-moderation preflight ask "am I an admin of the group that owns
+    /// this channel" in one request instead of resolving first.
     pub group_id: String,
     #[serde(default)]
     pub user_id: Option<String>,
+    /// Answer only `exists` / `authorized` / `role` and skip every list. The
+    /// authorization preflights want a role and nothing else, and a roster is
+    /// not free.
+    #[serde(default)]
+    pub role_only: bool,
     /// Include the group's custom emoji set. Members-only, and a separate flag
     /// because the picker asks for emoji across ALL the caller's groups through
     /// a different endpoint.
@@ -257,6 +266,13 @@ pub struct DirectoryGroupBody {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryGroupResponse {
+    /// The id resolved to a real GROUP.
+    ///
+    /// Reported separately from `authorized` because the two answer different
+    /// questions and the join flow needs both: "no such group" and "you are
+    /// already a member" are different refusals, and collapsing them would make
+    /// one of them wrong.
+    pub exists: bool,
     /// `false` → not a member. Everything below is empty, which is the same
     /// answer a stranger got from the membership-gated read this replaces.
     pub authorized: bool,
@@ -374,6 +390,16 @@ pub struct DirectoryUsersBody {
     /// against the database — this is a lookup, not a search index.
     #[serde(default)]
     pub identifier: Option<String>,
+    /// Which of these users are in a block relationship with the CALLER, in
+    /// EITHER direction.
+    ///
+    /// Direction-blind on purpose: every caller (send, invite, DM create) halts
+    /// delivery on either side's block and reports the same generic refusal, so
+    /// neither party can infer which of them blocked whom. Answering per
+    /// direction would hand that inference to the client, where a debug log or a
+    /// distinguishable error message would leak it back out.
+    #[serde(default)]
+    pub block_check: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -381,6 +407,9 @@ pub struct DirectoryUsersResponse {
     /// Everyone found, from ids and identifier together, deduplicated. A
     /// requested id that does not resolve is simply absent.
     pub users: Vec<UserWire>,
+    /// The subset of `block_check` that is blocked in either direction.
+    #[serde(default)]
+    pub blocked: Vec<String>,
 }
 
 /// A user's public directory projection.

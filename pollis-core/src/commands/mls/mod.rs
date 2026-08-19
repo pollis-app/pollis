@@ -5,7 +5,7 @@
 
 mod delivery;
 mod device;
-mod ds_client;
+pub(crate) mod ds_client;
 pub(crate) mod ds_reads;
 pub(crate) mod generation;
 mod group_state;

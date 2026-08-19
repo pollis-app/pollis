@@ -86,8 +86,6 @@ pub async fn delete_message(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
     // Resolve the message's AUTHOR + conversation. Authorship MUST come from the
     // LOCAL `message` row — its `sender_id` is the credential-authenticated author
     // (written from the MLS credential at ingest, or self-attributed at send).
@@ -115,13 +113,8 @@ pub async fn delete_message(
             // requires you authored — and therefore hold — the message). Take the
             // conversation from the remote envelope and leave the author unknown
             // (empty), which forces the admin branch below.
-            let mut rows = conn.query(
-                "SELECT conversation_id FROM message_envelope
-                 WHERE id = ?1 AND type = 'message'",
-                libsql::params![message_id.clone()],
-            ).await?;
-            match rows.next().await? {
-                Some(row) => (String::new(), row.get::<String>(0)?),
+            match crate::commands::ds_reads::message_conversation(state, &message_id).await? {
+                Some(cid) => (String::new(), cid),
                 None => {
                     return Err(crate::error::Error::Other(anyhow::anyhow!(
                         "Message not found"
@@ -339,15 +332,11 @@ async fn resolve_mls_group(
     state: &Arc<AppState>,
     conversation_id: &str,
 ) -> Result<(String, bool)> {
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn.query(
-        "SELECT group_id FROM channels WHERE id = ?1",
-        libsql::params![conversation_id.to_string()],
-    ).await?;
-    Ok(match rows.next().await? {
-        Some(row) => (row.get::<String>(0)?, true),
-        None => (conversation_id.to_string(), false),
-    })
+    let resolved = crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
+    Ok((
+        resolved.mls_group_id,
+        resolved.kind == pollis_api::directory::ConversationKind::Channel,
+    ))
 }
 
 /// Test-only: send a redaction as an ARBITRARY caller, bypassing the
@@ -760,17 +749,7 @@ pub async fn edit_message(
     let now = super::envelope_sent_at();
 
     // Resolve the MLS group for this conversation (channel → group_id, DM → conversation_id).
-    let mls_group_id = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![conversation_id.clone()],
-        ).await?;
-        match rows.next().await? {
-            Some(row) => row.get::<String>(0)?,
-            None => conversation_id.clone(),
-        }
-    };
+    let (mls_group_id, _) = resolve_mls_group(state, &conversation_id).await?;
 
     // Catch up MLS state before encrypting. Without this, an edit can be
     // emitted at a stale epoch — recipients at the current epoch will fail

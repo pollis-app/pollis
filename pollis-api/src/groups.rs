@@ -206,5 +206,64 @@ pub struct RedeemInviteLinkBody {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum RedeemInviteLinkResponse {
+    Ok {
+        group_id: String,
+        /// The group's display name, for the caller's confirmation UI (#987).
+        ///
+        /// Returned with the join rather than fetched after it: the DS has just
+        /// read the row to authorize the redemption, and the client asking again
+        /// was a second round trip for a string the server already had in hand.
+        /// `None` only if the row vanished between the join and this read.
+        #[serde(default)]
+        group_name: Option<String>,
+    },
+}
+
+/// `POST /v1/groups/update` — the row as it now stands (#987).
+///
+/// Returned rather than re-read, for the reason the whole read migration
+/// exists: the client used to `SELECT` the group straight back after the write,
+/// which was a second round trip for a row the server had just written and,
+/// worse, a read that could observe a LATER concurrent update and report it as
+/// the result of THIS one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum UpdatedGroup {
+    Ok {
+        id: String,
+        name: String,
+        #[serde(default)]
+        description: Option<String>,
+        owner_id: String,
+        created_at: String,
+    },
+}
+
+/// `POST /v1/channels/update` — the row as it now stands (#987). Same reasoning
+/// as [`UpdatedGroup`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum UpdatedChannel {
+    Ok {
+        id: String,
+        group_id: String,
+        name: String,
+        #[serde(default)]
+        description: Option<String>,
+        channel_type: String,
+    },
+}
+
+/// `POST /v1/invites/accept` — which group the invite admitted the caller to
+/// (#987).
+///
+/// The client used to read `group_invite` to learn this BEFORE posting the
+/// accept, which is both a round trip and a TOCTOU: the invite it read could be
+/// revoked before the write landed, leaving the client announcing membership of
+/// a group it never joined. Naming the group in the RESPONSE makes the answer a
+/// property of the write that succeeded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum AcceptedInvite {
     Ok { group_id: String },
 }
