@@ -23,7 +23,7 @@ import { SearchPanel } from "../SearchPanel";
 const TerminalView = lazy(() => import("../TerminalView"));
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
-import { isDropTargetActive } from "../../stores/dropTargetStore";
+import { isDropTargetActive, shouldShowDropOverlay } from "../../stores/dropTargetStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
@@ -187,8 +187,16 @@ export const AppShell: React.FC = observer(() => {
         setIsDragOver(false);
         return;
       }
-      if (event.payload.type === "enter" || event.payload.type === "over") {
-        setIsDragOver(true);
+      const dragging =
+        event.payload.type === "enter" || event.payload.type === "over";
+      // Pages that draw their own drop area (the emoji upload zone) listen for
+      // this instead of the app-wide overlay, which would cover the affordance
+      // they are trying to light up.
+      window.dispatchEvent(
+        new CustomEvent("pollis:pathdragstate", { detail: { dragging } }),
+      );
+      if (dragging) {
+        setIsDragOver(shouldShowDropOverlay());
       } else if (event.payload.type === "drop") {
         setIsDragOver(false);
         const paths = event.payload.paths;

@@ -312,7 +312,7 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**147 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**148 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -340,11 +340,12 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **PinEntryScreen** — props: userId, username, onUnlocked, onForgotPin, onSwitchAccount — `frontend/src/components/Auth/PinEntryScreen.tsx`
 - **SaveSecretKeyScreen** — props: secretKey, email, onConfirmed — `frontend/src/components/Auth/SaveSecretKeyScreen.tsx`
 
-### `components/Emoji` (8)
+### `components/Emoji` (9)
 
 - **CustomEmojiImage** — props: contentHash, shortcode, sizeRem, className — `frontend/src/components/Emoji/CustomEmojiImage.tsx`
 - **EmojiCategoryRail** — props: entries, activeId, onJump — `frontend/src/components/Emoji/EmojiCategoryRail.tsx`
 - **EmojiCell** — props: item, toneIndex, index, onSelect, onPreview — `frontend/src/components/Emoji/EmojiCell.tsx`
+- **EmojiDropZone** — props: onPick, onReject, disabled, children — `frontend/src/components/Emoji/EmojiDropZone.tsx`. The image-first half of the custom-emoji upload (Discord's model): drop a gif/image anywhere on the window or click to browse, and the file's PATH — never its bytes — goes to the caller. Registers as an *inline* drop target so `AppShell`'s full-window drop overlay stays out of the way and this zone lights up instead; a native drag never reaches the DOM, so "drag-over" is a window-level fact rather than a hover.
 - **EmojiPicker** — props: onSelect, onClose, closeOnSelect, className — `frontend/src/components/Emoji/EmojiPicker.tsx`
 - **EmojiPickerButton** — props: onSelect, closeOnSelect, placement, align, className, ariaLabel — `frontend/src/components/Emoji/EmojiPickerButton.tsx`
 - **EmojiSection** — props: id, title, items, toneIndex, baseIndex, onSelect, onPreview, scrollRoot — `frontend/src/components/Emoji/EmojiSection.tsx`
@@ -474,7 +475,7 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **DMPage** — `frontend/src/pages/DM.tsx`
 - **DMSettingsPage** — `frontend/src/pages/DMSettings.tsx`
 - **DMsPage** — `frontend/src/pages/DMs.tsx`
-- **GroupEmoji** — props: groupId — `frontend/src/pages/GroupEmoji.tsx`
+- **GroupEmoji** — props: groupId — `frontend/src/pages/GroupEmoji.tsx`. Add/list/remove a group's custom emoji. Adding is image-first: an `EmojiDropZone` takes the file, the shortcode is auto-filled from the filename sanitised to `[a-z0-9_]`, and a field the user has already typed in is never clobbered — either order works. Preview is a blob URL of the source file (gifs animate), shown both at 4rem and at the 1.375rem it renders at inline; the size shown before upload is the SOURCE size, since the 48 KB re-encode runs in Rust during `upload_group_emoji`. Empty/invalid/duplicate shortcodes and unsupported files are validated inline and disable the add button.
 - **GroupEmojiPage** — `frontend/src/pages/GroupEmojiPage.tsx`
 - **GroupPage** — `frontend/src/pages/Group.tsx`
 - **GroupsPage** — `frontend/src/pages/Groups.tsx`
