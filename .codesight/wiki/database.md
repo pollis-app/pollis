@@ -571,8 +571,10 @@ branches:
 - UNIQUE INDEX `idx_mls_welcome_recipient` on `(conversation_id, recipient_id, recipient_device_id)` _(commit-log-DB migration 000002, #430 P2)_ — one live Welcome per recipient device. It is the conflict target the DS submit bundle's and `/v1/welcomes/resubmit`'s idempotent `ON CONFLICT … DO UPDATE` upserts key on, so a re-sent Welcome refreshes the blob and re-arms delivery (`delivered = 0`) instead of stacking a duplicate row. The migration collapses any pre-existing duplicates (keeping the newest per tuple) before adding the index.
 
 `mls_welcome`, `mls_commit_log`, and `mls_group_info` live on the **separate
-commit-log Turso DB** (`LOG_DB_URL`) post-#420, where the Delivery Service holds
-the only read-write token and clients hold a read-only token. Their migrations are
+commit-log Turso DB** (`LOG_DB_URL`) post-#420. The Delivery Service holds the
+only token of any kind for it — clients used to hold a read-only one, and since
+#987 hold none: they read the control plane through
+`POST /v1/read/conversation-state` and `POST /v1/welcomes/fetch`. Their migrations are
 numbered independently in `pollis-schema/migrations-log/` and applied by the
 desktop-release workflow's second `db-apply` step (`MIGRATIONS_DIR=…/migrations-log`).
 

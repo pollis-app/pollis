@@ -27,8 +27,7 @@ A Pollis client is configured, at build time, with exactly these network destina
 
 | Config field | Service | Protocol | Role |
 |---|---|---|---|
-| `turso_url` / `turso_token` | **Turso (libSQL)** | Hrana over HTTP/2, TLS, `libsql://` | Canonical metadata + ciphertext envelope store. Direct connection for **reads only** — the token is read-only and every write goes through the Delivery Service (`ARCHITECTURE.md` §Network architecture). |
-| `log_db_url` / `log_db_token` (optional) | **Turso (commit-log DB)** | same | Read-only view of the MLS control-plane tables once split out (`config.rs:7-11`). Same operator, same protocol — not a distinct trust domain. |
+| ~~`turso_url` / `turso_token`~~, ~~`log_db_url` / `log_db_token`~~ | **Turso (libSQL)** | — | **Gone since #987.** The client held a read-only connection for reads; it now has no database credential and `pollis-core` does not link `libsql`, so Turso is no longer a host the client dials and is no longer on the overlay's route list. Everything it used to read arrives over the `pollis_delivery_url` row below. |
 | `r2_endpoint` + `r2_*` creds | **Cloudflare R2** | HTTPS + AWS SigV4 | Encrypted attachment / avatar object storage. |
 | `livekit_url` / `livekit_api_*` | **LiveKit** | WebSocket signalling + WebRTC (DTLS-SRTP) | SFU for realtime events + voice frames. |
 | `pollis_delivery_url` (optional) | **`pollis-delivery` Delivery Service** | HTTPS (axum, `pollis-delivery/src/lib.rs`) | Sole writer to the MLS commit log; also the secrets broker (LiveKit token mint + R2 presign, `docs/secrets-broker.md`). |

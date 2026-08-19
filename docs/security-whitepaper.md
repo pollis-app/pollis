@@ -422,33 +422,83 @@ Source: `pollis-core/src/db/local.rs`.
 
 ### 7.2 What's deliberately not local
 
-User profile rows, group/channel metadata, membership, blocks: those live on Turso and are fetched at read time. The argument for this separation is partial-trust: a stolen device with the SQLCipher key cannot enumerate the user's social graph without also being authenticated to Turso (via the read-only `TURSO_TOKEN`, baked into the binary — see §13 for trust caveats).
+User profile rows, group/channel metadata, membership, blocks: those live on Turso and are fetched at read time, through the Delivery Service. The argument for this separation is partial-trust, and #987 sharpened it: a stolen device with the SQLCipher key cannot enumerate the user's social graph, because the device holds no database credential at all — it can only ask the DS, which answers for the authenticated signer and no one else.
 
 ---
 
-## 8. Remote Database Transport (Turso / libSQL)
+## 8. Remote Database Access (there is none from the client)
 
-Source: `pollis-core/src/db/remote.rs`.
+Source: `pollis-core/src/commands/ds_reads.rs`, `pollis-core/src/commands/mls/ds_reads.rs`,
+`pollis-delivery/src/{reads,directory,account_reads}.rs`.
 
-- **Library:** `libsql` 0.6 with the `remote` feature, which uses Turso's **Hrana over HTTP/2** (the libSQL native protocol). The connection URL scheme is `libsql://...`. TLS is mandatory; `libsql` 0.6's `remote` feature uses `rustls` under the hood with the system trust store.
-- **Authentication:** a **read-only** bearer `TURSO_TOKEN` baked into the desktop binary's environment (`pollis-core/src/config.rs::Config::from_env`). It is read-only because the client has no write path to Turso at all — every write goes through the Delivery Service, which holds the writing credential. Since #393 the baked token is additionally only a *fallback*: on unlock the client asks the DS to mint a **short-TTL read-only** token and moves `remote_db` onto it, keeping the baked one only if the DS cannot be reached (`pollis-core/src/commands/turso_token.rs`). Per-user authentication is **not** layered on top of either token — every Pollis client reads the same Turso database with the same *class* of credential, and the token is whole-DB rather than row-scoped. Row-level security is enforced at the *application* layer, in Rust commands and in the DS, not by Turso.
-- **Resilience:** `RemoteDb::with_retry` handles transient Hrana stream eviction (libsql idle-stream GC) by reconnecting and retrying once. Non-transient errors surface. It is applied to the reads where a dropped stream costs the user something they cannot retry — the ingest envelope fetch, the reconcile key-package read, and the enrollment poll (#914) — not blanket-applied: paths that already degrade gracefully (avatar enrich, username backfill, TOFU key pin) deliberately do not use it.
+**Since #987 the client cannot reach the database.** Not "is not allowed to" —
+cannot: `pollis-core` does not depend on `libsql`, and the binary bakes no
+`TURSO_URL`, `TURSO_TOKEN`, `LOG_DB_URL` or `LOG_DB_TOKEN`. Every remote read is
+a typed `POST /v1/read/…` (or `/v1/directory/…`) to the Delivery Service, carried
+on the SAME ML-DSA-44 device-signed transport as the writes (§10.1), and the DS
+holds the only database credential.
 
-### 8.1 Threat consequence of a single shared token
+### 8.1 What this replaced, and why
 
-A reverse-engineer who extracts `TURSO_TOKEN` from a built binary can open a libSQL connection equivalent to any Pollis client. They can:
+The client used to open a libSQL connection with a **read-only** bearer token
+baked into the binary, and issue `SELECT`s directly — 102 call sites across 34
+files. Read-only meant it could not write, which was a real property; what it
+did not mean was *scoped*. The token was **whole-database**. A user who ignored
+the app's own guards and ran `SELECT * FROM group_member` read any group's
+roster, and #917 recorded exactly that as an open residual: the client-side
+membership checks made group metadata un-served by the app, not unreadable.
 
-- Read every public-metadata table (which is the same threat surface as a server-side database compromise).
-- **Not** insert, update or delete anything: the token is read-only, and every write goes through the Delivery Service, which re-derives the actor from a device signature. (This bullet previously described inserting into tables "not protected by application-level checks".) The application-layer rules the DS enforces are:
-  - Per-actor permission on group/channel CRUD inside the backend commands (the actor's `user_id` is supplied by the frontend and trusted because the frontend got it from the unlocked `account_id_key`).
-  - Atomic claim semantics on `mls_key_package`.
-  - `device_cert` cryptographic verification *on the read path*.
-- They cannot decrypt any message — those are MLS-encrypted.
-- They cannot forge a device into a user's MLS group without that device's cert verifying against the user's `account_id_pub`. The cross-signing check is the floor.
+#393 shortened the credential's life (the DS minted a short-TTL read-only token
+on unlock, keeping the baked one as a fallback) but could not change its scope: a
+short-lived whole-database token is still a whole-database token for its
+lifetime. The fix that closes the residual is not a smaller token but no token,
+which is what this section now documents. `POST /v1/turso/token`, the mint, is
+deleted too — with no client connection left, an endpoint that hands out database
+credentials is pure attack surface.
 
-The general shape — a desktop client carrying a credential to talk to backing services, with the cryptographic protocol (not the token) acting as the defence against server compromise — is similar to Signal Desktop, but with a meaningful difference: Signal Desktop holds a *per-account* auth token issued at registration, while Pollis ships a *single shared* read-only `TURSO_TOKEN` in every binary. The shared-token simplification compared to per-account tokens is a known cost; mitigations are in §13.
+### 8.2 Properties of the read path
 
-What that extracted token is **not** is a set of keys to the backing services. It reads Turso and nothing else: it cannot write a row, send an email, read or write an R2 object, or mint a LiveKit token, because the client no longer carries the credentials for any of those (§4, §9.3, §10.1). Every one of those capabilities sits behind the Delivery Service, which re-derives the caller's identity from a device signature rather than trusting the request. Earlier versions of this document described a client that held all four credentials and a `TURSO_TOKEN` that was the smallest of the problems; that is the architecture as it was, not as it ships.
+- **POST, never GET.** The canonical signing message is
+  `{METHOD}\n{PATH}\n{TIMESTAMP}\n{hex sha256(body)}` and the PATH excludes the
+  query string, so a signed `GET …?since=N&device_id=…` would carry
+  *unauthenticated* parameters. That is the #681 shape, where an unauthenticated
+  `GET /v1/commits` was a remote commit-log wipe primitive. Read parameters live
+  in the JSON body, where the signature covers them.
+- **The server decides what a caller may read**, using the same predicate it uses
+  to decide what they may write (`pollis_schema::authz::GROUP_ROLE_SQL`, shared
+  by both crates). A body-supplied `user_id` / `device_id` is the no-auth path's
+  input only; with auth on, both come from the verified signature.
+- **The MLS control plane is one snapshot.** `POST /v1/read/conversation-state`
+  answers GroupInfo, the pending-Welcome flag, the lineage heads, the commit
+  batch and the two membership gates from ONE read transaction, and refuses a
+  non-contiguous commit batch rather than serving it. Both properties are
+  correctness, not performance: a torn GroupInfo/Welcome pair strands a device
+  permanently, and a hole in a batch makes the client delete its MLS crypto
+  state. See `pollis-delivery/tests/conversation_snapshot.rs`.
+- **Three reads are unsigned, because no credential exists at that moment.**
+  `POST /v1/auth/account-probe` runs pre-PIN at launch (local DB closed, no
+  signer, no session) and answers `{ exists, has_identity, identity_version }`
+  for a 128-bit ULID the caller read out of its own `accounts.json`.
+  `POST /v1/read/enrollment` is gated on possession of the enrollment
+  `request_id` — a session cannot serve it, because the DS session TTL and the
+  enrollment TTL are both 600s and the session is minted strictly earlier, so a
+  session-gated poll is *guaranteed* to 401 before the request expires; the
+  payload is sealed to an ephemeral X25519 key the id does not confer.
+  `POST /v1/read/recovery-blob` takes the OTP session and records a security
+  event per fetch. All three sit on the DS's tightest per-IP rate-limit tier.
+
+### 8.3 What an attacker gets from a built binary
+
+Nothing that reads the database. There is no token to extract. The strongest
+remaining position is the one §10.1 describes: a device key stolen from the OS
+keychain of a compromised machine, which authenticates as **that device** — so
+the DS answers only for that device's own account, and MLS still denies the
+plaintext.
+
+This is a stronger position than Signal Desktop's, where a per-account auth token
+issued at registration is held on the device; Pollis holds a per-DEVICE signing
+key and no database credential. The earlier shape — a *single shared* read-only
+`TURSO_TOKEN` in every binary — was weaker than both, and is gone.
 
 ---
 
@@ -473,7 +523,7 @@ This is the same shape as MEGA's "Convergent Encrypted" layer (without its block
 
 **The client holds no R2 credentials.** It asks the Delivery Service for a short-lived **presigned URL** (`POST /v1/r2/presign`, via `pollis-core/src/commands/r2.rs::presign_r2`) and then does a plain HTTPS `PUT`/`GET`/`DELETE` against that URL. The SigV4 signing — canonical request → string-to-sign → date-region-service-derived signing key (HMAC-SHA256) → signature — happens **in the DS**, which is where `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` live (`pollis-delivery/src/broker.rs`). Only `R2_S3_ENDPOINT` and `R2_PUBLIC_URL` — endpoint URLs, not secrets — are compiled into the client (`pollis-core/src/config.rs`).
 
-This is a real reduction, not a relocation: a presigned URL authorises **one operation on one key for a short window**, so extracting a Pollis binary no longer yields the ability to enumerate, overwrite or delete the bucket. For `emoji/…` uploads the DS additionally signs `content-length` into the URL, so R2 itself rejects a body of any other size — a cap the client merely honoured was not a cap (#848). Earlier versions of this document described the R2 keys as baked into the binary under the same shared-credential trust model as `TURSO_TOKEN`; that stopped being true at the #506 secrets-broker cutover, which §1 already recorded and these sections did not.
+This is a real reduction, not a relocation: a presigned URL authorises **one operation on one key for a short window**, so extracting a Pollis binary no longer yields the ability to enumerate, overwrite or delete the bucket. For `emoji/…` uploads the DS additionally signs `content-length` into the URL, so R2 itself rejects a body of any other size — a cap the client merely honoured was not a cap (#848). Earlier versions of this document described the R2 keys as baked into the binary under the same shared-credential trust model as `TURSO_TOKEN`; that stopped being true at the #506 secrets-broker cutover, which §1 already recorded and these sections did not. `TURSO_TOKEN` itself followed at #987 (§8) — the client now bakes no service credential at all, only endpoint URLs.
 
 The `upload_media` command reads files from disk by path inside `pollis-core` (in the Tauri host process), rather than marshalling bytes across the `invoke` IPC boundary, so arbitrary-size attachments do not hit IPC framing limits.
 
@@ -602,8 +652,7 @@ The audit-relevant property is: an attacker who compromises only the user's emai
 | OTP | 6-digit numeric | In-memory **on the Delivery Service** as a salted hash, 10-min TTL, attempt-capped | Stored on disk; held by the client |
 | Device enrollment ephemeral X25519 private | X25519 (32 B) | `AppState.enrollment_ephemeral_keys` (in-memory) | Disk, server, anywhere persistent |
 | Attachment AEAD key | HKDF-SHA256 over content-hash → 32 B | Derived on-demand from content-hash | Persisted; transmitted to R2 |
-| `TURSO_TOKEN` | bearer, **read-only** | Baked into the desktop binary as a fallback; superseded at runtime by a DS-minted short-TTL read-only token (#393). Not user-scoped | Any write capability |
-| `LOG_DB_TOKEN` | bearer, read-only | **Optional** observability / commit-log token; baked only when a release supplies one | — |
+| `TURSO_TOKEN` / `LOG_DB_TOKEN` | bearer | **Delivery Service environment only** since #987 — the client binary bakes neither, and `pollis-core` does not link `libsql` (§8) | The client binary |
 | `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | AWS SigV4 creds | **Delivery Service environment only** | The client binary |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | JWT signing key | **Delivery Service environment only** | The client binary |
 | `RESEND_API_KEY` | bearer | **Delivery Service environment only** | The client binary |

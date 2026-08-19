@@ -400,8 +400,9 @@ Current state:
   path arg → desktop's exact `_att`/`_txt` envelope from `lib/attachments.ts`;
   inbound images render via `components/Media.tsx` + `get_media_path`). The DS base URL
   is threaded through `initializeNativeBridge` as `pollis_delivery_url`
-  (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, since
-  OTP bootstrap + all remote writes go through the DS, not direct Turso. Full
+  (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, and
+  since #987 the ONLY backend: OTP bootstrap, every remote write and every remote
+  read go through the DS. Full
   sign-in verified end-to-end on an Android emulator against the live dev DS.
 - **Keystore-at-rest (Android + iOS):** the file-backed keystore (the only
   backend on mobile) envelope-encrypts its contents with an AES-256-GCM master
@@ -501,12 +502,14 @@ build on a trusted device; it is **not shippable**. What leaks today:
   server-side fan-out/roster from `/v1/livekit/send-data` + `/v1/livekit/participants`.
   Only the non-secret `EXPO_PUBLIC_LIVEKIT_URL` remains. Never re-add the API
   key/secret env vars here.
-- 🟡 **Turso token** — the leak is closed (client holds a **read-only** token;
-  writes go through the DS). `commands/turso_token.rs` now moves it onto a
-  DS-minted **short-TTL** read-only token (`/v1/turso/token`), shrinking blast
-  radius from "forever" to the TTL. Reads are load-bearing, so the baked read-only
-  token stays as a fail-soft fallback until DS minting is live in prod. True
-  per-user row scoping needs per-user DBs (#261, separate).
+- ✅ **Turso token** — DONE (#987), and by removal rather than by scoping. The
+  client holds **no database credential of any kind**: `EXPO_PUBLIC_TURSO_URL` /
+  `EXPO_PUBLIC_TURSO_TOKEN` are gone from `InitConfig`, `commands/turso_token.rs`
+  and `RemoteDb` are deleted, `POST /v1/turso/token` is deleted, and `pollis-core`
+  does not depend on `libsql` at all. Every remote read is a signed
+  `POST /v1/read/…` to the DS, on the same transport as the writes. The
+  "true per-user row scoping needs per-user DBs (#261)" line this bullet used to
+  end on is moot — there is no client token left to scope.
 
 The fix is an **authorized-secrets broker** — a thin server-side endpoint (a
 Cloudflare Worker fits; CF is already in the stack) that holds the real secrets
@@ -515,19 +518,21 @@ and never ships them to the client:
 1. **Bootstrap (pre-auth):** `POST /otp/request` + `/otp/verify` run server-side
    (server calls Resend). The phone never holds the Resend key.
 2. **Post-auth, scoped + short-lived creds:**
-   - **Turso:** ✅ DONE — `commands/turso_token.rs` mints a short-TTL read-only
-     token via the DS (`/v1/turso/token`); baked token is a fail-soft fallback.
+   - **Turso:** ✅ DONE — and then deleted (#987). The client reads through the
+     DS and holds no token; the mint endpoint is gone with it.
    - **LiveKit:** ✅ DONE — the DS signs the JWT (`/v1/livekit/token`) and does
      server-side SendData/ListParticipants; the client holds no API secret.
    - **R2:** ✅ DONE — the DS returns presigned URLs; the client holds no R2 keys.
 
-Note the tension with the repo's "no backend server — Rust talks to Turso
-directly (1 hop)" principle (root `CLAUDE.md`). That model is tenable for a
-signed desktop binary (extraction is harder, though not impossible); it is
-**fundamentally incompatible** with keeping a DB token secret inside a client
-JS bundle. The broker reintroduces a minimal auth/credential service for the
-bootstrap + credential-minting paths only — the E2E model is untouched (the
-server still never sees message plaintext). Tracked in #393.
+This settled the tension with the old "no backend server — Rust talks to Turso
+directly (1 hop)" principle. That model was tenable for a signed desktop binary
+(extraction is harder, though not impossible) and **fundamentally incompatible**
+with keeping a DB token secret inside a client JS bundle — which is what made
+mobile the forcing function. #393 introduced the broker for the bootstrap and
+credential-minting paths; #987 finished the argument by moving the READS behind
+the DS too and deleting the database credential entirely. The E2E model is
+untouched throughout: the server still never sees message plaintext or a private
+key.
 
 ## Design tokens
 

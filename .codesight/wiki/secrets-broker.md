@@ -27,7 +27,6 @@ answers, like OTP with no Resend key).
 | `POST /v1/livekit/send-data` | Server-side `RoomService/SendData` — signs an admin JWT + Twirp POSTs a content-free control payload to a room | same LiveKit env |
 | `POST /v1/livekit/participants` | Server-side `RoomService/ListParticipants` (voice roster); each identity **resolved back to its user + username** server-side (#836), internal and `view` participants filtered; membership-gated | same LiveKit env |
 | `POST /v1/livekit/identities` | Resolve opaque participant pseudonyms → `{user_id, name, kind}` for a room the caller may join (#836). The per-room key never leaves the DS | same LiveKit env |
-| `POST /v1/turso/token` | Mints a short-TTL **read-only** Turso token via the Platform API | `TURSO_PLATFORM_TOKEN`, `TURSO_ORG`, `TURSO_DB` |
 | `POST /v1/r2/presign` | SigV4 query-string presigned URL (GET/PUT/DELETE), path-style, `UNSIGNED-PAYLOAD`, `host`-only signed header | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_REGION` defaults `auto`) |
 
 ### Room names are pseudonymous (#828)

@@ -151,12 +151,16 @@ file and force `DEV_OTP`, so the whole client path runs headless with no network
 cargo test -p pollis-tui        # unit tests + auth/sync smokes, all in-box
 ```
 
-- `tests/common/mod.rs` — the shared rig: local libsql (`RemoteDb::connect_local`,
-  gated behind pollis-core's `test-harness` dev-dep feature), an in-process
-  `pollis-delivery` wired to just the routes the scenario hits, and a `TestClient`
-  that signs up + drives the `pollis_tui` library through its own read-only
-  `query_only_view` (proving the client never writes Turso directly — all writes
-  go through the DS).
+- `tests/common/mod.rs` — the shared rig: two local libsql files
+  (`pollis_delivery::db::Db::connect_local`), the REAL `pollis-delivery` router
+  mounted in-process, and a `TestClient` that signs up + drives the `pollis_tui`
+  library. Since #987 it mounts the real router rather than a hand-rolled subset:
+  every client read is now a DS endpoint too, so a test double would have had to
+  reimplement twenty more handlers whose only job was to agree with the
+  originals. The client has no database handle at all — "everything went through
+  the DS" is a compile-time fact now, pinned by
+  `pollis-core/tests/no_client_side_remote_reads.rs`, not a `query_only` PRAGMA
+  catching a stray write at runtime.
 - `tests/sync_smoke.rs` — **the M2 gate.** Two clients share one DS + libsql; A
   opens a DM to B and sends while B is offline; B is driven *only* through
   `sync::sync_once` and must decrypt exactly A's message. Proves cross-client

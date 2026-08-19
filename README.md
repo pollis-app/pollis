@@ -35,7 +35,7 @@ encrypted at rest.
   are end-to-end encrypted too — per-frame AES-128-GCM via libwebrtc's
   `FrameCryptor`, keyed from the MLS group's exporter secret, so the LiveKit SFU
   forwards ciphertext only.
-- **Remote DB**: Turso (libSQL) — reads direct from the Rust core; writes via the Delivery Service
+- **Remote DB**: Turso (libSQL) — reached only by the Delivery Service; the client holds no database credential and every read and write is a signed `POST /v1/…`
 - **Local DB**: SQLite via rusqlite (encrypted at rest, key in the device keystore)
 - **Auth**: Email OTP, session stored in the device keystore
 - **Real-time**: LiveKit (voice calls via Rust `livekit` crate, real-time presence)

@@ -34,9 +34,10 @@ const h = require("./lib/harness");
 const ARTIFACTS = path.join(__dirname, "artifacts");
 const shot = h.makeShot(ARTIFACTS);
 
+// TURSO_URL / TURSO_TOKEN left this list in #987: the client no longer reads a
+// database credential (or links a database driver), so `Config::from_env` no
+// longer requires them and a placeholder would be dead weight.
 const REQUIRED_PLACEHOLDERS = {
-  TURSO_URL: "libsql://placeholder.invalid",
-  TURSO_TOKEN: "placeholder",
   R2_S3_ENDPOINT: "https://placeholder.invalid",
   R2_PUBLIC_URL: "https://placeholder.invalid",
 };

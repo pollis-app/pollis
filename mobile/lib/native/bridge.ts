@@ -89,8 +89,11 @@ export function setNativeBridge(bridge: NativeBridge): void {
 }
 
 export interface InitConfig {
-  tursoUrl: string;
-  tursoToken: string;
+  // No Turso URL or token (#987). The client holds NO database credential —
+  // every remote read and write is a signed POST to the Delivery Service, and
+  // the Rust core does not link libsql at all — so there is nothing for the
+  // bundle to carry. `EXPO_PUBLIC_TURSO_*` can be dropped from every .env; the
+  // Rust side ignores unknown keys, so an app still passing them boots fine.
   // R2 access credentials moved server-side to the DS secrets broker (#393); the
   // bundle no longer carries them. Only the non-secret endpoint/public URL remain.
   r2Endpoint?: string;
@@ -100,8 +103,10 @@ export interface InitConfig {
   // also returned by the DS token endpoint).
   livekitUrl?: string;
   resendApiKey?: string;
-  // Delivery Service base URL (api-dev.pollis.com / api.pollis.com). Required —
-  // OTP bootstrap and every remote write go through the DS, not direct Turso.
+  // Delivery Service base URL (api-dev.pollis.com / api.pollis.com). Since #987
+  // this is the ONLY backend: OTP bootstrap, every remote read and every remote
+  // write go through it. Optional in the type only because the Rust side
+  // defaults it; an app without it can open its local database and nothing else.
   pollisDeliveryUrl?: string;
 }
 
@@ -113,25 +118,22 @@ let initialized = false;
  * startup before any `invoke()` consumer mounts (the root layout in
  * `app/_layout.tsx` is the right place).
  *
- * Throws if `init_pollis` on the Rust side fails (e.g. Turso URL is
- * unreachable, config JSON is malformed).
+ * Throws if `init_pollis` on the Rust side fails (e.g. the config JSON is
+ * malformed).
  */
 export async function initializeNativeBridge(config: InitConfig): Promise<void> {
   if (initialized) {
     return;
   }
-  // Android's rustls-native-certs (pulled transitively by libsql) reads
-  // /etc/ssl/certs which is empty on Android. Rust ships a Mozilla CA
-  // bundle and writes it under `data_dir`; we need to hand it a writable
-  // path. Expo's documentDirectory comes back as a `file://` URL — strip
-  // the scheme for Rust's PathBuf.
+  // Android's rustls-native-certs reads /etc/ssl/certs, which is empty on
+  // Android. Rust ships a Mozilla CA bundle and writes it under `data_dir`; we
+  // need to hand it a writable path. Expo's documentDirectory comes back as a
+  // `file://` URL — strip the scheme for Rust's PathBuf.
   const dataDir =
     Platform.OS === "android" && FileSystem.documentDirectory
       ? FileSystem.documentDirectory.replace(/^file:\/\//, "")
       : undefined;
   const configJson = JSON.stringify({
-    turso_url: config.tursoUrl,
-    turso_token: config.tursoToken,
     data_dir: dataDir,
     r2_endpoint: config.r2Endpoint ?? "",
     r2_public_url: config.r2PublicUrl ?? "",

@@ -21,7 +21,8 @@ form factors.
    ```
    EXPO_PUBLIC_POLLIS_DELIVERY_URL=https://api-dev.pollis.com
    EXPO_PUBLIC_LIVEKIT_URL=wss://<dev-livekit>
-   EXPO_PUBLIC_TURSO_URL=... EXPO_PUBLIC_TURSO_TOKEN=...   # dev, read-only
+   # No database credential is needed or read since #987 — the client speaks
+   # only to the Delivery Service.
    ```
    Build + install: `cd mobile && pnpm expo run:ios` / `run:android` (see
    `mobile/CLAUDE.md` for the ubrn/native steps). App id: `com.pollis.mobile`.

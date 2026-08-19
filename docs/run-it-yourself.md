@@ -63,10 +63,11 @@ turso db show pollis-selfhost --url        # -> libsql://...turso.io
 turso db tokens create pollis-selfhost     # -> the auth token
 ```
 
-**You have to create the schema yourself — the client will not do it.** The client
-connects with a read-only token and has no code path that creates tables, so
-skipping this leaves you with an empty database and an app that fails on first
-query. Apply the baseline and then every numbered migration, in order:
+**You have to create the schema yourself — nothing else will do it.** The client
+never touches this database at all (it has no credential and does not link a
+database driver), and the Delivery Service does not create tables, so skipping
+this leaves you with an empty database and an app that fails on its first
+request. Apply the baseline and then every numbered migration, in order:
 
 ```bash
 turso db shell pollis-selfhost < pollis-schema/migrations/000000_baseline.sql
@@ -76,7 +77,7 @@ for f in pollis-schema/migrations/0000[1-9]*.sql; do
 done
 ```
 
-If you also run a separate commit-log DB (optional — see `LOG_DB_URL` in step 6),
+If you also run a separate commit-log DB (optional — see the Delivery Service's `LOG_DB_URL` in step 6),
 apply `pollis-schema/migrations-log/*.sql` to *that* database the same way.
 Skip it and the MLS control-plane tables live in the main DB instead, which works
 fine for a single-operator deployment.
@@ -162,20 +163,26 @@ key/secret, and note the S3 endpoint and a public URL for serving objects.
 
 Copy the sample and fill in everything you provisioned:
 
-The split matters: **shared secrets belong to the Delivery Service, not the
-client.** The R2 access key, the LiveKit API secret, and the Resend key used to
-ship inside the client binary, where anyone could extract them; #393/#506 moved
-them server-side and the client no longer reads them at all. Putting them in the
-client env does not enable anything — it just puts a secret on every desktop you
-install on.
+The split matters: **every shared credential belongs to the Delivery Service,
+not the client.** The R2 access key, the LiveKit API secret and the Resend key
+used to ship inside the client binary, where anyone could extract them; #393/#506
+moved them server-side. #987 finished the job with the last one — the Turso
+token — by removing the client's database access entirely rather than shrinking
+the token's scope. The client env below contains only endpoint URLs. Putting a
+credential in it does not enable anything; it just puts a secret on every desktop
+you install on.
 
 **Client** — `.env.development` at the repo root:
 
 ```ini
-TURSO_URL=libsql://pollis-selfhost-....turso.io
-TURSO_TOKEN=<a READ-ONLY token from step 2>
+# NO database URL or token. Since #987 the client holds no database credential
+# and cannot open a connection — every read and every write is a signed request
+# to the Delivery Service below. If you are upgrading a self-host from an older
+# release, delete TURSO_URL / TURSO_TOKEN / LOG_DB_URL / LOG_DB_TOKEN from this
+# file; they are ignored, and leaving a token on every desktop you install on is
+# the exact exposure this removed.
 
-# Required. The client has no direct-write path; without this, every write fails.
+# Required, and the only backend the client has. Without it nothing works.
 POLLIS_DELIVERY_URL=https://<your-ds-domain>   # the reverse proxy in front of step 4
 
 # Non-secret R2 values — where to fetch from, not credentials to write with.
@@ -185,9 +192,6 @@ R2_PUBLIC_URL=https://<your-public-r2-url>
 # Non-secret LiveKit value — the ws URL only. The API key/secret are DS-side.
 LIVEKIT_URL=wss://<your-livekit-domain>
 
-# Optional: separate commit-log DB. LOG_DB_TOKEN must be READ-ONLY.
-# LOG_DB_URL=libsql://pollis-selfhost-log-....turso.io
-# LOG_DB_TOKEN=<read-only token>
 ```
 
 **Delivery Service** — passed to `docker run` in step 4, never to the client:

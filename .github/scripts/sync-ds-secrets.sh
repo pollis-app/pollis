@@ -23,7 +23,8 @@ KEYS=(
   RESEND_API_KEY
   LIVEKIT_API_KEY LIVEKIT_API_SECRET LIVEKIT_URL
   R2_S3_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_KEY R2_BUCKET
-  TURSO_PLATFORM_TOKEN TURSO_ORG TURSO_DB
+  # TURSO_PLATFORM_TOKEN / TURSO_ORG / TURSO_DB were dropped in #987 along with
+  # POST /v1/turso/token, the client read-token mint that was their only consumer.
   POLLIS_DS_METRICS_TOKEN
 )
 if [ "${INCLUDE_DEV_OTP:-false}" = "true" ]; then
