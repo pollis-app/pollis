@@ -273,8 +273,12 @@ All functions in `pollis-core/src/commands/`; each takes `&Arc<AppState>`.
 | Search user | `search_user_by_username(username, &state)` |
 
 Also available if useful: reactions (`add_reaction`/`remove_reaction`/`get_reactions`),
-`edit_message`, `delete_message`, `search_messages`, `list_channel_previews`,
+`edit_message`, `delete_message`, `search_messages`, `read_last_messages`,
 join-request flow (`request_group_access`/`approve_join_request`/…).
+(`list_channel_previews` and `list_messages_by_sender` were deleted in #987 —
+both keyed on `message_envelope.sender_id`, which sealed sender (#607) has
+written as the literal `"sealed"` for every send since, so neither could match a
+real user any more. `read_last_messages` is the preview read that works.)
 
 ### UX layout (ratatui)
 - **Three-pane**: left = groups→channels + DMs tree; center = message list of the

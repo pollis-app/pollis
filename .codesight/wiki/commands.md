@@ -397,7 +397,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`install_kind`** — `detect_managed_install`
 - **`livekit`** — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
 - **`media_permissions`** — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
-- **`messages`** — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
+- **`messages`** — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_messages`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
 - **`mls`** — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 - **`overlay`** — `get_overlay_mode`, `set_overlay_mode`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
@@ -460,7 +460,7 @@ than hand-edit.
 
 **`bookmarks`** (5) — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 
-**`messages`** (22) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
+**`messages`** (20) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_messages`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
 
 **`mls`** (3) — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 
