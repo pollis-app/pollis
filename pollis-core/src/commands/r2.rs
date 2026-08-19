@@ -540,15 +540,15 @@ pub async fn upload_media(
         (None, None, None)
     };
 
-    // Check Turso for an existing object with the same content hash.
-    let already_uploaded = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT 1 FROM attachment_object WHERE content_hash = ?1",
-            libsql::params![content_hash.clone()],
-        ).await?;
-        rows.next().await?.is_some()
-    };
+    // Is this blob already stored? A content-addressed probe: the caller
+    // computed the hash from bytes it already holds, so the question discloses
+    // nothing it did not bring.
+    let already_uploaded = crate::commands::ds_reads::object_exists(
+        state,
+        &content_hash,
+        pollis_api::account_reads::ObjectKind::Attachment,
+    )
+    .await?;
 
     if !already_uploaded {
         // Encrypt with chunked AES-256-GCM, then upload via a DS-minted

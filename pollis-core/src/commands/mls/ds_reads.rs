@@ -97,6 +97,26 @@ pub(crate) fn state_query(conversation_id: &str, generation: Option<i64>) -> Con
     }
 }
 
+/// The MLS group backing a conversation: a channel maps to its `group_id` (all
+/// channels of a group share ONE MLS group), a DM is its own group.
+///
+/// Falls back to the id itself when the DS cannot resolve it, which is what the
+/// direct `SELECT group_id FROM channels` did by returning no row — the caller
+/// then treats the id as its own MLS group, and the paths that need membership
+/// re-check it themselves.
+pub(crate) async fn resolve_mls_group(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+) -> Result<String> {
+    let resolved =
+        crate::commands::ds_reads::catch_up(state, conversation_id, false, false).await?;
+    Ok(if resolved.mls_group_id.is_empty() {
+        conversation_id.to_string()
+    } else {
+        resolved.mls_group_id
+    })
+}
+
 /// Decode one base64 blob from a read response.
 pub(crate) fn decode_b64(what: &str, s: &str) -> Result<Vec<u8>> {
     use base64::Engine as _;

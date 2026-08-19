@@ -42,6 +42,7 @@ pub mod messages;
 pub mod otp;
 pub mod participant_id;
 pub mod profile;
+pub mod push;
 pub mod ratelimit;
 pub mod reads;
 pub mod redact;

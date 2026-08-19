@@ -326,8 +326,36 @@ pub async fn registered_devices(
     }
 
     let conn = state.db.conn().await?;
+    let pairs = registered_device_pairs(&conn, &parsed.user_ids).await?;
+    Ok(ok_response::<RegisteredDevicesBody>(
+        RegisteredDevicesResponse { pairs },
+    ))
+}
+
+/// Every NON-REVOKED `(user_id, device_id)` pair for a roster.
+///
+/// `revoked_at IS NULL` is the load-bearing clause (#679): `revoke_device`
+/// TOMBSTONES the row rather than deleting it — deliberately, so a peer can tell
+/// "revoked, drop the rejoin" from "not replicated yet, retry" — so a revoked
+/// device has to be excluded by the PREDICATE, never by the row's absence.
+/// Without it, reconcile keeps the revoked leaf in `desired`, never places it in
+/// `to_remove`, and the revoked device goes on decrypting.
+///
+/// Ids are BOUND, never interpolated: an id containing a quote must match itself
+/// exactly or not at all. It used to be spliced in behind a character filter
+/// that silently mangled anything else, which made the query answer a question
+/// nobody asked — and an answer to the wrong question is not a trustworthy place
+/// to put a revocation check.
+///
+/// An empty roster short-circuits rather than building `IN ()`.
+///
+/// `pub` so the #679 regression suite drives the real query rather than a copy.
+pub async fn registered_device_pairs(
+    conn: &Connection,
+    user_ids: &[String],
+) -> anyhow::Result<Vec<DevicePair>> {
     let mut pairs = Vec::new();
-    for chunk in parsed.user_ids.chunks(BIND_CHUNK) {
+    for chunk in user_ids.chunks(BIND_CHUNK) {
         let sql = format!(
             "SELECT user_id, device_id FROM user_device \
              WHERE user_id IN ({}) AND revoked_at IS NULL",
@@ -342,9 +370,7 @@ pub async fn registered_devices(
             });
         }
     }
-    Ok(ok_response::<RegisteredDevicesBody>(
-        RegisteredDevicesResponse { pairs },
-    ))
+    Ok(pairs)
 }
 
 // ── POST /v1/read/enrollment ─────────────────────────────────────────────────

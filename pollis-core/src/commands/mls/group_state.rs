@@ -2018,17 +2018,7 @@ pub async fn process_pending_commits(
     conversation_id: String,
     user_id: String,
 ) -> crate::error::Result<()> {
-    let mls_group_id = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![conversation_id.clone()],
-        ).await?;
-        match rows.next().await? {
-            Some(row) => row.get::<String>(0)?,
-            None => conversation_id,
-        }
-    };
+    let mls_group_id = super::ds_reads::resolve_mls_group(state, &conversation_id).await?;
     crate::commands::messages::catch_up_mls_group_interleaved(state, &mls_group_id, &user_id).await
 }
 

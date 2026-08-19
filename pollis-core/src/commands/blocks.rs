@@ -90,29 +90,16 @@ pub async fn list_blocked_users(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<BlockedUser>> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn
-        .query(
-            "SELECT ub.blocked_id, u.username, ub.created_at
-             FROM user_block ub
-             LEFT JOIN users u ON u.id = ub.blocked_id
-             WHERE ub.blocker_id = ?1
-             ORDER BY ub.created_at DESC",
-            libsql::params![user_id],
-        )
-        .await?;
-
-    let mut blocked = Vec::new();
-    while let Some(row) = rows.next().await? {
-        blocked.push(BlockedUser {
-            user_id: row.get(0)?,
-            username: row.get(1)?,
-            blocked_at: row.get(2)?,
-        });
-    }
-
-    Ok(blocked)
+    Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
+        .await?
+        .blocks
+        .into_iter()
+        .map(|b| BlockedUser {
+            user_id: b.user_id,
+            username: b.username,
+            blocked_at: b.blocked_at,
+        })
+        .collect())
 }
 
 #[cfg(test)]

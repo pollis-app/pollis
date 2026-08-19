@@ -58,6 +58,20 @@ pub struct CatchUpBody {
     /// would be two shapes for one query.
     #[serde(default)]
     pub want_dm: bool,
+    /// Include the conversation's DESIRED MLS ROSTER: the user ids that should
+    /// have a leaf in its tree.
+    ///
+    /// `group_member` plus pending `group_invite` invitees for a group, or
+    /// `dm_channel_member` for a DM. Pending invitees are in it so their devices
+    /// get a Welcome at invite time — the acceptor can join without any other
+    /// member being online simultaneously.
+    ///
+    /// ONE definition, server-side: `reconcile` diffs the tree against it and
+    /// `migrate` moves exactly this set into a successor group. If the two ever
+    /// disagreed about who belongs, a migration would strand whoever the diff
+    /// would have added.
+    #[serde(default)]
+    pub want_roster: bool,
     /// No-auth (dev/test) path only; ignored when the DS enforces auth, though
     /// still signature-bound.
     #[serde(default)]
@@ -103,6 +117,9 @@ pub struct CatchUpResponse {
     /// The DM and its members. `None` unless `want_dm` and `kind == Dm`.
     #[serde(default)]
     pub dm: Option<DmChannelWire>,
+    /// The desired MLS roster. Empty unless `want_roster`.
+    #[serde(default)]
+    pub roster: Vec<String>,
 }
 
 /// One `message_envelope` row as it crosses the wire.
@@ -553,10 +570,22 @@ pub fn derive_slug(name: &str) -> String {
 pub struct DirectoryConversationsBody {
     #[serde(default)]
     pub user_id: Option<String>,
+    /// Also resolve the 1:1 DM channel between the caller and this user.
+    ///
+    /// The voice path needs it for `call-*` rooms, which are ephemeral and have
+    /// no row of their own: their MLS group is the DM's. Scoped to the CALLER's
+    /// own DMs by construction, so it cannot be used to ask whether two other
+    /// people have a DM.
+    #[serde(default)]
+    pub dm_with_user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryConversationsResponse {
     pub group_ids: Vec<String>,
     pub dm_ids: Vec<String>,
+    /// The 1:1 DM channel with `dm_with_user_id`, if one exists. `None` when
+    /// the caller did not ask, or when the two share no two-person DM.
+    #[serde(default)]
+    pub dm_with: Option<String>,
 }

@@ -442,23 +442,14 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     //    version (the CAS expectation) and hand it to the Delivery Service —
     //    the sole writer — which performs the conditional append in ONE
     //    transaction (`pollis_delivery::account::apply_rotate_identity`).
-    let conn = state.remote_db.conn().await?;
-    let based_on_version: i64 = {
-        let mut rows = conn
-            .query(
-                "SELECT identity_version FROM users WHERE id = ?1",
-                libsql::params![user_id.to_string()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => row.get(0)?,
-            None => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "user {user_id} not found during reset_identity"
-                )))
-            }
-        }
-    };
+    let based_on_version: i64 = crate::commands::ds_reads::account_status(state, user_id)
+        .await?
+        .map(|a| a.identity_version)
+        .ok_or_else(|| {
+            Error::Other(anyhow::anyhow!(
+                "user {user_id} not found during reset_identity"
+            ))
+        })?;
 
     let new_version: i64 = {
         use base64::Engine as _;

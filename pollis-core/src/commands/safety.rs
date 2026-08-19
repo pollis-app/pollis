@@ -88,27 +88,6 @@ fn combined(my_fp: &str, peer_fp: &str) -> String {
         .join(" ")
 }
 
-/// Fetch a user's `account_id_pub` + `identity_version` from Turso.
-pub(crate) async fn fetch_account_key(
-    conn: &libsql::Connection,
-    user_id: &str,
-) -> Result<(Vec<u8>, i64)> {
-    let mut rows = conn
-        .query(
-            "SELECT account_id_pub, identity_version FROM users WHERE id = ?1",
-            libsql::params![user_id],
-        )
-        .await?;
-    let row = rows
-        .next()
-        .await?
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("user {user_id} not found")))?;
-    let pubkey: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(0).ok().flatten();
-    let pubkey = pubkey
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("user {user_id} has no account_id_pub")))?;
-    let version: i64 = row.get(1).unwrap_or(0);
-    Ok((pubkey, version))
-}
 
 /// Compute the safety number for the pair (`my_user_id`, `peer_user_id`)
 /// and report its verification status against the local pin.
@@ -117,9 +96,24 @@ pub async fn get_safety_number(
     peer_user_id: String,
     state: &Arc<AppState>,
 ) -> Result<SafetyNumberInfo> {
-    let conn = state.remote_db.conn().await?;
-    let (my_pub, _) = fetch_account_key(&conn, &my_user_id).await?;
-    let (peer_pub, peer_version) = fetch_account_key(&conn, &peer_user_id).await?;
+    // Both keys in ONE request — this used to be two sequential reads for a
+    // screen that cannot render until it has both.
+    let keys = crate::commands::ds_reads::account_keys(
+        state,
+        &[my_user_id.clone(), peer_user_id.clone()],
+    )
+    .await?;
+    let find = |id: &str| {
+        keys.iter()
+            .find(|(u, _, _)| u == id)
+            .map(|(_, k, v)| (k.clone(), *v))
+    };
+    let (my_pub, _) = find(&my_user_id).ok_or_else(|| {
+        Error::Other(anyhow::anyhow!("no account_id_pub for user {my_user_id}"))
+    })?;
+    let (peer_pub, peer_version) = find(&peer_user_id).ok_or_else(|| {
+        Error::Other(anyhow::anyhow!("no account_id_pub for user {peer_user_id}"))
+    })?;
 
     let my_fp = fingerprint(&my_pub, my_user_id.as_bytes());
     let peer_fp = fingerprint(&peer_pub, peer_user_id.as_bytes());
@@ -216,29 +210,16 @@ pub async fn list_peer_verifications(
     // `batch_check_and_pin_account_keys` gives: `account_id_pub` is the
     // cryptographic root of trust, so its lookup does not go near string-built
     // SQL.
-    let conn = state.remote_db.conn().await?;
-    let mut server_keys: std::collections::HashMap<String, Vec<u8>> =
-        std::collections::HashMap::new();
-    // Chunked (#916): the list is as long as the user's pinned-contact list, and
-    // an `IN (…)` past SQLite's bound-parameter ceiling does not degrade, it
-    // fails to prepare.
-    for chunk in crate::db::chunk::bind_chunks(&pinned, 0) {
-        let query = format!(
-            "SELECT id, account_id_pub FROM users WHERE id IN ({})",
-            crate::db::chunk::placeholders(chunk.len(), 1)
-        );
-        let params: Vec<libsql::Value> = chunk
-            .iter()
-            .map(|(id, _, _)| libsql::Value::Text(id.clone()))
+    // One request for the whole pinned-contact list. The DS chunks its own
+    // binds, so a long contact list is still one round trip rather than one per
+    // ceiling-sized chunk.
+    let ids: Vec<String> = pinned.iter().map(|(id, _, _)| id.clone()).collect();
+    let server_keys: std::collections::HashMap<String, Vec<u8>> =
+        crate::commands::ds_reads::account_keys(state, &ids)
+            .await?
+            .into_iter()
+            .map(|(id, key, _)| (id, key))
             .collect();
-        let mut rows = conn.query(&query, params).await?;
-        while let Some(row) = rows.next().await? {
-            let id: String = row.get(0)?;
-            if let Some(p) = row.get::<Option<Vec<u8>>>(1).ok().flatten() {
-                server_keys.insert(id, p);
-            }
-        }
-    }
 
     let mut out = Vec::with_capacity(pinned.len());
     for (peer_id, pinned_pub, verified) in pinned {
@@ -266,8 +247,8 @@ pub async fn set_contact_verified(
     verified: bool,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-    let (peer_pub, peer_version) = fetch_account_key(&conn, &peer_user_id).await?;
+    let (peer_pub, peer_version) =
+        crate::commands::ds_reads::account_key(state, &peer_user_id).await?;
 
     let guard = state.local_db.lock().await;
     let db = guard
@@ -295,12 +276,12 @@ pub async fn check_and_pin_account_key(
     state: &Arc<AppState>,
     peer_user_id: &str,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-    let (peer_pub, peer_version) = match fetch_account_key(&conn, peer_user_id).await {
-        Ok(v) => v,
-        // Peer not provisioned yet — nothing to pin, not an error.
-        Err(_) => return Ok(()),
-    };
+    let (peer_pub, peer_version) =
+        match crate::commands::ds_reads::account_key(state, peer_user_id).await {
+            Ok(v) => v,
+            // Peer not provisioned yet — nothing to pin, not an error.
+            Err(_) => return Ok(()),
+        };
 
     let guard = state.local_db.lock().await;
     let db = guard
@@ -392,31 +373,14 @@ pub async fn batch_check_and_pin_account_keys(
     //    uses for its own `IN (...)` lookups (those filter by alphanum
     //    via input scrubbing; we're stricter here because account_id_pub
     //    is the cryptographic root of trust).
-    let conn = state.remote_db.conn().await?;
-    let mut server_keys: std::collections::HashMap<String, (Vec<u8>, i64)> =
-        std::collections::HashMap::new();
-    // Chunked (#916). This is the site #916 names as the one the newer batched
-    // reads copied their shape from, so it is the one that most needed fixing:
-    // its list is a whole group roster.
-    for chunk in crate::db::chunk::bind_chunks(peer_user_ids, 0) {
-        let query = format!(
-            "SELECT id, account_id_pub, identity_version FROM users WHERE id IN ({})",
-            crate::db::chunk::placeholders(chunk.len(), 1)
-        );
-        let params: Vec<libsql::Value> = chunk
-            .iter()
-            .map(|id| libsql::Value::Text(id.clone()))
+    // One request for every peer. The DS chunks its own binds, so a whole group
+    // roster is one round trip.
+    let server_keys: std::collections::HashMap<String, (Vec<u8>, i64)> =
+        crate::commands::ds_reads::account_keys(state, peer_user_ids)
+            .await?
+            .into_iter()
+            .map(|(id, key, version)| (id, (key, version)))
             .collect();
-        let mut rows = conn.query(&query, params).await?;
-        while let Some(row) = rows.next().await? {
-            let id: String = row.get(0)?;
-            let pubkey: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(1).ok().flatten();
-            let version: i64 = row.get(2).unwrap_or(0);
-            if let Some(p) = pubkey {
-                server_keys.insert(id, (p, version));
-            }
-        }
-    }
 
     if server_keys.is_empty() {
         return Ok(());

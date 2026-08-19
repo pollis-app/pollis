@@ -104,6 +104,7 @@ pub async fn catch_up(
             conversation_ids: Vec::new(),
             envelopes: Vec::new(),
             dm: None,
+            roster: Vec::new(),
         }));
     };
 
@@ -115,6 +116,7 @@ pub async fn catch_up(
             conversation_ids: Vec::new(),
             envelopes: Vec::new(),
             dm: None,
+            roster: Vec::new(),
         }));
     }
 
@@ -135,6 +137,12 @@ pub async fn catch_up(
         None
     };
 
+    let roster = if parsed.want_roster {
+        desired_roster(&conn, &mls_group_id).await?
+    } else {
+        Vec::new()
+    };
+
     Ok(ok_response::<CatchUpBody>(CatchUpResponse {
         authorized: true,
         mls_group_id,
@@ -142,7 +150,52 @@ pub async fn catch_up(
         conversation_ids,
         envelopes,
         dm,
+        roster,
     }))
+}
+
+/// The user ids that SHOULD have a leaf in this conversation's MLS tree.
+///
+/// `group_member` plus pending `group_invite` invitees, falling back to
+/// `dm_channel_member` when neither yields anything (a DM has no group rows).
+/// Pending invitees are included so their devices get a Welcome at invite time.
+///
+/// This is THE definition of "desired roster" — `reconcile` diffs the tree
+/// against it, `migrate` moves exactly this set into the successor group, and
+/// the two must never disagree about who belongs.
+pub async fn desired_roster(conn: &Connection, conversation_id: &str) -> anyhow::Result<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |id: String, out: &mut Vec<String>| {
+        if !out.contains(&id) {
+            out.push(id);
+        }
+    };
+
+    let mut rows = conn
+        .query(
+            "SELECT user_id FROM group_member WHERE group_id = ?1 \
+             UNION \
+             SELECT invitee_id FROM group_invite WHERE group_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await?;
+    while let Some(row) = rows.next().await? {
+        push(row.get::<String>(0)?, &mut out);
+    }
+    drop(rows);
+
+    if out.is_empty() {
+        let mut rows = conn
+            .query(
+                "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
+                libsql::params![conversation_id.to_string()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            push(row.get::<String>(0)?, &mut out);
+        }
+    }
+    Ok(out)
 }
 
 /// Resolve an id in the shared conversation namespace to `(mls_group_id, kind)`.
@@ -1189,8 +1242,45 @@ pub async fn conversations(
         DirectoryConversationsResponse {
             group_ids: user_group_ids(&conn, &who).await?,
             dm_ids: user_dm_ids(&conn, &who).await?,
+            dm_with: match parsed.dm_with_user_id.as_deref() {
+                Some(other) => one_to_one_dm(&conn, &who, other).await?,
+                None => None,
+            },
         },
     ))
+}
+
+/// The 1:1 DM channel shared by two users, if any.
+///
+/// `HAVING COUNT(*) = 2` guards against a group DM accidentally matching — a
+/// three-person DM containing both users is not the 1:1 channel, and using it
+/// for a call's MLS group would export a key to a third party. Ordered by id so
+/// the answer is deterministic if two ever existed.
+async fn one_to_one_dm(
+    conn: &Connection,
+    user_id: &str,
+    other_user_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT dcm.dm_channel_id \
+             FROM dm_channel_member dcm \
+             WHERE dcm.dm_channel_id IN ( \
+                 SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1 \
+             ) \
+             AND dcm.user_id = ?2 \
+             AND ( \
+                 SELECT COUNT(*) FROM dm_channel_member \
+                 WHERE dm_channel_id = dcm.dm_channel_id \
+             ) = 2 \
+             ORDER BY dcm.dm_channel_id LIMIT 1",
+            libsql::params![user_id.to_string(), other_user_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(Some(row.get::<String>(0)?)),
+        None => Ok(None),
+    }
 }
 
 pub async fn user_group_ids(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<String>> {

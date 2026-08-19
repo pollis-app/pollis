@@ -27,6 +27,24 @@ pub struct SendMessageBody {
     /// MLS credential. Absent (old clients / unsealed sends) → `0`.
     #[serde(default)]
     pub sealed: i64,
+    /// Who to WAKE with a content-free push (#987, #843).
+    ///
+    /// The push fan-out moved server-side with this field: the DS already knows
+    /// the conversation and the sender, so all it was missing was the mention
+    /// list. Doing it here removes the client's need to read other people's
+    /// `push_token` rows — the most identifying row it had any reason to read
+    /// about someone else — and takes two dependent round trips off the hot send
+    /// path.
+    ///
+    /// * `None` → do not push at all (a suppressed send).
+    /// * `Some([])` → every member. The DM and `@all` behaviour.
+    /// * `Some([ids])` → only those, INTERSECTED with real membership
+    ///   server-side, so this can only ever narrow the audience — never widen it
+    ///   past the conversation.
+    ///
+    /// The push itself carries `{ conversationId, kind }` and nothing else.
+    #[serde(default)]
+    pub push_to: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]

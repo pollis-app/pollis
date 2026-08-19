@@ -78,7 +78,7 @@ pub use self_update::{self_update_group, self_update_if_due};
 // ── Reconcile + self-repair ──────────────────────────────────────────────────
 pub use reconcile::{
     reconcile_group_mls_core, reconcile_group_mls_core_staged, reconcile_group_mls_impl,
-    registered_devices, ReconcileCommitData, ReconcileOutcome,
+    ReconcileCommitData, ReconcileOutcome,
 };
 
 #[cfg(test)]

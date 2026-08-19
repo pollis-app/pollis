@@ -553,7 +553,45 @@ pub async fn send_message(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<SendMessageBody>(apply_send_message(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_send_message(&conn, authed.as_deref(), &parsed).await?;
+
+    // Wake the recipients, AFTER the envelope has landed and only if it did
+    // (#987). Best-effort and detached: a push that fails must never fail a send
+    // that already succeeded, and the sender must not wait on Expo.
+    //
+    // The sender is taken from the AUTHENTICATED user, never from the body:
+    // under sealed sender (#331) `body.sender_id` is a blinded sentinel, so
+    // using it would exclude nobody and push the sender their own message.
+    if matches!(outcome, WriteOutcome::Ok) {
+        if let Some(push_to) = parsed.push_to.clone() {
+            let sender = authed.clone().unwrap_or_else(|| {
+                parsed.sender_id.clone().unwrap_or_default()
+            });
+            let conversation_id = parsed.conversation_id.clone();
+            let db = state.db.clone();
+            tokio::spawn(async move {
+                let conn = match db.conn().await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!("push fan-out: conn failed: {e}");
+                        return;
+                    }
+                };
+                let only = if push_to.is_empty() {
+                    None
+                } else {
+                    Some(push_to.as_slice())
+                };
+                if let Err(e) =
+                    crate::push::notify_new_message(&conn, &conversation_id, &sender, only).await
+                {
+                    tracing::warn!("push fan-out for {conversation_id}: {e}");
+                }
+            });
+        }
+    }
+
+    outcome_response::<SendMessageBody>(outcome)
 }
 
 /// INSERT a `type='message'` envelope (the send). Authz: the authenticated user

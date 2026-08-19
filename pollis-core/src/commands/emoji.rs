@@ -635,22 +635,6 @@ fn emoji_from_wire(e: pollis_api::directory::CustomEmojiWire) -> CustomEmoji {
     }
 }
 
-async fn collect_emoji(rows: &mut libsql::Rows) -> Result<Vec<CustomEmoji>> {
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(CustomEmoji {
-            group_id: row.get(0)?,
-            group_name: row.get(1)?,
-            shortcode: row.get(2)?,
-            content_hash: row.get(3)?,
-            content_type: row.get(4)?,
-            animated: row.get::<i64>(5)? != 0,
-            size_bytes: row.get::<i64>(6)?.max(0) as u64,
-            created_by: row.get(7)?,
-        });
-    }
-    Ok(out)
-}
 
 /// Add an emoji to a group from a file on disk.
 ///

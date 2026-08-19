@@ -257,23 +257,14 @@ pub async fn ensure_device_cert(
     // 2. Read the current identity_version for this user from the remote
     //    `users` table. Defaults to 1 if the column is NULL (shouldn't
     //    happen post-migration-13 but is defensive).
-    let conn = state.remote_db.conn().await?;
-    let identity_version: u32 = {
-        let mut rows = conn
-            .query(
-                "SELECT identity_version FROM users WHERE id = ?1",
-                libsql::params![user_id],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => row.get::<i64>(0).unwrap_or(1) as u32,
-            None => {
-                return Err(crate::error::Error::Other(anyhow::anyhow!(
-                    "user {user_id} not found while signing device cert"
-                )))
-            }
-        }
-    };
+    let identity_version: u32 = crate::commands::ds_reads::account_status(state, user_id)
+        .await?
+        .map(|a| a.identity_version as u32)
+        .ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!(
+                "user {user_id} not found while signing device cert"
+            ))
+        })?;
 
     // 3. Sign the cert with the account identity key loaded from the OS
     //    keystore, using the current unix time as `issued_at`.
@@ -387,35 +378,49 @@ pub async fn ensure_device_cert(
 ///     — registered devices that never finished `ensure_device_cert` (or predate
 ///     the #668 v2 cert), which get their cert when that device next comes online.
 ///
-/// Extracted (and `pub` for the integration test) so the predicate is testable
-/// against a real libsql DB without the account-key signing + DS write the rest
-/// of [`resign_stale_device_certs`] performs. It must live in an integration
-/// binary, not a `--lib` test: libsql's local backend calls `sqlite3_config` on
-/// first use, which fails once rusqlite/SQLCipher has already initialised SQLite
-/// in the same process (see `tests/resign_stale_certs.rs`).
-pub async fn stale_cert_candidates(
-    conn: &libsql::Connection,
-    user_id: &str,
+/// A PURE predicate over rows the Delivery Service supplied (#987).
+///
+/// The revoked exclusion is enforced twice, on purpose: the caller asks the DS
+/// for non-revoked rows, and this filters again on `revoked_at`. A predicate
+/// this consequential should not depend on a caller having passed the right
+/// flag — re-signing a tombstoned device's cert resurrects a valid-looking
+/// credential for a device that was deliberately turned off.
+///
+/// `pub` so the regression suite drives the real predicate rather than a copy.
+/// It is pure now, so it needs no database and no separate integration binary —
+/// the libsql/rusqlite `sqlite3_config` clash that forced `tests/
+/// resign_stale_certs.rs` into its own process is simply gone.
+pub fn stale_cert_candidates(
+    rows: &[pollis_api::account_reads::DeviceRow],
     identity_version: i64,
 ) -> crate::error::Result<Vec<(String, Vec<u8>, Vec<u8>)>> {
-    let mut rows = conn
-        .query(
-            "SELECT device_id, mls_signature_pub, mls_signature_pub_pq FROM user_device \
-             WHERE user_id = ?1 \
-               AND revoked_at IS NULL \
-               AND mls_signature_pub IS NOT NULL \
-               AND mls_signature_pub_pq IS NOT NULL \
-               AND (cert_identity_version IS NULL \
-                    OR cert_identity_version < ?2)",
-            libsql::params![user_id, identity_version],
-        )
-        .await?;
     let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let did: String = row.get(0)?;
-        let pub_bytes: Vec<u8> = row.get(1)?;
-        let pq_pub_bytes: Vec<u8> = row.get(2)?;
-        out.push((did, pub_bytes, pq_pub_bytes));
+    for row in rows {
+        if row.revoked_at.is_some() {
+            continue;
+        }
+        // A device that never finished `ensure_device_cert` (or predates the
+        // #668 v2 cert) has no leaf pub to sign over. It gets its cert when it
+        // next comes online, not from here.
+        let (Some(sig), Some(pq)) = (
+            row.mls_signature_pub.as_deref(),
+            row.mls_signature_pub_pq.as_deref(),
+        ) else {
+            continue;
+        };
+        // NULL `cert_identity_version` means "never certified", which is stale
+        // by definition — the same reading the SQL's `IS NULL OR <` gave.
+        let stale = row
+            .cert_identity_version
+            .is_none_or(|v| v < identity_version);
+        if !stale {
+            continue;
+        }
+        out.push((
+            row.device_id.clone(),
+            super::ds_reads::decode_b64("mls_signature_pub", sig)?,
+            super::ds_reads::decode_b64("mls_signature_pub_pq", pq)?,
+        ));
     }
     Ok(out)
 }
@@ -442,26 +447,21 @@ pub async fn resign_stale_device_certs(
     state: &Arc<AppState>,
     user_id: &str,
 ) -> crate::error::Result<usize> {
-    let conn = state.remote_db.conn().await?;
+    let identity_version: u32 = crate::commands::ds_reads::account_status(state, user_id)
+        .await?
+        .map(|a| a.identity_version as u32)
+        .ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!(
+                "user {user_id} not found while re-signing device certs"
+            ))
+        })?;
 
-    let identity_version: u32 = {
-        let mut rows = conn
-            .query(
-                "SELECT identity_version FROM users WHERE id = ?1",
-                libsql::params![user_id],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => row.get::<i64>(0).unwrap_or(1) as u32,
-            None => {
-                return Err(crate::error::Error::Other(anyhow::anyhow!(
-                    "user {user_id} not found while re-signing device certs"
-                )))
-            }
-        }
-    };
-
-    let devices = stale_cert_candidates(&conn, user_id, identity_version as i64).await?;
+    // The caller's OWN devices, including the cert columns — served with the
+    // management columns because this is the owner asking. Revoked rows are
+    // excluded: re-signing a tombstoned device's cert would be re-issuing
+    // credentials for a device that was deliberately turned off.
+    let rows = crate::commands::ds_reads::devices(state, Some(user_id), Vec::new(), false).await?;
+    let devices = stale_cert_candidates(&rows, identity_version as i64)?;
 
     // Sign every stale device's cert with the account identity key (held only in
     // the OS keystore) BEFORE any remote write, collecting the cert columns. The

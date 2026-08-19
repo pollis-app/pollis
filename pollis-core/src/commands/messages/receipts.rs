@@ -238,6 +238,9 @@ pub(crate) async fn emit_receipt(
         reply_to_id: None,
         sent_at: now,
         sealed: 1,
+        // A receipt frame wakes nobody: it is an acknowledgement of
+        // something the recipient already has (#987).
+        push_to: None,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 

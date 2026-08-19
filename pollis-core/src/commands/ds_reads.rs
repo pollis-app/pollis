@@ -45,10 +45,26 @@ pub(crate) async fn catch_up(
     want_envelopes: bool,
     want_dm: bool,
 ) -> Result<dir::CatchUpResponse> {
+    catch_up_full(state, conversation_id, want_envelopes, want_dm, false).await
+}
+
+/// [`catch_up`], with the MLS roster as well.
+///
+/// Separate entry point rather than a fifth positional `bool` at every call
+/// site: only reconcile and migrate want the roster, and they want it WITH the
+/// resolution rather than after it.
+pub(crate) async fn catch_up_full(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    want_envelopes: bool,
+    want_dm: bool,
+    want_roster: bool,
+) -> Result<dir::CatchUpResponse> {
     let body = dir::CatchUpBody {
         conversation_id: conversation_id.to_string(),
         want_envelopes,
         want_dm,
+        want_roster,
         user_id: Some(current_user_id(state).await?),
         device_id: state.device_id.lock().await.clone(),
     };
@@ -183,8 +199,30 @@ pub(crate) async fn conversations(
 ) -> Result<dir::DirectoryConversationsResponse> {
     let body = dir::DirectoryConversationsBody {
         user_id: Some(user_id.to_string()),
+        dm_with_user_id: None,
     };
     ds_post_json(state, &body).await
+}
+
+/// The 1:1 DM channel the caller shares with `other_user_id`, if any.
+///
+/// Used by the voice path for `call-*` rooms, which are ephemeral and have no
+/// row of their own — their MLS group is the DM's. The DS scopes the search to
+/// the caller's own DMs, so this cannot ask whether two other people have one.
+///
+/// `media`-gated because the voice stack is: the headless/mobile build drives
+/// LiveKit through the native SDK and never derives a call's MLS group here.
+#[cfg(feature = "media")]
+pub(crate) async fn one_to_one_dm(
+    state: &Arc<AppState>,
+    user_id: &str,
+    other_user_id: &str,
+) -> Result<Option<String>> {
+    let body = dir::DirectoryConversationsBody {
+        user_id: Some(user_id.to_string()),
+        dm_with_user_id: Some(other_user_id.to_string()),
+    };
+    Ok(ds_post_json(state, &body).await?.dm_with)
 }
 
 // ── Accounts, devices, key packages ──────────────────────────────────────────

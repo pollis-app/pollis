@@ -53,33 +53,11 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         }
     }
 
-    let conn = state.remote_db.conn().await?;
-
-    let mut group_ids: Vec<String> = Vec::new();
-    let mut rows = conn
-        .query(
-            "SELECT g.id FROM groups g \
-             JOIN group_member gm ON gm.group_id = g.id \
-             WHERE gm.user_id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    while let Some(row) = rows.next().await? {
-        group_ids.push(row.get::<String>(0)?);
-    }
-    drop(rows);
-
-    let mut dm_ids: Vec<String> = Vec::new();
-    let mut rows = conn
-        .query(
-            "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    while let Some(row) = rows.next().await? {
-        dm_ids.push(row.get::<String>(0)?);
-    }
-    drop(rows);
+    // Id-only enumeration in ONE request (#987). This is the cold-launch sweep,
+    // so it is the path the round-trip count matters most on.
+    let dirs = crate::commands::ds_reads::conversations(state, user_id).await?;
+    let group_ids: Vec<String> = dirs.group_ids;
+    let dm_ids: Vec<String> = dirs.dm_ids;
 
     eprintln!(
         "[mls-sweep] {user_id}: {} group(s), {} dm(s)",
@@ -301,51 +279,26 @@ async fn local_tree_has_stale_leaf(
         return Ok(false);
     }
 
-    let conn = state.remote_db.conn().await?;
-
     // 2. Desired roster: group_member + pending invitees, or dm_channel_member.
-    //    Mirrors `reconcile_group_mls_impl` — pending invitees count as desired
+    //    THE definition, server-side (#987) — the same one
+    //    `reconcile_group_mls_impl` diffs against, so this pre-check can never
+    //    disagree with the reconcile it gates. Pending invitees count as desired
     //    so their as-yet-unjoined leaves are never mistaken for stale ones.
-    let mut roster: HashSet<String> = HashSet::new();
-    {
-        let mut rows = conn
-            .query(
-                "SELECT user_id FROM group_member WHERE group_id = ?1",
-                libsql::params![conversation_id.to_string()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster.insert(row.get::<String>(0)?);
-        }
-    }
-    {
-        let mut rows = conn
-            .query(
-                "SELECT invitee_id FROM group_invite WHERE group_id = ?1",
-                libsql::params![conversation_id.to_string()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster.insert(row.get::<String>(0)?);
-        }
-    }
-    if roster.is_empty() {
-        let mut rows = conn
-            .query(
-                "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
-                libsql::params![conversation_id.to_string()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster.insert(row.get::<String>(0)?);
-        }
-    }
+    let roster: HashSet<String> =
+        crate::commands::ds_reads::catch_up_full(state, conversation_id, false, false, true)
+            .await?
+            .roster
+            .into_iter()
+            .collect();
 
     // 3. Valid (user_id, device_id) pairs still registered for the roster — the
     //    same `user_device` snapshot reconcile uses to drop revoked single
-    //    devices of a still-present user, read through reconcile's own helper so
-    //    the pre-check can never disagree with the reconcile it gates.
-    let valid_devices = super::reconcile::registered_devices(&conn, &roster).await?;
+    //    devices of a still-present user.
+    let valid_devices = crate::commands::ds_reads::registered_devices(
+        state,
+        &roster.iter().cloned().collect::<Vec<_>>(),
+    )
+    .await?;
 
     // 4. A leaf is stale iff its user left the roster OR its device row is gone —
     //    exactly the leaves reconcile would remove. Any such leaf means a

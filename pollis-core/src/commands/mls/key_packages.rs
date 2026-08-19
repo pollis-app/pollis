@@ -167,23 +167,12 @@ pub(super) async fn replenish_key_packages(
     // retired suite is unclaimable — counting it would let a dead pool mask an
     // empty live one and silently make this device unaddable.
     //
-    // Counting remaining packages is a READ — it stays direct on the local
-    // libsql handle even when DS writes are enabled.
-    let remaining: i64 = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT COUNT(*) FROM mls_key_package \
-             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3",
-            libsql::params![user_id, device_id, suite_code],
-        ).await?;
-        let n = if let Some(row) = rows.next().await? {
-            row.get(0)?
-        } else {
-            0
-        };
-        drop(rows);
-        n
-    };
+    // Counted by the DS since #987, and scoped to the AUTHENTICATED device
+    // rather than to a body-named one — this number drives how many packages
+    // this device publishes, and counting someone else's pool would make it
+    // publish into the wrong one.
+    let remaining: i64 =
+        crate::commands::ds_reads::unclaimed_key_packages(state, suite_code).await?;
 
     let needed = TARGET - remaining;
     if needed <= 0 {

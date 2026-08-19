@@ -517,6 +517,10 @@ async fn send_redaction_message(
         reply_to_id: None,
         sent_at: now,
         sealed: 1,
+        // A redaction wakes nobody: the tombstone is applied on the next
+        // ingest, and pushing "you have a new message" for a deletion would be
+        // both wrong and a notification the user cannot act on (#987).
+        push_to: None,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 

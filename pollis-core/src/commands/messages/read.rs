@@ -6,7 +6,7 @@ use crate::state::AppState;
 
 use super::ingest::{ingest_channel_envelopes_inner, ingest_dm_envelopes_inner};
 use super::types::{
-    ChannelMessage, ChannelPreview, Message, MessageCursor, MessagePage, MessageWithContext,
+    ChannelMessage, Message, MessageCursor, MessagePage,
     SearchResult, ThreadSummary,
 };
 

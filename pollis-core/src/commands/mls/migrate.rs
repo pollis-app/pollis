@@ -76,7 +76,7 @@ use super::delivery::WelcomeOut;
 use super::group_state::{create_mls_group_in_suite, forget_local_mls_group_at};
 use super::provider::{current_suite, load_stored_group_at, PollisProvider};
 use super::reconcile::{
-    desired_roster_user_ids, publish_staged_commit, registered_devices, stage_reconcile_commit,
+    publish_staged_commit, stage_reconcile_commit,
     PublishOutcome,
 };
 
@@ -171,9 +171,17 @@ pub(super) async fn migrate_to_current_suite_if_due(
     //    migration BEFORE anything is created. This is the no-downgrade criterion
     //    in its strongest form — not "add whoever we can", but "move everyone or
     //    nobody".
-    let remote_conn = state.remote_db.conn().await?;
-    let roster_user_ids = desired_roster_user_ids(&remote_conn, conversation_id).await?;
-    let valid_devices = registered_devices(&remote_conn, &roster_user_ids).await?;
+    // The roster and its registered devices, from the SAME definitions
+    // `reconcile` uses — one copy, server-side (#987), so the diff and the
+    // migration cannot disagree about who belongs.
+    let roster_user_ids: Vec<String> =
+        crate::commands::ds_reads::catch_up_full(state, conversation_id, false, false, true)
+            .await?
+            .roster;
+    let valid_devices =
+        crate::commands::ds_reads::registered_devices(state, &roster_user_ids).await?;
+    let roster_user_ids: std::collections::HashSet<String> =
+        roster_user_ids.into_iter().collect();
     let targets: Vec<(String, String)> = valid_devices
         .iter()
         .filter(|(uid, did)| !(uid == actor_user_id && did == &actor_device_id))
