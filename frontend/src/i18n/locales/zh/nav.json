@@ -15,7 +15,8 @@
     "keyChanged": "身份密钥已更改 — 请重新验证",
     "verified": "已验证的联系人",
     "dmAvatarAlt": "{{name}} 的头像",
-    "close": "关闭侧边栏（{{shortcut}}）"
+    "close": "关闭侧边栏（{{shortcut}}）",
+    "resize": "调整侧边栏宽度（拖动；双击重置）"
   },
   "profile": {
     "you": "你",
@@ -80,7 +81,8 @@
     "details": "详情",
     "ariaLabel": "对话详情",
     "closeThread": "关闭话题面板（{{shortcut}}）",
-    "closeDetails": "关闭详情面板（{{shortcut}}）"
+    "closeDetails": "关闭详情面板（{{shortcut}}）",
+    "resize": "调整详情面板宽度（拖动；双击重置）"
   },
   "members": {
     "count_other": "成员 — {{count}}",

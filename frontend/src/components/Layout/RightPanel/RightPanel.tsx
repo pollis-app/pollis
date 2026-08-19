@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../../stores/appStore";
@@ -6,6 +6,8 @@ import { useShortcutLabel } from "../../../keyboard";
 import { useRightPanel } from "./useRightPanel";
 import { MembersPanel } from "./MembersPanel";
 import { ThreadPanel } from "./ThreadPanel";
+import { ResizeHandle } from "../ResizeHandle";
+import { usePanelWidth } from "../usePanelWidth";
 
 /**
  * The right-hand context panel slot (#824).
@@ -28,6 +30,14 @@ export const RightPanel: React.FC = observer(() => {
   // Live label for the same command AppShell binds — rebinding the shortcut
   // in Preferences relabels this footer with no extra wiring.
   const toggleRightPanelLabel = useShortcutLabel("app.toggleRightPanel");
+  // Collapsing by drag goes through `setPanel("none")` — the same writer the
+  // footer button and `mod+shift+b` use, so the panel has exactly one closed
+  // state and reopening restores the width it was dragged from.
+  const closePanel = useCallback(() => setPanel("none"), [setPanel]);
+  const { ref, widthClass, widthStyle, handleProps } = usePanelWidth(
+    "rightPanel",
+    closePanel,
+  );
 
   const groupId = appStore.selectedGroupId;
   const channelId = appStore.selectedChannelId;
@@ -56,11 +66,15 @@ export const RightPanel: React.FC = observer(() => {
 
   return (
     <aside
+      ref={ref}
       // `font-mono` is the whole skin switch: terminal renders it as DM Mono,
       // refined re-points `.font-mono:not(.font-machine)` at the sans face.
       // Width tracks `--side-w` so the panel mirrors the left sidebar's
-      // per-skin measure instead of a fixed 18rem.
-      className="flex w-side shrink-0 flex-col border-s border-line bg-surface font-mono"
+      // per-skin measure instead of a fixed 18rem, until the user drags it —
+      // then it is a dragged pixel value instead, never both. `relative`
+      // anchors the resize handle to this edge.
+      className={`relative flex ${widthClass} shrink-0 flex-col border-s border-line bg-surface font-mono`}
+      style={widthStyle}
       data-testid="right-panel"
       aria-label={t("panel.ariaLabel")}
     >
@@ -99,6 +113,8 @@ export const RightPanel: React.FC = observer(() => {
           {toggleRightPanelLabel}
         </kbd>
       </button>
+
+      <ResizeHandle edge="start" label={t("panel.resize")} {...handleProps} />
     </aside>
   );
 });

@@ -15,7 +15,8 @@
     "keyChanged": "Clé d'identité modifiée — à revérifier",
     "verified": "Contact vérifié",
     "dmAvatarAlt": "Avatar de {{name}}",
-    "close": "Fermer la barre latérale ({{shortcut}})"
+    "close": "Fermer la barre latérale ({{shortcut}})",
+    "resize": "Redimensionner la barre latérale (glisser ; double-clic pour réinitialiser)"
   },
   "profile": {
     "you": "Vous",
@@ -84,7 +85,8 @@
     "details": "Détails",
     "ariaLabel": "Détails de la conversation",
     "closeThread": "Fermer le panneau de fil ({{shortcut}})",
-    "closeDetails": "Fermer le panneau de détails ({{shortcut}})"
+    "closeDetails": "Fermer le panneau de détails ({{shortcut}})",
+    "resize": "Redimensionner le panneau de détails (glisser ; double-clic pour réinitialiser)"
   },
   "members": {
     "count_one": "Membres — {{count}}",

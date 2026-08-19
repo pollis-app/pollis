@@ -49,7 +49,7 @@ this sweep.
 | `--c-hover` / `--c-active` | `hover:bg-hover`, `bg-active` |
 | `--c-danger` | `text-danger`, `border-danger` |
 | `--c-voice-connected` | `text-connected` |
-| `--bar-h` / `--side-w` | `h-bar`, `min-h-bar`, `w-side` |
+| `--bar-h` / `--side-w` | `h-bar`, `min-h-bar`, `w-side` (the side panels' DEFAULT width only — see [Resizable side panels](#resizable-side-panels-985)) |
 | `--radius-chip` / `--radius-control` | `rounded-chip`, `rounded-control` |
 | `--msg-header-gap` / `-group-gap` / `-divider-gap` / `--msg-row-pad-y` | `pt-msg-header`, `pt-msg-group`, `mt-msg-divider`, `pb-msg-row` |
 | `--lh` | `leading-msg` |
@@ -58,7 +58,8 @@ this sweep.
 above are: tokens that had no utility, so every call site spelled them inline.
 
 Inline `style` is still correct for a value computed at runtime: a per-author
-username colour, a percentage width, a `transform`, a component-local custom property
+username colour, a percentage width, a **dragged panel width** ([Resizable side
+panels](#resizable-side-panels-985)), a `transform`, a component-local custom property
 (`--pill-accent`), or a colour handed to a third-party component as a prop rather than
 a class (`PollisLogo`, the QR renderer).
 
@@ -303,6 +304,91 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 
 **Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?thread=` on such a route falls back to the roster rather than rendering an empty thread.
 
+### Resizable side panels (#985)
+
+Both side columns — the left `Sidebar` and the right `RightPanel` — are dragged by a
+`ResizeHandle` on their **inner** edge. One component serves both: same gesture, same
+bounds, one place to fix a bug in either. The three behaviours are the ones Slack,
+Discord and VS Code all ship, and they behave the same way here: **drag** to resize,
+**drag past the minimum** to collapse, **double-click** to reset.
+
+The handle straddles the panel's hairline border (`w-2`, half over each side — the VS
+Code sash arrangement) so it is comfortably grabbable while the visible affordance
+stays a **1px solid line** at the edge, painted `bg-line-strong` on hover and for the
+duration of the drag. No glow, no wide hover band.
+
+**Widths are device-local `localStorage`, `pollis.layout.sidebarWidthPx` and
+`pollis.layout.rightPanelWidthPx`.** Not the synced user-preferences blob and not the
+database — deliberately, and for two reasons:
+
+- A width answers *how much of THIS screen* is worth spending on a channel list. A
+  13" laptop and a 34" ultrawide want different numbers, and syncing forces one
+  machine's answer onto the other. Same reasoning as the right panel's open/closed
+  state, the device language (`i18n/storage.ts`) and the device font size.
+- Nothing on the server has any use for it, and a width arriving over the network
+  could move a panel the user is looking at.
+
+Unlike the right panel's open/closed state these keys are **not scoped by user id**.
+That state is seeded from a synced preference, so it already waits on a query and a
+signed-in user; a width has to be on the element at **first paint** or the layout
+visibly jumps from the default to the user's measure, and at first paint there is no
+user id yet. `panelWidthStore` therefore reads both keys in its field initialisers, at
+module eval.
+
+**Default is still the token.** A panel with no stored width renders with `w-side`
+(`--side-w`, a per-skin rem measure), so the default keeps tracking the skin and the
+font-size preference. A stored width is an inline `style={{ width }}` — the sanctioned
+runtime-computed exception. Never both on one element: that would be two sources for
+one CSS property, which is exactly what the class-order rule forbids. Double-clicking
+a handle stores `null`, which is what makes "reset" mean *the token* rather than a
+hardcoded number.
+
+**The bounds** live as pure arithmetic in `components/Layout/panelWidth.ts`, covered by
+`frontend/tests/panel-width.test.ts`:
+
+| Rule | Value |
+| --- | --- |
+| Minimum | **50px**. Landing exactly on it is a legitimate width. |
+| Below the minimum | **Collapse**, not a clamp — `resolveDrag` returns a union, not a number. |
+| Maximum, one panel open | Window width **− 50px** (`MIN_CONTENT_PX`, the centre column's floor). |
+| Maximum, both open | Window width **− the other panel's measured width − 50px**. |
+| Window too small for both | Each panel floors at 50px rather than collapsing something the user opened. |
+
+The combined rule is deliberately "bounded by what the other panel *actually*
+occupies" rather than a fixed half-the-window split, which would stop someone widening
+one panel while the other is a stub. The other panel's width has to be **measured**,
+not read from the store, because a panel on the token default has no pixel number
+anywhere but the DOM; `usePanelWidth` reports `offsetWidth` back after every render and
+0 on unmount.
+
+**Collapse is the existing collapse.** Dragging shut calls the same writer the keyboard
+uses — `onToggle` (`app.toggleSidebar`, `mod+b`) and `setPanel("none")`
+(`app.toggleRightPanel`, `mod+shift+b`) — so there is one collapsed state, not a
+second drag-only one. Collapsing deliberately writes **no width**, so reopening
+restores the width it was dragged from and never a 0 or a stuck 50. The collapse lands
+on pointer-up rather than mid-drag: the handle is a child of the panel it resizes, so
+an unmount mid-gesture would strand the pointer capture. While below the minimum the
+panel visibly pins at 50px instead.
+
+**Clamping.** `panelWidthStore.clampToWindow` runs on `window`'s `resize` event (from
+`AppShell`, event-driven — no polling) and from `usePanelWidth`'s effect, which covers
+the other case that changes the arithmetic: the *other panel opening*, after this one
+was dragged wide while it was shut. It clamps the sidebar first and bounds the right
+panel with the result, so one pass cannot leave a pair that together overflow. It only
+ever narrows, and a pass that changes nothing writes nothing, so it converges.
+
+**Cost.** `pointermove` fires at 60–1000 Hz; a `setState` per move would re-render the
+whole sidebar subtree (every group, channel, DM row and badge) to move one edge a few
+pixels. So a move writes `panel.style.width` directly and React is not involved during
+the drag at all — the store and `localStorage` are written **once**, on release, which
+is the only moment a width is worth remembering. The imperative style is cleared before
+that write so the committed render owns the width afterwards.
+
+**RTL.** Which physical edge moves is measured at pointer-down (whichever edge the
+handle is nearer to is the one that moves), so the same component works under
+`dir="rtl"`, where the sidebar is drawn on the right and grows leftwards, without
+knowing the reading direction.
+
 ## Components
 
 > Generated from `frontend/src` by `scripts/ui-inventory.mjs` — the article said
@@ -312,7 +398,7 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**148 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**149 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -358,12 +444,13 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 - **InviteLinkManager** — props: groupId — `frontend/src/components/Invites/InviteLinkManager.tsx`
 - **InviteLinkRow** — props: link, onRevoke, isRevoking — `frontend/src/components/Invites/InviteLinkRow.tsx`
 
-### `components/Layout` (9)
+### `components/Layout` (10)
 
 - **AppShell** — `frontend/src/components/Layout/AppShell.tsx`
 - **BreadcrumbNav** — `frontend/src/components/Layout/BreadcrumbNav.tsx`
 - **MainContent** — props: pendingDmRequest — `frontend/src/components/Layout/MainContent.tsx`
 - **PageShell** — props: title, children, scrollable — `frontend/src/components/Layout/PageShell.tsx`
+- **ResizeHandle** — props: panelRef, edge, label, maxPx, onCommit, onCollapse, onReset — `frontend/src/components/Layout/ResizeHandle.tsx`. Shared by both side panels; drags write `style.width` straight to the panel and never through React. See [Resizable side panels](#resizable-side-panels-985).
 - **Sidebar** — props: isOpen, onToggle — `frontend/src/components/Layout/Sidebar.tsx`. Its settings rows carry `sidebar-row-*` testids like `SectionHeader`'s, so navigation tests never match on a translated label (#932).
 - **SidebarProfilePanel** — `frontend/src/components/Layout/SidebarProfilePanel.tsx`. Refined only; identity row + the persistent voice strip (channel, mic, deafen, screenshare, disconnect) that replaces terminal's `VoiceBar`.
 - **StatusBarSummary** — props: color — `frontend/src/components/Layout/StatusBarSummary.tsx`
