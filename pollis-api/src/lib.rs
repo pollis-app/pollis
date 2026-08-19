@@ -260,15 +260,15 @@ endpoints! {
     Client   groups::DeleteChannelBody          => "/v1/channels/delete",                StatusOk;
     Client   groups::RemoveMemberBody           => "/v1/members/remove",                 StatusOk;
     Client   groups::SetMemberRoleBody          => "/v1/members/role",                   StatusOk;
-    Client   groups::CreateInviteBody           => "/v1/invites/create",                 StatusOk;
+    Client   groups::CreateInviteBody           => "/v1/invites/create",                 groups::InviteCreated;
     Client   groups::AcceptInviteBody           => "/v1/invites/accept",                 groups::AcceptedInvite;
     Client   groups::DeclineInviteBody          => "/v1/invites/decline",                StatusOk;
     Client   groups::CreateInviteLinkBody       => "/v1/invite-links/create",            StatusOk;
     Client   groups::RevokeInviteLinkBody       => "/v1/invite-links/revoke",            StatusOk;
     Client   groups::RedeemInviteLinkBody       => "/v1/invite-links/redeem",            groups::RedeemInviteLinkResponse;
-    Client   groups::CreateJoinRequestBody      => "/v1/join-requests/create",           StatusOk;
-    Client   groups::ApproveJoinRequestBody     => "/v1/join-requests/approve",          StatusOk;
-    Client   groups::RejectJoinRequestBody      => "/v1/join-requests/reject",           StatusOk;
+    Client   groups::CreateJoinRequestBody      => "/v1/join-requests/create",           groups::JoinRequestCreated;
+    Client   groups::ApproveJoinRequestBody     => "/v1/join-requests/approve",          groups::ReviewedJoinRequest;
+    Client   groups::RejectJoinRequestBody      => "/v1/join-requests/reject",           groups::ReviewedJoinRequest;
 
     // ── Custom emoji (#848) ──────────────────────────────────────────────────
     Client   emoji::CreateEmojiBody             => "/v1/emoji/create",                   StatusOk;

@@ -171,14 +171,15 @@ pub async fn require_admin(
 pub async fn require_target_member(
     state: &Arc<AppState>,
     group_id: &str,
-    user_id: &str,
+    requester_id: &str,
+    target_user_id: &str,
 ) -> Result<GroupRole> {
-    let members = crate::commands::ds_reads::group(state, group_id, user_id, false)
+    let members = crate::commands::ds_reads::group(state, group_id, requester_id, false)
         .await?
         .members;
     members
         .iter()
-        .find(|m| m.user_id == user_id)
+        .find(|m| m.user_id == target_user_id)
         .map(|m| GroupRole::from_column(&m.role))
         .ok_or_else(|| Error::Other(anyhow::anyhow!("user is not a member of this group")))
 }

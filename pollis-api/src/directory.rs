@@ -50,10 +50,14 @@ pub struct CatchUpBody {
     /// device.
     #[serde(default)]
     pub want_envelopes: bool,
-    /// Include the other members of a DM, so the caller can re-pin their
-    /// identity keys (TOFU). Ignored for groups.
+    /// Include the DM row and its members. Ignored for groups.
+    ///
+    /// One flag for two callers that want the same thing at different depths:
+    /// the ingest path re-pins every peer's identity key (TOFU), and the DM
+    /// screen renders the roster. Splitting them into "peers" and "the row"
+    /// would be two shapes for one query.
     #[serde(default)]
-    pub want_dm_peers: bool,
+    pub want_dm: bool,
     /// No-auth (dev/test) path only; ignored when the DS enforces auth, though
     /// still signature-bound.
     #[serde(default)]
@@ -96,10 +100,9 @@ pub struct CatchUpResponse {
     /// ordering the interleaved ingest partitions on.
     #[serde(default)]
     pub envelopes: Vec<EnvelopeWire>,
-    /// The DM's other members (never the caller). Empty unless
-    /// `want_dm_peers` and `kind == Dm`.
+    /// The DM and its members. `None` unless `want_dm` and `kind == Dm`.
     #[serde(default)]
-    pub dm_peers: Vec<String>,
+    pub dm: Option<DmChannelWire>,
 }
 
 /// One `message_envelope` row as it crosses the wire.
@@ -133,6 +136,14 @@ pub struct MessageLookupBody {
     pub message_id: String,
     #[serde(default)]
     pub user_id: Option<String>,
+    /// Also return the reactions on these messages, in `conversation_id`.
+    ///
+    /// Batched, and folded into this endpoint rather than given its own,
+    /// because it is the same authorization question — "may this caller see
+    /// this conversation" — answered once. The mobile picker used to invoke a
+    /// per-message read for every row on screen; one request covers a page.
+    #[serde(default)]
+    pub reactions_for: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,6 +157,23 @@ pub struct MessageLookupResponse {
     /// it cannot delete.
     #[serde(default)]
     pub conversation_id: Option<String>,
+    /// One entry per message in `reactions_for` that HAS reactions and whose
+    /// conversation the caller is a member of. A message with none is absent,
+    /// which is what the per-message read answered with an empty list.
+    #[serde(default)]
+    pub reactions: Vec<MessageReactions>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageReactions {
+    pub message_id: String,
+    pub reactions: Vec<ReactionWire>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactionWire {
+    pub emoji: String,
+    pub user_ids: Vec<String>,
 }
 
 // ── POST /v1/directory/bootstrap ─────────────────────────────────────────────
@@ -217,6 +245,10 @@ pub struct DmMemberWire {
     #[serde(default)]
     pub avatar_url: Option<String>,
     #[serde(default)]
+    pub added_by: Option<String>,
+    #[serde(default)]
+    pub added_at: Option<String>,
+    #[serde(default)]
     pub accepted_at: Option<String>,
 }
 
@@ -266,6 +298,14 @@ pub struct DirectoryGroupBody {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryGroupResponse {
+    /// The GROUP id the request resolved to.
+    ///
+    /// Echoed even in `role_only` mode, and even when `exists` is false (in
+    /// which case it is the id as asked). Callers that passed a CHANNEL id need
+    /// the group for their follow-up — a realtime nudge, a reconcile — and
+    /// resolving it a second time would be both a round trip and a chance to
+    /// resolve differently than the check did.
+    pub group_id: String,
     /// The id resolved to a real GROUP.
     ///
     /// Reported separately from `authorized` because the two answer different

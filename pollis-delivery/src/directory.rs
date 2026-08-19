@@ -103,7 +103,7 @@ pub async fn catch_up(
             kind: ConversationKind::Group,
             conversation_ids: Vec::new(),
             envelopes: Vec::new(),
-            dm_peers: Vec::new(),
+            dm: None,
         }));
     };
 
@@ -114,7 +114,7 @@ pub async fn catch_up(
             kind,
             conversation_ids: Vec::new(),
             envelopes: Vec::new(),
-            dm_peers: Vec::new(),
+            dm: None,
         }));
     }
 
@@ -129,10 +129,10 @@ pub async fn catch_up(
         Vec::new()
     };
 
-    let dm_peers = if parsed.want_dm_peers && kind == ConversationKind::Dm {
-        dm_peer_ids(&conn, &mls_group_id, &who).await?
+    let dm = if parsed.want_dm && kind == ConversationKind::Dm {
+        dm_channel(&conn, &mls_group_id).await?
     } else {
-        Vec::new()
+        None
     };
 
     Ok(ok_response::<CatchUpBody>(CatchUpResponse {
@@ -141,7 +141,7 @@ pub async fn catch_up(
         kind,
         conversation_ids,
         envelopes,
-        dm_peers,
+        dm,
     }))
 }
 
@@ -255,23 +255,30 @@ async fn fetch_envelopes(
     Ok(out)
 }
 
-async fn dm_peer_ids(
+/// One DM channel with its members. The caller's membership is already
+/// established by the time this runs.
+async fn dm_channel(
     conn: &Connection,
     dm_channel_id: &str,
-    user_id: &str,
-) -> anyhow::Result<Vec<String>> {
+) -> anyhow::Result<Option<DmChannelWire>> {
     let mut rows = conn
         .query(
-            "SELECT user_id FROM dm_channel_member \
-             WHERE dm_channel_id = ?1 AND user_id <> ?2",
-            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
+            "SELECT id, created_by, created_at FROM dm_channel WHERE id = ?1",
+            libsql::params![dm_channel_id.to_string()],
         )
         .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let (id, created_by, created_at): (String, String, String) =
+        (row.get(0)?, row.get(1)?, row.get(2)?);
+    drop(rows);
+    Ok(Some(DmChannelWire {
+        members: dm_members(conn, &id).await?,
+        id,
+        created_by,
+        created_at,
+    }))
 }
 
 // ── POST /v1/messages/lookup ─────────────────────────────────────────────────
@@ -307,27 +314,89 @@ pub async fn message_lookup(
     };
 
     let conn = state.db.conn().await?;
+    let conversation_id = if parsed.message_id.is_empty() {
+        None
+    } else {
+        envelope_conversation(&conn, &parsed.message_id, &who).await?
+    };
+
+    // Reactions are gated on the same question — membership of the message's
+    // conversation — asked once per message. A message the caller may not see
+    // is simply absent, never a distinguishable refusal.
+    let mut reactions = Vec::new();
+    for message_id in &parsed.reactions_for {
+        let Some(_) = envelope_conversation(&conn, message_id, &who).await? else {
+            continue;
+        };
+        let grouped = message_reactions(&conn, message_id).await?;
+        if !grouped.is_empty() {
+            reactions.push(MessageReactions {
+                message_id: message_id.clone(),
+                reactions: grouped,
+            });
+        }
+    }
+
+    Ok(ok_response::<MessageLookupBody>(MessageLookupResponse {
+        conversation_id,
+        reactions,
+    }))
+}
+
+/// The conversation an envelope belongs to, or `None` when it does not exist OR
+/// the caller is not a member of it.
+///
+/// The two cases are deliberately indistinguishable: separating them would make
+/// this an existence oracle for message ids, and no caller can act on the
+/// difference.
+async fn envelope_conversation(
+    conn: &Connection,
+    message_id: &str,
+    user_id: &str,
+) -> anyhow::Result<Option<String>> {
     let mut rows = conn
         .query(
             "SELECT conversation_id FROM message_envelope WHERE id = ?1 AND type = 'message'",
-            libsql::params![parsed.message_id.clone()],
+            libsql::params![message_id.to_string()],
         )
         .await?;
-    let conversation_id = match rows.next().await? {
-        Some(row) => {
-            let cid: String = row.get(0)?;
-            drop(rows);
-            if crate::writes::is_member(&conn, &cid, &who).await? {
-                Some(cid)
-            } else {
-                None
-            }
-        }
-        None => None,
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
     };
-    Ok(ok_response::<MessageLookupBody>(MessageLookupResponse {
-        conversation_id,
-    }))
+    let cid: String = row.get(0)?;
+    drop(rows);
+    if crate::writes::is_member(conn, &cid, user_id).await? {
+        Ok(Some(cid))
+    } else {
+        Ok(None)
+    }
+}
+
+/// One message's reactions, grouped by emoji in insertion order.
+async fn message_reactions(
+    conn: &Connection,
+    message_id: &str,
+) -> anyhow::Result<Vec<ReactionWire>> {
+    let mut rows = conn
+        .query(
+            "SELECT emoji, user_id FROM message_reaction \
+             WHERE message_id = ?1 ORDER BY created_at ASC",
+            libsql::params![message_id.to_string()],
+        )
+        .await?;
+    let mut out: Vec<ReactionWire> = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let emoji: String = row.get(0)?;
+        let user_id: String = row.get(1)?;
+        match out.iter_mut().find(|r| r.emoji == emoji) {
+            Some(existing) => existing.user_ids.push(user_id),
+            None => out.push(ReactionWire {
+                emoji,
+                user_ids: vec![user_id],
+            }),
+        }
+    }
+    Ok(out)
 }
 
 // ── POST /v1/directory/bootstrap ─────────────────────────────────────────────
@@ -523,7 +592,8 @@ pub async fn dm_row(
 pub async fn dm_members(conn: &Connection, dm_id: &str) -> anyhow::Result<Vec<DmMemberWire>> {
     let mut rows = conn
         .query(
-            "SELECT dcm.user_id, u.username, u.avatar_url, dcm.accepted_at \
+            "SELECT dcm.user_id, u.username, u.avatar_url, dcm.added_by, dcm.added_at, \
+                    dcm.accepted_at \
              FROM dm_channel_member dcm \
              LEFT JOIN users u ON u.id = dcm.user_id \
              WHERE dcm.dm_channel_id = ?1",
@@ -536,7 +606,9 @@ pub async fn dm_members(conn: &Connection, dm_id: &str) -> anyhow::Result<Vec<Dm
             user_id: row.get(0)?,
             username: row.get(1)?,
             avatar_url: row.get(2)?,
-            accepted_at: row.get(3)?,
+            added_by: row.get(3)?,
+            added_at: row.get(4)?,
+            accepted_at: row.get(5)?,
         });
     }
     Ok(out)
@@ -649,6 +721,7 @@ pub async fn group(
         // the honest answer to "is this a group I could be in".
         _ => {
             return Ok(ok_response::<DirectoryGroupBody>(DirectoryGroupResponse {
+                group_id: parsed.group_id.clone(),
                 exists: false,
                 authorized: false,
                 role: None,
@@ -665,6 +738,7 @@ pub async fn group(
     let role = group_role(&conn, &group_id, &who).await?;
     let Some(role) = role else {
         return Ok(ok_response::<DirectoryGroupBody>(DirectoryGroupResponse {
+            group_id,
             exists: true,
             authorized: false,
             role: None,
@@ -679,6 +753,7 @@ pub async fn group(
     let admin = role == "admin";
     if parsed.role_only {
         return Ok(ok_response::<DirectoryGroupBody>(DirectoryGroupResponse {
+            group_id,
             exists: true,
             authorized: true,
             role: Some(role),
@@ -695,6 +770,7 @@ pub async fn group(
         exists: true,
         authorized: true,
         group: group_row(&conn, &group_id).await?,
+        group_id: group_id.clone(),
         channels: channels_of(&conn, &group_id).await?,
         members: group_members(&conn, &group_id).await?,
         invite_links: if admin {

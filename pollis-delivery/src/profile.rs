@@ -63,7 +63,7 @@ pub use pollis_api::profile::*;
 /// True when `user_a` has blocked `user_b` OR vice versa. Mirrors pollis-core's
 /// `blocks::is_blocked_either_way` (a symmetric `user_block` lookup) so the
 /// server re-derives the block relationship rather than trusting the client.
-async fn is_blocked_either_way(
+pub(crate) async fn is_blocked_either_way(
     conn: &Connection,
     user_a: &str,
     user_b: &str,

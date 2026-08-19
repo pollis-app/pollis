@@ -15,16 +15,14 @@ mod join_requests;
 mod membership;
 mod types;
 
-/// Mirrors the frontend `deriveSlug` in urlRouting.ts.
-///
-/// A group's URL slug — [`pollis_api::directory::derive_slug`], re-exported.
-///
-/// The rule itself moved to `pollis-api` in #987, when slug MATCHING moved
-/// server-side (`POST /v1/directory/group-by-slug`). Two copies of a
-/// name-normalisation rule that must agree exactly is precisely the drift that
-/// makes a shared link resolve on one build and 404 on the next, so there is one
-/// implementation and both ends call it.
-pub(super) use pollis_api::directory::derive_slug;
+// A group's URL slug is `pollis_api::directory::derive_slug`, and since #987
+// nothing in THIS crate derives it: slug MATCHING moved to the DS
+// (`POST /v1/directory/group-by-slug`), which is what finally makes the rate
+// limit on it meaningful. The rule lives in the shared crate because two copies
+// of a name-normalisation rule that must agree exactly is exactly the drift that
+// makes a shared link resolve on one build and 404 on the next. The renderer's
+// `deriveSlug` in `urlRouting.ts` is the third copy, and it only ever BUILDS
+// urls — it never has to agree with a stored value.
 
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{

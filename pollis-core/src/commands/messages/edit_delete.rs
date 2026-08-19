@@ -129,32 +129,35 @@ pub async fn delete_message(
     if is_admin_delete {
         // Admin path: caller must be an admin in the group that owns this
         // channel. DMs (no `channels` row) are not moderatable.
-        let group_id: String = {
-            let mut rows = conn.query(
-                "SELECT group_id FROM channels WHERE id = ?1",
-                libsql::params![conversation_id.clone()],
-            ).await?;
-            match rows.next().await? {
-                Some(row) => row.get(0)?,
-                None => {
-                    return Err(crate::error::Error::Other(anyhow::anyhow!(
-                        "only the sender can delete this message"
-                    )));
-                }
-            }
-        };
-
+        // ONE request: the channel id resolves to its owning group server-side
+        // and the caller's role comes back with it, so "is this a group channel"
+        // and "am I an admin of it" are answered together.
+        //
         // #875: non-membership used to answer "only the sender can delete this
         // message" — the same string as the DM case above, which is a different
         // condition. A DM genuinely has no admin concept; being outside the
         // group is being outside the group, and the shared preflight says so.
-        crate::commands::groups::authz::require_admin(
-            &conn,
-            &group_id,
-            &user_id,
-            "delete other members' messages",
-        )
-        .await?;
+        let role =
+            crate::commands::ds_reads::group_role(state, &conversation_id, &user_id).await?;
+        if !role.exists {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "only the sender can delete this message"
+            )));
+        }
+        if !role.authorized {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                crate::commands::groups::authz::NOT_A_MEMBER
+            )));
+        }
+        if role.role.as_deref() != Some("admin") {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "only group admins can delete other members' messages"
+            )));
+        }
+        // The RESOLVED group id, echoed by the same answer that authorized the
+        // delete — so the realtime nudge below cannot address a different group
+        // than the one the check ran against.
+        let group_id = role.group_id.clone();
 
         // Remove the original message envelope and any pending edit so
         // late-joiners or unsynced devices never receive the now-deleted

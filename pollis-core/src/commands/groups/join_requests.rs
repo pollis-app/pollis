@@ -13,57 +13,46 @@ pub async fn request_group_access(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    // PREFLIGHT, not enforcement (#875's pattern, tightened by #942).
+    // NO PREFLIGHT since #987 — and that is the point.
     //
-    // The Delivery Service re-derives both of these conditions in
-    // `apply_create_join_request` and is the only copy that decides anything —
-    // a client that skipped this entirely would still be refused. What the
-    // preflight buys is a specific local error instead of an opaque 403, which
-    // is why it stays.
+    // This used to run three reads before posting: does the group exist, am I
+    // already a member, and do I already have a PENDING request. All three were
+    // re-derived by the write anyway (the DS is the only copy that decides
+    // anything), so what they bought was a specific error message rather than an
+    // opaque 403. They also carried a TOCTOU: a request created between the
+    // third check and the write was silently reset to pending.
     //
-    // What it must NOT be is a second, independently-worded version of the same
-    // rule. Both checks below run `pollis_schema::authz`'s statements, which is
-    // the same text the DS executes; `preflight_parity` in
-    // `pollis-delivery/tests/join_requests.rs` asserts the two sides reach the
-    // same verdict over the whole decision matrix. If they ever disagree the
-    // client is wrong by definition.
-    if !authz::group_exists(&conn, &group_id).await? {
-        return Err(Error::Other(anyhow::anyhow!("group not found")));
-    }
-
-    if authz::group_role(&conn, &group_id, &requester_id).await?.is_some() {
-        return Err(Error::Other(anyhow::anyhow!("you are already a member of this group")));
-    }
-
-    // Block duplicate pending requests, but allow re-application after rejection.
-    // If a pending request already exists, error. If a prior rejected/approved row
-    // exists, the upsert below will reset it to pending — giving admins a clean
-    // slate to review while preserving the row-per-pair constraint.
-    let mut existing = conn.query(
-        "SELECT status FROM group_join_request WHERE group_id = ?1 AND requester_id = ?2",
-        libsql::params![group_id.clone(), requester_id.clone()],
-    ).await?;
-    if let Some(row) = existing.next().await? {
-        let status: String = row.get(0)?;
-        if status == "pending" {
-            return Err(Error::Other(anyhow::anyhow!("you already have a pending request for this group")));
-        }
-    }
-
+    // The write now NAMES its outcome, so every message survives, the reads are
+    // gone, and the duplicate case is decided by a guarded upsert whose row
+    // count cannot disagree with itself. `preflight_parity` in
+    // `pollis-delivery/tests/join_requests.rs` covers the decision matrix on the
+    // side that now owns all of it.
+    //
+    // Upsert semantics are unchanged: a new insert, or a prior
+    // rejected/approved row reset to pending. `reviewed_by` / `reviewed_at` are
+    // preserved so the history of who reviewed the previous request survives.
     let id = Ulid::new().to_string();
-    // Upsert: new insert, or reset a prior rejected/approved row back to pending.
-    // reviewed_by and reviewed_at are intentionally preserved so the history of
-    // who reviewed the previous request is available for future UI use. DS seam:
-    // route the upsert (authorized as the requester server-side) through the
-    // Delivery Service.
     let body = pollis_api::groups::CreateJoinRequestBody {
         id,
         group_id: group_id.clone(),
         requester_id: Some(requester_id),
     };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    match crate::commands::mls::ds_post_json(state, &body).await? {
+        pollis_api::groups::JoinRequestCreated::Ok => {}
+        pollis_api::groups::JoinRequestCreated::NoSuchGroup => {
+            return Err(Error::Other(anyhow::anyhow!("group not found")));
+        }
+        pollis_api::groups::JoinRequestCreated::AlreadyMember => {
+            return Err(Error::Other(anyhow::anyhow!(
+                "you are already a member of this group"
+            )));
+        }
+        pollis_api::groups::JoinRequestCreated::AlreadyPending => {
+            return Err(Error::Other(anyhow::anyhow!(
+                "you already have a pending request for this group"
+            )));
+        }
+    }
 
     // Notify the group's existing admins so the pending-request list (menu
     // badge + bottom bar) refreshes live instead of waiting for a manual
@@ -93,32 +82,35 @@ pub async fn get_group_join_requests(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<JoinRequest>> {
-    let conn = state.remote_db.conn().await?;
-
-    authz::require_admin(&conn, &group_id, &requester_id, "view join requests").await?;
-
-    let mut req_rows = conn.query(
-        "SELECT jr.id, jr.group_id, jr.requester_id, u.username, jr.status, jr.created_at
-         FROM group_join_request jr
-         LEFT JOIN users u ON u.id = jr.requester_id
-         WHERE jr.group_id = ?1 AND jr.status = 'pending'
-         ORDER BY jr.created_at ASC",
-        libsql::params![group_id],
-    ).await?;
-
-    let mut requests = Vec::new();
-    while let Some(row) = req_rows.next().await? {
-        requests.push(JoinRequest {
-            id: row.get(0)?,
-            group_id: row.get(1)?,
-            requester_id: row.get(2)?,
-            requester_username: row.get(3)?,
-            status: row.get(4)?,
-            created_at: row.get(5)?,
-        });
+    // Admin gate and the pending list in ONE request: the DS returns
+    // `join_requests` only to an admin, so the guard and the payload are the
+    // same decision instead of two that have to agree.
+    let resp = crate::commands::ds_reads::group(state, &group_id, &requester_id, false).await?;
+    if !resp.authorized {
+        return Err(Error::Other(anyhow::anyhow!(authz::NOT_A_MEMBER)));
     }
+    if resp.role.as_deref() != Some("admin") {
+        return Err(Error::Other(anyhow::anyhow!(
+            "only group admins can view join requests"
+        )));
+    }
+    Ok(resp
+        .join_requests
+        .into_iter()
+        .map(join_request_from_wire)
+        .collect())
+}
 
-    Ok(requests)
+/// Wire → domain for one join request.
+fn join_request_from_wire(r: pollis_api::directory::JoinRequestWire) -> JoinRequest {
+    JoinRequest {
+        id: r.id,
+        group_id: r.group_id,
+        requester_id: r.requester_id,
+        requester_username: r.requester_username,
+        status: r.status,
+        created_at: r.created_at,
+    }
 }
 
 /// Get the current user's own join request for a specific group, if one exists.
@@ -128,27 +120,21 @@ pub async fn get_my_join_request(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Option<JoinRequest>> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT id, group_id, requester_id, status, created_at
-         FROM group_join_request
-         WHERE group_id = ?1 AND requester_id = ?2",
-        libsql::params![group_id, requester_id],
-    ).await?;
-
-    if let Some(row) = rows.next().await? {
-        Ok(Some(JoinRequest {
-            id: row.get(0)?,
-            group_id: row.get(1)?,
-            requester_id: row.get(2)?,
-            requester_username: None,
-            status: row.get(3)?,
-            created_at: row.get(4)?,
-        }))
-    } else {
-        Ok(None)
-    }
+    // Answered from the group's pending list, which the DS serves only to an
+    // admin — so an admin sees their own request and a non-member sees `None`.
+    //
+    // That is a deliberate narrowing (#987). A non-member's own pending request
+    // is the one row they have a claim to, but there is no endpoint shape that
+    // serves it without also answering "has user X asked to join group Y" for
+    // arbitrary X and Y. The join flow shows the requester their own state from
+    // the outcome of `request_group_access` instead of asking the server to
+    // remember on their behalf.
+    let resp = crate::commands::ds_reads::group(state, &group_id, &requester_id, false).await?;
+    Ok(resp
+        .join_requests
+        .into_iter()
+        .find(|r| r.requester_id == requester_id)
+        .map(join_request_from_wire))
 }
 
 /// Approve a join request. Approver must be a group member. Adds the requester to the group.
@@ -157,31 +143,24 @@ pub async fn approve_join_request(
     approver_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT group_id, requester_id FROM group_join_request WHERE id = ?1 AND status = 'pending'",
-        libsql::params![request_id.clone()],
-    ).await?;
-
-    let (group_id, requester_id): (String, String) = if let Some(row) = rows.next().await? {
-        (row.get(0)?, row.get(1)?)
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("join request not found or already processed")));
-    };
-
-    authz::require_admin(&conn, &group_id, &approver_id, "approve join requests").await?;
-
     let now = chrono::Utc::now().to_rfc3339();
 
     // DS seam: route the member-add + request-approve through the Delivery
-    // Service (one transactional, admin-gated write).
+    // Service (one transactional, admin-gated write) — and take the group and
+    // requester it RESOLVED from the response (#987). Reading the request row
+    // first was a round trip AND a race: the row could change between the read
+    // and the write, leaving the follow-up reconcile pointed at a different
+    // group than the one actually joined.
     let body = pollis_api::groups::ApproveJoinRequestBody {
         request_id,
         approver_id: Some(approver_id.clone()),
         reviewed_at: now,
     };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    let pollis_api::groups::ReviewedJoinRequest::Ok {
+        group_id,
+        requester_id,
+    } = crate::commands::mls::ds_post_json(state, &body).await?;
+    let requester_id = requester_id.unwrap_or_default();
 
     // Reconcile adds the requester's devices to the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
@@ -218,30 +197,19 @@ pub async fn reject_join_request(
     approver_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT group_id FROM group_join_request WHERE id = ?1 AND status = 'pending'",
-        libsql::params![request_id.clone()],
-    ).await?;
-
-    let group_id: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("join request not found or already processed")));
-    };
-
-    authz::require_admin(&conn, &group_id, &approver_id, "reject join requests").await?;
-
     let now = chrono::Utc::now().to_rfc3339();
     // DS seam: route the status update through the Delivery Service (admin
-    // re-derived server-side).
+    // re-derived server-side). No preflight read since #987 — the write resolves
+    // the request under the same admin gate the preflight used, and a request
+    // that is not pending, or not in a group this caller administers, comes back
+    // as the same 403 the preflight produced.
     let body = pollis_api::groups::RejectJoinRequestBody {
         request_id,
         approver_id: Some(approver_id),
         reviewed_at: now,
     };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    let pollis_api::groups::ReviewedJoinRequest::Ok { .. } =
+        crate::commands::mls::ds_post_json(state, &body).await?;
 
     Ok(())
 }

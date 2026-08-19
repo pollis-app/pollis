@@ -572,21 +572,13 @@ fn sha256_hex(data: &[u8]) -> String {
 /// Discord's rule exactly (#848): membership of ANY registering group grants use
 /// in ANY conversation. Note the absence of a conversation argument — scoping
 /// this to the conversation is the obvious-looking rule and the wrong one.
-pub async fn list_usable_emoji(user_id: String, state: &Arc<AppState>) -> Result<Vec<CustomEmoji>> {
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT ge.group_id, COALESCE(g.name, ''), ge.shortcode, ge.content_hash, \
-                    o.content_type, o.animated, o.size_bytes, ge.created_by \
-             FROM group_emoji ge \
-             JOIN group_member gm ON gm.group_id = ge.group_id AND gm.user_id = ?1 \
-             JOIN custom_emoji_object o ON o.content_hash = ge.content_hash \
-             LEFT JOIN groups g ON g.id = ge.group_id \
-             ORDER BY g.name COLLATE NOCASE, ge.shortcode",
-            libsql::params![user_id],
-        )
-        .await?;
-    collect_emoji(&mut rows).await
+pub async fn list_usable_emoji(_user_id: String, state: &Arc<AppState>) -> Result<Vec<CustomEmoji>> {
+    let body = pollis_api::account_reads::EmojiReadBody {
+        want_usable: true,
+        content_hashes: Vec::new(),
+    };
+    let resp = crate::commands::mls::ds_post_json(state, &body).await?;
+    Ok(resp.usable.into_iter().map(emoji_from_wire).collect())
 }
 
 /// Every custom emoji registered to one group — the management page's list.
@@ -616,23 +608,31 @@ pub async fn list_group_emoji(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<CustomEmoji>> {
-    let conn = state.remote_db.conn().await?;
+    // Membership and the emoji set in ONE request. The DS applies the same
+    // members-only rule this preflight expressed, using the same predicate it
+    // uses to authorize the WRITES to `group_emoji`.
+    let resp = crate::commands::ds_reads::group(state, &group_id, &requester_id, true).await?;
+    if !resp.authorized {
+        return Err(Error::Other(anyhow::anyhow!(
+            crate::commands::groups::authz::NOT_A_MEMBER
+        )));
+    }
+    Ok(resp.emoji.into_iter().map(emoji_from_wire).collect())
+}
 
-    crate::commands::groups::authz::require_member(&conn, &group_id, &requester_id).await?;
-
-    let mut rows = conn
-        .query(
-            "SELECT ge.group_id, COALESCE(g.name, ''), ge.shortcode, ge.content_hash, \
-                    o.content_type, o.animated, o.size_bytes, ge.created_by \
-             FROM group_emoji ge \
-             JOIN custom_emoji_object o ON o.content_hash = ge.content_hash \
-             LEFT JOIN groups g ON g.id = ge.group_id \
-             WHERE ge.group_id = ?1 \
-             ORDER BY ge.shortcode",
-            libsql::params![group_id],
-        )
-        .await?;
-    collect_emoji(&mut rows).await
+/// Wire → domain for one custom emoji. One conversion, so the usable-set and
+/// per-group paths cannot map the same row differently.
+fn emoji_from_wire(e: pollis_api::directory::CustomEmojiWire) -> CustomEmoji {
+    CustomEmoji {
+        group_id: e.group_id,
+        group_name: e.group_name,
+        shortcode: e.shortcode,
+        content_hash: e.content_hash,
+        content_type: e.content_type,
+        animated: e.animated,
+        size_bytes: e.size_bytes.max(0) as u64,
+        created_by: e.created_by,
+    }
 }
 
 async fn collect_emoji(rows: &mut libsql::Rows) -> Result<Vec<CustomEmoji>> {
@@ -709,16 +709,12 @@ pub async fn upload_group_emoji(
     let content_hash = sha256_hex(&encoded.bytes);
     let r2_key = emoji_r2_key(&content_hash, encoded.content_type)?;
 
-    let already_stored = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn
-            .query(
-                "SELECT 1 FROM custom_emoji_object WHERE content_hash = ?1",
-                libsql::params![content_hash.clone()],
-            )
-            .await?;
-        rows.next().await?.is_some()
-    };
+    let already_stored = crate::commands::ds_reads::object_exists(
+        state,
+        &content_hash,
+        pollis_api::account_reads::ObjectKind::Emoji,
+    )
+    .await?;
 
     if !already_stored {
         let put_url = r2::presign_r2_with_length(
@@ -923,15 +919,17 @@ pub async fn download_verified_emoji(
         return Err(Error::Other(anyhow::anyhow!("malformed emoji content hash")));
     }
     let (r2_key, content_type) = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn
-            .query(
-                "SELECT r2_key, content_type FROM custom_emoji_object WHERE content_hash = ?1",
-                libsql::params![content_hash.to_string()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => (row.get::<String>(0)?, row.get::<String>(1)?),
+        // Deliberately NOT membership-gated (#848): resolving a hash you were
+        // already handed is part of reading a message you can already read, and
+        // is a different act from enumerating a group's emoji set — which IS
+        // members-only, in `list_group_emoji`.
+        let body = pollis_api::account_reads::EmojiReadBody {
+            want_usable: false,
+            content_hashes: vec![content_hash.to_string()],
+        };
+        let resp = crate::commands::mls::ds_post_json(state, &body).await?;
+        match resp.objects.into_iter().next() {
+            Some(o) => (o.r2_key, o.content_type),
             None => {
                 return Err(Error::Other(anyhow::anyhow!(
                     "no such emoji object: {content_hash}"

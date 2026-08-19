@@ -795,7 +795,16 @@ pub async fn ingest_dm_envelopes_inner(
     // the key, this emits a `KeyChanged` realtime event so the conversation
     // gets an inline banner (Signal-style) the moment we observe the change,
     // not only when the user opens the peer's profile.
-    let peer_ids: Vec<String> = resolved.dm_peers;
+    let peer_ids: Vec<String> = resolved
+        .dm
+        .map(|dm| {
+            dm.members
+                .into_iter()
+                .map(|m| m.user_id)
+                .filter(|id| id != user_id)
+                .collect()
+        })
+        .unwrap_or_default();
     // Batched (#875): one Turso query for the whole peer set instead of one per
     // peer. Identical semantics — `batch_check_and_pin_account_keys` pins new
     // peers, updates and un-verifies a changed pin, and emits the same

@@ -43,12 +43,12 @@ pub(crate) async fn catch_up(
     state: &Arc<AppState>,
     conversation_id: &str,
     want_envelopes: bool,
-    want_dm_peers: bool,
+    want_dm: bool,
 ) -> Result<dir::CatchUpResponse> {
     let body = dir::CatchUpBody {
         conversation_id: conversation_id.to_string(),
         want_envelopes,
-        want_dm_peers,
+        want_dm,
         user_id: Some(current_user_id(state).await?),
         device_id: state.device_id.lock().await.clone(),
     };
@@ -67,8 +67,28 @@ pub(crate) async fn message_conversation(
     let body = dir::MessageLookupBody {
         message_id: message_id.to_string(),
         user_id: Some(current_user_id(state).await?),
+        reactions_for: Vec::new(),
     };
     Ok(ds_post_json(state, &body).await?.conversation_id)
+}
+
+/// Reactions on a batch of messages, keyed by message id.
+///
+/// Batched because every caller has a page of messages, not one: the per-message
+/// read this replaces meant one round trip per row on screen.
+pub(crate) async fn message_reactions(
+    state: &Arc<AppState>,
+    message_ids: Vec<String>,
+) -> Result<Vec<dir::MessageReactions>> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let body = dir::MessageLookupBody {
+        message_id: String::new(),
+        user_id: Some(current_user_id(state).await?),
+        reactions_for: message_ids,
+    };
+    Ok(ds_post_json(state, &body).await?.reactions)
 }
 
 // ── Directory ────────────────────────────────────────────────────────────────

@@ -643,10 +643,6 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             )
             .await?)
         }
-        "list_channel_previews" => {
-            let user_id: String = arg(&args, "userId")?;
-            ok(messages::list_channel_previews(user_id, &state()?).await?)
-        }
         "send_message" => {
             let conversation_id: String = arg(&args, "conversationId")?;
             let sender_id: String = arg(&args, "senderId")?;

@@ -52,8 +52,18 @@ pub async fn send_message(
     // gated here; blocks in groups are purely render-side on the
     // blocker's client.
     let suppress_delivery = if !is_channel {
-        crate::commands::blocks::any_blocked_either_way(state, &sender_id, &resolved.dm_peers)
-            .await?
+        let peers: Vec<String> = resolved
+            .dm
+            .as_ref()
+            .map(|dm| {
+                dm.members
+                    .iter()
+                    .map(|m| m.user_id.clone())
+                    .filter(|id| id != &sender_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        crate::commands::blocks::any_blocked_either_way(state, &sender_id, &peers).await?
     } else {
         false
     };
