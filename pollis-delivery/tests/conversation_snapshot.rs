@@ -23,22 +23,33 @@
 //! against a writer flipping the pair on and off as fast as it can, and asserts
 //! the two halves always agree.
 //!
-//! # P10 — a hole must be impossible, a prune must still surface
+//! # P10 — a hole must be a FACT, and distinguishable from a prune
 //!
 //! The client's response to a non-contiguous batch is
-//! `forget_local_mls_group_at`: it DELETES the device's MLS crypto state. So a
-//! batch the server is not certain about must arrive as an error the client
-//! propagates, never as data it acts on. But a *retention prune* (#539) is a
-//! legitimate reason for a batch to start above what was asked for, and there
-//! the client SHOULD drop its local group and rejoin. The two look identical
-//! from a bare `epoch >= since` query; `pruned_below`, read in the same
-//! transaction, is what separates them.
+//! `forget_local_mls_group_at`: it drops the device's MLS state for that group
+//! and external-joins onto the head. That is the recovery, not the danger — a
+//! device cannot advance a local group across an epoch that does not exist, and
+//! `flows::adversarial::epoch_gap_recovers_via_external_join` pins exactly this
+//! behaviour. What makes it dangerous is a hole that is not real: when the
+//! batch, the head and the retention floor came off separate statements, a
+//! reader could see a gap the log never had and destroy live state recovering
+//! from nothing.
+//!
+//! So the endpoint reports rather than refuses, and reports from ONE
+//! transaction. Refusing would be worse in the other direction: a genuinely
+//! damaged conversation would become permanently unreadable, every read erroring
+//! forever with no path back.
+//!
+//! A *retention prune* (#539) is the third case and must not be confused with
+//! either: it is a legitimate reason for a batch to start above what was asked
+//! for, and `pruned_below` — read in that same transaction — is what separates
+//! "the floor moved" from "a row is missing".
 //!
 //! Note the log DB refuses a forward gap on INSERT
 //! (`trg_mls_commit_log_no_forward_gap`, migration 000005), so these fixtures
 //! build a hole the only way one can actually appear: by removing a row that was
-//! legitimately written. That is the shape a mis-scoped prune or a partial
-//! restore produces, and it is exactly the shape the client must not be handed.
+//! legitimately written — the shape a mis-scoped prune or a partial restore
+//! produces.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -357,17 +368,18 @@ async fn a_contiguous_batch_is_served() {
         snap.commits.iter().map(|c| c.epoch).collect::<Vec<_>>(),
         vec![0, 1, 2, 3, 4]
     );
+    assert_eq!(snap.hole, None, "a contiguous batch reports no hole");
     assert_eq!(snap.pruned_below, Some(0), "nothing pruned, floor is epoch 0");
 }
 
-/// The P10 regression: a hole must be REFUSED, not served.
+/// The P10 regression: a hole is DETECTED and reported, with both epochs.
 ///
-/// The client's handler for a non-contiguous batch deletes its MLS crypto state,
-/// so serving a hole destroys data on every device that receives it. Refusing is
-/// the only safe answer — the caller retries and, if the log really is torn, an
-/// operator sees an error instead of a fleet of self-wiped devices.
+/// Not refused — see the module header. The client rebuilds from a reported
+/// hole, which is the correct outcome for a log that really is missing a row;
+/// what it must never do is rebuild from a hole that is not there, and the
+/// single transaction is what rules that out.
 #[tokio::test]
-async fn a_hole_in_the_batch_is_refused() {
+async fn a_hole_in_the_batch_is_reported() {
     let db = log_db().await;
     let conn = db.conn().await.expect("conn");
     for epoch in 0..6 {
@@ -383,16 +395,31 @@ async fn a_hole_in_the_batch_is_refused() {
     .await
     .expect("punch a hole");
 
-    let err = snapshot(&conn, &batch_query(CONV, 0), &who(), Some(true))
+    let snap = snapshot(&conn, &batch_query(CONV, 0), &who(), Some(true))
         .await
-        .expect_err(
-            "a batch skipping epoch 3 must be refused — the client's response to a \
-             hole is to DELETE its MLS crypto state (#987 P10)",
-        );
-    let msg = format!("{:#}", err.0);
-    assert!(
-        msg.contains("hole") && msg.contains("expected epoch 3") && msg.contains("found 4"),
-        "the refusal must name both epochs so an operator can find the gap; got {msg}"
+        .expect("a damaged log must stay READABLE — refusing strands it forever");
+
+    assert_eq!(
+        snap.hole,
+        Some(pollis_api::reads::CommitHole {
+            expected: 3,
+            found: 4
+        }),
+        "HOLE UNREPORTED (#987 P10): the batch skips epoch 3 and the snapshot did \
+         not say so. Both epochs are named so an operator reading the warning can \
+         find the gap without a query."
+    );
+    // The batch itself is still served: the client needs the commits BELOW the
+    // gap to ingest anything it had not yet seen there before it rebuilds.
+    assert_eq!(
+        snap.commits.iter().map(|c| c.epoch).collect::<Vec<_>>(),
+        vec![0, 1, 2, 4, 5]
+    );
+    assert_eq!(
+        snap.pruned_below,
+        Some(0),
+        "the floor did not move — this is damage, not a prune, and the two must \
+         stay distinguishable"
     );
 }
 
@@ -425,6 +452,11 @@ async fn a_retention_prune_surfaces_as_pruned_below_not_as_an_error() {
         "the surviving batch is contiguous; only its floor moved"
     );
     assert_eq!(
+        snap.hole, None,
+        "a prune leaves a CONTIGUOUS batch — reporting a hole here would tell the \
+         client its log is damaged when retention simply moved the floor"
+    );
+    assert_eq!(
         snap.pruned_below,
         Some(5),
         "PRUNE INVISIBLE (#987 P10): the batch starts at 5 while the caller asked \
@@ -447,6 +479,7 @@ async fn an_empty_lineage_is_neither_a_hole_nor_a_prune() {
         .await
         .expect("an empty log is a valid, empty answer");
     assert!(snap.commits.is_empty());
+    assert_eq!(snap.hole, None);
     assert_eq!(snap.pruned_below, None);
     assert_eq!(snap.head, 0);
 }

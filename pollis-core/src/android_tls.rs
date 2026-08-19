@@ -1,21 +1,27 @@
 //! Android-only TLS bootstrap.
 //!
-//! `libsql 0.6` pulls `hyper-rustls 0.25` with its default `native-tokio`
-//! feature, which means `rustls-native-certs::load_native_certs()` is the
-//! root-of-trust path at connection time. On Android that function uses
-//! the unix backend, which reads `/etc/ssl/certs/*.pem` — those files do
-//! not exist on Android (Android stores roots as DER blobs in
-//! `/system/etc/security/cacerts/` with `c_rehash`-style hashed names).
-//! The result is a `TLS error: no valid native root CA certificates
-//! found` panic the moment `init_pollis` tries to dial Turso.
+//! Any `rustls-native-certs::load_native_certs()` on the connection path uses
+//! the unix backend on Android, which reads `/etc/ssl/certs/*.pem` — files that
+//! do not exist there (Android stores roots as DER blobs in
+//! `/system/etc/security/cacerts/` with `c_rehash`-style hashed names). The
+//! result is a `TLS error: no valid native root CA certificates found` panic on
+//! the first outbound connection.
+//!
+//! The dependency that originally forced this was `libsql`, whose
+//! `hyper-rustls` used native roots by default; #987 removed `libsql` from the
+//! client, and today's direct TLS (`reqwest` with `rustls-tls`) uses
+//! `webpki-roots` instead. This module stays because the fix is a cheap,
+//! dependency-independent safety net: it sets an env var that ANY future
+//! rustls-native-certs caller honours, and the alternative is discovering the
+//! panic on a device.
 //!
 //! `rustls-native-certs` *does* respect `SSL_CERT_FILE`, and if set will
 //! load roots from that PEM file instead of touching the platform store.
 //! So we ship the Mozilla CA bundle (`assets/cacert.pem`, sourced from
 //! https://curl.se/ca/cacert.pem) inside the static lib, write it once
 //! to the app sandbox at init, and point `SSL_CERT_FILE` there. After
-//! that every rustls-native-certs caller in the dependency tree (libsql,
-//! hyper-rustls, future deps) gets a working root store.
+//! that every rustls-native-certs caller in the dependency tree — present or
+//! future — gets a working root store.
 //!
 //! Desktop is untouched: this module compiles to nothing off-Android,
 //! and the PEM bytes are only `include_bytes!`'d on Android so the

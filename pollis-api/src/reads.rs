@@ -138,11 +138,24 @@ pub struct ConversationState {
     /// The lineage `head`, `commits` and `commit_at_epoch` are scoped to — the
     /// requested one, or the head generation when the query left it `None`.
     pub generation: i64,
-    /// Contiguous in `epoch` from first to last element. The handler verifies
-    /// this before answering and refuses rather than serving a hole, because the
-    /// client's response to a hole is to DELETE its MLS crypto state.
+    /// `epoch >= since` in `generation`, ascending. Read in the SAME transaction
+    /// as `head`, `head_generation` and `pruned_below`, so what the client sees
+    /// here cannot disagree with them.
     #[serde(default)]
     pub commits: Vec<CommitWire>,
+    /// A genuine discontinuity INSIDE `commits`: an epoch missing between two
+    /// epochs that are present. `None` is the normal case.
+    ///
+    /// Computed by [`check_contiguous`] in the snapshot transaction, so it is a
+    /// fact about the log rather than an artifact of reading `commits` and
+    /// `head` at two different instants — which is what could previously
+    /// manufacture a phantom gap and send a client into a destructive recovery
+    /// for nothing. The client's response to a REAL hole (drop the local group,
+    /// external-join onto the head) is correct and is what
+    /// `epoch_gap_recovers_via_external_join` pins; see [`check_contiguous`] for
+    /// why this is reported rather than refused.
+    #[serde(default)]
+    pub hole: Option<CommitHole>,
     /// The lowest epoch still retained in `generation`, or `None` for an empty
     /// lineage. `pruned_below > since` is how a client tells a genuine retention
     /// prune (#539) — where dropping the local group and re-joining is the
@@ -250,10 +263,12 @@ pub struct PendingWelcome {
 
 // ── Contiguity, as a pure function ───────────────────────────────────────────
 
-/// Why a commit batch was refused. Returned by [`check_contiguous`], which both
-/// ends compile: the DS calls it before answering, and the client's own test
-/// asserts the same rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A discontinuity in a served commit batch: the log is missing an epoch that
+/// sits between two it does have.
+///
+/// Reported on [`ConversationState::hole`], computed by [`check_contiguous`]
+/// INSIDE the snapshot transaction, so both ends compile the same rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommitHole {
     /// The epoch that should have come next.
     pub expected: i64,
@@ -261,14 +276,35 @@ pub struct CommitHole {
     pub found: i64,
 }
 
-/// A commit batch is servable iff its epochs are consecutive from first to last.
+/// A commit batch is contiguous iff its epochs are consecutive from first to
+/// last.
 ///
 /// Pure, so the invariant is testable without a database, and total, so "we did
-/// not check" is not representable. A batch that fails this must never reach a
-/// client: the client's handling of a hole is `forget_local_mls_group_at`, which
-/// deletes the device's MLS crypto state. Whether the batch *starts* where the
-/// caller asked is a different question, answered by
-/// [`ConversationState::pruned_below`] — a prune is legitimate, a hole is not.
+/// not check" is not representable.
+///
+/// # Report, do not refuse
+///
+/// A hole is REPORTED to the client, not turned into an error. The distinction
+/// matters and is easy to get backwards, because the client's response to a hole
+/// — `forget_local_mls_group_at`, which deletes its MLS crypto state for that
+/// group — reads like something to be prevented. It is not: it is the RECOVERY.
+/// The device cannot advance a local group across an epoch that does not exist,
+/// so it drops it and external-joins onto the head, which is exactly what
+/// `epoch_gap_recovers_via_external_join` and `corrupt_commit_recovers_instead_of_wedging`
+/// pin. Refusing to serve the batch would make a genuinely damaged conversation
+/// permanently unreadable instead — every read erroring, forever, with no path
+/// back. "Messages must work" points the other way.
+///
+/// What #987 actually fixed is the PHANTOM hole. The reads used to come off
+/// separate statements, so a batch fetched at one instant could disagree with a
+/// `head` fetched at another and manufacture a gap that was never in the log —
+/// and the client would destroy real state recovering from nothing. Computing
+/// this inside the same transaction as `head`, `head_generation` and
+/// `pruned_below` means a reported hole is a fact about the log.
+///
+/// Whether the batch *starts* where the caller asked is a different question,
+/// answered by [`ConversationState::pruned_below`]: a prune moves the floor and
+/// is legitimate; a hole is damage.
 pub fn check_contiguous(commits: &[CommitWire]) -> Result<(), CommitHole> {
     for pair in commits.windows(2) {
         let expected = pair[0].epoch + 1;
@@ -311,9 +347,8 @@ mod tests {
         assert_eq!(check_contiguous(&batch), Ok(()));
     }
 
-    /// The failure this whole endpoint exists to make unrepresentable: one
-    /// missing epoch in the middle of a batch. The client's response to it is
-    /// destructive, so the DS must refuse to serve it.
+    /// One missing epoch in the middle of a batch — reported with BOTH epochs so
+    /// an operator reading a log line can find the gap without a query.
     #[test]
     fn a_hole_is_reported_with_both_epochs() {
         let batch = vec![wire(3), wire(4), wire(6)];

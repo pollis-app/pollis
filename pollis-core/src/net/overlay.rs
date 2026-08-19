@@ -143,8 +143,8 @@ const OVERLAY_CERT_IDENTITY_VERSION: u32 = 1;
 /// alternative to a background health-poll loop (CLAUDE.md forbids periodic
 /// keepalives): a dead relay is simply skipped until this window elapses, then
 /// retried on the next connect that reaches it. Same POSTURE as
-/// `RemoteDb::with_retry` — recover lazily, never poll — though not the same
-/// mechanism: that one reconnects a libsql stream inline, this one just stops
+/// the deleted `RemoteDb::with_retry` — recover lazily, never poll — though not
+/// the same mechanism: that one reconnected a libsql stream inline, this one just stops
 /// skipping an endpoint once its cooldown lapses.
 const RELAY_DEAD_COOLDOWN: Duration = Duration::from_secs(30);
 
@@ -211,8 +211,8 @@ const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(8);
 /// is in its cooldown after a failed dial, `None` when healthy): a failed dial
 /// marks the endpoint dead for [`RELAY_DEAD_COOLDOWN`], a success clears it. There
 /// is **no background poll** — recovery is lazy (the cooldown expires and the next
-/// connect retries it), the same lazy-recovery posture as `RemoteDb::with_retry`
-/// (not its mechanism — nothing here reconnects a libsql stream). Selection is
+/// connect retries it), the same lazy-recovery posture the client's database
+/// layer used to take before #987 deleted it. Selection is
 /// *fail-open*:
 /// healthy endpoints are tried first, but if all are marked dead they are still
 /// tried (a transient outage that marked the whole pool dead must never wedge it
@@ -724,7 +724,7 @@ const DIRECTORY_REFRESH_SKEW: Duration = Duration::from_secs(5 * 60);
 const DIRECTORY_MIN_REFRESH: Duration = Duration::from_secs(30);
 const DIRECTORY_MAX_REFRESH: Duration = Duration::from_secs(55 * 60);
 /// After a failed fetch, retry on this fixed backoff — recover lazily, keep the
-/// previous pool meanwhile. Same rule as `RemoteDb::with_retry` — recover on
+/// previous pool meanwhile. Same rule the deleted `RemoteDb::with_retry` followed — recover on
 /// demand, never poll tightly — reached by a different route.
 const DIRECTORY_RETRY_BACKOFF: Duration = Duration::from_secs(60);
 /// Floor on the interval between fetches, so an on-exhaustion notify storm during
@@ -1511,7 +1511,7 @@ mod tests {
         drop(shim);
     }
 
-    // ── (c) end-to-end: reqwest AND the libsql connector route through the shim ─
+    // ── (c) end-to-end: reqwest AND a raw TLS session route through the shim ──
 
     #[tokio::test]
     async fn reqwest_routes_through_shim_to_tls_origin() {

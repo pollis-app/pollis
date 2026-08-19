@@ -35,13 +35,16 @@ static APP_STATE: OnceCell<Arc<AppState>> = OnceCell::const_new();
 /// functions by polling their futures **directly on the JS/Hermes thread**
 /// (see the `ffi_*_rust_future_poll` → JSI call path). That thread has a
 /// small stack — roughly 1 MB on iOS, often less on Android — while some
-/// synchronous work we call into needs far more: libsql parses every SQL
-/// statement client-side through a deeply-recursive lemon parser
-/// (`yyParser::yy_reduce`), which blows past the JS thread's guard page and
-/// crashes the whole app with SIGBUS (`KERN_PROTECTION_FAILURE` at the
-/// stack guard region) on the first query. Desktop never hits this because
-/// Tauri already runs commands on a multi-threaded Tokio runtime with
-/// generous worker stacks.
+/// synchronous work we call into needs far more. The original offender was
+/// `libsql`, which parsed every SQL statement client-side through a
+/// deeply-recursive lemon parser (`yyParser::yy_reduce`) and blew past the JS
+/// thread's guard page, crashing the whole app with SIGBUS
+/// (`KERN_PROTECTION_FAILURE` at the stack guard region) on the first query.
+/// #987 removed `libsql` from the client, but the rule stands on its own:
+/// SQLCipher's parser is the same shape on the local database, and MLS
+/// operations are not modest either. Desktop never hits this because Tauri
+/// already runs commands on a multi-threaded Tokio runtime with generous
+/// worker stacks.
 ///
 /// By spawning the real work onto these big-stack workers and only
 /// `await`ing the join handle on the JS thread, the JS thread does nothing

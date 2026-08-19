@@ -1877,6 +1877,32 @@ pub(crate) async fn steal_leaf(victim: &TestClient) -> StolenLeaf {
         }
     }
 
+    // Adopt the victim's (user_id, device_id) as the identity this state signs
+    // and reads AS.
+    //
+    // Not an escalation: `mls_kv` — which we just copied wholesale — is where the
+    // device's ML-DSA-44 request-signing key lives, so a copy of it IS a copy of
+    // the credential. What changed in #987 is where that matters. Before it, a
+    // client could fetch the commit log with the whole-database read token every
+    // binary carried, so an attacker holding only `mls_kv` caught up without ever
+    // presenting a credential; the harness could model that by leaving the
+    // attacker signed in as itself. There is no ambient read capability any more
+    // — the DS answers `conversation-state` for the VERIFIED signer and nobody
+    // else — so catching up now requires presenting the stolen device's identity,
+    // which the stolen bytes already permit.
+    //
+    // The adversary stays PASSIVE: it reads and decrypts, and never commits,
+    // writes, or external-joins. Device impersonation is a different attack that
+    // no key rotation defends against, and the roster/eviction tests cover it.
+    *client.state.device_id.lock().await = victim.state.device_id.lock().await.clone();
+    if let Some(u) = victim.state.unlock.lock().await.as_ref() {
+        *client.state.unlock.lock().await = Some(pollis_lib::commands::pin::UnlockState {
+            user_id: u.user_id.clone(),
+            db_key: u.db_key.clone(),
+            account_id_key: u.account_id_key.clone(),
+        });
+    }
+
     StolenLeaf {
         client,
         victim: victim.user_id().to_string(),

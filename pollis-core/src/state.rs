@@ -168,7 +168,7 @@ pub struct AppState {
     /// The running closed-overlay relay shim (design §14), or `None` when the
     /// overlay is off (`POLLIS_OVERLAY` unset/`off`). `Some` owns the loopback
     /// SOCKS5 shim task; dropping it (process exit, or a runtime switch to Off)
-    /// aborts the accept loop. Control-plane HTTP + the libsql connector consult
+    /// aborts the accept loop. Control-plane HTTP consults
     /// [`overlay_handle`](AppState::overlay_handle) to route through the shim;
     /// when `None` every path is byte-for-byte the pre-overlay direct behavior.
     ///
@@ -242,8 +242,8 @@ impl AppState {
 
     /// The overlay shim handle currently in force, or `None` when the overlay is
     /// off. Cheap hot-path read: an uncontended lock plus an `Arc` clone (no
-    /// `.await` held). Every control-plane HTTP caller and the libsql connector
-    /// go through this so a runtime `set_overlay_mode` is picked up immediately.
+    /// `.await` held). Every control-plane HTTP caller goes through this, so a
+    /// runtime `set_overlay_mode` is picked up immediately.
     pub fn overlay_handle(&self) -> Option<Arc<pollis_relay::OverlayHandle>> {
         self.overlay.lock().unwrap().clone()
     }

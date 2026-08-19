@@ -1282,20 +1282,35 @@ async fn process_one_generation<'h>(
         sender_id: Option<String>,
     }
 
-    // A genuine retention prune (#539) leaves the batch starting ABOVE the epoch
-    // we asked for, and the gap classification below is then the CORRECT
-    // response — drop the local group and rejoin at the published epoch. A torn
-    // read looks identical from here, which is why the DS reports the retained
-    // floor: logging it keeps the two distinguishable in the field instead of
-    // both surfacing as an unexplained "epoch gap".
+    // Three different reasons the batch can look short, all recovered the same
+    // way (drop the local group, external-join onto the head) and all worth
+    // telling apart in a log, because only one of them is a bug:
+    //
+    //   * a retention prune (#539) — the floor moved, `pruned_below > since`;
+    //   * genuine damage — a row missing BETWEEN two present epochs, which the
+    //     DS reports as `hole` after checking contiguity inside the same read
+    //     transaction as the batch and the head;
+    //   * a torn read — which is what the single transaction eliminated, and is
+    //     the reason `hole` can now be trusted at all. Before #987 the batch and
+    //     the head came off separate statements, so this path could destroy a
+    //     live group recovering from a gap the log never had.
     if let Some(floor) = snapshot.pruned_below {
         if floor > initial_epoch as i64 {
             eprintln!(
                 "[mls] process_pending_commits: {mls_group_id} generation {generation} is pruned \
                  below epoch {floor} but we are at {initial_epoch} — the missing commits are \
-                 retention-collected, not lost to a torn read; recovering via external join"
+                 retention-collected, not lost; recovering via external join"
             );
         }
+    }
+    if let Some(hole) = snapshot.hole {
+        eprintln!(
+            "[mls] process_pending_commits: {mls_group_id} generation {generation} has a HOLE — \
+             expected epoch {}, found {}. This is damage in the log, not a prune and not a torn \
+             read (the DS checked contiguity in the same transaction as the head); recovering \
+             via external join",
+            hole.expected, hole.found
+        );
     }
 
     let mut pending: Vec<PendingCommit> = Vec::with_capacity(snapshot.commits.len());

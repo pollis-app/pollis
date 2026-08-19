@@ -234,6 +234,7 @@ pub async fn conversation_state(
                 head_generation: 0,
                 generation: q.generation.unwrap_or(0),
                 commits: Vec::new(),
+                hole: None,
                 pruned_below: None,
                 commit_at_epoch: None,
                 // A confirmed non-member is `Some(false)`; a FAILED read is
@@ -322,17 +323,30 @@ pub async fn snapshot(
 
     tx.commit().await?;
 
-    // Refuse rather than serve a hole. The client's handling of a
-    // non-contiguous batch is `forget_local_mls_group_at` — it deletes the
-    // device's MLS crypto state — so a batch we are not certain about must
-    // surface as an error the client propagates, not as data it acts on.
-    if let Err(hole) = check_contiguous(&commits) {
-        return Err(AppError(anyhow::anyhow!(
-            "commit log for {} generation {generation} has a hole: expected epoch {}, found {}",
-            q.conversation_id,
-            hole.expected,
-            hole.found
-        )));
+    // Report a hole; do NOT refuse to serve the batch.
+    //
+    // The client's response to a hole is `forget_local_mls_group_at` — it
+    // deletes the device's MLS crypto state for that group — which reads like
+    // something to prevent and is in fact the RECOVERY: the device cannot
+    // advance a local group across an epoch that does not exist, so it drops it
+    // and external-joins onto the head. Erroring here instead would leave a
+    // genuinely damaged conversation permanently unreadable, with every read
+    // failing forever and no path back.
+    //
+    // What #987 fixed is the PHANTOM hole: `commits`, `head` and `pruned_below`
+    // used to come off separate statements, so a batch read at one instant could
+    // disagree with a head read at another and manufacture a gap the log never
+    // had — sending the client into that destructive recovery for nothing. They
+    // now share the transaction above, so a reported hole is real.
+    let hole = check_contiguous(&commits).err();
+    if let Some(h) = hole {
+        tracing::warn!(
+            conversation_id = %q.conversation_id,
+            generation,
+            expected = h.expected,
+            found = h.found,
+            "commit log has a hole; serving the batch with `hole` set so the client rebuilds"
+        );
     }
 
     Ok(ConversationState {
@@ -344,6 +358,7 @@ pub async fn snapshot(
         head_generation,
         generation,
         commits,
+        hole,
         pruned_below,
         commit_at_epoch,
         is_member: Some(true),
