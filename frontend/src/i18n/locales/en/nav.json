@@ -15,7 +15,8 @@
     "keyChanged": "Identity key changed — re-verify",
     "verified": "Verified contact",
     "dmAvatarAlt": "{{name}} avatar",
-    "close": "Close sidebar ({{shortcut}})"
+    "close": "Close sidebar ({{shortcut}})",
+    "resize": "Resize sidebar (drag; double-click to reset)"
   },
   "profile": {
     "you": "You",
@@ -84,7 +85,8 @@
     "details": "Details",
     "ariaLabel": "Conversation details",
     "closeThread": "Close thread panel ({{shortcut}})",
-    "closeDetails": "Close details panel ({{shortcut}})"
+    "closeDetails": "Close details panel ({{shortcut}})",
+    "resize": "Resize details panel (drag; double-click to reset)"
   },
   "members": {
     "count_one": "Members — {{count}}",

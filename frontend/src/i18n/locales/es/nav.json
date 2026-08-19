@@ -15,7 +15,8 @@
     "keyChanged": "La clave de identidad ha cambiado: vuelve a verificar",
     "verified": "Contacto verificado",
     "dmAvatarAlt": "Avatar de {{name}}",
-    "close": "Cerrar la barra lateral ({{shortcut}})"
+    "close": "Cerrar la barra lateral ({{shortcut}})",
+    "resize": "Redimensionar la barra lateral (arrastra; doble clic para restablecer)"
   },
   "profile": {
     "you": "Tú",
@@ -84,7 +85,8 @@
     "details": "Detalles",
     "ariaLabel": "Detalles de la conversación",
     "closeThread": "Cerrar el panel de hilo ({{shortcut}})",
-    "closeDetails": "Cerrar el panel de detalles ({{shortcut}})"
+    "closeDetails": "Cerrar el panel de detalles ({{shortcut}})",
+    "resize": "Redimensionar el panel de detalles (arrastra; doble clic para restablecer)"
   },
   "members": {
     "count_one": "Miembros — {{count}}",

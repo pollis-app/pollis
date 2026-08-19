@@ -29,6 +29,8 @@ import { useSkin } from "../../hooks/queries/usePreferences";
 import { probeRender } from "../../utils/renderProbe";
 import { PresenceAvatar } from "../ui/PresenceAvatar";
 import { SidebarProfilePanel } from "./SidebarProfilePanel";
+import { ResizeHandle } from "./ResizeHandle";
+import { usePanelWidth } from "./usePanelWidth";
 
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
 
@@ -61,6 +63,13 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
   const skin = useSkin();
+  // Dragging the inner edge past the minimum collapses through the SAME
+  // toggle `mod+b` uses, so there is one collapsed state and not a second
+  // drag-only one — and reopening restores the width that was dragged from.
+  const { ref, widthClass, widthStyle, handleProps } = usePanelWidth(
+    "sidebar",
+    onToggle,
+  );
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
@@ -152,8 +161,13 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 
   return (
     <aside
+      ref={ref}
       data-testid="sidebar"
-      className="flex w-side shrink-0 flex-col border-e border-line bg-surface font-mono"
+      // `relative` anchors the resize handle to this edge; the width is either
+      // the `--side-w` token (no answer on this device) or a dragged pixel
+      // value, never both.
+      className={`relative flex ${widthClass} shrink-0 flex-col border-e border-line bg-surface font-mono`}
+      style={widthStyle}
     >
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <SectionHeader
@@ -340,6 +354,8 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
           </kbd>
         </button>
       )}
+
+      <ResizeHandle edge="end" label={t("sidebar.resize")} {...handleProps} />
     </aside>
   );
 });

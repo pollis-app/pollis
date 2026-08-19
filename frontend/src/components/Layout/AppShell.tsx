@@ -24,6 +24,7 @@ const TerminalView = lazy(() => import("../TerminalView"));
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { isDropTargetActive, shouldShowDropOverlay } from "../../stores/dropTargetStore";
+import { panelWidthStore } from "../../stores/panelWidthStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
@@ -362,6 +363,19 @@ export const AppShell: React.FC = observer(() => {
   // every AppShell render — so the sidebar (group tree, DM list, unread badges)
   // re-rendered for every unrelated shell state change (#874).
   const toggleSidebar = useCallback(() => setIsSidebarOpen((v) => !v), []);
+
+  // Dragged panel widths are pixels, and a window that shrinks under them
+  // would leave a sidebar owning the whole app (#985). Event-driven, never
+  // polled: `resize` fires continuously while a window is dragged, and each
+  // pass only writes when a width actually moved.
+  useEffect(() => {
+    const clamp = () => panelWidthStore.clampToWindow(window.innerWidth);
+    // Once on mount too — the window may have been resized (or the app moved
+    // to a smaller display) while it was closed.
+    clamp();
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, []);
 
   // The search button in BreadcrumbNav fires this custom event so it can
   // open the panel without lifting AppShell's local state into a store.
