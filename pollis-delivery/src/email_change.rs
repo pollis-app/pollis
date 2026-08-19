@@ -153,8 +153,9 @@ pub async fn request_email_change_otp(
 /// response (the in-process harness maps it the same way).
 #[derive(Debug, PartialEq, Eq)]
 pub enum EmailChangeOutcome {
-    /// `users.email` swapped to the new address.
-    Updated,
+    /// `users.email` swapped to the new address. Carries the caller's username
+    /// (#987) so the client's `accounts.json` mirror needs no follow-up read.
+    Updated { username: Option<String> },
     /// Wrong / expired / unknown code → 401.
     InvalidCode,
     /// Past the attempt limit → 429.
@@ -270,14 +271,36 @@ pub async fn apply_verify_email_change(
     // Applied: consume the code (single-use) now that the write has succeeded.
     store.otp.consume(trimmed);
     store.clear(trimmed);
-    Ok(EmailChangeOutcome::Updated)
+    Ok(EmailChangeOutcome::Updated {
+        username: username_of(conn, authed).await?,
+    })
+}
+
+/// The caller's username, for the client's local accounts-index mirror.
+/// Best-effort shape: `None` if the row has none.
+async fn username_of(
+    conn: &libsql::Connection,
+    user_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT username FROM users WHERE id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(row.get::<Option<String>>(0)?),
+        None => Ok(None),
+    }
 }
 
 /// Map an [`EmailChangeOutcome`] to the wire response. Shared by the production
 /// handler and the in-process harness so both speak the same status codes.
 pub fn email_change_response(outcome: EmailChangeOutcome) -> Response {
     match outcome {
-        EmailChangeOutcome::Updated => ok_status::<VerifyEmailChangeBody>(),
+        EmailChangeOutcome::Updated { username } => crate::writes::ok_response::<
+            VerifyEmailChangeBody,
+        >(pollis_api::email_change::EmailChanged::Ok { username }),
         EmailChangeOutcome::InvalidCode => (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({ "error": "invalid code" })),

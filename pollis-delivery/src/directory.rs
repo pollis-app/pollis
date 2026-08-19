@@ -165,7 +165,7 @@ pub async fn catch_up(
 /// the two must never disagree about who belongs.
 pub async fn desired_roster(conn: &Connection, conversation_id: &str) -> anyhow::Result<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
-    let mut push = |id: String, out: &mut Vec<String>| {
+    let push = |id: String, out: &mut Vec<String>| {
         if !out.contains(&id) {
             out.push(id);
         }

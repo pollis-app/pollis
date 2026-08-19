@@ -111,6 +111,8 @@ fn body(id: &str, ciphertext: &str) -> SendMessageBody {
         reply_to_id: None,
         sent_at: "2026-08-15T12:00:00Z".to_string(),
         sealed: 1,
+        // No push from a unit test — this asserts envelope opacity.
+        push_to: None,
     }
 }
 

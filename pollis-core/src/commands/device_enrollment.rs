@@ -330,42 +330,26 @@ pub async fn poll_enrollment_status(
     state: &Arc<AppState>,
     request_id: String,
 ) -> Result<EnrollmentStatus> {
-    // `with_retry` rather than a bare `conn()`: this runs on a device that has
-    // no local database, no keystore entry, and no way to retry itself — a
-    // dropped libsql stream here used to mean the user watched a spinner until
-    // they gave up and restarted the sign-in. Reconnecting once and asking
-    // again is the difference between a blip and a dead end.
-    let id = request_id.clone();
-    let row_data: Option<(String, String, Option<Vec<u8>>, String)> = state
-        .remote_db
-        .with_retry(|conn| {
-            let id = id.clone();
-            async move {
-                let mut rows = conn
-                    .query(
-                        "SELECT user_id, new_device_id, status, wrapped_account_key, expires_at \
-                         FROM device_enrollment_request WHERE id = ?1",
-                        libsql::params![id],
-                    )
-                    .await?;
-                match rows.next().await? {
-                    Some(row) => Ok(Some((
-                        row.get::<String>(0)?,
-                        row.get::<String>(2)?,
-                        row.get::<Option<Vec<u8>>>(3).ok().flatten(),
-                        row.get::<String>(4)?,
-                    ))),
-                    None => Ok(None),
-                }
-            }
-        })
-        .await?;
-
-    let (user_id, status, wrapped, expires_at_str) = row_data.ok_or_else(|| {
-        Error::Other(anyhow::anyhow!(
-            "enrollment request {request_id} not found"
-        ))
-    })?;
+    // Read over the DS, gated on possession of `request_id` (#987 §6.5). This
+    // device has NO credential and cannot get one: no signing key (that is what
+    // it is enrolling to obtain), and its OTP session is already expired — both
+    // TTLs are 600s and the session was minted at `verify-otp`, strictly before
+    // this request existed. See `ds_reads::enrollment_request`.
+    let row = crate::commands::ds_reads::enrollment_request(state, &request_id, false)
+        .await?
+        .ok_or_else(|| {
+            Error::Other(anyhow::anyhow!("enrollment request {request_id} not found"))
+        })?;
+    let user_id = row.user_id;
+    let status = row.status;
+    let expires_at_str = row.expires_at;
+    let wrapped = match row.wrapped_account_key.as_deref() {
+        Some(b64) => Some(crate::commands::ds_reads::decode_b64(
+            "wrapped_account_key",
+            b64,
+        )?),
+        None => None,
+    };
 
     // TTL check — if expired, short-circuit without touching the status column.
     if let Ok(expires_at) = chrono::DateTime::parse_from_rfc3339(&expires_at_str) {
@@ -528,29 +512,22 @@ pub async fn list_pending_enrollment_requests(
     state: &Arc<AppState>,
     user_id: String,
 ) -> Result<Vec<PendingEnrollmentRequest>> {
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT id, new_device_id, verification_code, created_at, expires_at \
-             FROM device_enrollment_request \
-             WHERE user_id = ?1 AND status = 'pending' \
-             AND datetime(expires_at) > datetime('now') \
-             ORDER BY created_at DESC",
-            libsql::params![user_id],
-        )
-        .await?;
-
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(PendingEnrollmentRequest {
-            request_id: row.get(0)?,
-            new_device_id: row.get(1)?,
-            verification_code: row.get(2)?,
-            created_at: row.get(3)?,
-            expires_at: row.get(4)?,
-        });
-    }
-    Ok(out)
+    // The DS keeps the `status = 'pending'`, not-yet-expired filter and the
+    // newest-first ordering; it also scopes the enumeration to the signer, so a
+    // device can only ever list requests against its OWN account.
+    let rows = crate::commands::ds_reads::pending_enrollments(state, &user_id).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| PendingEnrollmentRequest {
+            request_id: r.id,
+            new_device_id: r.new_device_id,
+            // Present on this endpoint precisely because this list IS the
+            // approving device's UI, and the code is what it displays.
+            verification_code: r.verification_code.unwrap_or_default(),
+            created_at: r.created_at,
+            expires_at: r.expires_at,
+        })
+        .collect())
 }
 
 /// Existing-device side. Wrap `account_id_key.private` under the
@@ -569,29 +546,31 @@ pub async fn approve_device_enrollment(
         .clone()
         .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
 
-    // 1. Fetch the request row and validate.
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT user_id, new_device_id, new_device_ephemeral_pub, verification_code, \
-                    status, expires_at \
-             FROM device_enrollment_request WHERE id = ?1",
-            libsql::params![request_id.clone()],
-        )
-        .await?;
-    let row = rows.next().await?.ok_or_else(|| {
-        Error::Other(anyhow::anyhow!(
-            "enrollment request {request_id} not found"
-        ))
-    })?;
+    // 1. Fetch the request row and validate. DEVICE-SIGNED with
+    //    `want_approval_fields` (#987): the approving device is a fully enrolled
+    //    sibling, and the DS serves `new_device_ephemeral_pub` /
+    //    `verification_code` only to a signed caller who owns the request's
+    //    account — a bare `request_id` holder never receives them, because
+    //    reading the code aloud is what authorizes the enrollment.
+    let row = crate::commands::ds_reads::enrollment_request(state, &request_id, true)
+        .await?
+        .ok_or_else(|| {
+            Error::Other(anyhow::anyhow!("enrollment request {request_id} not found"))
+        })?;
 
-    let user_id: String = row.get(0)?;
-    let new_device_id: String = row.get(1)?;
-    let ephemeral_pub: Vec<u8> = row.get(2)?;
-    let stored_code: String = row.get(3)?;
-    let status: String = row.get(4)?;
-    let expires_at_str: String = row.get(5)?;
-    drop(rows);
+    let user_id: String = row.user_id;
+    let new_device_id: String = row.new_device_id;
+    let ephemeral_pub: Vec<u8> = match row.new_device_ephemeral_pub.as_deref() {
+        Some(b64) => crate::commands::ds_reads::decode_b64("new_device_ephemeral_pub", b64)?,
+        None => {
+            return Err(Error::Other(anyhow::anyhow!(
+                "enrollment request {request_id} has no ephemeral key"
+            )))
+        }
+    };
+    let stored_code: String = row.verification_code.unwrap_or_default();
+    let status: String = row.status;
+    let expires_at_str: String = row.expires_at;
 
     if status != "pending" {
         return Err(Error::Other(anyhow::anyhow!(
@@ -667,36 +646,17 @@ pub async fn approve_device_enrollment(
         out
     };
 
-    // 3. The new device has no device_cert of its own yet (it has never
-    //    held account_id_key). We sign one for it here, using the current
-    //    `identity_version` from users. The new device will NOT be able
-    //    to re-sign its own cert until `finalize_enrollment` stores the
-    //    account key — so we publish the cert on its behalf now.
-    let identity_version: u32 = {
-        let mut rows = conn
-            .query(
-                "SELECT identity_version FROM users WHERE id = ?1",
-                libsql::params![user_id.clone()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => row.get::<i64>(0).unwrap_or(1) as u32,
-            None => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "user {user_id} not found"
-                )))
-            }
-        }
-    };
+    // 3. The new device's MLS signing pub is generated by the NEW device when it
+    //    runs `finalize_enrollment`, and its cert is signed and published there.
+    //    Nothing to do on this side.
+    //
+    //    #987 deleted a `SELECT identity_version FROM users` that used to sit
+    //    here. It read the version to stamp a cert this function has never
+    //    actually signed — the value went straight into a `let _ = (…)` two
+    //    lines below it. Removing it costs nothing and is one fewer read that
+    //    would otherwise have needed an endpoint.
 
-    // 4. The new device's MLS signing pub will be generated by the new
-    //    device itself when it runs `finalize_enrollment`. The cert will
-    //    be re-signed and re-published at that point. For now, just mark
-    //    the request approved with the wrapped blob — the new device will
-    //    handle cert publishing in its own process.
-    let _ = (identity_version, new_device_id.clone());
-
-    // 5. Write the wrapped account key and flip status to 'approved'. Routed
+    // 4. Write the wrapped account key and flip status to 'approved'. Routed
     //    through the DS (#419 domains E+G) — the approver is a fully-enrolled
     //    sibling device, so it can sign. The DS binds the request to the signer
     //    (`WHERE id = ? AND user_id = actor`), so a device can only approve
@@ -718,7 +678,7 @@ pub async fn approve_device_enrollment(
         };
         crate::commands::mls::ds_post_ok(state, &body).await?;
 
-        // 6. Record a security event (best-effort).
+        // 5. Record a security event (best-effort).
         let ev = pollis_api::account::SecurityEventBody {
             kind: "device_enrolled".to_string(),
             device_id: Some(new_device_id.clone()),
@@ -735,7 +695,7 @@ pub async fn approve_device_enrollment(
         }
     }
 
-    // 7. MLS group addition is deferred — the new device hasn't published
+    // 6. MLS group addition is deferred — the new device hasn't published
     //    KPs yet so reconcile can't add it. Instead, finalize_enrollment on
     //    the new device publishes KPs and sends an `enrollment_finalized`
     //    event. The approver (or any sibling) picks that up, reconciles all
@@ -758,28 +718,17 @@ pub async fn recover_with_secret_key(
     user_id: String,
     secret_key: String,
 ) -> Result<()> {
-    // 1. Fetch the wrapped account identity blob from Turso.
-    let (salt, nonce, wrapped_key) = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn
-            .query(
-                "SELECT salt, nonce, wrapped_key FROM account_recovery WHERE user_id = ?1",
-                libsql::params![user_id.clone()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => (
-                row.get::<Vec<u8>>(0)?,
-                row.get::<Vec<u8>>(1)?,
-                row.get::<Vec<u8>>(2)?,
-            ),
-            None => {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "No recovery blob found for user {user_id}"
-                )))
-            }
-        }
-    };
+    // 1. Fetch the wrapped account identity blob (#987). The credential is the
+    //    OTP session the user just proved on the login gate — this device has no
+    //    signing key, which is the situation it is recovering from — and the DS
+    //    records a security event for every fetch, because a fetch is exactly
+    //    the signal an account owner wants to see if it was not them.
+    let (salt, nonce, wrapped_key) =
+        crate::commands::ds_reads::recovery_blob(state, &user_id)
+            .await?
+            .ok_or_else(|| {
+                Error::Other(anyhow::anyhow!("No recovery blob found for user {user_id}"))
+            })?;
 
     // 2. Unwrap with the user-provided Secret Key. The helper normalizes
     //    the input (whitespace, case, dashes) before derivation.
@@ -833,23 +782,14 @@ pub async fn reset_identity_and_recover(
     user_id: String,
     confirm_email: String,
 ) -> Result<String> {
-    // 1. Verify the confirmation email matches what we have on file.
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT email FROM users WHERE id = ?1",
-            libsql::params![user_id.clone()],
-        )
-        .await?;
-    let stored_email: String = match rows.next().await? {
-        Some(row) => row.get(0)?,
-        None => {
-            return Err(Error::Other(anyhow::anyhow!(
-                "user {user_id} not found"
-            )))
-        }
-    };
-    drop(rows);
+    // 1. Verify the confirmation email matches what we have on file. The DS
+    //    answers `account-status` for the AUTHENTICATED caller only (#987) — the
+    //    id in the body is the no-auth path's input and a mismatch is a 403 —
+    //    so this cannot be turned into an "is X's email Y?" oracle.
+    let stored_email: String = crate::commands::ds_reads::account_status(state, &user_id)
+        .await?
+        .and_then(|a| a.email)
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("user {user_id} not found")))?;
 
     if !constant_time_eq(
         stored_email.trim().to_lowercase().as_bytes(),
@@ -954,30 +894,20 @@ pub async fn list_security_events(
     user_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<SecurityEvent>> {
+    // The clamp stays here AND is re-applied server-side (#987): a body cannot
+    // ask the DS for the whole table regardless of what this client sends.
     let limit = limit.unwrap_or(100).clamp(1, 500);
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT id, kind, device_id, created_at, metadata \
-             FROM security_event \
-             WHERE user_id = ?1 \
-             ORDER BY created_at DESC \
-             LIMIT ?2",
-            libsql::params![user_id, limit],
-        )
-        .await?;
-
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(SecurityEvent {
-            id: row.get(0)?,
-            kind: row.get(1)?,
-            device_id: row.get::<Option<String>>(2).ok().flatten(),
-            created_at: row.get(3)?,
-            metadata: row.get::<Option<String>>(4).ok().flatten(),
-        });
-    }
-    Ok(out)
+    let rows = crate::commands::ds_reads::security_events(state, &user_id, limit).await?;
+    Ok(rows
+        .into_iter()
+        .map(|e| SecurityEvent {
+            id: e.id,
+            kind: e.kind,
+            device_id: e.device_id,
+            created_at: e.created_at,
+            metadata: e.metadata,
+        })
+        .collect())
 }
 
 /// Existing-device side. Reject an enrollment request without installing
@@ -994,24 +924,15 @@ pub async fn reject_device_enrollment(
         .clone()
         .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
 
-    let conn = state.remote_db.conn().await?;
-
-    // Fetch user_id / new_device_id for the security event.
-    let mut rows = conn
-        .query(
-            "SELECT user_id, new_device_id FROM device_enrollment_request WHERE id = ?1",
-            libsql::params![request_id.clone()],
-        )
-        .await?;
-    let (_user_id, new_device_id): (String, String) = match rows.next().await? {
-        Some(row) => (row.get(0)?, row.get(1)?),
-        None => {
-            return Err(Error::Other(anyhow::anyhow!(
-                "enrollment request {request_id} not found"
-            )))
-        }
-    };
-    drop(rows);
+    // Fetch user_id / new_device_id for the security event. Device-signed, but
+    // WITHOUT `want_approval_fields`: rejecting needs the request's identity,
+    // never the verification code.
+    let row = crate::commands::ds_reads::enrollment_request(state, &request_id, false)
+        .await?
+        .ok_or_else(|| {
+            Error::Other(anyhow::anyhow!("enrollment request {request_id} not found"))
+        })?;
+    let (_user_id, new_device_id): (String, String) = (row.user_id, row.new_device_id);
 
     // Flip the request to 'rejected'. Routed through the DS (#419 domains E+G) —
     // the rejecting device is a fully-enrolled sibling, so it can sign; the DS
@@ -1099,10 +1020,12 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
     // External-join every group/DM this user belongs to. The new device
     // uses the stored GroupInfo to self-add via an MLS external commit —
     // no coordination with sibling devices required.
-    let conn = state.remote_db.conn().await?;
-    let group_ids = fetch_user_group_ids(&conn, user_id).await?;
-    let dm_ids = fetch_user_dm_ids(&conn, user_id).await?;
-    let candidate_ids: Vec<String> = group_ids.into_iter().chain(dm_ids).collect();
+    // One DS read (#987), scoped by the DS to the signer's own memberships. By
+    // this point the device HAS published its cert (two steps up), so it can
+    // sign; that ordering is why this is the only enrollment read here that is
+    // not capability- or session-gated.
+    let mine = crate::commands::ds_reads::conversations(state, user_id).await?;
+    let candidate_ids: Vec<String> = mine.group_ids.into_iter().chain(mine.dm_ids).collect();
 
     for conv_id in candidate_ids {
         let already_joined = {
@@ -1126,38 +1049,6 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-async fn fetch_user_group_ids(conn: &libsql::Connection, user_id: &str) -> Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT g.id FROM groups g \
-             JOIN group_member gm ON gm.group_id = g.id \
-             WHERE gm.user_id = ?1",
-            libsql::params![user_id],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
-}
-
-async fn fetch_user_dm_ids(conn: &libsql::Connection, user_id: &str) -> Result<Vec<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT dc.id FROM dm_channel dc \
-             JOIN dm_channel_member dcm ON dcm.dm_channel_id = dc.id \
-             WHERE dcm.user_id = ?1",
-            libsql::params![user_id],
-        )
-        .await?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        out.push(row.get::<String>(0)?);
-    }
-    Ok(out)
-}
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {

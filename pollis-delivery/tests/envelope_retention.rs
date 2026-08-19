@@ -51,7 +51,7 @@ use pollis_delivery::messages::{
     DeleteMessageBody, EnvelopeGcBody, WatermarkBody,
 };
 use pollis_delivery::profile::{apply_add_dm_member, apply_create_dm, AddDmMemberBody, CreateDmBody};
-use pollis_delivery::groups::{apply_approve_join_request, ApproveJoinRequestBody};
+use pollis_delivery::groups::{apply_approve_join_request, ApproveJoinRequestBody, ReviewOutcome};
 use pollis_delivery::writes::WriteOutcome;
 
 mod common;
@@ -310,7 +310,7 @@ async fn approve_join_request_skips_revoked_devices() {
         reviewed_at: "2026-01-03T00:00:00+00:00".into(),
     };
     let out = apply_approve_join_request(&db.conn().await.unwrap(), None, &body).await.unwrap();
-    assert!(matches!(out, WriteOutcome::Ok));
+    assert!(matches!(out, ReviewOutcome::Reviewed { .. }));
 
     assert_eq!(
         watermark_devices(&db, "c1").await,

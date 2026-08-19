@@ -23,8 +23,7 @@
 //! therefore inert, and is exactly why the existence check has to be explicit.
 
 use pollis_delivery::db::Db;
-use pollis_delivery::groups::{apply_create_join_request, CreateJoinRequestBody};
-use pollis_delivery::writes::WriteOutcome;
+use pollis_delivery::groups::{apply_create_join_request, CreateJoinRequestBody, JoinRequestOutcome};
 
 mod common;
 
@@ -90,7 +89,7 @@ async fn a_join_request_for_an_unknown_group_is_refused() {
     .expect("apply");
 
     assert!(
-        matches!(outcome, WriteOutcome::Forbidden),
+        matches!(outcome, JoinRequestOutcome::NoSuchGroup),
         "a request naming a nonexistent group must be refused, got {outcome:?}"
     );
     assert_eq!(
@@ -113,7 +112,7 @@ async fn an_existing_member_cannot_request_to_join() {
         .expect("apply");
 
     assert!(
-        matches!(outcome, WriteOutcome::Forbidden),
+        matches!(outcome, JoinRequestOutcome::AlreadyMember),
         "a current member must not be able to request to join, got {outcome:?}"
     );
     assert_eq!(request_rows(&db).await, 0, "no row may be written for a member");
@@ -133,7 +132,7 @@ async fn an_admin_cannot_request_to_join_their_own_group() {
         .expect("apply");
 
     assert!(
-        matches!(outcome, WriteOutcome::Forbidden),
+        matches!(outcome, JoinRequestOutcome::AlreadyMember),
         "an admin must not be able to request to join their own group, got {outcome:?}"
     );
     assert_eq!(request_rows(&db).await, 0, "no row may be written for an admin");
@@ -153,7 +152,7 @@ async fn a_non_member_may_request_to_join() {
             .expect("apply");
 
     assert!(
-        matches!(outcome, WriteOutcome::Ok),
+        matches!(outcome, JoinRequestOutcome::Ok),
         "a non-member must be able to request to join, got {outcome:?}"
     );
 
@@ -193,7 +192,7 @@ async fn a_rejected_requester_may_apply_again() {
             .expect("apply");
 
     assert!(
-        matches!(outcome, WriteOutcome::Ok),
+        matches!(outcome, JoinRequestOutcome::Ok),
         "a previously rejected requester must be able to re-apply, got {outcome:?}"
     );
     assert_eq!(
@@ -294,7 +293,7 @@ async fn preflight_parity() {
             apply_create_join_request(&conn, Some(requester), &body("req-parity", group, requester))
                 .await
                 .expect("apply"),
-            WriteOutcome::Ok
+            JoinRequestOutcome::Ok
         );
         // Leave no row behind — the next matrix row must see a clean slate, and
         // the upsert would otherwise make later rows depend on earlier ones.

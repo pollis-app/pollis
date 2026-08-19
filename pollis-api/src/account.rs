@@ -63,6 +63,29 @@ pub struct RevokeDeviceBody {
     pub user_id: Option<String>,
 }
 
+/// `POST /v1/devices/revoke` — the tombstone, plus the name the device had at
+/// the moment it was revoked (#987).
+///
+/// The client writes a `device_revoked` security event straight after this, and
+/// a log line that says only "device 01HQ7Z..." is not the answer to "was it the
+/// laptop or the phone?". It used to `SELECT device_name` itself before the
+/// write; the name is on the row the DS is already touching.
+///
+/// `NotFound` keeps the pre-check the client did: the write is bound
+/// `WHERE user_id = actor`, so revoking a device that is not yours is already a
+/// silent no-op, and reporting it as success would tell a user their stolen
+/// laptop had been cut off when nothing happened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum DeviceRevoked {
+    Ok {
+        #[serde(default)]
+        device_name: Option<String>,
+    },
+    /// No live device with that id on the caller's account.
+    NotFound,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct LogoutDeviceBody {
     /// The device logging out — in practice the signing device itself. Bound

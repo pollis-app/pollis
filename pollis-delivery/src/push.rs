@@ -101,9 +101,14 @@ pub async fn notify_new_message(
         })
         .collect();
 
-    let client = reqwest::Client::new();
     for chunk in messages.chunks(EXPO_BATCH) {
-        match client.post(EXPO_PUSH_URL).json(chunk).send().await {
+        // Through `util::http_post`, which forces a deadline (#913). A push
+        // nobody is waiting on must never be the thing that pins a handler open.
+        match crate::util::http_post(crate::util::Upstream::ExpoPush, EXPO_PUSH_URL)
+            .json(chunk)
+            .send()
+            .await
+        {
             Ok(r) if !r.status().is_success() => {
                 let status = r.status();
                 let body = r.text().await.unwrap_or_default();

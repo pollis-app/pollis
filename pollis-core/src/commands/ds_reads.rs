@@ -23,6 +23,41 @@ use crate::state::AppState;
 
 use super::mls::ds_client::{current_user_id, ds_post_json};
 
+/// Does this account exist, and does it have an identity yet?
+///
+/// # The one read with no credential (#987 §6.5)
+///
+/// UNAUTHENTICATED, and it has to be. This runs at every app launch, BEFORE PIN
+/// entry: the local SQLCipher database is closed, so `ds_post` cannot load the
+/// ML-DSA-44 device signer and errors with *"not signed in for DS request
+/// signing"*; `device_id` is not set either; and no OTP has run, so there is no
+/// session bearer. There is no credential in existence at that moment — and the
+/// answer gates the PRE-UNLOCK UI, because a device that needs enrollment has no
+/// PIN to unlock with, so it cannot be deferred until one exists.
+///
+/// The disclosure is strictly smaller than one already shipped: `user_id` is a
+/// 128-bit ULID the caller read out of its OWN `accounts.json`, not guessable
+/// and not an enumeration surface, while `verify-otp` already answers
+/// `has_identity` for an EMAIL ADDRESS, which is guessable. The DS rate-limits
+/// it on its tightest tier.
+pub(crate) async fn account_probe(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<ar::AccountProbeResponse> {
+    let body = ar::AccountProbeBody {
+        user_id: user_id.to_string(),
+    };
+    let resp = crate::commands::mls::ds_post_plain(state, &body).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "account-probe {status}: {txt}"
+        )));
+    }
+    crate::commands::mls::decode_response::<ar::AccountProbeBody>(resp).await
+}
+
 /// Decode one base64 blob from a read response.
 pub(crate) fn decode_b64(what: &str, s: &str) -> Result<Vec<u8>> {
     use base64::Engine as _;
@@ -349,6 +384,104 @@ pub(crate) async fn registered_devices(
         .into_iter()
         .map(|p| (p.user_id, p.device_id))
         .collect())
+}
+
+// ── Device enrollment, recovery, audit ───────────────────────────────────────
+
+/// One device-enrollment request, addressed by its id.
+///
+/// UNSIGNED (`ds_post_plain`) when `want_approval_fields` is false, because the
+/// polling device has no credential at all and cannot acquire one: it has no
+/// signing key (that is what it is enrolling to get), and its OTP session is
+/// guaranteed to have expired first — the DS session TTL and the enrollment TTL
+/// are both 600s, and the session is minted at `verify-otp`, STRICTLY BEFORE the
+/// request is created. Possession of the 128-bit `request_id` is the gate, which
+/// is sound because `wrapped_account_key` is sealed to an ephemeral X25519 key
+/// whose private half never leaves the requesting process's memory.
+///
+/// With `want_approval_fields` it is DEVICE-SIGNED instead: the approval columns
+/// (`verification_code`, `new_device_ephemeral_pub`) authorize the enrollment,
+/// so the DS serves them only to an enrolled sibling that owns the account.
+pub(crate) async fn enrollment_request(
+    state: &Arc<AppState>,
+    request_id: &str,
+    want_approval_fields: bool,
+) -> Result<Option<ar::EnrollmentRequestRow>> {
+    let body = ar::EnrollmentRequestBody {
+        request_id: request_id.to_string(),
+        want_approval_fields,
+    };
+    let resp = if want_approval_fields {
+        crate::commands::mls::ds_post(state, &body).await?
+    } else {
+        crate::commands::mls::ds_post_plain(state, &body).await?
+    };
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!("read/enrollment {status}: {txt}")));
+    }
+    Ok(crate::commands::mls::decode_response::<ar::EnrollmentRequestBody>(resp)
+        .await?
+        .request)
+}
+
+/// The authenticated user's still-open enrollment requests, newest first.
+pub(crate) async fn pending_enrollments(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<Vec<ar::EnrollmentRequestRow>> {
+    let body = ar::PendingEnrollmentsBody {
+        user_id: Some(user_id.to_string()),
+    };
+    Ok(ds_post_json(state, &body).await?.requests)
+}
+
+/// The Secret-Key-wrapped account identity: `(salt, nonce, wrapped_key)`.
+///
+/// OTP-SESSION credential. The caller is recovering an account on a device that
+/// has nothing — no signing key, no local DB — so the only thing it can present
+/// is the email OTP it just verified, which is the authorization this flow has
+/// always actually rested on. The DS records a security event per fetch.
+pub(crate) async fn recovery_blob(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<Option<(Vec<u8>, Vec<u8>, Vec<u8>)>> {
+    let body = ar::RecoveryBlobBody {
+        user_id: user_id.to_string(),
+    };
+    let resp = crate::commands::mls::ds_post_signed_or_session(state, &body).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "read/recovery-blob {status}: {txt}"
+        )));
+    }
+    let blob = crate::commands::mls::decode_response::<ar::RecoveryBlobBody>(resp)
+        .await?
+        .blob;
+    match blob {
+        Some(b) => Ok(Some((
+            decode_b64("recovery salt", &b.salt)?,
+            decode_b64("recovery nonce", &b.nonce)?,
+            decode_b64("recovery wrapped_key", &b.wrapped_key)?,
+        ))),
+        None => Ok(None),
+    }
+}
+
+/// The account's own security-event log, most recent first.
+pub(crate) async fn security_events(
+    state: &Arc<AppState>,
+    user_id: &str,
+    limit: i64,
+) -> Result<Vec<ar::SecurityEventRow>> {
+    let body = ar::SecurityEventsBody {
+        user_id: Some(user_id.to_string()),
+        limit: Some(limit),
+    };
+    Ok(ds_post_json(state, &body).await?.events)
 }
 
 // ── Objects ──────────────────────────────────────────────────────────────────

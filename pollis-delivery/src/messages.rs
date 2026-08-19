@@ -3153,6 +3153,8 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: msg_sent_at.to_string(),
                 sealed: 1,
+                // No push from a unit test — these assert envelope columns.
+                push_to: None,
             },
         )
         .await
@@ -3301,6 +3303,8 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: client_stamp(base, 999_999_999),
                 sealed: 1,
+                // No push from a unit test — these assert envelope columns.
+                push_to: None,
             },
         )
         .await
@@ -3388,6 +3392,8 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: boundary.clone(),
                 sealed: 1,
+                // No push from a unit test — these assert envelope columns.
+                push_to: None,
             },
         )
         .await

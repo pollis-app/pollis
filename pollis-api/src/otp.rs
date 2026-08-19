@@ -42,4 +42,18 @@ pub struct VerifyOtpResponse {
     pub session_token: String,
     /// Unix seconds.
     pub session_expires_at: i64,
+    /// The account's published `account_id_pub`, base64, when it has one
+    /// (`has_identity`).
+    ///
+    /// Rides on the verify (#987) because the client's orphan check —
+    /// "does the server's account identity still match the key this device
+    /// holds?" — needs the actual bytes, and the row was read to compute
+    /// `has_identity` two lines away. It used to be a second, direct
+    /// `SELECT account_id_pub FROM users` from the client, which is exactly the
+    /// kind of read the client no longer has a credential for. It is also
+    /// strictly not a disclosure: it is this caller's OWN account, the OTP just
+    /// proved control of the mailbox, and the value is a PUBLIC key that every
+    /// member of every shared group already receives inside device certs.
+    #[serde(default)]
+    pub account_id_pub: Option<String>,
 }

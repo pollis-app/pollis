@@ -300,7 +300,7 @@ endpoints! {
     Client   account::SecurityEventBody         => "/v1/security-events",                StatusOk;
     Client   account::ApproveEnrollmentBody     => "/v1/enrollment/approve",             StatusOk;
     Client   account::RejectEnrollmentBody      => "/v1/enrollment/reject",              StatusOk;
-    Client   account::RevokeDeviceBody          => "/v1/devices/revoke",                 StatusOk;
+    Client   account::RevokeDeviceBody          => "/v1/devices/revoke",                 account::DeviceRevoked;
     Client   account::LogoutDeviceBody          => "/v1/auth/logout",                    StatusOk;
 
     // ── OTP + bootstrap ──────────────────────────────────────────────────────
@@ -311,7 +311,7 @@ endpoints! {
     Client   bootstrap::PublishCertBody         => "/v1/auth/publish-device-cert",       StatusOk;
     Client   bootstrap::EnrollmentRequestBody   => "/v1/auth/enrollment-request",        StatusOk;
     Client   email_change::RequestEmailChangeBody => "/v1/auth/request-email-change-otp", StatusOk;
-    Client   email_change::VerifyEmailChangeBody  => "/v1/auth/verify-email-change",      StatusOk;
+    Client   email_change::VerifyEmailChangeBody  => "/v1/auth/verify-email-change",      email_change::EmailChanged;
 
     // ── Authorized-secrets broker (#393) ─────────────────────────────────────
     Client   broker::LivekitTokenBody           => "/v1/livekit/token",                  broker::LivekitTokenResponse;
@@ -640,8 +640,9 @@ mod tests {
                 has_identity: true,
                 session_token: "s".into(),
                 session_expires_at: 42,
+                account_id_pub: Some("AQID".into()),
             },
-            r#"{"user_id":"u","username":"alice","is_new_account":false,"has_identity":true,"session_token":"s","session_expires_at":42}"#,
+            r#"{"user_id":"u","username":"alice","is_new_account":false,"has_identity":true,"session_token":"s","session_expires_at":42,"account_id_pub":"AQID"}"#,
         );
     }
 

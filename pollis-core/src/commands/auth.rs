@@ -198,24 +198,9 @@ async fn verify_otp_ds(
     let session_token = v.session_token;
 
     // Orphan-detection for a returning device whose server identity no longer
-    // matches the local key (a reset elsewhere). Mirrors the direct path.
+    // matches the local key (a reset elsewhere).
     if has_identity {
-        let remote_pub = read_account_id_pub(state, &user_id).await.unwrap_or(None);
-        if let Some(pub_bytes) = remote_pub {
-            let matches = crate::commands::account_identity::has_matching_local_account_identity(
-                state, &user_id, &pub_bytes,
-            )
-            .await
-            .unwrap_or(false);
-            if !matches {
-                if let Err(e) =
-                    crate::commands::account_identity::wipe_local_account_identity(state, &user_id)
-                        .await
-                {
-                    eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
-                }
-            }
-        }
+        reconcile_account_identity(state, &user_id, v.account_id_pub.as_deref()).await;
     }
 
     let new_secret_key = if !has_identity {
@@ -357,22 +342,40 @@ async fn verify_otp_ds(
     Ok(profile)
 }
 
-/// Read `users.account_id_pub` for `user_id` from the remote DB (still a direct
-/// read — Slice 3 downgrades the token to read-only but reads stay direct).
-async fn read_account_id_pub(
+/// Drop this device's local account key when the server's account identity is a
+/// DIFFERENT one — the signature of a reset performed on another device.
+///
+/// `account_id_pub` is the value the just-completed verify-otp reported for this
+/// account (#987); it used to be a second, direct `SELECT` from the client.
+///
+/// Fails SAFE in both directions: an absent or unparseable value leaves the
+/// local key alone (a wipe is destructive and must never be triggered by a
+/// missing field), and only a value that decodes AND fails to match wipes.
+async fn reconcile_account_identity(
     state: &Arc<AppState>,
     user_id: &str,
-) -> Result<Option<Vec<u8>>> {
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT account_id_pub FROM users WHERE id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    match rows.next().await? {
-        Some(row) => Ok(row.get::<Option<Vec<u8>>>(0).ok().flatten()),
-        None => Ok(None),
+    account_id_pub: Option<&str>,
+) {
+    use base64::Engine as _;
+    let Some(encoded) = account_id_pub else {
+        return;
+    };
+    let Ok(pub_bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+        eprintln!("[auth] verify-otp returned an undecodable account_id_pub; leaving local key");
+        return;
+    };
+    let matches = crate::commands::account_identity::has_matching_local_account_identity(
+        state, user_id, &pub_bytes,
+    )
+    .await
+    .unwrap_or(false);
+    if matches {
+        return;
+    }
+    if let Err(e) =
+        crate::commands::account_identity::wipe_local_account_identity(state, user_id).await
+    {
+        eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
     }
 }
 
@@ -401,6 +404,27 @@ async fn ensure_device_id(
     Ok(device_id)
 }
 
+/// Resolve an email address to a `user_id` from the LOCAL accounts index.
+///
+/// The only such lookup available pre-unlock: the local DB is closed (so there
+/// is no device signer) and no OTP has run (so there is no session), which
+/// leaves no credential for a DS read — and #987 removed the direct
+/// `SELECT id FROM users WHERE email = ?` that used to serve these call sites.
+/// `None` means "this machine has not signed into that address before", which is
+/// exactly the condition under which both callers want the fresh-device path.
+fn local_user_id_for_email(email: &str) -> Option<String> {
+    let index = crate::accounts::read_accounts_index().ok()?;
+    index
+        .accounts
+        .iter()
+        .find(|a| {
+            a.email
+                .as_deref()
+                .is_some_and(|e| e.eq_ignore_ascii_case(email))
+        })
+        .map(|a| a.user_id.clone())
+}
+
 /// For a RETURNING, not-yet-enrolled device, return its existing stable
 /// `device_id` so `verify_otp_ds` can bind the OTP session to it (rather than a
 /// throwaway candidate) — the prerequisite for minting an `enrollment_session`
@@ -414,12 +438,7 @@ async fn ensure_device_id(
 /// enrollment check reads the keystore, not the still-locked DB, so it is valid
 /// here pre-unlock (same call site semantics as the `enrollment_required` calc).
 async fn stable_device_id_for_reenrollment(state: &Arc<AppState>, email: &str) -> Option<String> {
-    let index = crate::accounts::read_accounts_index().ok()?;
-    let user_id = index
-        .accounts
-        .iter()
-        .find(|a| a.email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(email)))
-        .map(|a| a.user_id.clone())?;
+    let user_id = local_user_id_for_email(email)?;
 
     let enrolled = crate::commands::account_identity::has_local_account_identity(state, &user_id)
         .await
@@ -438,14 +457,20 @@ async fn stable_device_id_for_reenrollment(state: &Arc<AppState>, email: &str) -
 
 /// Send an OTP to a new email address as part of the email-change flow.
 ///
-/// When a Delivery Service is configured the request is DEVICE-SIGNED and routed
-/// to `POST /v1/auth/request-email-change-otp` — the DS records `(authed user →
+/// The request is DEVICE-SIGNED and routed to
+/// `POST /v1/auth/request-email-change-otp` — the DS records `(authed user →
 /// new_email)`, generates/stores/emails the OTP keyed on the new email, and the
-/// client no longer touches `state.otp_store`, the Resend key, or `users` (it
-/// holds only a read-only token). The DS always 200s (anti-enumeration), so the
-/// uniqueness check moves to verify time. With no DS configured it falls back to
-/// the legacy client-side path: pre-check uniqueness, then `request_otp` keyed on
-/// the new email. See `docs/otp-server-bootstrap-design.md`.
+/// client never touches `state.otp_store`, the Resend key, or `users`. The DS
+/// always 200s (anti-enumeration), so the uniqueness check happens at verify
+/// time. See `docs/otp-server-bootstrap-design.md`.
+///
+/// #987 deleted the no-DS fallback that used to sit below this. It pre-checked
+/// uniqueness with a direct `SELECT id FROM users WHERE email = ?` and then ran
+/// the client-side OTP path — a path unreachable in any real deployment since
+/// #419 moved OTP server-side, and one that cannot exist at all now the client
+/// holds no database credential. Nothing is lost by its removal: the pre-check
+/// was a TOCTOU against a mailbox another account could claim in the interval,
+/// so verify time is where uniqueness has to be decided regardless.
 pub async fn request_email_change_otp(
     state: &Arc<AppState>,
     user_id: String,
@@ -456,35 +481,17 @@ pub async fn request_email_change_otp(
         return Err(anyhow::anyhow!("Email is required.").into());
     }
 
-    if state.config.pollis_delivery_url.is_some() {
-        // Device-signed: `authed` (== this user) is derived from the signature by
-        // `ds_post`; the body carries only the new email.
-        crate::commands::mls::ds_post_ok(
-            state,
-            &pollis_api::email_change::RequestEmailChangeBody {
-                new_email: trimmed,
-            },
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT id FROM users WHERE email = ?1",
-            libsql::params![trimmed.clone()],
-        )
-        .await?;
-    if let Some(row) = rows.next().await? {
-        let owner: String = row.get(0)?;
-        if owner == user_id {
-            return Err(anyhow::anyhow!("That's already your email address.").into());
-        }
-        return Err(anyhow::anyhow!("That email is already in use.").into());
-    }
-
-    request_otp(state, trimmed).await
+    // `authed` (== this user) is derived from the signature by `ds_post`; the
+    // body carries only the new email, so the caller-supplied id is unused.
+    let _ = user_id;
+    crate::commands::mls::ds_post_ok(
+        state,
+        &pollis_api::email_change::RequestEmailChangeBody {
+            new_email: trimmed,
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 /// Verify the OTP sent to a new email address and atomically swap
@@ -513,8 +520,19 @@ pub async fn verify_email_change(
         },
     )
     .await?;
-    match resp.status().as_u16() {
-        200 => {}
+    let username: Option<String> = match resp.status().as_u16() {
+        200 => {
+            // The username rides on the swap (#987): the accounts-index mirror
+            // below needs it, and reading it back afterwards was a round trip
+            // for a row the DS had just written — one that could observe a
+            // rename in between and stamp it as part of this change.
+            let pollis_api::email_change::EmailChanged::Ok { username } =
+                crate::commands::mls::decode_response::<
+                    pollis_api::email_change::VerifyEmailChangeBody,
+                >(resp)
+                .await?;
+            username
+        }
         401 => return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into()),
         429 => {
             return Err(anyhow::anyhow!("Too many attempts. Please request a new code.").into())
@@ -533,20 +551,11 @@ pub async fn verify_email_change(
             let txt = resp.text().await.unwrap_or_default();
             return Err(anyhow::anyhow!("verify-email-change failed ({s}): {txt}").into());
         }
-    }
+    };
 
     // Mirror the new email into the local accounts index so the login screen's
     // "continue as" picker shows the new address. Runs after the swap succeeds.
-    // A read of `users.username` is fine under the client's read-only token.
-    let conn = state.remote_db.conn().await?;
-    let mut name_rows = conn
-        .query(
-            "SELECT username FROM users WHERE id = ?1",
-            libsql::params![user_id.clone()],
-        )
-        .await?;
-    if let Some(row) = name_rows.next().await? {
-        let username: String = row.get(0)?;
+    if let Some(username) = username {
         if let Err(e) = crate::accounts::upsert_account(&user_id, &username, Some(&trimmed), None) {
             eprintln!("[auth] email-change accounts.json mirror failed: {e}");
         }
@@ -625,39 +634,31 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         enrollment_required: false,
     };
 
-    // Verify the user still exists in Turso. After an account deletion
-    // elsewhere the local record is stale and would cause FK errors.
-    // Network failures are treated as "assume valid" so a flaky
-    // connection at startup doesn't force re-authentication.
-    match state.remote_db.conn().await {
-        Ok(conn) => {
-            match conn.query(
-                "SELECT id FROM users WHERE id = ?1",
-                libsql::params![profile.id.clone()],
-            ).await {
-                Ok(mut rows) => {
-                    match rows.next().await {
-                        Ok(None) => {
-                            // Turso confirmed the user doesn't exist — stale local record.
-                            let _ = crate::accounts::remove_account(&profile.id);
-                            return Ok(None);
-                        }
-                        Ok(Some(_)) => {
-                            // User confirmed to exist — proceed.
-                        }
-                        Err(e) => {
-                            eprintln!("[session] failed to read Turso row ({e}); proceeding from accounts.json");
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[session] Turso query failed ({e}); proceeding from accounts.json");
-                }
-            }
-        }
+    // Verify the user still exists, and recompute the enrollment gate — ONE
+    // probe for both (#987 §6.5).
+    //
+    // This runs before PIN entry, so there is no credential of any kind: the
+    // local DB is closed (no signer), `device_id` is unset, and no OTP has run.
+    // Hence the unauthenticated probe. Both answers keep the biases they had:
+    //
+    //   * "user exists" fails OPEN — a network failure is "assume valid", so a
+    //     flaky connection at startup does not force re-authentication (#247).
+    //     Only a CONFIRMED `exists: false` removes the local record, which is
+    //     what a genuine account deletion elsewhere looks like.
+    //   * "has identity" fails to `false` — an unknown remote state skips the
+    //     enrollment gate this launch rather than trapping a logged-in user
+    //     behind it. An un-enrolled device still cannot read history (the keys
+    //     are not local); it is simply not *forced* through the gate offline.
+    let probe = match crate::commands::ds_reads::account_probe(state, &profile.id).await {
+        Ok(p) => Some(p),
         Err(e) => {
-            eprintln!("[session] Turso connection failed ({e}); proceeding from accounts.json");
+            eprintln!("[session] account probe failed ({e}); proceeding from accounts.json");
+            None
         }
+    };
+    if probe.as_ref().is_some_and(|p| !p.exists) {
+        let _ = crate::accounts::remove_account(&profile.id);
+        return Ok(None);
     }
 
     // The local DB is NOT opened here. The frontend's next call is
@@ -689,42 +690,14 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     // the gate while offline. Consistent with the network-tolerant
     // user-existence check above; only a confirmed `None` row (user
     // genuinely has no remote pubkey) and a present row are decisive.
-    let remote_pub: Option<Vec<u8>> = match state.remote_db.conn().await {
-        Ok(conn) => {
-            match conn
-                .query(
-                    "SELECT account_id_pub FROM users WHERE id = ?1",
-                    libsql::params![profile.id.clone()],
-                )
-                .await
-            {
-                Ok(mut rows) => match rows.next().await {
-                    Ok(Some(row)) => row.get::<Option<Vec<u8>>>(0).ok().flatten(),
-                    Ok(None) => None,
-                    Err(e) => {
-                        eprintln!("[session] enrollment-recompute row read failed ({e}); skipping gate this launch");
-                        None
-                    }
-                },
-                Err(e) => {
-                    eprintln!("[session] enrollment-recompute query failed ({e}); skipping gate this launch");
-                    None
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("[session] enrollment-recompute Turso connect failed ({e}); skipping gate this launch");
-            None
-        }
-    };
-
+    let has_remote_identity = probe.as_ref().is_some_and(|p| p.has_identity);
     let has_local_identity = crate::commands::account_identity::has_local_account_identity(
         state,
         &profile.id,
     )
     .await
     .unwrap_or(false);
-    profile.enrollment_required = remote_pub.is_some() && !has_local_identity;
+    profile.enrollment_required = has_remote_identity && !has_local_identity;
 
     Ok(Some(profile))
 }
@@ -810,27 +783,22 @@ fn dev_otp_code() -> String {
 /// production bootstrap invariants.
 #[cfg(debug_assertions)]
 async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfile> {
-    // Pre-resolve the account (if any) so we can reuse this device's stable
-    // device_id and bind the OTP session to it. A brand-new dev account has no
-    // row yet — the standard first-device DS bootstrap (verify_otp_ds via
-    // verify_otp) is already correct for that, so delegate.
-    let conn = state.remote_db.conn().await?;
-    let existing_user_id: Option<String> = {
-        let mut rows = conn
-            .query(
-                "SELECT id FROM users WHERE email = ?1",
-                libsql::params![email.clone()],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => Some(row.get::<String>(0)?),
-            None => None,
-        }
-    };
-    let user_id = match existing_user_id {
+    // Pre-resolve the account so we can reuse this device's stable device_id and
+    // bind the OTP session to it. Resolved from the LOCAL accounts index (#987):
+    // this runs pre-unlock, where no credential of any kind exists, and the
+    // index is written by every prior successful login on this machine.
+    //
+    // A miss means this machine has never signed into that address — so the
+    // keystore holds no device_id for it either, the "returning device" twist
+    // below would degenerate into a fresh candidate anyway, and the standard
+    // first-device DS bootstrap (verify_otp_ds via verify_otp) is the correct
+    // path. That covers both a brand-new dev account and a clean dev machine.
+    let user_id = match local_user_id_for_email(&email) {
         Some(uid) => uid,
         None => {
-            eprintln!("[auth] DEV_EMAIL: no existing account for {email}; first-device DS bootstrap");
+            eprintln!(
+                "[auth] DEV_EMAIL: no local account for {email}; first-device DS bootstrap"
+            );
             request_otp(state, email.clone()).await?;
             return verify_otp(state, email, dev_otp_code()).await;
         }
@@ -873,24 +841,10 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
     // Persist + publish the bound device_id into state.
     let device_id = ensure_device_id(state, &user_id, &bound_device_id).await?;
 
-    // Orphan-detection: a reset elsewhere leaves a stale local key. Mirror the
-    // direct path so the enrollment gate recomputes honestly.
+    // Orphan-detection: a reset elsewhere leaves a stale local key, so the
+    // enrollment gate recomputes honestly.
     if has_identity {
-        if let Some(pub_bytes) = read_account_id_pub(state, &user_id).await.unwrap_or(None) {
-            let matches = crate::commands::account_identity::has_matching_local_account_identity(
-                state, &user_id, &pub_bytes,
-            )
-            .await
-            .unwrap_or(false);
-            if !matches {
-                if let Err(e) =
-                    crate::commands::account_identity::wipe_local_account_identity(state, &user_id)
-                        .await
-                {
-                    eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
-                }
-            }
-        }
+        reconcile_account_identity(state, &user_id, v.account_id_pub.as_deref()).await;
     }
 
     // register-device (session-gated): creates/upserts the DS `user_device` row —
@@ -1063,28 +1017,20 @@ pub async fn delete_account(
     state: &Arc<AppState>,
     user_id: String,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    // ── Phase 1: Signal membership change ─────��──────────────────────
+    // ── Phase 1: Signal membership change ────────────────────────────
     // Broadcast membership_changed to all groups and DM channels the user
     // belongs to. Remaining online members will reconcile and remove the
     // deleting user's stale MLS leaves asynchronously. The user's local DB
     // (including MLS state) is wiped in Phase 3, so they can't decrypt
     // regardless.
+    //
+    // The enumeration is one DS read (#987) — the DS scopes it to the signer,
+    // so this can only ever list the caller's OWN conversations. It runs BEFORE
+    // the wipe below, which is the last moment the memberships still exist.
+    let mine = crate::commands::ds_reads::conversations(state, &user_id).await?;
 
-    // Enumerate all groups the user belongs to.
     {
-        let mut group_rows = conn.query(
-            "SELECT group_id FROM group_member WHERE user_id = ?1",
-            libsql::params![user_id.clone()],
-        ).await?;
-
-        let mut group_ids: Vec<String> = Vec::new();
-        while let Some(row) = group_rows.next().await? {
-            group_ids.push(row.get(0)?);
-        }
-
-        for gid in &group_ids {
+        for gid in &mine.group_ids {
             if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
                 &state.livekit, gid,
             ).await {
@@ -1093,19 +1039,8 @@ pub async fn delete_account(
         }
     }
 
-    // Enumerate all DM channels the user belongs to.
     {
-        let mut dm_rows = conn.query(
-            "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
-            libsql::params![user_id.clone()],
-        ).await?;
-
-        let mut dm_ids: Vec<String> = Vec::new();
-        while let Some(row) = dm_rows.next().await? {
-            dm_ids.push(row.get(0)?);
-        }
-
-        for dm_id in &dm_ids {
+        for dm_id in &mine.dm_ids {
             if let Err(e) = crate::commands::livekit::publish_to_room_server(
                 state,
                 dm_id,
@@ -1220,29 +1155,24 @@ pub async fn list_user_devices(
     user_id: String,
 ) -> Result<Vec<serde_json::Value>> {
     let current_device_id = state.device_id.lock().await.clone();
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn.query(
-        "SELECT device_id, device_name, created_at, last_seen FROM user_device \
-         WHERE user_id = ?1 AND revoked_at IS NULL \
-         ORDER BY created_at ASC",
-        libsql::params![user_id],
-    ).await?;
+    // Live devices only (`include_revoked: false`), oldest first — the DS
+    // preserves both the `revoked_at IS NULL` filter and the `created_at`
+    // ordering this list has always had.
+    let rows = crate::commands::ds_reads::devices(state, Some(&user_id), Vec::new(), false).await?;
 
-    let mut devices = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let did: String = row.get(0)?;
-        let name: Option<String> = row.get(1).ok();
-        let created: String = row.get(2)?;
-        let seen: String = row.get(3)?;
-        let is_current = current_device_id.as_deref() == Some(did.as_str());
-        devices.push(serde_json::json!({
-            "device_id": did,
-            "device_name": name,
-            "created_at": created,
-            "last_seen": seen,
-            "is_current": is_current,
-        }));
-    }
+    let devices = rows
+        .into_iter()
+        .map(|d| {
+            let is_current = current_device_id.as_deref() == Some(d.device_id.as_str());
+            serde_json::json!({
+                "device_id": d.device_id,
+                "device_name": d.device_name,
+                "created_at": d.created_at,
+                "last_seen": d.last_seen,
+                "is_current": is_current,
+            })
+        })
+        .collect();
 
     Ok(devices)
 }
@@ -1264,27 +1194,6 @@ pub async fn revoke_device(
         )));
     }
 
-    let conn = state.remote_db.conn().await?;
-
-    // Confirm the device belongs to this user before touching anything. The
-    // name comes back with it because after the row is tombstoned the audit
-    // entry below is the only place it can still be read from.
-    let mut owner_rows = conn
-        .query(
-            "SELECT device_name FROM user_device WHERE device_id = ?1 AND user_id = ?2",
-            libsql::params![device_id.clone(), user_id.clone()],
-        )
-        .await?;
-    let device_name: Option<String> = match owner_rows.next().await? {
-        Some(row) => row.get::<Option<String>>(0).ok().flatten(),
-        None => {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "device not found for this user"
-            )))
-        }
-    };
-    drop(owner_rows);
-
     // Drop the revoked device's unclaimed key packages (one-time-use, useless
     // now) and tombstone its row (issue #372 — a tombstone, not a hard-delete,
     // so other members' `verify_added_devices` can tell "revoked, drop rejoin"
@@ -1302,7 +1211,19 @@ pub async fn revoke_device(
         // the caller may do.
         user_id: Some(user_id.clone()),
     };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    // The response carries the name the device had at the moment it was revoked
+    // (#987) — the audit entry below is the only place it can still be read once
+    // the row is tombstoned, and it used to be a separate client SELECT that ran
+    // BEFORE the write, so a device revoked concurrently was named by a read
+    // that had already gone stale.
+    let device_name = match crate::commands::mls::ds_post_json(state, &body).await? {
+        pollis_api::account::DeviceRevoked::Ok { device_name } => device_name,
+        pollis_api::account::DeviceRevoked::NotFound => {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "device not found for this user"
+            )))
+        }
+    };
 
     // Append the revocation to the account's own security log (#947).
     //
@@ -1337,30 +1258,14 @@ pub async fn revoke_device(
     }
 
     // Collect every conversation the user belongs to (groups + DMs) so
-    // we can reconcile each one as the calling device.
-    let mut conversation_ids: Vec<String> = Vec::new();
-    {
-        let mut rows = conn
-            .query(
-                "SELECT group_id FROM group_member WHERE user_id = ?1",
-                libsql::params![user_id.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            conversation_ids.push(row.get::<String>(0)?);
-        }
-    }
-    {
-        let mut rows = conn
-            .query(
-                "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
-                libsql::params![user_id.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            conversation_ids.push(row.get::<String>(0)?);
-        }
-    }
+    // we can reconcile each one as the calling device. One DS read (#987),
+    // scoped by the DS to the signer's own memberships.
+    let mine = crate::commands::ds_reads::conversations(state, &user_id).await?;
+    let conversation_ids: Vec<String> = mine
+        .group_ids
+        .into_iter()
+        .chain(mine.dm_ids)
+        .collect();
 
     for cid in &conversation_ids {
         if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
@@ -1412,15 +1317,17 @@ pub async fn is_current_device_registered(
         Some(d) => d,
         None => return Ok(true),
     };
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM user_device \
-             WHERE user_id = ?1 AND device_id = ?2 AND revoked_at IS NULL",
-            libsql::params![user_id, device_id],
-        )
-        .await?;
-    Ok(rows.next().await?.is_some())
+    // `include_revoked: false` IS the `revoked_at IS NULL` predicate, now
+    // applied server-side (#987) — see the note above for why it is load-bearing.
+    // Asking for one id keeps this a point lookup rather than a device-list scan.
+    let rows = crate::commands::ds_reads::devices(
+        state,
+        Some(&user_id),
+        vec![device_id.clone()],
+        false,
+    )
+    .await?;
+    Ok(rows.iter().any(|d| d.device_id == device_id))
 }
 
 #[cfg(test)]
