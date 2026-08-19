@@ -48,12 +48,13 @@ desktop app, and it builds/tests headlessly in-box (`--no-default-features`).
 │         ▼                                   │
 │  pollis_core::commands::*  (&Arc<AppState>) │
 │         │                                   │
-│  AppState { Config, RemoteDb, log_db,       │
-│             file Keystore, local DB }       │
+│  AppState { Config, file Keystore,          │
+│             local DB }                      │
 └─────────────────────────────────────────────┘
-        │ reads (direct)        │ writes (via DS)
-        ▼                       ▼
-      Turso libSQL        pollis-delivery  ──► LiveKit / R2 (unused v1)
+                 │ every remote read AND write (#987)
+                 ▼
+          pollis-delivery ──► Turso libSQL
+                          ──► LiveKit / R2 (unused v1)
 ```
 
 - **No Tauri.** Do **not** build a `tauri::App` or use the `#[tauri::command]`
