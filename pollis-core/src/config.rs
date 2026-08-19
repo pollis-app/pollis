@@ -5,15 +5,21 @@ use crate::error::{Error, Result};
 pub use pollis_relay::OverlayMode;
 
 #[derive(Debug, Clone)]
+/// The client's compile-time configuration.
+///
+/// **No database credential appears here (#987).** `TURSO_URL`, `TURSO_TOKEN`,
+/// `LOG_DB_URL` and `LOG_DB_TOKEN` were baked in with `option_env!` and reached
+/// every shipped binary; the client now speaks only to the Delivery Service, so
+/// there is nothing to bake. Removing the FIELDS is what makes that permanent —
+/// a future read cannot quietly reintroduce a connection when no URL and no
+/// token exist to make one with, and `pollis-core` no longer depends on
+/// `libsql` either.
+///
+/// Note for anyone adding a compile-time input here: `scripts/check-build-recipe.py`
+/// enforces `desktop-release.yml` ⊆ `rebuild-verify.yml` ⊆ the `option_env!`
+/// keys below, so a new value must be added to the release workflow AND the
+/// reproducer's recipe, or independent Linux reproduction breaks.
 pub struct Config {
-    pub turso_url: String,
-    pub turso_token: String,
-    /// Optional read-only connection to the commit-log Turso DB (the future
-    /// home of `mls_commit_log` / `mls_welcome` / `mls_group_info`). When both
-    /// are set, `AppState.log_db` connects here; otherwise it falls back to
-    /// `remote_db` so behavior is unchanged pre-cutover. See `docs/goal-a-commit-log-sole-writer.md`.
-    pub log_db_url: Option<String>,
-    pub log_db_token: Option<String>,
     /// R2 S3 endpoint. Non-secret — retained only to build the display `url`
     /// returned from uploads. All R2 access credentials moved server-side to the
     /// DS secrets broker (`/v1/r2/presign`); the client holds none. See #393.
@@ -97,24 +103,13 @@ impl Config {
         Ok(Self {
             // option_env! embeds the value at compile time (e.g. from GH Actions secrets).
             // Falls back to std::env::var for dev builds loaded via dotenvy.
-            turso_url:            require_env("TURSO_URL",        option_env!("TURSO_URL"))?,
-            turso_token:          require_env("TURSO_TOKEN",      option_env!("TURSO_TOKEN"))?,
-            // Optional: absent → log_db falls back to remote_db (tests / pre-cutover).
-            log_db_url: option_env!("LOG_DB_URL")
-                .map(|s| s.to_string())
-                .or_else(|| std::env::var("LOG_DB_URL").ok())
-                .filter(|s| !s.is_empty()),
-            log_db_token: option_env!("LOG_DB_TOKEN")
-                .map(|s| s.to_string())
-                .or_else(|| std::env::var("LOG_DB_TOKEN").ok())
-                .filter(|s| !s.is_empty()),
             r2_endpoint:          require_env("R2_S3_ENDPOINT",   option_env!("R2_S3_ENDPOINT"))?,
             r2_public_url:        require_env("R2_PUBLIC_URL",    option_env!("R2_PUBLIC_URL"))?,
             livekit_url: option_env!("LIVEKIT_URL")
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("LIVEKIT_URL").ok())
                 .unwrap_or_default(),
-            // Optional: absent → direct Turso writes; present → route through the DS.
+            // Absent → no remote backend at all (see the field's doc).
             pollis_delivery_url: option_env!("POLLIS_DELIVERY_URL")
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("POLLIS_DELIVERY_URL").ok())
@@ -166,34 +161,26 @@ fn require_env(key: &str, compiled: Option<&'static str>) -> Result<String> {
 
 #[cfg(any(test, feature = "test-harness"))]
 impl Config {
-    /// Build a Config for the integration-test harness. Loads `.env.test`
-    /// (searching up from the workspace) with override semantics so any
-    /// ambient `.env.development` values never leak into tests. R2 /
-    /// LiveKit fields are filled with placeholders — the harness does not
-    /// touch R2 or real-time media, and OTP delivery is routed through the
-    /// configured Delivery Service.
+    /// Build a Config for the integration-test harness.
+    ///
+    /// Reads nothing from the environment (#987). It used to load `.env.test`
+    /// and REQUIRE `TURSO_URL` / `TURSO_TOKEN` from it — CI provisioned both as
+    /// literal placeholders, because the harness always backed "remote Turso"
+    /// with a local libsql file and never dialled Turso at all. With the fields
+    /// gone there is nothing left to provision, so the requirement goes with
+    /// them: the suite now builds and runs with every `TURSO_*` and `LOG_DB_*`
+    /// variable unset, which is the property #987 is actually claiming.
+    ///
+    /// R2 / LiveKit fields are placeholders — the harness touches neither — and
+    /// the flows harness overrides `pollis_delivery_url` with its in-process DS.
     pub fn for_test() -> Result<Self> {
-        let env_path = find_env_test_file()?;
-        dotenvy::from_filename_override(&env_path)
-            .map_err(|e| Error::Config(format!("load {}: {e}", env_path.display())))?;
-
-        let turso_url = std::env::var("TURSO_URL")
-            .map_err(|_| Error::Config("TURSO_URL missing from .env.test".into()))?;
-        let turso_token = std::env::var("TURSO_TOKEN")
-            .map_err(|_| Error::Config("TURSO_TOKEN missing from .env.test".into()))?;
-
         Ok(Self {
-            turso_url,
-            turso_token,
-            // Tests use a single Turso instance; log_db falls back to remote_db.
-            log_db_url: None,
-            log_db_token: None,
             r2_endpoint: String::new(),
             r2_public_url: String::new(),
             livekit_url: String::new(),
             // Default None; the flows harness overrides this to its in-process
-            // DS URL, so integration tests exercise the real (signed) DS write
-            // path. There is no remaining direct-write path to exercise.
+            // DS URL, so integration tests exercise the real (signed) DS path.
+            // There is no other path left to exercise.
             pollis_delivery_url: None,
             // Overlay off in the integration harness — it exercises the direct
             // control-plane path. Overlay wiring has its own unit tests
@@ -207,24 +194,3 @@ impl Config {
     }
 }
 
-#[cfg(any(test, feature = "test-harness"))]
-fn find_env_test_file() -> Result<std::path::PathBuf> {
-    let start = std::env::current_dir()
-        .map_err(|e| Error::Config(format!("current_dir: {e}")))?;
-    let mut dir = start.as_path();
-    loop {
-        let candidate = dir.join(".env.test");
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-        dir = match dir.parent() {
-            Some(p) => p,
-            None => {
-                return Err(Error::Config(format!(
-                    ".env.test not found walking up from {}",
-                    start.display()
-                )))
-            }
-        };
-    }
-}

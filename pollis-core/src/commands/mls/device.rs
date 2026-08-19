@@ -254,17 +254,29 @@ pub async fn ensure_device_cert(
         load_device_cert_pubs(&provider, user_id, device_id)?
     };
 
-    // 2. Read the current identity_version for this user from the remote
-    //    `users` table. Defaults to 1 if the column is NULL (shouldn't
-    //    happen post-migration-13 but is defensive).
-    let identity_version: u32 = crate::commands::ds_reads::account_status(state, user_id)
+    // 2. Read the current identity_version to stamp into the cert.
+    //
+    //    Via the UNAUTHENTICATED account probe, not the authenticated
+    //    `account-status` read, because of the bootstrap pivot documented at
+    //    step 4: this runs on a device whose `user_device.mls_signature_pub` is
+    //    still NULL, which is the exact column the DS reads to verify a
+    //    signature — so a device-signed read here 401s on every first signup and
+    //    on every sibling-approval enrollment. A session does not close the gap
+    //    either; the enrollment path deliberately publishes on cert-validity
+    //    alone because a human approval outlives the session TTL.
+    //
+    //    `identity_version` is public by construction (it is stamped in the
+    //    clear into every device cert every group member reads), so the probe is
+    //    the right place for it. Defaults to 1 when the column is NULL —
+    //    defensive; it should not happen post-migration-13.
+    let identity_version: u32 = crate::commands::ds_reads::account_probe(state, user_id)
         .await?
-        .map(|a| a.identity_version as u32)
+        .identity_version
         .ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!(
-                "user {user_id} not found while signing device cert"
+                "user {user_id} has no account identity while signing device cert"
             ))
-        })?;
+        })? as u32;
 
     // 3. Sign the cert with the account identity key loaded from the OS
     //    keystore, using the current unix time as `issued_at`.

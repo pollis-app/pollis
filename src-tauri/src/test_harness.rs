@@ -124,8 +124,6 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::messages::read_last_messages,
             crate::commands::messages::read_thread_messages,
             crate::commands::messages::list_thread_summaries,
-            crate::commands::messages::list_messages_by_sender,
-            crate::commands::messages::list_channel_previews,
             crate::commands::messages::search_messages,
             crate::commands::messages::add_reaction,
             crate::commands::messages::remove_reaction,
@@ -229,15 +227,14 @@ pub const LOG_TABLES: [&str; 3] = ["mls_commit_log", "mls_welcome", "mls_group_i
 
 /// Apply the commit-log DB schema (the three MLS control-plane tables) to a
 /// genuinely separate libsql file. Idempotent (`CREATE TABLE IF NOT EXISTS`).
-pub async fn bootstrap_log_schema(log: &crate::db::remote::RemoteDb) -> Result<()> {
-    let conn = log.conn().await?;
-    run_sql_script(&conn, LOG_DB_SCHEMA, "log-db schema").await?;
+pub async fn bootstrap_log_schema(conn: &libsql::Connection) -> Result<()> {
+    run_sql_script(conn, LOG_DB_SCHEMA, "log-db schema").await?;
     // Post-baseline log-DB migrations (mirrors db-apply.sh's second apply). The
     // log DB is fresh per test run and each migration is idempotent
     // (CREATE ... IF NOT EXISTS + a dedupe DELETE that's a no-op on empty data),
     // so applying them unconditionally matches the prod schema without gating.
     for (_version, description, sql) in POST_BASELINE_LOG_MIGRATIONS {
-        run_sql_script(&conn, sql, &format!("log migration {description}")).await?;
+        run_sql_script(conn, sql, &format!("log migration {description}")).await?;
     }
     Ok(())
 }
@@ -246,8 +243,7 @@ pub async fn bootstrap_log_schema(log: &crate::db::remote::RemoteDb) -> Result<(
 /// creates them (they still ship in the main schema for old clients), but in
 /// the split-DB harness they must live ONLY on the log DB so a misrouted query
 /// — a `log_db` table read on the main connection — fails with "no such table".
-pub async fn drop_log_tables_from_main(remote: &crate::db::remote::RemoteDb) -> Result<()> {
-    let conn = remote.conn().await?;
+pub async fn drop_log_tables_from_main(conn: &libsql::Connection) -> Result<()> {
     for t in LOG_TABLES {
         conn.execute(&format!("DROP TABLE IF EXISTS {t}"), ())
             .await
@@ -258,9 +254,7 @@ pub async fn drop_log_tables_from_main(remote: &crate::db::remote::RemoteDb) -> 
 
 /// Apply the baseline schema to the shared test DB if it hasn't been applied
 /// yet. Idempotent: safe to call on every test run.
-pub async fn bootstrap_schema(remote: &crate::db::remote::RemoteDb) -> Result<()> {
-    let conn = remote.conn().await?;
-
+pub async fn bootstrap_schema(conn: &libsql::Connection) -> Result<()> {
     // `users` is created by the baseline and never dropped — use it as a
     // marker for "baseline already applied."
     let has_baseline = conn
@@ -411,20 +405,13 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 /// doesn't look un-migrated after a wipe.
 ///
 /// The order matters: child tables come before parent tables so FK cascades
-/// don't fire redundantly. `libsql::Connection` doesn't expose transactions
-/// for remote databases here, so we rely on CASCADE and delete in order.
-pub async fn wipe_remote(
-    remote: &crate::db::remote::RemoteDb,
-    log: &crate::db::remote::RemoteDb,
-) -> Result<()> {
-    // A ~4-minute serialized test run leaves the shared libsql `Database`
-    // handle idle between scenarios. Turso / intermediate hops occasionally
-    // tear that TCP connection down, and the next operation surfaces as
-    // "Connection reset by peer" or "stream not found". Force a fresh
-    // handle at the start of every wipe so each scenario starts clean.
-    remote.reconnect().await?;
-    log.reconnect().await?;
-
+/// don't fire redundantly, and we rely on CASCADE rather than a transaction.
+///
+/// Takes bare connections since #987: the harness's "remote" is a local libsql
+/// file owned by the in-process DS, so the reconnect-on-transient-error dance
+/// this used to do — a defence against Turso tearing an idle TCP connection
+/// down mid-run — has nothing left to defend against.
+pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) -> Result<()> {
     // MAIN DB: tables that reference others first, then roots. The list covers
     // the base schema + every table added by migrations 000001–000015. The
     // three MLS control-plane tables (`mls_commit_log`, `mls_welcome`,
@@ -462,23 +449,13 @@ pub async fn wipe_remote(
     Ok(())
 }
 
-/// DELETE every row from `tables` on `db`, reconnecting + retrying on transient
-/// libsql errors. Shared by the main- and log-DB wipes.
-async fn wipe_tables(db: &crate::db::remote::RemoteDb, tables: &[&str]) -> Result<()> {
+/// DELETE every row from `tables` on `conn`. Shared by the main- and log-DB
+/// wipes.
+async fn wipe_tables(conn: &libsql::Connection, tables: &[&str]) -> Result<()> {
     for t in tables {
-        let mut attempts = 0;
-        loop {
-            let conn = db.conn().await?;
-            match conn.execute(&format!("DELETE FROM {t}"), ()).await {
-                Ok(_) => break,
-                Err(e) if attempts < 2 && crate::db::remote::is_transient_libsql_error(&e) => {
-                    eprintln!("wipe {t}: transient libsql error, reconnecting and retrying: {e}");
-                    db.reconnect().await?;
-                    attempts += 1;
-                }
-                Err(e) => return Err(Error::Other(anyhow::anyhow!("wipe {t}: {e}"))),
-            }
-        }
+        conn.execute(&format!("DELETE FROM {t}"), ())
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("wipe {t}: {e}")))?;
     }
     Ok(())
 }

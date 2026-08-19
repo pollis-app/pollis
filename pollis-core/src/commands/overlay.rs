@@ -24,7 +24,6 @@
 //!   shim's routing policy mode live (a shared atomic the shim reads per request).
 //!   No shim restart, no DB reconnect.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use pollis_relay::OverlayMode;
@@ -85,42 +84,25 @@ fn current_mode(state: &Arc<AppState>) -> OverlayMode {
         .unwrap_or(OverlayMode::Off)
 }
 
-/// Off → non-off. Start the shim, publish it, then route the DBs through it. On
-/// any failure leave the previous (working, direct) state intact and surface the
-/// error — never a half-routed app (§10.1, Strict must not silent-direct).
+/// Off → non-off. Start the shim and publish it. On failure leave the previous
+/// (working, direct) state intact and surface the error — never a half-routed
+/// app (§10.1, Strict must not silent-direct).
+///
+/// #987 removed the second half of this function. It used to reconnect both
+/// libsql handles onto the shim after publishing it, with a rollback path for
+/// when that failed; there are no libsql handles left, so publishing the handle
+/// IS the routing — every overlaid caller reads `AppState::overlay_handle()` on
+/// its hot path and picks the shim up immediately.
 async fn start_and_route(state: &Arc<AppState>, mode: OverlayMode) -> Result<()> {
     let handle = crate::net::overlay::start_overlay_shim(state, mode).await?;
-    let shim_addr = handle.socks_addr();
-
-    // Publish first so the http_client hot path picks up the shim immediately.
     *state.overlay.lock().unwrap() = Some(Arc::new(handle));
-
-    // Then route libsql (both remote DBs) through the shim.
-    if let Err(e) = reconnect_dbs(state, Some(shim_addr)).await {
-        // Roll back: drop the handle (aborts the shim task) and restore direct.
-        *state.overlay.lock().unwrap() = None;
-        let _ = reconnect_dbs(state, None).await;
-        return Err(e);
-    }
     Ok(())
 }
 
-/// non-off → Off. Reconnect the DBs DIRECT first so an in-flight libsql rebuild
-/// can't race the shim task's abort, then drop the handle.
+/// non-off → Off. Dropping the stored handle aborts the shim's accept loop, and
+/// every caller's next `overlay_handle()` returns `None` — direct again.
 async fn stop_and_go_direct(state: &Arc<AppState>) -> Result<()> {
-    reconnect_dbs(state, None).await?;
-    // Dropping the stored handle aborts the shim's accept loop.
     *state.overlay.lock().unwrap() = None;
-    Ok(())
-}
-
-/// Point (or unpoint) both remote DBs at the shim. `log_db` is often the very
-/// same `Arc` as `remote_db` (unconfigured commit-log DB) — skip the duplicate.
-async fn reconnect_dbs(state: &Arc<AppState>, shim: Option<SocketAddr>) -> Result<()> {
-    state.remote_db.set_overlay_shim(shim).await?;
-    if !Arc::ptr_eq(&state.remote_db, &state.log_db) {
-        state.log_db.set_overlay_shim(shim).await?;
-    }
     Ok(())
 }
 

@@ -6,22 +6,18 @@
 //! way the TUI does), not through a `MockRuntime` webview + `invoke`.
 //!
 //! Shared world, mirroring production `pollis_delivery::AppState { db, log_db }`:
-//! - ONE writable main `RemoteDb` (users / groups / DMs / envelopes / auth) and
-//!   ONE `RemoteDb` for the commit log (`mls_commit_log` / `mls_welcome` /
-//!   `mls_group_info`) — two genuinely separate libsql files, so a misrouted
-//!   query fails loudly (the #420 split).
-//! - ONE in-process `pollis-delivery` axum server, bound on loopback, that both
-//!   clients' writes route through (their own `remote_db` handle is a read-only
-//!   `query_only_view`, so a stray direct write fails instead of silently
-//!   passing — the definitive "everything went through the DS" gate).
+//! - ONE main `Db` (users / groups / DMs / envelopes / auth) and ONE for the
+//!   commit log (`mls_commit_log` / `mls_welcome` / `mls_group_info`) — two
+//!   genuinely separate libsql files, so a misrouted query fails loudly (the
+//!   #420 split). Both belong to the DS.
+//! - ONE in-process `pollis-delivery` server, bound on loopback, that every
+//!   client read AND write routes through. Since #987 a client has no database
+//!   handle at all — `pollis-core` does not link `libsql` — so "everything went
+//!   through the DS" is a compile-time fact rather than something a `query_only`
+//!   PRAGMA had to catch at runtime.
 //!
-//! Each `TestClient` gets its OWN `AppState` + `InMemoryKeystore` + read-only
-//! main view, exactly like the flows `TestClient`.
-//!
-//! DS routes wired here are ONLY the ones the DM message path exercises — see the
-//! router in [`spawn_in_process_delivery`]. The handlers are copied
-//! verbatim-in-pattern from the flows harness (same `pollis_delivery::*::apply_*`
-//! calls); the harness-only fault-injection menu is dropped (not needed here).
+//! Each `TestClient` gets its OWN `AppState` + `InMemoryKeystore`, exactly like
+//! the flows `TestClient`.
 
 #![allow(dead_code)]
 
@@ -34,13 +30,10 @@ pub use driver::Driver;
 
 use std::sync::Arc;
 
-use axum::extract::State;
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
-use axum::response::{IntoResponse, Response};
 use pollis_core::accounts;
 use pollis_core::commands::{auth, dm, messages, pin};
 use pollis_core::config::Config;
-use pollis_core::db::remote::RemoteDb;
+use pollis_delivery::db::Db;
 use pollis_core::db::{
     BASELINE_SQL, LOG_DB_SCHEMA, POST_BASELINE_LOG_MIGRATIONS, POST_BASELINE_MIGRATIONS,
 };
@@ -58,8 +51,7 @@ const LOG_TABLES: [&str; 3] = ["mls_commit_log", "mls_welcome", "mls_group_info"
 
 // ─── Schema bootstrap (public `pollis_core::db` constants — no src-tauri dep) ──
 
-async fn bootstrap_schema(remote: &RemoteDb) -> anyhow::Result<()> {
-    let conn = remote.conn().await?;
+async fn bootstrap_schema(conn: &libsql::Connection) -> anyhow::Result<()> {
     // `users` is created by the baseline and never dropped — marker for "applied".
     let has_baseline = conn
         .query(
@@ -71,7 +63,7 @@ async fn bootstrap_schema(remote: &RemoteDb) -> anyhow::Result<()> {
         .await?
         .is_some();
     if !has_baseline {
-        run_sql_script(&conn, BASELINE_SQL).await?;
+        run_sql_script(conn, BASELINE_SQL).await?;
     }
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -113,9 +105,8 @@ async fn bootstrap_schema(remote: &RemoteDb) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn bootstrap_log_schema(log: &RemoteDb) -> anyhow::Result<()> {
-    let conn = log.conn().await?;
-    run_sql_script(&conn, LOG_DB_SCHEMA).await?;
+async fn bootstrap_log_schema(conn: &libsql::Connection) -> anyhow::Result<()> {
+    run_sql_script(conn, LOG_DB_SCHEMA).await?;
     // Post-baseline log-DB migrations (mirrors the flows harness + db-apply.sh's
     // second apply). Without these the log DB is missing e.g. migration 000002's
     // `mls_welcome` UNIQUE index, so the DS's idempotent welcome upsert
@@ -123,15 +114,14 @@ async fn bootstrap_log_schema(log: &RemoteDb) -> anyhow::Result<()> {
     // log DB is fresh per test and each migration is idempotent, so apply
     // unconditionally.
     for (_version, _description, sql) in POST_BASELINE_LOG_MIGRATIONS {
-        run_sql_script(&conn, sql).await?;
+        run_sql_script(conn, sql).await?;
     }
     Ok(())
 }
 
 /// Drop the three MLS control-plane tables from MAIN so a misrouted main-side
 /// read of them fails loudly (they live only on the log DB now).
-async fn drop_log_tables_from_main(remote: &RemoteDb) -> anyhow::Result<()> {
-    let conn = remote.conn().await?;
+async fn drop_log_tables_from_main(conn: &libsql::Connection) -> anyhow::Result<()> {
     for t in LOG_TABLES {
         conn.execute(&format!("DROP TABLE IF EXISTS {t}"), ()).await?;
     }
@@ -210,8 +200,8 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 /// pointing at the in-process DS, and the temp dir backing per-user SQLCipher
 /// DBs. Every client shares `main`/`log`; each opens its own read-only view.
 pub struct World {
-    pub main: Arc<RemoteDb>,
-    pub log: Arc<RemoteDb>,
+    pub main: Arc<Db>,
+    pub log: Arc<Db>,
     pub config: Config,
     // Kept alive so the temp dir (per-user DBs + libsql files) survives the test.
     _tmp: std::path::PathBuf,
@@ -250,31 +240,32 @@ pub async fn spawn_world() -> World {
     pollis_core::db::local::set_data_dir(&tmp);
 
     let main = Arc::new(
-        RemoteDb::connect_local(tmp.join("test_turso.db"))
+        Db::connect_local(tmp.join("test_turso.db").to_str().expect("utf-8 path"))
             .await
             .expect("connect main libsql"),
     );
-    bootstrap_schema(&main).await.expect("bootstrap main schema");
+    bootstrap_schema(&main.conn().await.expect("main conn"))
+        .await
+        .expect("bootstrap main schema");
 
     let log = Arc::new(
-        RemoteDb::connect_local(tmp.join("test_log.db"))
+        Db::connect_local(tmp.join("test_log.db").to_str().expect("utf-8 path"))
             .await
             .expect("connect log libsql"),
     );
-    bootstrap_log_schema(&log).await.expect("bootstrap log schema");
-    drop_log_tables_from_main(&main)
+    bootstrap_log_schema(&log.conn().await.expect("log conn"))
+        .await
+        .expect("bootstrap log schema");
+    drop_log_tables_from_main(&main.conn().await.expect("main conn"))
         .await
         .expect("drop log tables from main");
 
     let delivery_url = spawn_in_process_delivery(main.clone(), log.clone()).await;
 
-    // Config literal: turso/R2/livekit fields are placeholders (clients use the
-    // explicit `RemoteDb` handles, not these URLs); only the DS URL is real.
+    // Config literal: R2/livekit fields are placeholders (nothing here touches
+    // them); only the DS URL is real — since #987 it is the only backend there
+    // is.
     let config = Config {
-        turso_url: "libsql://placeholder.invalid".to_string(),
-        turso_token: "placeholder".to_string(),
-        log_db_url: None,
-        log_db_token: None,
         r2_endpoint: String::new(),
         r2_public_url: String::new(),
         livekit_url: String::new(),
@@ -297,804 +288,55 @@ pub async fn spawn_world() -> World {
 
 // ─── In-process Delivery Service ──────────────────────────────────────────────
 
-/// Two-handle DS state, mirroring production `pollis_delivery::AppState`.
-#[derive(Clone)]
-struct DsState {
-    main: Arc<RemoteDb>,
-    log: Arc<RemoteDb>,
-    otp: pollis_delivery::otp::OtpStore,
-    sessions: pollis_delivery::session::SessionStore,
-    otp_config: pollis_delivery::otp::OtpConfig,
-}
-
-/// The shared `{"status":"ok"}` success body.
+/// Boot the REAL `pollis-delivery` router on a dedicated OS thread + runtime, so
+/// the server outlives the per-test runtime.
 ///
-/// Typed through `pollis-api` (#922) rather than a `json!{}` literal: this file
-/// is a SECOND implementation of the DS's responses, so it is exactly the place
-/// a hand-written literal drifts from the real server without anything noticing.
-fn ds_ok() -> Response {
-    (StatusCode::OK, axum::Json(pollis_api::StatusOk::Ok)).into_response()
-}
-
-fn ds_bad_request() -> Response {
-    (StatusCode::BAD_REQUEST, "invalid body").into_response()
-}
-
-fn ds_internal_error(msg: String) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response()
-}
-
-fn ds_conflict(msg: &str) -> Response {
-    (
-        StatusCode::CONFLICT,
-        axum::Json(serde_json::json!({ "status": "conflict", "error": msg })),
-    )
-        .into_response()
-}
-
-fn ds_outcome(outcome: pollis_delivery::writes::WriteOutcome) -> Response {
-    match outcome {
-        pollis_delivery::writes::WriteOutcome::Ok => ds_ok(),
-        pollis_delivery::writes::WriteOutcome::Forbidden => {
-            pollis_delivery::error::AuthRejection::Forbidden.into_response()
-        }
-    }
-}
-
-fn b64d(s: &str) -> Option<Vec<u8>> {
-    use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.decode(s).ok()
-}
-
-fn now_u64() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-/// Verify the device signature over the raw body against the MAIN DB's
-/// `user_device` rows; return the authenticated user or a rejection response.
-async fn ds_auth(
-    remote: &RemoteDb,
-    method: &Method,
-    uri: &Uri,
-    headers: &HeaderMap,
-    body: &axum::body::Bytes,
-) -> Result<String, Response> {
-    let conn = remote
-        .conn()
-        .await
-        .map_err(|e| ds_internal_error(format!("conn: {e}")))?;
-    pollis_delivery::auth::verify_request(
-        &conn,
-        headers,
-        method.as_str(),
-        uri.path(),
-        body,
-        pollis_delivery::util::now_unix() as i64,
-    )
-    .await
-    .map_err(|rej| rej.into_response())
-}
-
-// ── /v1/commits — the MLS add/update/remove commit + GroupInfo + Welcomes ──────
-async fn delivery_submit(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    use pollis_delivery::commit::{SubmitBody, SubmitResponse};
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: SubmitBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    if parsed.sender_id != authed {
-        return pollis_delivery::error::AuthRejection::Forbidden.into_response();
-    }
-    let conn = match state.log.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::commit::submit_commit(&conn, &parsed).await {
-        Ok(outcome) => {
-            let code = match &outcome {
-                SubmitResponse::Accepted { .. } => StatusCode::OK,
-                SubmitResponse::Rejected { .. } => StatusCode::CONFLICT,
-            };
-            (code, axum::Json(outcome)).into_response()
-        }
-        Err(e) => ds_internal_error(format!("submit: {e}")),
-    }
-}
-
-// ── /v1/group-info — republish GroupInfo (member-gated) ───────────────────────
-async fn delivery_group_info(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::writes::GroupInfoBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let main_conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::writes::is_member(&main_conn, &parsed.conversation_id, &authed).await {
-        Ok(true) => {}
-        Ok(false) => return pollis_delivery::error::AuthRejection::Forbidden.into_response(),
-        Err(e) => return ds_internal_error(format!("is_member: {e}")),
-    }
-    let log_conn = match state.log.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::writes::apply_group_info(&log_conn, &parsed).await {
-        Ok(_) => ds_ok(),
-        Err(e) => ds_internal_error(format!("group_info: {e}")),
-    }
-}
-
-// ── /v1/welcomes/ack + /v1/welcomes/reset ─────────────────────────────────────
-async fn delivery_welcomes_ack(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::writes::AckBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.log.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::writes::ack_welcomes(&conn, &authed, &parsed.welcome_ids).await {
-        Ok(_) => ds_ok(),
-        Err(e) => ds_internal_error(format!("welcomes_ack: {e}")),
-    }
-}
-
-async fn delivery_welcomes_reset(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::writes::ResetBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.log.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::writes::reset_welcomes(&conn, &authed, parsed.device_id.as_deref()).await
-    {
-        Ok(_) => ds_ok(),
-        Err(e) => ds_internal_error(format!("welcomes_reset: {e}")),
-    }
-}
-
-// ── Domain A: messages/send + watermarks/advance + envelopes/gc (MAIN DB) ──────
-async fn delivery_messages_send(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::messages::SendMessageBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::messages::apply_send_message(&conn, Some(&authed), &parsed).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("messages/send: {e}")),
-    }
-}
-
-async fn delivery_watermarks_advance(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::messages::WatermarkBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::messages::apply_advance_watermark(&conn, Some(&authed), &parsed).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("watermarks/advance: {e}")),
-    }
-}
-
-async fn delivery_envelopes_gc(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::messages::EnvelopeGcBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    let stale = pollis_delivery::messages::watermark_stale_modifier();
-    match pollis_delivery::messages::apply_envelope_gc(&conn, Some(&authed), &parsed, &stale).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("envelopes/gc: {e}")),
-    }
-}
-
-// ── Domain C: dm/create + dm/accept (MAIN DB) ─────────────────────────────────
-async fn delivery_dm_create(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::profile::CreateDmBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::profile::apply_create_dm(&conn, Some(&authed), &parsed).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("dm/create: {e}")),
-    }
-}
-
-async fn delivery_dm_accept(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::profile::AcceptDmBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::profile::apply_accept_dm(&conn, Some(&authed), &parsed).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("dm/accept: {e}")),
-    }
-}
-
-// ── Domain D: key-packages (publish / claim / replenish) + devices/resign ──────
-async fn delivery_key_packages(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::devices::PublishKeyPackagesBody =
-        match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(_) => return ds_bad_request(),
-        };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::devices::apply_publish_key_packages(&conn, Some(&authed), &parsed).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("key-packages: {e}")),
-    }
-}
-
-async fn delivery_key_packages_claim(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    if let Err(resp) = ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        return resp;
-    }
-    let parsed: pollis_delivery::devices::ClaimKeyPackageBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::devices::apply_claim_key_package(&conn, &parsed).await {
-        Ok(o) => pollis_delivery::devices::claim_outcome_response::<pollis_delivery::devices::ClaimKeyPackageBody>(o),
-        Err(e) => ds_internal_error(format!("key-packages/claim: {e}")),
-    }
-}
-
-async fn delivery_key_packages_replenish(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::devices::ReplenishKeyPackagesBody =
-        match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(_) => return ds_bad_request(),
-        };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::devices::apply_replenish_key_packages(&conn, Some(&authed), &parsed).await
-    {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("key-packages/replenish: {e}")),
-    }
-}
-
-async fn delivery_devices_resign(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::devices::ResignDeviceCertsBody =
-        match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(_) => return ds_bad_request(),
-        };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::devices::apply_resign_device_certs(&conn, Some(&authed), &parsed).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("devices/resign: {e}")),
-    }
-}
-
-// ── Server-side OTP + bootstrap (Goal B): the signup path ──────────────────────
-async fn delivery_request_otp(State(state): State<DsState>, body: axum::body::Bytes) -> Response {
-    let parsed: pollis_delivery::otp::RequestOtpBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let email = parsed.email.trim().to_string();
-    if !email.is_empty() {
-        pollis_delivery::otp::process_request_otp(&state.otp, &state.otp_config, &email).await;
-    }
-    ds_ok()
-}
-
-async fn delivery_verify_otp(State(state): State<DsState>, body: axum::body::Bytes) -> Response {
-    let parsed: pollis_delivery::otp::VerifyOtpBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let email = parsed.email.trim().to_string();
-    let device_id = parsed.device_id.trim().to_string();
-    if email.is_empty() || device_id.is_empty() {
-        return ds_bad_request();
-    }
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::otp::apply_verify_otp(
-        &conn,
-        &state.otp,
-        &state.sessions,
-        &state.otp_config,
-        &email,
-        &parsed.code,
-        &device_id,
-    )
-    .await
-    {
-        Ok(result) => pollis_delivery::otp::verify_otp_response(result),
-        Err(e) => ds_internal_error(format!("verify-otp: {e}")),
-    }
-}
-
-async fn delivery_establish_identity(
-    State(state): State<DsState>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let claims =
-        match pollis_delivery::session::verify_session(&headers, &state.sessions, now_u64()) {
-            Ok(c) => c,
-            Err(rej) => return rej.into_response(),
-        };
-    let parsed: pollis_delivery::bootstrap::EstablishIdentityBody =
-        match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(_) => return ds_bad_request(),
-        };
-    let (pub_bytes, salt, nonce, wrapped) = match (
-        b64d(&parsed.account_id_pub),
-        b64d(&parsed.salt),
-        b64d(&parsed.nonce),
-        b64d(&parsed.wrapped_key),
-    ) {
-        (Some(p), Some(s), Some(n), Some(w)) => (p, s, n, w),
-        _ => return ds_bad_request(),
-    };
-    if pub_bytes.len() != pollis_core::commands::account_identity::MLDSA44_PUB_LEN {
-        return ds_bad_request();
-    }
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::bootstrap::apply_establish_identity(
-        &conn,
-        &claims.user_id,
-        &pub_bytes,
-        &salt,
-        &nonce,
-        &wrapped,
-    )
-    .await
-    {
-        Ok(pollis_delivery::bootstrap::EstablishOutcome::Applied) => ds_ok(),
-        Ok(pollis_delivery::bootstrap::EstablishOutcome::Conflict) => {
-            ds_conflict("identity already established")
-        }
-        Err(e) => ds_internal_error(format!("establish-identity: {e}")),
-    }
-}
-
-async fn delivery_register_device(
-    State(state): State<DsState>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let claims =
-        match pollis_delivery::session::verify_session(&headers, &state.sessions, now_u64()) {
-            Ok(c) => c,
-            Err(rej) => return rej.into_response(),
-        };
-    let parsed: pollis_delivery::bootstrap::RegisterDeviceBody =
-        match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(_) => return ds_bad_request(),
-        };
-    if parsed.device_id.trim().is_empty() || parsed.device_id != claims.device_id {
-        return pollis_delivery::error::AuthRejection::Forbidden.into_response();
-    }
-    let device_name = parsed
-        .device_name
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "device".to_string());
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::bootstrap::apply_register_device(
-        &conn,
-        &claims.user_id,
-        &claims.device_id,
-        &device_name,
-    )
-    .await
-    {
-        Ok(()) => ds_ok(),
-        Err(e) => ds_internal_error(format!("register-device: {e}")),
-    }
-}
-
-async fn delivery_publish_device_cert(
-    State(state): State<DsState>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let now = now_u64();
-    let parsed: pollis_delivery::bootstrap::PublishCertBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let cert_bytes = match b64d(&parsed.device_cert) {
-        Some(b) => b,
-        None => return ds_bad_request(),
-    };
-    let mls_sig_pub = match b64d(&parsed.mls_signature_pub) {
-        Some(b) => b,
-        None => return ds_bad_request(),
-    };
-    let mls_sig_pub_pq = match b64d(&parsed.mls_signature_pub_pq) {
-        Some(b) => b,
-        None => return ds_bad_request(),
-    };
-    if parsed.cert_issued_at < 0 {
-        return ds_bad_request();
-    }
-    let issued_at = parsed.cert_issued_at as u64;
-    let session_token = pollis_delivery::session::session_token(&headers)
-        .filter(|t| !t.is_empty())
-        .map(|t| t.to_string());
-    let session_claims = session_token
-        .as_ref()
-        .and_then(|t| state.sessions.resolve(t, now));
-    let (user_id, device_id, invalidate_token) = match session_claims {
-        Some(claims) => {
-            if parsed.device_id != claims.device_id {
-                return pollis_delivery::error::AuthRejection::Forbidden.into_response();
-            }
-            (claims.user_id, claims.device_id, session_token)
-        }
-        None => {
-            let uid = match parsed.user_id.as_deref().filter(|s| !s.trim().is_empty()) {
-                Some(u) => u.to_string(),
-                None => return pollis_delivery::error::AuthRejection::Unauthorized.into_response(),
-            };
-            (uid, parsed.device_id.clone(), None)
-        }
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::bootstrap::apply_publish_device_cert(
-        &conn,
-        &user_id,
-        &device_id,
-        &cert_bytes,
-        issued_at,
-        parsed.cert_identity_version,
-        &mls_sig_pub,
-        &mls_sig_pub_pq,
-    )
-    .await
-    {
-        Ok(pollis_delivery::bootstrap::PublishCertOutcome::Applied) => {
-            if let Some(token) = invalidate_token {
-                state.sessions.invalidate(&token);
-            }
-            ds_ok()
-        }
-        Ok(pollis_delivery::bootstrap::PublishCertOutcome::IdentityNotEstablished) => {
-            ds_conflict("account identity not established")
-        }
-        Ok(pollis_delivery::bootstrap::PublishCertOutcome::CertInvalid) => {
-            pollis_delivery::error::AuthRejection::Unauthorized.into_response()
-        }
-        Ok(pollis_delivery::bootstrap::PublishCertOutcome::DeviceNotRegistered) => {
-            ds_conflict("device not registered for this user")
-        }
-        Err(e) => ds_internal_error(format!("publish-device-cert: {e}")),
-    }
-}
-
-// ── Domains E + G (#419) — device-enrollment / security audit ─────────────────
-// Copied verbatim-in-pattern from the flows harness (`flows/harness.rs`): the
-// same `pollis_delivery::{bootstrap,account}::apply_*` calls the desktop DS runs.
-// Only the set the M4 enrollment + recovery flows touch is wired.
-
-// ── /v1/auth/enrollment-request — SESSION-gated INSERT of a pending request ────
-// The requesting (new) device is pre-credential (`mls_signature_pub` NULL), so
-// it cannot device-sign; the write authenticates via the `enrollment_session`
-// minted by re-login `verify_otp`. The DS binds user + device from the session.
-async fn delivery_enrollment_request(
-    State(state): State<DsState>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let claims =
-        match pollis_delivery::session::verify_session(&headers, &state.sessions, now_u64()) {
-            Ok(c) => c,
-            Err(rej) => return rej.into_response(),
-        };
-    let parsed: pollis_delivery::bootstrap::EnrollmentRequestBody =
-        match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(_) => return ds_bad_request(),
-        };
-    let ephemeral_pub = match b64d(&parsed.new_device_ephemeral_pub) {
-        Some(b) => b,
-        None => return ds_bad_request(),
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::bootstrap::apply_enrollment_request(
-        &conn,
-        &claims.user_id,
-        &claims.device_id,
-        &parsed.request_id,
-        &ephemeral_pub,
-        &parsed.verification_code,
-        &parsed.created_at,
-        &parsed.expires_at,
-    )
-    .await
-    {
-        Ok(()) => ds_ok(),
-        Err(e) => ds_internal_error(format!("enrollment-request: {e}")),
-    }
-}
-
-// ── /v1/enrollment/approve — DEVICE-signed by an already-enrolled sibling ──────
-async fn delivery_enrollment_approve(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::account::ApproveEnrollmentBody =
-        match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(_) => return ds_bad_request(),
-        };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::account::apply_approve_enrollment(&conn, Some(&authed), &parsed).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("enrollment/approve: {e}")),
-    }
-}
-
-// ── /v1/enrollment/reject — DEVICE-signed by an already-enrolled sibling ───────
-async fn delivery_enrollment_reject(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::account::RejectEnrollmentBody =
-        match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(_) => return ds_bad_request(),
-        };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::account::apply_reject_enrollment(&conn, Some(&authed), &parsed).await {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("enrollment/reject: {e}")),
-    }
-}
-
-// ── /v1/security-events — DEVICE-signed audit rows (best-effort in the client) ─
-async fn delivery_security_events(
-    State(state): State<DsState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
-        Ok(u) => u,
-        Err(resp) => return resp,
-    };
-    let parsed: pollis_delivery::account::SecurityEventBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return ds_bad_request(),
-    };
-    let conn = match state.main.conn().await {
-        Ok(c) => c,
-        Err(e) => return ds_internal_error(format!("conn: {e}")),
-    };
-    match pollis_delivery::account::apply_record_security_event(&conn, Some(&authed), &parsed).await
-    {
-        Ok(o) => ds_outcome(o),
-        Err(e) => ds_internal_error(format!("security-events: {e}")),
-    }
-}
-
-/// Boot the axum router with ONLY the routes the DM message path exercises, on a
-/// dedicated OS thread + runtime so the server outlives the per-test runtime.
-async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> String {
+/// # Why this is the real router now (#987)
+///
+/// This used to be ~900 lines of hand-rolled handlers: a second implementation
+/// of every endpoint the DM path touched, wired to the same `apply_*` functions
+/// but with its own routing table, its own auth glue and its own response
+/// bodies. It was already the wrong shape — a test double of a server is exactly
+/// where a hand-written literal drifts from the server without anything noticing
+/// — and #987 made it untenable: with every client READ now a `POST /v1/read/…`,
+/// the double would have had to grow twenty more handlers whose only job was to
+/// agree with the originals.
+///
+/// So it is gone, and this rig mounts `pollis_delivery::build_router_with_state`
+/// exactly as the flows harness does. Anything the TUI exercises is served by
+/// the code that serves it in production.
+async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     use std::sync::mpsc;
 
-    let state = DsState {
-        main,
-        log,
-        otp: pollis_delivery::otp::OtpStore::default(),
-        sessions: pollis_delivery::session::SessionStore::default(),
-        otp_config: pollis_delivery::otp::OtpConfig {
+    // Auth ENFORCED, like production and like the flows harness: the smokes
+    // drive the signed path end to end, so a regression in request signing or
+    // server-side authz fails here rather than in a release.
+    let state = pollis_delivery::AppState::new_with_log_db(main, log, true)
+        .with_otp_config(pollis_delivery::otp::OtpConfig {
             resend_api_key: None,
             dev_otp: Some(DEV_OTP.to_string()),
             ttl_secs: 600,
             session_ttl_secs: 600,
             resend_throttle_secs: 0,
             max_attempts: 5,
-        },
-    };
+        })
+        // Every request arrives from 127.0.0.1, so the production per-IP limits
+        // would read one test run as a single abusive client. Raised, not
+        // disabled — `ratelimit.rs`'s own unit tests pin the real numbers.
+        .with_ratelimit_config(pollis_delivery::ratelimit::RateLimitConfig {
+            request_otp_max: 1_000_000,
+            request_otp_window_secs: 1,
+            verify_otp_max: 1_000_000,
+            verify_otp_window_secs: 1,
+            write_max: 1_000_000,
+            write_window_secs: 1,
+            invite_redeem_max: 1_000_000,
+            invite_redeem_window_secs: 1,
+            read_max: 1_000_000,
+            read_window_secs: 1,
+            probe_max: 1_000_000,
+            probe_window_secs: 1,
+        });
 
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::Builder::new()
@@ -1105,78 +347,7 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                 .build()
                 .expect("delivery: build runtime");
             rt.block_on(async move {
-                let router = axum::Router::new()
-                    // MLS control plane
-                    .route("/v1/commits", axum::routing::post(delivery_submit))
-                    .route("/v1/group-info", axum::routing::post(delivery_group_info))
-                    .route("/v1/welcomes/ack", axum::routing::post(delivery_welcomes_ack))
-                    .route(
-                        "/v1/welcomes/reset",
-                        axum::routing::post(delivery_welcomes_reset),
-                    )
-                    // Messages / envelopes (MAIN DB)
-                    .route(
-                        "/v1/messages/send",
-                        axum::routing::post(delivery_messages_send),
-                    )
-                    .route(
-                        "/v1/watermarks/advance",
-                        axum::routing::post(delivery_watermarks_advance),
-                    )
-                    .route("/v1/envelopes/gc", axum::routing::post(delivery_envelopes_gc))
-                    // DM membership
-                    .route("/v1/dm/create", axum::routing::post(delivery_dm_create))
-                    .route("/v1/dm/accept", axum::routing::post(delivery_dm_accept))
-                    // Key packages + device certs
-                    .route("/v1/key-packages", axum::routing::post(delivery_key_packages))
-                    .route(
-                        "/v1/key-packages/claim",
-                        axum::routing::post(delivery_key_packages_claim),
-                    )
-                    .route(
-                        "/v1/key-packages/replenish",
-                        axum::routing::post(delivery_key_packages_replenish),
-                    )
-                    .route(
-                        "/v1/devices/resign",
-                        axum::routing::post(delivery_devices_resign),
-                    )
-                    // Signup / bootstrap
-                    .route(
-                        "/v1/auth/request-otp",
-                        axum::routing::post(delivery_request_otp),
-                    )
-                    .route("/v1/auth/verify-otp", axum::routing::post(delivery_verify_otp))
-                    .route(
-                        "/v1/auth/establish-identity",
-                        axum::routing::post(delivery_establish_identity),
-                    )
-                    .route(
-                        "/v1/auth/register-device",
-                        axum::routing::post(delivery_register_device),
-                    )
-                    .route(
-                        "/v1/auth/publish-device-cert",
-                        axum::routing::post(delivery_publish_device_cert),
-                    )
-                    // Device enrollment + recovery (Domains E + G) — M4
-                    .route(
-                        "/v1/auth/enrollment-request",
-                        axum::routing::post(delivery_enrollment_request),
-                    )
-                    .route(
-                        "/v1/enrollment/approve",
-                        axum::routing::post(delivery_enrollment_approve),
-                    )
-                    .route(
-                        "/v1/enrollment/reject",
-                        axum::routing::post(delivery_enrollment_reject),
-                    )
-                    .route(
-                        "/v1/security-events",
-                        axum::routing::post(delivery_security_events),
-                    )
-                    .with_state(state);
+                let router = pollis_delivery::build_router_with_state(state);
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                     .await
                     .expect("delivery: bind loopback");
@@ -1213,14 +384,6 @@ impl TestClient {
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
         let state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
-            // Read-only main view — mirrors the production read-only Turso token.
-            // Shares the writable handle's `Database` (sees the DS's writes with no
-            // WAL lag) but rejects any DIRECT write, so a client-side write that
-            // should have gone through the DS fails the test loudly.
-            Arc::new(world.main.query_only_view()),
-            // Log handle: client only reads it (welcomes / commits); DS is the
-            // sole writer.
-            world.log.clone(),
             keystore,
         ));
         Self {
@@ -1254,8 +417,6 @@ impl TestClient {
     pub fn new_persistent(world: &World) -> Self {
         let state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
-            Arc::new(world.main.query_only_view()),
-            world.log.clone(),
             default_os_keystore(),
         ));
         Self {
@@ -1277,8 +438,6 @@ impl TestClient {
         pollis_core::db::local::set_data_dir(&dir);
         let state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
-            Arc::new(world.main.query_only_view()),
-            world.log.clone(),
             default_os_keystore(),
         ));
         Self {
@@ -1305,8 +464,6 @@ impl TestClient {
         // keystore + local SQLCipher DB the previous instance wrote.
         self.state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
-            Arc::new(world.main.query_only_view()),
-            world.log.clone(),
             default_os_keystore(),
         ));
     }

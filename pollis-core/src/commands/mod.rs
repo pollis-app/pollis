@@ -60,7 +60,6 @@ pub mod r2;
 pub mod relay_serving;
 pub mod safety;
 pub mod transparency;
-pub mod turso_token;
 #[cfg(feature = "media")]
 pub mod sfx;
 // Terminal pane: real PTY backend on Unix desktop, Windows stub until

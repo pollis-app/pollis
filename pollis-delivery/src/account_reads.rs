@@ -697,17 +697,30 @@ pub async fn account_probe(
     let conn = state.db.conn().await?;
     let mut rows = conn
         .query(
-            "SELECT account_id_pub FROM users WHERE id = ?1",
+            "SELECT account_id_pub, identity_version FROM users WHERE id = ?1",
             libsql::params![parsed.user_id.clone()],
         )
         .await?;
-    let (exists, has_identity) = match rows.next().await? {
-        Some(row) => (true, row.get::<Option<Vec<u8>>>(0)?.is_some()),
-        None => (false, false),
+    // `identity_version` rides along for the bootstrap pivot — see the field's
+    // doc on `AccountProbeResponse`. It is served only for an account that HAS
+    // an identity, because a version without a key is not a fact any caller can
+    // use, and withholding it keeps this response's shape honest.
+    let (exists, has_identity, identity_version) = match rows.next().await? {
+        Some(row) => {
+            let has = row.get::<Option<Vec<u8>>>(0)?.is_some();
+            let version = if has {
+                Some(row.get::<Option<i64>>(1)?.unwrap_or(1))
+            } else {
+                None
+            };
+            (true, has, version)
+        }
+        None => (false, false, None),
     };
     Ok(ok_response::<AccountProbeBody>(AccountProbeResponse {
         exists,
         has_identity,
+        identity_version,
     }))
 }
 

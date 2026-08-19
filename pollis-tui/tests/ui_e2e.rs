@@ -125,15 +125,13 @@ async fn message_typed_on_one_ui_surfaces_on_the_others_rendered_screen() {
         "A's rendered pane should hold both messages, buffer:\n{alice_final}",
     );
 
-    // ── Invariant (mirrors the smokes): every write went through the DS. Each
-    //    client's main handle is a read-only view, so a direct write MUST fail —
-    //    proving neither the UI's send nor receive path reached around the DS. ──
-    for (label, state) in [("A", alice.state()), ("B", bob.state())] {
-        let conn = state.remote_db.conn().await.expect("main conn");
-        let direct_write = conn.execute("CREATE TABLE _should_not_write (x)", ()).await;
-        assert!(
-            direct_write.is_err(),
-            "{label}'s main handle must reject direct writes (query_only) — all writes go through the DS",
-        );
-    }
+    // ── Invariant: every read AND write went through the DS.
+    //
+    //    This used to be a runtime assertion: each client's main handle was a
+    //    `query_only` view, so a direct write had to fail. #987 replaced the
+    //    property with a stronger one that no runtime check can express —
+    //    `pollis-core` does not link `libsql` at all, so a client cannot open a
+    //    connection to open. The tripwire is
+    //    `pollis-core/tests/no_client_side_remote_reads.rs`, which fails if the
+    //    dependency ever comes back by any path.
 }

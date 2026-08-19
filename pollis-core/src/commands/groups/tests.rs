@@ -27,45 +27,51 @@ fn setup(conn: &Connection) {
 }
 
 // ── derive_slug ────────────────────────────────────────────────────────
+//
+// The function moved to `pollis-api` in #987 so the client and the DS derive a
+// slug from ONE implementation — `POST /v1/read/group-by-slug` runs it
+// server-side now, and two copies that agree today are exactly how a lookup
+// starts silently missing. These cases stay here because they are the client's
+// contract with it.
 
 #[test]
 fn slug_simple_name() {
-    assert_eq!(super::derive_slug("Test Group"), "test-group");
+    assert_eq!(pollis_api::directory::derive_slug("Test Group"), "test-group");
 }
 
 #[test]
 fn slug_special_characters_stripped() {
-    assert_eq!(super::derive_slug("Hello, World!"), "hello-world");
+    assert_eq!(pollis_api::directory::derive_slug("Hello, World!"), "hello-world");
 }
 
 #[test]
 fn slug_multiple_spaces_collapsed() {
-    assert_eq!(super::derive_slug("a   b"), "a-b");
+    assert_eq!(pollis_api::directory::derive_slug("a   b"), "a-b");
 }
 
 #[test]
 fn slug_leading_trailing_hyphens_trimmed() {
-    assert_eq!(super::derive_slug("-test-"), "test");
+    assert_eq!(pollis_api::directory::derive_slug("-test-"), "test");
 }
 
 #[test]
 fn slug_consecutive_hyphens_collapsed() {
-    assert_eq!(super::derive_slug("a---b"), "a-b");
+    assert_eq!(pollis_api::directory::derive_slug("a---b"), "a-b");
 }
 
 #[test]
 fn slug_mixed_case_lowered() {
-    assert_eq!(super::derive_slug("My Cool Group"), "my-cool-group");
+    assert_eq!(pollis_api::directory::derive_slug("My Cool Group"), "my-cool-group");
 }
 
 #[test]
 fn slug_already_clean() {
-    assert_eq!(super::derive_slug("simple"), "simple");
+    assert_eq!(pollis_api::directory::derive_slug("simple"), "simple");
 }
 
 #[test]
 fn slug_unicode_stripped() {
-    assert_eq!(super::derive_slug("café"), "caf");
+    assert_eq!(pollis_api::directory::derive_slug("café"), "caf");
 }
 
 // ── group queries ──────────────────────────────────────────────────────
@@ -713,7 +719,7 @@ fn search_group_by_slug_finds_match() {
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).unwrap();
     for r in rows {
         let (id, name) = r.unwrap();
-        if super::derive_slug(&name) == "test-group" {
+        if pollis_api::directory::derive_slug(&name) == "test-group" {
             found = Some(id);
             break;
         }
@@ -731,7 +737,7 @@ fn search_group_by_slug_no_match() {
     let mut stmt = conn.prepare("SELECT name FROM groups").unwrap();
     let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
     for r in rows {
-        if super::derive_slug(&r.unwrap()) == "nonexistent-group" {
+        if pollis_api::directory::derive_slug(&r.unwrap()) == "nonexistent-group" {
             found = true;
         }
     }

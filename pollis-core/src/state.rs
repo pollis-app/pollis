@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 
 use crate::config::Config;
-use crate::db::{local::LocalDb, remote::RemoteDb};
+use crate::db::local::LocalDb;
 use crate::keystore::{self, Keystore};
 use crate::commands::pin::UnlockState;
 #[cfg(feature = "media")]
@@ -28,14 +28,14 @@ pub struct OtpEntry {
 pub struct AppState {
     pub config: Config,
     /// None until a user logs in. Opened per-user as pollis_{user_id}.db.
+    ///
+    /// The ONLY database this process opens (#987). `remote_db` and `log_db`
+    /// used to sit beside it, each holding a whole-database Turso token baked
+    /// into the shipped binary; both are gone, along with `RemoteDb` and the
+    /// `libsql` dependency itself. Every remote read is now a signed
+    /// `POST /v1/read/...` on the Delivery Service, on the same transport as the
+    /// writes — see `commands/ds_reads.rs`.
     pub local_db: Arc<Mutex<Option<LocalDb>>>,
-    pub remote_db: Arc<RemoteDb>,
-    /// Read-only connection to the commit-log DB (`mls_commit_log` /
-    /// `mls_welcome` / `mls_group_info`). Falls back to `remote_db` when the
-    /// log DB isn't configured (tests / pre-cutover), so repointing reads here
-    /// is behaviorally inert until `LOG_DB_*` is set. Reads only — writes to the
-    /// three MLS tables still go through `remote_db` (and, post-cutover, the DS).
-    pub log_db: Arc<RemoteDb>,
     /// Pluggable secret store. Production wires an [`OsKeystore`]; integration
     /// tests inject an [`InMemoryKeystore`] per simulated client so multiple
     /// users coexist in one test process without sharing session tokens or
@@ -182,44 +182,29 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Nothing to connect to any more (#987) — this stays `async` because its
+    /// callers await it, and because the overlay is applied AFTERWARDS, by the
+    /// shell calling `commands::overlay::apply_overlay_mode(&state,
+    /// config.overlay_mode)` on the `Arc`-wrapped state. That keeps boot on the
+    /// SAME runtime code path a settings toggle uses (design §14). Off by
+    /// default: with the overlay off no shim is ever started.
     pub async fn new(config: Config) -> crate::error::Result<Self> {
-        // Build both remote DBs on the DIRECT path. The overlay is applied AFTER
-        // the state is wrapped in an `Arc` — the shell calls
-        // `commands::overlay::apply_overlay_mode(&state, config.overlay_mode)` at
-        // boot to honor `POLLIS_OVERLAY` through the SAME runtime code path a
-        // settings toggle uses (design §14: boot = construct DBs direct, then
-        // apply the mode). Off-by-default: with the overlay off this is
-        // byte-for-byte the pre-overlay direct path and no shim is ever started.
-        let remote_db = Arc::new(RemoteDb::connect(&config.turso_url, &config.turso_token).await?);
-        // Read-only commit-log DB when configured; otherwise reuse remote_db so
-        // behavior is unchanged pre-cutover.
-        let log_db = match (&config.log_db_url, &config.log_db_token) {
-            (Some(url), Some(token)) => Arc::new(RemoteDb::connect(url, token).await?),
-            _ => Arc::clone(&remote_db),
-        };
-        let state = Self::new_with_parts(
+        Ok(Self::new_with_parts(
             config,
-            remote_db,
-            log_db,
             keystore::default_os_keystore(),
-        );
-        Ok(state)
+        ))
     }
 
     /// Build AppState from pre-constructed parts. Production should use
-    /// [`AppState::new`]; tests use this to inject an [`InMemoryKeystore`] and
-    /// a RemoteDb pointed at the disposable test Turso.
+    /// [`AppState::new`]; tests use this to inject an [`InMemoryKeystore`] so
+    /// several simulated clients can coexist in one process.
     pub fn new_with_parts(
         config: Config,
-        remote_db: Arc<RemoteDb>,
-        log_db: Arc<RemoteDb>,
         keystore: Arc<dyn Keystore>,
     ) -> Self {
         Self {
             config,
             local_db: Arc::new(Mutex::new(None)),
-            remote_db,
-            log_db,
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),

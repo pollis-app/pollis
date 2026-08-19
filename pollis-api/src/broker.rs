@@ -114,15 +114,6 @@ pub struct R2PresignBody {
     pub user_id: Option<String>,
 }
 
-/// `POST /v1/turso/token` — mint a short-TTL READ-ONLY Turso token (#393).
-///
-/// Carries no parameters: the token's scope is fixed server-side (read-only, one
-/// database) and its bearer is the verified signer. Empty for the same reason as
-/// [`crate::emoji::EmojiGcBody`] — so the endpoint is a row in the
-/// [`crate::ENDPOINTS`] table rather than a loose `json!({})`.
-#[derive(Serialize, Deserialize)]
-pub struct TursoTokenBody {}
-
 // ── Responses (#922) ─────────────────────────────────────────────────────────
 
 /// `POST /v1/livekit/token` — the participant JWT and the SFU to present it to.
@@ -182,14 +173,6 @@ pub struct LivekitParticipantsResponse {
 pub struct LivekitIdentitiesResponse {
     #[serde(default)]
     pub identities: Vec<ResolvedIdentity>,
-}
-
-/// `POST /v1/turso/token` — a short-TTL READ-ONLY Turso token.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TursoTokenResponse {
-    pub token: String,
-    /// Seconds until the token expires.
-    pub expires_in: u64,
 }
 
 /// `POST /v1/r2/presign` — the presigned URL and how it must be used.

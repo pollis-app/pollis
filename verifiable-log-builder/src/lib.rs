@@ -36,6 +36,13 @@ pub mod builder;
 pub mod commit_log;
 pub mod error;
 pub mod keys;
+/// The log's row types, their hashing/emptiness guards, and — behind
+/// `db-source` — the reader that fetches them from Turso.
+///
+/// The DATABASE half is gated so a verification-only consumer (`pollis-core`,
+/// via `verifiable-log-serve`) does not link `libsql`; the row types and guards
+/// are pure and stay available either way, because `builder` needs them to shape
+/// a bundle no matter where the rows came from. See #987.
 pub mod source;
 
 pub use account_key::{AccountKeyInvariant, AccountKeyLeaf};
@@ -48,6 +55,6 @@ pub use commit_log::{
     CommitLogInvariant, PSEUDONYM_WINDOW_SIZE, TENANT,
 };
 pub use error::{BuilderError, Result};
-pub use source::{
-    connect, read_account_key_log, read_commit_log, AccountKeyRow, CommitRow,
-};
+pub use source::{AccountKeyRow, CommitRow};
+#[cfg(feature = "db-source")]
+pub use source::{connect, read_account_key_log, read_commit_log};

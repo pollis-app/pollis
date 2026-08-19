@@ -318,7 +318,6 @@ endpoints! {
     Client   broker::LivekitSendDataBody        => "/v1/livekit/send-data",              broker::LivekitSendDataResponse;
     Client   broker::LivekitParticipantsBody    => "/v1/livekit/participants",           broker::LivekitParticipantsResponse;
     Client   broker::LivekitIdentitiesBody      => "/v1/livekit/identities",             broker::LivekitIdentitiesResponse;
-    Client   broker::TursoTokenBody             => "/v1/turso/token",                    broker::TursoTokenResponse;
     Client   broker::R2PresignBody              => "/v1/r2/presign",                     broker::R2PresignResponse;
 
     // ── Directory + conversation READS (#987) ────────────────────────────────
@@ -439,11 +438,12 @@ endpoints! {
 /// [E0609] "no field on type" — the read that used to yield `Option::None`:
 ///
 /// ```compile_fail,E0609
-/// use pollis_api::broker::TursoTokenResponse;
-/// fn read(r: TursoTokenResponse) -> u64 {
-///     // The wire field is `expires_in`. A client that spells it otherwise now
-///     // fails to compile instead of quietly defaulting to 0.
-///     r.expires_in_secs
+/// use pollis_api::broker::LivekitTokenResponse;
+/// fn read(r: LivekitTokenResponse) -> String {
+///     // The wire field is `url`. A client that spells it otherwise now fails
+///     // to compile instead of quietly defaulting to the empty string and
+///     // dialling its compiled-in SFU.
+///     r.livekit_url
 /// }
 /// ```
 ///
@@ -454,9 +454,9 @@ endpoints! {
 /// ```compile_fail,E0308
 /// # use pollis_api::DsRequest;
 /// # fn answer<B: DsRequest>(_: B::Response) {}
-/// use pollis_api::{broker::TursoTokenBody, StatusOk};
-/// // `/v1/turso/token` answers a token, not `{"status":"ok"}`.
-/// answer::<TursoTokenBody>(StatusOk::Ok);
+/// use pollis_api::{broker::LivekitTokenBody, StatusOk};
+/// // `/v1/livekit/token` answers a token, not `{"status":"ok"}`.
+/// answer::<LivekitTokenBody>(StatusOk::Ok);
 /// ```
 ///
 /// The matching positive case, so the failures above mean something:
@@ -464,10 +464,10 @@ endpoints! {
 /// ```
 /// # use pollis_api::DsRequest;
 /// # fn answer<B: DsRequest>(_: B::Response) {}
-/// use pollis_api::broker::{TursoTokenBody, TursoTokenResponse};
-/// answer::<TursoTokenBody>(TursoTokenResponse {
+/// use pollis_api::broker::{LivekitTokenBody, LivekitTokenResponse};
+/// answer::<LivekitTokenBody>(LivekitTokenResponse {
 ///     token: "jwt".into(),
-///     expires_in: 600,
+///     url: "wss://sfu".into(),
 /// });
 /// ```
 ///
@@ -565,13 +565,6 @@ mod tests {
                 group_id: "g1".into(),
             },
             r#"{"status":"ok","group_id":"g1"}"#,
-        );
-        round_trip(
-            &broker::TursoTokenResponse {
-                token: "t".into(),
-                expires_in: 600,
-            },
-            r#"{"token":"t","expires_in":600}"#,
         );
         round_trip(
             &broker::LivekitTokenResponse {

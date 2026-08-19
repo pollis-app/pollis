@@ -99,12 +99,14 @@ async fn an_unrouted_path_is_observably_404() {
 fn the_endpoint_table_covers_the_whole_write_surface() {
     assert_eq!(
         pollis_api::ENDPOINTS.len(),
-        // 95 since #987 moved every client remote READ behind the DS: 8
-        // directory/conversation endpoints, 12 account/device/object reads, and
-        // the 2 MLS control-plane reads (`/v1/mls/conversation-state`,
-        // `/v1/welcomes/fetch`). That migration is also what let the client's
-        // database credential be deleted outright.
-        95,
+        // 94 since #987 moved every client remote READ behind the DS: +8
+        // directory/conversation endpoints, +12 account/device/object reads, +2
+        // MLS control-plane reads (`/v1/mls/conversation-state`,
+        // `/v1/welcomes/fetch`), and -1 for `/v1/turso/token`, the read-only
+        // database-token mint the client no longer has any use for. That last
+        // one is the point of the migration: with no client connection left, an
+        // endpoint that hands out database credentials is pure attack surface.
+        94,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

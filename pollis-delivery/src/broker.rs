@@ -105,13 +105,6 @@ pub struct BrokerConfig {
     /// `R2_SECRET_ACCESS_KEY`, falling back to the established `R2_SECRET_KEY`.
     /// NEVER logged.
     pub r2_secret_access_key: Option<String>,
-    /// Turso Platform API token (env `TURSO_PLATFORM_TOKEN`) — bearer for
-    /// api.turso.tech, used to mint short-TTL read-only DB tokens. NEVER logged.
-    pub turso_platform_token: Option<String>,
-    /// Turso organization slug (env `TURSO_ORG`).
-    pub turso_org: Option<String>,
-    /// Turso database name to mint read-only tokens for (env `TURSO_DB`).
-    pub turso_db: Option<String>,
 }
 
 impl BrokerConfig {
@@ -131,9 +124,6 @@ impl BrokerConfig {
             r2_bucket: var("R2_BUCKET"),
             r2_access_key_id: var("R2_ACCESS_KEY_ID"),
             r2_secret_access_key: var("R2_SECRET_ACCESS_KEY").or_else(|| var("R2_SECRET_KEY")),
-            turso_platform_token: var("TURSO_PLATFORM_TOKEN"),
-            turso_org: var("TURSO_ORG"),
-            turso_db: var("TURSO_DB"),
         }
     }
 
@@ -153,15 +143,6 @@ impl BrokerConfig {
             self.r2_bucket.as_deref()?,
             self.r2_access_key_id.as_deref()?,
             self.r2_secret_access_key.as_deref()?,
-        ))
-    }
-
-    /// All three Turso Platform fields present → the token endpoint can mint.
-    fn turso_ready(&self) -> Option<(&str, &str, &str)> {
-        Some((
-            self.turso_platform_token.as_deref()?,
-            self.turso_org.as_deref()?,
-            self.turso_db.as_deref()?,
         ))
     }
 }
@@ -850,77 +831,22 @@ pub async fn livekit_identities(
     Ok(ok_response::<LivekitIdentitiesBody>(LivekitIdentitiesResponse { identities }))
 }
 
-// ── POST /v1/turso/token ──────────────────────────────────────────────────────
+// #987 deleted `POST /v1/turso/token` here.
 //
-// Mint a SHORT-TTL, READ-ONLY Turso DB token so the client stops shipping a
-// long-lived read token in its bundle (#393). The DS holds the Turso Platform
-// API token and calls api.turso.tech to mint a per-session read-only JWT scoped
-// to the shared DB, handing only that back. A leaked client token's blast radius
-// shrinks from "forever" to the TTL. 503 when unconfigured — the client falls
-// back to its baked read-only token, so an unconfigured deploy still reads.
-
-/// Read-only Turso token lifetime. The duration string is what the Platform API
-/// `expiration` query param wants; the seconds mirror it for the `expires_in`
-/// hint handed to the client's refresh timer. Keep the two in sync.
-const TURSO_TOKEN_EXPIRATION: &str = "2h";
-const TURSO_TOKEN_EXPIRATION_SECS: u64 = 2 * 60 * 60;
-
-/// POST /v1/turso/token — mint a short-TTL read-only Turso token for the
-/// authenticated device. Identity is irrelevant (the token is whole-DB
-/// read-only); the gate only proves a real device is asking.
-pub async fn turso_token(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    // Require a valid device signature (or pass-through when auth is disabled).
-    if let Err(resp) = gate(&state, &headers, &method, &uri, &body).await? {
-        return Ok(resp);
-    }
-
-    let (platform_token, org, db) = match state.broker.turso_ready() {
-        Some(t) => t,
-        None => return Ok(not_configured("turso")),
-    };
-
-    let endpoint = format!(
-        "https://api.turso.tech/v1/organizations/{org}/databases/{db}/auth/tokens\
-?expiration={TURSO_TOKEN_EXPIRATION}&authorization=read-only"
-    );
-    let minted = crate::util::http_post(crate::util::Upstream::TursoPlatform, &endpoint)
-        .bearer_auth(platform_token)
-        .send()
-        .await;
-
-    match minted {
-        Ok(r) if r.status().is_success() => {
-            #[derive(Deserialize)]
-            struct MintResp {
-                jwt: String,
-            }
-            let parsed: MintResp = match r.json().await {
-                Ok(p) => p,
-                Err(e) => return Ok(bad_gateway(format!("turso token decode: {e}"))),
-            };
-            Ok(ok_response::<TursoTokenBody>(TursoTokenResponse {
-                token: parsed.jwt,
-                expires_in: TURSO_TOKEN_EXPIRATION_SECS,
-            }))
-        }
-        Ok(r) => {
-            let status = r.status();
-            let text = r.text().await.unwrap_or_default();
-            Ok(bad_gateway(format!("turso mint {status}: {text}")))
-        }
-        Err(e) => Ok(upstream_error(
-            crate::util::Upstream::TursoPlatform,
-            "turso mint",
-            &e,
-        )),
-    }
-}
+// It minted a short-TTL, READ-ONLY Turso token so the client would stop
+// shipping a long-lived one in its bundle (#393) — the right move at the time,
+// and the wrong shape in the end: short-TTL or not, the token was whole-DATABASE
+// and read-only was its only scope, so any authenticated device could read every
+// row in the deployment for its lifetime. That is the residual #917 named and
+// could not close.
+//
+// #987 closed it by removing the client's database access entirely rather than
+// by shortening the credential's life. With no client connection left, an
+// endpoint that hands out database credentials is pure attack surface — so it
+// goes, along with `TURSO_PLATFORM_TOKEN` / `TURSO_ORG` / `TURSO_DB`, which the
+// DS needed for nothing else. (`TURSO_URL` / `TURSO_TOKEN` /
+// `TURSO_ADMIN_TOKEN` / `LOG_DB_ADMIN_TOKEN` are UNRELATED and still required:
+// they are the DS's own data-plane connection and the migration runner's.)
 
 // ── 2. POST /v1/r2/presign ───────────────────────────────────────────────────
 

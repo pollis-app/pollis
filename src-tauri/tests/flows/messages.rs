@@ -736,7 +736,7 @@ async fn edit_message_across_membership_changes() {
 
 /// Count remaining envelopes for a conversation via a direct libsql query.
 /// Bypasses any Tauri command so we observe the raw row state.
-async fn envelope_count(remote: &Arc<pollis_lib::db::remote::RemoteDb>, conversation_id: &str) -> i64 {
+async fn envelope_count(remote: &Arc<pollis_delivery::db::Db>, conversation_id: &str) -> i64 {
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
         .query(
@@ -753,7 +753,7 @@ async fn envelope_count(remote: &Arc<pollis_lib::db::remote::RemoteDb>, conversa
 /// simulate old envelopes without waiting 30 days. Applies to envelopes of
 /// any type.
 async fn backdate_envelopes(
-    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
     sent_at: &str,
 ) {
@@ -770,7 +770,7 @@ async fn backdate_envelopes(
 /// reconstruct a known lag pattern. Add-member seeding would otherwise leave
 /// recent watermarks that mask the behavior we want to exercise.
 async fn clear_watermarks(
-    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
 ) {
     let conn = remote.conn().await.expect("remote conn");
@@ -786,7 +786,7 @@ async fn clear_watermarks(
 /// longer fired from the client ingest path (#689) — it is the DS's own periodic
 /// sweep — so tests drive that sweep directly, standing in for the DS task. The
 /// deletion predicate is unchanged; only what triggers it moved.
-async fn run_gc_sweep(remote: &Arc<pollis_lib::db::remote::RemoteDb>) {
+async fn run_gc_sweep(remote: &Arc<pollis_delivery::db::Db>) {
     let conn = remote.conn().await.expect("remote conn");
     let stale = pollis_delivery::messages::watermark_stale_modifier();
     pollis_delivery::messages::sweep_envelope_gc(&conn, &stale)
@@ -842,7 +842,7 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
 
     // The backdating + watermark hacks below poke the "server" DB directly,
     // standing in for server-side envelope GC effects. The client's own
-    // `state.remote_db` is a read-only view, so use the writable world handle.
+    // Server-side state, so use the DS's own handle (#987 — a client has none).
     let remote = crate::harness::writable_remote().await;
 
     // ── Negative: young envelope, only sender fetched ──
@@ -932,7 +932,7 @@ async fn envelope_cleanup_is_watermark_gated_and_never_ttl_gated() {
 /// confirm the fork precondition (two competing commits at one epoch) was
 /// actually produced — diagnostic only, not an invariant.
 async fn distinct_commits_at_epoch(
-    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
     epoch: i64,
 ) -> i64 {
@@ -1018,7 +1018,7 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
     // Precondition sanity (diagnostic): the fork was actually produced. The
     // add-bob commit was epoch 0, so the concurrent adds race for epoch 1.
     // The commit log lives on the LOG DB (split harness), so inspect it there.
-    let log = alice.state.log_db.clone();
+    let log = crate::harness::writable_log().await;
     let distinct = distinct_commits_at_epoch(&log, &group_id, 1).await;
     eprintln!("[test] distinct commits at epoch 1 = {distinct} (fork iff > 1)");
 
@@ -1221,7 +1221,7 @@ async fn revoked_device_cannot_rejoin_group() {
     // revoke_device to set revoked_at, and this test mirrors that path.
     {
         // Server-side revocation effect — poke the writable "server" handle
-        // directly (the client's `state.remote_db` is a read-only view).
+        // directly (a client has no database handle at all since #987).
         let remote = crate::harness::writable_remote().await;
         let conn = remote.conn().await.expect("remote conn");
         conn.execute(
@@ -1275,7 +1275,7 @@ async fn revoked_device_cannot_rejoin_group() {
 
 /// Read the `mls_group_info` row (epoch, byte length) for a conversation, if any.
 async fn group_info_row(
-    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
 ) -> Option<(i64, usize)> {
     let conn = remote.conn().await.expect("remote conn");
@@ -1298,7 +1298,7 @@ async fn group_info_row(
 
 /// Count `mls_welcome` rows for a recipient in a conversation.
 async fn welcome_count(
-    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    remote: &Arc<pollis_delivery::db::Db>,
     conversation_id: &str,
     recipient_id: &str,
 ) -> i64 {
@@ -1342,7 +1342,7 @@ async fn commit_welcome_groupinfo_land_atomically_via_delivery_service() {
     let channel_id = alice.general_channel_id(&group_id).await;
     // The MLS control-plane tables (`mls_group_info`, `mls_welcome`) live on the
     // LOG DB in the split harness — inspect them there, not on the main DB.
-    let remote = alice.state.log_db.clone();
+    let remote = crate::harness::writable_log().await;
 
     // Baseline GroupInfo: init_mls_group published the epoch-0 GroupInfo. The
     // MLS group is keyed by group_id (the channel's group), so that's the
@@ -1429,7 +1429,7 @@ async fn dropped_bootstrap_group_info_is_healed_on_next_touch() {
     let group_id = alice.create_group("Stranded").await;
     let channel_id = alice.general_channel_id(&group_id).await;
     // MLS control-plane rows live on the LOG DB; the MLS group is keyed by group_id.
-    let log = alice.state.log_db.clone();
+    let log = crate::harness::writable_log().await;
 
     // Baseline: init_mls_group published the epoch-0 GroupInfo.
     let (epoch0, _) = group_info_row(&log, &group_id)

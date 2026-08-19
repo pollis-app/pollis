@@ -79,9 +79,10 @@ pollis-tui (binary `pollis`)
   (#882), so the same binary works on both without ever writing plaintext.
   `pollis-tui/src/auth.rs` carries a guard test that fails if the feature is
   dropped again.
-- **Reads go direct to Turso; writes go through the Delivery Service.** This is the
-  post-#419 model — `POLLIS_DELIVERY_URL` is **mandatory** config. The TUI invents
-  no new backend path.
+- **Everything goes through the Delivery Service.** Writes since #419, reads
+  since #987 — `POLLIS_DELIVERY_URL` is **mandatory** config and is now the only
+  backend the TUI can reach at all: it holds no database credential, and neither
+  does `pollis-core`. The TUI invents no new backend path.
 - **Own device identity.** Set `POLLIS_DATA_DIR` (default
   `~/.local/share/pollis-tui`) so the TUI's file keystore + local SQLCipher DB do
   not share identity with the desktop app — it enrolls as its own device with its

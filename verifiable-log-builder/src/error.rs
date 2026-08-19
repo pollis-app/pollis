@@ -6,6 +6,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum BuilderError {
+    /// Only reachable with `db-source` on — the feature that compiles the
+    /// database reader at all.
+    #[cfg(feature = "db-source")]
     #[error("database error: {0}")]
     Db(#[from] libsql::Error),
 

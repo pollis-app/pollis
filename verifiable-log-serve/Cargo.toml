@@ -28,19 +28,37 @@ path = "src/lib.rs"
 [[bin]]
 name = "serve"
 path = "src/bin/serve.rs"
+required-features = ["live"]
 
 # Verification-only CLI shipped to auditors (operator commands live in `serve`).
 [[bin]]
 name = "pollis-verify"
 path = "src/bin/pollis-verify.rs"
 
+# `live` gates the ONE thing here that touches a database: the lazily-refreshed
+# server that reads `mls_commit_log` out of Turso, plus the `serve` binary that
+# drives it. The VERIFIER half — release verification, account verification, the
+# bundle/layout readers — is pure and is all `pollis-core` uses.
+#
+# The gate is #987's second libsql edge. `pollis-core` depends on this crate, so
+# without it a `libsql` link came back into the shipped client through
+# `verifiable-log-builder`'s database reader, silently undoing the point of
+# removing the client's own dependency. `pollis-core` therefore takes this crate
+# with `default-features = false`, and `no_client_side_remote_reads.rs` asserts
+# no `libsql` reaches the client's graph by ANY path.
+[features]
+default = ["live"]
+live = ["verifiable-log-builder/db-source"]
+
 [dependencies]
 # Slice 1: Merkle/STH/proof core and its verifiers — depended on, never reimplemented.
 verifiable-log = { path = "../verifiable-log" }
 # Slice 2: the mls-commit-log tenant — reuse its CommitLeaf decoding and the
 # CommitLogInvariant (fork + epoch-regression) for per-group verification.
-# Never reimplement either here.
-verifiable-log-builder = { path = "../verifiable-log-builder" }
+# Never reimplement either here. `default-features = false` so the pure half
+# (leaf encodings, invariants, bundle assembly) links without `libsql`; the
+# `live` feature above turns its database reader back on.
+verifiable-log-builder = { path = "../verifiable-log-builder", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"

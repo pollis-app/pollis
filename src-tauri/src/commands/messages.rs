@@ -64,16 +64,6 @@ pub async fn ingest_dm_envelopes(user_id: String, dm_channel_id: String, state: 
 }
 
 #[tauri::command]
-pub async fn list_messages_by_sender(sender_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<MessageWithContext>> {
-    pollis_core::commands::messages::list_messages_by_sender(sender_id, &state).await
-}
-
-#[tauri::command]
-pub async fn list_channel_previews(user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<ChannelPreview>> {
-    pollis_core::commands::messages::list_channel_previews(user_id, &state).await
-}
-
-#[tauri::command]
 pub async fn search_messages(query: String, limit: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<Vec<SearchResult>> {
     pollis_core::commands::messages::search_messages(query, limit, &state).await
 }

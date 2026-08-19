@@ -61,7 +61,10 @@ fn b64(bytes: &[u8]) -> String {
 /// `device_id` would let any authenticated user drain another device's Welcome
 /// queue. On the no-auth path they come from the body, which is what that path
 /// means.
-pub(crate) struct Reader {
+/// `pub` so `tests/conversation_snapshot.rs` can drive [`snapshot`] directly.
+/// Constructing one is not authority — the handler still derives both halves
+/// from a verified signature; this type only carries the result.
+pub struct Reader {
     pub user_id: String,
     pub device_id: String,
 }
@@ -276,7 +279,11 @@ pub async fn conversation_state(
 /// handler, which runs three separate queries on a bare connection. That handler
 /// keeps its behaviour (old clients, operator debugging); extending its shape
 /// onto the hot join path is the bug this avoids.
-async fn snapshot(
+///
+/// `pub` for `tests/conversation_snapshot.rs`, which asserts both properties
+/// above directly — the atomicity one under concurrency, where only a caller
+/// racing a writer can observe a tear at all (#987 P9/P10).
+pub async fn snapshot(
     log: &Connection,
     q: &ConversationStateQuery,
     who: &Reader,

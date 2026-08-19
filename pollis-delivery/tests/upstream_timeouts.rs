@@ -132,7 +132,7 @@ async fn a_hung_livekit_returns_504_instead_of_hanging_the_handler() {
 /// this regresses without any handler changing. Guard.
 #[test]
 fn every_upstream_declares_a_sane_deadline() {
-    for upstream in [Upstream::LiveKit, Upstream::Resend, Upstream::TursoPlatform] {
+    for upstream in [Upstream::LiveKit, Upstream::Resend, Upstream::ExpoPush] {
         let t = upstream.timeout();
         assert!(
             t >= Duration::from_secs(1),

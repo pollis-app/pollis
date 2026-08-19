@@ -341,6 +341,25 @@ pub struct AccountProbeBody {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountProbeResponse {
+    /// The account's current `identity_version`, when it has an identity.
+    ///
+    /// Here rather than on `account-status` because of the BOOTSTRAP PIVOT:
+    /// `ensure_device_cert` must stamp this version into the cert it is about to
+    /// sign, and it runs on a device whose `user_device.mls_signature_pub` is
+    /// still NULL — the column the DS reads to authenticate a signature. The
+    /// write that establishes the credential cannot be authenticated by that
+    /// credential, and neither can the read that feeds it. A session does not
+    /// close the gap either: sibling-approval enrollment publishes its cert on
+    /// cert-validity ALONE precisely because a slow human approval outlives the
+    /// session TTL.
+    ///
+    /// It is not a disclosure. Every device cert carries `cert_identity_version`
+    /// in the clear, `POST /v1/read/account-keys` returns it for any user id to
+    /// any authenticated caller, and it is a small counter of how many times the
+    /// account has been reset. `email` and `username`, which are NOT public in
+    /// that sense, stay on the authenticated `account-status` read.
+    #[serde(default)]
+    pub identity_version: Option<i64>,
     /// The `users` row exists. `false` means the locally cached account is stale
     /// and should be dropped.
     pub exists: bool,

@@ -96,16 +96,15 @@ impl From<anyhow::Error> for BridgeError {
     }
 }
 
+/// The JSON the mobile host hands `init_pollis`.
+///
+/// `turso_url` / `turso_token` / `log_db_url` / `log_db_token` are gone (#987) —
+/// the client holds no database credential, so the host has none to pass. Extra
+/// keys are IGNORED rather than rejected (serde's default), so a mobile build
+/// still sending the old `EXPO_PUBLIC_TURSO_*` values starts cleanly instead of
+/// failing at init; they simply do nothing.
 #[derive(serde::Deserialize)]
 struct InitConfig {
-    turso_url: String,
-    turso_token: String,
-    /// Optional read-only commit-log DB connection. Absent → log_db falls back
-    /// to the main remote DB.
-    #[serde(default)]
-    log_db_url: Option<String>,
-    #[serde(default)]
-    log_db_token: Option<String>,
     /// Absolute path of a writable directory the bridge can park per-app
     /// state in. Required on Android (we drop the CA bundle there and
     /// scope `POLLIS_DATA_DIR` to it); optional everywhere else, where
@@ -127,9 +126,9 @@ struct InitConfig {
 
 /// Initialize the process-global `AppState`. Safe to call multiple times —
 /// only the first call does any work. `config_json` is a JSON object whose
-/// fields mirror [`Config`]; the only required fields are `turso_url` and
-/// `turso_token` (the rest default to empty so a mobile build that doesn't
-/// use R2 / LiveKit yet can omit them).
+/// fields mirror [`Config`]; every field defaults, so a mobile build that does
+/// not use R2 / LiveKit yet can omit them all. In practice `pollis_delivery_url`
+/// is the one that matters: since #987 it is the only backend there is.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn init_pollis(config_json: String) -> Result<(), BridgeError> {
     run_on_worker(init_pollis_inner(config_json)).await
@@ -142,10 +141,6 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
             #[cfg(target_os = "android")]
             android_bootstrap(parsed.data_dir.as_deref())?;
             let config = Config {
-                turso_url: parsed.turso_url,
-                turso_token: parsed.turso_token,
-                log_db_url: parsed.log_db_url.filter(|s| !s.is_empty()),
-                log_db_token: parsed.log_db_token.filter(|s| !s.is_empty()),
                 r2_endpoint: parsed.r2_endpoint,
                 r2_public_url: parsed.r2_public_url,
                 livekit_url: parsed.livekit_url,

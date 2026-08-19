@@ -62,10 +62,6 @@ impl Driver {
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
         let state = Arc::new(AppState::new_with_parts(
             world.config.clone(),
-            // Read-only main view: a stray client-side write (one that should have
-            // gone through the DS) fails loudly, exactly like the smokes.
-            Arc::new(world.main.query_only_view()),
-            world.log.clone(),
             keystore,
         ));
 

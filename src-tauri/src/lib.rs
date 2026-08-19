@@ -579,8 +579,6 @@ pub fn run() {
             commands::messages::list_thread_summaries,
             commands::messages::ingest_channel_envelopes,
             commands::messages::ingest_dm_envelopes,
-            commands::messages::list_messages_by_sender,
-            commands::messages::list_channel_previews,
             commands::messages::search_messages,
             commands::messages::add_reaction,
             commands::messages::remove_reaction,

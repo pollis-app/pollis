@@ -69,7 +69,14 @@ impl GroupRole {
         matches!(self, GroupRole::Admin)
     }
 
-    fn from_column(raw: &str) -> Self {
+    /// `group_member.role` -> a role. An UNKNOWN string is a plain member,
+    /// matching the DS's `== Some("admin")` — the two must agree, or a corrupt
+    /// column means "admin" on one side and "member" on the other.
+    ///
+    /// `pub` since #987: the row now arrives over HTTP rather than out of a
+    /// local query, so the mapping is the client's whole share of this decision
+    /// and `tests/group_authz.rs` exercises it directly.
+    pub fn from_column(raw: &str) -> Self {
         if raw == "admin" {
             GroupRole::Admin
         } else {
@@ -81,6 +88,10 @@ impl GroupRole {
 /// The one wording for "the caller is not in this group". Every site that used
 /// to invent its own now returns exactly this.
 pub const NOT_A_MEMBER: &str = "you are not a member of this group";
+
+/// The one wording for "the TARGET of this action is not in this group" — a
+/// different subject from the caller, and deliberately a different sentence.
+pub const TARGET_NOT_A_MEMBER: &str = "user is not a member of this group";
 
 fn not_a_member() -> Error {
     Error::Other(anyhow::anyhow!(NOT_A_MEMBER))
@@ -132,6 +143,36 @@ pub async fn channel_group_role(
     group_role(state, channel_id, user_id).await
 }
 
+// ── The decisions, as pure functions ────────────────────────────────────────
+//
+// Split out in #987. The role used to arrive from a local query, so "fetch" and
+// "decide" were one function and one test could cover both. The fetch is now a
+// DS round trip, and folding a network call into the decision would mean the
+// wordings below — the entire reason this module exists — could only be
+// exercised by standing up a server. These take the answer and return the
+// verdict; the async wrappers do nothing but fetch and delegate.
+
+/// Membership required: `Some(role)` passes through, `None` is [`NOT_A_MEMBER`].
+pub fn decide_member(role: Option<GroupRole>) -> Result<GroupRole> {
+    role.ok_or_else(not_a_member)
+}
+
+/// Admin required. A NON-MEMBER is told they are not a member, not that they are
+/// not an admin — the two are different facts and conflating them tells a
+/// stranger which groups exist.
+pub fn decide_admin(role: Option<GroupRole>, action: &str) -> Result<()> {
+    if decide_member(role)?.is_admin() {
+        return Ok(());
+    }
+    Err(not_an_admin(action))
+}
+
+/// The TARGET of an action must be a member. Distinct wording from
+/// [`decide_member`] because the subject is a different person.
+pub fn decide_target_member(role: Option<GroupRole>) -> Result<GroupRole> {
+    role.ok_or_else(|| Error::Other(anyhow::anyhow!(TARGET_NOT_A_MEMBER)))
+}
+
 /// Require membership. Returns the caller's role so an admin-only *branch* can
 /// be taken without a second query (e.g. "members may remove themselves, admins
 /// may remove anyone").
@@ -140,9 +181,7 @@ pub async fn require_member(
     group_id: &str,
     user_id: &str,
 ) -> Result<GroupRole> {
-    group_role(state, group_id, user_id)
-        .await?
-        .ok_or_else(not_a_member)
+    decide_member(group_role(state, group_id, user_id).await?)
 }
 
 /// Require admin. `action` completes "only group admins can …".
@@ -152,10 +191,7 @@ pub async fn require_admin(
     user_id: &str,
     action: &str,
 ) -> Result<()> {
-    if require_member(state, group_id, user_id).await?.is_admin() {
-        return Ok(());
-    }
-    Err(not_an_admin(action))
+    decide_admin(group_role(state, group_id, user_id).await?, action)
 }
 
 /// Require that `user_id` is a member of `group_id` — used to validate the
@@ -177,9 +213,10 @@ pub async fn require_target_member(
     let members = crate::commands::ds_reads::group(state, group_id, requester_id, false)
         .await?
         .members;
-    members
-        .iter()
-        .find(|m| m.user_id == target_user_id)
-        .map(|m| GroupRole::from_column(&m.role))
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("user is not a member of this group")))
+    decide_target_member(
+        members
+            .iter()
+            .find(|m| m.user_id == target_user_id)
+            .map(|m| GroupRole::from_column(&m.role)),
+    )
 }

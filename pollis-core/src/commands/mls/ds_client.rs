@@ -403,15 +403,6 @@ pub async fn ds_livekit_identities(
     Ok(parsed.identities)
 }
 
-/// Mint a short-TTL **read-only** Turso token via the DS. Returns `(token,
-/// expires_in_secs)`. Device-signed. Any error (incl. 503 when the DS has no
-/// Turso Platform credentials) lets the caller fall back to the baked read-only
-/// token, so an unconfigured deploy still reads. See #393.
-pub async fn ds_turso_token(state: &Arc<AppState>) -> Result<(String, u64)> {
-    let parsed = ds_post_json(state, &pollis_api::broker::TursoTokenBody {}).await?;
-    Ok((parsed.token, parsed.expires_in))
-}
-
 /// [`ds_post`] plus decoding the ONE response body this endpoint declares (#922).
 ///
 /// The mirror image of what `ds_post` does for the request. Callers used to

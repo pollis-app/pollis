@@ -76,6 +76,7 @@ impl CommitRow {
 
 /// Does this `--db` value look like a remote libSQL/Turso URL (vs. a local file
 /// path)?
+#[cfg(feature = "db-source")]
 fn is_remote_url(db: &str) -> bool {
     let lower = db.to_ascii_lowercase();
     lower.starts_with("libsql://")
@@ -93,6 +94,7 @@ fn is_remote_url(db: &str) -> bool {
 ///   from the main DB that still owns `account_key_log`).
 /// * Otherwise `db` is treated as a local SQLite file path (no network) and the
 ///   `token` is ignored — this is what the tests use.
+#[cfg(feature = "db-source")]
 pub async fn connect_with_token(db: &str, token: &str) -> Result<libsql::Connection> {
     let database = if is_remote_url(db) {
         libsql::Builder::new_remote(db.to_string(), token.to_string())
@@ -112,6 +114,7 @@ pub async fn connect_with_token(db: &str, token: &str) -> Result<libsql::Connect
 ///   instances).
 /// * Otherwise `db` is treated as a local SQLite file path (no network) — this
 ///   is what the tests use.
+#[cfg(feature = "db-source")]
 pub async fn connect(db: &str) -> Result<libsql::Connection> {
     let token = std::env::var("TURSO_AUTH_TOKEN").unwrap_or_default();
     connect_with_token(db, &token).await
@@ -123,6 +126,7 @@ pub async fn connect(db: &str) -> Result<libsql::Connection> {
 /// the log DB's migrations, so it cannot assume the two are in lockstep. Probing
 /// beats catching a "no such column" error: the query below fails cleanly on a
 /// genuinely unreachable DB instead of silently degrading to the narrow read.
+#[cfg(feature = "db-source")]
 async fn has_column(conn: &libsql::Connection, table: &str, column: &str) -> Result<bool> {
     let mut rows = conn
         .query(&format!("PRAGMA table_info({table})"), ())
@@ -143,6 +147,7 @@ async fn has_column(conn: &libsql::Connection, table: &str, column: &str) -> Res
 /// it does not — which is correct, not a fallback approximation: a log DB
 /// predating migration `000004_commit_generation.sql` cannot contain a migrated
 /// conversation, so every commit in it genuinely belongs to generation 0.
+#[cfg(feature = "db-source")]
 pub async fn read_commit_log(conn: &libsql::Connection) -> Result<Vec<CommitRow>> {
     // Only the structural columns plus the blob (to hash it). `created_at`,
     // `added_user_id`, `added_device_ids` are intentionally not read — the leaf
@@ -209,6 +214,7 @@ impl AccountKeyRow {
 /// Read every `account_key_log` row in ascending `seq` order. `account_id_pub` is
 /// a BLOB (the raw Ed25519 public key); it is hex-encoded — never hashed — since
 /// the account-key directory exists precisely to publish it.
+#[cfg(feature = "db-source")]
 pub async fn read_account_key_log(conn: &libsql::Connection) -> Result<Vec<AccountKeyRow>> {
     let mut rows = conn
         .query(

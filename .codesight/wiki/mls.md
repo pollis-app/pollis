@@ -244,9 +244,14 @@ itself" unrepresentable client-side. The `[Add(1), Remove(1), Add(2)]` shape is
 the tightest repro (`removed_member_cannot_climb_back_via_external_join`): the
 leak is only observable once a message is sent AFTER the climb-back.
 
-The membership check uses `state.remote_db.conn()` directly (a separate
-connection), NOT the `mls_group_lock` — safe to call from inside
-`process_pending_commits_locked_impl`, which already holds that lock.
+Since #987 the membership check is an ordinary DS read
+(`POST /v1/read/conversation-state`, `is_member`), so it holds no local lock at
+all and stays safe to call from inside `process_pending_commits_locked_impl`,
+which already holds `mls_group_lock`. It arrives on the SAME snapshot as the
+GroupInfo and the pending-Welcome flag — one server-side read transaction — and
+it fails **CLOSED** (`Option<bool>`, `None` reads as "not a member"), while
+`welcome_pending` seven lines away fails OPEN. Those two biases are opposite on
+purpose; see `commands.md`, "The client holds no database credential".
 
 The `local_device_registered` gate here is the client half of the same
 fail-closed logic the DS enforces server-side: the external-join **recovery** path
