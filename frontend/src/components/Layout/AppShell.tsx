@@ -25,6 +25,7 @@ import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { isDropTargetActive, shouldShowDropOverlay } from "../../stores/dropTargetStore";
 import { panelWidthStore } from "../../stores/panelWidthStore";
+import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
@@ -478,11 +479,16 @@ export const AppShell: React.FC = observer(() => {
     { enabled: !!activeVoiceChannelId },
   );
 
-  // Navigate back in history (disabled while the search panel is open). If
-  // currently viewing a channel, go directly to the group page to avoid
-  // landing on "create channel" if that was in history. preventDefault off
-  // to mirror the prior behavior and stay out of the way of the
-  // capture-phase modal-cancel Esc handlers.
+  // Escape goes one entry back in history (disabled while the search panel is
+  // open) — the same step the breadcrumb's back chevron takes, through the
+  // same guard, so the key and the button can never disagree about where
+  // "back" lands. It used to special-case a channel into a jump up to its
+  // group page, which was hierarchical navigation wearing a history label:
+  // the chevrons no longer do that, and a shortcut that quietly did something
+  // else than the control next to it is worse than the "create channel" entry
+  // it was dodging (which a real back step walks through, exactly as a browser
+  // would). preventDefault stays off to stay out of the way of the
+  // capture-phase cancel-Esc handlers.
   useGlobalShortcut(
     "nav.back",
     () => {
@@ -492,17 +498,7 @@ export const AppShell: React.FC = observer(() => {
         setViewingScreenShareTrackKey(null);
         return;
       }
-      const channelMatch = pathname.match(
-        /^\/groups\/([^/]+)\/channels\/([^/]+)/,
-      );
-      if (channelMatch && channelMatch[2] !== "new") {
-        router.navigate({
-          to: "/groups/$groupId",
-          params: { groupId: channelMatch[1] },
-        });
-      } else {
-        router.history.back();
-      }
+      historyNavStore.goBack();
     },
     { enabled: !isSearchOpen, preventDefault: false },
   );

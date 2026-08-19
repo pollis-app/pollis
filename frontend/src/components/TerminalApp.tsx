@@ -1,6 +1,7 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { RouterProvider } from "@tanstack/react-router";
 import { createAppRouter } from "../router";
+import { historyNavStore } from "../stores/historyNavStore";
 
 // ─── TerminalApp ──────────────────────────────────────────────────────────────
 
@@ -26,6 +27,13 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onLock, onDe
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+
+  // Track the history cursor here, where the router lives, rather than in the
+  // chrome that reads it — `BreadcrumbNav` mounts and unmounts (skin changes,
+  // routes without the bar) and would forget the forward stack each time.
+  useEffect(() => {
+    return historyNavStore.attach(router.history);
+  }, [router]);
 
   return <RouterProvider router={router} />;
 };
