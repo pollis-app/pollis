@@ -112,18 +112,24 @@ applies the same `POST_BASELINE_LOG_MIGRATIONS` (the post-baseline commit-log-DB
 migrations) as the app, so it exercises the current log-DB schema rather than a
 stale baseline. See [pollis-tui.md](./pollis-tui.md).
 
-## `.env.test`
+## No `.env.test`, and no database to point it at (#987)
 
-Tests require a disposable Turso database. Create `.env.test` at the repo root:
+The suite needs no configuration. `Config::for_test` reads nothing from the
+environment and the harness backs "remote Turso" with two process-local libsql
+files it creates in a tempdir — which it has done since #420; what #987 removed
+is the last reason a *credential* had to be present at all. `TURSO_URL` /
+`TURSO_TOKEN` used to be required fields of `Config`, so CI provisioned an
+`.env.test` containing `libsql://placeholder.invalid` and the literal string
+`placeholder` to satisfy them. Both fields are gone, so both the file and the CI
+step that wrote it are gone with them.
 
-```
-TURSO_URL=libsql://pollis-test-<yours>.turso.io
-TURSO_TOKEN=<read/write token>
-```
+`cargo test --features test-harness --test flows` therefore runs green with every
+`TURSO_*` and `LOG_DB_*` variable unset — which is the property #987 claims, and
+now a structural one rather than a convention.
 
-The harness wipes all tables at the start of each test (see `wipe_remote` in `src-tauri/src/test_harness.rs`), so never point this at a production or shared-dev DB.
-
-Tests serialize on a process-wide mutex (`serial_test`) because the wipe would race otherwise.
+The harness wipes all tables at the start of each test (see `wipe_remote` in
+`src-tauri/src/test_harness.rs`), and tests serialize on a process-wide mutex
+(`serial_test`) because that wipe would race otherwise.
 
 ## Architecture
 
@@ -131,8 +137,14 @@ Tests serialize on a process-wide mutex (`serial_test`) because the wipe would r
 
 Lazy, process-wide singleton (`tokio::sync::OnceCell`) that owns:
 
-- `Arc<RemoteDb>` — one libsql connection pool shared across all clients in the process.
-- `Config` — test config loaded from `.env.test`.
+- Two `Arc<pollis_delivery::db::Db>` handles — the main DB and the commit-log DB,
+  two genuinely separate local libsql files. They belong to the in-process DS;
+  since #987 a client has none of its own, so tests that must construct
+  server-side state reach them through `harness::writable_remote()` /
+  `writable_log()`.
+- `Config` — built by `Config::for_test`, which reads NOTHING from the
+  environment since #987 (it used to require `TURSO_URL`/`TURSO_TOKEN` out of a
+  CI-provisioned `.env.test`; there is no such field to fill any more).
 - A tempdir used for per-user SQLCipher files, installed with `db::local::set_data_dir`.
 
 ### `TestClient`
@@ -140,7 +152,7 @@ Lazy, process-wide singleton (`tokio::sync::OnceCell`) that owns:
 One simulated device for one user. Owns:
 
 - `App<MockRuntime>` + `WebviewWindow<MockRuntime>` — the headless Tauri runtime.
-- `Arc<AppState>` — wired with an `InMemoryKeystore` and the shared `RemoteDb`.
+- `Arc<AppState>` — wired with an `InMemoryKeystore`. No database handle: `pollis-core` does not link `libsql` (#987), so every read this client performs is a signed POST to the in-process DS.
 - `profile: Option<UserProfile>` — populated after `sign_up`.
 
 **Two devices of the same user SHARE local state.** `LocalDb::open_for_user` derives
@@ -226,10 +238,15 @@ libsql's local backend calls `sqlite3_config` on first use, which returns
 therefore **passes under a filter and panics in the full suite**, depending only on
 whether it shares its binary with a test that touched the local DB.
 
-Put remote-DB (libsql) query tests in `pollis-core/tests/` instead — an integration
-binary gets its own process and never loads rusqlite. See
-`pollis-core/tests/revoked_device_reconcile.rs`. This is why pollis-core had no
-`user_device` query coverage before #679.
+This shaped where `pollis-core`'s remote-query tests lived: in `tests/`, since an
+integration binary gets its own process and never loads rusqlite.
+
+**Since #987 the question does not arise for `pollis-core` at all** — it does not
+depend on `libsql`, so no test of its can open a local libsql DB by accident, and
+`tests/no_client_side_remote_reads.rs` fails the build if the dependency ever
+returns. The remote-query tests moved to `pollis-delivery` with the queries
+themselves (`tests/registered_devices.rs` is the #679 suite), and the constraint
+still applies THERE — but harmlessly, because that crate never links rusqlite.
 
 ## `pollis-delivery` DB fixtures — use `common::TempDb` (#942)
 
@@ -337,13 +354,18 @@ on the shipped handler.
 
 It did not always. The harness used to re-declare the route table and wrap all ~60
 handlers itself, because its DB handle was a `pollis-core` `RemoteDb` and the DS
-wanted a `pollis_delivery::db::Db`. `RemoteDb::shared_database()` (test-harness
-feature) and `Db::from_shared()` remove that: both now wrap the SAME libsql
-`Database`, so the DS writes through the very handle the clients read from —
-which was the whole reason for the copy. Opening a second `Builder::new_local` on
-one file is NOT equivalent: two independent handles do not share WAL writes
-promptly, and a client reading rows the DS "already wrote" is exactly the ghost
-failure this suite exists to rule out.
+wanted a `pollis_delivery::db::Db`. #925 bridged the two with
+`RemoteDb::shared_database()` + `Db::from_shared()` so both wrapped the SAME
+libsql `Database`; #987 removed the bridge along with `RemoteDb` itself, and the
+world now simply owns `Db` handles and hands them to the DS. Opening a second
+`Builder::new_local` on one file is still NOT equivalent: two independent handles
+do not share WAL writes promptly, and a test reading rows the DS "already wrote"
+is exactly the ghost failure this suite exists to rule out.
+
+`pollis-tui/tests/common` made the same move in #987, for a sharper reason: with
+every client READ now a DS endpoint, a hand-rolled double would have had to grow
+twenty more handlers whose only job was to agree with the originals. It mounts
+`build_router_with_state` too, and ~900 lines of second implementation went.
 
 The copy was not free while it lasted. It silently omitted ten routes:
 `/v1/invite-links/redeem` 404'd under test while working in production, and
@@ -686,7 +708,7 @@ Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
 - Server-side, the same invariant is pinned twice in `pollis-delivery` without needing Turso: the `messages::gc_sql_tests` unit module drives the raw `CLEANUP_*` SQL, and `tests/envelope_retention.rs` (Part E) drives `apply_envelope_gc`. Both encode "an envelope a member device has not collected survives regardless of age", plus the conservative empty-roster / never-reported edges and the positive leg proving GC still deletes once everyone has collected.
 - **`messages::roster_parity_tests`** (`pollis-delivery`, #722) guards the *other* half of that invariant: the member-device roster is implemented three times — inside `CLEANUP_CHANNEL_ENVELOPES`, inside `CLEANUP_DM_ENVELOPES`, and in `commit::current_member_devices` — and they must resolve the same set (I5). Because a DELETE's roster cannot be read back, the join chain is factored into a macro that the DELETE `concat!`s in and the test SELECTs from, so there is exactly one copy of the roster SQL in the crate rather than a hand-written "equivalent" that could drift unnoticed; `the_extraction_did_not_change_the_cleanup_sql` pins the executed statements byte-for-byte, and `the_roster_is_what_the_delete_actually_gates_on` shows the DELETE's outcome pivots on exactly the devices the fragment reports. The fixture covers a plain single-device member, a member with a revoked device alongside live ones, an all-revoked member, a member device with no watermark row, a non-member (with a stray watermark row), a sibling conversation, and both the channel and DM shapes. Expected rosters are also spelled out literally, so a change applied symmetrically to both implementations still fails instead of silently redefining the rule.
 - **DS tests run against the SHIPPED schema** (#875). `pollis-delivery` does not depend on `pollis-core`, and until #875 it paid for that with 22 hand-rolled `const SCHEMA` blocks (111 `CREATE TABLE` statements, 27 tables, 60 distinct definitions of them — 7 different `message_envelope`s, 6 different `group_member`s, 4 different `user_device`s). They had drifted past cosmetics: `tests/retention.rs` and `tests/envelope_retention.rs` declared `group_member` with **no primary key**, so the fixture could hold the same member twice and the Tier-1 floor's "MIN over member devices" was proved over a roster production forbids; `tests/key_packages.rs` keyed `user_device` on `(user_id, device_id)` where the baseline keys it on `device_id` alone; `tests/auth.rs` gave `mls_key_package` a `claimed_at` column that does not exist (the shipped column is `claimed INTEGER`); `tests/reset_session.rs` gave `mls_key_package` and `mls_welcome` INTEGER `id` primary keys where both ship as TEXT, and `dm_channel_member` an `accepted` column (the shipped one is `accepted_at`). Every fixture now calls `pollis_schema::apply::{main_db, log_db, single_db}`, and `tests/schema_is_not_reinvented.rs` fails the build if any DS source grows a `CREATE TABLE` again. Two things this immediately caught: `serialize.rs::welcome_failure_rolls_back_commit_and_group_info` was rolling back because its hand-rolled replacement `mls_welcome` had no `generation` column, not because of the poison CHECK it claims to inject (it now installs a trigger instead of replacing the table); and `attachment_refs.rs` seeded envelopes with `INSERT OR IGNORE INTO message_envelope (id)`, which against the real NOT NULL columns inserts nothing at all. `retention.rs`'s `a_duplicate_membership_row_is_rejected` / `a_device_id_cannot_belong_to_two_users` / `a_device_cannot_report_two_high_waters_for_one_conversation` pin the constraints the old fixtures lacked.
-  - Note for fixture authors: libsql's LOCAL backend enables `PRAGMA foreign_keys` by default, while production (Turso) does not. Every `Db` now stamps its per-connection PRAGMAs on *every* checkout (#919, `db.rs` `PerConnPragmas`), and as of the teardown work all three local pragma sets — `LOCAL_PRAGMAS`, `SHARED_LOCAL_PRAGMAS` (the `flows` harness) and `pollis_core::db::remote::RemoteDb::conn` — say `foreign_keys=OFF`. So a fixture inherits production semantics by default and must **seed the parent rows**; it can no longer lean on a cascade that no deploy has. `flows` used to be the exception (FKs ON), which is precisely why it never caught account/group deletion leaving rows behind — see `pollis-delivery/src/teardown.rs`.
+  - Note for fixture authors: libsql's LOCAL backend enables `PRAGMA foreign_keys` by default, while production (Turso) does not. Every `Db` now stamps its per-connection PRAGMAs on *every* checkout (#919, `db.rs` `PerConnPragmas`), and as of the teardown work the local pragma set (`LOCAL_PRAGMAS`) says `foreign_keys=OFF` — as did `SHARED_LOCAL_PRAGMAS` and `RemoteDb::conn`, both deleted in #987 when the client stopped having a database handle at all. So a fixture inherits production semantics by default and must **seed the parent rows**; it can no longer lean on a cascade that no deploy has. `flows` used to be the exception (FKs ON), which is precisely why it never caught account/group deletion leaving rows behind — see `pollis-delivery/src/teardown.rs`.
   - `tests/teardown.rs` is the enumerated deletion suite: it reads the live schema and fails if any table naming a user or a conversation is neither purged nor carried in a documented exemption list, so a new migration cannot silently add a table that account deletion forgets.
 - **`tests/conversation_namespace.rs`** (`pollis-delivery`, #880) pins "one id names exactly one kind of conversation" and is deliberately split into two classes of test, because the two are proved by different things. **Guard tests** assert the clean `Forbidden` that `conversation_id_taken` produces — remove the guard and exactly these fail. **Registry tests** assert only that *no row was written*, which holds whether the guard refused the write or the `conversation` primary key did; they are what makes the invariant a property of the schema rather than of anyone's memory, and they still pass with the guard deleted. Two of them can only be proved this way: an id whose conversation no longer exists (the registry is append-only, so the three-table guard query cannot see it) and one request naming the same id twice (nothing exists yet, so no lookup can catch it). The backfill half stamps a database at the PREVIOUS schema version, seeds the row shapes production actually has (a group with channels, a group with none, a DM), runs the real migration SQL out of `POST_BASELINE_MIGRATIONS` rather than a paraphrase, and asserts exactly one registry row per conversation — including the pre-existing-collision case, where the migration must not fail and the id must go to whichever conversation had it first.
 - **`tests/conn_pool.rs`** (`pollis-delivery`, #777) is the only DS test that runs the **remote** (hrana/HTTP) path — every other one uses `Db::connect_local` and never speaks hrana at all, which is why the per-request-`hyper::Client` defect went unnoticed and why a connection-reuse change could not be landed on faith. It stands up a hrana-speaking test double (an axum `/v3/pipeline` route built on the `libsql-hrana` wire types, tracking batons → streams and per-stream autocommit so `transaction()` behaves) and points `Db::connect_remote` at it. Because each libsql `Connection` owns its own `hyper::Client` and therefore its own TCP pool, *distinct client socket addresses* is an exact count of connections built — i.e. of TLS handshakes in prod. Asserted: 20 sequential requests use ONE connection (was 20); 8 concurrent holders get 8 distinct connections and 8 distinct hrana streams, then release them for reuse (exclusive checkout — the pool can never hand one connection to two callers); a connection parked past the idle window is discarded rather than reused (so a server-expired stream can't surface as a failed request later); and 6 concurrent transactions each own a stream carrying exactly their `BEGIN`/`INSERT`/`COMMIT` and nothing else. The first three fail against the old per-request-connect code; the last one guards the property reuse must not break.

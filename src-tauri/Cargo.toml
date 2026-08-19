@@ -130,11 +130,13 @@ openmls_basic_credential = "0.5"
 tls_codec = "0.5"
 rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
 # In-process MLS Delivery Service for the flows harness: the real DS router
-# (build_router) bound on a loopback port against the SAME test libsql file the
-# clients use, so flows exercise the deployed DS submission path end to end.
-# `test-harness` exposes `Db::from_shared`, which the flows harness needs to
-# hand the DS the SAME libsql handle its clients read from (#925).
-pollis-delivery = { path = "../pollis-delivery", features = ["test-harness"] }
+# (build_router) bound on a loopback port, against the two local libsql files the
+# harness owns, so flows exercise the deployed DS path end to end. Since #987 the
+# harness ALSO gets its `Db` type from here — clients have no database handle of
+# their own, so the DS's is the only one, and the tests share it rather than
+# opening a second `Database` on the same file (which would not see the DS's WAL
+# writes promptly).
+pollis-delivery = { path = "../pollis-delivery" }
 # The shared endpoint table + request types, so the harness routes on the same
 # `Body::PATH` constants the client posts to and can assert route coverage
 # against the one declaration instead of a hand-kept list (#875, #918).

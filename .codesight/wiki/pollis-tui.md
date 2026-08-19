@@ -46,10 +46,10 @@ pollis-tui (binary `pollis`)
         ▼
   pollis_core::commands::* (&Arc<AppState>)   src/auth.rs — order-enforcing wrappers
         │
-  AppState { Config, RemoteDb, log_db, file Keystore, local SQLCipher DB }
-        │ reads (direct)              │ writes (via Delivery Service)
-        ▼                            ▼
-      Turso libSQL              pollis-delivery
+  AppState { Config, file Keystore, local SQLCipher DB }
+        │ every remote read AND write (#987)
+        ▼
+   pollis-delivery ──▶ Turso libSQL
 ```
 
 ### Source layout

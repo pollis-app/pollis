@@ -13,14 +13,11 @@ path = "src/lib.rs"
 name = "pollis-delivery"
 path = "src/main.rs"
 
-[features]
-default = []
-# Exposes the constructors that exist ONLY for the integration harnesses, so
-# they cannot be reached from a production build (#925). Mirrors pollis-core's
-# feature of the same name — `RemoteDb::shared_database` (the giving half of the
-# shared-handle pair) has always been gated this way, and `Db::from_shared` (the
-# receiving half) was not, purely by omission.
-test-harness = []
+# #987 removed the `test-harness` feature. It existed to gate `Db::from_shared`,
+# the receiving half of the shared-libsql-handle pair whose giving half was
+# `pollis_core::db::remote::RemoteDb::shared_database` (#925). Neither side
+# exists any more: the client has no database handle to share, so the harnesses
+# hand the DS's own `Db` to the tests instead.
 
 [dependencies]
 axum = "0.7"
