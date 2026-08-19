@@ -562,8 +562,24 @@ pub(super) enum VerifyOutcome {
     AbsentRetry,
 }
 
-pub(super) async fn verify_added_devices(
-    conn: &libsql::Connection,
+/// Decide whether the devices a commit adds are legitimately added, from rows
+/// the Delivery Service supplied.
+///
+/// **The decision stays here.** Since #987 the client holds no database
+/// credential, so the ROWS arrive over HTTP — but the loop below is a signature
+/// check over a cert chain rooted in the user's own `account_id_pub`, and the DS
+/// is explicitly outside the trust boundary (`docs/security-whitepaper.md`). A
+/// DS that answered "Verified" would be a DS that could add devices to groups.
+/// So it answers with columns and this function answers with a verdict, exactly
+/// as when the columns came from a `SELECT`.
+///
+/// `identity` is `None` when the batch named this user but the DS had no
+/// `users` row for them — the same replication-lag case a missing row used to
+/// be, and treated identically ([`VerifyOutcome::AbsentRetry`]). Every outcome
+/// and every log line below is byte-for-byte what the direct-read version
+/// produced for the same inputs.
+pub(super) fn verify_added_devices(
+    identity: Option<&pollis_api::reads::AddedIdentity>,
     target_user_id: &str,
     device_ids: &[String],
 ) -> crate::error::Result<VerifyOutcome> {
@@ -571,102 +587,36 @@ pub(super) async fn verify_added_devices(
         return Ok(VerifyOutcome::Verified);
     }
 
-    // Fetch account_id_pub once. A missing `users` row or NULL
-    // account_id_pub falls into AbsentRetry: the row may simply not have
-    // replicated yet.
-    let account_id_pub: Vec<u8> = {
-        let mut rows = conn
-            .query(
-                "SELECT account_id_pub FROM users WHERE id = ?1",
-                libsql::params![target_user_id],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => match row.get::<Option<Vec<u8>>>(0).ok().flatten() {
-                Some(b) => b,
-                None => {
-                    eprintln!(
-                        "[mls] verify_added_devices: {target_user_id} has no account_id_pub — retry"
-                    );
-                    return Ok(VerifyOutcome::AbsentRetry);
-                }
-            },
-            None => {
-                eprintln!(
-                    "[mls] verify_added_devices: user {target_user_id} not found — retry"
-                );
-                return Ok(VerifyOutcome::AbsentRetry);
-            }
-        }
+    // A missing `users` row or NULL account_id_pub falls into AbsentRetry: the
+    // row may simply not have replicated yet.
+    let Some(identity) = identity else {
+        eprintln!("[mls] verify_added_devices: user {target_user_id} not found — retry");
+        return Ok(VerifyOutcome::AbsentRetry);
+    };
+    let Some(account_id_pub) = identity
+        .account_id_pub
+        .as_deref()
+        .map(|s| super::ds_reads::decode_b64("account_id_pub", s))
+        .transpose()?
+    else {
+        eprintln!("[mls] verify_added_devices: {target_user_id} has no account_id_pub — retry");
+        return Ok(VerifyOutcome::AbsentRetry);
     };
 
-    // ONE query for the whole added-device list (#875). This runs inside the
-    // commit replay, once per add-carrying commit, so a cold-launch catch-up
-    // over K commits was paying K × (1 + devices) SEQUENTIAL Turso round trips
-    // interleaved with MLS work.
-    //
-    // The verification LOOP below is unchanged and still short-circuits in
-    // `device_ids` order, so the outcome and the log line for any given input
-    // are byte-identical. The only difference is that devices after the first
-    // failure are now fetched-but-not-examined instead of never fetched — no
-    // decision depends on that.
-    //
     // The map is READ, never drained: `added_device_ids` is a CSV column the DS
     // writes, so a repeated id in it is a shape this function has to survive.
     // Taking rows out would make the second mention of a device look absent,
     // turn a legitimate commit into a permanent `AbsentRetry`, and wedge the
-    // replay — where the per-device query it replaces would simply have
-    // returned the same row twice.
-    struct DeviceRow {
-        cert: Option<Vec<u8>>,
-        issued_at_str: Option<String>,
-        cert_identity_version: Option<i64>,
-        mls_sig_pub: Option<Vec<u8>>,
-        revoked_at: Option<String>,
-        mls_sig_pub_pq: Option<Vec<u8>>,
-    }
-    let mut by_device: std::collections::HashMap<String, DeviceRow> =
-        std::collections::HashMap::with_capacity(device_ids.len());
-    // `?1` is the user; devices occupy `?2..`. Bound by position — a device id
-    // is attacker-influenced and never goes near string-built SQL. Chunked
-    // (#916) with ONE slot reserved for the user id, so the two halves of that
-    // arithmetic stay adjacent.
-    for chunk in crate::db::chunk::bind_chunks(device_ids, 1) {
-        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 1);
-        params.push(target_user_id.to_string().into());
-        for did in chunk {
-            params.push(did.clone().into());
-        }
-        let mut rows = conn
-            .query(
-                &format!(
-                    "SELECT device_id, device_cert, cert_issued_at, cert_identity_version, \
-                            mls_signature_pub, revoked_at, mls_signature_pub_pq \
-                     FROM user_device WHERE user_id = ?1 AND device_id IN ({})",
-                    crate::db::chunk::placeholders(chunk.len(), 2)
-                ),
-                params,
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            let did: String = row.get(0)?;
-            by_device.insert(
-                did,
-                DeviceRow {
-                    cert: row.get::<Option<Vec<u8>>>(1).ok().flatten(),
-                    issued_at_str: row.get::<Option<String>>(2).ok().flatten(),
-                    cert_identity_version: row.get::<Option<i64>>(3).ok().flatten(),
-                    mls_sig_pub: row.get::<Option<Vec<u8>>>(4).ok().flatten(),
-                    revoked_at: row.get::<Option<String>>(5).ok().flatten(),
-                    mls_sig_pub_pq: row.get::<Option<Vec<u8>>>(6).ok().flatten(),
-                },
-            );
-        }
+    // replay.
+    let mut by_device: std::collections::HashMap<&str, &pollis_api::reads::DeviceCertRow> =
+        std::collections::HashMap::with_capacity(identity.devices.len());
+    for row in &identity.devices {
+        by_device.insert(row.device_id.as_str(), row);
     }
 
     for did in device_ids {
         let row = match by_device.get(did.as_str()) {
-            Some(r) => r,
+            Some(r) => *r,
             None => {
                 // Row absent. Could be (a) revoked + hard-deleted by an
                 // older app version (pre-#372 deployment), or (b) just not
@@ -679,45 +629,40 @@ pub(super) async fn verify_added_devices(
             }
         };
 
-        let DeviceRow {
-            cert,
-            issued_at_str,
-            cert_identity_version,
-            mls_sig_pub,
-            revoked_at,
-            mls_sig_pub_pq,
-        } = row;
-        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, revoked_at, mls_sig_pub_pq) = (
-            cert.clone(),
-            issued_at_str.clone(),
-            *cert_identity_version,
-            mls_sig_pub.clone(),
-            revoked_at.clone(),
-            mls_sig_pub_pq.clone(),
-        );
-
         // Tombstone wins — a revoked device is unambiguously not allowed
         // to add itself, regardless of cert column state.
-        if revoked_at.is_some() {
+        if row.revoked_at.is_some() {
+            let revoked_at = &row.revoked_at;
             eprintln!(
                 "[mls] verify_added_devices: device {did} is REVOKED (revoked_at={revoked_at:?})"
             );
             return Ok(VerifyOutcome::Revoked);
         }
 
-        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) =
-            match (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) {
-                (Some(c), Some(t), Some(v), Some(p), Some(q)) => (c, t, v, p, q),
-                _ => {
-                    // Cert columns NULL on a non-revoked row is the
-                    // "device row inserted but cert publish hasn't landed
-                    // yet" race. Same treatment as fully absent.
-                    eprintln!(
-                        "[mls] verify_added_devices: device {did} has no cert columns populated — retry"
-                    );
-                    return Ok(VerifyOutcome::AbsentRetry);
-                }
-            };
+        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) = match (
+            row.device_cert.as_deref(),
+            row.cert_issued_at.as_deref(),
+            row.cert_identity_version,
+            row.mls_signature_pub.as_deref(),
+            row.mls_signature_pub_pq.as_deref(),
+        ) {
+            (Some(c), Some(t), Some(v), Some(p), Some(q)) => (
+                super::ds_reads::decode_b64("device_cert", c)?,
+                t,
+                v,
+                super::ds_reads::decode_b64("mls_signature_pub", p)?,
+                super::ds_reads::decode_b64("mls_signature_pub_pq", q)?,
+            ),
+            _ => {
+                // Cert columns NULL on a non-revoked row is the
+                // "device row inserted but cert publish hasn't landed
+                // yet" race. Same treatment as fully absent.
+                eprintln!(
+                    "[mls] verify_added_devices: device {did} has no cert columns populated — retry"
+                );
+                return Ok(VerifyOutcome::AbsentRetry);
+            }
+        };
 
         let issued_at: u64 = match issued_at_str.parse() {
             Ok(v) => v,
@@ -741,9 +686,7 @@ pub(super) async fn verify_added_devices(
             &cert,
         ) {
             // Cert chain itself failed — unambiguous bad data, not a race.
-            eprintln!(
-                "[mls] verify_added_devices: device {did} cert verification failed: {e}"
-            );
+            eprintln!("[mls] verify_added_devices: device {did} cert verification failed: {e}");
             return Ok(VerifyOutcome::Revoked);
         }
     }

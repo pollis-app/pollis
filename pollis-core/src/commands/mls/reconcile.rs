@@ -69,20 +69,24 @@ async fn fetch_commit_at_epoch(
     generation: i64,
     epoch: i64,
 ) -> Option<Vec<u8>> {
-    // Read-only commit-log lookup → log_db (falls back to remote_db pre-cutover).
-    let conn = state.log_db.conn().await.ok()?;
-    let mut rows = conn
-        .query(
-            "SELECT commit_data FROM mls_commit_log \
-             WHERE conversation_id = ?1 AND generation = ?2 AND epoch = ?3",
-            libsql::params![conversation_id.to_string(), generation, epoch],
-        )
-        .await
-        .ok()?;
-    match rows.next().await {
-        Ok(Some(row)) => row.get::<Vec<u8>>(0).ok(),
-        _ => None,
-    }
+    let snap = super::ds_reads::conversation_snapshot(
+        state,
+        pollis_api::reads::ConversationStateQuery {
+            conversation_id: conversation_id.to_string(),
+            generation: Some(generation),
+            since: None,
+            want_group_info_blob: false,
+            commit_at_epoch: Some(epoch),
+        },
+    )
+    .await
+    .ok()?;
+    // `None` on any failure keeps the caller's documented bias: `invariants::
+    // resolve` maps "no canonical commit visible" to Rollback, so an unreadable
+    // log can never be mistaken for "our commit won". Adopting on a failed read
+    // would leave the group at a phantom epoch with undecryptable messages.
+    let bytes = snap.commit_at_epoch.as_deref()?;
+    super::ds_reads::decode_b64("commit_data", bytes).ok()
 }
 
 /// Apply the side effects of a commit that won its epoch — whether confirmed

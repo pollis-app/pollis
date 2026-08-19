@@ -98,6 +98,7 @@ pub mod groups;
 pub mod messages;
 pub mod otp;
 pub mod profile;
+pub mod reads;
 pub mod writes;
 
 /// A request body that knows the one path it is addressed at, and the one body
@@ -232,6 +233,8 @@ endpoints! {
     Client   writes::AckBody                    => "/v1/welcomes/ack",                   writes::WelcomesUpdated;
     Client   writes::ResetBody                  => "/v1/welcomes/reset",                 writes::WelcomesUpdated;
     Client   writes::PurgeBody                  => "/v1/welcomes/purge",                 writes::WelcomesPurged;
+    Client   reads::FetchWelcomesBody           => "/v1/welcomes/fetch",                 reads::FetchWelcomesResponse;
+    Client   reads::ConversationStateBody       => "/v1/mls/conversation-state",         reads::ConversationStateResponse;
     Operator writes::ResubmitBody               => "/v1/welcomes/resubmit",              StatusOk;
 
     // ── Domain A — messages ──────────────────────────────────────────────────

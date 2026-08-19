@@ -393,18 +393,17 @@ async fn head_epoch_in(
     conversation_id: &str,
     generation: i64,
 ) -> Result<i64> {
-    let conn = state.log_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT COALESCE(MAX(epoch), -1) + 1 FROM mls_commit_log \
-             WHERE conversation_id = ?1 AND generation = ?2",
-            libsql::params![conversation_id, generation],
-        )
-        .await?;
-    match rows.next().await? {
-        Some(row) => Ok(row.get::<i64>(0)?),
-        None => Ok(0),
-    }
+    // Advisory only, and deliberately so: the DS re-validates `closes_epoch`
+    // inside the migration's compare-and-swap, so a head that goes stale between
+    // this read and the submit rejects the migration rather than orphaning a
+    // commit. That is what lets this be an ordinary read rather than something
+    // that needs a lock.
+    let snap = super::ds_reads::conversation_snapshot(
+        state,
+        super::ds_reads::state_query(conversation_id, Some(generation)),
+    )
+    .await?;
+    Ok(snap.head)
 }
 
 /// One Welcome per added recipient, all carrying the same blob (the commit's

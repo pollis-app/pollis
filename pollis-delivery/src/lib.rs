@@ -41,6 +41,7 @@ pub mod otp;
 pub mod participant_id;
 pub mod profile;
 pub mod ratelimit;
+pub mod reads;
 pub mod redact;
 pub mod room_id;
 pub mod session;
@@ -298,6 +299,11 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<writes::ResetBody as DsRequest>::PATH, post(writes::welcomes_reset))
         .route(<writes::PurgeBody as DsRequest>::PATH, post(writes::welcomes_purge))
         .route(<writes::ResubmitBody as DsRequest>::PATH, post(writes::welcomes_resubmit))
+        // ── MLS control-plane READS (#987) ───────────────────────────────────
+        // POST, not GET: the canonical signing message covers the path without
+        // its query string, so a signed GET's parameters are unauthenticated.
+        .route(<reads::FetchWelcomesBody as DsRequest>::PATH, post(reads::fetch_welcomes))
+        .route(<reads::ConversationStateBody as DsRequest>::PATH, post(reads::conversation_state))
         // Domain A (#419) — messages / envelopes / watermarks / reactions /
         // attachments. All land on the MAIN DB.
         .route(<messages::SendMessageBody as DsRequest>::PATH, post(messages::send_message))
