@@ -57,6 +57,13 @@ this sweep.
 **If a utility is missing, add it to the theme** — that is what the bottom seven rows
 above are: tokens that had no utility, so every call site spelled them inline.
 
+**Never put two utilities of the same property on one element** — `text-muted` and
+`text-dim` in one class string, or two `focus:bg-*`. Tailwind emits its own
+stylesheet order, so which one wins has nothing to do with the order you wrote them
+in, and the loser is silently dropped. Pick the tone with a conditional and append
+exactly one (`MessageActions` splits `barBtnBaseClass` from its resting color for
+this reason), or hold the variant classes apart per call site.
+
 Inline `style` is still correct for a value computed at runtime: a per-author
 username colour, a percentage width, a **dragged panel width** ([Resizable side
 panels](#resizable-side-panels-985)), a `transform`, a component-local custom property
@@ -463,7 +470,7 @@ tone already stored by the picker; there is no tone syntax in the composer.
 ### `components` (6)
 
 - **ErrorBoundary** — `frontend/src/components/ErrorBoundary.tsx`
-- **SearchPanel** — props: isOpen, onClose — `frontend/src/components/SearchPanel.tsx`
+- **SearchPanel** — props: isOpen, onClose — `frontend/src/components/SearchPanel.tsx`. Selection moves by arrows, Tab/Shift-Tab, and the rebindable `search.next` / `search.prev` commands (defaults `mod+j` / `mod+k`, vim's direction). Those two register at priority 10 and only while the menu is open, which is what lets `mod+k` move the selection instead of re-firing `app.toggleSearch` and closing the menu the user just opened — Esc already closes it. All three routes call the same wrapping `selectNext` / `selectPrev`, and the hint row renders the live combos via `useShortcutLabel`, so a rebind shows up there.
 - **TerminalApp** — props: onLogout, onLock, onDeleteAccount — `frontend/src/components/TerminalApp.tsx`
 - **TerminalView** — props: visible — `frontend/src/components/TerminalView.tsx`
 - **TypingIndicator** — props: channelId, conversationId — `frontend/src/components/TypingIndicator.tsx`
@@ -526,7 +533,7 @@ tone already stored by the picker; there is no tone syntax in the composer.
 - **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`
 - **MentionToken** — props: name, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`
-- **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, copyLinkState, onReply, onOpenThread, onToggleSave, onCopyLink, onEdit, onDelete — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut.
+- **MessageActions** — props: messageId, variant, isOwn, canModerate, isSaved, copyLinkState, onReply, onOpenThread, onToggleSave, onCopyLink, onEdit, onDelete — `frontend/src/components/Message/MessageActions.tsx`. The per-message hover toolbar, shared by both skins: Reply, Edit (own messages), and a "more" trigger whose anchored menu (icon + label rows, Delete last) carries thread/save/copy-link/delete. Non-modal — `absolute` inside its own `relative` wrapper, same shape as `EmojiPickerButton`. Its Escape claim uses `stopImmediatePropagation` so closing the menu never also fires the window-level `nav.back` Escape shortcut. Keyboard selection **inverts** the focused control (`focus:bg-accent focus:text-bg`; menu rows too, with Delete inverting to `bg-danger` instead of borrowing the affirmative accent) — a recolor alone was invisible in the terminal skin, and it replaces the browser's default focus ring on the menu rows. The inversion is on plain `focus:`, not `focus-visible:`, because `MessageList` projects nav state with a programmatic `.focus()` that WebKitGTK does not reliably treat as focus-visible — the row's own `focus-within:bg-hover` is plain-focus for the same reason. The "more" trigger rests one step brighter (`text-dim`) than Reply/Edit: three dots carry less ink than the arrow or pencil, so at a shared `text-muted` it read as disabled.
 - **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
 - **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, copyLinkState, isSaved, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed.

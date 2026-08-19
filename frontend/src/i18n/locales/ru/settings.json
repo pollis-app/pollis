@@ -326,6 +326,8 @@
     "appCloseWindow": "Скрыть / закрыть окно",
     "appSync": "Синхронизация (обновление + MLS)",
     "navBack": "Назад",
+    "searchNext": "Меню поиска: следующий результат",
+    "searchPrev": "Меню поиска: предыдущий результат",
     "voiceToggleMute": "Микрофон вкл./выкл.",
     "voiceToggleDeafen": "Звук вкл./выкл.",
     "voicePushToTalk": "Режим рации (удержание)",

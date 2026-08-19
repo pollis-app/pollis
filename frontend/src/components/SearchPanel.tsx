@@ -11,6 +11,7 @@ import type { GroupWithChannels } from "../services/api";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 import { parseMessagePermalink } from "../utils/urlRouting";
 import { useMessagePermalink } from "../hooks/useMessagePermalink";
+import { useGlobalShortcut, useShortcutLabel } from "../keyboard";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -401,21 +402,43 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     [onClose, navigate]
   );
 
+  // Shared by the arrow keys, Tab, and the rebindable search.next /
+  // search.prev commands, so every way of moving the selection wraps
+  // identically.
+  const selectNext = useCallback(() => {
+    setSelectedIndex((prev) => (prev < filteredItems.length - 1 ? prev + 1 : 0));
+  }, [filteredItems.length]);
+
+  const selectPrev = useCallback(() => {
+    setSelectedIndex((prev) => (prev > 0 ? prev - 1 : filteredItems.length - 1));
+  }, [filteredItems.length]);
+
+  // Registered above app.toggleSearch (priority 0) and live only while the
+  // menu is open, so the default mod+k moves the selection here instead of
+  // toggling the menu shut behind the user's back.
+  useGlobalShortcut("search.next", selectNext, {
+    enabled: isOpen,
+    priority: 10,
+  });
+  useGlobalShortcut("search.prev", selectPrev, {
+    enabled: isOpen,
+    priority: 10,
+  });
+
+  const nextLabel = useShortcutLabel("search.next");
+  const prevLabel = useShortcutLabel("search.prev");
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       switch (e.key) {
         case "ArrowDown": {
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev < filteredItems.length - 1 ? prev + 1 : 0
-          );
+          selectNext();
           break;
         }
         case "ArrowUp": {
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev > 0 ? prev - 1 : filteredItems.length - 1
-          );
+          selectPrev();
           break;
         }
         case "Enter": {
@@ -440,19 +463,15 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         case "Tab": {
           e.preventDefault();
           if (e.shiftKey) {
-            setSelectedIndex((prev) =>
-              prev > 0 ? prev - 1 : filteredItems.length - 1
-            );
+            selectPrev();
           } else {
-            setSelectedIndex((prev) =>
-              prev < filteredItems.length - 1 ? prev + 1 : 0
-            );
+            selectNext();
           }
           break;
         }
       }
     },
-    [filteredItems, selectedIndex, handleSelect, onClose]
+    [filteredItems, selectedIndex, handleSelect, onClose, selectNext, selectPrev]
   );
 
   if (!isOpen) {
@@ -544,6 +563,9 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
         >
           <ArrowUp className="w-3 h-3" />
           <ArrowDown className="w-3 h-3" />
+          <span className="text-line-strong">/</span>
+          <span>{prevLabel}</span>
+          <span>{nextLabel}</span>
           <span>{t("panel.hintNavigate")}</span>
           <span className="mx-1 text-line-strong">
             &bull;

@@ -338,6 +338,8 @@
     "appCloseWindow": "إخفاء / إغلاق النافذة",
     "appSync": "المزامنة (إعادة الجلب + MLS)",
     "navBack": "العودة",
+    "searchNext": "قائمة البحث: النتيجة التالية",
+    "searchPrev": "قائمة البحث: النتيجة السابقة",
     "voiceToggleMute": "تبديل كتم الصوت",
     "voiceToggleDeafen": "تبديل كتم السماع",
     "voicePushToTalk": "اضغط للتحدث (مع الاستمرار)",

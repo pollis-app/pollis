@@ -318,6 +318,8 @@
     "appCloseWindow": "Hide / close window",
     "appSync": "Sync (refetch + MLS)",
     "navBack": "Go back",
+    "searchNext": "Search menu: next result",
+    "searchPrev": "Search menu: previous result",
     "voiceToggleMute": "Toggle mute",
     "voiceToggleDeafen": "Toggle deafen",
     "voicePushToTalk": "Push to talk (hold)",
