@@ -1,10 +1,17 @@
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter, useRouterState } from "@tanstack/react-router";
-import { ChevronLeft, Search as SearchIcon, Settings as SettingsIcon } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Search as SearchIcon,
+  Settings as SettingsIcon,
+} from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useShortcutLabel } from "../../keyboard";
+import { Button } from "../ui/Button";
 import { appStore } from "../../stores/appStore";
+import { historyNavStore } from "../../stores/historyNavStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useSkin } from "../../hooks/queries/usePreferences";
@@ -140,11 +147,59 @@ function useBreadcrumbTrail(): Segment[] {
   }, [pathname, groupsWithChannels, dmConversations, channels, t]);
 }
 
+interface HistoryNavProps {
+  iconSize: number;
+}
+
+/**
+ * The back/forward chevron pair, the way a browser — and Slack and Discord —
+ * draw it: two buttons that walk the router's history, always on screen, each
+ * greyed out and genuinely `disabled` when that direction has nowhere to go.
+ *
+ * Always-visible matters more than it looks: a control that disappears at the
+ * root moves everything next to it sideways, so the trail would shift under
+ * the pointer on the way home. Disabled keeps the geometry still AND tells a
+ * screen reader the same thing the grey tells everyone else, which the
+ * `aria-hidden` spacer div it replaced did not.
+ *
+ * Enablement comes from `historyNavStore`, never from `window.history.length`
+ * — see `utils/historyNav.ts` for why that number cannot answer "forward?".
+ */
+const HistoryNav: React.FC<HistoryNavProps> = observer(({ iconSize }) => {
+  const { t } = useTranslation("nav");
+
+  return (
+    <div className="flex flex-shrink-0 items-center gap-0.5">
+      <Button
+        variant="ghost"
+        size="xs"
+        data-testid="breadcrumb-back-button"
+        onClick={historyNavStore.goBack}
+        disabled={!historyNavStore.canGoBack}
+        aria-label={t("common:actions.back")}
+      >
+        <ChevronLeft size={iconSize} className="rtl-mirror" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="xs"
+        data-testid="breadcrumb-forward-button"
+        onClick={historyNavStore.goForward}
+        disabled={!historyNavStore.canGoForward}
+        aria-label={t("common:actions.forward")}
+      >
+        <ChevronRight size={iconSize} className="rtl-mirror" />
+      </Button>
+    </div>
+  );
+});
+
 /**
  * BreadcrumbNav renders below the TitleBar on authenticated pages.
- * Shows a persistent back button that navigates up one level in the
- * breadcrumb hierarchy (not browser-history back) plus the breadcrumb
- * trail itself ("Home / Direct Messages / @someone").
+ * Shows the browser-style back/forward pair (router history, not the
+ * breadcrumb hierarchy) plus the breadcrumb trail itself
+ * ("Home / Direct Messages / @someone"), whose segments stay clickable for
+ * the hierarchical jumps the arrows no longer do.
  */
 export const BreadcrumbNav: React.FC = observer(() => {
   const { t } = useTranslation("nav");
@@ -153,16 +208,6 @@ export const BreadcrumbNav: React.FC = observer(() => {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const searchLabel = useShortcutLabel("app.toggleSearch");
   const segments = useBreadcrumbTrail();
-
-  // Back = up one segment in the breadcrumb stack (not browser history)
-  const parentTo = segments.length > 1 ? segments[segments.length - 2].to : null;
-
-  const handleBack = () => {
-    if (!parentTo) {
-      return;
-    }
-    router.navigate({ to: parentTo });
-  };
 
   const openSearch = () => {
     window.dispatchEvent(new CustomEvent("pollis:open-search"));
@@ -176,18 +221,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
         data-testid="breadcrumb-nav"
         className="h-[2.75rem] flex-shrink-0 flex items-center gap-3 border-b border-line bg-surface px-3"
       >
-        {parentTo ? (
-          <button
-            data-testid="breadcrumb-back-button"
-            onClick={handleBack}
-            aria-label={t("common:actions.back")}
-            className="flex items-center justify-center text-dim transition-colors hover:text-accent"
-          >
-            <ChevronLeft size={18} className="rtl-mirror" />
-          </button>
-        ) : (
-          <div className="w-[18px]" aria-hidden="true" />
-        )}
+        <HistoryNav iconSize={18} />
         <nav
           data-testid="breadcrumb-trail"
           className="flex min-w-0 flex-1 items-center gap-1.5 text-sm"
@@ -258,25 +292,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
         paddingInlineEnd: 12,
       }}
     >
-      {parentTo ? (
-        <button
-          data-testid="breadcrumb-back-button"
-          onClick={handleBack}
-          aria-label={t("common:actions.back")}
-          className="flex items-center justify-center transition-colors text-muted hover:text-accent border-0"
-          style={{
-            width: 20,
-            height: 20,
-            background: "none",
-            padding: 0,
-            cursor: "pointer",
-          }}
-        >
-          <ChevronLeft size={14} className="rtl-mirror" />
-        </button>
-      ) : (
-        <div style={{ width: 20, height: 20 }} aria-hidden="true" />
-      )}
+      <HistoryNav iconSize={14} />
       <span
         data-testid="breadcrumb-trail"
         className="text-xs font-mono truncate text-muted"
