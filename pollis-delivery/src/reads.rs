@@ -61,9 +61,24 @@ fn b64(bytes: &[u8]) -> String {
 /// `device_id` would let any authenticated user drain another device's Welcome
 /// queue. On the no-auth path they come from the body, which is what that path
 /// means.
-struct Reader {
-    user_id: String,
-    device_id: String,
+pub(crate) struct Reader {
+    pub user_id: String,
+    pub device_id: String,
+}
+
+/// [`reader`] for the sibling read modules — the reads that are scoped to a
+/// DEVICE, not just a user (the key-package pool this device owns, the Welcome
+/// queue addressed to it). Same gate, exported so there is one of it.
+// The `Err` IS the response returned to the client, as elsewhere in this crate.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn reader_identity(
+    state: &AppState,
+    headers: &HeaderMap,
+    method: &Method,
+    uri: &Uri,
+    body: &Bytes,
+) -> Result<Result<Reader, Response>, AppError> {
+    reader(state, headers, method, uri, body, None, None).await
 }
 
 /// Authenticate a read and resolve the reader identity.
@@ -105,6 +120,53 @@ async fn reader(
     .await
     {
         Ok((user_id, device_id)) => Ok(Ok(Reader { user_id, device_id })),
+        Err(rej) => Ok(Err(rej.into_response())),
+    }
+}
+
+/// Authenticate a read that needs only the USER half of the identity.
+///
+/// The device-scoped reads use [`reader`]; this is for the many that answer for
+/// a user regardless of which of their devices asked. Same gate, same
+/// no-auth-path contract: with auth on, the id comes from the verified
+/// signature and a body that names a DIFFERENT user is a 403 rather than a
+/// silently-ignored field.
+// The `Err` IS the response returned to the client, as elsewhere in this crate.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn authed_user(
+    state: &AppState,
+    headers: &HeaderMap,
+    method: &Method,
+    uri: &Uri,
+    body: &Bytes,
+    body_user_id: Option<&str>,
+) -> Result<Result<String, Response>, AppError> {
+    if !state.require_auth {
+        return Ok(match body_user_id {
+            Some(u) if !u.is_empty() => Ok(u.to_string()),
+            _ => Err(bad_request("user_id required when auth is disabled")),
+        });
+    }
+    let conn = state.db.conn().await?;
+    match auth::verify_request_cached(
+        &state.device_keys,
+        &conn,
+        headers,
+        method.as_str(),
+        uri.path(),
+        body,
+        crate::util::now_unix() as i64,
+    )
+    .await
+    {
+        Ok(user_id) => {
+            if let Some(claimed) = body_user_id {
+                if !claimed.is_empty() && claimed != user_id {
+                    return Ok(Err(AuthRejection::Forbidden.into_response()));
+                }
+            }
+            Ok(Ok(user_id))
+        }
         Err(rej) => Ok(Err(rej.into_response())),
     }
 }

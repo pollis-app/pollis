@@ -23,6 +23,7 @@
 //! production configuration.
 
 pub mod account;
+pub mod account_reads;
 pub mod auth;
 pub mod bootstrap;
 pub mod broker;
@@ -30,6 +31,7 @@ pub mod cert;
 pub mod commit;
 pub mod db;
 pub mod devices;
+pub mod directory;
 pub mod email_change;
 pub mod emoji;
 pub mod error;
@@ -417,6 +419,34 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<broker::LivekitIdentitiesBody as DsRequest>::PATH, post(broker::livekit_identities))
         .route(<broker::TursoTokenBody as DsRequest>::PATH, post(broker::turso_token))
         .route(<broker::R2PresignBody as DsRequest>::PATH, post(broker::r2_presign))
+
+        // ── Directory + conversation READS (#987) ────────────────────────────
+        .route(<directory::CatchUpBody as DsRequest>::PATH, post(directory::catch_up))
+        .route(<directory::MessageLookupBody as DsRequest>::PATH, post(directory::message_lookup))
+        .route(<directory::DirectoryBootstrapBody as DsRequest>::PATH, post(directory::bootstrap))
+        .route(<directory::DirectoryGroupBody as DsRequest>::PATH, post(directory::group))
+        .route(<directory::DirectoryMembersBody as DsRequest>::PATH, post(directory::members))
+        .route(<directory::DirectoryUsersBody as DsRequest>::PATH, post(directory::users))
+        .route(<directory::GroupBySlugBody as DsRequest>::PATH, post(directory::group_by_slug))
+        .route(<directory::DirectoryConversationsBody as DsRequest>::PATH, post(directory::conversations))
+
+        // ── Account, device and object READS (#987) ──────────────────────────
+        .route(<account_reads::AccountKeysBody as DsRequest>::PATH, post(account_reads::account_keys))
+        .route(<account_reads::DevicesBody as DsRequest>::PATH, post(account_reads::devices))
+        .route(<account_reads::KeyPackagesBody as DsRequest>::PATH, post(account_reads::key_packages))
+        .route(<account_reads::RegisteredDevicesBody as DsRequest>::PATH, post(account_reads::registered_devices))
+        .route(<account_reads::EnrollmentRequestBody as DsRequest>::PATH, post(account_reads::enrollment))
+        .route(<account_reads::PendingEnrollmentsBody as DsRequest>::PATH, post(account_reads::pending_enrollments))
+        .route(<account_reads::RecoveryBlobBody as DsRequest>::PATH, post(account_reads::recovery_blob))
+        .route(<account_reads::AccountStatusBody as DsRequest>::PATH, post(account_reads::account_status))
+        .route(<account_reads::SecurityEventsBody as DsRequest>::PATH, post(account_reads::security_events))
+        .route(<account_reads::EmojiReadBody as DsRequest>::PATH, post(account_reads::emoji))
+        .route(<account_reads::ObjectExistsBody as DsRequest>::PATH, post(account_reads::object_exists))
+        // UNAUTHENTICATED, and it has to be: it runs before PIN entry, when the
+        // local DB is closed (no signer), `device_id` is unset, and no OTP has
+        // run (no session). Rate-limited on the tight `probe` tier. See #987
+        // §6.5 and `account_reads::account_probe`.
+        .route(<account_reads::AccountProbeBody as DsRequest>::PATH, post(account_reads::account_probe))
         // Hardening middleware (#345). Rate limiting runs first (inner); security
         // headers are added last so they wrap every response, including the
         // rate-limiter's own 429s and any error replies.

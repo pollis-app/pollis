@@ -88,10 +88,12 @@
 //! reaching both routers.
 
 pub mod account;
+pub mod account_reads;
 pub mod bootstrap;
 pub mod broker;
 pub mod commit;
 pub mod devices;
+pub mod directory;
 pub mod email_change;
 pub mod emoji;
 pub mod groups;
@@ -318,6 +320,35 @@ endpoints! {
     Client   broker::LivekitIdentitiesBody      => "/v1/livekit/identities",             broker::LivekitIdentitiesResponse;
     Client   broker::TursoTokenBody             => "/v1/turso/token",                    broker::TursoTokenResponse;
     Client   broker::R2PresignBody              => "/v1/r2/presign",                     broker::R2PresignResponse;
+
+    // ── Directory + conversation READS (#987) ────────────────────────────────
+    // All POST, all with the parameters in the SIGNED body: the canonical
+    // signing message covers the path without its query string, so a signed GET
+    // carries unauthenticated parameters (the #681 shape). GETs are also exempt
+    // from rate limiting and absent from this table, which would make a GET read
+    // endpoint invisible to the route-coverage tests below.
+    Client   directory::CatchUpBody              => "/v1/conversations/catch-up",         directory::CatchUpResponse;
+    Client   directory::MessageLookupBody        => "/v1/messages/lookup",                directory::MessageLookupResponse;
+    Client   directory::DirectoryBootstrapBody   => "/v1/directory/bootstrap",            directory::DirectoryBootstrapResponse;
+    Client   directory::DirectoryGroupBody       => "/v1/directory/group",                directory::DirectoryGroupResponse;
+    Client   directory::DirectoryMembersBody     => "/v1/directory/members",              directory::DirectoryMembersResponse;
+    Client   directory::DirectoryUsersBody       => "/v1/directory/users",                directory::DirectoryUsersResponse;
+    Client   directory::GroupBySlugBody          => "/v1/directory/group-by-slug",        directory::GroupBySlugResponse;
+    Client   directory::DirectoryConversationsBody => "/v1/directory/conversations",      directory::DirectoryConversationsResponse;
+
+    // ── Account, device and object READS (#987) ──────────────────────────────
+    Client   account_reads::AccountKeysBody      => "/v1/read/account-keys",              account_reads::AccountKeysResponse;
+    Client   account_reads::DevicesBody          => "/v1/read/devices",                   account_reads::DevicesResponse;
+    Client   account_reads::KeyPackagesBody      => "/v1/read/key-packages",              account_reads::KeyPackagesResponse;
+    Client   account_reads::RegisteredDevicesBody => "/v1/read/registered-devices",       account_reads::RegisteredDevicesResponse;
+    Client   account_reads::EnrollmentRequestBody => "/v1/read/enrollment",               account_reads::EnrollmentRequestResponse;
+    Client   account_reads::PendingEnrollmentsBody => "/v1/read/pending-enrollments",     account_reads::PendingEnrollmentsResponse;
+    Client   account_reads::RecoveryBlobBody     => "/v1/read/recovery-blob",             account_reads::RecoveryBlobResponse;
+    Client   account_reads::AccountStatusBody    => "/v1/read/account-status",            account_reads::AccountStatusResponse;
+    Client   account_reads::AccountProbeBody     => "/v1/auth/account-probe",             account_reads::AccountProbeResponse;
+    Client   account_reads::SecurityEventsBody   => "/v1/read/security-events",           account_reads::SecurityEventsResponse;
+    Client   account_reads::EmojiReadBody        => "/v1/read/emoji",                     account_reads::EmojiReadResponse;
+    Client   account_reads::ObjectExistsBody     => "/v1/read/objects",                   account_reads::ObjectExistsResponse;
 }
 
 /// The guarantee, executable: a body missing a field does not compile.

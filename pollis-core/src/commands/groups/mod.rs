@@ -16,31 +16,15 @@ mod membership;
 mod types;
 
 /// Mirrors the frontend `deriveSlug` in urlRouting.ts.
-pub(super) fn derive_slug(name: &str) -> String {
-    let lower = name.to_lowercase();
-    let cleaned: String = lower
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || c.is_ascii_whitespace() || *c == '-')
-        .collect();
-    let with_hyphens = cleaned.split_ascii_whitespace().collect::<Vec<_>>().join("-");
-    let mut result = String::new();
-    let mut prev_hyphen = false;
-    for c in with_hyphens.chars() {
-        if c == '-' {
-            if !prev_hyphen {
-                result.push('-');
-            }
-            prev_hyphen = true;
-        } else {
-            result.push(c);
-            prev_hyphen = false;
-        }
-    }
-    result.trim_matches('-').to_string()
-}
-
-// ── Authorization preflight ───────────────────────────────────────────────────
-pub use authz::{channel_group_role, group_role, GroupRole, NOT_A_MEMBER};
+///
+/// A group's URL slug — [`pollis_api::directory::derive_slug`], re-exported.
+///
+/// The rule itself moved to `pollis-api` in #987, when slug MATCHING moved
+/// server-side (`POST /v1/directory/group-by-slug`). Two copies of a
+/// name-normalisation rule that must agree exactly is precisely the drift that
+/// makes a shared link resolve on one build and 404 on the next, so there is one
+/// implementation and both ends call it.
+pub(super) use pollis_api::directory::derive_slug;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{
