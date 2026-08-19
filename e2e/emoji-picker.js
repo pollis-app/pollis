@@ -79,6 +79,27 @@ async function createGroupWithChannel(browser, groupName, channelName) {
   await h.waitTestId(browser, "message-form", 30000);
 }
 
+/**
+ * Click the breadcrumb trail segment whose text is `label`.
+ *
+ * The bar's chevrons are history back/forward now, so "back" from this channel
+ * is the create-channel form it was made from, not the group. Climbing the
+ * hierarchy is the trail's job — this clicks it the way a user would.
+ */
+async function clickTrailSegment(browser, label) {
+  const clicked = await browser.execute((needle) => {
+    const trail = document.querySelector('[data-testid="breadcrumb-trail"]');
+    if (!trail) { return false; }
+    for (const btn of trail.querySelectorAll("button")) {
+      if ((btn.textContent || "").trim() === needle) { btn.click(); return true; }
+    }
+    return false;
+  }, label);
+  if (!clicked) {
+    throw new Error(`no breadcrumb trail segment labelled "${label}"`);
+  }
+}
+
 async function countSelector(browser, selector) {
   return browser.execute((sel) => document.querySelectorAll(sel).length, selector);
 }
@@ -192,7 +213,7 @@ async function main() {
     await h.sleep(300);
 
     // ── 5. The per-group Custom Emoji page ──────────────────────────────────
-    await h.clickTestId(browser, "breadcrumb-back-button");
+    await clickTrailSegment(browser, groupName);
     await h.waitTestId(browser, "menu-item-group-emoji", 20000);
     await h.clickTestId(browser, "menu-item-group-emoji");
     await h.waitTestId(browser, "group-emoji-page", 20000);
