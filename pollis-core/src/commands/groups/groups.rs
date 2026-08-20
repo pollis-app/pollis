@@ -4,95 +4,65 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::derive_slug;
 use super::types::{Channel, Group, GroupPreview, GroupWithChannels};
 use super::authz;
 
+/// The sidebar tree: every group the user belongs to, each carrying its
+/// channels and the user's role in it.
+///
+/// Derived from `group_member` server-side, NOT from `user_groups`: that table
+/// was the #532 directory index, reverted by #540, and now holds a one-time
+/// backfill minus deletions. Reading it would serve a confidently wrong sidebar.
 pub async fn list_user_groups_with_channels(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<GroupWithChannels>> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT g.id, g.name, g.description, g.owner_id, g.created_at,
-                c.id, c.group_id, c.name, c.description, c.channel_type,
-                gm.role
-         FROM groups g
-         JOIN group_member gm ON gm.group_id = g.id
-         LEFT JOIN channels c ON c.group_id = g.id
-         WHERE gm.user_id = ?1
-         ORDER BY g.created_at, c.name",
-        libsql::params![user_id],
-    ).await?;
-
-    let mut groups: Vec<GroupWithChannels> = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let group_id: String = row.get(0)?;
-        let channel_id: Option<String> = row.get(5)?;
-
-        if let Some(existing) = groups.iter_mut().find(|g| g.id == group_id) {
-            if let Some(cid) = channel_id {
-                existing.channels.push(Channel {
-                    id: cid,
-                    group_id: row.get(6)?,
-                    name: row.get(7)?,
-                    description: row.get(8)?,
-                    channel_type: row.get::<Option<String>>(9)?.unwrap_or_else(|| "text".to_string()),
-                });
-            }
-        } else {
-            let mut channels = Vec::new();
-            if let Some(cid) = channel_id {
-                channels.push(Channel {
-                    id: cid,
-                    group_id: row.get(6)?,
-                    name: row.get(7)?,
-                    description: row.get(8)?,
-                    channel_type: row.get::<Option<String>>(9)?.unwrap_or_else(|| "text".to_string()),
-                });
-            }
-            groups.push(GroupWithChannels {
-                id: group_id,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                owner_id: row.get(3)?,
-                created_at: row.get(4)?,
-                current_user_role: row.get::<Option<String>>(10)?.unwrap_or_else(|| "member".to_string()),
-                channels,
-            });
-        }
-    }
-
-    Ok(groups)
+    Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
+        .await?
+        .groups
+        .into_iter()
+        .map(|g| GroupWithChannels {
+            id: g.group.id,
+            name: g.group.name,
+            description: g.group.description,
+            owner_id: g.group.owner_id,
+            created_at: g.group.created_at,
+            channels: g.channels.into_iter().map(channel_from_wire).collect(),
+            current_user_role: g.role,
+        })
+        .collect())
 }
 
-pub async fn list_user_groups(
-    user_id: String,
-    state: &Arc<AppState>,
-) -> Result<Vec<Group>> {
-    let conn = state.remote_db.conn().await?;
+/// Every group the user belongs to, without their channels.
+///
+/// Same source as [`list_user_groups_with_channels`] — one bootstrap read,
+/// projected down. Kept as a separate command because mobile and the flows
+/// suite drive it; it is not a second query.
+pub async fn list_user_groups(user_id: String, state: &Arc<AppState>) -> Result<Vec<Group>> {
+    Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
+        .await?
+        .groups
+        .into_iter()
+        .map(|g| Group {
+            id: g.group.id,
+            name: g.group.name,
+            description: g.group.description,
+            owner_id: g.group.owner_id,
+            created_at: g.group.created_at,
+        })
+        .collect())
+}
 
-    let mut rows = conn.query(
-        "SELECT g.id, g.name, g.description, g.owner_id, g.created_at
-         FROM groups g
-         JOIN group_member gm ON gm.group_id = g.id
-         WHERE gm.user_id = ?1",
-        libsql::params![user_id],
-    ).await?;
-
-    let mut groups = Vec::new();
-    while let Some(row) = rows.next().await? {
-        groups.push(Group {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            owner_id: row.get(3)?,
-            created_at: row.get(4)?,
-        });
+/// Wire → domain for one channel row. One conversion, so a field added to the
+/// wire type cannot be picked up by one call site and missed by another.
+pub(super) fn channel_from_wire(c: pollis_api::directory::ChannelWire) -> Channel {
+    Channel {
+        id: c.id,
+        group_id: c.group_id,
+        name: c.name,
+        description: c.description,
+        channel_type: c.channel_type,
     }
-
-    Ok(groups)
 }
 
 pub async fn create_group(
@@ -153,12 +123,12 @@ pub async fn update_group(
     icon_url: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<Group> {
-    let conn = state.remote_db.conn().await?;
-
-    authz::require_admin(&conn, &group_id, &requester_id, "update group settings").await?;
+    authz::require_admin(state, &group_id, &requester_id, "update group settings").await?;
 
     // Route the column updates through the Delivery Service (which re-derives the
-    // admin role server-side).
+    // admin role server-side) and take the UPDATED ROW from its response (#987).
+    // Re-reading it afterwards was a second round trip, and worse: the read could
+    // observe a LATER concurrent update and report it as the result of this one.
     let body = pollis_api::groups::UpdateGroupBody {
         group_id: group_id.clone(),
         requester_id: Some(requester_id),
@@ -166,7 +136,13 @@ pub async fn update_group(
         description,
         icon_url,
     };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    let pollis_api::groups::UpdatedGroup::Ok {
+        id,
+        name,
+        description,
+        owner_id,
+        created_at,
+    } = crate::commands::mls::ds_post_json(state, &body).await?;
 
     // Announce the rename/icon change to the group (#874). Without this the
     // only thing that refreshed another member's sidebar was a window-focus
@@ -178,22 +154,13 @@ pub async fn update_group(
         eprintln!("[realtime] update_group: notify group {group_id}: {e}");
     }
 
-    let mut rows = conn.query(
-        "SELECT id, name, description, owner_id, created_at FROM groups WHERE id = ?1",
-        libsql::params![group_id],
-    ).await?;
-
-    if let Some(row) = rows.next().await? {
-        Ok(Group {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            owner_id: row.get(3)?,
-            created_at: row.get(4)?,
-        })
-    } else {
-        Err(Error::Other(anyhow::anyhow!("group not found after update")))
-    }
+    Ok(Group {
+        id,
+        name,
+        description,
+        owner_id,
+        created_at,
+    })
 }
 
 pub async fn delete_group(
@@ -201,9 +168,7 @@ pub async fn delete_group(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    authz::require_admin(&conn, &group_id, &requester_id, "delete the group").await?;
+    authz::require_admin(state, &group_id, &requester_id, "delete the group").await?;
 
     // CASCADE deletes group_member and channels entries. Route the delete through
     // the Delivery Service (admin re-checked server-side).
@@ -238,39 +203,29 @@ pub async fn delete_group(
 /// given slug exists; that is inherent to slug lookup and is the same bet the
 /// products above take.
 ///
-/// The scan below is O(rows) per query — `derive_slug` is Rust, not SQL, so it
-/// cannot be an indexed lookup. That is a cost worth knowing about, but it is
-/// deliberately NOT described here as "wants a rate limit": this query runs on
-/// the client, against Turso, under the caller's own read token, so a limit
-/// applied at this function is one the caller can decline to apply. Rate
-/// limiting slug lookup would mean moving the lookup behind the DS. See the
-/// bound documented in `authz.rs` — it applies to this projection exactly as it
-/// applies to the `require_member` guards.
+/// The scan is O(rows) per query — `derive_slug` is Rust, not SQL, so it cannot
+/// be an indexed lookup. Since #987 it runs on the DS
+/// (`POST /v1/directory/group-by-slug`), which is what finally makes the rate
+/// limit meaningful: the old note here said a limit applied at this function was
+/// one the caller could simply decline to apply, because the query ran on the
+/// client under its own read token. There is no such token now, and the DS puts
+/// slug lookup on its own tight `probe` tier — the same treatment invite-link
+/// redemption gets, and for the same reason: guessable input.
 pub async fn search_group_by_slug(
     slug: String,
     state: &Arc<AppState>,
 ) -> Result<GroupPreview> {
-    let conn = state.remote_db.conn().await?;
-    let target = slug.trim().to_lowercase();
-
-    // Only the three columns `GroupPreview` carries are SELECTed. Narrowing the
-    // query as well as the struct means a future edit to the mapping cannot
-    // reach a sensitive column without also editing the SQL.
-    let mut rows = conn.query(
-        "SELECT id, name, description FROM groups",
-        libsql::params![],
-    ).await?;
-
-    while let Some(row) = rows.next().await? {
-        let name: String = row.get(1)?;
-        if derive_slug(&name) == target {
-            return Ok(GroupPreview {
-                id: row.get(0)?,
-                name,
-                description: row.get(2)?,
-            });
-        }
+    let body = pollis_api::directory::GroupBySlugBody { slug: slug.clone() };
+    let found = crate::commands::mls::ds_post_json(state, &body).await?.group;
+    match found {
+        Some(g) => Ok(GroupPreview {
+            id: g.id,
+            name: g.name,
+            description: g.description,
+        }),
+        None => Err(Error::Other(anyhow::anyhow!(
+            "No group found with slug '{}'",
+            slug
+        ))),
     }
-
-    Err(Error::Other(anyhow::anyhow!("No group found with slug '{}'", slug)))
 }

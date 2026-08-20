@@ -10,7 +10,6 @@ pub struct UserProfile {
     pub id: String,
     pub username: Option<String>,
     pub preferred_name: Option<String>,
-    pub phone: Option<String>,
     pub avatar_url: Option<String>,
 }
 
@@ -18,23 +17,28 @@ pub async fn get_user_profile(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Option<UserProfile>> {
-    let conn = state.remote_db.conn().await?;
+    Ok(
+        crate::commands::ds_reads::users(state, vec![user_id], None)
+            .await?
+            .into_iter()
+            .next()
+            .map(profile_from_wire),
+    )
+}
 
-    let mut rows = conn.query(
-        "SELECT id, username, preferred_name, phone, avatar_url FROM users WHERE id = ?1",
-        libsql::params![user_id],
-    ).await?;
-
-    if let Some(row) = rows.next().await? {
-        Ok(Some(UserProfile {
-            id: row.get(0)?,
-            username: row.get(1)?,
-            preferred_name: row.get(2)?,
-            phone: row.get(3)?,
-            avatar_url: row.get(4)?,
-        }))
-    } else {
-        Ok(None)
+/// Wire → domain for one user profile.
+///
+/// **No `phone`** since #987. The column exists and the old `SELECT` handed it
+/// to every caller — including the ones that only wanted an avatar — but nothing
+/// in the app renders it, and a phone number is the most re-identifying field on
+/// the row. It does not cross the boundary at all now, rather than crossing it
+/// and being ignored.
+fn profile_from_wire(u: pollis_api::directory::UserWire) -> UserProfile {
+    UserProfile {
+        id: u.id,
+        username: Some(u.username),
+        preferred_name: u.preferred_name,
+        avatar_url: u.avatar_url,
     }
 }
 
@@ -98,18 +102,9 @@ async fn fetch_remote_preferences(
     state: &Arc<AppState>,
     user_id: &str,
 ) -> Result<Option<String>> {
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT preferences FROM user_preferences WHERE user_id = ?1",
-            libsql::params![user_id.to_string()],
-        )
-        .await?;
-    if let Some(row) = rows.next().await? {
-        let prefs: String = row.get(0)?;
-        return Ok(Some(prefs));
-    }
-    Ok(None)
+    Ok(crate::commands::ds_reads::bootstrap(state, user_id)
+        .await?
+        .preferences)
 }
 
 pub async fn save_preferences(
@@ -148,24 +143,13 @@ pub async fn search_user_by_username(
     username: String,
     state: &Arc<AppState>,
 ) -> Result<Option<UserProfile>> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT id, username, preferred_name, phone, avatar_url FROM users WHERE username = ?1 OR email = ?1",
-        libsql::params![username],
-    ).await?;
-
-    if let Some(row) = rows.next().await? {
-        Ok(Some(UserProfile {
-            id: row.get(0)?,
-            username: row.get(1)?,
-            preferred_name: row.get(2)?,
-            phone: row.get(3)?,
-            avatar_url: row.get(4)?,
-        }))
-    } else {
-        Ok(None)
-    }
+    Ok(
+        crate::commands::ds_reads::users(state, Vec::new(), Some(username))
+            .await?
+            .into_iter()
+            .next()
+            .map(profile_from_wire),
+    )
 }
 
 #[cfg(test)]

@@ -112,29 +112,14 @@ where
 ///
 /// Called on startup and from `poll_pending_messages`.
 pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, device_id: &str) -> Result<()> {
-    // R6: read undelivered welcomes from the read-only log DB (falls back to
-    // remote_db when the log DB isn't configured). The delivered=1 write below
-    // no longer shares this connection — it routes through the DS (W5 seam).
-    let read_conn = state.log_db.conn().await?;
-
-    // Fetch welcomes targeted at this specific device, plus legacy rows
-    // (recipient_device_id IS NULL) from before multi-device was deployed.
-    let mut rows = read_conn.query(
-        "SELECT id, welcome_data FROM mls_welcome \
-         WHERE recipient_id = ?1 AND delivered = 0 \
-         AND (recipient_device_id = ?2 OR recipient_device_id IS NULL) \
-         ORDER BY created_at ASC",
-        libsql::params![user_id, device_id],
-    ).await?;
-
-    // Drain into owned Vec so `rows` is dropped before local-DB awaits below.
-    let mut items: Vec<(String, Vec<u8>)> = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let id: String = row.get(0)?;
-        let bytes: Vec<u8> = row.get(1)?;
-        items.push((id, bytes));
-    }
-    drop(rows);
+    // The drain is a DS read since #987 (`POST /v1/welcomes/fetch`) — the read
+    // counterpart of the `delivered = 1` ack below, which has routed through the
+    // DS since the W5 seam. The DS scopes it to the VERIFIED signing device and
+    // includes the legacy device-agnostic rows (`recipient_device_id IS NULL`)
+    // from before multi-device, so the selection is unchanged; what is gone is
+    // the client-side credential that used to run it.
+    let items: Vec<(String, Vec<u8>)> =
+        super::ds_reads::fetch_welcomes(state, user_id, device_id).await?;
 
     let had_welcomes = !items.is_empty();
     // IDs to mark delivered. We ack even apply failures — the private key for a

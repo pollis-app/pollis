@@ -1,35 +1,35 @@
 //! #679 — a revoked device must not count as registered.
 //!
-//! These live in an integration binary rather than pollis-core's `--lib` tests
-//! deliberately. libsql's local backend calls `sqlite3_config` on first use,
-//! which returns `SQLITE_MISUSE` (21) once rusqlite/SQLCipher — which `LocalDb`
-//! uses — has already run `sqlite3_initialize` in the same process. Any lib test
-//! that opens a local libsql DB therefore panics as soon as it shares a test
-//! binary with a test that touches the local DB. An integration test gets its own
-//! process and never loads rusqlite, so the real query runs against a real DB.
+//! These tests moved here from `pollis-core/tests/revoked_device_reconcile.rs`
+//! in #987, along with the query they cover: the client no longer holds a
+//! database credential, so `registered_devices` is now
+//! `POST /v1/read/registered-devices` and the predicate that decides whether a
+//! tombstoned device is "registered" lives in this crate.
 //!
-//! The pure set-algebra half of the #679 invariant (`desired_set`, which covers
-//! the KeyPackage/addition path) needs no DB and stays in the lib tests.
+//! What is being protected has not changed. `revoke_device` TOMBSTONES the row
+//! (`revoked_at`) rather than deleting it, precisely so other members can tell
+//! "revoked, drop the rejoin" from "not replicated yet, retry" — so the
+//! revocation must be excluded by the PREDICATE, never by the row's absence.
+//! Before the #679 fix the query returned both devices, which left the revoked
+//! leaf in `desired` and therefore out of `to_remove`: the revoked device kept
+//! its leaf and went on decrypting.
 
 use std::collections::HashSet;
 
-use pollis_core::commands::mls::registered_devices;
+use pollis_delivery::account_reads::registered_device_pairs;
 
-/// The `user_device` shape `registered_devices` reads, including the #372
-/// tombstone column added by migration 000004.
-async fn db_with_devices(rows: &[(&str, &str, Option<&str>)]) -> libsql::Connection {
-    let db = libsql::Builder::new_local(":memory:")
-        .build()
-        .await
-        .expect("in-memory libsql");
-    let conn = db.connect().expect("connect");
-    // The SHIPPED remote schema (#875) rather than a hand-rolled `user_device`.
-    for sql in pollis_schema::main_scripts() {
-        conn.execute_batch(sql).await.expect("schema");
-    }
+mod common;
+
+/// The `user_device` shape the query reads, including the #372 tombstone column
+/// added by migration 000004. Seeds against the SHIPPED schema rather than a
+/// hand-rolled table (#875), so a migration that changes the column set breaks
+/// these tests rather than sliding past them.
+async fn db_with_devices(rows: &[(&str, &str, Option<&str>)]) -> common::TempDb {
+    let db = common::TempDb::open("db.db").await;
+    let conn = db.conn().await.expect("conn");
+    pollis_schema::apply::single_db(&conn).await.expect("schema");
     for (user_id, _, _) in rows {
-        // `user_device.user_id` is a real foreign key; libsql's local backend
-        // enforces it. Give each device an owner.
+        // `user_device.user_id` is a real foreign key; give each device an owner.
         conn.execute(
             "INSERT OR IGNORE INTO users (id, email, username) VALUES (?1, ?1 || '@x', ?1)",
             libsql::params![user_id.to_string()],
@@ -49,28 +49,30 @@ async fn db_with_devices(rows: &[(&str, &str, Option<&str>)]) -> libsql::Connect
         .await
         .expect("insert device");
     }
-    conn
+    db
 }
 
-fn roster(ids: &[&str]) -> HashSet<String> {
-    ids.iter().map(|s| s.to_string()).collect()
+async fn registered(db: &common::TempDb, roster: &[&str]) -> HashSet<(String, String)> {
+    let conn = db.conn().await.expect("conn");
+    let ids: Vec<String> = roster.iter().map(|s| s.to_string()).collect();
+    registered_device_pairs(&conn, &ids)
+        .await
+        .expect("registered devices")
+        .into_iter()
+        .map(|p| (p.user_id, p.device_id))
+        .collect()
 }
 
-/// The #679 regression itself. `revoke_device` tombstones the row rather
-/// than deleting it, so a revoked device must be excluded by the predicate,
-/// not by the row's absence. Before the fix this returned BOTH devices,
-/// which left the revoked leaf in `desired` and so out of `to_remove`.
+/// The #679 regression itself.
 #[tokio::test]
 async fn revoked_device_is_not_registered() {
-    let conn = db_with_devices(&[
+    let db = db_with_devices(&[
         ("alice", "live-device", None),
         ("alice", "revoked-device", Some("2026-07-30 12:00:00")),
     ])
     .await;
 
-    let got = registered_devices(&conn, &roster(&["alice"]))
-        .await
-        .unwrap();
+    let got = registered(&db, &["alice"]).await;
 
     assert!(
         got.contains(&("alice".to_string(), "live-device".to_string())),
@@ -88,7 +90,7 @@ async fn revoked_device_is_not_registered() {
 /// evict its owner's other devices, and must not spare other users'.
 #[tokio::test]
 async fn mixed_users_yield_only_live_devices() {
-    let conn = db_with_devices(&[
+    let db = db_with_devices(&[
         ("alice", "a-live-1", None),
         ("alice", "a-live-2", None),
         ("alice", "a-dead", Some("2026-07-30 12:00:00")),
@@ -99,9 +101,7 @@ async fn mixed_users_yield_only_live_devices() {
     ])
     .await;
 
-    let got = registered_devices(&conn, &roster(&["alice", "bob", "carol"]))
-        .await
-        .unwrap();
+    let got = registered(&db, &["alice", "bob", "carol"]).await;
 
     let mut want: HashSet<(String, String)> = HashSet::new();
     want.insert(("alice".into(), "a-live-1".into()));
@@ -114,15 +114,13 @@ async fn mixed_users_yield_only_live_devices() {
 /// error. Reconcile must then treat all of their leaves as removable.
 #[tokio::test]
 async fn fully_revoked_user_contributes_no_devices() {
-    let conn = db_with_devices(&[
+    let db = db_with_devices(&[
         ("alice", "a1", Some("2026-07-30 12:00:00")),
         ("alice", "a2", Some("2026-07-30 12:00:00")),
     ])
     .await;
 
-    let got = registered_devices(&conn, &roster(&["alice"]))
-        .await
-        .unwrap();
+    let got = registered(&db, &["alice"]).await;
     assert!(
         got.is_empty(),
         "every device revoked ⇒ no registered devices; got {got:?}"
@@ -134,15 +132,13 @@ async fn fully_revoked_user_contributes_no_devices() {
 /// backwards would lock a user out of their own re-enrolled device.
 #[tokio::test]
 async fn reenrolled_device_replaces_the_revoked_one() {
-    let conn = db_with_devices(&[
+    let db = db_with_devices(&[
         ("alice", "old-device", Some("2026-07-30 12:00:00")),
         ("alice", "new-device", None),
     ])
     .await;
 
-    let got = registered_devices(&conn, &roster(&["alice"]))
-        .await
-        .unwrap();
+    let got = registered(&db, &["alice"]).await;
     assert_eq!(
         got,
         HashSet::from([("alice".to_string(), "new-device".to_string())]),
@@ -150,22 +146,22 @@ async fn reenrolled_device_replaces_the_revoked_one() {
     );
 }
 
-/// The ids are BOUND, not interpolated. Previously they were spliced into
-/// the SQL behind a character filter that silently *mangled* anything else —
-/// a user_id containing a quote became a different id, so the query answered
-/// a question nobody asked. Binding makes it match exactly or not at all,
-/// which is what makes the `revoked_at IS NULL` predicate trustworthy.
+/// The ids are BOUND, not interpolated. Previously they were spliced into the
+/// SQL behind a character filter that silently *mangled* anything else — a
+/// user_id containing a quote became a different id, so the query answered a
+/// question nobody asked. Binding makes it match exactly or not at all, which is
+/// what makes the `revoked_at IS NULL` predicate trustworthy.
 #[tokio::test]
 async fn ids_are_bound_not_interpolated() {
     let weird = "alice' OR '1'='1";
-    let conn = db_with_devices(&[
+    let db = db_with_devices(&[
         (weird, "weird-live", None),
         (weird, "weird-dead", Some("2026-07-30 12:00:00")),
         ("bob", "b-live", None),
     ])
     .await;
 
-    let got = registered_devices(&conn, &roster(&[weird])).await.unwrap();
+    let got = registered(&db, &[weird]).await;
 
     assert_eq!(
         got,
@@ -175,11 +171,11 @@ async fn ids_are_bound_not_interpolated() {
     );
 }
 
-/// An empty roster must not build `IN ()` (a syntax error) nor fall through
-/// to an unfiltered scan that would report every device in the table.
+/// An empty roster must not build `IN ()` (a syntax error) nor fall through to
+/// an unfiltered scan that would report every device in the table.
 #[tokio::test]
 async fn empty_roster_short_circuits() {
-    let conn = db_with_devices(&[("alice", "a1", None)]).await;
-    let got = registered_devices(&conn, &roster(&[])).await.unwrap();
+    let db = db_with_devices(&[("alice", "a1", None)]).await;
+    let got = registered(&db, &[]).await;
     assert!(got.is_empty(), "empty roster ⇒ empty result; got {got:?}");
 }

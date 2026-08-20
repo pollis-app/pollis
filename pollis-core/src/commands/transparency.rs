@@ -314,9 +314,15 @@ pub async fn self_audit_account_key(
 ) -> Result<SelfAuditReport> {
     // Local view of my own current key, from the same `users` row the safety
     // module reads.
-    let conn = state.remote_db.conn().await?;
+    // My own key, from the DS.
+    //
+    // The transparency log stays on a SEPARATE ORIGIN (`POLLIS_TRANSPARENCY_URL`)
+    // and that separation is what makes this audit mean anything: it compares
+    // what the DS says my key is against what an independently-operated log says
+    // it is. Collapsing the transparency endpoint onto the DS would make this the
+    // DS attesting to itself, and the audit worthless. Do not.
     let (my_pub, my_version) =
-        crate::commands::safety::fetch_account_key(&conn, &my_user_id).await?;
+        crate::commands::ds_reads::account_key(state, &my_user_id).await?;
     let my_pub_hex = hex::encode(&my_pub);
 
     let base = transparency_base_url();

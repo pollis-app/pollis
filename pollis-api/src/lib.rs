@@ -88,16 +88,19 @@
 //! reaching both routers.
 
 pub mod account;
+pub mod account_reads;
 pub mod bootstrap;
 pub mod broker;
 pub mod commit;
 pub mod devices;
+pub mod directory;
 pub mod email_change;
 pub mod emoji;
 pub mod groups;
 pub mod messages;
 pub mod otp;
 pub mod profile;
+pub mod reads;
 pub mod writes;
 
 /// A request body that knows the one path it is addressed at, and the one body
@@ -232,6 +235,8 @@ endpoints! {
     Client   writes::AckBody                    => "/v1/welcomes/ack",                   writes::WelcomesUpdated;
     Client   writes::ResetBody                  => "/v1/welcomes/reset",                 writes::WelcomesUpdated;
     Client   writes::PurgeBody                  => "/v1/welcomes/purge",                 writes::WelcomesPurged;
+    Client   reads::FetchWelcomesBody           => "/v1/welcomes/fetch",                 reads::FetchWelcomesResponse;
+    Client   reads::ConversationStateBody       => "/v1/mls/conversation-state",         reads::ConversationStateResponse;
     Operator writes::ResubmitBody               => "/v1/welcomes/resubmit",              StatusOk;
 
     // ── Domain A — messages ──────────────────────────────────────────────────
@@ -247,23 +252,23 @@ endpoints! {
 
     // ── Domain B — groups, channels, membership, invites, join requests ──────
     Client   groups::CreateGroupBody            => "/v1/groups/create",                  StatusOk;
-    Client   groups::UpdateGroupBody            => "/v1/groups/update",                  StatusOk;
+    Client   groups::UpdateGroupBody            => "/v1/groups/update",                  groups::UpdatedGroup;
     Client   groups::DeleteGroupBody            => "/v1/groups/delete",                  StatusOk;
     Client   groups::LeaveGroupBody             => "/v1/groups/leave",                   StatusOk;
     Client   groups::CreateChannelBody          => "/v1/channels/create",                StatusOk;
-    Client   groups::UpdateChannelBody          => "/v1/channels/update",                StatusOk;
+    Client   groups::UpdateChannelBody          => "/v1/channels/update",                groups::UpdatedChannel;
     Client   groups::DeleteChannelBody          => "/v1/channels/delete",                StatusOk;
     Client   groups::RemoveMemberBody           => "/v1/members/remove",                 StatusOk;
     Client   groups::SetMemberRoleBody          => "/v1/members/role",                   StatusOk;
-    Client   groups::CreateInviteBody           => "/v1/invites/create",                 StatusOk;
-    Client   groups::AcceptInviteBody           => "/v1/invites/accept",                 StatusOk;
+    Client   groups::CreateInviteBody           => "/v1/invites/create",                 groups::InviteCreated;
+    Client   groups::AcceptInviteBody           => "/v1/invites/accept",                 groups::AcceptedInvite;
     Client   groups::DeclineInviteBody          => "/v1/invites/decline",                StatusOk;
     Client   groups::CreateInviteLinkBody       => "/v1/invite-links/create",            StatusOk;
     Client   groups::RevokeInviteLinkBody       => "/v1/invite-links/revoke",            StatusOk;
     Client   groups::RedeemInviteLinkBody       => "/v1/invite-links/redeem",            groups::RedeemInviteLinkResponse;
-    Client   groups::CreateJoinRequestBody      => "/v1/join-requests/create",           StatusOk;
-    Client   groups::ApproveJoinRequestBody     => "/v1/join-requests/approve",          StatusOk;
-    Client   groups::RejectJoinRequestBody      => "/v1/join-requests/reject",           StatusOk;
+    Client   groups::CreateJoinRequestBody      => "/v1/join-requests/create",           groups::JoinRequestCreated;
+    Client   groups::ApproveJoinRequestBody     => "/v1/join-requests/approve",          groups::ReviewedJoinRequest;
+    Client   groups::RejectJoinRequestBody      => "/v1/join-requests/reject",           groups::ReviewedJoinRequest;
 
     // ── Custom emoji (#848) ──────────────────────────────────────────────────
     Client   emoji::CreateEmojiBody             => "/v1/emoji/create",                   StatusOk;
@@ -275,7 +280,7 @@ endpoints! {
     Client   profile::SavePreferencesBody       => "/v1/profile/preferences",            StatusOk;
     Client   profile::AddBlock                  => "/v1/blocks/add",                     StatusOk;
     Client   profile::RemoveBlock               => "/v1/blocks/remove",                  StatusOk;
-    Client   profile::CreateDmBody              => "/v1/dm/create",                      StatusOk;
+    Client   profile::CreateDmBody              => "/v1/dm/create",                      profile::CreatedDm;
     Client   profile::AcceptDmBody              => "/v1/dm/accept",                      StatusOk;
     Client   profile::AddDmMemberBody           => "/v1/dm/add",                         StatusOk;
     Client   profile::RemoveDmMemberBody        => "/v1/dm/remove",                      StatusOk;
@@ -295,7 +300,7 @@ endpoints! {
     Client   account::SecurityEventBody         => "/v1/security-events",                StatusOk;
     Client   account::ApproveEnrollmentBody     => "/v1/enrollment/approve",             StatusOk;
     Client   account::RejectEnrollmentBody      => "/v1/enrollment/reject",              StatusOk;
-    Client   account::RevokeDeviceBody          => "/v1/devices/revoke",                 StatusOk;
+    Client   account::RevokeDeviceBody          => "/v1/devices/revoke",                 account::DeviceRevoked;
     Client   account::LogoutDeviceBody          => "/v1/auth/logout",                    StatusOk;
 
     // ── OTP + bootstrap ──────────────────────────────────────────────────────
@@ -306,15 +311,43 @@ endpoints! {
     Client   bootstrap::PublishCertBody         => "/v1/auth/publish-device-cert",       StatusOk;
     Client   bootstrap::EnrollmentRequestBody   => "/v1/auth/enrollment-request",        StatusOk;
     Client   email_change::RequestEmailChangeBody => "/v1/auth/request-email-change-otp", StatusOk;
-    Client   email_change::VerifyEmailChangeBody  => "/v1/auth/verify-email-change",      StatusOk;
+    Client   email_change::VerifyEmailChangeBody  => "/v1/auth/verify-email-change",      email_change::EmailChanged;
 
     // ── Authorized-secrets broker (#393) ─────────────────────────────────────
     Client   broker::LivekitTokenBody           => "/v1/livekit/token",                  broker::LivekitTokenResponse;
     Client   broker::LivekitSendDataBody        => "/v1/livekit/send-data",              broker::LivekitSendDataResponse;
     Client   broker::LivekitParticipantsBody    => "/v1/livekit/participants",           broker::LivekitParticipantsResponse;
     Client   broker::LivekitIdentitiesBody      => "/v1/livekit/identities",             broker::LivekitIdentitiesResponse;
-    Client   broker::TursoTokenBody             => "/v1/turso/token",                    broker::TursoTokenResponse;
     Client   broker::R2PresignBody              => "/v1/r2/presign",                     broker::R2PresignResponse;
+
+    // ── Directory + conversation READS (#987) ────────────────────────────────
+    // All POST, all with the parameters in the SIGNED body: the canonical
+    // signing message covers the path without its query string, so a signed GET
+    // carries unauthenticated parameters (the #681 shape). GETs are also exempt
+    // from rate limiting and absent from this table, which would make a GET read
+    // endpoint invisible to the route-coverage tests below.
+    Client   directory::CatchUpBody              => "/v1/conversations/catch-up",         directory::CatchUpResponse;
+    Client   directory::MessageLookupBody        => "/v1/messages/lookup",                directory::MessageLookupResponse;
+    Client   directory::DirectoryBootstrapBody   => "/v1/directory/bootstrap",            directory::DirectoryBootstrapResponse;
+    Client   directory::DirectoryGroupBody       => "/v1/directory/group",                directory::DirectoryGroupResponse;
+    Client   directory::DirectoryMembersBody     => "/v1/directory/members",              directory::DirectoryMembersResponse;
+    Client   directory::DirectoryUsersBody       => "/v1/directory/users",                directory::DirectoryUsersResponse;
+    Client   directory::GroupBySlugBody          => "/v1/directory/group-by-slug",        directory::GroupBySlugResponse;
+    Client   directory::DirectoryConversationsBody => "/v1/directory/conversations",      directory::DirectoryConversationsResponse;
+
+    // ── Account, device and object READS (#987) ──────────────────────────────
+    Client   account_reads::AccountKeysBody      => "/v1/read/account-keys",              account_reads::AccountKeysResponse;
+    Client   account_reads::DevicesBody          => "/v1/read/devices",                   account_reads::DevicesResponse;
+    Client   account_reads::KeyPackagesBody      => "/v1/read/key-packages",              account_reads::KeyPackagesResponse;
+    Client   account_reads::RegisteredDevicesBody => "/v1/read/registered-devices",       account_reads::RegisteredDevicesResponse;
+    Client   account_reads::EnrollmentRequestBody => "/v1/read/enrollment",               account_reads::EnrollmentRequestResponse;
+    Client   account_reads::PendingEnrollmentsBody => "/v1/read/pending-enrollments",     account_reads::PendingEnrollmentsResponse;
+    Client   account_reads::RecoveryBlobBody     => "/v1/read/recovery-blob",             account_reads::RecoveryBlobResponse;
+    Client   account_reads::AccountStatusBody    => "/v1/read/account-status",            account_reads::AccountStatusResponse;
+    Client   account_reads::AccountProbeBody     => "/v1/auth/account-probe",             account_reads::AccountProbeResponse;
+    Client   account_reads::SecurityEventsBody   => "/v1/read/security-events",           account_reads::SecurityEventsResponse;
+    Client   account_reads::EmojiReadBody        => "/v1/read/emoji",                     account_reads::EmojiReadResponse;
+    Client   account_reads::ObjectExistsBody     => "/v1/read/objects",                   account_reads::ObjectExistsResponse;
 }
 
 /// The guarantee, executable: a body missing a field does not compile.
@@ -405,11 +438,12 @@ endpoints! {
 /// [E0609] "no field on type" — the read that used to yield `Option::None`:
 ///
 /// ```compile_fail,E0609
-/// use pollis_api::broker::TursoTokenResponse;
-/// fn read(r: TursoTokenResponse) -> u64 {
-///     // The wire field is `expires_in`. A client that spells it otherwise now
-///     // fails to compile instead of quietly defaulting to 0.
-///     r.expires_in_secs
+/// use pollis_api::broker::LivekitTokenResponse;
+/// fn read(r: LivekitTokenResponse) -> String {
+///     // The wire field is `url`. A client that spells it otherwise now fails
+///     // to compile instead of quietly defaulting to the empty string and
+///     // dialling its compiled-in SFU.
+///     r.livekit_url
 /// }
 /// ```
 ///
@@ -420,9 +454,9 @@ endpoints! {
 /// ```compile_fail,E0308
 /// # use pollis_api::DsRequest;
 /// # fn answer<B: DsRequest>(_: B::Response) {}
-/// use pollis_api::{broker::TursoTokenBody, StatusOk};
-/// // `/v1/turso/token` answers a token, not `{"status":"ok"}`.
-/// answer::<TursoTokenBody>(StatusOk::Ok);
+/// use pollis_api::{broker::LivekitTokenBody, StatusOk};
+/// // `/v1/livekit/token` answers a token, not `{"status":"ok"}`.
+/// answer::<LivekitTokenBody>(StatusOk::Ok);
 /// ```
 ///
 /// The matching positive case, so the failures above mean something:
@@ -430,10 +464,10 @@ endpoints! {
 /// ```
 /// # use pollis_api::DsRequest;
 /// # fn answer<B: DsRequest>(_: B::Response) {}
-/// use pollis_api::broker::{TursoTokenBody, TursoTokenResponse};
-/// answer::<TursoTokenBody>(TursoTokenResponse {
+/// use pollis_api::broker::{LivekitTokenBody, LivekitTokenResponse};
+/// answer::<LivekitTokenBody>(LivekitTokenResponse {
 ///     token: "jwt".into(),
-///     expires_in: 600,
+///     url: "wss://sfu".into(),
 /// });
 /// ```
 ///
@@ -529,15 +563,9 @@ mod tests {
         round_trip(
             &groups::RedeemInviteLinkResponse::Ok {
                 group_id: "g1".into(),
+                group_name: Some("Team".into()),
             },
-            r#"{"status":"ok","group_id":"g1"}"#,
-        );
-        round_trip(
-            &broker::TursoTokenResponse {
-                token: "t".into(),
-                expires_in: 600,
-            },
-            r#"{"token":"t","expires_in":600}"#,
+            r#"{"status":"ok","group_id":"g1","group_name":"Team"}"#,
         );
         round_trip(
             &broker::LivekitTokenResponse {
@@ -606,8 +634,9 @@ mod tests {
                 has_identity: true,
                 session_token: "s".into(),
                 session_expires_at: 42,
+                account_id_pub: Some("AQID".into()),
             },
-            r#"{"user_id":"u","username":"alice","is_new_account":false,"has_identity":true,"session_token":"s","session_expires_at":42}"#,
+            r#"{"user_id":"u","username":"alice","is_new_account":false,"has_identity":true,"session_token":"s","session_expires_at":42,"account_id_pub":"AQID"}"#,
         );
     }
 

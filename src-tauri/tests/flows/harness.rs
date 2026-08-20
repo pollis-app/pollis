@@ -4,7 +4,16 @@
 //! pipeline — no `_inner` shims, no mocked DB layer. Each [`TestClient`]
 //! owns its own `App<MockRuntime>` backed by its own `InMemoryKeystore`,
 //! while all clients share a single [`TestWorld`] pointed at a process-local
-//! libsql file (no network round-trip — see `RemoteDb::connect_local`).
+//! libsql file (no network round-trip — see `Db::connect_local`).
+//!
+//! Since #987 a client has NO database handle of its own: `pollis-core` does not
+//! link `libsql` at all, so every read a client performs is a signed POST to the
+//! in-process Delivery Service, exactly like its writes. The world's two handles
+//! belong to the DS. Tests that need to construct server-side state directly —
+//! backdating envelopes, clearing watermarks, seeding an emoji row — use
+//! [`writable_remote`] / [`writable_log`], which are those DS handles: they stand
+//! in for effects that happen server-side in production, never for client
+//! writes.
 //!
 //! Run with:
 //! ```
@@ -13,17 +22,17 @@
 //!
 //! Tests serialize on a process-wide mutex (`serial_test`) so the per-test DB
 //! wipe can't race. Note there is NO shared Turso involved: since #420 each run
-//! uses process-local libsql files (see `RemoteDb::connect_local` above), and CI
-//! provisions `.env.test` with `TURSO_URL=libsql://placeholder.invalid`. An
-//! intermittent failure here is a real race in the code, never contention on a
-//! shared database — a stale comment claiming otherwise sent one investigation
-//! down exactly that wrong path (#832).
+//! uses process-local libsql files, and since #987 there is no Turso credential
+//! anywhere in the build to point at one. An intermittent failure here is a real
+//! race in the code, never contention on a shared database — a stale comment
+//! claiming otherwise sent one investigation down exactly that wrong path
+//! (#832).
 
 use std::sync::Arc;
 
 use pollis_lib::commands::auth::UserProfile;
 use pollis_lib::config::Config;
-use pollis_lib::db::remote::RemoteDb;
+use pollis_delivery::db::Db;
 use pollis_lib::keystore::{InMemoryKeystore, Keystore};
 use pollis_lib::state::AppState;
 use pollis_lib::test_harness::{
@@ -52,13 +61,13 @@ pub(crate) const TEST_PIN: &str = "0000";
 pub(crate) struct TestWorld {
     /// Main DB — users/devices/groups/channels/membership/messages, plus the
     /// auth lookups (`user_device`) the DS verifies against.
-    pub(crate) remote: Arc<RemoteDb>,
+    pub(crate) remote: Arc<Db>,
     /// Commit-log DB — the three MLS control-plane tables (`mls_commit_log`,
     /// `mls_welcome`, `mls_group_info`) and NOTHING else. A genuinely separate
     /// libsql file so a misrouted query (a main read on the log handle, or a
     /// log read on the main handle) fails with "no such table" instead of
     /// silently succeeding on one shared file. Mirrors the #420 production split.
-    pub(crate) log: Arc<RemoteDb>,
+    pub(crate) log: Arc<Db>,
     pub(crate) config: Config,
 }
 
@@ -93,12 +102,12 @@ pub(crate) async fn world() -> &'static TestWorld {
             // same temp dir as the per-user SQLCipher DBs. No network round-trip.
             let remote_db_path = path.join("test_turso.db");
             let remote = Arc::new(
-                RemoteDb::connect_local(&remote_db_path)
+                Db::connect_local(remote_db_path.to_str().expect("utf-8 path"))
                     .await
                     .expect("connect local libsql"),
             );
 
-            bootstrap_schema(&remote)
+            bootstrap_schema(&remote.conn().await.expect("main conn"))
                 .await
                 .expect("bootstrap test turso schema");
 
@@ -110,17 +119,17 @@ pub(crate) async fn world() -> &'static TestWorld {
             // commit e4cfe9e).
             let log_db_path = path.join("test_log.db");
             let log = Arc::new(
-                RemoteDb::connect_local(&log_db_path)
+                Db::connect_local(log_db_path.to_str().expect("utf-8 path"))
                     .await
                     .expect("connect local log libsql"),
             );
-            bootstrap_log_schema(&log)
+            bootstrap_log_schema(&log.conn().await.expect("log conn"))
                 .await
                 .expect("bootstrap log db schema");
             // The baseline created the three MLS tables on MAIN too (for old
             // shipped clients); drop them so main no longer has them and any
             // stray main-side access fails loudly.
-            drop_log_tables_from_main(&remote)
+            drop_log_tables_from_main(&remote.conn().await.expect("main conn"))
                 .await
                 .expect("drop log tables from main");
 
@@ -242,9 +251,9 @@ pub(crate) fn ds_fault_armed() -> bool {
 #[derive(Clone)]
 struct DsState {
     /// Main DB — `user_device`, for the signature check.
-    main: Arc<RemoteDb>,
+    main: Arc<Db>,
     /// Commit-log DB — `mls_commit_log` / `mls_welcome` / `mls_group_info`.
-    log: Arc<RemoteDb>,
+    log: Arc<Db>,
 }
 
 /// Shared auth gate for the in-process DS: verify the device signature over the
@@ -258,7 +267,7 @@ struct DsState {
 /// `pollis_delivery::auth::verify_request` against the MAIN DB — `user_device`
 /// (the auth lookup) lives there, not on the log DB.
 async fn ds_auth(
-    remote: &RemoteDb,
+    remote: &Db,
     method: &axum::http::Method,
     uri: &axum::http::Uri,
     headers: &axum::http::HeaderMap,
@@ -294,8 +303,8 @@ fn ds_bad_request() -> axum::response::Response {
     (axum::http::StatusCode::BAD_REQUEST, "invalid body").into_response()
 }
 
-/// The `/v1/commits` submit handler, driven against the SHARED `RemoteDb` so
-/// the DS writes land on the exact handle the clients read from. Mirrors
+/// The `/v1/commits` submit handler, driven against the SHARED `Db` that also
+/// answers every client read, so a write is visible to the next read. Mirrors
 /// `pollis_delivery`'s real `submit` arm: verify the signature over the raw
 /// body, bind `sender_id` to the authenticated user, then submit — PLUS the
 /// harness-only lost-response fault injection the #411 test depends on.
@@ -395,10 +404,11 @@ async fn delivery_submit(
 /// wrappers and a 70-line route table, all of them `gate → parse → apply →
 /// map outcome` around the same `pollis_delivery::*` functions the real handlers
 /// call. The only thing that forced the duplication was the DB handle type
-/// (`Arc<RemoteDb>` here, `Arc<pollis_delivery::db::Db>` there), and
-/// `RemoteDb::shared_database` + `Db::from_shared` remove it: both now wrap the
-/// SAME libsql `Database`, so the DS writes through the very handle the clients
-/// read from — which was the reason for the copy in the first place.
+/// (`Arc<Db>` here, `Arc<pollis_delivery::db::Db>` there). #918 removed it by
+/// sharing one handle; #987 removed the question entirely, because the clients
+/// hold no database handle to disagree with — the harness builds ONE
+/// `pollis_delivery::db::Db` and `Arc::clone`s it into the router, and every
+/// client read is a signed POST to that router.
 ///
 /// The copy was not free. It silently omitted ~10 routes: `/v1/invite-links/*`
 /// 404'd under test while working in production, and custom emoji (#848) had no
@@ -416,20 +426,17 @@ async fn delivery_submit(
 /// test would hit a dead port (connection refused). Owning the server on a
 /// separate thread + runtime decouples its lifetime from the per-test runtimes,
 /// so the single shared DS stays up for the whole `cargo test` process.
-
-async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> String {
+async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     use std::sync::mpsc;
 
-    // The DS gets the harness's OWN libsql handles, not second ones opened on the
-    // same files: two independent `Database`s on one file do not share WAL writes
-    // promptly, and a client reading rows the DS has "already written" is exactly
-    // the ghost failure this suite exists to rule out.
-    let ds_main = Arc::new(pollis_delivery::db::Db::from_shared(
-        main.shared_database().await,
-    ));
-    let ds_log = Arc::new(pollis_delivery::db::Db::from_shared(
-        log.shared_database().await,
-    ));
+    // The DS gets the harness's OWN handles, not second ones opened on the same
+    // files: two independent `Database`s on one file do not share WAL writes
+    // promptly, and a test reading rows the DS has "already written" is exactly
+    // the ghost failure this suite exists to rule out. Since #987 they are
+    // `pollis_delivery::db::Db` outright — there is no client-side handle type
+    // left to bridge from.
+    let ds_main = Arc::clone(&main);
+    let ds_log = Arc::clone(&log);
 
     // Auth is ENFORCED. The suite drives the signed write path end to end, so a
     // regression in request signing or in server-side authz fails here rather
@@ -460,6 +467,10 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
             write_window_secs: 1,
             invite_redeem_max: 1_000_000,
             invite_redeem_window_secs: 1,
+            read_max: 1_000_000,
+            read_window_secs: 1,
+            probe_max: 1_000_000,
+            probe_window_secs: 1,
         });
 
     // Only `/v1/commits` is served by the harness, for fault injection.
@@ -503,9 +514,12 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
 
 pub(crate) async fn wipe() {
     let w = world().await;
-    wipe_remote(&w.remote, &w.log)
-        .await
-        .expect("wipe test turso");
+    wipe_remote(
+        &w.remote.conn().await.expect("main conn"),
+        &w.log.conn().await.expect("log conn"),
+    )
+    .await
+    .expect("wipe test turso");
     // The current-suite pin is process-global (see `set_current_suite`), so a
     // scenario that panics between pinning and clearing would otherwise hand the
     // next test a world running on a retired code point. Resetting here rather
@@ -513,18 +527,24 @@ pub(crate) async fn wipe() {
     set_current_suite(None);
 }
 
-/// The WRITABLE main-DB handle — the very one the in-process DS writes through.
+/// The main-DB handle — the very one the in-process DS reads and writes through.
 ///
-/// A client's `state.remote_db` is a READ-ONLY view (PRAGMA query_only=ON),
-/// mirroring the production read-only Turso token, so it rejects every direct
-/// write. Tests that must seed or mutate *server-side* state directly —
-/// backdating envelopes or clearing watermarks to set up an envelope-GC
-/// scenario, tombstoning a revoked device's `user_device` row — stand in for
-/// effects that happen server-side in prod (envelope GC, DS-driven device
-/// revocation), NOT for client writes. They use THIS handle, not a client's
-/// read-only one.
-pub(crate) async fn writable_remote() -> Arc<RemoteDb> {
+/// Clients have no handle at all since #987: `pollis-core` does not link
+/// `libsql`, so a stray client-side query is a compile error rather than
+/// something a `query_only` PRAGMA has to catch at runtime. Tests that must seed
+/// or mutate *server-side* state directly — backdating envelopes or clearing
+/// watermarks to set up an envelope-GC scenario, tombstoning a revoked device's
+/// `user_device` row — stand in for effects that happen server-side in
+/// production (envelope GC, DS-driven device revocation), never for client
+/// writes.
+pub(crate) async fn writable_remote() -> Arc<Db> {
     world().await.remote.clone()
+}
+
+/// The commit-log handle, for the same reason and with the same caveat as
+/// [`writable_remote`]. The three MLS control-plane tables live ONLY here.
+pub(crate) async fn writable_log() -> Arc<Db> {
+    world().await.log.clone()
 }
 
 /// Register a custom emoji in `group_id`, server-side (#917 / #848).
@@ -971,7 +991,7 @@ pub(crate) async fn signed_post_status(client: &TestClient, path: &str, body: &[
 
 /// One simulated device for one user. Holds a `MockRuntime` app with its own
 /// isolated keystore + managed `AppState`. All clients in a given test share
-/// the `Arc<RemoteDb>` on `TestWorld`, so they actually round-trip through
+/// the `Arc<Db>` on `TestWorld`, so they actually round-trip through
 /// the same test Turso DB the way real clients round-trip through production
 /// Turso.
 pub(crate) struct TestClient {
@@ -997,25 +1017,13 @@ impl TestClient {
     /// sender is UNCONDITIONAL (#607) — there is no per-client seal toggle to
     /// flip; every client seals every outbound envelope.
     async fn new_with_config(config: Config) -> Self {
-        let w = world().await;
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
-        let state = Arc::new(AppState::new_with_parts(
-            config,
-            // Main DB — a READ-ONLY view (PRAGMA query_only=ON), mirroring the
-            // production read-only Turso token the client will hold. It SHARES
-            // the writable handle's underlying `Database` (so it sees every row
-            // the in-process DS writes with no WAL lag) but rejects any direct
-            // INSERT/UPDATE/DELETE. A stray client-side write that should have
-            // gone through the DS therefore fails the suite instead of silently
-            // passing — the definitive gate for the prod read-only-token flip.
-            Arc::new(w.remote.query_only_view()),
-            // Commit-log DB — a genuinely separate libsql file, so a query that
-            // should hit one DB but is routed to the other fails loudly. Goal A
-            // already made this read-only-ish (the client only reads the log;
-            // the DS is the sole writer), so it keeps the shared handle.
-            w.log.clone(),
-            keystore,
-        ));
+        // No database handle (#987). The `query_only_view` this used to pass was
+        // the runtime gate that a client never wrote the shared DB directly;
+        // `pollis-core` no longer links `libsql`, so the same guarantee — now
+        // covering READS too — holds at compile time, and
+        // `pollis-core/tests/no_client_side_remote_reads.rs` pins it.
+        let state = Arc::new(AppState::new_with_parts(config, keystore));
         let (app, webview) = build_client_app(state.clone()).expect("build client app");
         Self {
             _app: app,
@@ -1867,6 +1875,32 @@ pub(crate) async fn steal_leaf(victim: &TestClient) -> StolenLeaf {
                 )
                 .expect("seed attacker mls_kv");
         }
+    }
+
+    // Adopt the victim's (user_id, device_id) as the identity this state signs
+    // and reads AS.
+    //
+    // Not an escalation: `mls_kv` — which we just copied wholesale — is where the
+    // device's ML-DSA-44 request-signing key lives, so a copy of it IS a copy of
+    // the credential. What changed in #987 is where that matters. Before it, a
+    // client could fetch the commit log with the whole-database read token every
+    // binary carried, so an attacker holding only `mls_kv` caught up without ever
+    // presenting a credential; the harness could model that by leaving the
+    // attacker signed in as itself. There is no ambient read capability any more
+    // — the DS answers `conversation-state` for the VERIFIED signer and nobody
+    // else — so catching up now requires presenting the stolen device's identity,
+    // which the stolen bytes already permit.
+    //
+    // The adversary stays PASSIVE: it reads and decrypts, and never commits,
+    // writes, or external-joins. Device impersonation is a different attack that
+    // no key rotation defends against, and the roster/eviction tests cover it.
+    *client.state.device_id.lock().await = victim.state.device_id.lock().await.clone();
+    if let Some(u) = victim.state.unlock.lock().await.as_ref() {
+        *client.state.unlock.lock().await = Some(pollis_lib::commands::pin::UnlockState {
+            user_id: u.user_id.clone(),
+            db_key: u.db_key.clone(),
+            account_id_key: u.account_id_key.clone(),
+        });
     }
 
     StolenLeaf {

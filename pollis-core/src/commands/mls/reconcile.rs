@@ -69,20 +69,24 @@ async fn fetch_commit_at_epoch(
     generation: i64,
     epoch: i64,
 ) -> Option<Vec<u8>> {
-    // Read-only commit-log lookup → log_db (falls back to remote_db pre-cutover).
-    let conn = state.log_db.conn().await.ok()?;
-    let mut rows = conn
-        .query(
-            "SELECT commit_data FROM mls_commit_log \
-             WHERE conversation_id = ?1 AND generation = ?2 AND epoch = ?3",
-            libsql::params![conversation_id.to_string(), generation, epoch],
-        )
-        .await
-        .ok()?;
-    match rows.next().await {
-        Ok(Some(row)) => row.get::<Vec<u8>>(0).ok(),
-        _ => None,
-    }
+    let snap = super::ds_reads::conversation_snapshot(
+        state,
+        pollis_api::reads::ConversationStateQuery {
+            conversation_id: conversation_id.to_string(),
+            generation: Some(generation),
+            since: None,
+            want_group_info_blob: false,
+            commit_at_epoch: Some(epoch),
+        },
+    )
+    .await
+    .ok()?;
+    // `None` on any failure keeps the caller's documented bias: `invariants::
+    // resolve` maps "no canonical commit visible" to Rollback, so an unreadable
+    // log can never be mistaken for "our commit won". Adopting on a failed read
+    // would leave the group at a phantom epoch with undecryptable messages.
+    let bytes = snap.commit_at_epoch.as_deref()?;
+    super::ds_reads::decode_b64("commit_data", bytes).ok()
 }
 
 /// Apply the side effects of a commit that won its epoch — whether confirmed
@@ -598,113 +602,14 @@ where
     Ok((outcome, commit_data_opt))
 }
 
-/// Every `(user_id, device_id)` still registered in `user_device` for `roster`.
-///
-/// The counterpart to [`desired_roster_user_ids`] one level down: the roster says
-/// which *users* belong, this says which of their *devices* still exist. Reconcile
-/// diffs the tree against it to drop leaves whose device row was revoked while the
-/// user remained a member, and migration (#454 P4) uses the same set as the list
-/// of devices the successor lineage must be able to admit — the two must never
-/// disagree about who belongs, which is why there is one query, not two.
-///
-/// A revoked device is NOT still registered. `revoke_device` tombstones the row
-/// (`user_device.revoked_at`, migration 000004) rather than deleting it, so the
-/// row's mere existence says nothing about whether the device still belongs —
-/// only `revoked_at IS NULL` does. Without that predicate the tombstoned device
-/// stays in `desired`, never reaches `to_remove`, and keeps its leaf: it goes on
-/// decrypting every subsequent message and deriving the call media key. The
-/// filter matches the DS, which gets this right in `current_member_devices`.
-///
-/// libsql has no array binding, so the `IN` clause is built with a generated
-/// `?n` placeholder per id and the ids are BOUND, not interpolated. They used to
-/// be interpolated behind a character filter; binding is what makes the
-/// predicate above trustworthy rather than something a stray quote can reshape.
-///
-/// `pub` so the #679 revocation regression tests can reach it from
-/// `tests/revoked_device_reconcile.rs`. They cannot live in the crate's `--lib`
-/// test binary: libsql's local backend calls `sqlite3_config` on first use, which
-/// returns `SQLITE_MISUSE` once rusqlite/SQLCipher (`LocalDb`) has already run
-/// `sqlite3_initialize` in the same process — so any lib test that opens a local
-/// libsql DB panics as soon as it shares a binary with a test that touches the
-/// local DB. An integration test gets its own process and does not load rusqlite.
-pub async fn registered_devices(
-    conn: &libsql::Connection,
-    roster: &std::collections::HashSet<String>,
-) -> crate::error::Result<std::collections::HashSet<(String, String)>> {
-    let mut devices = std::collections::HashSet::new();
-    if roster.is_empty() {
-        return Ok(devices);
-    }
-    let ids: Vec<String> = roster.iter().cloned().collect();
-    // Chunked (#916): `roster` is a whole group's membership.
-    for chunk in crate::db::chunk::bind_chunks(&ids, 0) {
-        let query = format!(
-            "SELECT user_id, device_id FROM user_device \
-             WHERE revoked_at IS NULL AND user_id IN ({})",
-            crate::db::chunk::placeholders(chunk.len(), 1)
-        );
-        let params: Vec<libsql::Value> =
-            chunk.iter().cloned().map(libsql::Value::from).collect();
-        let mut rows = conn.query(&query, params).await?;
-        while let Some(row) = rows.next().await? {
-            devices.insert((row.get::<String>(0)?, row.get::<String>(1)?));
-        }
-    }
-    Ok(devices)
-}
 
-/// The set of user_ids that *should* have a leaf in `conversation_id`'s tree:
-/// `group_member` plus pending `group_invite` rows, falling back to
-/// `dm_channel_member` for DMs.
-///
-/// Pending invitees are included so their devices get a Welcome at invite time —
-/// the acceptor can join the MLS group without requiring any other member to be
-/// online simultaneously.
-///
-/// The single definition of "desired roster". `reconcile_group_mls_impl` diffs
-/// the tree against it, and `migrate` moves exactly this set into a successor
-/// group; the two must never disagree about who belongs, or a migration would
-/// strand whoever the diff would have added.
-pub(super) async fn desired_roster_user_ids(
-    conn: &libsql::Connection,
-    conversation_id: &str,
-) -> crate::error::Result<std::collections::HashSet<String>> {
-    let mut roster_user_ids = std::collections::HashSet::new();
-    {
-        let mut rows = conn
-            .query(
-                "SELECT user_id FROM group_member WHERE group_id = ?1",
-                libsql::params![conversation_id.to_string()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
-    {
-        let mut rows = conn
-            .query(
-                "SELECT invitee_id FROM group_invite WHERE group_id = ?1",
-                libsql::params![conversation_id.to_string()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
-    if roster_user_ids.is_empty() {
-        let mut rows = conn
-            .query(
-                "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
-                libsql::params![conversation_id.to_string()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
-    Ok(roster_user_ids)
-}
+// #987: `registered_devices` and `desired_roster_user_ids` moved to the
+// Delivery Service (`POST /v1/read/registered-devices`,
+// `POST /v1/conversations/catch-up` with `want_roster`). They were the two
+// definitions `reconcile` and `migrate` had to agree on, and having one copy
+// server-side is what makes agreement structural rather than reviewed — the
+// alternative is a migration that strands whoever the diff would have added.
+
 
 /// Load the group, read its signer, validate the claimed KeyPackages and stage
 /// the reconcile commit — the whole crypto-bearing half of
@@ -835,10 +740,16 @@ pub async fn reconcile_group_mls_impl(
     // that advances/rebuilds can't strand an un-ingested current-epoch message.
     let _mls_guard = state.mls_group_lock(&conversation_id).await;
 
-    let conn = state.remote_db.conn().await?;
-
     // 1. Determine roster: group_member + pending invitees, or dm_channel_member.
-    let roster_user_ids = desired_roster_user_ids(&conn, &conversation_id).await?;
+    //    Derived server-side since #987, from the ONE definition both this and
+    //    `migrate` use — the two must never disagree about who belongs, or a
+    //    migration would strand whoever the diff would have added.
+    let roster_user_ids: std::collections::HashSet<String> =
+        crate::commands::ds_reads::catch_up_full(state, &conversation_id, false, false, true)
+            .await?
+            .roster
+            .into_iter()
+            .collect();
 
     // 1b. TOFU-pin every roster member's account_id_pub before we use
     //     server-reported keys to add devices to the MLS tree. Without
@@ -881,48 +792,26 @@ pub async fn reconcile_group_mls_impl(
         // a character filter, matching `registered_devices`. libsql has no array
         // binding, so the placeholder list is generated but the values are not.
         let ids: Vec<String> = roster_user_ids.iter().cloned().collect();
-        // Chunked (#916), same reason as `registered_devices` above.
-        for chunk in crate::db::chunk::bind_chunks(&ids, 0) {
-            let query = format!(
-                "SELECT d.user_id, d.device_id FROM user_device d \
-                 WHERE d.revoked_at IS NULL AND d.user_id IN ({}) \
-                 AND EXISTS ( \
-                     SELECT 1 FROM mls_key_package kp \
-                     WHERE kp.user_id = d.user_id AND kp.device_id = d.device_id AND kp.claimed = 0 \
-                 )",
-                crate::db::chunk::placeholders(chunk.len(), 1)
-            );
-            let params: Vec<libsql::Value> =
-                chunk.iter().cloned().map(libsql::Value::from).collect();
-            // Through `with_retry` (#914): this read decides WHICH devices get
-            // added to the tree. A dropped stream here does not fail loudly —
-            // it yields a shorter list, the reconcile commits without those
-            // devices, and they stay out of the group until something triggers
-            // another reconcile. Pure SELECT, so the retry is safe.
-            let found: Vec<(String, String)> = state
-                .remote_db
-                .with_retry(|conn| {
-                    let query = query.clone();
-                    let params = params.clone();
-                    async move {
-                        let mut rows = conn.query(&query, params).await?;
-                        let mut out = Vec::new();
-                        while let Some(row) = rows.next().await? {
-                            out.push((row.get::<String>(0)?, row.get::<String>(1)?));
-                        }
-                        Ok(out)
-                    }
-                })
-                .await?;
-            device_pairs.extend(found);
-        }
+        // ONE request for the whole roster, and an ERROR rather than a short
+        // list on failure. That distinction is the important half: this read
+        // decides WHICH devices get added to the tree, and a truncated answer
+        // does not fail loudly — it commits a reconcile without those devices,
+        // and they stay out of the group until something else triggers another
+        // one. The DS answers all-or-nothing for exactly that reason.
+        device_pairs.extend(
+            crate::commands::ds_reads::claimable_devices(state, &ids, None).await?,
+        );
     }
 
     // 2b. Snapshot of every (user_id, device_id) pair still registered in
     //     `user_device` for the current roster. Used by reconcile to drop
     //     leaves whose device row was revoked even though the user is still
     //     a roster member (single-device revoke flow).
-    let valid_devices = registered_devices(&conn, &roster_user_ids).await?;
+    let valid_devices = crate::commands::ds_reads::registered_devices(
+        state,
+        &roster_user_ids.iter().cloned().collect::<Vec<_>>(),
+    )
+    .await?;
 
     let actor_device_id = state
         .device_id

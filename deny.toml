@@ -50,6 +50,27 @@ ignore = [
     { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.101/0.102 pinned via livekit/libsql; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
     { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.101 pinned via livekit rustls 0.21; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
 
+    # h2 0.3 accepts and queues empty DATA frames without limit (unbounded
+    # memory, or a panic on length overflow). Low severity. The fix is h2
+    # 0.4.16; there is no 0.3 backport, and 0.3.27 is the last 0.3 release.
+    #
+    # h2 0.3 enters through exactly one edge — libsql's replication/hrana stack
+    # (libsql -> tonic 0.11 -> hyper 0.14 -> h2 0.3) — and #987 removed every
+    # other one: `pollis-core` and the shipping `pollis` binary now link no
+    # database driver at all, which `pollis-core/tests/no_client_side_remote_
+    # reads.rs` holds shut. What remains is server-side: `pollis-delivery` and
+    # `pollis-schema`'s migration runner, which ARE the database clients.
+    #
+    # Not reachable as stated. The flaw is a peer flooding an HTTP/2 connection;
+    # every h2 0.3 instance here is an OUTBOUND CLIENT to Turso over TLS, so the
+    # only peer that can send those frames is Turso itself or a broken TLS
+    # session. The DS's inbound listener — the surface untrusted peers actually
+    # reach — is axum 0.8 on hyper 1.9, which is not built with h2 at all (see
+    # `cargo tree -p pollis-delivery -i h2`: hyper 1.9 does not appear).
+    #
+    # Drop this entry when libsql moves to tonic 0.12+ / hyper 1.x.
+    { id = "RUSTSEC-2026-0258", reason = "h2 0.3 empty-DATA-frame DoS; no 0.3 backport (fix is 0.4.16); reachable only as libsql's outbound client to Turso, never on the DS's inbound listener (hyper 1.9, no h2)" },
+
     # quick-xml DoS (quadratic attribute scan / unbounded namespace alloc).
     # Requires attacker-controlled XML. Every vulnerable instance in our tree is
     # BUILD- or DEV-time only, never parsing untrusted runtime input:

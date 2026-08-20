@@ -5,9 +5,6 @@ pub enum Error {
     #[error("Database error: {0}")]
     Database(#[from] rusqlite::Error),
 
-    #[error("Remote database error: {0}")]
-    RemoteDatabase(#[from] libsql::Error),
-
     #[error("Keystore error: {0}")]
     Keystore(String),
 

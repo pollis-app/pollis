@@ -173,17 +173,17 @@ pub(crate) fn bad_request(msg: &str) -> Response {
 ///
 /// ```compile_fail,E0308
 /// use pollis_delivery::writes::ok_response;
-/// use pollis_api::{broker::TursoTokenBody, StatusOk};
-/// // `/v1/turso/token` answers a token, not `{"status":"ok"}`.
-/// let _ = ok_response::<TursoTokenBody>(StatusOk::Ok);
+/// use pollis_api::{broker::LivekitTokenBody, StatusOk};
+/// // `/v1/livekit/token` answers a token, not `{"status":"ok"}`.
+/// let _ = ok_response::<LivekitTokenBody>(StatusOk::Ok);
 /// ```
 ///
 /// ```
 /// use pollis_delivery::writes::ok_response;
-/// use pollis_api::broker::{TursoTokenBody, TursoTokenResponse};
-/// let _ = ok_response::<TursoTokenBody>(TursoTokenResponse {
+/// use pollis_api::broker::{LivekitTokenBody, LivekitTokenResponse};
+/// let _ = ok_response::<LivekitTokenBody>(LivekitTokenResponse {
 ///     token: "jwt".into(),
-///     expires_in: 600,
+///     url: "wss://sfu".into(),
 /// });
 /// ```
 pub fn ok_response<B: pollis_api::DsRequest>(body: B::Response) -> Response {

@@ -76,7 +76,7 @@ use super::delivery::WelcomeOut;
 use super::group_state::{create_mls_group_in_suite, forget_local_mls_group_at};
 use super::provider::{current_suite, load_stored_group_at, PollisProvider};
 use super::reconcile::{
-    desired_roster_user_ids, publish_staged_commit, registered_devices, stage_reconcile_commit,
+    publish_staged_commit, stage_reconcile_commit,
     PublishOutcome,
 };
 
@@ -171,9 +171,17 @@ pub(super) async fn migrate_to_current_suite_if_due(
     //    migration BEFORE anything is created. This is the no-downgrade criterion
     //    in its strongest form — not "add whoever we can", but "move everyone or
     //    nobody".
-    let remote_conn = state.remote_db.conn().await?;
-    let roster_user_ids = desired_roster_user_ids(&remote_conn, conversation_id).await?;
-    let valid_devices = registered_devices(&remote_conn, &roster_user_ids).await?;
+    // The roster and its registered devices, from the SAME definitions
+    // `reconcile` uses — one copy, server-side (#987), so the diff and the
+    // migration cannot disagree about who belongs.
+    let roster_user_ids: Vec<String> =
+        crate::commands::ds_reads::catch_up_full(state, conversation_id, false, false, true)
+            .await?
+            .roster;
+    let valid_devices =
+        crate::commands::ds_reads::registered_devices(state, &roster_user_ids).await?;
+    let roster_user_ids: std::collections::HashSet<String> =
+        roster_user_ids.into_iter().collect();
     let targets: Vec<(String, String)> = valid_devices
         .iter()
         .filter(|(uid, did)| !(uid == actor_user_id && did == &actor_device_id))
@@ -393,18 +401,17 @@ async fn head_epoch_in(
     conversation_id: &str,
     generation: i64,
 ) -> Result<i64> {
-    let conn = state.log_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT COALESCE(MAX(epoch), -1) + 1 FROM mls_commit_log \
-             WHERE conversation_id = ?1 AND generation = ?2",
-            libsql::params![conversation_id, generation],
-        )
-        .await?;
-    match rows.next().await? {
-        Some(row) => Ok(row.get::<i64>(0)?),
-        None => Ok(0),
-    }
+    // Advisory only, and deliberately so: the DS re-validates `closes_epoch`
+    // inside the migration's compare-and-swap, so a head that goes stale between
+    // this read and the submit rejects the migration rather than orphaning a
+    // commit. That is what lets this be an ordinary read rather than something
+    // that needs a lock.
+    let snap = super::ds_reads::conversation_snapshot(
+        state,
+        super::ds_reads::state_query(conversation_id, Some(generation)),
+    )
+    .await?;
+    Ok(snap.head)
 }
 
 /// One Welcome per added recipient, all carrying the same blob (the commit's

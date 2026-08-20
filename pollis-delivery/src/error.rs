@@ -14,6 +14,10 @@ use axum::{
     Json,
 };
 
+/// `Debug` is derived so tests can `.expect(...)` on a `Result<_, AppError>`.
+/// It forwards to `anyhow::Error`'s, which prints the whole cause chain — the
+/// only rendering worth having when a test reports one.
+#[derive(Debug)]
 pub struct AppError(pub anyhow::Error);
 
 impl IntoResponse for AppError {

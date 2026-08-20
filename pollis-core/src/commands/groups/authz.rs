@@ -17,45 +17,42 @@
 //! Delivery Service, which re-derives the same role from `group_member` and
 //! answers 403 (`pollis_delivery::groups::{group_role, is_admin}`) — the DS is
 //! untrusted-by-the-client but authoritative-for-the-server, and it never
-//! trusts a client-supplied role. Reads go direct to Turso, where this *is* the
-//! only check; that is exactly why it must be honest rather than silently empty.
+//! trusts a client-supplied role.
 //!
-//! ## The bound on every read guard here (#917)
+//! ## What #987 changed
 //!
-//! State it plainly, because the read guards added by #917 (`get_group_members`,
-//! `list_group_channels`, `list_group_emoji`, and the `GroupPreview` projection
-//! on `search_group_by_slug`) are easy to over-read as a fix for the underlying
-//! exposure. They are not.
+//! The role now comes from `POST /v1/directory/group` (`role_only`), not from a
+//! client-held database credential — which is the whole point of #987, and also
+//! resolves the residual this module used to have to write down. The old note
+//! said the guards here were an *application-level* protection only, because the
+//! client's whole-DB read token let any user run `SELECT * FROM group_member`
+//! themselves. **There is no such token any more.** The DS decides what a caller
+//! may read, using the same predicate it uses to decide what they may write, so
+//! the guard and the enforcement are the same rule evaluated in the same place.
 //!
-//! The client's Turso token is short-TTL and read-only, but it is **whole-DB**
-//! — it is not scoped to the signed-in user's rows (`commands/turso_token.rs`).
-//! So a user who ignores these commands and issues their own
-//! `SELECT * FROM group_member` still reads any group's roster. What #917
-//! closed is the *application-level* exposure: the app itself no longer hands a
-//! stranger a roster, a channel list or an emoji set for a group they named,
-//! and the rule is now stated once at a chokepoint instead of being absent.
-//! That is the shape the issue asked for, and it matches #875.
+//! Two consequences worth stating, because both are easy to forget:
 //!
-//! Closing the residual needs a **row-scoped Turso token** so the database
-//! refuses the read regardless of which client asks. That is a separate,
-//! larger piece of work and is not attempted here. Until it lands, do not add
-//! a comment anywhere claiming a `require_member` call makes group metadata
-//! unreadable — it makes it un-served, which is a different and weaker claim.
-//!
-//! Every entry point takes the caller's existing `&Connection` rather than
-//! `&AppState`: for a REMOTE database `Database::connect()` builds a whole new
-//! `hyper::Client` with a cold pool, so a helper that opened its own would turn
-//! one preflight into an extra TCP + TLS handshake on every guarded command.
+//!   * These calls are now NETWORK calls. An unreachable DS makes a preflight
+//!     fail where it used to succeed against a warm connection — which is the
+//!     correct direction (refuse rather than proceed into a doomed write), but it
+//!     means a preflight failure is now an ordinary event rather than a
+//!     vanishing one.
+//!   * The preflight is no longer a saving. It costs a round trip that the write
+//!     would have made anyway, so it exists purely for the ERROR MESSAGE. That is
+//!     still worth it — "only group admins can invite members" is a different
+//!     product than an opaque 403 — but a new command that does not need a
+//!     specific message should simply post the write and report its refusal.
 //!
 //! ## Roles
 //!
 //! `group_member.role` carries `'admin'` or `'member'` and nothing else.
-//! `'owner'` was renamed to `'admin'` by migration 000008 (see
-//! `db::remote::migration_008_owner_role_becomes_admin`) and `groups.owner_id`
+//! `'owner'` was renamed to `'admin'` by migration 000008 and `groups.owner_id`
 //! is a display field, never an authorization input — so an unknown role string
 //! is treated as a plain member, matching the DS's `== Some("admin")`.
 
-use libsql::Connection;
+use std::sync::Arc;
+
+use crate::state::AppState;
 
 use crate::error::{Error, Result};
 
@@ -72,7 +69,14 @@ impl GroupRole {
         matches!(self, GroupRole::Admin)
     }
 
-    fn from_column(raw: &str) -> Self {
+    /// `group_member.role` -> a role. An UNKNOWN string is a plain member,
+    /// matching the DS's `== Some("admin")` — the two must agree, or a corrupt
+    /// column means "admin" on one side and "member" on the other.
+    ///
+    /// `pub` since #987: the row now arrives over HTTP rather than out of a
+    /// local query, so the mapping is the client's whole share of this decision
+    /// and `tests/group_authz.rs` exercises it directly.
+    pub fn from_column(raw: &str) -> Self {
         if raw == "admin" {
             GroupRole::Admin
         } else {
@@ -84,6 +88,10 @@ impl GroupRole {
 /// The one wording for "the caller is not in this group". Every site that used
 /// to invent its own now returns exactly this.
 pub const NOT_A_MEMBER: &str = "you are not a member of this group";
+
+/// The one wording for "the TARGET of this action is not in this group" — a
+/// different subject from the caller, and deliberately a different sentence.
+pub const TARGET_NOT_A_MEMBER: &str = "user is not a member of this group";
 
 fn not_a_member() -> Error {
     Error::Other(anyhow::anyhow!(NOT_A_MEMBER))
@@ -98,39 +106,29 @@ fn not_an_admin(action: &str) -> Error {
 /// The caller's role in `group_id`, or `None` when they are not a member.
 /// Prefer [`require_member`] / [`require_admin`] — reach for this only where
 /// "not a member" is a legitimate non-error outcome.
+///
+/// `group_id` may also name a CHANNEL, in which case the answer is about its
+/// owning group. That is the DS's `resolve_conversation`, and it is what lets
+/// the moderation preflight ask one question instead of two.
 pub async fn group_role(
-    conn: &Connection,
+    state: &Arc<AppState>,
     group_id: &str,
     user_id: &str,
 ) -> Result<Option<GroupRole>> {
-    let mut rows = conn
-        .query(
-            pollis_schema::authz::GROUP_ROLE_SQL,
-            libsql::params![group_id.to_string(), user_id.to_string()],
-        )
-        .await?;
-    Ok(match rows.next().await? {
-        Some(row) => Some(GroupRole::from_column(&row.get::<String>(0)?)),
-        None => None,
-    })
+    let resp = crate::commands::ds_reads::group_role(state, group_id, user_id).await?;
+    Ok(resp.role.as_deref().map(GroupRole::from_column))
 }
 
 /// Whether `group_id` names a real group.
 ///
-/// The other half of `request_group_access`'s preflight, which used to inline
-/// this SELECT at the call site. Both this and [`group_role`] now run
-/// `pollis_schema::authz`'s statements — the same text the Delivery Service
-/// executes when it re-derives the decision (#942). The DS remains the enforcing
-/// copy; sharing the statement removes the way the preflight could quietly stop
-/// agreeing with it.
-pub async fn group_exists(conn: &Connection, group_id: &str) -> Result<bool> {
-    let mut rows = conn
-        .query(
-            pollis_schema::authz::GROUP_EXISTS_SQL,
-            libsql::params![group_id.to_string()],
-        )
-        .await?;
-    Ok(rows.next().await?.is_some())
+/// The other half of `request_group_access`'s preflight. Reported by the DS
+/// separately from membership because the join flow needs both: "no such group"
+/// and "you are already a member" are different refusals, and a single boolean
+/// would make one of them wrong.
+pub async fn group_exists(state: &Arc<AppState>, group_id: &str) -> Result<bool> {
+    Ok(crate::commands::ds_reads::group_role(state, group_id, "")
+        .await?
+        .exists)
 }
 
 /// The caller's role in the group that owns `channel_id`, or `None` when the
@@ -138,58 +136,87 @@ pub async fn group_exists(conn: &Connection, group_id: &str) -> Result<bool> {
 /// caller is not a member. One round trip, mirroring the DS's
 /// `messages::channel_group_role`.
 pub async fn channel_group_role(
-    conn: &Connection,
+    state: &Arc<AppState>,
     channel_id: &str,
     user_id: &str,
 ) -> Result<Option<GroupRole>> {
-    let mut rows = conn
-        .query(
-            "SELECT gm.role FROM channels c \
-             JOIN group_member gm ON gm.group_id = c.group_id \
-             WHERE c.id = ?1 AND gm.user_id = ?2",
-            libsql::params![channel_id.to_string(), user_id.to_string()],
-        )
-        .await?;
-    Ok(match rows.next().await? {
-        Some(row) => Some(GroupRole::from_column(&row.get::<String>(0)?)),
-        None => None,
-    })
+    group_role(state, channel_id, user_id).await
+}
+
+// ── The decisions, as pure functions ────────────────────────────────────────
+//
+// Split out in #987. The role used to arrive from a local query, so "fetch" and
+// "decide" were one function and one test could cover both. The fetch is now a
+// DS round trip, and folding a network call into the decision would mean the
+// wordings below — the entire reason this module exists — could only be
+// exercised by standing up a server. These take the answer and return the
+// verdict; the async wrappers do nothing but fetch and delegate.
+
+/// Membership required: `Some(role)` passes through, `None` is [`NOT_A_MEMBER`].
+pub fn decide_member(role: Option<GroupRole>) -> Result<GroupRole> {
+    role.ok_or_else(not_a_member)
+}
+
+/// Admin required. A NON-MEMBER is told they are not a member, not that they are
+/// not an admin — the two are different facts and conflating them tells a
+/// stranger which groups exist.
+pub fn decide_admin(role: Option<GroupRole>, action: &str) -> Result<()> {
+    if decide_member(role)?.is_admin() {
+        return Ok(());
+    }
+    Err(not_an_admin(action))
+}
+
+/// The TARGET of an action must be a member. Distinct wording from
+/// [`decide_member`] because the subject is a different person.
+pub fn decide_target_member(role: Option<GroupRole>) -> Result<GroupRole> {
+    role.ok_or_else(|| Error::Other(anyhow::anyhow!(TARGET_NOT_A_MEMBER)))
 }
 
 /// Require membership. Returns the caller's role so an admin-only *branch* can
 /// be taken without a second query (e.g. "members may remove themselves, admins
 /// may remove anyone").
 pub async fn require_member(
-    conn: &Connection,
+    state: &Arc<AppState>,
     group_id: &str,
     user_id: &str,
 ) -> Result<GroupRole> {
-    group_role(conn, group_id, user_id)
-        .await?
-        .ok_or_else(not_a_member)
+    decide_member(group_role(state, group_id, user_id).await?)
 }
 
 /// Require admin. `action` completes "only group admins can …".
 pub async fn require_admin(
-    conn: &Connection,
+    state: &Arc<AppState>,
     group_id: &str,
     user_id: &str,
     action: &str,
 ) -> Result<()> {
-    if require_member(conn, group_id, user_id).await?.is_admin() {
-        return Ok(());
-    }
-    Err(not_an_admin(action))
+    decide_admin(group_role(state, group_id, user_id).await?, action)
 }
 
 /// Require that `user_id` is a member of `group_id` — used to validate the
 /// *target* of an action, not the caller.
+///
+/// Since #987 the DS answers about the AUTHENTICATED caller, not an arbitrary
+/// user — a client cannot ask "is Bob in this group" and get a straight answer,
+/// which is a tightening, not a regression. The target-membership rule is
+/// re-derived server-side inside the write it guards
+/// (`pollis_delivery::groups::apply_set_member_role`), so the enforcement is
+/// unchanged; what is gone is the client's ability to enumerate someone else's
+/// standing before attempting it.
 pub async fn require_target_member(
-    conn: &Connection,
+    state: &Arc<AppState>,
     group_id: &str,
-    user_id: &str,
+    requester_id: &str,
+    target_user_id: &str,
 ) -> Result<GroupRole> {
-    group_role(conn, group_id, user_id)
+    let members = crate::commands::ds_reads::group(state, group_id, requester_id, false)
         .await?
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("user is not a member of this group")))
+        .members;
+    decide_target_member(
+        members
+            .iter()
+            .find(|m| m.user_id == target_user_id)
+            .map(|m| GroupRole::from_column(&m.role)),
+    )
 }

@@ -1605,12 +1605,16 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
 /// stayed in the group.
 ///
 /// The adversary here is passive and honest about it: it exfiltrates bob's
-/// `mls_kv` (every MLS secret the device holds), then only listens. It is given
-/// the DS's entire envelope set for the conversation and runs the real
-/// production decrypt over all of it. It never writes, commits, or authenticates
-/// — an adversary that *acts* could use the stolen device signing key to
-/// external-join as bob, but that is device impersonation, which no key rotation
-/// defends against and which the roster/eviction tests cover instead.
+/// `mls_kv` (every MLS secret the device holds, the ML-DSA-44 request-signing
+/// key among them) and then only listens. It is given the DS's entire envelope
+/// set for the conversation and runs the real production decrypt over all of it,
+/// and it catches up on commits by presenting the stolen device's identity —
+/// which #987 made necessary and the stolen bytes already permit. Before #987 it
+/// did not have to: every binary carried a whole-database read token, so the
+/// commit log was readable with no credential at all. It never writes, commits,
+/// or external-joins — an adversary that *acts* could rejoin as bob with the same
+/// key, but that is device impersonation, which no key rotation defends against
+/// and which the roster/eviction tests cover instead.
 ///
 /// Three-sided by construction, because a bare lockout assertion is worthless on
 /// its own — an attacker that could never read anything, or one that any epoch

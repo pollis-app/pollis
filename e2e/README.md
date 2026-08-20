@@ -542,11 +542,13 @@ backend-free launch check.
 - Vite 3 binds IPv6 loopback only (`[::1]:5173`); port checks probe both
   families.
 - **`smoke.js` still needs placeholder env vars**: `Config::from_env()`
-  (`pollis-core/src/config.rs`) hard-requires `TURSO_URL` / `TURSO_TOKEN` /
-  `R2_S3_ENDPOINT` / `R2_PUBLIC_URL` to be present — baked in at compile time
-  or set at runtime — or the app panics in its Tauri setup hook before any
-  window opens. `smoke.js` supplies unreachable placeholders for these
-  (`REQUIRED_PLACEHOLDERS`), since the login screen never dials any of them.
+  (`pollis-core/src/config.rs`) hard-requires `R2_S3_ENDPOINT` /
+  `R2_PUBLIC_URL` to be present — baked in at compile time or set at runtime —
+  or the app panics in its Tauri setup hook before any window opens. `smoke.js`
+  supplies unreachable placeholders for these (`REQUIRED_PLACEHOLDERS`), since
+  the login screen never dials either. `TURSO_URL` / `TURSO_TOKEN` were on this
+  list until #987 removed them from the client's config entirely; the harnesses
+  still export them for the DS's own use, and the app now ignores them.
   If `Config::from_env()` grows a new required field, `smoke.js` needs a
   matching placeholder or it starts failing for an unrelated reason.
 

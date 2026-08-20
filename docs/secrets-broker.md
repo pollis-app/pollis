@@ -70,10 +70,20 @@ no LiveKit or R2 secret:
   `livekit_api_key` / `livekit_api_secret` are deleted. Connected-room pushes
   (typing, a ping on an already-joined room) still ride the participant's data
   channel and need no secret.
-- **Turso** — `commands/turso_token.rs` refreshes `remote_db` onto a DS-minted
-  short-TTL read-only token (`/v1/turso/token`). Because Turso reads are
-  load-bearing, the baked read-only token remains as a **fail-soft fallback**
-  until DS minting is confirmed live in prod (a config/ops flip, not a code gap).
+- **Turso** — there is no client database credential at all since #987, and no
+  endpoint that mints one. `commands/turso_token.rs`, `RemoteDb`,
+  `state.remote_db` / `state.log_db`, the baked `TURSO_URL` / `TURSO_TOKEN` /
+  `LOG_DB_URL` / `LOG_DB_TOKEN`, and `POST /v1/turso/token` itself are all
+  deleted; `pollis-core` does not depend on `libsql`. Every read is a
+  `POST /v1/read/…` on the DS, on the same signed transport as the writes.
+
+  This is the one broker cutover that ended by REMOVING the secret rather than
+  by shortening its life, and the reason is worth keeping: a short-TTL read-only
+  token is still a WHOLE-DATABASE read-only token for its lifetime. Scoping it
+  per row was the plan (#917's stated residual) and was never going to be small.
+  Removing the client's read path made the question moot — the DS decides what a
+  caller may read using the same predicate it uses to decide what they may
+  write.
 
 ### `POST /v1/livekit/token`
 
@@ -163,12 +173,16 @@ The key stays server-side deliberately: a per-room key shipped in a release bina
 could be extracted, and one that resolved every room would hand back the whole
 social graph.
 
-### `POST /v1/turso/token`
+### `POST /v1/turso/token` — REMOVED (#987)
 
-Mint a short-TTL **read-only** Turso token via the Turso Platform API and hand
-back only the JWT. Body `{}` → `{ token, expires_in }`. Env:
-`TURSO_PLATFORM_TOKEN`, `TURSO_ORG`, `TURSO_DB` — all required, else `503` (the
-client then keeps its baked read-only token, so reads still work).
+It minted a short-TTL read-only Turso token via the Turso Platform API so the
+client would stop shipping a long-lived one (#393). #987 removed the client's
+database access entirely, which left an endpoint whose only job was to hand out
+database credentials — pure attack surface. It is gone, along with the
+`TURSO_PLATFORM_TOKEN` / `TURSO_ORG` / `TURSO_DB` env vars it needed and nothing
+else did. (`TURSO_URL` / `TURSO_TOKEN` / `TURSO_ADMIN_TOKEN` / `LOG_DB_*` are
+UNRELATED and still required: they are the DS's own data-plane connection and the
+migration runner's credential.)
 
 ### `POST /v1/r2/presign`
 

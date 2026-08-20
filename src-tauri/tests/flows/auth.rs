@@ -1179,7 +1179,8 @@ async fn logout_with_delete_removes_device_via_ds() {
 
     // The device row exists after sign-up (a cert was published by set_pin).
     let device_id: String = {
-        let conn = alice.state.remote_db.conn().await.expect("remote conn");
+        let db = crate::harness::writable_remote().await;
+        let conn = db.conn().await.expect("remote conn");
         let mut rows = conn
             .query(
                 "SELECT device_id FROM user_device WHERE user_id = ?1",
@@ -1203,7 +1204,8 @@ async fn logout_with_delete_removes_device_via_ds() {
 
     // The shared remote handle is unaffected by the local teardown, so we can
     // confirm the DS DELETE landed.
-    let conn = alice.state.remote_db.conn().await.expect("remote conn");
+    let db = crate::harness::writable_remote().await;
+    let conn = db.conn().await.expect("remote conn");
     let mut rows = conn
         .query(
             "SELECT 1 FROM user_device WHERE device_id = ?1",

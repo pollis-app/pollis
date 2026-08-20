@@ -90,17 +90,13 @@ async fn full_mls_round_trip_both_directions_via_send_layer() {
         "B should hold both messages in send order (A's + B's own), got: {bob_view:#?}",
     );
 
-    // ── Invariant: every write went through the DS. Each client's main handle
-    //    is a read-only view, so a direct write MUST fail — proving neither the
-    //    send nor the receive path reached around the DS to write Turso. ──
-    for (label, client) in [("A", &alice), ("B", &bob)] {
-        let conn = client.state.remote_db.conn().await.expect("main conn");
-        let direct_write = conn
-            .execute("CREATE TABLE _should_not_write (x)", ())
-            .await;
-        assert!(
-            direct_write.is_err(),
-            "{label}'s main handle must reject direct writes (query_only) — all writes go through the DS",
-        );
-    }
+    // ── Invariant: every read AND write went through the DS.
+    //
+    //    This used to be a runtime assertion: each client's main handle was a
+    //    `query_only` view, so a direct write had to fail. #987 replaced the
+    //    property with a stronger one that no runtime check can express —
+    //    `pollis-core` does not link `libsql` at all, so a client cannot open a
+    //    connection to open. The tripwire is
+    //    `pollis-core/tests/no_client_side_remote_reads.rs`, which fails if the
+    //    dependency ever comes back by any path.
 }

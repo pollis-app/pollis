@@ -2,32 +2,35 @@
 //! `docs/relay-overlay-design.md` §14). This is the CONSUMER side of the
 //! `pollis-relay` transport crate: it derives the routing policy from `Config`,
 //! builds the real circuit factory + starts the loopback SOCKS5 shim
-//! ([`start_overlay_shim`]), hands out the shared reqwest client, and builds the
-//! libsql SOCKS connector. The runtime on/off/switch engine that DRIVES this lives
-//! in [`crate::commands::overlay`] (`set_overlay_mode` / `apply_overlay_mode`).
+//! ([`start_overlay_shim`]), and hands out the shared reqwest client. The
+//! runtime on/off/switch engine that DRIVES this lives in
+//! [`crate::commands::overlay`] (`set_overlay_mode` / `apply_overlay_mode`).
 //!
 //! **Off-by-default is sacred.** With `POLLIS_OVERLAY` unset (`OverlayMode::Off`)
 //! no shim is ever started, `AppState.overlay` stays `None`, and every network
 //! path is byte-for-byte identical to a build without the overlay: [`http_client`]
-//! returns a proxy-less `reqwest::Client`, and `RemoteDb::connect` takes libsql's
-//! unchanged `.build()` path (no `.connector()`).
+//! returns a proxy-less `reqwest::Client`.
+//!
+//! #987 removed the libsql SOCKS connector this module also used to build. The
+//! client has no database connection left to route, so the only overlaid traffic
+//! is HTTPS — the Delivery Service and R2 — which rides reqwest's own proxy
+//! support.
 
-use std::future::Future;
-use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use hyper::client::connect::{Connected, Connection};
 use ml_dsa::Keypair;
-use hyper::Uri;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
-use tower_service::Service;
+
+// The raw SOCKS5 client is test-only since #987 — see its note below.
+#[cfg(test)]
+use std::net::SocketAddr;
+#[cfg(test)]
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(test)]
+use tokio::net::TcpStream;
 
 use super::directory;
 use super::path::{self, GuardBook, RelayEndpoint, RelayPath};
@@ -101,9 +104,10 @@ fn host_of(url: &str) -> Option<String> {
 /// `a_socks_shim_cannot_carry_media_even_for_an_overlaid_host`.
 pub(crate) fn overlay_policy(config: &Config, mode: OverlayMode) -> RoutingPolicy {
     let mut overlay_hosts: Vec<String> = Vec::new();
+    // #987 removed the two Turso URLs from this list along with the client's
+    // database connection. What remains IS the whole first-party control plane
+    // now: the Delivery Service (every read and every write) and R2 (media).
     let control_urls = [
-        Some(config.turso_url.as_str()),
-        config.log_db_url.as_deref(),
         config.pollis_delivery_url.as_deref(),
         Some(config.r2_endpoint.as_str()),
         Some(config.r2_public_url.as_str()),
@@ -139,8 +143,8 @@ const OVERLAY_CERT_IDENTITY_VERSION: u32 = 1;
 /// alternative to a background health-poll loop (CLAUDE.md forbids periodic
 /// keepalives): a dead relay is simply skipped until this window elapses, then
 /// retried on the next connect that reaches it. Same POSTURE as
-/// `RemoteDb::with_retry` — recover lazily, never poll — though not the same
-/// mechanism: that one reconnects a libsql stream inline, this one just stops
+/// the deleted `RemoteDb::with_retry` — recover lazily, never poll — though not
+/// the same mechanism: that one reconnected a libsql stream inline, this one just stops
 /// skipping an endpoint once its cooldown lapses.
 const RELAY_DEAD_COOLDOWN: Duration = Duration::from_secs(30);
 
@@ -185,10 +189,12 @@ const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(8);
 /// with zero I/O. Both halves are loaded from LOCAL state: the device signing key
 /// from the open local DB (openmls storage), and the cert is minted on the spot
 /// from the locally-held account identity key (`load_account_id_key`). Minting
-/// locally — rather than reading the published `user_device.device_cert` through
-/// `remote_db` — is deliberate: once the mode is applied, `remote_db` itself
-/// routes through THIS shim, so reading the cert from it to *build* a circuit
-/// would recurse into the very circuit being built. The minted cert is
+/// locally — rather than reading the published `user_device.device_cert` from
+/// the server — is deliberate: once the mode is applied, every remote read is a
+/// DS request that routes through THIS shim, so fetching the cert to *build* a
+/// circuit would recurse into the very circuit being built. (Before #987 the
+/// recursing caller was `remote_db`; replacing it with a signed POST changed
+/// which client recurses, not whether it does.) The minted cert is
 /// cryptographically identical in what the relay checks (the current account key
 /// certifying the real device key), and a device with NO account key yet
 /// (pre-enrollment / locked / no user) simply can't mint one → `connect` errors →
@@ -207,8 +213,8 @@ const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(8);
 /// is in its cooldown after a failed dial, `None` when healthy): a failed dial
 /// marks the endpoint dead for [`RELAY_DEAD_COOLDOWN`], a success clears it. There
 /// is **no background poll** — recovery is lazy (the cooldown expires and the next
-/// connect retries it), the same lazy-recovery posture as `RemoteDb::with_retry`
-/// (not its mechanism — nothing here reconnects a libsql stream). Selection is
+/// connect retries it), the same lazy-recovery posture the client's database
+/// layer used to take before #987 deleted it. Selection is
 /// *fail-open*:
 /// healthy endpoints are tried first, but if all are marked dead they are still
 /// tried (a transient outage that marked the whole pool dead must never wedge it
@@ -720,7 +726,7 @@ const DIRECTORY_REFRESH_SKEW: Duration = Duration::from_secs(5 * 60);
 const DIRECTORY_MIN_REFRESH: Duration = Duration::from_secs(30);
 const DIRECTORY_MAX_REFRESH: Duration = Duration::from_secs(55 * 60);
 /// After a failed fetch, retry on this fixed backoff — recover lazily, keep the
-/// previous pool meanwhile. Same rule as `RemoteDb::with_retry` — recover on
+/// previous pool meanwhile. Same rule the deleted `RemoteDb::with_retry` followed — recover on
 /// demand, never poll tightly — reached by a different route.
 const DIRECTORY_RETRY_BACKOFF: Duration = Duration::from_secs(60);
 /// Floor on the interval between fetches, so an on-exhaustion notify storm during
@@ -1103,105 +1109,24 @@ pub(crate) async fn start_overlay_shim(
     Ok(handle)
 }
 
-// ── The libsql SOCKS connector (design §14.1) ──────────────────────────────
+// ── The raw SOCKS5 client (design §14.1) ───────────────────────────────────
+//
+// #987 deleted `overlay_connector` and the `tower::Service<hyper::Uri>` wrapper
+// that fed it. Both existed for exactly one caller — libsql, which needed a
+// connector shaped like its own `Socket` bound (`hyper::client::connect::
+// Connection` + `AsyncRead`/`AsyncWrite`) so Turso's Hrana/TLS could be dialled
+// through the shim. With the client's database connection gone, so is that
+// caller, and with it `pollis-core`'s direct `hyper` 0.14 / `hyper-rustls` 0.25 /
+// `tower-service` dependencies — declared solely to mirror libsql's connector.
+//
+// [`socks5_connect`] itself stays, but only under `cfg(test)`: production has
+// no SOCKS client left, because the one remaining overlaid protocol is HTTPS and
+// reqwest speaks SOCKS5 to the shim itself. The tests drive it directly to prove
+// a TLS session survives the tunnel end to end — the property §14.1 T2 is about,
+// and one no reqwest-level assertion can make, since reqwest would hide the very
+// stream under test.
 
-/// Build the libsql connector that routes Turso's Hrana/TLS through the overlay
-/// shim. It mirrors libsql's own default remote connector (native roots verify
-/// the REAL service cert via SNI from the request URI, http/1 ALPN, https-or-http)
-/// but wraps a [`SocksConnector`] so the TCP lands on the loopback shim instead of
-/// dialing Turso directly. The inner client TLS still terminates at the real host,
-/// so the relay only ever forwards opaque bytes (§8).
-pub(crate) fn overlay_connector(
-    shim: SocketAddr,
-) -> Result<hyper_rustls::HttpsConnector<SocksConnector>> {
-    let connector = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_native_roots()
-        .map_err(|e| Error::Other(anyhow::anyhow!("overlay connector native roots: {e}")))?
-        .https_or_http()
-        .enable_http1()
-        .wrap_connector(SocksConnector::new(shim));
-    Ok(connector)
-}
-
-/// A `tower::Service<Uri>` that dials a target through the loopback SOCKS5 shim.
-/// This is the inner connector libsql (via [`overlay_connector`]) calls to obtain
-/// a TCP-shaped byte pipe, over which it then runs its own TLS to the real host.
-#[derive(Clone, Copy)]
-pub(crate) struct SocksConnector {
-    shim: SocketAddr,
-}
-
-impl SocksConnector {
-    pub(crate) fn new(shim: SocketAddr) -> Self {
-        SocksConnector { shim }
-    }
-}
-
-impl Service<Uri> for SocksConnector {
-    type Response = SocksStream;
-    type Error = std::io::Error;
-    type Future = Pin<Box<dyn Future<Output = std::io::Result<SocksStream>> + Send>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, uri: Uri) -> Self::Future {
-        let shim = self.shim;
-        Box::pin(async move {
-            let host = uri
-                .host()
-                .ok_or_else(|| io_err("overlay connector: request URI has no host"))?
-                .to_string();
-            // Turso/Hrana is always TLS; default to 443 when the URI omits a port.
-            let port = uri.port_u16().unwrap_or(443);
-            let inner = socks5_connect(shim, &host, port).await?;
-            Ok(SocksStream { inner })
-        })
-    }
-}
-
-/// A TCP stream to the shim, wrapped so it satisfies libsql's `Socket` bound
-/// (`hyper::client::connect::Connection` + `AsyncRead`/`AsyncWrite`).
-pub(crate) struct SocksStream {
-    inner: TcpStream,
-}
-
-impl Connection for SocksStream {
-    fn connected(&self) -> Connected {
-        // A plain proxied TCP hop — no HTTP/2 negotiation to advertise.
-        Connected::new()
-    }
-}
-
-impl AsyncRead for SocksStream {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for SocksStream {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        Pin::new(&mut self.inner).poll_write(cx, buf)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_shutdown(cx)
-    }
-}
-
+#[cfg(test)]
 fn io_err(msg: &str) -> std::io::Error {
     std::io::Error::other(msg.to_string())
 }
@@ -1209,7 +1134,12 @@ fn io_err(msg: &str) -> std::io::Error {
 /// Open a TCP connection to `host:port` via a SOCKS5 CONNECT to the loopback
 /// `shim`, using proxy-side DNS (ATYP=DOMAIN) so the shim resolves + allowlists
 /// the real hostname. Mirrors the client half of `pollis_relay::shim`'s server.
-async fn socks5_connect(shim: SocketAddr, host: &str, port: u16) -> std::io::Result<TcpStream> {
+#[cfg(test)]
+pub(crate) async fn socks5_connect(
+    shim: SocketAddr,
+    host: &str,
+    port: u16,
+) -> std::io::Result<TcpStream> {
     let mut sock = TcpStream::connect(shim).await?;
 
     // Greeting: VER=5, one method, METHOD=0 (no auth — loopback only).
@@ -1283,7 +1213,6 @@ mod tests {
     use zeroize::Zeroizing;
 
     use crate::commands::pin::UnlockState;
-    use crate::db::remote::RemoteDb;
 
     const USER: &str = "u_overlay_test";
     const DEVICE: &str = "d_overlay_test";
@@ -1328,10 +1257,6 @@ mod tests {
 
     fn cfg(mode: OverlayMode, relay: Option<&str>) -> Config {
         Config {
-            turso_url: "libsql://turso.example.com".into(),
-            turso_token: "t".into(),
-            log_db_url: None,
-            log_db_token: None,
             r2_endpoint: "https://r2.example.com".into(),
             r2_public_url: "https://cdn.example.com".into(),
             livekit_url: "wss://livekit.example.com".into(),
@@ -1491,7 +1416,6 @@ mod tests {
 
     #[test]
     fn host_of_strips_scheme_port_path() {
-        assert_eq!(host_of("libsql://turso.example.com").as_deref(), Some("turso.example.com"));
         assert_eq!(host_of("https://api.example.com:8080/v1").as_deref(), Some("api.example.com"));
         assert_eq!(host_of("wss://LiveKit.Example.com").as_deref(), Some("livekit.example.com"));
         assert_eq!(host_of("bare-host:443").as_deref(), Some("bare-host"));
@@ -1508,10 +1432,8 @@ mod tests {
         let policy = overlay_policy(&cfg(OverlayMode::Prefer, None), OverlayMode::Prefer);
         use pollis_relay::PlannedRoute;
         // Control-plane hosts route overlay (with direct fallback in Prefer).
-        assert_eq!(
-            policy.plan("turso.example.com"),
-            PlannedRoute::Overlay { fallback_to_direct: true }
-        );
+        // Since #987 that is the DS and R2 — the two Turso hosts left the list
+        // when the client's database connection did.
         assert_eq!(
             policy.plan("api.example.com"),
             PlannedRoute::Overlay { fallback_to_direct: true }
@@ -1536,8 +1458,8 @@ mod tests {
     fn off_mode_policy_is_all_direct() {
         use pollis_relay::PlannedRoute;
         let policy = overlay_policy(&cfg(OverlayMode::Off, None), OverlayMode::Off);
-        assert_eq!(policy.plan("turso.example.com"), PlannedRoute::Direct);
         assert_eq!(policy.plan("api.example.com"), PlannedRoute::Direct);
+        assert_eq!(policy.plan("r2.example.com"), PlannedRoute::Direct);
         // E1 did not weaken this: with the overlay off, the LiveKit signaling
         // host is direct like everything else.
         assert_eq!(policy.plan("livekit.example.com"), PlannedRoute::Direct);
@@ -1591,7 +1513,7 @@ mod tests {
         drop(shim);
     }
 
-    // ── (c) end-to-end: reqwest AND the libsql connector route through the shim ─
+    // ── (c) end-to-end: reqwest AND a raw TLS session route through the shim ──
 
     #[tokio::test]
     async fn reqwest_routes_through_shim_to_tls_origin() {
@@ -1617,13 +1539,17 @@ mod tests {
         drop(shim);
     }
 
-    /// The libsql-shaped path: drive the exact `SocksConnector` that
-    /// `overlay_connector` feeds libsql, then run client TLS over the stream it
-    /// returns — the cert is verified for the REAL name `origin.test` through
-    /// shim→relay, proving end-to-end TLS survives tunneling (design §14.1, T2).
+    /// End-to-end TLS survives the tunnel: SOCKS-dial the real name through the
+    /// shim, then run client TLS over the returned stream and verify the cert for
+    /// `origin.test` (design §14.1, T2).
+    ///
+    /// Before #987 this drove the connector `overlay_connector` handed libsql.
+    /// The client has no libsql left, so it drives [`socks5_connect`] — the same
+    /// bytes on the wire, which is what the property was ever about: the relay
+    /// forwards ciphertext and the session terminates at the real host.
     #[tokio::test]
-    async fn libsql_socks_connector_carries_verified_tls() {
-        let (origin_addr, ca, _c) = spawn_tls_origin("libsql-connector-shape").await;
+    async fn socks_shim_carries_verified_tls() {
+        let (origin_addr, ca, _c) = spawn_tls_origin("socks-connector-shape").await;
         let relay = spawn_relay(&[ORIGIN_NAME], &[(ORIGIN_NAME, IpAddr::V4(Ipv4Addr::LOCALHOST))]);
         let policy = RoutingPolicy::new(
             OverlayMode::Strict,
@@ -1632,12 +1558,8 @@ mod tests {
         );
         let shim = OverlayShim::start(policy, relay.factory()).await.unwrap();
 
-        // The inner connector: SOCKS-dial the real name through the shim.
-        let mut connector = SocksConnector::new(shim.socks_addr());
-        let uri: Uri = format!("https://{ORIGIN_NAME}:{}", origin_addr.port())
-            .parse()
-            .unwrap();
-        let stream = Service::call(&mut connector, uri)
+        // SOCKS-dial the real name through the shim.
+        let stream = socks5_connect(shim.socks_addr(), ORIGIN_NAME, origin_addr.port())
             .await
             .expect("SOCKS connect through shim");
 
@@ -1662,11 +1584,8 @@ mod tests {
         tls.read_to_end(&mut resp).await.unwrap();
         let resp = String::from_utf8_lossy(&resp);
         assert!(resp.starts_with("HTTP/1.1 200 OK"), "unexpected response: {resp}");
-        assert!(resp.contains("libsql-connector-shape"));
+        assert!(resp.contains("socks-connector-shape"));
         assert_eq!(relay.stats.dials(), 1);
-
-        // And the production connector builds (native roots) for this shim.
-        assert!(overlay_connector(shim.socks_addr()).is_ok());
         drop(shim);
     }
 
@@ -1688,9 +1607,7 @@ mod tests {
             .await
             .expect("Strict starts the shim even with no relay reachable");
 
-        let mut connector = SocksConnector::new(shim.socks_addr());
-        let uri: Uri = format!("https://{host}:{}", addr.port()).parse().unwrap();
-        let result = Service::call(&mut connector, uri).await;
+        let result = socks5_connect(shim.socks_addr(), &host, addr.port()).await;
         assert!(result.is_err(), "Strict + no relay must degrade, never silent-direct");
         drop(shim);
     }
@@ -1700,19 +1617,10 @@ mod tests {
     /// Build an `AppState` with device cert material provisioned (unlocked
     /// session + account identity key + open local DB + device id), so the
     /// `RealRelayFactory` can load a `ClientIdentity` and authenticate to a relay.
-    /// `remote_db` is a (lazy) remote handle so `set_overlay_shim` exercises the
-    /// real rebuild path; it is never queried here.
     async fn provisioned_state(config: Config) -> Arc<AppState> {
-        let remote = Arc::new(RemoteDb::connect(&config.turso_url, "tok").await.unwrap());
         let keystore: Arc<dyn crate::keystore::Keystore> =
             Arc::new(crate::keystore::InMemoryKeystore::new());
-        // log_db == remote_db (unconfigured commit-log DB), like production.
-        let state = Arc::new(AppState::new_with_parts(
-            config,
-            Arc::clone(&remote),
-            remote,
-            keystore,
-        ));
+        let state = Arc::new(AppState::new_with_parts(config, keystore));
         *state.unlock.lock().await = Some(UnlockState {
             user_id: USER.to_string(),
             db_key: Zeroizing::new(vec![7u8; 32]),
@@ -1723,12 +1631,11 @@ mod tests {
         state
     }
 
-    /// Drive the exact libsql-shaped `SocksConnector` through `shim` to the TLS
-    /// origin and verify the inner TLS terminates at the REAL name `origin.test`.
+    /// SOCKS-dial the TLS origin through `shim` and verify the inner TLS
+    /// terminates at the REAL name `origin.test` — the relay forwards opaque
+    /// bytes and never sees inside (§8).
     async fn tls_probe_through_shim(shim: SocketAddr, port: u16, ca: &CertificateDer<'static>) {
-        let mut connector = SocksConnector::new(shim);
-        let uri: Uri = format!("https://{ORIGIN_NAME}:{port}").parse().unwrap();
-        let stream = Service::call(&mut connector, uri)
+        let stream = socks5_connect(shim, ORIGIN_NAME, port)
             .await
             .expect("SOCKS connect through shim");
 
@@ -1751,39 +1658,34 @@ mod tests {
         tls.read_to_end(&mut resp).await.unwrap();
         assert!(
             String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 200 OK"),
-            "libsql-shaped probe did not reach origin through the relay"
+            "TLS probe did not reach origin through the relay"
         );
     }
 
     /// THE live-application proof: flipping `set_overlay_mode` genuinely routes a
-    /// reqwest control-plane call AND a libsql-shaped connection through an
-    /// in-process relay (cert verified for the real name), Prefer↔Strict flips the
-    /// live policy with no shim restart / DB reconnect, and Off restores the
-    /// byte-for-byte direct path (relay sees no further dials).
+    /// reqwest control-plane call AND a raw TLS session through an in-process
+    /// relay (cert verified for the real name), Prefer↔Strict flips the live
+    /// policy with no shim restart, and Off restores the byte-for-byte direct
+    /// path (relay sees no further dials).
     #[tokio::test]
     async fn set_overlay_mode_routes_live_through_relay() {
         let (origin_addr, ca, origin_conns) = spawn_tls_origin("live-apply").await;
         let relay = spawn_relay(&[ORIGIN_NAME], &[(ORIGIN_NAME, IpAddr::V4(Ipv4Addr::LOCALHOST))]);
 
         let mut config = cfg(OverlayMode::Off, Some(&relay.addr.to_string()));
-        // origin.test is the control-plane (Turso) host, so it routes overlay.
-        config.turso_url = format!("libsql://{ORIGIN_NAME}");
+        // origin.test is the control-plane host (the DS), so it routes overlay.
+        config.pollis_delivery_url = Some(format!("https://{ORIGIN_NAME}"));
         config.overlay_relay_cert = Some(cert_b64(&relay.cert));
         let state = provisioned_state(config).await;
 
         use crate::commands::overlay::{apply_overlay_mode, get_overlay_mode};
 
-        // Off → Prefer: shim up, both remote DBs repointed through it.
+        // Off → Prefer: shim up and the policy live.
         apply_overlay_mode(&state, OverlayMode::Prefer).await.unwrap();
         assert_eq!(get_overlay_mode(&state).await.unwrap(), "prefer");
         let handle = state.overlay_handle().expect("shim running after Prefer");
         assert_eq!(handle.mode(), OverlayMode::Prefer);
         let shim_addr = handle.socks_addr();
-        assert_eq!(
-            state.remote_db.overlay_shim(),
-            Some(shim_addr),
-            "remote_db must be routed through the shim after Prefer"
-        );
 
         // (1) A reqwest control-plane call routes THROUGH THE RELAY.
         let client = pollis_relay::http::http_client_builder(Some(handle.as_ref()))
@@ -1796,10 +1698,10 @@ mod tests {
         assert_eq!(resp.text().await.unwrap(), "live-apply");
         assert_eq!(relay.stats.dials(), 1, "relay must have dialed the origin (reqwest)");
 
-        // (2) A libsql-shaped connection routes through the relay too, cert
-        //     verified for the REAL name origin.test.
+        // (2) A raw TLS session routes through the relay too, cert verified for
+        //     the REAL name origin.test.
         tls_probe_through_shim(shim_addr, origin_addr.port(), &ca).await;
-        assert_eq!(relay.stats.dials(), 2, "relay must have dialed the origin (libsql shape)");
+        assert_eq!(relay.stats.dials(), 2, "relay must have dialed the origin (SOCKS shape)");
         assert!(origin_conns.load(Ordering::Relaxed) >= 2);
 
         // Prefer → Strict: live policy flip — SAME shim, no DB reconnect.
@@ -1808,17 +1710,11 @@ mod tests {
         let handle2 = state.overlay_handle().expect("shim still running after Strict");
         assert_eq!(handle2.mode(), OverlayMode::Strict);
         assert_eq!(handle2.socks_addr(), shim_addr, "Prefer↔Strict must not restart the shim");
-        assert_eq!(
-            state.remote_db.overlay_shim(),
-            Some(shim_addr),
-            "Prefer↔Strict must not reconnect the DBs"
-        );
 
-        // Strict → Off: shim dropped, DBs back to direct, relay sees no new dials.
+        // Strict → Off: shim dropped, relay sees no new dials.
         apply_overlay_mode(&state, OverlayMode::Off).await.unwrap();
         assert_eq!(get_overlay_mode(&state).await.unwrap(), "off");
         assert!(state.overlay_handle().is_none(), "shim must stop after Off");
-        assert_eq!(state.remote_db.overlay_shim(), None, "remote_db must be direct after Off");
 
         // A direct call now bypasses the relay entirely.
         let plain = spawn_plain_http("direct-after-off").await;
@@ -1840,7 +1736,7 @@ mod tests {
             .unwrap()
             .cert_der;
         let mut config = cfg(OverlayMode::Off, Some("127.0.0.1:1"));
-        config.turso_url = format!("libsql://{ORIGIN_NAME}");
+        config.pollis_delivery_url = Some(format!("https://{ORIGIN_NAME}"));
         config.overlay_relay_cert = Some(cert_b64(&cert));
         let state = provisioned_state(config).await;
 
@@ -1849,10 +1745,8 @@ mod tests {
             .unwrap();
         let handle = state.overlay_handle().unwrap();
 
-        let mut connector = SocksConnector::new(handle.socks_addr());
-        let uri: Uri = format!("https://{ORIGIN_NAME}:443").parse().unwrap();
         assert!(
-            Service::call(&mut connector, uri).await.is_err(),
+            socks5_connect(handle.socks_addr(), ORIGIN_NAME, 443).await.is_err(),
             "Strict + relay down must degrade, never silent-direct"
         );
     }
@@ -1868,7 +1762,7 @@ mod tests {
             .cert_der;
         let mut config = cfg(OverlayMode::Off, Some("127.0.0.1:1"));
         // Control-plane host = the directly-connectable plain origin.
-        config.turso_url = format!("libsql://{host}");
+        config.pollis_delivery_url = Some(format!("https://{host}"));
         config.overlay_relay_cert = Some(cert_b64(&cert));
         let state = provisioned_state(config).await;
 
@@ -1877,10 +1771,8 @@ mod tests {
             .unwrap();
         let handle = state.overlay_handle().unwrap();
 
-        let mut connector = SocksConnector::new(handle.socks_addr());
-        let uri: Uri = format!("http://{host}:{}", plain.port()).parse().unwrap();
         assert!(
-            Service::call(&mut connector, uri).await.is_ok(),
+            socks5_connect(handle.socks_addr(), &host, plain.port()).await.is_ok(),
             "Prefer + relay down must fall back to a direct dial"
         );
     }
@@ -1978,7 +1870,7 @@ mod tests {
             .cert_der;
         // Two dead relays, comma-separated — parsed into a two-member pool.
         let mut config = cfg(OverlayMode::Off, Some("127.0.0.1:1,127.0.0.1:2"));
-        config.turso_url = format!("libsql://{host}");
+        config.pollis_delivery_url = Some(format!("https://{host}"));
         config.overlay_relay_cert = Some(cert_b64(&cert));
         let state = provisioned_state(config).await;
 
@@ -1987,10 +1879,8 @@ mod tests {
             .unwrap();
         let handle = state.overlay_handle().unwrap();
 
-        let mut connector = SocksConnector::new(handle.socks_addr());
-        let uri: Uri = format!("http://{host}:{}", plain.port()).parse().unwrap();
         assert!(
-            Service::call(&mut connector, uri).await.is_ok(),
+            socks5_connect(handle.socks_addr(), &host, plain.port()).await.is_ok(),
             "Prefer + whole pool down must still fall back to a direct dial"
         );
     }
@@ -2963,9 +2853,7 @@ mod tests {
         let shim = OverlayShim::start(policy, factory).await.unwrap();
 
         // (1) SIGNALING: a TCP stream to the SFU is carried by a circuit.
-        let mut connector = SocksConnector::new(shim.socks_addr());
-        let uri: Uri = format!("http://{host}:{}", sfu_addr.port()).parse().unwrap();
-        let mut stream = Service::call(&mut connector, uri)
+        let mut stream = socks5_connect(shim.socks_addr(), &host, sfu_addr.port())
             .await
             .expect("signaling routes through the overlay");
         stream

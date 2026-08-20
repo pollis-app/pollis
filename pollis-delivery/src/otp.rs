@@ -365,6 +365,8 @@ pub enum VerifyOtpResult {
         username: String,
         is_new_account: bool,
         has_identity: bool,
+        /// Base64 `users.account_id_pub`, present iff `has_identity`.
+        account_id_pub: Option<String>,
         session_token: String,
         session_expires_at: u64,
     },
@@ -429,14 +431,21 @@ pub async fn apply_verify_otp(
     let existing = rows.next().await?;
     drop(rows);
 
-    let (user_id, username, has_identity, is_new_account) = match existing {
+    let (user_id, username, account_id_pub, is_new_account) = match existing {
         Some(row) => {
             let id: String = row.get(0)?;
             let uname: String = row
                 .get(1)
                 .unwrap_or_else(|_| email.split('@').next().unwrap_or("user").to_string());
             let pub_bytes: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(2).ok().flatten();
-            (id, uname, pub_bytes.is_some(), false)
+            // Returned to the caller (#987): its orphan check compares these
+            // bytes against the account key it holds locally, and this row read
+            // is the one that already has them.
+            let encoded = pub_bytes.map(|b| {
+                use base64::Engine as _;
+                base64::engine::general_purpose::STANDARD.encode(b)
+            });
+            (id, uname, encoded, false)
         }
         None => {
             let user_id = Ulid::new().to_string();
@@ -448,9 +457,10 @@ pub async fn apply_verify_otp(
                 libsql::params![user_id.clone(), email.to_string(), default_username.clone()],
             )
             .await?;
-            (user_id, default_username, false, true)
+            (user_id, default_username, None, true)
         }
     };
+    let has_identity = account_id_pub.is_some();
 
     let now = crate::util::now_unix();
     let session_token = sessions.mint(&user_id, email, device_id, cfg.session_ttl_secs, now);
@@ -464,6 +474,7 @@ pub async fn apply_verify_otp(
         username,
         is_new_account,
         has_identity,
+        account_id_pub,
         session_token,
         session_expires_at: now + cfg.session_ttl_secs,
     })
@@ -478,6 +489,7 @@ pub fn verify_otp_response(result: VerifyOtpResult) -> Response {
             username,
             is_new_account,
             has_identity,
+            account_id_pub,
             session_token,
             session_expires_at,
         } => crate::writes::ok_response::<VerifyOtpBody>(VerifyOtpResponse {
@@ -485,6 +497,7 @@ pub fn verify_otp_response(result: VerifyOtpResult) -> Response {
             username,
             is_new_account,
             has_identity,
+            account_id_pub,
             session_token,
             // Unix seconds. `i64` on the wire type, matching every other
             // timestamp in the API; the DS computes it as `u64`.

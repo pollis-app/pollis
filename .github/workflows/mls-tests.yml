@@ -206,15 +206,14 @@ jobs:
           python3 -m pip install --user 'meson>=1.3'
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      # The flows harness backs "remote Turso" with a LOCAL libsql file, so these
-      # are placeholders — Config::for_test only requires the keys to be present.
-      # No real credentials touch the test path.
-      - name: Provision .env.test
-        run: |
-          cat > .env.test <<'EOF'
-          TURSO_URL=libsql://placeholder.invalid
-          TURSO_TOKEN=placeholder
-          EOF
+      # #987 removed the "Provision .env.test" step that used to sit here. The
+      # flows harness has backed "remote Turso" with LOCAL libsql files since
+      # #420, so the two values it wrote were literal placeholders — present
+      # only because `Config::for_test` still had `turso_url` / `turso_token`
+      # fields to fill. The client holds no database credential now and those
+      # fields are gone, so the suite runs with every TURSO_* and LOG_DB_*
+      # variable unset. That is the property #987 claims, and this job is where
+      # it is exercised.
 
       # The remote schema itself (#924). Runs FIRST — it is seconds-cheap, it has
       # no system deps, and it is the definition every other job here stamps its

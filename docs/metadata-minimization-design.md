@@ -307,7 +307,7 @@ Every schema touch obeys the additive/backward-compatible rule (CLAUDE.md: old a
 
 ## 10. In-Box Testability (the flows harness)
 
-The integration harness (`src-tauri/tests/flows.rs`, `tests/flows/harness.rs`) drives the real command implementations through the real dispatch path against a process-local Turso, and gives tests **direct read access to the shared remote DB** via `world().await.remote` (`harness.rs:2176`, `2334`). That is exactly the seam needed to assert the server-visible envelope no longer carries the sender while delivery still works. Concretely, add to `tests/flows/messages.rs`:
+The integration harness (`src-tauri/tests/flows.rs`, `tests/flows/harness.rs`) drives the real command implementations through the real dispatch path against a process-local Turso, and gives tests **direct read access to the shared remote DB** via `harness::writable_remote()` — the in-process DS's own handle, since #987 removed the client's. That is exactly the seam needed to assert the server-visible envelope no longer carries the sender while delivery still works. Concretely, add to `tests/flows/messages.rs`:
 
 - **`sealed_sender_hides_sender_but_delivers`:** Alice and Bob in a DM/channel. Alice sends. Then:
   1. Query the shared remote directly: `SELECT sender_id, sealed FROM message_envelope WHERE conversation_id = ?` — **assert `sealed = 1` and `sender_id` is the sentinel, NOT Alice's `user_id`.** (This is the core metadata-minimization assertion.)

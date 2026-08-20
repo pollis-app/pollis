@@ -33,17 +33,14 @@ pub async fn send_message(
     // For group channels, all channels share the group's MLS group (keyed by group_id).
     // For DM conversations, the MLS group is keyed by conversation_id directly.
     // is_channel = true means conversation_id is a channel ID; group_id is the LiveKit room name.
-    let (mls_group_id, is_channel) = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![conversation_id.clone()],
-        ).await?;
-        match rows.next().await? {
-            Some(row) => (row.get::<String>(0)?, true),
-            None => (conversation_id.clone(), false),
-        }
-    };
+    //
+    // ONE request answers the resolve, the membership check and the DM peer list
+    // (which the block gate below consumes) — three dependent round trips before
+    // #987, and the peer list was itself a query per peer.
+    let resolved =
+        crate::commands::ds_reads::catch_up(state, &conversation_id, false, true).await?;
+    let is_channel = resolved.kind == pollis_api::directory::ConversationKind::Channel;
+    let mls_group_id = resolved.mls_group_id.clone();
 
     // Block enforcement for DMs: if any other participant in this DM
     // has a block relationship with the sender (either direction),
@@ -55,23 +52,18 @@ pub async fn send_message(
     // gated here; blocks in groups are purely render-side on the
     // blocker's client.
     let suppress_delivery = if !is_channel {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT user_id
-             FROM dm_channel_member
-             WHERE dm_channel_id = ?1
-               AND user_id <> ?2",
-            libsql::params![conversation_id.clone(), sender_id.clone()],
-        ).await?;
-        let mut blocked = false;
-        while let Some(row) = rows.next().await? {
-            let other: String = row.get(0)?;
-            if crate::commands::blocks::is_blocked_either_way(&conn, &sender_id, &other).await? {
-                blocked = true;
-                break;
-            }
-        }
-        blocked
+        let peers: Vec<String> = resolved
+            .dm
+            .as_ref()
+            .map(|dm| {
+                dm.members
+                    .iter()
+                    .map(|m| m.user_id.clone())
+                    .filter(|id| id != &sender_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        crate::commands::blocks::any_blocked_either_way(state, &sender_id, &peers).await?
     } else {
         false
     };
@@ -200,6 +192,52 @@ pub async fn send_message(
     // path writes attribution directly rather than re-deriving it from the
     // credential the way the ingest reader does.
 
+    // Mentions (#843) — decided HERE, before the envelope post, because the push
+    // audience now rides on that write (#987).
+    //
+    // Group messages don't raise OS notifications for every new message, but a
+    // mention does: an explicit `@all` pings every group member's inbox, and an
+    // `@username` pings exactly the members named. Both resolve against THIS
+    // channel's roster, which the sender is already a member of, so a mention can
+    // never address (or probe for) someone outside the room. Per-user
+    // "notifications off" is enforced client-side in notify.ts. Only meaningful
+    // for group channels; a DM already notifies its recipient unconditionally.
+    let members: Vec<(String, String)> = if is_channel {
+        crate::commands::ds_reads::group(state, &mls_group_id, &sender_id, false)
+            .await?
+            .members
+            .into_iter()
+            .filter(|m| m.user_id != sender_id)
+            // A member whose `users` row is missing still counts for `@all` — it
+            // just cannot be named individually, which is exactly what the LEFT
+            // JOIN's empty-string default expressed.
+            .map(|m| (m.user_id, m.username.unwrap_or_default()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let audience = if is_channel {
+        mention_audience(is_channel, &content, &members)
+    } else {
+        MentionAudience::Everyone
+    };
+
+    // Content-free push to recipients' backgrounded/closed apps (#344), fanned
+    // out by the DS since #987 — the client no longer reads other people's
+    // `push_token` rows, and the two round trips it took to do so are gone.
+    //
+    // Notification policy is driven by the SAME `audience` the inbox fanout
+    // below uses, so the two cannot drift: a DM always notifies its recipient, a
+    // channel `@all` notifies every member, a channel `@username` notifies
+    // exactly the members named, and ordinary channel chatter notifies nobody
+    // (it would be far too noisy — desktop raises no per-message notification
+    // for it either).
+    let push_to: Option<Vec<String>> = match &audience {
+        MentionAudience::Everyone => Some(Vec::new()),
+        MentionAudience::Only(ids) => Some(ids.clone()),
+        MentionAudience::Nobody => None,
+    };
+
     // Post to Turso for offline delivery. DS seam: route the envelope write
     // through the Delivery Service (the write API).
     let body = pollis_api::messages::SendMessageBody {
@@ -210,6 +248,7 @@ pub async fn send_message(
         reply_to_id: reply_to_id.clone(),
         sent_at: now.clone(),
         sealed: 1,
+        push_to,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
 
@@ -249,36 +288,9 @@ pub async fn send_message(
         }
     }
 
-    // Mentions (#843). Group messages don't raise OS notifications for every
-    // new message, but a mention does — an explicit `@all` pings every group
-    // member's inbox, and an `@username` pings exactly the members named. Both
-    // resolve against THIS channel's roster, which the sender is already a
-    // member of, so a mention can never address (or probe for) someone outside
-    // the room. Per-user "notifications off" is enforced client-side in
-    // notify.ts. Inbox publish (one per member) is fire-and-forget; failures
-    // are logged, never fatal to the send. Only meaningful for group channels;
-    // a DM already notifies its recipient unconditionally.
-    let audience = if is_channel {
-        // `(user_id, username)` for every other member. LEFT JOIN so a member
-        // whose user row is missing still counts for `@all` — it just can't be
-        // named individually.
-        let members: Vec<(String, String)> = {
-            let conn = state.remote_db.conn().await?;
-            let mut rows = conn.query(
-                "SELECT gm.user_id, COALESCE(u.username, '')
-                 FROM group_member gm
-                 LEFT JOIN users u ON u.id = gm.user_id
-                 WHERE gm.group_id = ?1 AND gm.user_id <> ?2",
-                libsql::params![mls_group_id.clone(), sender_id.clone()],
-            ).await?;
-            let mut out = Vec::new();
-            while let Some(row) = rows.next().await? {
-                out.push((row.get::<String>(0)?, row.get::<String>(1)?));
-            }
-            out
-        };
-        let audience = mention_audience(is_channel, &content, &members);
-
+    // Inbox pings for the audience decided above. Fire-and-forget; failures are
+    // logged, never fatal to the send.
+    if is_channel {
         // `@all` keeps its exact existing payload and fanout — every member.
         if mentions_all(&content) {
             let payload = serde_json::json!({
@@ -289,11 +301,10 @@ pub async fn send_message(
                 "sender_username": sender_username,
             });
             for (uid, _) in &members {
-                if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
-                    state,
-                    uid,
-                    payload.clone(),
-                ).await {
+                if let Err(e) =
+                    crate::commands::livekit::publish_to_user_inbox(state, uid, payload.clone())
+                        .await
+                {
                     eprintln!("[realtime] send_message: @all inbox publish to {uid}: {e}");
                 }
             }
@@ -306,59 +317,14 @@ pub async fn send_message(
                 "sender_username": sender_username,
             });
             for uid in ids {
-                if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
-                    state,
-                    uid,
-                    payload.clone(),
-                ).await {
+                if let Err(e) =
+                    crate::commands::livekit::publish_to_user_inbox(state, uid, payload.clone())
+                        .await
+                {
                     eprintln!("[realtime] send_message: @mention inbox publish to {uid}: {e}");
                 }
             }
         }
-        audience
-    } else {
-        MentionAudience::Everyone
-    };
-
-    // Content-free push to recipients' backgrounded/closed apps (#344).
-    // Fire-and-forget: a push relay hiccup must never block or fail the send,
-    // and foreground recipients already got the LiveKit realtime ping above.
-    // Desktop runs this too (its users just have no registered tokens), which
-    // is what lets a desktop-sent message wake a recipient's phone.
-    //
-    // Notification policy mirrors desktop and is driven by the SAME `audience`
-    // the inbox fanout above used, so the two can't drift: a DM always notifies
-    // its recipient, a channel `@all` notifies every member, a channel
-    // `@username` notifies exactly the members named, and ordinary channel
-    // chatter notifies nobody (it would be far too noisy — desktop raises no
-    // per-message notification for it either).
-    let push_only: Option<Vec<String>> = match audience {
-        MentionAudience::Everyone => Some(Vec::new()),
-        MentionAudience::Only(ids) => Some(ids),
-        MentionAudience::Nobody => None,
-    };
-    if let Some(only) = push_only {
-        let state = Arc::clone(state);
-        let conversation_id = conversation_id.clone();
-        let mls_group_id = mls_group_id.clone();
-        let sender_id = sender_id.clone();
-        tokio::spawn(async move {
-            // An empty restriction means "every member", which is what
-            // `notify_new_message` does with `None`.
-            let restrict = if only.is_empty() { None } else { Some(only.as_slice()) };
-            if let Err(e) = crate::commands::push::notify_new_message(
-                &conversation_id,
-                &mls_group_id,
-                is_channel,
-                &sender_id,
-                restrict,
-                &state,
-            )
-            .await
-            {
-                eprintln!("[push] send_message notify: {e}");
-            }
-        });
     }
 
     Ok(Message {

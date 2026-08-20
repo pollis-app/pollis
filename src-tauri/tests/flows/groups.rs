@@ -5,8 +5,8 @@ use serial_test::serial;
 // ─── Smoke test ─────────────────────────────────────────────────────────────
 
 /// Minimal end-to-end path: one client signs up, creates a group, and can
-/// list it back. Validates the whole stack — Config → AppState → RemoteDb →
-/// keystore → MLS init → Turso round-trip — on real code paths.
+/// list it back. Validates the whole stack — Config → AppState → keystore →
+/// MLS init → signed POST to the in-process DS and back — on real code paths.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn single_client_signup_and_create_group() {

@@ -206,18 +206,23 @@ Apple's notary service staples a ticket **after** the build, changing the shippe
 bytes. We log the pre-staple payload hash and treat the staple as part of the
 non-reproducible signed-wrapper layer.
 
-### 4. Baked `option_env!` build recipe — **[blocks Linux payload]** for a secretless third party, via the optional log token only
+### 4. Baked `option_env!` build recipe — **CLOSED as a secretless-repro blocker (#987)**
 The client bakes build-configuration values into the binary at compile time via
-`option_env!` (`pollis-core/src/config.rs`): `TURSO_URL`, the **read-only**
-`TURSO_TOKEN`, `LOG_DB_URL`, `LOG_DB_TOKEN`, `R2_S3_ENDPOINT`, `R2_PUBLIC_URL`,
-`LIVEKIT_URL`, and `POLLIS_DELIVERY_URL`. (`POLLIS_SEAL_SENDER` is gone as of
-#607 — sealed sender is unconditional, so there is no longer a flag to bake.)
-These bytes are part of the reproducible payload, so a reproducer must bake the
-**identical** values or its hash legitimately diverges.
+`option_env!` (`pollis-core/src/config.rs`). As of #987 that recipe is
+`R2_S3_ENDPOINT`, `R2_PUBLIC_URL`, `LIVEKIT_URL`, `POLLIS_DELIVERY_URL`,
+`POLLIS_OVERLAY_DIRECTORY_URL` and `POLLIS_OVERLAY_DIRECTORY_KEY` — **every one
+of them a public endpoint URL or a public verification key.** These bytes are part
+of the reproducible payload, so a reproducer must bake the identical values or its
+hash legitimately diverges; the point is that all of them are publishable, so a
+zero-secret third party can.
 
-- Most are **non-secret by design** (public URLs, the RO token)
-  and can be published as a build recipe; `rebuild-verify.yml` reads them from
-  non-secret repository/environment `vars`.
+(`POLLIS_SEAL_SENDER` went at #607 — sealed sender is unconditional, so there is
+no flag to bake. `TURSO_URL`, `TURSO_TOKEN`, `LOG_DB_URL` and `LOG_DB_TOKEN` went
+at #987, which removed the client's database access entirely: `pollis-core` does
+not link `libsql`, so there is nothing for a token to authenticate.)
+
+- All are **non-secret by design** and are published as a build recipe;
+  `rebuild-verify.yml` reads them from non-secret repository/environment `vars`.
 - **The recipe is now CI-enforced, because it silently drifted (#697 sweep).**
   `POLLIS_OVERLAY_DIRECTORY_URL` and `POLLIS_OVERLAY_DIRECTORY_KEY` were added to the
   Linux release build and never to the rebuilder's recipe, so from the moment the
@@ -284,20 +289,20 @@ These bytes are part of the reproducible payload, so a reproducer must bake the
   `LIVEKIT_API_SECRET` into the build env, but the client no longer reads them, so
   they are dead build-env vars; that workflow cleanup is out of scope here.) This
   closes what was the single largest secretless-reproduction gap.
-- The only baked **credentials** that remain are the publishable read-only
-  `TURSO_TOKEN` (it reads already-public metadata and encrypted envelopes, never
-  plaintext or keys, so it can be published in the recipe and is **not** a
-  secretless-repro blocker) and the **optional** observability `LOG_DB_TOKEN` (a
-  bearer token to the log DB, consumed at `pollis-core/src/state.rs`; when a
-  release bakes it — `desktop-release.yml` still does — a fully-independent,
-  zero-secret party **cannot bit-reproduce the Linux payload**, only a party
-  holding the recipe can). That optional log token is now the remaining
-  secretless-repro blocker, and a much smaller surface than the media secrets it
-  replaces at the top of this list. It does **not** weaken log-inclusion
-  verification, which needs no build inputs at all.
-- Tracked future work: scope/cut over `LOG_DB_TOKEN` so no secret-shaped input is
-  baked into the client binary, and publish the remaining recipe as a stable
-  per-release manifest (§1.3 of the design doc).
+- **NO baked credentials remain (#987).** This bullet used to name two: the
+  publishable read-only `TURSO_TOKEN`, and the optional observability
+  `LOG_DB_TOKEN` — the latter recorded here as "the remaining secretless-repro
+  blocker", because a release that baked it left a fully-independent zero-secret
+  party unable to bit-reproduce the Linux payload. #987 closed it by the route
+  the tracked follow-up anticipated, only further: rather than scoping the log
+  token, it removed the client's database access outright. `pollis-core` does not
+  depend on `libsql`; `state.remote_db` / `state.log_db` and `RemoteDb` are gone;
+  the four database values are no longer exported by `desktop-release.yml` nor
+  read by `config.rs`. `pollis-core/tests/no_client_side_remote_reads.rs` fails if
+  a driver ever re-enters the graph by any path, direct or transitive.
+- Remaining tracked work here: publish the recipe as a stable per-release
+  manifest (§1.3 of the design doc). The secret-shaped half of that item is
+  done.
 
 ### 5. `bindgen` host-header layout (Linux capture helper) — best-effort
 `pollis-capture-linux` links `libspa-sys`, whose `bindgen` step generates Rust

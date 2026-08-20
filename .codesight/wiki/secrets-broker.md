@@ -27,7 +27,6 @@ answers, like OTP with no Resend key).
 | `POST /v1/livekit/send-data` | Server-side `RoomService/SendData` — signs an admin JWT + Twirp POSTs a content-free control payload to a room | same LiveKit env |
 | `POST /v1/livekit/participants` | Server-side `RoomService/ListParticipants` (voice roster); each identity **resolved back to its user + username** server-side (#836), internal and `view` participants filtered; membership-gated | same LiveKit env |
 | `POST /v1/livekit/identities` | Resolve opaque participant pseudonyms → `{user_id, name, kind}` for a room the caller may join (#836). The per-room key never leaves the DS | same LiveKit env |
-| `POST /v1/turso/token` | Mints a short-TTL **read-only** Turso token via the Platform API | `TURSO_PLATFORM_TOKEN`, `TURSO_ORG`, `TURSO_DB` |
 | `POST /v1/r2/presign` | SigV4 query-string presigned URL (GET/PUT/DELETE), path-style, `UNSIGNED-PAYLOAD`, `host`-only signed header | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_REGION` defaults `auto`) |
 
 ### Room names are pseudonymous (#828)
@@ -108,9 +107,17 @@ no LiveKit or R2 secret:
   `make_view_token` / `make_admin_token` and `livekit_api_key` / `livekit_api_secret`
   are deleted from the client. Connected-room pushes (typing, pings on an
   already-joined room) still ride the participant's data channel — no secret.
-- **Turso** — `commands/turso_token.rs` refreshes `remote_db` onto a DS-minted
-  short-TTL read-only token; the baked read-only token stays only as a fail-soft
-  fallback (Turso reads are load-bearing) until DS minting is live in prod.
+- **Turso** — there is no client database credential at all since #987. The
+  broker's `/v1/turso/token` mint, `commands/turso_token.rs`, `RemoteDb`,
+  `state.remote_db` / `state.log_db` and the baked `TURSO_URL` / `TURSO_TOKEN` /
+  `LOG_DB_URL` / `LOG_DB_TOKEN` build inputs are all deleted; `pollis-core` does
+  not depend on `libsql`. Every read is a `POST /v1/read/…` on the DS, on the
+  same signed transport as the writes — see `commands.md`, "The client holds no
+  database credential". This is the one broker cutover that ended by removing
+  the secret rather than by shortening its life: a short-TTL read-only token is
+  still a whole-database read-only token for its lifetime, so scoping it was
+  never going to close #917's residual, and it made every shipped binary a
+  credential to be extracted.
 
 ## Why R2 presign has no per-object authz
 

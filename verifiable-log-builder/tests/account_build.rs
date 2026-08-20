@@ -1,3 +1,8 @@
+//! Requires the `db-source` feature (on by default): these fixtures seed a local
+//! libsql database and drive `source`'s readers, which are the part of this crate
+//! #987 gated so a verification-only consumer does not link `libsql`.
+#![cfg(feature = "db-source")]
+
 //! Deterministic gate suite for the account-key builder tenant.
 //!
 //! Mirrors `build.rs` for the second tenant: seeds a LOCAL libSQL/SQLite fixture

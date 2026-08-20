@@ -46,10 +46,10 @@ pollis-tui (binary `pollis`)
         ▼
   pollis_core::commands::* (&Arc<AppState>)   src/auth.rs — order-enforcing wrappers
         │
-  AppState { Config, RemoteDb, log_db, file Keystore, local SQLCipher DB }
-        │ reads (direct)              │ writes (via Delivery Service)
-        ▼                            ▼
-      Turso libSQL              pollis-delivery
+  AppState { Config, file Keystore, local SQLCipher DB }
+        │ every remote read AND write (#987)
+        ▼
+   pollis-delivery ──▶ Turso libSQL
 ```
 
 ### Source layout
@@ -79,9 +79,10 @@ pollis-tui (binary `pollis`)
   (#882), so the same binary works on both without ever writing plaintext.
   `pollis-tui/src/auth.rs` carries a guard test that fails if the feature is
   dropped again.
-- **Reads go direct to Turso; writes go through the Delivery Service.** This is the
-  post-#419 model — `POLLIS_DELIVERY_URL` is **mandatory** config. The TUI invents
-  no new backend path.
+- **Everything goes through the Delivery Service.** Writes since #419, reads
+  since #987 — `POLLIS_DELIVERY_URL` is **mandatory** config and is now the only
+  backend the TUI can reach at all: it holds no database credential, and neither
+  does `pollis-core`. The TUI invents no new backend path.
 - **Own device identity.** Set `POLLIS_DATA_DIR` (default
   `~/.local/share/pollis-tui`) so the TUI's file keystore + local SQLCipher DB do
   not share identity with the desktop app — it enrolls as its own device with its
@@ -150,12 +151,16 @@ file and force `DEV_OTP`, so the whole client path runs headless with no network
 cargo test -p pollis-tui        # unit tests + auth/sync smokes, all in-box
 ```
 
-- `tests/common/mod.rs` — the shared rig: local libsql (`RemoteDb::connect_local`,
-  gated behind pollis-core's `test-harness` dev-dep feature), an in-process
-  `pollis-delivery` wired to just the routes the scenario hits, and a `TestClient`
-  that signs up + drives the `pollis_tui` library through its own read-only
-  `query_only_view` (proving the client never writes Turso directly — all writes
-  go through the DS).
+- `tests/common/mod.rs` — the shared rig: two local libsql files
+  (`pollis_delivery::db::Db::connect_local`), the REAL `pollis-delivery` router
+  mounted in-process, and a `TestClient` that signs up + drives the `pollis_tui`
+  library. Since #987 it mounts the real router rather than a hand-rolled subset:
+  every client read is now a DS endpoint too, so a test double would have had to
+  reimplement twenty more handlers whose only job was to agree with the
+  originals. The client has no database handle at all — "everything went through
+  the DS" is a compile-time fact now, pinned by
+  `pollis-core/tests/no_client_side_remote_reads.rs`, not a `query_only` PRAGMA
+  catching a stray write at runtime.
 - `tests/sync_smoke.rs` — **the M2 gate.** Two clients share one DS + libsql; A
   opens a DM to B and sends while B is offline; B is driven *only* through
   `sync::sync_once` and must decrypt exactly A's message. Proves cross-client

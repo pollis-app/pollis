@@ -403,15 +403,6 @@ pub async fn ds_livekit_identities(
     Ok(parsed.identities)
 }
 
-/// Mint a short-TTL **read-only** Turso token via the DS. Returns `(token,
-/// expires_in_secs)`. Device-signed. Any error (incl. 503 when the DS has no
-/// Turso Platform credentials) lets the caller fall back to the baked read-only
-/// token, so an unconfigured deploy still reads. See #393.
-pub async fn ds_turso_token(state: &Arc<AppState>) -> Result<(String, u64)> {
-    let parsed = ds_post_json(state, &pollis_api::broker::TursoTokenBody {}).await?;
-    Ok((parsed.token, parsed.expires_in))
-}
-
 /// [`ds_post`] plus decoding the ONE response body this endpoint declares (#922).
 ///
 /// The mirror image of what `ds_post` does for the request. Callers used to
@@ -474,12 +465,26 @@ pub async fn ds_post_ok<B: ClientRequest>(state: &Arc<AppState>, body: &B) -> Re
 }
 
 /// [`ds_post`] when this device can sign (local DB open, device key enrolled);
-/// otherwise fall back to the verified-OTP bootstrap session ([`ds_post_session`]
-/// with `state.bootstrap_session`). For the account-lifecycle writes reachable
-/// from a PRE-ENROLLMENT device — the soft reset offered on the login gate —
-/// where no signing key exists yet and the user's authorization is the email
-/// OTP they just verified. The DS accepts either credential on these endpoints
+/// otherwise fall back to whichever verified-OTP session this sign-in minted.
+/// For the account-lifecycle calls reachable from a PRE-ENROLLMENT device — the
+/// soft reset and the Secret-Key recovery offered on the login gate — where no
+/// signing key exists yet and the user's authorization is the email OTP they
+/// just verified. The DS accepts either credential on these endpoints
 /// (`gate_or_session`).
+///
+/// BOTH session slots are tried, and which one is populated depends on the
+/// branch `verify_otp` took:
+///
+///   * `bootstrap_session` — a FIRST-device signup.
+///   * `enrollment_session` — a re-login on a device the account already knows.
+///     `verify_otp` keeps this one separate on purpose (the subsequent-device
+///     cert publish must not consume a session, because a sibling approval can
+///     outlast the TTL), but for THESE calls the two are interchangeable: each
+///     is a bearer token proving the same freshly-verified mailbox.
+///
+/// Trying only `bootstrap_session` is how Secret-Key recovery on a returning
+/// device failed with "not signed in and no verified-email session" — that
+/// device had an `enrollment_session` and nothing else.
 pub async fn ds_post_signed_or_session<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
@@ -488,7 +493,15 @@ pub async fn ds_post_signed_or_session<B: ClientRequest>(
     if can_sign {
         return ds_post(state, body).await;
     }
-    let token = state.bootstrap_session.lock().await.clone().ok_or_else(|| {
+    // Each guard is bound to a `let` and dropped before the next `.await`: in
+    // edition 2021 a guard taken in a `match` scrutinee lives to the end of the
+    // whole statement, so the obvious `match state.bootstrap_session.lock()...`
+    // would hold that lock across the `enrollment_session.lock().await` below.
+    // `state.rs`'s `no_lock_guard_in_a_scrutinee_spans_an_await` fails the build
+    // on exactly that shape.
+    let bootstrap = state.bootstrap_session.lock().await.clone();
+    let enrollment = state.enrollment_session.lock().await.clone();
+    let token = bootstrap.or(enrollment).ok_or_else(|| {
         Error::Other(anyhow::anyhow!(
             "not signed in and no verified-email session — verify your email again, then retry"
         ))

@@ -144,9 +144,9 @@ impl Drop for ConnGuard {
 /// then passed or failed on how deeply the call under test nested its checkouts.
 ///
 /// Each entry is issued with `query`, not `execute`: several PRAGMAs return the
-/// resulting value as a row, which `execute` rejects. This mirrors
-/// `pollis_core::db::remote::RemoteDb::conn`, which has always re-stamped its
-/// per-connection PRAGMAs on every checkout.
+/// resulting value as a row, which `execute` rejects. This mirrors the client's
+/// old `RemoteDb::conn`, which re-stamped its per-connection PRAGMAs on every
+/// checkout for the same reason, until #987 deleted the client's handle.
 type PerConnPragmas = &'static [&'static str];
 
 /// Production (remote Turso). PRAGMAs are the server's business, and each entry
@@ -172,38 +172,15 @@ const REMOTE_PRAGMAS: PerConnPragmas = &[];
 ///
 /// `journal_mode=WAL` is NOT here — it is a property of the file, set once in
 /// [`Db::connect_local`].
+///
+/// #925 added a second, `test-harness`-gated constant beside this one
+/// (`SHARED_LOCAL_PRAGMAS`, with a longer `busy_timeout`) for `Db::from_shared`,
+/// which handed the DS the libsql handle a `pollis-core` client had already
+/// opened on the same file — two `Database`s on one file do not share WAL writes
+/// promptly. #987 deleted both: the client has no handle to hand over, so the
+/// flows and TUI harnesses give the DS's own `Db` to the tests instead. One
+/// handle, one pool, no cross-handle lock contention to time out on.
 const LOCAL_PRAGMAS: PerConnPragmas = &["PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=OFF"];
-
-/// A local file whose handle we were *given* — the `flows` harness (see
-/// [`Db::from_shared`]).
-///
-/// `busy_timeout` matches what `RemoteDb::conn` puts on the *client* connections
-/// to this same file, so neither side of that suite fails with "database is
-/// locked" while the other holds the write lock. Previously `from_shared` set
-/// nothing at all, so the DS half of the harness ran at libsql's default of 0.
-///
-/// **`foreign_keys=OFF`, matching production and [`LOCAL_PRAGMAS`].**
-///
-/// This used to be the one place that diverged. `flows` ran with foreign keys ON
-/// — libsql's local default — so the harness executed *stricter* deletion
-/// semantics than any real deploy, and the DS's cascade-dependent call sites
-/// looked correct there while leaving rows behind on Turso
-/// (`account::apply_delete_account` leaned on `DELETE FROM users` to clear
-/// `user_device`, `dm_channel_member`, `group_invite`, `account_recovery` and
-/// `security_event`; `groups::delete_group` leaned on it for members, channels
-/// and invites). The divergence was recorded rather than fixed because flipping
-/// it alone would have failed the suite on that very bug.
-///
-/// Those deletes are now explicit ([`crate::teardown`]), so the flip is safe and
-/// is made here: `flows` is the suite that exists to mirror the real deployment,
-/// and it now does. With FKs off, a future teardown path that forgets a table
-/// leaves its rows behind in `flows` exactly as it would in production, which is
-/// the only way that class of bug is visible to a test.
-///
-/// Gated with [`Db::from_shared`], its only user (#925).
-#[cfg(any(test, feature = "test-harness"))]
-const SHARED_LOCAL_PRAGMAS: PerConnPragmas =
-    &["PRAGMA busy_timeout=10000", "PRAGMA foreign_keys=OFF"];
 
 pub struct Db {
     db: Arc<Database>,
@@ -237,26 +214,6 @@ impl Db {
     ///
     /// For the `flows` integration harness (#918), which runs this crate's real
     /// router in-process against the same file its clients read: two independent
-    /// `Database` handles on one local file do not share WAL writes promptly, so
-    /// the DS must be given the client's handle rather than a second one. The
-    /// pool below is per-`Db` and stays exclusive either way.
-    ///
-    /// Being handed the handle does NOT mean inheriting the giver's connection
-    /// state: this `Db` still builds its own connections out of it, so it needs
-    /// its own per-connection PRAGMAs — see [`SHARED_LOCAL_PRAGMAS`].
-    ///
-    /// Gated behind `test-harness` (#925). Its counterpart on the giving side,
-    /// `pollis_core::db::remote::RemoteDb::shared_database`, always was; this
-    /// half was `pub` unconditionally purely because this crate had no such
-    /// feature to gate it behind. The risk was genuinely low — it is the normal
-    /// construction path (`connect_local` delegates to it) and the pool stays
-    /// exclusive either way — but a pair of functions that only make sense
-    /// together should not be reachable in different builds.
-    #[cfg(any(test, feature = "test-harness"))]
-    pub fn from_shared(db: Arc<Database>) -> Self {
-        Self::wrap(db, SHARED_LOCAL_PRAGMAS)
-    }
-
     fn wrap(db: Arc<Database>, pragmas: PerConnPragmas) -> Self {
         Self {
             db,

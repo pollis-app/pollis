@@ -14,7 +14,7 @@ For deeper, file-anchored documentation see `.codesight/wiki/index.md`. For the 
 | Frontend | React 19 + TypeScript, Vite, TailwindCSS, TanStack Router (memory history), TanStack Query, MobX (UI state only) |
 | Backend | Rust split into `pollis-core` (reusable crate; also exposed to mobile via uniffi) and `src-tauri` (the Tauri host), invoked from the renderer via `invoke(cmd, args)` |
 | End-to-end encryption | MLS (RFC 9420) via OpenMLS 0.8 for messages and files, ciphersuite `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` (post-quantum; the classical suite was retired in #669); AES-128-GCM frame-level encryption via libwebrtc's `FrameCryptor` for voice, keyed from a 32-byte MLS exporter secret |
-| Remote DB | Turso (libSQL) via `libsql` 0.9, native Hrana/HTTP2 protocol over TLS. **Reads only** from the client — every write goes through the Delivery Service |
+| Remote DB | Turso (libSQL). Reached **only by `pollis-delivery`** — since #987 the client has no database credential and does not link `libsql` at all; every remote read and write is a signed `POST /v1/…` to the DS |
 | Local DB | SQLite via `rusqlite` 0.37 with bundled SQLCipher; per-user file `pollis_{user_id}.db` |
 | Auth | Email OTP (Resend) + 4-digit per-user local PIN unlocking PIN-wrapped key blobs in the OS keystore |
 | Object storage | Cloudflare R2, with convergent encryption for attachments. The client holds **no** R2 credentials (#506) — uploads use a short-lived presigned URL minted by the Delivery Service |
@@ -31,7 +31,7 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 
 1. **End-to-end encrypted messaging, files, and voice.** All message content is MLS-encrypted on the device before it leaves; the server never sees plaintext. Files are convergent-encrypted with the key delivered inside the MLS-encrypted message. Voice frames are AES-128-GCM-encrypted by libwebrtc's `FrameCryptor`, keyed by the channel's MLS-exporter secret, so the LiveKit SFU forwards ciphertext only.
 2. **Zero-knowledge servers.** Turso stores ciphertext envelopes, public MLS material, and metadata; the Delivery Service handles the writes. Neither can read messages or recover any private key — both are untrusted parties in the security model below.
-3. **Reads direct, writes through the Delivery Service.** The Rust backend runs inside the Tauri host process (`src-tauri` over `pollis-core`) and reads directly from Turso over libSQL with a read-only token. **Every remote write goes through `pollis-delivery`** (`api.pollis.com`), an axum service in this repo — it is the single writer that serializes MLS commits (#419/#420), and it also brokers the credentials the client no longer holds: R2 presigned uploads, LiveKit room tokens, and the Turso token itself. Crypto stays client-side; the DS sees ciphertext and metadata, never plaintext or a private key. There is no client-side remote `INSERT`/`UPDATE`/`DELETE` anywhere in the codebase.
+3. **Everything remote goes through the Delivery Service.** The Rust backend runs inside the Tauri host process (`src-tauri` over `pollis-core`) and talks to exactly one backend: `pollis-delivery` (`api.pollis.com`), an axum service in this repo. It is the single writer that serializes MLS commits (#419/#420), and since #987 it is also the single reader — the client holds no database credential and `pollis-core` does not depend on `libsql`, so "the client cannot reach the database" is a fact about the dependency graph rather than a rule about the token's scope. It brokers the remaining credentials too: R2 presigned uploads and LiveKit room tokens. Crypto stays client-side; the DS sees ciphertext and metadata, never plaintext or a private key.
 4. **Local-first secrets.** Private keys, MLS group state, and decrypted plaintext only exist on the user's device. Disk copies are protected by SQLCipher (local DB) and Argon2id-derived AEAD wrapping (keystore). Where no OS keychain exists, the keystore file itself is AES-256-GCM ciphertext under a machine-bound key (#882) — never plaintext.
 5. **Bounded but reliable history.** Members joining at MLS epoch N cannot decrypt messages from epoch < N (an MLS property), and new devices for an existing user start empty (no Megolm-style key backup). Within those limits, every message that was sent while a member was a member must be deliverable and decryptable on every device that user owns. See `CLAUDE.md` § "Messages must work" for the product principle.
 
@@ -50,19 +50,22 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 │        · all MLS crypto, all plaintext               │
 └───┬──────────────────────────────────────────┬───────┘
     │                                          │
-    │ READS: libSQL/Hrana over TLS,            │ WRITES: typed HTTPS
-    │ read-only token, SELECT only             │ POST /v1/… , Ed25519
-    │                                          │ device-signed headers
-    ▼                                          ▼
-┌────────────────┐                  ┌──────────────────────────┐
-│ Turso (libSQL) │ ◀────writes───── │ pollis-delivery (axum)   │
-│ metadata,      │                  │ api.pollis.com           │
+    │                                          │ READS AND WRITES:
+    │                                          │ typed HTTPS POST /v1/… ,
+    │                                          │ ML-DSA-44 device-signed
+    │                                          │ headers (#987)
+    │                                          ▼
+┌────────────────┐   reads +        ┌──────────────────────────┐
+│ Turso (libSQL) │ ◀──writes────────│ pollis-delivery (axum)   │
+│ metadata,      │   (DS only)      │ api.pollis.com           │
 │ ciphertext     │                  │ · single writer: commits │
 │ envelopes,     │                  │   serialize per group    │
-│ MLS commit log,│                  │ · mints R2 presigned URL │
-│ welcomes,      │                  │ · mints LiveKit token    │
-│ GroupInfo      │                  │ · Resend OTP, push fan-  │
-└────────────────┘                  │   out, retention sweeps  │
+│ MLS commit log,│                  │ · single reader: the     │
+│ welcomes,      │                  │   client has no token    │
+│ GroupInfo      │                  │ · mints R2 presigned URL │
+└────────────────┘                  │ · mints LiveKit token    │
+                                    │ · Resend OTP, push fan-  │
+                                    │   out, retention sweeps  │
                                     └────┬──────────┬──────────┘
     ┌──────────────┐   ┌────────────────┐│          │
     │ Cloudflare R2│◀──┤ LiveKit (SFU)  ││          │
@@ -73,18 +76,29 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
           ▲ presigned PUT/GET from the client  └───────────┘
 ```
 
-**Reads are direct; every write goes through the Delivery Service.** The client opens a
-libSQL connection to Turso with a **read-only** token and issues `SELECT`s only. It has no
-credential that can write, so "don't write from the client" is enforced by the token, not by
-discipline. Remote mutations are typed `POST /v1/…` calls to `pollis-delivery`
-(`api.pollis.com`, `api-dev.pollis.com`), made through
+**The client has no database credential (#987).** It used to open a libSQL
+connection to Turso with a read-only token and issue `SELECT`s; the write side
+was already the DS, so "don't write from the client" was enforced by the token's
+scope. The read side had no such enforcement available — a read-only token is
+still a WHOLE-DATABASE token, which is the residual #917 named and could not
+close. #987 closed it by removing the connection: `pollis-core` does not link
+`libsql`, so a client-side query is a compile error, not a policy violation.
+
+Every remote read and every remote mutation is a typed `POST /v1/…` call to
+`pollis-delivery` (`api.pollis.com`, `api-dev.pollis.com`), made through
 `pollis-core/src/commands/mls/ds_client.rs`:
 
 | Helper | Authenticated by | Used for |
 |---|---|---|
-| `ds_post` / `ds_post*` | Ed25519 device signature in `X-Pollis-*` headers | everything a signed-in device does |
+| `ds_post` / `ds_post*` | ML-DSA-44 device signature in `X-Pollis-*` headers | everything a signed-in device does, reads included |
 | `ds_post_session*` | OTP-session bearer token | bootstrap and pre-enrolment writes, before a device key exists |
-| `ds_post_plain` | nothing | the OTP endpoints themselves |
+| `ds_post_plain` | nothing, or a capability | the OTP endpoints, the pre-unlock account probe, and the enrollment poll (gated on possession of a 128-bit `request_id`) |
+
+Reads are POST, not GET, for a specific reason: the canonical signing message
+covers the path WITHOUT its query string, so a signed `GET …?since=N` would carry
+unauthenticated parameters — the #681 shape, where an unauthenticated
+`GET /v1/commits` was a remote commit-log wipe. Putting the query in a JSON body
+makes the signature's `sha256(body)` binding cover the values themselves.
 
 The DS exists for three reasons, in order of importance:
 
@@ -113,7 +127,7 @@ Media stays in Rust by design. The renderer's Chromium does have WebRTC availabl
 | Store | Stores | Never stores |
 |---|---|---|
 | **Turso** (remote) | Identity and devices (`users`, `user_device` with its cross-signing `device_cert` and PQ signature key, `account_recovery` holding the *wrapped* account-identity key, `account_key_log`); the social graph (groups, channels, DM membership, invites, blocks); delivery state (`message_envelope` — MLS ciphertext, reactions, per-device `conversation_watermark`, push tokens); public MLS material (`mls_key_package`, `mls_commit_log`, `mls_welcome`, `mls_group_info`); and `attachment_object`/`attachment_ref` mapping content hashes to R2 keys | Message plaintext, private keys |
-| **Local SQLite (SQLCipher)** | Decrypted message plaintext (`message.content`), MLS group state (`mls_kv`), preferences cache, UI state | User profiles, groups, channels (fetched from Turso) |
+| **Local SQLite (SQLCipher)** | Decrypted message plaintext (`message.content`), MLS group state (`mls_kv`), preferences cache, UI state | User profiles, groups, channels (fetched from the DS) |
 | **Device keystore** — the OS keychain (Keychain / Secret Service / Credential Manager) where one exists, otherwise a machine-bound encrypted file (#882) | `device_id_{uid}`, `db_key_wrapped_{uid}` (SQLCipher key, AEAD-wrapped under PIN-derived KEK), `account_id_key_wrapped_{uid}` (Ed25519 account-identity private, same wrapping), `pin_meta_{uid}` (Argon2 params + verifier blob + attempt counter) | The unwrapped DB key or account-identity key (after PIN setup) |
 
 Turso is two databases, not one. The main DB holds user/device metadata and message
@@ -169,7 +183,7 @@ Either path ends with the new device populating `AppState.unlock`, the user sett
 - **Membership changes** flow through `reconcile_group_mls_impl` in `pollis-core/src/commands/mls/reconcile.rs`. It diffs the desired roster against the actual MLS tree and emits a single combined commit carrying `Add` + `Remove` proposals. The commit is *staged* locally, submitted to the Delivery Service via `POST /v1/commits` (commit, `GroupInfo`, and the per-recipient welcomes in one request — `mls/delivery.rs`), and only merged locally once the DS accepts it. That ordering is the invariant preventing "local epoch ahead of remote" split-brain, and the DS is what makes it enforceable: a second device committing from the same epoch gets `409 Conflict` (`SubmitResult::LostRace`) and retries against the new epoch rather than forking the group.
 - **External commits** (RFC 9420 §11.2.1) handle new-device joins without requiring a sibling Welcome: the device fetches the latest `GroupInfo` from `mls_group_info` and externally commits into the group.
 - **Cross-signing verification** runs at two points. The Delivery Service verifies a cert against the account's stored `account_id_pub` before accepting the publish (`pollis-delivery/src/cert.rs` — the format itself lives in the shared `pollis-device-cert` crate, so client and servers cannot drift). Receivers verify again on inbound commits that add devices (`verify_added_devices`). A failing cert does **not** cause the commit to be dropped: a commit that won the epoch CAS is canonical and immutable, and deleting one forks the group — that was a real production wedge. Instead the commit is applied to stay on the single canonical branch, and the uncertified device is evicted the MLS-native way by the next reconcile, one epoch later. Verification failure is thus enforced by eviction rather than rejection, bounded to one epoch of exposure.
-- **Account-key TOFU** runs on every group reconcile and every DM message ingest. `batch_check_and_pin_account_keys` in `pollis-core/src/commands/safety.rs` bulk-fetches every roster peer's `account_id_pub` from Turso, pins first-seen values locally (`contact_verification` table), and emits a `KeyChanged` realtime event on mismatch. This closes the historical group MITM hole — previously only the DM path detected Turso-side key swaps; groups inherited the gap. The pin is per-USER (not per-conversation), so verifying a peer once propagates a shield badge to every surface where they appear.
+- **Account-key TOFU** runs on every group reconcile and every DM message ingest. `batch_check_and_pin_account_keys` in `pollis-core/src/commands/safety.rs` bulk-fetches every roster peer's `account_id_pub` (`POST /v1/read/account-keys` since #987 — one batched request per reconcile, not one per contact), pins first-seen values locally (`contact_verification` table), and emits a `KeyChanged` realtime event on mismatch. This closes the historical group MITM hole — previously only the DM path detected Turso-side key swaps; groups inherited the gap. The pin is per-USER (not per-conversation), so verifying a peer once propagates a shield badge to every surface where they appear.
 - **Roster-change banners.** A non-empty reconcile commit emits a `RosterChanged` realtime event with the per-user diff (joined / left / device added / device removed). The reconciler emits locally + broadcasts to the conversation's LiveKit room so already-connected peers render the inline timeline banner without refetching. See `pollis-core/src/commands/mls/reconcile.rs` and `frontend/src/stores/rosterChangeStore.ts`.
 
 For the full key-material taxonomy, KDF/AEAD parameters, and attack-surface analysis see `docs/security-whitepaper.md`.
@@ -184,8 +198,7 @@ React component
     → tauri invoke(cmd, args)                   // bridge → @tauri-apps/api/core
       → #[tauri::command] shim                  // src-tauri/src/commands/*.rs
         → pollis_core::commands::*              // pollis-core/src/commands/*.rs
-          → Turso  (SELECT only, read-only token)
-          → pollis-delivery  (POST /v1/… — every remote write)
+          → pollis-delivery  (POST /v1/… — every remote read AND write)
           → SQLCipher local  (plaintext, MLS state, secrets)
         ← Result<T>
       ← Result<T>

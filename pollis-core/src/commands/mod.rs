@@ -9,6 +9,8 @@ pub mod blocks;
 // device-local DB — no DS, no Turso, compiles on every target.
 pub mod bookmarks;
 pub mod device_enrollment;
+/// The client half of the DS directory + account READ endpoints (#987).
+pub(crate) mod ds_reads;
 // Custom per-group emoji (#848): the untrusted-image re-encoder, the
 // content-addressed upload/GC path, and the cross-group "may this user send
 // it" rule. Pure `image` + libsql + reqwest, so it compiles on every target.
@@ -58,7 +60,6 @@ pub mod r2;
 pub mod relay_serving;
 pub mod safety;
 pub mod transparency;
-pub mod turso_token;
 #[cfg(feature = "media")]
 pub mod sfx;
 // Terminal pane: real PTY backend on Unix desktop, Windows stub until

@@ -17,9 +17,9 @@
 //! every 2 minutes, i.e. ~5× margin, with jitter so a pool of nodes does not
 //! stampede the CDN in lockstep. Failures back off exponentially from
 //! [`MIN_BACKOFF`] to [`MAX_BACKOFF`] rather than hammering. That is an
-//! exponential backoff loop, NOT `RemoteDb::with_retry` (which reconnects a
-//! libsql stream and retries exactly once); the two solve different problems and
-//! this file has never used the latter.
+//! exponential backoff loop, not a reconnect-and-retry-once seam like the
+//! `RemoteDb::with_retry` #987 deleted; the two solve different problems and
+//! this file never used the latter.
 //!
 //! **A missed refresh is safe by construction.** The store enforces expiry when
 //! `admit` is called, not when a list is installed, so a wedged fetch degrades to

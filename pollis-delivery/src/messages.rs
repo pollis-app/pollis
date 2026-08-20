@@ -553,7 +553,45 @@ pub async fn send_message(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<SendMessageBody>(apply_send_message(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_send_message(&conn, authed.as_deref(), &parsed).await?;
+
+    // Wake the recipients, AFTER the envelope has landed and only if it did
+    // (#987). Best-effort and detached: a push that fails must never fail a send
+    // that already succeeded, and the sender must not wait on Expo.
+    //
+    // The sender is taken from the AUTHENTICATED user, never from the body:
+    // under sealed sender (#331) `body.sender_id` is a blinded sentinel, so
+    // using it would exclude nobody and push the sender their own message.
+    if matches!(outcome, WriteOutcome::Ok) {
+        if let Some(push_to) = parsed.push_to.clone() {
+            let sender = authed.clone().unwrap_or_else(|| {
+                parsed.sender_id.clone().unwrap_or_default()
+            });
+            let conversation_id = parsed.conversation_id.clone();
+            let db = state.db.clone();
+            tokio::spawn(async move {
+                let conn = match db.conn().await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!("push fan-out: conn failed: {e}");
+                        return;
+                    }
+                };
+                let only = if push_to.is_empty() {
+                    None
+                } else {
+                    Some(push_to.as_slice())
+                };
+                if let Err(e) =
+                    crate::push::notify_new_message(&conn, &conversation_id, &sender, only).await
+                {
+                    tracing::warn!("push fan-out for {conversation_id}: {e}");
+                }
+            });
+        }
+    }
+
+    outcome_response::<SendMessageBody>(outcome)
 }
 
 /// INSERT a `type='message'` envelope (the send). Authz: the authenticated user
@@ -2992,16 +3030,16 @@ mod admin_delete_visibility_tests {
     //!
     //! ## Why two connections of one `Database` is the faithful model
     //!
-    //! In the flows harness every `TestClient.remote_db` is a
-    //! `RemoteDb::query_only_view()` of the in-process DS's own `RemoteDb` — an
-    //! `Arc::clone` of ONE underlying libsql `Database` on ONE local WAL file
-    //! (`harness.rs`, and `RemoteDb`'s doc-comment on why a second `Database` on
-    //! the same file would NOT see the writer's rows promptly). Every
-    //! `RemoteDb::conn()` is a fresh `db.connect()` on that shared handle. So the
-    //! DS's write connection and carol's read connection are two connections of
-    //! ONE `Database` — which is precisely what these tests use. If libsql gave no
-    //! read-your-writes guarantee across such connections, the tombstone SELECT
-    //! below would intermittently miss the just-written row; it never does.
+    //! In the flows harness the in-process DS holds ONE `Db` — an `Arc`-shared
+    //! libsql `Database` on ONE local WAL file (`harness.rs`; a second `Database`
+    //! on the same file would NOT see the writer's rows promptly). Since #987 the
+    //! clients hold no handle at all: their reads are signed POSTs served by that
+    //! same `Db`. Every `Db::conn()` is a pooled `db.connect()` on the shared
+    //! handle, so the write connection and the connection serving carol's read are
+    //! two connections of ONE `Database` — which is precisely what these tests
+    //! use. If libsql gave no read-your-writes guarantee across such connections,
+    //! the tombstone SELECT below would intermittently miss the just-written row;
+    //! it never does.
     //!
     //! ## What this proves (and what it therefore leaves)
     //!
@@ -3029,8 +3067,9 @@ mod admin_delete_visibility_tests {
     }
 
     /// One shared libsql `Database` on a WAL file — the faithful model of the
-    /// harness's `RemoteDb`. Returns the tempdir (kept alive) so callers can open
-    /// as many independent connections on it as they like.
+    /// single `Db` the flows harness hands to its in-process DS. Returns the
+    /// tempdir (kept alive) so callers can open as many independent connections
+    /// on it as they like.
     async fn shared_db() -> (TempDir, libsql::Database) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("main.db");
@@ -3115,6 +3154,8 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: msg_sent_at.to_string(),
                 sealed: 1,
+                // No push from a unit test — these assert envelope columns.
+                push_to: None,
             },
         )
         .await
@@ -3263,6 +3304,8 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: client_stamp(base, 999_999_999),
                 sealed: 1,
+                // No push from a unit test — these assert envelope columns.
+                push_to: None,
             },
         )
         .await
@@ -3350,6 +3393,8 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: boundary.clone(),
                 sealed: 1,
+                // No push from a unit test — these assert envelope columns.
+                push_to: None,
             },
         )
         .await
@@ -3387,7 +3432,8 @@ mod admin_delete_visibility_tests {
     /// The candidate-1 primitive in isolation: a row written on one connection of
     /// a shared libsql `Database` is IMMEDIATELY visible on another connection of
     /// the same handle — the read-your-writes guarantee the flows harness leans on
-    /// (all clients are `query_only_view`s sharing the DS's `Database`). A second,
+    /// (since #987 the clients hold no handle at all — every read is a POST the
+    /// DS answers from that one `Database`, which only strengthens this). A second,
     /// INDEPENDENT `Database` opened on the same file is NOT guaranteed to see it
     /// promptly — which is exactly why the harness shares one handle rather than
     /// opening a second, and why candidate 1 cannot occur in that harness.

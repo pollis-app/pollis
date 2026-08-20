@@ -52,32 +52,31 @@ pub async fn remove_reaction(
 }
 
 /// Get all reactions for a message, grouped by emoji.
+/// Reactions on one message, grouped by emoji.
+///
+/// Since #987 the grouping happens on the DS (`POST /v1/messages/lookup`),
+/// gated on membership of the message's conversation — a question the client
+/// could not previously ask about someone else's message and can no longer
+/// answer for itself. The wire order is insertion order rather than the old
+/// `HashMap` iteration order, so pill order is now stable; callers that sorted
+/// to compensate still sort correctly.
 pub async fn get_reactions(
     message_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<Reaction>> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT emoji, user_id FROM message_reaction WHERE message_id = ?1 ORDER BY created_at ASC",
-        libsql::params![message_id],
-    ).await?;
-
-    // Collect all (emoji, user_id) rows and group by emoji.
-    let mut grouped: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    while let Some(row) = rows.next().await? {
-        let emoji: String = row.get(0)?;
-        let uid: String = row.get(1)?;
-        grouped.entry(emoji).or_default().push(uid);
-    }
-
-    let reactions: Vec<Reaction> = grouped
+    let batched = crate::commands::ds_reads::message_reactions(state, vec![message_id]).await?;
+    Ok(batched
         .into_iter()
-        .map(|(emoji, user_ids)| {
-            let count = user_ids.len() as u32;
-            Reaction { emoji, user_ids, count }
+        .next()
+        .map(|m| {
+            m.reactions
+                .into_iter()
+                .map(|r| Reaction {
+                    count: r.user_ids.len() as u32,
+                    emoji: r.emoji,
+                    user_ids: r.user_ids,
+                })
+                .collect()
         })
-        .collect();
-
-    Ok(reactions)
+        .unwrap_or_default())
 }

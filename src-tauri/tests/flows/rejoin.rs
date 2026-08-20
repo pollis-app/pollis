@@ -11,7 +11,7 @@ use serial_test::serial;
 /// up to that re-add commit via `process_pending_commits`, which runs
 /// cross-signing cert verification (`verify_added_devices`). That verification
 /// reads `users` / `user_device` / `account_key_log` — all MAIN-DB tables. The
-/// fix gave it a dedicated `state.remote_db` connection; before the fix it ran on
+/// fix gave it a dedicated remote connection; before the fix it ran on
 /// the `log_db` connection, which in the two-DB harness has NO `users` table, so
 /// the verify errors ("no such table: users"), the error is swallowed as
 /// `AbsentRetry`, and A defers the re-add commit — stranding A at the old epoch

@@ -107,11 +107,18 @@ fn channel_body(id: &str, group_id: &str) -> CreateChannelBody {
     }
 }
 
+/// A DM with one OTHER participant.
+///
+/// Since #987 `apply_create_dm` refuses a members-only-me DM outright — the
+/// client always did, and "a conversation with nobody in it" is an invalid state
+/// the write should not be able to produce. So the fixture names a peer: the
+/// counterparty is whichever of the two seeded users is not the creator.
 fn dm_body(id: &str, creator: &str) -> CreateDmBody {
+    let peer = if creator == OWNER { MALLORY } else { OWNER };
     CreateDmBody {
         id: id.to_string(),
         creator_id: creator.to_string(),
-        member_ids: vec![creator.to_string()],
+        member_ids: vec![creator.to_string(), peer.to_string()],
         created_at: "2026-01-02T00:00:00Z".to_string(),
     }
 }
@@ -137,7 +144,12 @@ async fn every_kind_of_conversation_is_still_creatable_and_lands_in_the_registry
 
     assert!(matches!(g, WriteOutcome::Ok), "group create: {g:?}");
     assert!(matches!(c, WriteOutcome::Ok), "channel create: {c:?}");
-    assert!(matches!(d, WriteOutcome::Ok), "dm create: {d:?}");
+    // A three-outcome enum since #987: a block is not an authorization failure,
+    // so `apply_create_dm` reports it separately rather than as `Forbidden`.
+    assert!(
+        matches!(d, pollis_delivery::profile::DmOutcome::Created { existing: false, .. }),
+        "dm create: {d:?}"
+    );
 
     assert_eq!(claimed_kind(&conn, "grp-1").await.as_deref(), Some("group"));
     assert_eq!(
@@ -163,7 +175,7 @@ async fn a_dm_cannot_be_created_with_an_existing_groups_id() {
         .expect("dm");
 
     assert!(
-        matches!(outcome, WriteOutcome::Forbidden),
+        matches!(outcome, pollis_delivery::profile::DmOutcome::Forbidden),
         "a DM naming an existing group must be refused, got {outcome:?}"
     );
 }

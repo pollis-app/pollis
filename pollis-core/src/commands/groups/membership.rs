@@ -20,31 +20,25 @@ pub async fn get_group_members(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<GroupMember>> {
-    let conn = state.remote_db.conn().await?;
-
-    authz::require_member(&conn, &group_id, &requester_id).await?;
-
-    let mut rows = conn.query(
-        "SELECT gm.user_id, u.username, u.avatar_url, gm.role, gm.joined_at
-         FROM group_member gm
-         LEFT JOIN users u ON u.id = gm.user_id
-         WHERE gm.group_id = ?1",
-        libsql::params![group_id],
-    ).await?;
-
-    let mut members = Vec::new();
-    while let Some(row) = rows.next().await? {
-        members.push(GroupMember {
-            user_id: row.get(0)?,
-            username: row.get(1)?,
-            display_name: None,
-            avatar_url: row.get(2)?,
-            role: row.get(3)?,
-            joined_at: row.get(4)?,
-        });
+    // Membership and the roster in ONE request. Non-membership comes back as
+    // `authorized: false`, which this turns into the shared refusal — the point
+    // of #875's chokepoint, now enforced by the server rather than asked of it.
+    let resp = crate::commands::ds_reads::group(state, &group_id, &requester_id, false).await?;
+    if !resp.authorized {
+        return Err(Error::Other(anyhow::anyhow!(authz::NOT_A_MEMBER)));
     }
-
-    Ok(members)
+    Ok(resp
+        .members
+        .into_iter()
+        .map(|m| GroupMember {
+            user_id: m.user_id,
+            username: m.username,
+            display_name: None,
+            avatar_url: m.avatar_url,
+            role: m.role,
+            joined_at: m.joined_at,
+        })
+        .collect())
 }
 
 pub async fn remove_member_from_group(
@@ -53,11 +47,9 @@ pub async fn remove_member_from_group(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
     // Admins can remove others; anyone can remove themselves (leave). Both
     // branches need membership first, so take the role once.
-    let requester_role = authz::require_member(&conn, &group_id, &requester_id).await?;
+    let requester_role = authz::require_member(state, &group_id, &requester_id).await?;
     if requester_id != user_id && !requester_role.is_admin() {
         return Err(Error::Other(anyhow::anyhow!(
             "only group admins can remove other members"
@@ -113,12 +105,10 @@ pub async fn leave_group(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
     // Membership is the only bar: any member may leave, admins included. There
     // is no ownership to transfer — migration 000008 renamed the 'owner' role to
     // 'admin' and `groups.owner_id` is a display field, not an authz input.
-    authz::require_member(&conn, &group_id, &user_id).await?;
+    authz::require_member(state, &group_id, &user_id).await?;
 
     // Route the leaver's member-row delete (and, when the group empties, the group
     // delete) through the Delivery Service — one server-authorized write scoped to
@@ -169,10 +159,8 @@ pub async fn set_member_role(
         return Err(Error::Other(anyhow::anyhow!("invalid role: must be 'admin' or 'member'")));
     }
 
-    let conn = state.remote_db.conn().await?;
-
-    authz::require_admin(&conn, &group_id, &requester_id, "change member roles").await?;
-    authz::require_target_member(&conn, &group_id, &user_id).await?;
+    authz::require_admin(state, &group_id, &requester_id, "change member roles").await?;
+    authz::require_target_member(state, &group_id, &requester_id, &user_id).await?;
 
     // Route the role update through the Delivery Service (admin re-derived
     // server-side, target-membership re-checked).

@@ -27,6 +27,61 @@ The path in each section header below points at the implementation in `pollis-co
 >
 > When you add or change a command, update the relevant section here **and** Appendix A in the same PR (per `CLAUDE.md`: update the wiki alongside the code).
 
+### The client holds no database credential (#987)
+
+Until #987 the split was "writes through the Delivery Service, reads direct to
+Turso": every shipped binary carried a whole-database read token, and 102 call
+sites across 34 files opened `state.remote_db` to run their own `SELECT`.
+That is gone. **Every remote read is now a `POST /v1/…` on `pollis-delivery`**,
+exactly like the writes, and neither `pollis-core` nor the shipping `pollis`
+binary links `libsql` at all — so a client-side query is not a policy violation
+any more, it is a compile error. (`pollis` keeps it optional behind
+`test-harness`, for the flows harness's process-local "remote"; both graphs are
+walked by `pollis-core/tests/no_client_side_remote_reads.rs`.)
+
+Where the client half lives:
+
+| module | covers |
+| --- | --- |
+| `pollis-core/src/commands/ds_reads.rs` | directory, groups, DMs, messages, accounts, devices, key packages, enrollment, security events, objects |
+| `pollis-core/src/commands/mls/ds_reads.rs` | the MLS control plane — GroupInfo, Welcomes, commit batches, membership gates |
+| `pollis-api/src/{reads,directory,account_reads}.rs` | the wire types, shared verbatim with the DS |
+
+Four properties are load-bearing and easy to lose in a refactor:
+
+1. **Reads are POST, not GET.** The canonical signing message covers
+   `{METHOD}\n{PATH}\n{TIMESTAMP}\n{hex sha256(body)}` and the PATH excludes the
+   query string, so a signed `GET …?user_id=…&device_id=…` would carry
+   *unauthenticated* parameters — which is exactly the #681 hole. Putting the
+   query in a JSON body makes the signature cover it.
+2. **`POST /v1/read/conversation-state` answers from ONE read transaction.**
+   GroupInfo, the pending-Welcome flag, the lineage heads, the commit batch and
+   the two membership gates come back together because the DS read them
+   together. Split across two requests, a device can see a GroupInfo without the
+   Welcome written atomically beside it, external-join into its own inbound
+   Welcome, and be stranded. Do not add a round trip between them.
+3. **Commit batches are contiguous or refused.** `head`, `head_generation` and
+   the commits are read inside that same transaction, and
+   `pollis_api::reads::check_contiguous` rejects a hole server-side. A hole
+   reaching the client makes it delete its MLS crypto state; a genuine retention
+   prune is reported as `pruned_below` instead, which is a different thing and
+   handled differently.
+4. **Failure biases stay at the call sites.** `is_member` and
+   `device_registered` are `Option<bool>` on the wire and fail **CLOSED**;
+   `welcome_pending` fails **OPEN**. They are seven lines apart in
+   `mls/group_state.rs`. Collapsing them into one "false on error" helper
+   silently inverts one of them — and HTTP makes those failures common where a
+   libsql read failure was rare.
+
+Three reads run with no device signature, because the caller provably has no
+credential at that moment (#987 §6.5):
+
+| endpoint | credential | why |
+| --- | --- | --- |
+| `POST /v1/auth/account-probe` | none (IP rate-limited, tightest tier) | runs pre-PIN at every launch: local DB closed, no signer, no `device_id`, no OTP session. Answers `{ exists, has_identity }` for a 128-bit ULID the caller read out of its own `accounts.json`. |
+| `POST /v1/read/enrollment` | possession of `request_id` | the enrolling device has no key (that is what it is enrolling for) and its OTP session is *guaranteed* expired — both TTLs are 600s and the session is minted at `verify-otp`, strictly before the request exists. The payload is sealed to an ephemeral X25519 key, so the id confers a status and an unopenable blob. Asking for the approval columns (`verification_code`) requires a full device signature. |
+| `POST /v1/read/recovery-blob` | OTP session | the caller is recovering an account on a device with nothing. Every fetch writes a `recovery_blob_fetched` security event. |
+
 ### Every DS write body must NAME ITS ACTOR (#875)
 
 `pollis-delivery` resolves the acting user for every `POST /v1/…` write through one
@@ -152,15 +207,15 @@ Idle auto-lock (#851) — the timer that was missing from `pin::lock`. Rust owns
 - `remove_member_from_group(group_id, user_id, actor_id)`
 - `leave_group(group_id, user_id)`
 - `set_member_role(group_id, user_id, role, requester_id)` — promote/demote; requester must be an admin, `role` is `'admin' | 'member'`. (Was documented as `update_member_role`; corrected in #714.)
-- `get_group_members(group_id, requester_id)` → `GroupMember[]` — **#917: members-only.** The headline exposure of that issue: this took no caller at all, so any signed-in user who named a group id got the full roster including usernames and avatar URLs, and ids are enumerable because every client holds a whole-DB read-only Turso token. Non-member → `you are not a member of this group` (an error, not `[]` — same reasoning as #875). (Was documented as `list_group_members`; corrected in #714.)
+- `get_group_members(group_id, requester_id)` → `GroupMember[]` — **#917: members-only.** The headline exposure of that issue: this took no caller at all, so any signed-in user who named a group id got the full roster including usernames and avatar URLs, and ids were enumerable because every client held a whole-DB read-only Turso token (#987 removed that token; the roster is now re-derived server-side by `POST /v1/read/group` before it answers). Non-member → `you are not a member of this group` (an error, not `[]` — same reasoning as #875). (Was documented as `list_group_members`; corrected in #714.)
 - `search_group_by_slug(slug)` → `GroupPreview` — finds the group whose name derives to `slug`; **errors** if there is no match (it is not a list-returning search). (Was documented as `search_groups(query)` → `Group[]`; corrected in #714.)
   - **#917: deliberately NOT membership-gated — narrowed instead.** This is the discovery step of the join flow (`SearchGroupPage` → `request_group_access`), so a membership check would delete the feature rather than harden it: you search for a group precisely because you are not in it. The guard is therefore the *shape*. It used to return the whole `groups` row; it now returns `GroupPreview` — `{ id, name, description }`, exactly what the join prompt renders.
   - `owner_id` (names a specific user — the roster leak in miniature) and `created_at` (no consumer) are gone. Member count was considered and **deliberately not added**: no consumer, and a per-group population figure is exactly what a slug-enumerating client would want.
   - `GroupPreview` is a distinct struct rather than a trimmed `Group`, so "which fields may an outsider see" is answered once by the type and a field added to `Group` cannot leak here by accident.
-  - Still discloses *whether* a group exists at a guessed slug — inherent to slug lookup, and the same trade Discord's vanity invites and Slack's workspace URLs make. Unrate-limited and O(rows) per call (`derive_slug` is Rust, not SQL, so it cannot be an indexed lookup).
+  - Still discloses *whether* a group exists at a guessed slug — inherent to slug lookup, and the same trade Discord's vanity invites and Slack's workspace URLs make. O(rows) per call (`derive_slug` is Rust, not SQL, so it cannot be an indexed lookup), and since #987 it runs on the DS, where it shares the tightest rate-limit tier with `account-probe`: those two are the only endpoints whose INPUT is guessable, so the generic write backstop was the wrong bound for them — exactly as it was for invite redemption (#847). `derive_slug` itself moved to `pollis-api` so client and server derive the same slug from the same code rather than from two copies.
 - Also registered but undocumented here: `update_group`, `delete_group`, `update_channel`, `delete_channel`, `get_group_join_requests`, `get_my_join_request`. See Appendix A.
 - **#917 — group READS take a caller.** #875 unified the *inconsistent* authz on group writes and admin-gated reads; #917 closed the reads that had *no* authz at all. `get_group_members`, `list_group_channels` and `list_group_emoji` each gained a `requester_id` and an `authz::require_member` call; `search_group_by_slug` kept its open access and lost fields instead (see above); and the DS's `apply_create_join_request` began re-deriving group-existence and not-already-a-member server-side rather than documenting them as client-side. Per-endpoint reasoning lives in the doc comments — the rule was decided per endpoint, not applied as a blanket guard.
-  - **What #917 did NOT close, stated plainly.** The client's Turso token is short-TTL and read-only but **whole-DB** — not scoped to the caller's rows (`commands/turso_token.rs`). A user who ignores these commands and runs their own `SELECT * FROM group_member` still reads any group's roster. So the guards above make group metadata *un-served by the app*, not *unreadable*; they are the client chokepoint #875 established, and the issue asked for exactly that. The residual needs a **row-scoped Turso token**, which is separate, larger work and is not attempted here. The DS half (`apply_create_join_request`) is different in kind — the DS is the authoritative writer, so that one is real enforcement. See the "bound on every read guard" section in `pollis-core/src/commands/groups/authz.rs`.
+  - **The residual #917 named is now closed (#987).** That entry used to end: the client's Turso token was short-TTL and read-only but **whole-DB**, so a user who ignored these commands and ran their own `SELECT * FROM group_member` still read any group's roster — the guards made group metadata *un-served by the app*, not *unreadable*, and closing the gap needed a row-scoped token nobody had built. #987 took the other route and removed the credential entirely: there is no client token to scope, `pollis-core` cannot open a database connection, and `POST /v1/read/group` re-derives membership server-side before it answers. The client-side guards stay as the first chokepoint (a wrong answer should fail here, close to the caller, not only at the DS), but they are no longer the *only* enforcement. See the "bound on every read guard" section in `pollis-core/src/commands/groups/authz.rs`.
 - **Authorization preflight (#875):** every group-scoped command routes its membership/role check through `pollis-core/src/commands/groups/authz.rs` (`group_role` / `require_member` / `require_admin` / `require_target_member` / `channel_group_role`). One wording for "not a member" (`you are not a member of this group`), one shape for "not an admin" (`only group admins can {action}`). It is a preflight for the error message, not the enforcement point — the DS re-derives the same role from `group_member` and answers 403 (`pollis_delivery::groups::{group_role, is_admin}`, now also used by `emoji.rs`, which previously kept a copy that swallowed a decode error into a silent deny).
 
 ## messages (`commands/messages.rs`)
@@ -243,7 +298,7 @@ Corrected 2026-08-03 (#714):
 ## device_enrollment (`commands/device_enrollment.rs`)
 Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key recovery, identity reset) hands the bytes to `AppState.unlock` — never to the keystore unwrapped. The frontend then routes to pin-create; `set_pin` wraps under the user's PIN and opens the local DB.
 - `start_device_enrollment(user_id)` → `EnrollmentHandle`
-- `poll_enrollment_status(request_id)` → `EnrollmentStatus`. On `Approved`, populates `AppState.unlock`; defers cert / KP / external-join to `finalize_device_enrollment`. The row read goes through `RemoteDb::with_retry` (#874) — this runs on a device with no local DB and no keystore entry, so a dropped libsql stream used to strand the user on a spinner.
+- `poll_enrollment_status(request_id)` → `EnrollmentStatus`. On `Approved`, populates `AppState.unlock`; defers cert / KP / external-join to `finalize_device_enrollment`. The row read is `POST /v1/read/enrollment`, gated on possession of `request_id` (#987 — see "The client holds no database credential" above): this runs on a device with no local DB, no keystore entry and an already-expired OTP session, so the capability is the only credential that exists. It superseded a `RemoteDb::with_retry` read (#874) whose purpose — surviving a dropped libsql stream rather than stranding the user on a spinner — is now the HTTP client's problem.
 - `await_enrollment_approval(request_id)` → `EnrollmentStatus` — resolves once the request reaches a terminal state (#874). What the renderer calls; it replaced a 2-second `setInterval` on `poll_enrollment_status`, which CLAUDE.md bans. The new device is pre-enrollment and cannot subscribe to realtime, so the answer genuinely has to be fetched — but the waiting is the backend's, with 1s→8s exponential backoff and a hard stop at the request's own 10-minute TTL, so it cannot outlive the thing it waits on. The renderer awaits one promise and ignores late answers from superseded requests via a generation counter.
 - `approve_device_enrollment(request_id, user_id, verification_code)`
 - `reject_device_enrollment(request_id, user_id)`
@@ -307,8 +362,8 @@ Custom per-group emoji (#848). Remote metadata lives in `custom_emoji_object` (c
 ## overlay (`commands/overlay.rs`)
 Runtime application of the closed-overlay relay mode (design `docs/relay-overlay-design.md` §14). Off-by-default; when off no shim runs and every network path is byte-for-byte the direct path.
 - `get_overlay_mode()` → `"off" | "prefer" | "strict"` — the CURRENT live mode (the running shim's mode, or `off` when no shim).
-- `set_overlay_mode(mode)` — parse + APPLY LIVE. Off→non-off builds the `RealRelayFactory`, starts the loopback SOCKS5 shim, and reconnects both remote DBs through it (`RemoteDb::set_overlay_shim`) so reqwest control-plane calls AND libsql route through the relay; non-off→Off tears the shim down and reconnects direct; Prefer↔Strict flips the shim's policy mode live (no restart, no DB reconnect). Idempotent — safe to call on every app start / login (the UI calls it after loading the saved preference; boot calls the same `apply_overlay_mode` with `POLLIS_OVERLAY`). On failure to bring the overlay up it rolls back to the previous working state and errors — never a half-routed app; Strict degrades (surfaced error) rather than silently going direct. Config: `POLLIS_OVERLAY` (mode), `POLLIS_OVERLAY_RELAY` (comma-sep relay endpoints — a POOL: `RealRelayFactory` tries them in health order and fails over to the first success, marking a failed relay dead for a cooldown, fail-open if all dead, single-hop), `POLLIS_OVERLAY_RELAY_CERT` (path or base64 DER of the pinned relay QUIC leaf). Persisting the choice is the settings-UI slice's job.
-- **Frontend surface:** Preferences → "Network privacy (relay)" (`PreferencesPage.tsx`) — an Off/Prefer/Strict `radiogroup`. `overlay_mode` lives in `PreferencesData` (`usePreferences.ts`, synced blob, default `off`); selecting a mode persists it (`save_preferences`) and applies it live (`set_overlay_mode`); on login/restart the saved mode is re-applied once, guarded by a `get_overlay_mode` diff so an unchanged mode never reconnects the DBs. An apply error (e.g. Strict with no relay) surfaces inline and the control reflects the real resulting mode from `get_overlay_mode` — never a silent direct.
+- `set_overlay_mode(mode)` — parse + APPLY LIVE. Off→non-off builds the `RealRelayFactory` and starts the loopback SOCKS5 shim; publishing the handle IS the routing, because every overlaid caller reads `AppState::overlay_handle()` on its hot path. non-off→Off drops the handle, which aborts the accept loop and returns every caller to direct; Prefer↔Strict flips the shim's policy mode live (no restart). #987 removed the libsql half of this: there are no database handles to reconnect, and the only overlaid protocol left is HTTPS (the DS and R2), which rides reqwest's own SOCKS support. Idempotent — safe to call on every app start / login (the UI calls it after loading the saved preference; boot calls the same `apply_overlay_mode` with `POLLIS_OVERLAY`). On failure to bring the overlay up it rolls back to the previous working state and errors — never a half-routed app; Strict degrades (surfaced error) rather than silently going direct. Config: `POLLIS_OVERLAY` (mode), `POLLIS_OVERLAY_RELAY` (comma-sep relay endpoints — a POOL: `RealRelayFactory` tries them in health order and fails over to the first success, marking a failed relay dead for a cooldown, fail-open if all dead, single-hop), `POLLIS_OVERLAY_RELAY_CERT` (path or base64 DER of the pinned relay QUIC leaf). Persisting the choice is the settings-UI slice's job.
+- **Frontend surface:** Preferences → "Network privacy (relay)" (`PreferencesPage.tsx`) — an Off/Prefer/Strict `radiogroup`. `overlay_mode` lives in `PreferencesData` (`usePreferences.ts`, synced blob, default `off`); selecting a mode persists it (`save_preferences`) and applies it live (`set_overlay_mode`); on login/restart the saved mode is re-applied once, guarded by a `get_overlay_mode` diff so an unchanged mode never restarts the shim. An apply error (e.g. Strict with no relay) surfaces inline and the control reflects the real resulting mode from `get_overlay_mode` — never a silent direct.
 
 ## relay_serving (`commands/relay_serving.rs`)
 The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *your* traffic goes through the overlay, this decides whether *other people's* traffic goes through *your* device. Neither implies the other, and this one is off by default behind explicit consent. Engine: `pollis-core/src/net/peer/`.
@@ -345,7 +400,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`install_kind`** — `detect_managed_install`
 - **`livekit`** — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
 - **`media_permissions`** — `get_media_permission_status`, `open_privacy_settings`, `revoke_media_permissions`, `set_revoke_media_on_exit`
-- **`messages`** — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
+- **`messages`** — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_messages`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
 - **`mls`** — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 - **`overlay`** — `get_overlay_mode`, `set_overlay_mode`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
@@ -408,7 +463,7 @@ than hand-edit.
 
 **`bookmarks`** (5) — `list_saved_messages`, `resolve_message_permalink`, `save_message`, `toggle_saved_message`, `unsave_message`
 
-**`messages`** (22) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_channel_previews`, `list_messages`, `list_messages_by_sender`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
+**`messages`** (20) — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_messages`, `list_thread_summaries`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_thread_messages`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`
 
 **`mls`** (3) — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 

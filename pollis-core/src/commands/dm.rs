@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use ulid::Ulid;
 
-use crate::commands::blocks::is_blocked_either_way;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
@@ -32,31 +31,26 @@ pub struct DmChannelMember {
     pub accepted_at: Option<String>,
 }
 
-/// Fetch members of a DM channel from the remote DB.
-async fn fetch_dm_members(
-    conn: &libsql::Connection,
-    dm_channel_id: &str,
-) -> Result<Vec<DmChannelMember>> {
-    let mut rows = conn.query(
-        "SELECT dcm.user_id, u.username, u.avatar_url, dcm.added_by, dcm.added_at, dcm.accepted_at
-         FROM dm_channel_member dcm
-         LEFT JOIN users u ON u.id = dcm.user_id
-         WHERE dcm.dm_channel_id = ?1",
-        libsql::params![dm_channel_id],
-    ).await?;
-
-    let mut members = Vec::new();
-    while let Some(row) = rows.next().await? {
-        members.push(DmChannelMember {
-            user_id: row.get(0)?,
-            username: row.get(1)?,
-            avatar_url: row.get(2)?,
-            added_by: row.get(3)?,
-            added_at: row.get(4)?,
-            accepted_at: row.get(5)?,
-        });
+/// Wire → domain for one DM channel. One conversion, so the create, list and
+/// fetch paths cannot map the same row differently.
+fn dm_from_wire(d: pollis_api::directory::DmChannelWire) -> DmChannel {
+    DmChannel {
+        id: d.id,
+        created_by: d.created_by,
+        created_at: d.created_at,
+        members: d
+            .members
+            .into_iter()
+            .map(|m| DmChannelMember {
+                user_id: m.user_id,
+                username: m.username,
+                avatar_url: m.avatar_url,
+                added_by: m.added_by.unwrap_or_default(),
+                added_at: m.added_at.unwrap_or_default(),
+                accepted_at: m.accepted_at,
+            })
+            .collect(),
     }
-    Ok(members)
 }
 
 
@@ -71,69 +65,77 @@ pub async fn create_dm_channel(
         return Err(Error::Other(anyhow::anyhow!("cannot create a DM with only yourself")));
     }
 
-    let conn = state.remote_db.conn().await?;
-
-    // Refuse channel creation if ANY proposed pairing is blocked in
-    // either direction. Return the generic BLOCK_ERR so neither side
-    // can infer why their DM failed.
-    for other_id in member_ids.iter().filter(|id| *id != &creator_id) {
-        if is_blocked_either_way(&conn, &creator_id, other_id).await? {
-            return Err(Error::Other(anyhow::anyhow!(BLOCK_ERR)));
-        }
-    }
-
-    // 2-person DM dedupe: if an existing channel already has exactly
-    // {creator, target} as its membership (order-independent, regardless
-    // of accepted_at state), return it instead of creating a duplicate.
-    // Multi-party DMs (3+ members) skip dedupe and always create fresh.
-    let others: Vec<&String> = member_ids.iter().filter(|id| *id != &creator_id).collect();
-    if others.len() == 1 {
-        let target_id = others[0].clone();
-        let mut rows = conn.query(
-            "SELECT dm_channel_id
-             FROM dm_channel_member
-             GROUP BY dm_channel_id
-             HAVING COUNT(*) = 2
-                AND SUM(CASE WHEN user_id = ?1 THEN 1 ELSE 0 END) = 1
-                AND SUM(CASE WHEN user_id = ?2 THEN 1 ELSE 0 END) = 1
-             LIMIT 1",
-            libsql::params![creator_id.clone(), target_id],
-        ).await?;
-        if let Some(row) = rows.next().await? {
-            let existing_id: String = row.get(0)?;
-            return get_dm_channel(existing_id, state).await;
-        }
-    }
+    // The block check and the 2-person dedupe both moved into the write (#987).
+    //
+    // Dedupe especially: run on the client it was two reads AND a race — two
+    // devices creating the same DM at once each saw no existing pair and each
+    // created one, splitting the pair's messages across two conversations.
+    // Deciding it inside the write makes "one DM per pair" a property of the
+    // transaction rather than of the client's timing. Multi-party DMs (3+
+    // members) still skip dedupe and always create fresh.
 
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
     // DS seam: route the channel-creation writes (dm_channel + every membership
     // row + per-member watermark seeds) through the Delivery Service. The DS
-    // performs all writes in one transaction and re-checks the block
-    // relationships server-side; the block check above is the client-side
-    // fast-fail for the generic BLOCK_ERR.
+    // performs all writes in one transaction, re-checks the block relationships,
+    // dedupes a 2-person pair, and answers with the DM either way.
     let body = pollis_api::profile::CreateDmBody {
         id: id.clone(),
         creator_id: creator_id.clone(),
         member_ids,
         created_at: now.clone(),
     };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
-
-    let members = fetch_dm_members(&conn, &id).await?;
-
-    // Initialise the MLS group for this DM (creator becomes the sole member).
-    // Reconcile then adds all members' devices (including creator's other devices).
-    match crate::commands::mls::init_mls_group(state, &id, &creator_id).await {
-        Ok(()) => {
-            if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
-                state, &id, &creator_id,
-            ).await {
-                eprintln!("[mls] create_dm_channel: reconcile failed: {e}");
-            }
+    let (dm, existing) = match crate::commands::mls::ds_post_json(state, &body).await? {
+        pollis_api::profile::CreatedDm::Blocked => {
+            return Err(Error::Other(anyhow::anyhow!(BLOCK_ERR)));
         }
-        Err(e) => eprintln!("[mls] create_dm_channel: mls group init failed (non-fatal): {e}"),
+        pollis_api::profile::CreatedDm::Ok {
+            id,
+            created_by,
+            created_at,
+            members,
+            existing,
+        } => (
+            DmChannel {
+                id,
+                created_by,
+                created_at,
+                members: members
+                    .into_iter()
+                    .map(|m| DmChannelMember {
+                        user_id: m.user_id,
+                        username: m.username,
+                        avatar_url: m.avatar_url,
+                        added_by: creator_id.clone(),
+                        added_at: now.clone(),
+                        accepted_at: m.accepted_at,
+                    })
+                    .collect(),
+            },
+            existing,
+        ),
+    };
+    let id = dm.id.clone();
+    let members = dm.members.clone();
+
+    // An existing DM already has its MLS group; re-initialising would delete and
+    // rebuild one every member is already in.
+    if !existing {
+        // Initialise the MLS group for this DM (creator becomes the sole member).
+        // Reconcile then adds all members' devices (including creator's other
+        // devices).
+        match crate::commands::mls::init_mls_group(state, &id, &creator_id).await {
+            Ok(()) => {
+                if let Err(e) =
+                    crate::commands::mls::reconcile_group_mls_impl(state, &id, &creator_id).await
+                {
+                    eprintln!("[mls] create_dm_channel: reconcile failed: {e}");
+                }
+            }
+            Err(e) => eprintln!("[mls] create_dm_channel: mls group init failed (non-fatal): {e}"),
+        }
     }
 
     // TOFU-pin every peer's account_id_pub locally so a later Turso-side key
@@ -169,108 +171,41 @@ pub async fn create_dm_channel(
         }
     }
 
-    Ok(DmChannel {
-        id,
-        created_by: creator_id,
-        created_at: now,
-        members,
-    })
+    Ok(dm)
 }
 
+/// The caller's ACCEPTED DMs.
+///
+/// The block filter is deliberately ASYMMETRIC, and lives server-side now: it
+/// hides channels whose other members the caller has blocked, but NOT channels
+/// where the caller is the blocked party. A blocked user keeps seeing the
+/// conversation, so the block produces no observable signal on their side —
+/// their messages simply stay pending, indistinguishable from a recipient who
+/// has not accepted.
 pub async fn list_dm_channels(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<DmChannel>> {
-    let conn = state.remote_db.conn().await?;
-
-    // Accepted DMs only. Filter hides channels with users I have
-    // blocked — but NOT channels where I am the blocked party. The
-    // blocked user must continue to see the conversation so the
-    // block produces no observable signal on their side (messages
-    // simply stay in the [pending] state, indistinguishable from a
-    // recipient who hasn't accepted yet).
-    let mut rows = conn.query(
-        "SELECT dc.id, dc.created_by, dc.created_at
-         FROM dm_channel dc
-         JOIN dm_channel_member dcm ON dcm.dm_channel_id = dc.id
-         WHERE dcm.user_id = ?1
-           AND dcm.accepted_at IS NOT NULL
-           AND NOT EXISTS (
-             SELECT 1
-             FROM dm_channel_member other
-             JOIN user_block ub ON
-                  ub.blocker_id = ?1 AND ub.blocked_id = other.user_id
-             WHERE other.dm_channel_id = dc.id
-               AND other.user_id <> ?1
-           )",
-        libsql::params![user_id],
-    ).await?;
-
-    let mut channels = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let id: String = row.get(0)?;
-        let created_by: String = row.get(1)?;
-        let created_at: String = row.get(2)?;
-
-        let members = fetch_dm_members(&conn, &id).await?;
-
-        channels.push(DmChannel {
-            id,
-            created_by,
-            created_at,
-            members,
-        });
-    }
-
-    Ok(channels)
+    Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
+        .await?
+        .dms
+        .into_iter()
+        .map(dm_from_wire)
+        .collect())
 }
 
+/// The caller's still-unaccepted DMs — the request list. Same asymmetric block
+/// filter as [`list_dm_channels`], for the same reason.
 pub async fn list_dm_requests(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<DmChannel>> {
-    let conn = state.remote_db.conn().await?;
-
-    // Pending requests: my own row is un-accepted and I have not
-    // blocked the other participant. Symmetric to list_dm_channels —
-    // we filter on blocks I have made, not blocks made against me.
-    // A user I blocked never reappears in my requests list; when I
-    // unblock them, their unaccepted channel surfaces here again.
-    let mut rows = conn.query(
-        "SELECT dc.id, dc.created_by, dc.created_at
-         FROM dm_channel dc
-         JOIN dm_channel_member dcm ON dcm.dm_channel_id = dc.id
-         WHERE dcm.user_id = ?1
-           AND dcm.accepted_at IS NULL
-           AND NOT EXISTS (
-             SELECT 1
-             FROM dm_channel_member other
-             JOIN user_block ub ON
-                  ub.blocker_id = ?1 AND ub.blocked_id = other.user_id
-             WHERE other.dm_channel_id = dc.id
-               AND other.user_id <> ?1
-           )
-         ORDER BY dc.created_at DESC",
-        libsql::params![user_id],
-    ).await?;
-
-    let mut channels = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let id: String = row.get(0)?;
-        let created_by: String = row.get(1)?;
-        let created_at: String = row.get(2)?;
-
-        let members = fetch_dm_members(&conn, &id).await?;
-
-        channels.push(DmChannel {
-            id,
-            created_by,
-            created_at,
-            members,
-        });
-    }
-
-    Ok(channels)
+    Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
+        .await?
+        .dm_requests
+        .into_iter()
+        .map(dm_from_wire)
+        .collect())
 }
 
 pub async fn accept_dm_request(
@@ -293,26 +228,22 @@ pub async fn accept_dm_request(
     Ok(())
 }
 
+/// One DM and its members.
+///
+/// Membership-gated since #987: the DS answers `authorized: false` for a DM the
+/// caller is not in, which surfaces here as the same "not found" the caller
+/// already handled. Before, any user could read any DM's roster.
 pub async fn get_dm_channel(
     dm_channel_id: String,
     state: &Arc<AppState>,
 ) -> Result<DmChannel> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT id, created_by, created_at FROM dm_channel WHERE id = ?1",
-        libsql::params![dm_channel_id.clone()],
-    ).await?;
-
-    let (id, created_by, created_at) = if let Some(row) = rows.next().await? {
-        (row.get::<String>(0)?, row.get::<String>(1)?, row.get::<String>(2)?)
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("DM channel not found: {dm_channel_id}")));
-    };
-
-    let members = fetch_dm_members(&conn, &id).await?;
-
-    Ok(DmChannel { id, created_by, created_at, members })
+    let resolved = crate::commands::ds_reads::catch_up(state, &dm_channel_id, false, true).await?;
+    match resolved.dm {
+        Some(dm) => Ok(dm_from_wire(dm)),
+        None => Err(Error::Other(anyhow::anyhow!(
+            "DM channel not found: {dm_channel_id}"
+        ))),
+    }
 }
 
 pub async fn add_user_to_dm_channel(

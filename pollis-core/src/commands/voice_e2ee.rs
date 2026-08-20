@@ -49,34 +49,18 @@ async fn resolve_mls_group_id(
     self_user_id: &str,
     counterparty_user_id: Option<&str>,
 ) -> Result<String> {
-    let conn = state.remote_db.conn().await?;
-
     if channel_id.starts_with("call-") {
         let other = counterparty_user_id.ok_or_else(|| {
             Error::Other(anyhow::anyhow!(
                 "voice call room {channel_id} requires a counterparty user id"
             ))
         })?;
-        // Find the 1:1 DM channel between the two users. HAVING COUNT(*) = 2
-        // guards against group DMs accidentally matching.
-        let mut rows = conn
-            .query(
-                "SELECT dcm.dm_channel_id \
-                 FROM dm_channel_member dcm \
-                 WHERE dcm.dm_channel_id IN ( \
-                     SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1 \
-                 ) \
-                 AND dcm.user_id = ?2 \
-                 AND ( \
-                     SELECT COUNT(*) FROM dm_channel_member \
-                     WHERE dm_channel_id = dcm.dm_channel_id \
-                 ) = 2 \
-                 ORDER BY dcm.dm_channel_id LIMIT 1",
-                libsql::params![self_user_id.to_owned(), other.to_owned()],
-            )
-            .await?;
-        return match rows.next().await? {
-            Some(row) => Ok(row.get::<String>(0)?),
+        // The 1:1 DM channel between the two users. The DS guards it with
+        // `HAVING COUNT(*) = 2` so a group DM containing both cannot match —
+        // exporting a call key from a three-person group's tree would hand it to
+        // the third party.
+        return match crate::commands::ds_reads::one_to_one_dm(state, self_user_id, other).await? {
+            Some(id) => Ok(id),
             None => Err(Error::Other(anyhow::anyhow!(
                 "no 1:1 DM channel exists between {self_user_id} and {other} \
                  — cannot derive voice key for call {channel_id}"
@@ -84,16 +68,9 @@ async fn resolve_mls_group_id(
         };
     }
 
-    let mut rows = conn
-        .query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![channel_id.to_owned()],
-        )
-        .await?;
-    match rows.next().await? {
-        Some(row) => Ok(row.get::<String>(0)?),
-        None => Ok(channel_id.to_owned()),
-    }
+    // A channel resolves to its owning group; anything else (a DM id) is its own
+    // MLS group.
+    crate::commands::mls::ds_reads::resolve_mls_group(state, channel_id).await
 }
 
 /// Public entry point used at voice-join time. Returns
@@ -172,164 +149,50 @@ pub async fn derive_voice_key(
     Ok((key, idx, epoch, mls_group_id))
 }
 
-/// Look up the highest epoch we've seen published in `mls_group_info` for
-/// this MLS group. None on any query failure (treated as "can't tell —
-/// don't trigger recovery"), so a transient Turso blip never forces an
-/// unnecessary external-join.
+/// The highest epoch published in `mls_group_info` for this MLS group.
+///
+/// `None` on any failure — "can't tell, don't trigger recovery" — so a transient
+/// blip never forces an unnecessary external-join. That bias is the opposite of
+/// `group_state::published_group_info_head`'s, deliberately: this one gates a
+/// DESTRUCTIVE recovery, that one gates a redundant republish.
+///
+/// Known limitation, out of scope for #987 and tracked separately: this compares
+/// `epoch` WITHOUT `generation`. After a suite migration the successor lineage's
+/// numerically-lower epoch reads as "not stale" and recovery silently never
+/// fires — the same bug class `group_info_is_stale` already fixes for the
+/// republish path.
 async fn published_group_epoch(state: &Arc<AppState>, mls_group_id: &str) -> Option<u64> {
-    // Read-only GroupInfo epoch lookup → log_db (falls back to remote_db pre-cutover).
-    let conn = state.log_db.conn().await.ok()?;
-    let mut rows = conn
-        .query(
-            "SELECT epoch FROM mls_group_info WHERE conversation_id = ?1",
-            libsql::params![mls_group_id.to_string()],
-        )
-        .await
-        .ok()?;
-    let row = rows.next().await.ok()??;
-    row.get::<i64>(0).ok().map(|v| v as u64)
+    let snap = crate::commands::mls::ds_reads::conversation_snapshot(
+        state,
+        crate::commands::mls::ds_reads::state_query(mls_group_id, None),
+    )
+    .await
+    .ok()?;
+    snap.group_info.map(|gi| gi.epoch as u64)
 }
 
-/// Pull and process any unread envelopes for every conversation backed by
-/// this MLS group so the local epoch matches whoever sent the most recent
-/// commit. Best-effort: ingest failures are logged and ignored so a
-/// transient network blip doesn't block the voice join.
+/// Pull and process any unread envelopes for every conversation backed by this
+/// MLS group so the local epoch matches whoever sent the most recent commit.
+/// Best-effort: failures are logged and ignored so a transient blip doesn't block
+/// the voice join.
+///
+/// #987 folded this into the ONE catch-up entry point. It used to run its own
+/// copy of the resolve → is-DM → channel-enumerate chain and then ingest each
+/// conversation, which is exactly what `catch_up_mls_group_interleaved` does —
+/// except that this copy did NOT interleave, so a voice join could advance the
+/// shared group past an epoch at which a text channel held an un-ingested
+/// message and (with `max_past_epochs = 0`) discard its keys.
+///
+/// It also carried a diagnostic that dumped up to 20 `mls_commit_log` rows on
+/// every voice join, with a silent fall-back to the MAIN database if the log DB
+/// connection failed — a fall-back that would have quietly queried a database
+/// with no such table. Both are gone.
 async fn catch_up_mls_group(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) {
-    // Look up the conversations that share this MLS group. Two shapes:
-    //   1. `mls_group_id` IS a DM channel id — the DM table is keyed by it.
-    //   2. `mls_group_id` is a group id — fan out across every `channels.id`
-    //      where `group_id = mls_group_id`.
-    let conn = match state.remote_db.conn().await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[voice-e2ee] catch-up: remote_db conn failed: {e}");
-            return;
-        }
-    };
-
-    let is_dm = match conn
-        .query(
-            "SELECT 1 FROM dm_channel WHERE id = ?1 LIMIT 1",
-            libsql::params![mls_group_id.to_string()],
-        )
-        .await
+    if let Err(e) =
+        crate::commands::messages::catch_up_mls_group_interleaved(state, mls_group_id, user_id)
+            .await
     {
-        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
-        Err(e) => {
-            eprintln!("[voice-e2ee] catch-up: dm_channel probe failed: {e}");
-            false
-        }
-    };
-
-    if is_dm {
-        eprintln!("[voice-e2ee] catch-up: ingesting DM {mls_group_id}");
-        match crate::commands::messages::ingest_dm_envelopes_inner(
-            state,
-            user_id,
-            mls_group_id,
-        )
-        .await
-        {
-            Ok(()) => eprintln!("[voice-e2ee] catch-up: DM ingest OK {mls_group_id}"),
-            Err(e) => {
-                eprintln!("[voice-e2ee] catch-up ingest_dm for {mls_group_id}: {e}")
-            }
-        }
-        return;
-    }
-
-    let channel_ids: Vec<String> = match conn
-        .query(
-            "SELECT id FROM channels WHERE group_id = ?1",
-            libsql::params![mls_group_id.to_string()],
-        )
-        .await
-    {
-        Ok(mut rows) => {
-            let mut out = Vec::new();
-            loop {
-                match rows.next().await {
-                    Ok(Some(row)) => match row.get::<String>(0) {
-                        Ok(id) => out.push(id),
-                        Err(e) => {
-                            eprintln!("[voice-e2ee] catch-up: channel row decode: {e}");
-                            break;
-                        }
-                    },
-                    Ok(None) => break,
-                    Err(e) => {
-                        eprintln!("[voice-e2ee] catch-up: channel row read: {e}");
-                        break;
-                    }
-                }
-            }
-            out
-        }
-        Err(e) => {
-            eprintln!("[voice-e2ee] catch-up: channels query failed for {mls_group_id}: {e}");
-            return;
-        }
-    };
-
-    eprintln!(
-        "[voice-e2ee] catch-up: group {mls_group_id} → {} channel(s)",
-        channel_ids.len()
-    );
-    // Diagnostic: dump what's in `mls_commit_log` for this MLS group on
-    // Turso. process_pending_commits filters by `epoch >= local_epoch`, so
-    // if the rows we'd need (e.g. epochs 5..N for a local at epoch 4) are
-    // missing, advancement is impossible regardless of how many times we
-    // ingest. Lists at most ~20 rows so the log stays manageable.
-    // The commit-log read targets the read-only log DB; fall back to the main
-    // connection (this `conn` already served the dm_channel/channels reads above,
-    // which live in the main DB, so shadowing it here is safe).
-    let conn = state.log_db.conn().await.unwrap_or(conn);
-    match conn
-        .query(
-            "SELECT seq, epoch, sender_id, added_user_id \
-             FROM mls_commit_log \
-             WHERE conversation_id = ?1 \
-             ORDER BY epoch ASC, seq ASC \
-             LIMIT 20",
-            libsql::params![mls_group_id.to_string()],
-        )
-        .await
-    {
-        Ok(mut rows) => {
-            let mut lines: Vec<String> = Vec::new();
-            while let Ok(Some(row)) = rows.next().await {
-                let seq: i64 = row.get(0).unwrap_or(-1);
-                let epoch: i64 = row.get(1).unwrap_or(-1);
-                let sender_id: Option<String> = row.get(2).ok().flatten();
-                let added: Option<String> = row.get(3).ok().flatten();
-                lines.push(format!(
-                    "seq={seq} epoch={epoch} sender={} added={}",
-                    sender_id.as_deref().unwrap_or("-"),
-                    added.as_deref().unwrap_or("-")
-                ));
-            }
-            eprintln!(
-                "[voice-e2ee] catch-up: mls_commit_log for {mls_group_id} ({} rows): {}",
-                lines.len(),
-                if lines.is_empty() {
-                    "<empty>".to_string()
-                } else {
-                    lines.join(" | ")
-                }
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "[voice-e2ee] catch-up: mls_commit_log query for {mls_group_id} failed: {e}"
-            );
-        }
-    }
-    for ch in channel_ids {
-        match crate::commands::messages::ingest_channel_envelopes_inner(state, user_id, &ch).await
-        {
-            Ok(()) => eprintln!("[voice-e2ee] catch-up: channel ingest OK {ch}"),
-            Err(e) => eprintln!("[voice-e2ee] catch-up ingest_channel for {ch}: {e}"),
-        }
+        eprintln!("[voice-e2ee] catch-up for {mls_group_id}: {e}");
     }
 }
 

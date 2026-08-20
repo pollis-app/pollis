@@ -9,13 +9,33 @@ description = "Reads real MLS commit-log rows from Turso/libSQL and emits a sign
 name = "verifiable_log_builder"
 path = "src/lib.rs"
 
+# The builder CLI exists to READ Turso, so it requires `db-source` — the
+# feature that compiles the reader at all. `--no-default-features` builds the
+# pure library half (leaf encodings, invariants, bundle assembly), which is what
+# a verification-only consumer links.
 [[bin]]
 name = "builder"
 path = "src/bin/builder.rs"
+required-features = ["db-source"]
+
+# `db-source` gates the ONLY part of this crate that talks to a database:
+# `source`, which reads `mls_commit_log` / `account_key_log` straight out of
+# Turso. Everything else — leaf encodings, the fork/epoch invariants, bundle
+# building, key custody — is pure and is what `verifiable-log-serve`'s VERIFIER
+# half needs.
+#
+# The split exists because of #987 (see that crate's `live` feature): `pollis-core`
+# depends on `verifiable-log-serve` for release/account verification, and without
+# this gate that dependency dragged `libsql` back into the client through the
+# side door — one of the two edges #987 had to cut before the client could be
+# said to hold no database credential.
+[features]
+default = ["db-source"]
+db-source = ["dep:libsql"]
 
 [dependencies]
 verifiable-log = { path = "../verifiable-log" }
-libsql = { version = "0.9", features = ["remote"] }
+libsql = { version = "0.9", features = ["remote"], optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 sha2 = "0.10"
 # STH signing key (#668): ML-DSA-44. Its private key IS a 32-byte seed, so the

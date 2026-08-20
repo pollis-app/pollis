@@ -42,6 +42,11 @@ pub mod bundle;
 pub mod error;
 pub mod group;
 pub mod layout;
+/// The live, lazily-refreshed server that reads the commit log straight out of
+/// Turso. Behind `live` — the only part of this crate that needs a database — so
+/// a verification-only consumer does not link `libsql` (#987). See the feature's
+/// note in `Cargo.toml`.
+#[cfg(feature = "live")]
 pub mod live;
 pub mod release;
 pub mod remote;
@@ -68,6 +73,7 @@ pub use layout::{
     generate, generate_account, generate_account_artifacts, generate_artifacts, generate_binaries,
     generate_binaries_artifacts, load_bundle, ACCOUNT_API_PREFIX, API_VERSION, BINARIES_API_PREFIX,
 };
+#[cfg(feature = "live")]
 pub use live::LiveServer;
 pub use remote::{verify_remote, Report};
 pub use server::DevServer;

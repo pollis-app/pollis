@@ -271,7 +271,7 @@ async fn dm_invite_reject_removes_from_tree() {
     bob_d1.leave_dm(&dm_id).await;
 
     // `dm_channel_member` has NO rows for bob in this dm.
-    let remote = alice.state.remote_db.clone();
+    let remote = crate::harness::writable_remote().await;
     let bob_member_count: i64 = {
         let conn = remote.conn().await.expect("remote conn");
         let mut rows = conn
@@ -486,7 +486,7 @@ async fn dm_re_invite_after_reject() {
 /// blocked) pair. Lets tests observe the raw row state without going
 /// through a Tauri command that also filters by block.
 async fn user_block_count(
-    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    remote: &Arc<pollis_delivery::db::Db>,
     blocker_id: &str,
     blocked_id: &str,
 ) -> i64 {
@@ -516,7 +516,7 @@ async fn user_block_lifecycle() {
     let alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
 
-    let remote = alice.state.remote_db.clone();
+    let remote = crate::harness::writable_remote().await;
 
     // Before block: search_user_by_username resolves bob for alice.
     let hit: serde_json::Value = alice

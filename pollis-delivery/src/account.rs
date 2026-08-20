@@ -460,6 +460,13 @@ pub async fn revoke_device(
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
+    // The device's name BEFORE the write (#987). Tombstoning does not clear the
+    // column, but reading first keeps "does this device exist on your account?"
+    // and "what was it called?" a single question with a single answer.
+    let device_name = match resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
+        Ok(owner) => live_device_name(&conn, &owner, &parsed.device_id).await?,
+        Err(_) => None,
+    };
     let outcome = apply_revoke_device(&conn, authed.as_deref(), &parsed).await?;
     // Revocation must bite on the NEXT request, not when the cache TTL lapses
     // (#658). Evicted unconditionally: if the write was Forbidden nothing
@@ -475,7 +482,44 @@ pub async fn revoke_device(
             crate::teardown::purge_device_log_rows(&log_conn, &owner, &parsed.device_id).await?;
         }
     }
-    outcome_response::<RevokeDeviceBody>(outcome)
+    match outcome {
+        WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        WriteOutcome::Ok => Ok(crate::writes::ok_response::<RevokeDeviceBody>(
+            match device_name {
+                Some(name) => DeviceRevoked::Ok {
+                    device_name: Some(name),
+                },
+                // The row was absent (or already tombstoned): the UPDATE's
+                // `revoked_at IS NULL` bind made it a no-op, so say so rather
+                // than report a revocation that did not happen.
+                None => DeviceRevoked::NotFound,
+            },
+        )),
+    }
+}
+
+/// The name of a LIVE (non-tombstoned) device on `user_id`'s account.
+///
+/// `None` covers both "no such device" and "already revoked", which the caller
+/// treats identically: neither is a revocation this call performed.
+async fn live_device_name(
+    conn: &Connection,
+    user_id: &str,
+    device_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT device_name FROM user_device \
+             WHERE device_id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
+            libsql::params![device_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        // A live row with a NULL name is still a real device: report the empty
+        // string rather than `None`, which the caller reads as "no such device".
+        Some(row) => Ok(Some(row.get::<Option<String>>(0).ok().flatten().unwrap_or_default())),
+        None => Ok(None),
+    }
 }
 
 /// DELETE the revoked device's unclaimed key packages and its conversation

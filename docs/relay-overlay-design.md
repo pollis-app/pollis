@@ -27,8 +27,7 @@ A Pollis client is configured, at build time, with exactly these network destina
 
 | Config field | Service | Protocol | Role |
 |---|---|---|---|
-| `turso_url` / `turso_token` | **Turso (libSQL)** | Hrana over HTTP/2, TLS, `libsql://` | Canonical metadata + ciphertext envelope store. Direct connection for **reads only** — the token is read-only and every write goes through the Delivery Service (`ARCHITECTURE.md` §Network architecture). |
-| `log_db_url` / `log_db_token` (optional) | **Turso (commit-log DB)** | same | Read-only view of the MLS control-plane tables once split out (`config.rs:7-11`). Same operator, same protocol — not a distinct trust domain. |
+| ~~`turso_url` / `turso_token`~~, ~~`log_db_url` / `log_db_token`~~ | **Turso (libSQL)** | — | **Gone since #987.** The client held a read-only connection for reads; it now has no database credential and `pollis-core` does not link `libsql`, so Turso is no longer a host the client dials and is no longer on the overlay's route list. Everything it used to read arrives over the `pollis_delivery_url` row below. |
 | `r2_endpoint` + `r2_*` creds | **Cloudflare R2** | HTTPS + AWS SigV4 | Encrypted attachment / avatar object storage. |
 | `livekit_url` / `livekit_api_*` | **LiveKit** | WebSocket signalling + WebRTC (DTLS-SRTP) | SFU for realtime events + voice frames. |
 | `pollis_delivery_url` (optional) | **`pollis-delivery` Delivery Service** | HTTPS (axum, `pollis-delivery/src/lib.rs`) | Sole writer to the MLS commit log; also the secrets broker (LiveKit token mint + R2 presign, `docs/secrets-broker.md`). |
@@ -251,7 +250,7 @@ Consumer peers are the opposite of reliable infrastructure: they **churn** (clos
 Design implications:
 
 - **Availability floor:** if the overlay is enabled and no peer relay is reachable, the client uses a first-party relay (still IP-unlinking from *Turso* if the relay tier is operationally separated from the Turso metadata plane, §6.1). If even that is unreachable and the user has opted into "overlay required," the client must surface a clear degraded state — it must **not** silently drop a send (violates the messages-must-work invariant). A sensible default is "prefer overlay, fall back to **direct** on total overlay failure unless the user set strict mode."
-- **Health / circuit rebuild:** dead-relay detection with fast failover to another relay or the fallback pool, mirroring the existing `RemoteDb::with_retry` reconnect discipline (`pollis-core/src/db/remote.rs`) — the client already knows how to transparently reconnect a dropped Hrana stream; overlay circuit failure should reuse that resilience posture.
+- **Health / circuit rebuild:** dead-relay detection with fast failover to another relay or the fallback pool, mirroring the `RemoteDb::with_retry` reconnect discipline the client's database layer used to have (`pollis-core/src/db/remote.rs`, deleted in #987 along with the connection itself) — reconnect once, retry once, never poll. Overlay circuit failure reuses that posture.
 
 ### 7.1 NAT traversal — DECIDED in v1: parked outbound connections, not ICE
 
@@ -308,7 +307,7 @@ The relay **server** logic (the node that forwards bytes) is a separate small bi
 
 ### 9.2 How it plugs into endpoint resolution (`config.rs`)
 
-Today every service address is a field on `Config` (`config.rs:4-25`), resolved once at startup and handed to the connection builders — `RemoteDb::connect(url, token)` for Turso (`pollis-core/src/db/remote.rs`), the LiveKit room connect, R2 SigV4 requests, and the DS HTTP client. The clean insertion point is a **local overlay shim** that these connections dial *instead of* the real host:
+Every service address is a field on `Config`, resolved once at startup and handed to the connection builders — the LiveKit room connect, R2 SigV4 requests, and the DS HTTP client. (Turso was a fourth, via `RemoteDb::connect(url, token)`; #987 removed the client's database connection entirely, so the DS URL now covers everything that used to reach it.) The clean insertion point is a **local overlay shim** that these connections dial *instead of* the real host:
 
 1. **Local SOCKS-style shim.** The overlay client exposes a loopback proxy (`127.0.0.1:<auto-port>`), conceptually a SOCKS5-to-allowlisted-first-party-host proxy. This mirrors a pattern Pollis already uses and blesses: the *"Rust-side local-loopback HTTP server (`127.0.0.1:<auto-port>`)"* for media transport (`CLAUDE.md` §Performance Architecture). The overlay is the same shape for the control plane — a local proxy the rest of `pollis-core` dials.
 2. **Endpoint re-resolution.** When the overlay is enabled, `Config` resolution (or a thin wrapper over it) rewrites the outbound path so that the libSQL/DS/R2 connections connect **through** the shim, which builds/selects an overlay circuit to the *real* configured host and pipes the (still end-to-end-TLS-to-the-service) bytes. The real `turso_url` etc. remain the *inner* destination; the shim is the *outer* dial target. Because `libsql` uses `rustls` over the connection (`whitepaper` §8), the TLS session still terminates at Turso — the shim only carries bytes.

@@ -23,13 +23,13 @@
 use std::sync::Arc;
 
 use crate::harness::{signed_post_status, wipe, writable_remote, TestClient};
-use pollis_lib::db::remote::RemoteDb;
+use pollis_delivery::db::Db;
 use serial_test::serial;
 
 /// Read `(sealed, sender_id)` for one stored `message_envelope` row straight from
 /// the "remote Turso" handle — the server's at-rest view. This is exactly the
 /// artifact sealed sender minimizes: a breach / subpoena dump of this table.
-async fn envelope_sealed_and_sender(remote: &Arc<RemoteDb>, msg_id: &str) -> (i64, String) {
+async fn envelope_sealed_and_sender(remote: &Arc<Db>, msg_id: &str) -> (i64, String) {
     let conn = remote.conn().await.expect("remote conn");
     let mut rows = conn
         .query(

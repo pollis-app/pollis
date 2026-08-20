@@ -59,6 +59,22 @@ pub struct RateLimitConfig {
     pub invite_redeem_max: u32,
     /// Invite-link redemption window length, seconds.
     pub invite_redeem_window_secs: u64,
+    /// Max READ calls per IP per window (#987). Every read is a POST — the
+    /// canonical signing message excludes the query string, so a signed GET's
+    /// parameters would be unauthenticated — which means reads would otherwise
+    /// spend the `write` budget. A cold launch legitimately issues dozens of
+    /// them in a second, so reads get their own, larger allowance rather than
+    /// competing with sends for one.
+    pub read_max: u32,
+    /// Read window length, seconds.
+    pub read_window_secs: u64,
+    /// Max slug lookups and account probes per IP per window (#987). These two
+    /// are the only endpoints whose INPUT is guessable — a group name and, for
+    /// an unauthenticated caller, nothing at all — so the generic backstop is
+    /// the wrong bound for them, exactly as it was for invite redemption.
+    pub probe_max: u32,
+    /// Probe window length, seconds.
+    pub probe_window_secs: u64,
 }
 
 impl Default for RateLimitConfig {
@@ -77,6 +93,16 @@ impl Default for RateLimitConfig {
             // that resembles a search.
             invite_redeem_max: 20,
             invite_redeem_window_secs: 600,
+            // A cold launch is one bootstrap plus a conversation-state batch
+            // plus a catch-up per open conversation; a busy session adds a few
+            // per interaction. 3000/60s is far above that and far below a scrape.
+            read_max: 3000,
+            read_window_secs: 60,
+            // A real user looks up a handful of slugs, and probes their own
+            // account id once per launch. 60 per 10 minutes covers retries and
+            // multi-account installs without resembling a search.
+            probe_max: 60,
+            probe_window_secs: 600,
         }
     }
 }
@@ -104,6 +130,18 @@ impl RateLimitConfig {
         }
         if let Some(v) = env_u64("RL_WRITE_WINDOW_SECS") {
             cfg.write_window_secs = v;
+        }
+        if let Some(v) = env_u32("RL_READ_MAX") {
+            cfg.read_max = v;
+        }
+        if let Some(v) = env_u64("RL_READ_WINDOW_SECS") {
+            cfg.read_window_secs = v;
+        }
+        if let Some(v) = env_u32("RL_PROBE_MAX") {
+            cfg.probe_max = v;
+        }
+        if let Some(v) = env_u64("RL_PROBE_WINDOW_SECS") {
+            cfg.probe_window_secs = v;
         }
         if let Some(v) = env_u32("RL_INVITE_REDEEM_MAX") {
             cfg.invite_redeem_max = v;
@@ -246,8 +284,35 @@ fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'sta
             cfg.invite_redeem_max,
             cfg.invite_redeem_window_secs,
         )),
+        // #987 — the two guessable-input reads. `group-by-slug` is deliberately
+        // not membership-gated (gating it would remove the join flow, not
+        // tighten it), and `account-probe` is deliberately unauthenticated (it
+        // runs before any credential exists). Both therefore need a bound that
+        // is about GUESSING, which the generic write backstop is not.
+        "/v1/directory/group-by-slug" | "/v1/auth/account-probe" => {
+            Some(("probe", cfg.probe_max, cfg.probe_window_secs))
+        }
+        // Every other read (#987). They are POSTs, so without this they would
+        // spend the write budget — and a cold launch issues far more reads than
+        // a user ever issues writes.
+        p if is_read_path(p) => Some(("read", cfg.read_max, cfg.read_window_secs)),
         _ => Some(("write", cfg.write_max, cfg.write_window_secs)),
     }
+}
+
+/// Whether a path is one of the #987 read endpoints.
+///
+/// Prefix-matched on the three families the reads live under, so a new read
+/// endpoint lands in the read tier by construction rather than by remembering to
+/// list it here — and a new WRITE cannot accidentally land there, because writes
+/// do not live under these prefixes.
+fn is_read_path(path: &str) -> bool {
+    path.starts_with("/v1/read/")
+        || path.starts_with("/v1/directory/")
+        || path == "/v1/conversations/catch-up"
+        || path == "/v1/mls/conversation-state"
+        || path == "/v1/welcomes/fetch"
+        || path == "/v1/messages/lookup"
 }
 
 /// Axum middleware: per-IP rate limiting for the whole service, keyed by
@@ -272,6 +337,39 @@ pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reads must not spend the write budget, and the two guessable-input ones
+    /// must not spend the read budget (#987).
+    #[test]
+    fn reads_probes_and_writes_are_separate_tiers() {
+        let cfg = RateLimitConfig::default();
+        let tier = |p: &str| classify(&Method::POST, p, &cfg).map(|(t, _, _)| t);
+        assert_eq!(tier("/v1/messages/send"), Some("write"));
+        assert_eq!(tier("/v1/read/devices"), Some("read"));
+        assert_eq!(tier("/v1/directory/bootstrap"), Some("read"));
+        assert_eq!(tier("/v1/conversations/catch-up"), Some("read"));
+        assert_eq!(tier("/v1/mls/conversation-state"), Some("read"));
+        assert_eq!(tier("/v1/welcomes/fetch"), Some("read"));
+        assert_eq!(tier("/v1/directory/group-by-slug"), Some("probe"));
+        assert_eq!(tier("/v1/auth/account-probe"), Some("probe"));
+    }
+
+    /// The probe tier is tighter than the read tier, which is looser than the
+    /// write tier. Asserting the ORDER rather than the numbers keeps the point
+    /// (guessable input gets the smallest budget) true through re-tuning.
+    #[test]
+    fn the_probe_budget_is_the_tightest_of_the_three() {
+        let cfg = RateLimitConfig::default();
+        let per_sec = |max: u32, win: u64| max as f64 / win as f64;
+        assert!(
+            per_sec(cfg.probe_max, cfg.probe_window_secs)
+                < per_sec(cfg.write_max, cfg.write_window_secs)
+        );
+        assert!(
+            per_sec(cfg.write_max, cfg.write_window_secs)
+                < per_sec(cfg.read_max, cfg.read_window_secs)
+        );
+    }
 
     #[test]
     fn allows_up_to_max_then_limits() {

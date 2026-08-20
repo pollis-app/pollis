@@ -15,32 +15,14 @@ mod join_requests;
 mod membership;
 mod types;
 
-/// Mirrors the frontend `deriveSlug` in urlRouting.ts.
-pub(super) fn derive_slug(name: &str) -> String {
-    let lower = name.to_lowercase();
-    let cleaned: String = lower
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || c.is_ascii_whitespace() || *c == '-')
-        .collect();
-    let with_hyphens = cleaned.split_ascii_whitespace().collect::<Vec<_>>().join("-");
-    let mut result = String::new();
-    let mut prev_hyphen = false;
-    for c in with_hyphens.chars() {
-        if c == '-' {
-            if !prev_hyphen {
-                result.push('-');
-            }
-            prev_hyphen = true;
-        } else {
-            result.push(c);
-            prev_hyphen = false;
-        }
-    }
-    result.trim_matches('-').to_string()
-}
-
-// ── Authorization preflight ───────────────────────────────────────────────────
-pub use authz::{channel_group_role, group_role, GroupRole, NOT_A_MEMBER};
+// A group's URL slug is `pollis_api::directory::derive_slug`, and since #987
+// nothing in THIS crate derives it: slug MATCHING moved to the DS
+// (`POST /v1/directory/group-by-slug`), which is what finally makes the rate
+// limit on it meaningful. The rule lives in the shared crate because two copies
+// of a name-normalisation rule that must agree exactly is exactly the drift that
+// makes a shared link resolve on one build and 404 on the next. The renderer's
+// `deriveSlug` in `urlRouting.ts` is the third copy, and it only ever BUILDS
+// urls — it never has to agree with a stored value.
 
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{

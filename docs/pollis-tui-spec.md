@@ -48,20 +48,22 @@ desktop app, and it builds/tests headlessly in-box (`--no-default-features`).
 │         ▼                                   │
 │  pollis_core::commands::*  (&Arc<AppState>) │
 │         │                                   │
-│  AppState { Config, RemoteDb, log_db,       │
-│             file Keystore, local DB }       │
+│  AppState { Config, file Keystore,          │
+│             local DB }                      │
 └─────────────────────────────────────────────┘
-        │ reads (direct)        │ writes (via DS)
-        ▼                       ▼
-      Turso libSQL        pollis-delivery  ──► LiveKit / R2 (unused v1)
+                 │ every remote read AND write (#987)
+                 ▼
+          pollis-delivery ──► Turso libSQL
+                          ──► LiveKit / R2 (unused v1)
 ```
 
 - **No Tauri.** Do **not** build a `tauri::App` or use the `#[tauri::command]`
   shims in `src-tauri/`. Those are 1:1 forwarders. Call
   `pollis_core::commands::<module>::<fn>(args…, &state)` directly.
-- **Reads go direct to Turso; writes go through the Delivery Service.** This is
-  the post-#419 model — `send_message`, group/DM/invite/reaction ops all
-  `ds_post_ok` to `pollis_delivery_url`, which is therefore **mandatory** config.
+- **Everything goes through the Delivery Service** — writes since #419, reads
+  since #987. `send_message`, group/DM/invite/reaction ops all `ds_post_ok` to
+  `pollis_delivery_url`, and every read is a `POST /v1/read/…` on the same
+  transport, so that URL is **mandatory** config and the only backend there is.
 - **Runtime:** multi-thread Tokio (`rt-multi-thread`). The DB/keystore paths use
   `spawn_blocking`, so a current-thread runtime deadlocks.
 - **Incoming messages surface by polling**, not a sink push (the canonical state
@@ -119,17 +121,19 @@ media/realtime commands the TUI never calls. No sink wiring needed.
 
 ## 4. Configuration & credentials
 
-`Config` (`pollis-core/src/config.rs:3-25`) fields:
-`turso_url, turso_token, log_db_url?, log_db_token?, r2_* , livekit_*, pollis_delivery_url?`.
+`Config` (`pollis-core/src/config.rs`) fields:
+`r2_* , livekit_url, pollis_delivery_url?, overlay_*`.
 
-`Config::from_env` requires `TURSO_URL, TURSO_TOKEN, R2_S3_ENDPOINT,
-R2_PUBLIC_URL`; the rest default. It does **not** read `R2_ACCESS_KEY_ID` or
-`R2_SECRET_KEY` — the client holds no R2 credentials since #393/#506, and the two
-R2 values it does read are endpoint URLs, not secrets.
+`Config::from_env` requires `R2_S3_ENDPOINT, R2_PUBLIC_URL`; the rest default. It
+does **not** read `R2_ACCESS_KEY_ID` or `R2_SECRET_KEY` — the client holds no R2
+credentials since #393/#506 — and it no longer reads `TURSO_URL` / `TURSO_TOKEN`
+/ `LOG_DB_*` either: since #987 the client holds no database credential at all
+and `pollis-core` does not link `libsql`. Every value it does read is an endpoint
+URL, not a secret.
 
-**For a text-only TUI:** `turso_url`/`turso_token` and `pollis_delivery_url` are
-the real requirements. R2/LiveKit fields are unused in v1 and may be empty
-strings (as `Config::for_test` does, `config.rs:88-117`).
+**For a text-only TUI:** `pollis_delivery_url` is the real requirement. R2 /
+LiveKit fields are unused in v1 and may be empty strings (as `Config::for_test`
+does).
 
 **Credential distribution — reuse the desktop mechanism (no new secret handling).**
 The desktop app bakes first-party creds at build time via `option_env!` (Doppler →
@@ -270,8 +274,12 @@ All functions in `pollis-core/src/commands/`; each takes `&Arc<AppState>`.
 | Search user | `search_user_by_username(username, &state)` |
 
 Also available if useful: reactions (`add_reaction`/`remove_reaction`/`get_reactions`),
-`edit_message`, `delete_message`, `search_messages`, `list_channel_previews`,
+`edit_message`, `delete_message`, `search_messages`, `read_last_messages`,
 join-request flow (`request_group_access`/`approve_join_request`/…).
+(`list_channel_previews` and `list_messages_by_sender` were deleted in #987 —
+both keyed on `message_envelope.sender_id`, which sealed sender (#607) has
+written as the literal `"sealed"` for every send since, so neither could match a
+real user any more. `read_last_messages` is the preview read that works.)
 
 ### UX layout (ratatui)
 - **Three-pane**: left = groups→channels + DMs tree; center = message list of the
@@ -316,10 +324,11 @@ The box is a headless Rust rig for exactly this surface.
 - **Headless core regression stays green:**
   `cargo test -p pollis --no-default-features --features test-harness --test flows`
   (proves the new crate didn't perturb the workspace).
-- **Smoke test (optional, in-box):** point `TURSO_URL`/`TURSO_TOKEN` at the
-  disposable test DB + `POLLIS_DELIVERY_URL` at a local `pollis-delivery`, run the
-  binary headlessly through a scripted signup→send→read against the same infra the
-  flows harness uses. (The flows harness already stands this up; reuse `.env.test`.)
+- **Smoke test (optional, in-box):** point `POLLIS_DELIVERY_URL` at a local
+  `pollis-delivery` and run the binary headlessly through a scripted
+  signup→send→read. There is no database URL to configure — the DS owns the
+  connection. (`pollis-tui/tests/common` already stands this up in-process,
+  mounting the REAL DS router.)
 - **Definition of Done (v1):** builds + clippy-clean in-box; headless flows
   regression green; a documented manual run that signs up, creates a group/channel,
   sends and receives a message decrypted end-to-end, and survives a

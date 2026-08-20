@@ -561,12 +561,8 @@ async fn account_key_log_cas_rejects_second_rotation_at_same_version() {
 
     // The append-only log holds exactly ONE row at version 2 — the winner's. A
     // fork would show two distinct rows at the same (user_id, identity_version).
-    let conn = alice
-        .state
-        .remote_db
-        .conn()
-        .await
-        .expect("remote conn");
+    let db = crate::harness::writable_remote().await;
+    let conn = db.conn().await.expect("remote conn");
     let mut rows = conn
         .query(
             "SELECT COUNT(*) FROM account_key_log WHERE user_id = ?1 AND identity_version = 2",
@@ -606,8 +602,9 @@ async fn ds_logout_only_removes_own_device() {
     let _mallory = mallory.sign_up("mallory@test.local").await;
 
     // Resolve each client's stable device_id from the shared remote.
-    async fn device_id_of(client: &TestClient, user_id: &str) -> String {
-        let conn = client.state.remote_db.conn().await.expect("remote conn");
+    async fn device_id_of(_client: &TestClient, user_id: &str) -> String {
+        let db = crate::harness::writable_remote().await;
+        let conn = db.conn().await.expect("remote conn");
         let mut rows = conn
             .query(
                 "SELECT device_id FROM user_device WHERE user_id = ?1",
@@ -622,8 +619,9 @@ async fn ds_logout_only_removes_own_device() {
             .get::<String>(0)
             .expect("device_id")
     }
-    async fn device_row_exists(client: &TestClient, device_id: &str) -> bool {
-        let conn = client.state.remote_db.conn().await.expect("remote conn");
+    async fn device_row_exists(_client: &TestClient, device_id: &str) -> bool {
+        let db = crate::harness::writable_remote().await;
+        let conn = db.conn().await.expect("remote conn");
         let mut rows = conn
             .query(
                 "SELECT 1 FROM user_device WHERE device_id = ?1",

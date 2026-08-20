@@ -91,9 +91,6 @@ const SECRET_KEYS = [
   "R2_ACCESS_KEY_ID",
   "R2_SECRET_KEY",
   "R2_BUCKET",
-  "TURSO_PLATFORM_TOKEN",
-  "TURSO_ORG",
-  "TURSO_DB",
   "DEV_OTP",
   // #720: gates GET /v1/retention/metrics. Absent here means the DS never sees
   // it, the route stays default-closed, and the endpoint 404s however correctly

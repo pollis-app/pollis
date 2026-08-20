@@ -44,8 +44,6 @@ export default function RootLayout() {
 
   useEffect(() => {
     initializeNativeBridge({
-      tursoUrl: process.env.EXPO_PUBLIC_TURSO_URL ?? "",
-      tursoToken: process.env.EXPO_PUBLIC_TURSO_TOKEN ?? "",
       r2Endpoint: process.env.EXPO_PUBLIC_R2_ENDPOINT,
       r2PublicUrl: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
       livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL,

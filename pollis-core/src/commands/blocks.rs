@@ -18,20 +18,32 @@ pub struct BlockedUser {
 /// (create_dm_channel, send_message, send_group_invite) so either
 /// side's block silently halts delivery.
 pub async fn is_blocked_either_way(
-    conn: &libsql::Connection,
+    state: &Arc<AppState>,
     user_a: &str,
     user_b: &str,
 ) -> Result<bool> {
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM user_block
-             WHERE (blocker_id = ?1 AND blocked_id = ?2)
-                OR (blocker_id = ?2 AND blocked_id = ?1)
-             LIMIT 1",
-            libsql::params![user_a, user_b],
-        )
-        .await?;
-    Ok(rows.next().await?.is_some())
+    any_blocked_either_way(state, user_a, std::slice::from_ref(&user_b.to_string())).await
+}
+
+/// Whether ANY of `others` is in a block relationship with `me`, in either
+/// direction.
+///
+/// The batch form, because every caller has a set: a DM's other members, a
+/// multi-party DM's proposed roster. Before #987 this was a query per candidate,
+/// run inside a loop on the send path.
+///
+/// Direction-blind by construction — the DS answers which ids are blocked, never
+/// which way — because every caller reports the same generic refusal so neither
+/// side can infer who blocked whom. A helper that knew the direction would put
+/// that inference one log line away from leaking.
+pub async fn any_blocked_either_way(
+    state: &Arc<AppState>,
+    _me: &str,
+    others: &[String],
+) -> Result<bool> {
+    Ok(!crate::commands::ds_reads::blocked_among(state, others)
+        .await?
+        .is_empty())
 }
 
 pub async fn block_user(
@@ -78,29 +90,16 @@ pub async fn list_blocked_users(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<BlockedUser>> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn
-        .query(
-            "SELECT ub.blocked_id, u.username, ub.created_at
-             FROM user_block ub
-             LEFT JOIN users u ON u.id = ub.blocked_id
-             WHERE ub.blocker_id = ?1
-             ORDER BY ub.created_at DESC",
-            libsql::params![user_id],
-        )
-        .await?;
-
-    let mut blocked = Vec::new();
-    while let Some(row) = rows.next().await? {
-        blocked.push(BlockedUser {
-            user_id: row.get(0)?,
-            username: row.get(1)?,
-            blocked_at: row.get(2)?,
-        });
-    }
-
-    Ok(blocked)
+    Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
+        .await?
+        .blocks
+        .into_iter()
+        .map(|b| BlockedUser {
+            user_id: b.user_id,
+            username: b.username,
+            blocked_at: b.blocked_at,
+        })
+        .collect())
 }
 
 #[cfg(test)]

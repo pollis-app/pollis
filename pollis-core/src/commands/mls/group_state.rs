@@ -151,17 +151,29 @@ pub(super) async fn published_group_info_head(
     state: &Arc<AppState>,
     conversation_id: &str,
 ) -> Option<(i64, u64)> {
-    // Read-only GroupInfo head lookup → log_db (falls back to remote_db pre-cutover).
-    let conn = state.log_db.conn().await.ok()?;
-    let mut rows = conn
-        .query(
-            "SELECT generation, epoch FROM mls_group_info WHERE conversation_id = ?1",
-            libsql::params![conversation_id.to_string()],
-        )
-        .await
-        .ok()?;
-    let row = rows.next().await.ok()??;
-    Some((row.get::<i64>(0).ok()?, row.get::<i64>(1).ok()? as u64))
+    let snap = super::ds_reads::conversation_snapshot(
+        state,
+        super::ds_reads::state_query(conversation_id, None),
+    )
+    .await
+    .ok()?;
+    group_info_head_of(&snap)
+}
+
+/// The `(generation, epoch)` head out of a conversation snapshot, or `None` when
+/// no GroupInfo is published — or the caller was not authorized to see one.
+///
+/// Split out so the several call sites that already hold a snapshot read the
+/// head from it rather than spending a second round trip on
+/// [`published_group_info_head`]. Non-membership collapses to `None` on purpose:
+/// "no GroupInfo I may see" and "no GroupInfo" lead to the same decision
+/// everywhere this feeds, and the alternative — a distinct third state — would
+/// need a bias of its own at every one of those sites.
+pub(super) fn group_info_head_of(
+    snap: &pollis_api::reads::ConversationState,
+) -> Option<(i64, u64)> {
+    let gi = snap.group_info.as_ref()?;
+    Some((gi.generation, gi.epoch as u64))
 }
 
 /// Durability backstop for MLS bootstrap: ensure the log DB holds a current-epoch
@@ -192,7 +204,34 @@ async fn ensure_group_info_published(state: &Arc<AppState>, conversation_id: &st
         }
     };
 
-    let published = published_group_info_head(state, conversation_id).await;
+    // One snapshot, and it answers two questions: whether the published head is
+    // behind, and whether we are still a member. A removed member's local group
+    // lingers until the next sweep drops it, and republishing for a group we
+    // have been removed from is a guaranteed 403 on every pass — so read the
+    // authorization out of the same answer rather than discovering it as an
+    // error.
+    let Ok(snap) = super::ds_reads::conversation_snapshot(
+        state,
+        super::ds_reads::state_query(conversation_id, None),
+    )
+    .await
+    else {
+        // Unreadable → treat the GroupInfo as ABSENT, which is this backstop's
+        // deliberate bias: a redundant publish on a transient blip is safer than
+        // a missed heal, because a group whose GroupInfo never landed is
+        // unjoinable forever. Falling through to `group_info_is_stale(None, …)`
+        // preserves that exactly.
+        if let Err(e) = publish_group_info(state, conversation_id).await {
+            eprintln!(
+                "[mls] ensure_group_info_published: republish for {conversation_id} failed: {e}"
+            );
+        }
+        return;
+    };
+    if !snap.authorized {
+        return;
+    }
+    let published = group_info_head_of(&snap);
     if !group_info_is_stale(published, local_head) {
         return;
     }
@@ -316,18 +355,31 @@ async fn external_join_attempt(
     //    lineage (the upsert is monotone on `(generation, epoch)`), so a device
     //    recovering into a migrated conversation joins the successor directly —
     //    which is the only lineage still accepting commits.
+    //
+    //    The Welcome check eight lines below reads the SAME snapshot, and that
+    //    is load-bearing rather than an optimisation — see the comment there.
+    let snap = super::ds_reads::conversation_snapshot(
+        state,
+        pollis_api::reads::ConversationStateQuery {
+            conversation_id: conversation_id.to_string(),
+            generation: None,
+            since: None,
+            want_group_info_blob: true,
+            commit_at_epoch: None,
+        },
+    )
+    .await?;
     let (group_info_bytes, stored_generation, stored_epoch): (Vec<u8>, i64, i64) = {
-        // Read-only GroupInfo lookup → log_db (falls back to remote_db pre-cutover).
-        let conn = state.log_db.conn().await?;
-        let mut rows = conn
-            .query(
-                "SELECT group_info, generation, epoch FROM mls_group_info \
-                 WHERE conversation_id = ?1",
-                libsql::params![conversation_id],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => (row.get(0)?, row.get(1)?, row.get(2)?),
+        match snap.group_info.as_ref().and_then(|gi| {
+            gi.group_info
+                .as_deref()
+                .map(|b| (b, gi.generation, gi.epoch))
+        }) {
+            Some((blob, generation, epoch)) => (
+                super::ds_reads::decode_b64("group_info", blob)?,
+                generation,
+                epoch,
+            ),
             None => {
                 return Err(crate::error::Error::Other(anyhow::anyhow!(
                     "no GroupInfo stored for {conversation_id} — cannot external-join"
@@ -351,7 +403,14 @@ async fn external_join_attempt(
     // once GroupInfo exists, and by the atomic write that is exactly when the
     // Welcome exists — so re-checking HERE catches it deterministically. A genuine
     // Secret-Key recovery / dropped-Welcome case has no such row and proceeds.
-    if has_pending_welcome(state, conversation_id, user_id).await {
+    //
+    // Since #987 both facts come from ONE snapshot — the same server-side read
+    // transaction — which is what keeps the argument above true across an HTTP
+    // boundary. Re-reading the Welcome in a second request would restore exactly
+    // the race this paragraph rules out, and would do so silently: the Kani
+    // property is proved over the pure gate, so feeding it two snapshots does
+    // not fail the proof, it makes it vacuous.
+    if snap.welcome_pending {
         eprintln!(
             "[mls] external_join: a Welcome for {conversation_id} is available — deferring to it \
              instead of external-joining (avoids racing our own Welcome)"
@@ -842,41 +901,30 @@ pub async fn process_pending_commits_inner(
 /// squat an epoch and wedge the group under the UNIQUE(conversation_id, epoch)
 /// constraint.
 ///
-/// Fails CLOSED (returns false) on any conn/query error: a transient inability
-/// to confirm the device is still registered must NOT permit a rejoin. The DS
-/// `/v1/commits` endpoint does not itself gate submissions on device-revocation,
-/// so an errored check here is the only thing standing between a just-revoked
-/// device and a climb-back — treating "couldn't check" as "registered" is the
-/// same fail-OPEN hole `local_user_is_member` closes for membership. This is
-/// never a permanent lockout: a legitimate device recovers on the next catch-up
-/// pass once the (transient) read succeeds, and by the time control reaches this
-/// gate the same `remote_db` was already read successfully for the commit-log
-/// fetch, so an error here is vanishingly unlikely in practice.
+/// Fails CLOSED (returns false) whenever the answer is not a confirmed `true`: a
+/// transient inability to confirm the device is still registered must NOT permit
+/// a rejoin. The DS `/v1/commits` endpoint does not itself gate submissions on
+/// device-revocation, so an errored check here is the only thing standing
+/// between a just-revoked device and a climb-back — treating "couldn't check" as
+/// "registered" is the same fail-OPEN hole `local_user_is_member` closes for
+/// membership. This is never a permanent lockout: a legitimate device recovers
+/// on the next catch-up pass once the read succeeds.
 ///
-/// The one fail-OPEN case is a missing local `device_id` (returns true): that is
-/// not a failed check but the absence of a device context (pre-enrollment), and
-/// a revoked device always HAS an id — its `user_device` row is what gets
-/// tombstoned — so it can never reach the tree through this branch.
-async fn local_device_registered(state: &Arc<AppState>, user_id: &str) -> bool {
-    let device_id = match state.device_id.lock().await.clone() {
-        Some(d) => d,
-        None => return true,
-    };
-    let conn = match state.remote_db.conn().await {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    match conn
-        .query(
-            "SELECT 1 FROM user_device \
-             WHERE user_id = ?1 AND device_id = ?2 AND revoked_at IS NULL",
-            libsql::params![user_id, device_id],
-        )
-        .await
-    {
-        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
-        Err(_) => false,
-    }
+/// #987 note: this used to fail OPEN for a missing local `device_id`, on the
+/// grounds that no device context is not a failed check. That branch is gone
+/// because it is now unreachable — the snapshot is a device-SIGNED request, so a
+/// device with no id cannot obtain one at all, and the surrounding replay path
+/// already requires an unlocked session. It also used to plead that an error was
+/// "vanishingly unlikely" because the same `remote_db` had just been read for
+/// the commit log. That sentence is retired: both are HTTP now, so the safety
+/// rests on the bias rather than on the improbability.
+fn local_device_registered(snap: Option<&pollis_api::reads::ConversationState>) -> bool {
+    // `None` = the snapshot request failed; `Some(state)` with
+    // `device_registered: None` = the DS could not read `user_device`. Both are
+    // "couldn't check", and both are false here. The two are kept distinct on
+    // the wire so a sick main DB is visible rather than disguised as a fleet of
+    // plausible revocations, but the CLIENT's rule is the same for both.
+    snap.and_then(|s| s.device_registered).unwrap_or(false)
 }
 
 /// Whether `user_id` is a CURRENT member of the conversation backed by
@@ -889,41 +937,24 @@ async fn local_device_registered(state: &Arc<AppState>, user_id: &str) -> bool {
 /// member's external-join would otherwise WIN its epoch on the CAS and climb the
 /// removed member back into the tree — a membership leak (fuzzer finding #2).
 ///
-/// Mirrors the DS-side `pollis_delivery::writes::is_member`: an MLS
-/// `mls_group_id` is one of a group id (channels share one MLS group keyed by the
-/// group id), a DM channel id, or a channel id, so all three membership shapes
-/// are accepted.
+/// Answered by `pollis_delivery::writes::is_member` — the very predicate the DS
+/// enforces on the write half of these tables, so the two can no longer drift.
 ///
-/// Fails CLOSED (returns false) on a missing device context or any query error:
+/// Fails CLOSED (returns false) whenever the answer is not a confirmed `true`:
 /// unlike the revoked-device check, this guards a membership *leak*, so when we
 /// cannot confirm membership we must NOT rebuild. This is never a permanent
 /// lockout — a legitimate current member simply recovers on the next catch-up
-/// pass once the (transient) read succeeds — and by the time control reaches this
-/// gate the same `remote_db` was already read successfully for the commit-log
-/// fetch, so a failure here is vanishingly unlikely in practice.
-async fn local_user_is_member(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) -> bool {
-    let conn = match state.remote_db.conn().await {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    match conn
-        .query(
-            "SELECT 1 WHERE \
-                EXISTS (SELECT 1 FROM dm_channel_member \
-                        WHERE dm_channel_id = ?1 AND user_id = ?2) \
-             OR EXISTS (SELECT 1 FROM group_member \
-                        WHERE group_id = ?1 AND user_id = ?2) \
-             OR EXISTS (SELECT 1 FROM channels c \
-                        JOIN group_member gm ON gm.group_id = c.group_id \
-                        WHERE c.id = ?1 AND gm.user_id = ?2) \
-             LIMIT 1",
-            libsql::params![mls_group_id, user_id],
-        )
-        .await
-    {
-        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
-        Err(_) => false,
-    }
+/// pass once the read succeeds.
+///
+/// #987 note: this gate used to justify itself with "the same `remote_db` was
+/// already read successfully for the commit-log fetch, so a failure here is
+/// vanishingly unlikely". That sentence is retired. The commit fetch is now an
+/// HTTP call and so is this, so a failure is an ORDINARY event rather than a
+/// vanishing one — which is why the bias, not its improbability, is what the
+/// safety argument now rests on. The two are in fact the SAME call since #987,
+/// so they cannot disagree.
+fn local_user_is_member(snap: Option<&pollis_api::reads::ConversationState>) -> bool {
+    snap.and_then(|s| s.is_member).unwrap_or(false)
 }
 
 /// Whether an undelivered MLS `Welcome` for THIS device targets `mls_group_id`.
@@ -939,43 +970,25 @@ async fn local_user_is_member(state: &Arc<AppState>, mls_group_id: &str, user_id
 /// the Welcome is genuinely consumed — a truly orphaned Welcome then hands off to
 /// external-join rather than deadlocking recovery forever.
 ///
-/// Reads the log DB (where `mls_welcome` lives post-#420), mirroring
-/// `poll_mls_welcomes_inner`'s selection exactly (recipient + this device, or a
-/// legacy device-agnostic row). Fails OPEN (returns `false` ⇒ "no Welcome, don't
-/// suppress") on a missing device context or any read error: a transient inability
-/// to see the Welcome must never permanently block recovery — external-join, which
-/// reads the same log DB for GroupInfo, is the pre-existing fallback and simply
-/// no-ops itself if the GroupInfo isn't visible either.
-async fn has_pending_welcome(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) -> bool {
-    let device_id = match state.device_id.lock().await.clone() {
-        Some(d) => d,
-        None => return false,
-    };
-    let conn = match state.log_db.conn().await {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    match conn
-        .query(
-            "SELECT 1 FROM mls_welcome \
-             WHERE conversation_id = ?1 AND recipient_id = ?2 AND delivered = 0 \
-             AND (recipient_device_id = ?3 OR recipient_device_id IS NULL) \
-             LIMIT 1",
-            libsql::params![mls_group_id, user_id, device_id],
-        )
-        .await
-    {
-        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
-        Err(_) => false,
-    }
+/// Fails OPEN (returns `false` ⇒ "no Welcome, don't suppress") whenever the
+/// answer is not a confirmed `true`: a transient inability to see the Welcome
+/// must never permanently block recovery — external-join, which needs the
+/// GroupInfo from the same snapshot, is the pre-existing fallback and simply
+/// no-ops itself if that isn't visible either.
+///
+/// **This is the OPPOSITE bias to [`local_user_is_member`], seven lines away,
+/// and they must not be collapsed into one error path.** They read the same
+/// snapshot; they do not share a default.
+fn has_pending_welcome(snap: Option<&pollis_api::reads::ConversationState>) -> bool {
+    snap.map(|s| s.welcome_pending).unwrap_or(false)
 }
 
 /// Both cooperative gates on the external-join *recovery* paths: this device is
 /// still registered (not revoked) AND its user is still a current member of the
 /// group. A `false` from either means "do not rebuild/rejoin". Logs the specific
 /// reason so a skipped recovery is never a silent no-op.
-async fn may_rejoin_via_external_join(
-    state: &Arc<AppState>,
+fn may_rejoin_via_external_join(
+    snap: Option<&pollis_api::reads::ConversationState>,
     mls_group_id: &str,
     user_id: &str,
 ) -> bool {
@@ -986,7 +999,7 @@ async fn may_rejoin_via_external_join(
     // `invariants::may_rejoin`, proved by Kani to admit a rejoin ONLY for
     // (registered && member) — a revoked or removed device can never climb back
     // in (fuzzer finding #2).
-    let registered = local_device_registered(state, user_id).await;
+    let registered = local_device_registered(snap);
     if !registered {
         eprintln!(
             "[mls] external-join recovery for {mls_group_id}: device for {user_id} is no longer \
@@ -994,7 +1007,7 @@ async fn may_rejoin_via_external_join(
         );
         return super::invariants::may_rejoin(false, false);
     }
-    let is_member = local_user_is_member(state, mls_group_id, user_id).await;
+    let is_member = local_user_is_member(snap);
     if !is_member {
         eprintln!(
             "[mls] external-join recovery for {mls_group_id}: {user_id} is no longer a group \
@@ -1127,14 +1140,41 @@ async fn process_one_generation<'h>(
             //     membership gate on `/v1/commits` a removed member would also
             //     rejoin the tree and decrypt post-removal traffic — membership
             //     leak, fuzzer finding #2).
-            let welcome_pending = has_pending_welcome(state, mls_group_id, user_id).await;
-            let may_rejoin = may_rejoin_via_external_join(state, mls_group_id, user_id).await;
+            //
+            // All three inputs come from ONE snapshot, and the pairing is
+            // load-bearing rather than a saving: split across requests, a device
+            // can see a GroupInfo without the Welcome `submit_commit` wrote in
+            // the same transaction, pick ExternalJoin, and strand itself. The
+            // gate is Kani-proved over a pure function, so two snapshots would
+            // not fail the proof — they would make it vacuous.
+            //
+            // Each gate keeps its OWN bias on a failed request, which is why the
+            // three lines below read the same `Option` three different ways and
+            // must not be folded together.
+            let snap = super::ds_reads::conversation_snapshot(
+                state,
+                super::ds_reads::state_query(mls_group_id, Some(generation)),
+            )
+            .await
+            .map_err(|e| {
+                eprintln!(
+                    "[mls] process_pending_commits: conversation-state for {mls_group_id} failed: {e}"
+                );
+                e
+            })
+            .ok();
+            let snap = snap.as_ref().filter(|s| s.authorized);
+            // Fails OPEN — a Welcome we cannot see must never permanently block
+            // recovery.
+            let welcome_pending = has_pending_welcome(snap);
+            // Fails CLOSED — a membership we cannot confirm must never license a
+            // rebuild.
+            let may_rejoin = may_rejoin_via_external_join(snap, mls_group_id, user_id);
             // #832: external-join builds a commit ON the published GroupInfo, so
             // with no `mls_group_info` row there is nothing to join onto. Feeding
             // that to the gate is what stops it selecting an impossible join and
             // retrying it once per pass through the pre-establishment window.
-            let group_info_available =
-                published_group_info_head(state, mls_group_id).await.is_some();
+            let group_info_available = snap.and_then(group_info_head_of).is_some();
             match super::invariants::join_recovery(
                 welcome_pending,
                 may_rejoin,
@@ -1194,22 +1234,43 @@ async fn process_one_generation<'h>(
         }
     }
 
-    // 2. Fetch pending commits from remote, along with the add-metadata
-    //    columns (`added_user_id`, `added_device_ids`) so we can verify
-    //    cross-signing certs BEFORE calling `process_message`. Collected
-    //    into an owned Vec so the `rows` cursor is dropped before any
-    //    local-DB await below.
-    // Read-only commit-log fetch → log_db (falls back to remote_db pre-cutover).
-    let conn = state.log_db.conn().await?;
-    // Scoped to ONE lineage: commits of a different generation are encrypted
-    // under a different suite's key schedule and are not replayable here.
-    let mut rows = conn.query(
-        "SELECT seq, epoch, commit_data, added_user_id, added_device_ids, sender_id \
-         FROM mls_commit_log \
-         WHERE conversation_id = ?1 AND generation = ?2 AND epoch >= ?3 \
-         ORDER BY epoch ASC, seq ASC",
-        libsql::params![mls_group_id, generation, initial_epoch as i64],
-    ).await?;
+    // 2. Fetch pending commits, along with the add-metadata columns
+    //    (`added_user_id`, `added_device_ids`) so we can verify cross-signing
+    //    certs BEFORE calling `process_message` — and, since #987, the cert rows
+    //    themselves, so verification costs no round trip per add-carrying commit.
+    //
+    //    Scoped to ONE lineage: commits of a different generation are encrypted
+    //    under a different suite's key schedule and are not replayable here.
+    //
+    //    The DS reads `head`, `head_generation` and the batch inside ONE
+    //    transaction and REFUSES to answer with a non-contiguous batch, which is
+    //    what makes the gap classification below safe to act on: a hole reaching
+    //    this loop triggers `forget_local_mls_group_at`, i.e. deletion of this
+    //    device's MLS crypto state, so "the log is append-only and reads are
+    //    consistent" had to stop being an assumption about the transport and
+    //    become a checked property of the response.
+    let snapshot = super::ds_reads::conversation_snapshot(
+        state,
+        pollis_api::reads::ConversationStateQuery {
+            conversation_id: mls_group_id.to_string(),
+            generation: Some(generation),
+            since: Some(initial_epoch as i64),
+            want_group_info_blob: false,
+            commit_at_epoch: None,
+        },
+    )
+    .await?;
+    if !snapshot.authorized {
+        // Removed from the conversation. Not an error and not a recovery
+        // trigger: `may_rejoin_via_external_join` is the gate that decides
+        // whether to climb back, and it answers `false` for exactly this case.
+        // Replaying commits we are no longer entitled to read is not an option
+        // the DS leaves open, so this pass simply ends.
+        eprintln!(
+            "[mls] process_pending_commits: {user_id} is not a member of {mls_group_id} — nothing to replay"
+        );
+        return Ok(false);
+    }
 
     #[derive(Debug)]
     struct PendingCommit {
@@ -1221,15 +1282,41 @@ async fn process_one_generation<'h>(
         sender_id: Option<String>,
     }
 
-    let mut pending: Vec<PendingCommit> = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let seq: i64 = row.get(0)?;
-        let epoch: i64 = row.get(1)?;
-        let data: Vec<u8> = row.get(2)?;
-        let added_user_id: Option<String> = row.get::<Option<String>>(3).ok().flatten();
-        let ids_csv: Option<String> = row.get::<Option<String>>(4).ok().flatten();
-        let sender_id: Option<String> = row.get::<Option<String>>(5).ok().flatten();
-        let added_device_ids: Vec<String> = ids_csv
+    // Three different reasons the batch can look short, all recovered the same
+    // way (drop the local group, external-join onto the head) and all worth
+    // telling apart in a log, because only one of them is a bug:
+    //
+    //   * a retention prune (#539) — the floor moved, `pruned_below > since`;
+    //   * genuine damage — a row missing BETWEEN two present epochs, which the
+    //     DS reports as `hole` after checking contiguity inside the same read
+    //     transaction as the batch and the head;
+    //   * a torn read — which is what the single transaction eliminated, and is
+    //     the reason `hole` can now be trusted at all. Before #987 the batch and
+    //     the head came off separate statements, so this path could destroy a
+    //     live group recovering from a gap the log never had.
+    if let Some(floor) = snapshot.pruned_below {
+        if floor > initial_epoch as i64 {
+            eprintln!(
+                "[mls] process_pending_commits: {mls_group_id} generation {generation} is pruned \
+                 below epoch {floor} but we are at {initial_epoch} — the missing commits are \
+                 retention-collected, not lost; recovering via external join"
+            );
+        }
+    }
+    if let Some(hole) = snapshot.hole {
+        eprintln!(
+            "[mls] process_pending_commits: {mls_group_id} generation {generation} has a HOLE — \
+             expected epoch {}, found {}. This is damage in the log, not a prune and not a torn \
+             read (the DS checked contiguity in the same transaction as the head); recovering \
+             via external join",
+            hole.expected, hole.found
+        );
+    }
+
+    let mut pending: Vec<PendingCommit> = Vec::with_capacity(snapshot.commits.len());
+    for row in &snapshot.commits {
+        let added_device_ids: Vec<String> = row
+            .added_device_ids
             .as_deref()
             .map(|s| {
                 s.split(',')
@@ -1239,22 +1326,25 @@ async fn process_one_generation<'h>(
             })
             .unwrap_or_default();
         pending.push(PendingCommit {
-            seq,
-            epoch,
-            commit_data: data,
-            added_user_id,
+            seq: row.seq,
+            epoch: row.epoch,
+            commit_data: super::ds_reads::decode_b64("commit_data", &row.commit)?,
+            added_user_id: row.added_user_id.clone(),
             added_device_ids,
-            sender_id,
+            // The DS column is NOT NULL, but sealed-sender commits carry the
+            // literal sender the submitter named; `Option` is kept so the
+            // self-add discrimination below reads exactly as it did.
+            sender_id: Some(row.sender_id.clone()).filter(|s| !s.is_empty()),
         });
     }
-    drop(rows);
 
-    // Cross-signing cert verification (`verify_added_devices` below) reads
-    // `users` / `user_device` / `account_key_log` — all on the MAIN DB. `conn`
-    // above is the read-only commit-log DB, which has none of those tables (a
-    // verify against it fails with "no such table: users"). Open a main-DB
-    // connection for verification. Falls back to the same DB pre-cutover.
-    let verify_conn = state.remote_db.conn().await?;
+    // Cross-signing cert rows for every add this batch carries, fetched with the
+    // batch rather than once per commit (#987 §5): a cold catch-up over K adds
+    // used to pay K sequential main-DB round trips interleaved with MLS work.
+    // The VERDICT is still computed here — `verify_added_devices` is a signature
+    // check over a chain rooted in the added user's own identity key, and the DS
+    // is outside the trust boundary.
+    let added_identities = snapshot.added_identities;
 
     // 3. Apply each commit in epoch order. For any commit carrying add
     //    metadata, verify every added device's cross-signing cert
@@ -1298,13 +1388,14 @@ async fn process_one_generation<'h>(
 
         // ── Inbound cert verification ────────────────────────────
         if let Some(ref added_user_id) = commit.added_user_id {
+            let identity = added_identities
+                .iter()
+                .find(|i| &i.user_id == added_user_id);
             let outcome = match verify_added_devices(
-                &verify_conn,
+                identity,
                 added_user_id,
                 &commit.added_device_ids,
-            )
-            .await
-            {
+            ) {
                 Ok(o) => o,
                 Err(e) => {
                     eprintln!(
@@ -1512,7 +1603,18 @@ async fn process_one_generation<'h>(
         // tree, decrypting post-removal traffic (membership leak, fuzzer finding
         // #2). A legitimately-forked or freshly-wiped CURRENT member keeps both
         // rows and recovers normally.
-        if may_rejoin_via_external_join(state, mls_group_id, user_id).await {
+        // Re-read the gates rather than reusing the snapshot taken before the
+        // replay: applying a commit may have removed THIS member, and the whole
+        // point of the gate is to notice that before rebuilding. Fails CLOSED on
+        // a failed request, as it must.
+        let gates = super::ds_reads::conversation_snapshot(
+            state,
+            super::ds_reads::state_query(mls_group_id, Some(generation)),
+        )
+        .await
+        .ok();
+        let gates = gates.as_ref().filter(|s| s.authorized);
+        if may_rejoin_via_external_join(gates, mls_group_id, user_id) {
             eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
             // Lock already held by the wrapper, so call the unlocked inner variant.
             if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
@@ -1590,12 +1692,22 @@ async fn maybe_advance_generation(
         }
     }
 
-    // 2. No successor locally. Ask the log whether one exists at all.
-    let (head_generation, _) = published_group_info_head(state, mls_group_id).await?;
+    // 2. No successor locally. Ask the log whether one exists at all — and, in
+    //    the SAME answer, whether we are still entitled to join it. One request,
+    //    so the "a successor exists" observation and the "we may rejoin" decision
+    //    cannot straddle a removal that lands between them.
+    let snap = super::ds_reads::conversation_snapshot(
+        state,
+        super::ds_reads::state_query(mls_group_id, None),
+    )
+    .await
+    .ok();
+    let snap = snap.as_ref().filter(|s| s.authorized);
+    let (head_generation, _) = snap.and_then(group_info_head_of)?;
     if head_generation <= generation {
         return None;
     }
-    if !may_rejoin_via_external_join(state, mls_group_id, user_id).await {
+    if !may_rejoin_via_external_join(snap, mls_group_id, user_id) {
         return None;
     }
     eprintln!(
@@ -1921,17 +2033,7 @@ pub async fn process_pending_commits(
     conversation_id: String,
     user_id: String,
 ) -> crate::error::Result<()> {
-    let mls_group_id = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![conversation_id.clone()],
-        ).await?;
-        match rows.next().await? {
-            Some(row) => row.get::<String>(0)?,
-            None => conversation_id,
-        }
-    };
+    let mls_group_id = super::ds_reads::resolve_mls_group(state, &conversation_id).await?;
     crate::commands::messages::catch_up_mls_group_interleaved(state, &mls_group_id, &user_id).await
 }
 

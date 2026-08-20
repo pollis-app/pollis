@@ -3,12 +3,10 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::state::AppState;
 
-use crate::db::queries::MESSAGES_BY_SENDER as QUERY_MESSAGES_BY_SENDER;
-use crate::db::queries::CHANNEL_PREVIEWS as QUERY_CHANNEL_PREVIEWS;
 
 use super::ingest::{ingest_channel_envelopes_inner, ingest_dm_envelopes_inner};
 use super::types::{
-    ChannelMessage, ChannelPreview, Message, MessageCursor, MessagePage, MessageWithContext,
+    ChannelMessage, Message, MessageCursor, MessagePage,
     SearchResult, ThreadSummary,
 };
 
@@ -221,27 +219,16 @@ async fn attach_sender_usernames_local(
     };
 
     if !missing.is_empty() {
-        let conn = state.remote_db.conn().await?;
-        // Chunked (#916).
-        for chunk in crate::db::chunk::bind_chunks(&missing, 0) {
-        let sql = format!(
-            "SELECT id, username FROM users WHERE id IN ({})",
-            crate::db::chunk::placeholders(chunk.len(), 1)
-        );
-        let params: Vec<libsql::Value> = chunk
-            .iter()
-            .map(|s| libsql::Value::Text(s.clone()))
-            .collect();
-        match conn.query(&sql, libsql::params_from_iter(params)).await {
-            Ok(mut rows) => {
-                let mut fetched: Vec<(String, String)> = Vec::new();
-                while let Some(row) = rows.next().await? {
-                    let id: String = row.get(0)?;
-                    let name: String = row.get(1)?;
-                    fetched.push((id.clone(), name.clone()));
-                    found.insert(id, name);
+        // One request for the whole missing set — the DS chunks its own binds.
+        match crate::commands::ds_reads::users(state, missing.clone(), None).await {
+            Ok(users) => {
+                let fetched: Vec<(String, String)> = users
+                    .into_iter()
+                    .map(|u| (u.id, u.username))
+                    .collect();
+                for (id, name) in &fetched {
+                    found.insert(id.clone(), name.clone());
                 }
-                drop(rows);
                 if !fetched.is_empty() {
                     let guard = state.local_db.lock().await;
                     if let Some(db) = guard.as_ref() {
@@ -260,7 +247,6 @@ async fn attach_sender_usernames_local(
                 // Next ingest / read while online will fill them in.
                 eprintln!("[messages] attach_sender_usernames_local: remote fallback failed: {e}");
             }
-        }
         }
     }
 
@@ -403,59 +389,16 @@ pub async fn read_last_messages(
     Ok(messages)
 }
 
-/// All messages sent by a given user across all their channels,
-/// ordered by group name, then channel name, then timestamp.
-pub async fn list_messages_by_sender(
-    sender_id: String,
-    state: &Arc<AppState>,
-) -> Result<Vec<MessageWithContext>> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(QUERY_MESSAGES_BY_SENDER, libsql::params![sender_id]).await?;
-
-    let mut messages = Vec::new();
-    while let Some(row) = rows.next().await? {
-        messages.push(MessageWithContext {
-            group_id: row.get(0)?,
-            group_name: row.get(1)?,
-            channel_id: row.get(2)?,
-            channel_name: row.get(3)?,
-            id: row.get(4)?,
-            sender_id: row.get(5)?,
-            ciphertext: row.get(6)?,
-            sent_at: row.get(7)?,
-        });
-    }
-
-    Ok(messages)
-}
-
-/// Last message and sender username for every channel the given user belongs to,
-/// ordered most-recently-active first. Channels with no messages appear last.
-pub async fn list_channel_previews(
-    user_id: String,
-    state: &Arc<AppState>,
-) -> Result<Vec<ChannelPreview>> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(QUERY_CHANNEL_PREVIEWS, libsql::params![user_id]).await?;
-
-    let mut previews = Vec::new();
-    while let Some(row) = rows.next().await? {
-        previews.push(ChannelPreview {
-            group_id: row.get(0)?,
-            group_name: row.get(1)?,
-            channel_id: row.get(2)?,
-            channel_name: row.get(3)?,
-            last_message: row.get(4)?,
-            last_sent_at: row.get(5)?,
-            last_sender_id: row.get(6)?,
-            last_sender_username: row.get(7)?,
-        });
-    }
-
-    Ok(previews)
-}
+// #987: `list_messages_by_sender` and `list_channel_previews` were deleted here.
+//
+// Both were caller-less — no renderer, no mobile hook, no test drove either —
+// AND both were semantically dead: they filter or project
+// `message_envelope.sender_id`, which since #607's sealed sender is always the
+// literal string `"sealed"`. `list_messages_by_sender` could therefore never
+// match a real user, and `list_channel_previews` could only ever report the
+// sentinel as every channel's last sender. Porting them behind the DS would
+// have meant building an endpoint for two queries that cannot answer their own
+// question.
 
 /// Fetch a page of messages for a DM channel the user is a member of.
 /// Results are ordered newest-first.

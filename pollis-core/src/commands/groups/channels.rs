@@ -20,27 +20,19 @@ pub async fn list_group_channels(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<Channel>> {
-    let conn = state.remote_db.conn().await?;
-
-    authz::require_member(&conn, &group_id, &requester_id).await?;
-
-    let mut rows = conn.query(
-        "SELECT id, group_id, name, description, channel_type FROM channels WHERE group_id = ?1",
-        libsql::params![group_id],
-    ).await?;
-
-    let mut channels = Vec::new();
-    while let Some(row) = rows.next().await? {
-        channels.push(Channel {
-            id: row.get(0)?,
-            group_id: row.get(1)?,
-            name: row.get(2)?,
-            description: row.get(3)?,
-            channel_type: row.get::<Option<String>>(4)?.unwrap_or_else(|| "text".to_string()),
-        });
+    // Membership and the channel list in ONE request: the DS answers
+    // `authorized: false` with an empty list, which is the same refusal
+    // `require_member` produced — expressed once, server-side, by the same
+    // predicate that gates the writes.
+    let resp = crate::commands::ds_reads::group(state, &group_id, &requester_id, false).await?;
+    if !resp.authorized {
+        return Err(Error::Other(anyhow::anyhow!(authz::NOT_A_MEMBER)));
     }
-
-    Ok(channels)
+    Ok(resp
+        .channels
+        .into_iter()
+        .map(super::groups::channel_from_wire)
+        .collect())
 }
 
 pub async fn create_channel(
@@ -89,31 +81,39 @@ pub async fn update_channel(
     description: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<Channel> {
-    let conn = state.remote_db.conn().await?;
-
-    // Get channel's group_id then check requester role
-    let mut rows = conn.query(
-        "SELECT group_id FROM channels WHERE id = ?1",
-        libsql::params![channel_id.clone()],
-    ).await?;
-
-    let group_id: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
+    // The channel id resolves to its owning group server-side, so the preflight
+    // is one request rather than two (resolve, then role).
+    let role = crate::commands::ds_reads::group_role(state, &channel_id, &requester_id).await?;
+    if !role.exists {
         return Err(Error::Other(anyhow::anyhow!("channel not found")));
-    };
-
-    authz::require_admin(&conn, &group_id, &requester_id, "update channels").await?;
+    }
+    let group_id = role.group_id.clone();
+    if role.role.as_deref() != Some("admin") {
+        return Err(Error::Other(anyhow::anyhow!(
+            "only group admins can update channels"
+        )));
+    }
 
     // DS seam: route the column updates through the Delivery Service (admin
-    // re-derived server-side).
+    // re-derived server-side) and take the UPDATED ROW from its response (#987).
     let body = pollis_api::groups::UpdateChannelBody {
         channel_id: channel_id.clone(),
         requester_id: Some(requester_id),
         name,
         description,
     };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    let pollis_api::groups::UpdatedChannel::Ok {
+        id,
+        group_id: updated_group_id,
+        name,
+        description,
+        channel_type,
+    } = crate::commands::mls::ds_post_json(state, &body).await?;
+    let group_id = if group_id.is_empty() {
+        updated_group_id.clone()
+    } else {
+        group_id
+    };
 
     // Same reasoning as `create_channel` (#874): a rename other members can't
     // see until they refocus is a stale sidebar, not a saved round trip.
@@ -124,22 +124,13 @@ pub async fn update_channel(
         eprintln!("[realtime] update_channel: notify group {group_id}: {e}");
     }
 
-    let mut rows = conn.query(
-        "SELECT id, group_id, name, description, channel_type FROM channels WHERE id = ?1",
-        libsql::params![channel_id],
-    ).await?;
-
-    if let Some(row) = rows.next().await? {
-        Ok(Channel {
-            id: row.get(0)?,
-            group_id: row.get(1)?,
-            name: row.get(2)?,
-            description: row.get(3)?,
-            channel_type: row.get::<Option<String>>(4)?.unwrap_or_else(|| "text".to_string()),
-        })
-    } else {
-        Err(Error::Other(anyhow::anyhow!("channel not found after update")))
-    }
+    Ok(Channel {
+        id,
+        group_id: updated_group_id,
+        name,
+        description,
+        channel_type,
+    })
 }
 
 pub async fn delete_channel(
@@ -147,20 +138,16 @@ pub async fn delete_channel(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT group_id FROM channels WHERE id = ?1",
-        libsql::params![channel_id.clone()],
-    ).await?;
-
-    let group_id: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
+    let role = crate::commands::ds_reads::group_role(state, &channel_id, &requester_id).await?;
+    if !role.exists {
         return Err(Error::Other(anyhow::anyhow!("channel not found")));
-    };
-
-    authz::require_admin(&conn, &group_id, &requester_id, "delete channels").await?;
+    }
+    if role.role.as_deref() != Some("admin") {
+        return Err(Error::Other(anyhow::anyhow!(
+            "only group admins can delete channels"
+        )));
+    }
+    let group_id = role.group_id.clone();
 
     // DS seam: route the envelope/watermark/channel deletes through the Delivery
     // Service (one transactional, admin-gated write).

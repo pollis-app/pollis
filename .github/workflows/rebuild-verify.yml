@@ -26,17 +26,16 @@ name: Rebuild & Verify (independent reproducer)
 #     none is a hard refusal. Empty means no anchor at all, and the assert step
 #     fails loudly rather than proceeding on an unpinned log.
 #
-# HONEST LIMIT — the "reproducible modulo a documented list" caveat is real and
-# lives in docs/reproducible-builds-residuals.md. The client bakes its build
-# recipe via `option_env!` at compile time (pollis-core/src/config.rs). Since
-# the #506 secrets-broker cutover that recipe is: TURSO_URL, the READ-ONLY
-# TURSO_TOKEN, LOG_DB_URL, LOG_DB_TOKEN, R2_S3_ENDPOINT, R2_PUBLIC_URL,
-# LIVEKIT_URL, POLLIS_DELIVERY_URL — no R2 or LiveKit
-# credentials are read by the client at all anymore. Every entry is publishable
-# except the one remaining secret-shaped residual: the OPTIONAL observability
-# LOG_DB_TOKEN (see the residuals doc, item 4). Until that token is scoped out
-# of the client build, a truly zero-recipe third party cannot bit-reproduce the
-# shipped payload — the baked bytes differ. So this workflow:
+# THE RECIPE — the client bakes its build inputs via `option_env!` at compile
+# time (pollis-core/src/config.rs). Since #987 that recipe is: R2_S3_ENDPOINT,
+# R2_PUBLIC_URL, LIVEKIT_URL, POLLIS_DELIVERY_URL,
+# POLLIS_OVERLAY_DIRECTORY_URL, POLLIS_OVERLAY_DIRECTORY_KEY — and every one of
+# them is PUBLISHABLE. The #506 secrets-broker cutover had already taken the R2
+# and LiveKit credentials out; #987 took the last secret-shaped entries, the
+# database URLs and tokens, by removing the client's database access entirely.
+# The residuals doc's item 4 (the optional observability LOG_DB_TOKEN, the one
+# thing that stopped a zero-recipe third party bit-reproducing the payload) is
+# therefore closed. So this workflow:
 #   (a) ALWAYS proves LOG INCLUSION for everyone — the `verify-log-inclusion`
 #       job needs no build inputs at all, and it is a SEPARATE job precisely so
 #       it passes or fails on its own even when the rebuild half fails; and
@@ -478,22 +477,28 @@ jobs:
       # The published, NON-SECRET build recipe (see the header). Read from
       # repository/environment `vars` — never `secrets` — so this file stays
       # fork-runnable. `option_env!` bakes each into the binary at compile time,
-      # and this list is EXACTLY pollis-core/src/config.rs's recipe as of #506
-      # (the client no longer reads any R2 or LiveKit credential, so none is
-      # passed). Exported via $GITHUB_ENV behind an is-set guard because an
+      # and this list is EXACTLY pollis-core/src/config.rs's recipe as of #987
+      # (the client reads no R2 or LiveKit credential since #506, and no database
+      # credential at all since #987). `scripts/check-build-recipe.py` fails CI
+      # if the three lists — config.rs, desktop-release.yml, this one — ever
+      # disagree. Exported via $GITHUB_ENV behind an is-set guard because an
       # unset var must stay truly UNSET: a plain `env:` mapping of an undefined
       # var exports an EMPTY string, which option_env! bakes as Some("") —
       # different bytes from a release that left the var unset (None), e.g. an
-      # unset LOG_DB_URL. Tags older than v1.3.5 predate both the
-      # determinism flags (#504) and the #506 recipe and are not
-      # bit-reproducible here regardless — for those, only log inclusion
-      # applies.
+      # unset LIVEKIT_URL. Tags older than v1.3.5 predate both the determinism
+      # flags (#504) and the #506 recipe and are not bit-reproducible here
+      # regardless — for those, only log inclusion applies. A tag from BEFORE
+      # #987 additionally needs the four database vars this list no longer
+      # carries, since its binary baked them.
       - name: Load build recipe (non-secret vars)
         env:
-          TURSO_URL: ${{ vars.TURSO_URL }}
-          TURSO_TOKEN: ${{ vars.TURSO_RO_TOKEN }}
-          LOG_DB_URL: ${{ vars.LOG_DB_URL }}
-          LOG_DB_TOKEN: ${{ vars.LOG_DB_TOKEN }}
+          # #987 removed TURSO_URL / TURSO_RO_TOKEN / LOG_DB_URL / LOG_DB_TOKEN
+          # from this recipe, because the client no longer reads them: it holds
+          # no database credential and `pollis-core` does not link libsql. That
+          # took the LAST secret-shaped entry out of the recipe — see the HONEST
+          # LIMIT note at the top of this file, which used to say a truly
+          # zero-recipe third party could not reproduce the payload while the
+          # optional LOG_DB_TOKEN was baked in.
           R2_S3_ENDPOINT: ${{ vars.R2_S3_ENDPOINT }}
           R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
           LIVEKIT_URL: ${{ vars.LIVEKIT_URL }}
@@ -508,8 +513,7 @@ jobs:
           POLLIS_OVERLAY_DIRECTORY_KEY: ${{ vars.POLLIS_OVERLAY_DIRECTORY_KEY }}
         run: |
           set -euo pipefail
-          for key in TURSO_URL TURSO_TOKEN LOG_DB_URL LOG_DB_TOKEN \
-                     R2_S3_ENDPOINT R2_PUBLIC_URL LIVEKIT_URL \
+          for key in R2_S3_ENDPOINT R2_PUBLIC_URL LIVEKIT_URL \
                      POLLIS_DELIVERY_URL \
                      POLLIS_OVERLAY_DIRECTORY_URL POLLIS_OVERLAY_DIRECTORY_KEY; do
             if [ -n "${!key}" ]; then

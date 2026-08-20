@@ -254,26 +254,29 @@ pub async fn ensure_device_cert(
         load_device_cert_pubs(&provider, user_id, device_id)?
     };
 
-    // 2. Read the current identity_version for this user from the remote
-    //    `users` table. Defaults to 1 if the column is NULL (shouldn't
-    //    happen post-migration-13 but is defensive).
-    let conn = state.remote_db.conn().await?;
-    let identity_version: u32 = {
-        let mut rows = conn
-            .query(
-                "SELECT identity_version FROM users WHERE id = ?1",
-                libsql::params![user_id],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => row.get::<i64>(0).unwrap_or(1) as u32,
-            None => {
-                return Err(crate::error::Error::Other(anyhow::anyhow!(
-                    "user {user_id} not found while signing device cert"
-                )))
-            }
-        }
-    };
+    // 2. Read the current identity_version to stamp into the cert.
+    //
+    //    Via the UNAUTHENTICATED account probe, not the authenticated
+    //    `account-status` read, because of the bootstrap pivot documented at
+    //    step 4: this runs on a device whose `user_device.mls_signature_pub` is
+    //    still NULL, which is the exact column the DS reads to verify a
+    //    signature — so a device-signed read here 401s on every first signup and
+    //    on every sibling-approval enrollment. A session does not close the gap
+    //    either; the enrollment path deliberately publishes on cert-validity
+    //    alone because a human approval outlives the session TTL.
+    //
+    //    `identity_version` is public by construction (it is stamped in the
+    //    clear into every device cert every group member reads), so the probe is
+    //    the right place for it. Defaults to 1 when the column is NULL —
+    //    defensive; it should not happen post-migration-13.
+    let identity_version: u32 = crate::commands::ds_reads::account_probe(state, user_id)
+        .await?
+        .identity_version
+        .ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!(
+                "user {user_id} has no account identity while signing device cert"
+            ))
+        })? as u32;
 
     // 3. Sign the cert with the account identity key loaded from the OS
     //    keystore, using the current unix time as `issued_at`.
@@ -370,9 +373,23 @@ pub async fn ensure_device_cert(
     Ok(true)
 }
 
+/// One device that needs its cross-signing cert re-signed: its id and both leaf
+/// signing keys, decoded from the base64 the DS serves.
+///
+/// A named type rather than a tuple because the v2 cert (#668) binds BOTH leaf
+/// keys and the two are the same shape — an accidental swap at a call site would
+/// produce a cert that verifies against the wrong key and fails only for the
+/// device it was minted for.
+pub struct StaleCertDevice {
+    pub device_id: String,
+    /// Ed25519 leaf signing key (classic MLS suite).
+    pub mls_signature_pub: Vec<u8>,
+    /// ML-DSA-44 leaf signing key (PQ suite, #668).
+    pub mls_signature_pub_pq: Vec<u8>,
+}
+
 /// The stale-cert candidate set for `user_id` at account identity version
-/// `identity_version`: the `(device_id, mls_signature_pub, mls_signature_pub_pq)`
-/// of every `user_device` row that still needs re-signing.
+/// `identity_version`: every `user_device` row that still needs re-signing.
 ///
 /// "Stale" means `cert_identity_version IS NULL` or
 /// `cert_identity_version < identity_version` — the cert was signed under a
@@ -387,35 +404,49 @@ pub async fn ensure_device_cert(
 ///     — registered devices that never finished `ensure_device_cert` (or predate
 ///     the #668 v2 cert), which get their cert when that device next comes online.
 ///
-/// Extracted (and `pub` for the integration test) so the predicate is testable
-/// against a real libsql DB without the account-key signing + DS write the rest
-/// of [`resign_stale_device_certs`] performs. It must live in an integration
-/// binary, not a `--lib` test: libsql's local backend calls `sqlite3_config` on
-/// first use, which fails once rusqlite/SQLCipher has already initialised SQLite
-/// in the same process (see `tests/resign_stale_certs.rs`).
-pub async fn stale_cert_candidates(
-    conn: &libsql::Connection,
-    user_id: &str,
+/// A PURE predicate over rows the Delivery Service supplied (#987).
+///
+/// The revoked exclusion is enforced twice, on purpose: the caller asks the DS
+/// for non-revoked rows, and this filters again on `revoked_at`. A predicate
+/// this consequential should not depend on a caller having passed the right
+/// flag — re-signing a tombstoned device's cert resurrects a valid-looking
+/// credential for a device that was deliberately turned off.
+///
+/// `pub` so the regression suite drives the real predicate rather than a copy.
+/// It is pure now, so it needs no database and no separate integration binary —
+/// the libsql/rusqlite `sqlite3_config` clash that forced `tests/
+/// resign_stale_certs.rs` into its own process is simply gone.
+pub fn stale_cert_candidates(
+    rows: &[pollis_api::account_reads::DeviceRow],
     identity_version: i64,
-) -> crate::error::Result<Vec<(String, Vec<u8>, Vec<u8>)>> {
-    let mut rows = conn
-        .query(
-            "SELECT device_id, mls_signature_pub, mls_signature_pub_pq FROM user_device \
-             WHERE user_id = ?1 \
-               AND revoked_at IS NULL \
-               AND mls_signature_pub IS NOT NULL \
-               AND mls_signature_pub_pq IS NOT NULL \
-               AND (cert_identity_version IS NULL \
-                    OR cert_identity_version < ?2)",
-            libsql::params![user_id, identity_version],
-        )
-        .await?;
+) -> crate::error::Result<Vec<StaleCertDevice>> {
     let mut out = Vec::new();
-    while let Some(row) = rows.next().await? {
-        let did: String = row.get(0)?;
-        let pub_bytes: Vec<u8> = row.get(1)?;
-        let pq_pub_bytes: Vec<u8> = row.get(2)?;
-        out.push((did, pub_bytes, pq_pub_bytes));
+    for row in rows {
+        if row.revoked_at.is_some() {
+            continue;
+        }
+        // A device that never finished `ensure_device_cert` (or predates the
+        // #668 v2 cert) has no leaf pub to sign over. It gets its cert when it
+        // next comes online, not from here.
+        let (Some(sig), Some(pq)) = (
+            row.mls_signature_pub.as_deref(),
+            row.mls_signature_pub_pq.as_deref(),
+        ) else {
+            continue;
+        };
+        // NULL `cert_identity_version` means "never certified", which is stale
+        // by definition — the same reading the SQL's `IS NULL OR <` gave.
+        let stale = row
+            .cert_identity_version
+            .is_none_or(|v| v < identity_version);
+        if !stale {
+            continue;
+        }
+        out.push(StaleCertDevice {
+            device_id: row.device_id.clone(),
+            mls_signature_pub: super::ds_reads::decode_b64("mls_signature_pub", sig)?,
+            mls_signature_pub_pq: super::ds_reads::decode_b64("mls_signature_pub_pq", pq)?,
+        });
     }
     Ok(out)
 }
@@ -442,33 +473,33 @@ pub async fn resign_stale_device_certs(
     state: &Arc<AppState>,
     user_id: &str,
 ) -> crate::error::Result<usize> {
-    let conn = state.remote_db.conn().await?;
+    let identity_version: u32 = crate::commands::ds_reads::account_status(state, user_id)
+        .await?
+        .map(|a| a.identity_version as u32)
+        .ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!(
+                "user {user_id} not found while re-signing device certs"
+            ))
+        })?;
 
-    let identity_version: u32 = {
-        let mut rows = conn
-            .query(
-                "SELECT identity_version FROM users WHERE id = ?1",
-                libsql::params![user_id],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => row.get::<i64>(0).unwrap_or(1) as u32,
-            None => {
-                return Err(crate::error::Error::Other(anyhow::anyhow!(
-                    "user {user_id} not found while re-signing device certs"
-                )))
-            }
-        }
-    };
-
-    let devices = stale_cert_candidates(&conn, user_id, identity_version as i64).await?;
+    // The caller's OWN devices, including the cert columns — served with the
+    // management columns because this is the owner asking. Revoked rows are
+    // excluded: re-signing a tombstoned device's cert would be re-issuing
+    // credentials for a device that was deliberately turned off.
+    let rows = crate::commands::ds_reads::devices(state, Some(user_id), Vec::new(), false).await?;
+    let devices = stale_cert_candidates(&rows, identity_version as i64)?;
 
     // Sign every stale device's cert with the account identity key (held only in
     // the OS keystore) BEFORE any remote write, collecting the cert columns. The
     // re-sign never touches `mls_signature_pub` — only the cert columns — so it
     // cannot change a device's DS-auth credential.
     let mut signed: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(devices.len());
-    for (device_id, sig_pub_bytes, pq_sig_pub_bytes) in devices {
+    for StaleCertDevice {
+        device_id,
+        mls_signature_pub: sig_pub_bytes,
+        mls_signature_pub_pq: pq_sig_pub_bytes,
+    } in devices
+    {
         let issued_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -562,8 +593,24 @@ pub(super) enum VerifyOutcome {
     AbsentRetry,
 }
 
-pub(super) async fn verify_added_devices(
-    conn: &libsql::Connection,
+/// Decide whether the devices a commit adds are legitimately added, from rows
+/// the Delivery Service supplied.
+///
+/// **The decision stays here.** Since #987 the client holds no database
+/// credential, so the ROWS arrive over HTTP — but the loop below is a signature
+/// check over a cert chain rooted in the user's own `account_id_pub`, and the DS
+/// is explicitly outside the trust boundary (`docs/security-whitepaper.md`). A
+/// DS that answered "Verified" would be a DS that could add devices to groups.
+/// So it answers with columns and this function answers with a verdict, exactly
+/// as when the columns came from a `SELECT`.
+///
+/// `identity` is `None` when the batch named this user but the DS had no
+/// `users` row for them — the same replication-lag case a missing row used to
+/// be, and treated identically ([`VerifyOutcome::AbsentRetry`]). Every outcome
+/// and every log line below is byte-for-byte what the direct-read version
+/// produced for the same inputs.
+pub(super) fn verify_added_devices(
+    identity: Option<&pollis_api::reads::AddedIdentity>,
     target_user_id: &str,
     device_ids: &[String],
 ) -> crate::error::Result<VerifyOutcome> {
@@ -571,102 +618,36 @@ pub(super) async fn verify_added_devices(
         return Ok(VerifyOutcome::Verified);
     }
 
-    // Fetch account_id_pub once. A missing `users` row or NULL
-    // account_id_pub falls into AbsentRetry: the row may simply not have
-    // replicated yet.
-    let account_id_pub: Vec<u8> = {
-        let mut rows = conn
-            .query(
-                "SELECT account_id_pub FROM users WHERE id = ?1",
-                libsql::params![target_user_id],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => match row.get::<Option<Vec<u8>>>(0).ok().flatten() {
-                Some(b) => b,
-                None => {
-                    eprintln!(
-                        "[mls] verify_added_devices: {target_user_id} has no account_id_pub — retry"
-                    );
-                    return Ok(VerifyOutcome::AbsentRetry);
-                }
-            },
-            None => {
-                eprintln!(
-                    "[mls] verify_added_devices: user {target_user_id} not found — retry"
-                );
-                return Ok(VerifyOutcome::AbsentRetry);
-            }
-        }
+    // A missing `users` row or NULL account_id_pub falls into AbsentRetry: the
+    // row may simply not have replicated yet.
+    let Some(identity) = identity else {
+        eprintln!("[mls] verify_added_devices: user {target_user_id} not found — retry");
+        return Ok(VerifyOutcome::AbsentRetry);
+    };
+    let Some(account_id_pub) = identity
+        .account_id_pub
+        .as_deref()
+        .map(|s| super::ds_reads::decode_b64("account_id_pub", s))
+        .transpose()?
+    else {
+        eprintln!("[mls] verify_added_devices: {target_user_id} has no account_id_pub — retry");
+        return Ok(VerifyOutcome::AbsentRetry);
     };
 
-    // ONE query for the whole added-device list (#875). This runs inside the
-    // commit replay, once per add-carrying commit, so a cold-launch catch-up
-    // over K commits was paying K × (1 + devices) SEQUENTIAL Turso round trips
-    // interleaved with MLS work.
-    //
-    // The verification LOOP below is unchanged and still short-circuits in
-    // `device_ids` order, so the outcome and the log line for any given input
-    // are byte-identical. The only difference is that devices after the first
-    // failure are now fetched-but-not-examined instead of never fetched — no
-    // decision depends on that.
-    //
     // The map is READ, never drained: `added_device_ids` is a CSV column the DS
     // writes, so a repeated id in it is a shape this function has to survive.
     // Taking rows out would make the second mention of a device look absent,
     // turn a legitimate commit into a permanent `AbsentRetry`, and wedge the
-    // replay — where the per-device query it replaces would simply have
-    // returned the same row twice.
-    struct DeviceRow {
-        cert: Option<Vec<u8>>,
-        issued_at_str: Option<String>,
-        cert_identity_version: Option<i64>,
-        mls_sig_pub: Option<Vec<u8>>,
-        revoked_at: Option<String>,
-        mls_sig_pub_pq: Option<Vec<u8>>,
-    }
-    let mut by_device: std::collections::HashMap<String, DeviceRow> =
-        std::collections::HashMap::with_capacity(device_ids.len());
-    // `?1` is the user; devices occupy `?2..`. Bound by position — a device id
-    // is attacker-influenced and never goes near string-built SQL. Chunked
-    // (#916) with ONE slot reserved for the user id, so the two halves of that
-    // arithmetic stay adjacent.
-    for chunk in crate::db::chunk::bind_chunks(device_ids, 1) {
-        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 1);
-        params.push(target_user_id.to_string().into());
-        for did in chunk {
-            params.push(did.clone().into());
-        }
-        let mut rows = conn
-            .query(
-                &format!(
-                    "SELECT device_id, device_cert, cert_issued_at, cert_identity_version, \
-                            mls_signature_pub, revoked_at, mls_signature_pub_pq \
-                     FROM user_device WHERE user_id = ?1 AND device_id IN ({})",
-                    crate::db::chunk::placeholders(chunk.len(), 2)
-                ),
-                params,
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            let did: String = row.get(0)?;
-            by_device.insert(
-                did,
-                DeviceRow {
-                    cert: row.get::<Option<Vec<u8>>>(1).ok().flatten(),
-                    issued_at_str: row.get::<Option<String>>(2).ok().flatten(),
-                    cert_identity_version: row.get::<Option<i64>>(3).ok().flatten(),
-                    mls_sig_pub: row.get::<Option<Vec<u8>>>(4).ok().flatten(),
-                    revoked_at: row.get::<Option<String>>(5).ok().flatten(),
-                    mls_sig_pub_pq: row.get::<Option<Vec<u8>>>(6).ok().flatten(),
-                },
-            );
-        }
+    // replay.
+    let mut by_device: std::collections::HashMap<&str, &pollis_api::reads::DeviceCertRow> =
+        std::collections::HashMap::with_capacity(identity.devices.len());
+    for row in &identity.devices {
+        by_device.insert(row.device_id.as_str(), row);
     }
 
     for did in device_ids {
         let row = match by_device.get(did.as_str()) {
-            Some(r) => r,
+            Some(r) => *r,
             None => {
                 // Row absent. Could be (a) revoked + hard-deleted by an
                 // older app version (pre-#372 deployment), or (b) just not
@@ -679,45 +660,40 @@ pub(super) async fn verify_added_devices(
             }
         };
 
-        let DeviceRow {
-            cert,
-            issued_at_str,
-            cert_identity_version,
-            mls_sig_pub,
-            revoked_at,
-            mls_sig_pub_pq,
-        } = row;
-        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, revoked_at, mls_sig_pub_pq) = (
-            cert.clone(),
-            issued_at_str.clone(),
-            *cert_identity_version,
-            mls_sig_pub.clone(),
-            revoked_at.clone(),
-            mls_sig_pub_pq.clone(),
-        );
-
         // Tombstone wins — a revoked device is unambiguously not allowed
         // to add itself, regardless of cert column state.
-        if revoked_at.is_some() {
+        if row.revoked_at.is_some() {
+            let revoked_at = &row.revoked_at;
             eprintln!(
                 "[mls] verify_added_devices: device {did} is REVOKED (revoked_at={revoked_at:?})"
             );
             return Ok(VerifyOutcome::Revoked);
         }
 
-        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) =
-            match (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) {
-                (Some(c), Some(t), Some(v), Some(p), Some(q)) => (c, t, v, p, q),
-                _ => {
-                    // Cert columns NULL on a non-revoked row is the
-                    // "device row inserted but cert publish hasn't landed
-                    // yet" race. Same treatment as fully absent.
-                    eprintln!(
-                        "[mls] verify_added_devices: device {did} has no cert columns populated — retry"
-                    );
-                    return Ok(VerifyOutcome::AbsentRetry);
-                }
-            };
+        let (cert, issued_at_str, cert_identity_version, mls_sig_pub, mls_sig_pub_pq) = match (
+            row.device_cert.as_deref(),
+            row.cert_issued_at.as_deref(),
+            row.cert_identity_version,
+            row.mls_signature_pub.as_deref(),
+            row.mls_signature_pub_pq.as_deref(),
+        ) {
+            (Some(c), Some(t), Some(v), Some(p), Some(q)) => (
+                super::ds_reads::decode_b64("device_cert", c)?,
+                t,
+                v,
+                super::ds_reads::decode_b64("mls_signature_pub", p)?,
+                super::ds_reads::decode_b64("mls_signature_pub_pq", q)?,
+            ),
+            _ => {
+                // Cert columns NULL on a non-revoked row is the
+                // "device row inserted but cert publish hasn't landed
+                // yet" race. Same treatment as fully absent.
+                eprintln!(
+                    "[mls] verify_added_devices: device {did} has no cert columns populated — retry"
+                );
+                return Ok(VerifyOutcome::AbsentRetry);
+            }
+        };
 
         let issued_at: u64 = match issued_at_str.parse() {
             Ok(v) => v,
@@ -741,9 +717,7 @@ pub(super) async fn verify_added_devices(
             &cert,
         ) {
             // Cert chain itself failed — unambiguous bad data, not a race.
-            eprintln!(
-                "[mls] verify_added_devices: device {did} cert verification failed: {e}"
-            );
+            eprintln!("[mls] verify_added_devices: device {did} cert verification failed: {e}");
             return Ok(VerifyOutcome::Revoked);
         }
     }

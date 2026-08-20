@@ -70,7 +70,6 @@ async-trait = "0.1"
 # with libwebrtc-sys's bundled BoringSSL (duplicate `PKCS8_*` symbols at
 # link), so we keep system OpenSSL for the desktop link. NDK builds have
 # no system libcrypto, hence vendored on mobile.
-libsql = { version = "0.9", features = ["remote"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 # The account identity key and every Pollis-owned signature moved to ML-DSA-44
@@ -123,14 +122,6 @@ pollis-device-cert = { path = "../pollis-device-cert" }
 # pollis-delivery — which must not depend on pollis-core — builds its test
 # databases from the same definitions rather than hand-rolled partial ones.
 pollis-schema = { path = "../pollis-schema" }
-# The libsql connector that routes Turso's Hrana/TLS through the overlay shim.
-# hyper 0.14 + hyper-rustls 0.25 are ALREADY in this crate's graph via libsql's
-# default (tls) features; naming them directly lets `net::overlay::overlay_connector`
-# mirror libsql's own default TLS connector (`with_native_roots().enable_http1()`)
-# but wrap a SOCKS-dialing inner connector. No new lockfile crates.
-hyper = { version = "0.14", features = ["client"] }
-hyper-rustls = "0.25"
-tower-service = "0.3"
 dotenvy = "0.15"
 thiserror = "1"
 zeroize = { version = "1", features = ["derive"] }
@@ -211,7 +202,13 @@ gethostname = "1.1.0"
 # `pollis-verify` auditor CLI runs (account::verify_account), so the client's
 # self-audit / peer-audit can never reach a different verdict than the
 # published per-user reports. Path dep on the serve layer (#330, slice E).
-verifiable-log-serve = { path = "../verifiable-log-serve" }
+# Release + account transparency verification (`commands/transparency.rs`).
+# `default-features = false` drops the crate's `live` feature, which is the only
+# thing in it that reads a database — without that, `verifiable-log-builder`'s
+# Turso reader pulls `libsql` back into the CLIENT through the side door, and
+# #987's whole claim ("the client holds no database credential") stops being
+# true at the dependency level even though no client code calls it.
+verifiable-log-serve = { path = "../verifiable-log-serve", default-features = false }
 
 # Desktop real-time media stack — optional, pulled in by the `media` feature
 # (on by default). These have no mobile path and mobile drops voice, so a mobile

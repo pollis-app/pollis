@@ -235,9 +235,21 @@ fn no_seed_writes_a_sqlite_datetime_into_the_cursor_column() {
                 }
             }
             // The direct form: a Rust-side seed that stopped using the chokepoint.
+            //
+            // Gated on the file actually INSERTing into the table (#987). Since
+            // the read migration a module can name both `conversation_watermark`
+            // and `last_fetched_at` while only ever SELECTing them — the
+            // envelope fetch correlates on the watermark to answer "strictly past
+            // THAT conversation's cursor". A reader has no cursor to format, so
+            // flagging it would make this tripwire cry wolf, which is how a
+            // tripwire stops being read.
+            let inserts_watermarks = flat
+                .split("INSERT ")
+                .skip(1)
+                .any(|stmt| stmt.contains("conversation_watermark"));
             if rel != std::path::Path::new("src/messages.rs")
+                && inserts_watermarks
                 && text.contains("last_fetched_at")
-                && text.contains("conversation_watermark")
                 && !text.contains("seeded_watermark_cursor")
                 && !text.contains("body.last_fetched_at")
             {

@@ -61,7 +61,7 @@ os-keystore = ["pollis-core/os-keystore"]
 # scope. Not enabled in release builds — run the harness with
 # `cargo test --features test-harness --test flows` (default features), or
 # headless with `--no-default-features --features test-harness`.
-test-harness = ["tauri/test", "pollis-core/test-harness"]
+test-harness = ["tauri/test", "pollis-core/test-harness", "dep:libsql"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -103,9 +103,14 @@ serde_json = "1"
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 dotenvy = "0.15"
-# Used by src/test_harness.rs (compiled under feature = "test-harness") for
-# direct Turso access + anyhow! sites; and by tests/flows.rs.
-libsql = { version = "0.9", features = ["remote"] }
+# OPTIONAL, and pulled in only by `test-harness` (#987). The shipping desktop
+# binary holds no database credential and links no database driver: every
+# remote read and write is a signed POST to the Delivery Service. libsql
+# survives here solely for src/test_harness.rs and tests/flows.rs, where the
+# harness stands up a process-local "remote" the DS reads from. Making it
+# optional is what keeps `libsql` — and the h2 0.3 / hyper 0.14 stack it drags
+# behind it — out of the graph a user actually installs.
+libsql = { version = "0.9", features = ["remote"], optional = true }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -130,11 +135,13 @@ openmls_basic_credential = "0.5"
 tls_codec = "0.5"
 rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
 # In-process MLS Delivery Service for the flows harness: the real DS router
-# (build_router) bound on a loopback port against the SAME test libsql file the
-# clients use, so flows exercise the deployed DS submission path end to end.
-# `test-harness` exposes `Db::from_shared`, which the flows harness needs to
-# hand the DS the SAME libsql handle its clients read from (#925).
-pollis-delivery = { path = "../pollis-delivery", features = ["test-harness"] }
+# (build_router) bound on a loopback port, against the two local libsql files the
+# harness owns, so flows exercise the deployed DS path end to end. Since #987 the
+# harness ALSO gets its `Db` type from here — clients have no database handle of
+# their own, so the DS's is the only one, and the tests share it rather than
+# opening a second `Database` on the same file (which would not see the DS's WAL
+# writes promptly).
+pollis-delivery = { path = "../pollis-delivery" }
 # The shared endpoint table + request types, so the harness routes on the same
 # `Body::PATH` constants the client posts to and can assert route coverage
 # against the one declaration instead of a hand-kept list (#875, #918).

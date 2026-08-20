@@ -31,21 +31,21 @@ const UI_REFRESH: Duration = Duration::from_millis(750);
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     // Build the client the same way AppState::new does for the desktop app:
-    // Config::from_env + connect both DBs + the device keystore, which picks
-    // the OS keychain or the machine-bound encrypted file at runtime (#882) —
-    // so this works over SSH with no secret-service. POLLIS_DELIVERY_URL is
-    // required for writes; TURSO_* for reads. Set POLLIS_DATA_DIR so the TUI
-    // enrolls as its own device.
-    let config = Config::from_env().context(
-        "loading config from env (need TURSO_URL, TURSO_TOKEN, POLLIS_DELIVERY_URL, R2_* placeholders)",
-    )?;
+    // Config::from_env + the local DB + the device keystore, which picks the OS
+    // keychain or the machine-bound encrypted file at runtime (#882) — so this
+    // works over SSH with no secret-service. POLLIS_DELIVERY_URL is required for
+    // everything: since #987 the TUI holds no database credential either, so
+    // reads and writes alike are signed POSTs to the DS. Set POLLIS_DATA_DIR so
+    // the TUI enrolls as its own device.
+    let config = Config::from_env()
+        .context("loading config from env (need POLLIS_DELIVERY_URL, R2_* placeholders)")?;
     let state = Arc::new(
         AppState::new(config)
             .await
-            .context("connecting AppState (Turso + keystore)")?,
+            .context("connecting AppState (local DB + keystore)")?,
     );
 
-    // Honor POLLIS_OVERLAY at boot via the runtime apply path (construct DBs
+    // Honor POLLIS_OVERLAY at boot via the runtime apply path (build the client
     // direct, then apply the mode). Non-fatal: on failure stay direct.
     let boot_mode = state.config.overlay_mode;
     if let Err(e) = pollis_core::commands::overlay::apply_overlay_mode(&state, boot_mode).await {
@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
     // where stderr is a dev terminal). Here stderr IS the UI's terminal — any
     // write scrolls the screen under ratatui and corrupts the layout — so
     // redirect fd 2 to a log file for the whole session. This also catches
-    // native-library chatter (e.g. libsql) that no Rust-level capture could.
+    // native-library chatter that no Rust-level capture could.
     let log_path = redirect_stderr_to_log();
 
     // Restore the terminal even if the render loop panics, so a crash never

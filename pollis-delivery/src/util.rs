@@ -53,10 +53,11 @@ pub enum Upstream {
     /// three, but the OTP handler awaits it before answering, so a caller who
     /// asked for a code is waiting on this.
     Resend,
-    /// The Turso **Platform** API, minting a short-TTL read-only DB token. Not
-    /// the data plane — this is api.turso.tech, called once per token refresh —
-    /// and the client's DB access is blocked until it returns.
-    TursoPlatform,
+    /// Expo's push service, for the content-free new-message nudge (#987). Third
+    /// party, and the only upstream here that NOBODY is waiting on: the send has
+    /// already committed by the time the fan-out runs, so a stalled push must
+    /// never hold the handler open — hence the tightest deadline of the four.
+    ExpoPush,
 }
 
 impl Upstream {
@@ -65,7 +66,7 @@ impl Upstream {
         std::time::Duration::from_secs(match self {
             Upstream::LiveKit => 5,
             Upstream::Resend => 10,
-            Upstream::TursoPlatform => 10,
+            Upstream::ExpoPush => 5,
         })
     }
 
@@ -75,7 +76,7 @@ impl Upstream {
         match self {
             Upstream::LiveKit => "livekit",
             Upstream::Resend => "resend",
-            Upstream::TursoPlatform => "turso-platform",
+            Upstream::ExpoPush => "expo-push",
         }
     }
 }

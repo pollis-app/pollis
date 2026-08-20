@@ -5,7 +5,8 @@
 
 mod delivery;
 mod device;
-mod ds_client;
+pub(crate) mod ds_client;
+pub(crate) mod ds_reads;
 pub(crate) mod generation;
 mod group_state;
 pub mod invariants;
@@ -42,7 +43,7 @@ pub use device::{
 pub(crate) use ds_client::{
     current_user_id, decode_response, ds_claim_key_package, ds_livekit_send_data,
     ds_livekit_token, ds_post, ds_post_json, ds_post_ok, ds_post_plain, ds_post_session_ok,
-    ds_post_signed_or_session, ds_post_signed_or_session_ok, ds_turso_token,
+    ds_post_signed_or_session, ds_post_signed_or_session_ok,
 };
 // Desktop-only (voice roster); mobile has no Rust-side participants path.
 #[cfg(feature = "media")]
@@ -77,7 +78,7 @@ pub use self_update::{self_update_group, self_update_if_due};
 // ── Reconcile + self-repair ──────────────────────────────────────────────────
 pub use reconcile::{
     reconcile_group_mls_core, reconcile_group_mls_core_staged, reconcile_group_mls_impl,
-    registered_devices, ReconcileCommitData, ReconcileOutcome,
+    ReconcileCommitData, ReconcileOutcome,
 };
 
 #[cfg(test)]

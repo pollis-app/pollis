@@ -7,8 +7,9 @@
 //! the three list calls (§6's "conversation enumeration") behind one call so the
 //! sync loop and the left pane share one source of truth.
 //!
-//! Reads go direct to Turso (the core functions open `state.remote_db`); the
-//! message reads additionally pull + decrypt any newly-delivered envelopes
+//! Reads go to the Delivery Service (#987 — the client has no database
+//! credential and `pollis-core` does not link `libsql`); the message reads
+//! additionally pull + decrypt any newly-delivered envelopes
 //! (`get_channel_messages` / `get_dm_messages` run ingest before returning),
 //! which is what surfaces a peer's message locally.
 

@@ -113,7 +113,7 @@ pub enum SubmitResponse {
 }
 
 /// One commit row as it crosses the wire (blobs base64).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitWire {
     pub generation: i64,
     pub epoch: i64,
