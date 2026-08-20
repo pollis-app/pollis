@@ -34,9 +34,6 @@
       "R2_ACCESS_KEY_ID",
       "R2_SECRET_KEY",
       "R2_BUCKET",
-      "TURSO_PLATFORM_TOKEN",
-      "TURSO_ORG",
-      "TURSO_DB",
       "POLLIS_DS_METRICS_TOKEN"
     ],
     "dev_only": ["DEV_OTP"]
