@@ -22,7 +22,7 @@
 #   3. `macos-at-rest` — the local-database at-rest tests on `macos-latest`,
 #      gated on the same decision. macOS is the third desktop platform and the
 #      only one whose SQLCipher crypto provider is CommonCrypto, and nothing
-#      ran these tests there until #NNN.
+#      ran these tests there until #998.
 #   4. `gate`    — `needs: [tests, macos-at-rest]`, `if: always()`. Green when
 #      both heavy jobs passed OR were legitimately skipped as exempt; red when
 #      either failed, was cancelled, or the decision job itself failed
@@ -364,7 +364,7 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
-  # The local database's at-rest guarantee, on the third desktop platform (#NNN).
+  # The local database's at-rest guarantee, on the third desktop platform (#998).
   #
   # Until now these tests ran on Linux (the `tests` job above) and natively on
   # `windows-latest` (`windows-link.yml`), and on no macOS runner anywhere — the
