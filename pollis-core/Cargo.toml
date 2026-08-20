@@ -63,13 +63,49 @@ serde_json = "1"
 pollis-api = { path = "../pollis-api" }
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 async-trait = "0.1"
-# NOTE: rusqlite is declared *per target* below — desktop links the system
-# libcrypto via `bundled-sqlcipher`, mobile vendors OpenSSL into SQLCipher
-# via `bundled-sqlcipher-vendored-openssl`. Both feature sets share the
-# `libsqlite3-sys` build, but on desktop the vendored openssl-sys collides
-# with libwebrtc-sys's bundled BoringSSL (duplicate `PKCS8_*` symbols at
-# link), so we keep system OpenSSL for the desktop link. NDK builds have
-# no system libcrypto, hence vendored on mobile.
+# NOTE: rusqlite is declared *per target* below, and the feature set differs on
+# every one of the three. All of it is one question — how does SQLCipher get its
+# crypto, given that libwebrtc-sys already puts a whole BoringSSL in this crate's
+# link?
+#
+#   Linux    `bundled-sqlcipher` + the SYSTEM libcrypto. libsqlite3-sys emits
+#            `-l dylib=crypto`, so OpenSSL is a SHARED object: the linker never
+#            copies its members into our image and cannot collide with
+#            BoringSSL. `bundled-sqlcipher-vendored-openssl` would vendor a
+#            STATIC openssl-sys instead and immediately collides (duplicate
+#            `PKCS8_*` and ~1,200 more symbols at link).
+#   macOS    `bundled-sqlcipher`, and libsqlite3-sys compiles SQLCipher against
+#            CommonCrypto (`-DSQLCIPHER_CRYPTO_CC`) — no OpenSSL in the picture
+#            at all, so nothing to collide.
+#   mobile   `bundled-sqlcipher-vendored-openssl`. NDK/iOS builds have no system
+#            libcrypto to link, and no libwebrtc either (mobile drops `media`
+#            and uses the native LiveKit SDK), so vendoring is both necessary
+#            and safe.
+#   Windows  `bundled` — SQLCipher is NOT AVAILABLE HERE, and the local database
+#            is therefore NOT encrypted at rest on Windows. See below (#991).
+#
+# Why Windows cannot have SQLCipher (#991): there is no shared system libcrypto
+# on Windows, so `bundled-sqlcipher` links a static one — and MSVC resolves a
+# static archive by pulling whole object files. SQLCipher built against OpenSSL
+# 3 headers uses the provider API (`EVP_CIPHER_fetch`), which BoringSSL does not
+# implement, so the first unresolved symbol drags in OpenSSL's provider core and
+# from there 169 objects and the entire X.509/PEM/RSA/EC surface — 1,253
+# `LNK2005 already defined in libwebrtc_sys...(bcm.obj)` errors. Unlike ELF,
+# where a duplicate definition in a shared object is simply not used, MSVC makes
+# it a hard error. There is no feature combination that avoids this: the two
+# libraries implement the same C API and both must be in the same image.
+#
+# This is NOT a new loss. Until #988 the graph also contained libsql, whose
+# `libsql-ffi` bundles its own sqlite3 amalgamation; it won every `sqlite3_*`
+# symbol, SQLCipher's object was never pulled, `PRAGMA key` was an unknown
+# pragma (which SQLite ignores SILENTLY), and every shipped Windows build has
+# written a plaintext database while believing otherwise. #988 removed libsql,
+# SQLCipher's object became the only candidate, and the link exploded — which is
+# how any of this was found. Declaring `bundled` here changes no Windows
+# behaviour; it makes the existing state explicit, keeps every current Windows
+# user's database readable, and is pinned in both directions by
+# `sqlcipher_is_the_sqlite_we_actually_linked` in `src/db/local.rs`.
+# `docs/security-whitepaper.md` §7.0 states the gap; #992 tracks closing it.
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 # The account identity key and every Pollis-owned signature moved to ML-DSA-44
@@ -269,6 +305,11 @@ jni = "0.21"
 # free-threaded capture session, and BGRA frame buffers, without the raw
 # D3D11 staging-texture/Map boilerplate. WGC needs Win10 1803+.
 [target.'cfg(target_os = "windows")'.dependencies]
+# Plain `bundled`, NOT `bundled-sqlcipher` — see the long note above the
+# [dependencies] table. Feature-unified with the desktop entry below, so that
+# entry's cfg has to exclude Windows or the union would put `bundled-sqlcipher`
+# back and the link would break again.
+rusqlite = { version = "0.37", features = ["bundled"] }
 windows-capture = "2"
 # Raw GDI for picker thumbnail capture (BitBlt for displays,
 # PrintWindow for windows). Same major windows-rs version as
@@ -306,9 +347,13 @@ windows = { version = "0.62", features = [
 # native LiveKit SDK (@livekit/react-native — issue #185) and drops voice, so a
 # mobile build turns `media` off (`--no-default-features`) to reach the stubs.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
-rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
 nix = { version = "0.30", features = ["term"] }
 libc = "0.2"
+
+# Linux + macOS only. Windows is excluded on purpose and gets plain `bundled`
+# in its own table above — see the long note above the [dependencies] table.
+[target.'cfg(not(any(target_os = "ios", target_os = "android", target_os = "windows")))'.dependencies]
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
 
 # Shared capture-helper wire protocol. Both the Linux and macOS capture
 # helpers are subprocesses speaking this; this is the parent-side decoder.

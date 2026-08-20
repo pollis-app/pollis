@@ -182,14 +182,14 @@ jobs:
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
-      # libsqlite3-sys resolves openssl-sys through vcpkg on Windows (same as
-      # the desktop build), so a static-md OpenSSL must be present.
-      - name: Install OpenSSL via vcpkg
-        shell: bash
-        run: |
-          vcpkg install openssl:x64-windows-static-md
-          echo "OPENSSL_DIR=$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md" >> $GITHUB_ENV
-          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+      # #991 deleted the "Install OpenSSL via vcpkg" step that used to sit here,
+      # for the same reason as the desktop release: the Windows target links
+      # plain `bundled` SQLite now, so no OpenSSL is in its graph. The step was
+      # also actively broken — the `x64-windows-static-md` OpenSSL it installed
+      # is built against the DYNAMIC UCRT, while `.cargo/config.toml` links
+      # Windows with `+crt-static`, so any build that genuinely pulled libcrypto
+      # failed on `__imp__strdup` / `__imp__stat64i32`. Nothing pulled it until
+      # #988, which is why it went unnoticed here too.
 
       - name: Build CLI (Windows)
         run: cargo build -p pollis-tui --release

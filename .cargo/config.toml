@@ -29,6 +29,15 @@ MACOSX_DEPLOYMENT_TARGET = "14.0"
 
 [target.x86_64-pc-windows-msvc]
 # Use static CRT to match LiveKit WebRTC libraries (which use /MT)
+#
+# This binds every native library we link on Windows: it must also be built
+# against the STATIC CRT. A prebuilt that is not — vcpkg's `x64-windows-static-md`
+# flavour is the classic trap, "static libs, dynamic CRT" — links its C-runtime
+# calls as `__declspec(dllimport)`, and `libucrt.lib` cannot satisfy the `__imp_`
+# form of all of them. #991 hit exactly that (`__imp__strdup`,
+# `__imp__stat64i32`) with a vcpkg `-static-md` OpenSSL. Use the plain
+# `x64-windows-static` triplet, or drop `+crt-static` here and rebuild WebRTC —
+# never mix the two.
 rustflags = ["-C", "target-feature=+crt-static"]
 
 [env]

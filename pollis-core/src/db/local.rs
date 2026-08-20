@@ -344,9 +344,13 @@ mod tests {
     /// warning, and no behavioural difference until someone reads the file.
     ///
     /// `PRAGMA cipher_version` exists only in SQLCipher, so it is the one
-    /// question whose answer distinguishes the two builds. Asserting it here
-    /// makes "the app believes it is encrypting and is not" a state the test
-    /// suite cannot leave standing.
+    /// question whose answer distinguishes the two builds. It is asserted in
+    /// BOTH directions, per platform, because both answers are wrong somewhere:
+    /// Linux/macOS/mobile must have SQLCipher, and Windows deliberately must
+    /// NOT (it cannot link one — see the long note in `Cargo.toml`, #991). A
+    /// one-way assert would let the Windows gap re-open silently on the other
+    /// platforms, or let Windows quietly acquire encryption while the docs and
+    /// the upgrade path still say it has none.
     #[test]
     fn sqlcipher_is_the_sqlite_we_actually_linked() {
         let conn = Connection::open_in_memory().expect("open");
@@ -359,12 +363,25 @@ mod tests {
             .as_deref()
             .map(str::trim)
             .is_some_and(|v| !v.is_empty());
+
+        #[cfg(not(target_os = "windows"))]
         assert!(
             linked,
             "`PRAGMA cipher_version` answered nothing ({version:?}): the linked sqlite3 is NOT \
              SQLCipher. `PRAGMA key` is being silently ignored and pollis_<user>.db is PLAINTEXT \
              on this platform. Check what else in the dependency graph ships an sqlite3 \
-             amalgamation."
+             amalgamation and is winning the `sqlite3_*` symbols."
+        );
+
+        #[cfg(target_os = "windows")]
+        assert!(
+            !linked,
+            "SQLCipher is linked on Windows ({version:?}) — which this build is not supposed to \
+             be able to do. If that is now genuinely possible, this is good news and three things \
+             must change together: the rusqlite feature note in Cargo.toml, \
+             docs/security-whitepaper.md §7.0, and the upgrade path — every existing Windows \
+             pollis_<user>.db is PLAINTEXT and SQLCipher will refuse to open it, which wipes the \
+             device's history and MLS state unless it is migrated first."
         );
     }
 
