@@ -17,12 +17,18 @@ export type ShortcutCommandId =
   | "app.closeWindow"
   | "app.sync"
   | "nav.back"
+  | "search.next"
+  | "search.prev"
   | "voice.toggleMute"
   | "voice.toggleDeafen"
   | "voice.pushToTalk"
   | "voice.leave";
 
-export type ShortcutCategory = "Application" | "Navigation" | "Voice";
+export type ShortcutCategory =
+  | "Application"
+  | "Navigation"
+  | "Search"
+  | "Voice";
 
 export interface ShortcutCommandMeta {
   id: ShortcutCommandId;
@@ -111,6 +117,24 @@ export const SHORTCUT_COMMANDS: Record<
     titleKey: "shortcuts.navBack",
     category: "Navigation",
     defaultCombo: "escape",
+  },
+  // Only dispatched while the search menu is open, and registered above
+  // app.toggleSearch so the `mod+k` that opened the menu moves the
+  // selection instead of closing it again — Esc already closes, and a
+  // toggle that fires from inside the menu is a wasted key. The j/k
+  // direction follows vim, which is where every app that offers this
+  // (Linear, GitHub, Slack's quick switcher) took it from.
+  "search.next": {
+    id: "search.next",
+    titleKey: "shortcuts.searchNext",
+    category: "Search",
+    defaultCombo: "mod+j",
+  },
+  "search.prev": {
+    id: "search.prev",
+    titleKey: "shortcuts.searchPrev",
+    category: "Search",
+    defaultCombo: "mod+k",
   },
   "voice.toggleMute": {
     id: "voice.toggleMute",

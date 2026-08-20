@@ -121,12 +121,26 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   };
 
   const iconSize = variant === "refined" ? 16 : 18;
-  // focus-visible mirrors hover so a bar button reached by arrow-key log
-  // navigation shows the same affordance the pointer would.
-  const barBtnClass =
+  // Keyboard selection INVERTS the button (accent fill, background-colored
+  // glyph) rather than merely recoloring it. A tint alone was invisible in
+  // the terminal skin, where the icons are already small and un-chromed, so
+  // there was no way to tell which action arrow-key navigation had landed on.
+  //
+  // Plain `focus:`, not `focus-visible:` — the nav machine moves focus
+  // programmatically (MessageList projects nav state with `.focus()`), which
+  // WebKitGTK does not reliably treat as focus-visible; the message row's own
+  // `focus-within:bg-hover` is on plain focus for the same reason. Focus
+  // variants are emitted after hover ones, so the flip wins while hovered.
+  //
+  // The resting color is deliberately NOT baked in here: each button appends
+  // exactly one `text-*`, because two of them on one element resolve by
+  // stylesheet order rather than by the order they appear in the string.
+  const barBtnFlipClass = "outline-none focus:bg-accent focus:text-bg";
+  const barBtnBaseClass =
     variant === "refined"
-      ? "p-1 text-muted hover:text-accent focus-visible:text-accent outline-none"
-      : "text-muted hover:text-accent focus-visible:text-accent outline-none";
+      ? `p-1 rounded-control ${barBtnFlipClass}`
+      : `p-0.5 ${barBtnFlipClass}`;
+  const barBtnClass = `${barBtnBaseClass} text-muted hover:text-accent`;
 
   // The container owns hover-reveal for both skins; while the menu is open it
   // stays fully visible even if the pointer leaves the row — otherwise the
@@ -142,7 +156,18 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
       : `flex-shrink-0 ms-2 flex items-center gap-4 h-6 ${visibilityClass}`;
 
   const menuRowClass =
-    "flex w-full items-center gap-2 px-2.5 py-1.5 text-sm text-start whitespace-nowrap hover:bg-hover";
+    "flex w-full items-center gap-2 px-2.5 py-1.5 text-sm text-start whitespace-nowrap hover:bg-hover outline-none";
+  // Same inversion as the bar buttons, replacing the browser's default focus
+  // ring — which was the only thing marking the focused row while tabbing the
+  // menu, and reads as foreign chrome against either skin. Destructive rows
+  // invert to danger so Delete never borrows the affirmative accent.
+  //
+  // Kept off `menuRowClass` and appended per row on purpose: two competing
+  // `focus:bg-*` utilities on one element resolve by stylesheet order, which
+  // the class-string order does not control, so the row would win or lose the
+  // fight by accident.
+  const menuRowFocusClass = "focus:bg-accent focus:text-bg";
+  const menuRowFocusDangerClass = "focus:bg-danger focus:text-bg";
 
   const closeAnd = (action: () => void) => () => {
     setMenuOpen(false);
@@ -183,7 +208,13 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
             aria-label={t("actions.more")}
             aria-expanded={menuOpen}
             aria-haspopup="menu"
-            className={`${barBtnClass}${menuOpen ? " text-accent" : ""}`}
+            // Three small dots carry far less ink than the reply arrow or the
+            // pencil, so at the shared `text-muted` the trigger read as
+            // disabled next to them. One step brighter evens the row up
+            // optically rather than nominally.
+            className={`${barBtnBaseClass} ${
+              menuOpen ? "text-accent" : "text-dim hover:text-accent"
+            }`}
           >
             <MoreHorizontal size={iconSize} />
           </button>
@@ -201,7 +232,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                   role="menuitem"
                   data-testid="thread-button"
                   onClick={closeAnd(() => onOpenThread(messageId))}
-                  className={`${menuRowClass} text-dim hover:text-fg`}
+                  className={`${menuRowClass} ${menuRowFocusClass} text-dim hover:text-fg`}
                 >
                   <MessagesSquare size={16} className="shrink-0" />
                   {t("actions.replyInThread")}
@@ -212,7 +243,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                   role="menuitem"
                   data-testid="save-button"
                   onClick={closeAnd(() => onToggleSave(messageId))}
-                  className={`${menuRowClass} text-dim hover:text-fg`}
+                  className={`${menuRowClass} ${menuRowFocusClass} text-dim hover:text-fg`}
                 >
                   <Bookmark size={16} className="shrink-0" fill={isSaved ? "currentColor" : "none"} />
                   {isSaved ? t("actions.removeBookmark") : t("actions.save")}
@@ -226,7 +257,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                   // Stays open so the copied/failed feedback is visible where
                   // the click happened.
                   onClick={() => onCopyLink(messageId)}
-                  className={`${menuRowClass} ${copyLinkTone}`}
+                  className={`${menuRowClass} ${menuRowFocusClass} ${copyLinkTone}`}
                 >
                   {React.createElement(copyLinkIcon, { size: 16, className: "shrink-0" })}
                   {copyLinkLabel}
@@ -237,7 +268,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                   role="menuitem"
                   data-testid={isOwn ? "delete-button" : "admin-delete-button"}
                   onClick={closeAnd(() => onDelete(messageId))}
-                  className={`${menuRowClass} text-danger`}
+                  className={`${menuRowClass} ${menuRowFocusDangerClass} text-danger`}
                 >
                   <Trash2 size={16} className="shrink-0" />
                   {isOwn ? t("actions.delete") : t("actions.deleteAsAdmin")}

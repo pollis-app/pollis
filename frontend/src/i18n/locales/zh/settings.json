@@ -308,6 +308,8 @@
     "appCloseWindow": "隐藏 / 关闭窗口",
     "appSync": "同步（重新拉取 + MLS）",
     "navBack": "返回",
+    "searchNext": "搜索菜单：下一个结果",
+    "searchPrev": "搜索菜单：上一个结果",
     "voiceToggleMute": "切换静音",
     "voiceToggleDeafen": "切换拒听",
     "voicePushToTalk": "按键通话（按住）",

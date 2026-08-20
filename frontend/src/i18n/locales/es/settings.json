@@ -314,6 +314,8 @@
     "appCloseWindow": "Ocultar / cerrar la ventana",
     "appSync": "Sincronizar (recarga + MLS)",
     "navBack": "Volver",
+    "searchNext": "Menú de búsqueda: siguiente resultado",
+    "searchPrev": "Menú de búsqueda: resultado anterior",
     "voiceToggleMute": "Alternar silencio",
     "voiceToggleDeafen": "Alternar ensordecer",
     "voicePushToTalk": "Pulsar para hablar (mantener)",
