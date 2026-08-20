@@ -133,7 +133,13 @@ openmls = "0.8"
 openmls_traits = "0.5"
 openmls_basic_credential = "0.5"
 tls_codec = "0.5"
-rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
+# rusqlite is target-split into the two dev-dependency tables at the bottom of
+# this file, mirroring pollis-core's [dependencies]. It has to be: cargo unions
+# features across the whole graph, so a plain `bundled-sqlcipher` here would put
+# `libsqlite3-sys`'s own SQLCipher into a Windows build alongside
+# `pollis-sqlcipher`'s — two sqlite3s racing for the same symbols, which is
+# exactly the state that left every Windows database plaintext until #992.
+#
 # In-process MLS Delivery Service for the flows harness: the real DS router
 # (build_router) bound on a loopback port, against the two local libsql files the
 # harness owns, so flows exercise the deployed DS path end to end. Since #987 the
@@ -172,3 +178,17 @@ objc = "0.2.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Registry"] }
+
+# The flows harness's own rusqlite handle, split by target for the reason given
+# beside the [dev-dependencies] entry it replaced: these features are unioned
+# with pollis-core's, so they must agree with pollis-core's per-target choice or
+# a Windows test build ends up with two SQLCipher builds in one image.
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+rusqlite = { version = "0.37", features = ["sqlcipher", "modern_sqlite"] }
+# Supplies the `sqlcipher` library the feature above only declares. It reaches
+# this link through pollis-core anyway; naming it here keeps the pair visible
+# together, so nobody removes one and leaves the other dangling.
+pollis-sqlcipher = { path = "../pollis-sqlcipher" }

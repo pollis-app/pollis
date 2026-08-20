@@ -95,19 +95,29 @@ data-dir section](#the-process-wide-data-dir--never-set_var)).
 1. `cargo test -p pollis-schema` — the remote schema itself (#924). Seconds-cheap, no system deps, and it is the definition every other job stamps its databases from: it is the only automatic check that every migration file on disk is *listed*, that versions are unique and ascending, and that `single_db_scripts()` keeps main-then-log order (what a single-DB deploy depends on).
 2. `cargo test -p pollis-api` — the client/server wire contract (#875, #922), whose `compile_fail` doctests are the guarantee that a mistyped request **or response** body cannot compile.
 3. `cargo test -p pollis-delivery` — DS serializer + route coverage.
-4. `cargo test -p pollis-core` — MLS unit tests.
-5. `cargo test -p pollis-tui` — see below.
-6. `cargo test --features test-harness --test flows` — the integration harness.
-7. `cargo clippy --workspace --all-targets -- -D warnings` — the Rust lint gate (#912). Runs last so the test signal lands first, and inside this job because the toolchain, apt deps and cargo cache are already there. `rust-toolchain.toml` lists `components = ["clippy"]`, so `cargo clippy` works on a dev box with no extra step; the job pins `dtolnay/rust-toolchain@1.96.0` (the action exports `RUSTUP_TOOLCHAIN` and would otherwise override the pin) so a new stable's new lints cannot turn an untouched PR red.
+4. `cargo test -p pollis-core` — MLS unit tests, and the local-database at-rest tests (#992): `the_local_database_file_is_encrypted_at_rest` writes a message through `LocalDb::open_for_user` and then reads the file's raw bytes back.
+5. `cargo test -p pollis-sqlcipher` — the SQLCipher crypto provider the **Windows** build links (#992): known-answer vectors (RFC 6070, RFC 4231/2202, NIST SP 800-38A) plus a real encrypted database driven straight through the vendored amalgamation. It only ships on Windows, but its C is compiled on every target precisely so this runs here — a provider mistake fails in seconds on Linux rather than 25 minutes later in `windows-link.yml`.
+6. `cargo test -p pollis-tui` — see below.
+7. `cargo test --features test-harness --test flows` — the integration harness.
+8. `cargo clippy --workspace --all-targets -- -D warnings` — the Rust lint gate (#912). Runs last so the test signal lands first, and inside this job because the toolchain, apt deps and cargo cache are already there. `rust-toolchain.toml` lists `components = ["clippy"]`, so `cargo clippy` works on a dev box with no extra step; the job pins `dtolnay/rust-toolchain@1.96.0` (the action exports `RUSTUP_TOOLCHAIN` and would otherwise override the pin) so a new stable's new lints cannot turn an untouched PR red.
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so one failure still lets the rest report.
 
-### What `windows-link.yml` runs (#991)
+### What `windows-link.yml` runs (#991, #992)
 
 Everything above is Linux. `.github/workflows/windows-link.yml` is the only gate
 that meets the **MSVC linker** before a release does: it builds `pollis-core`
-for `x86_64-pc-windows-msvc` and links the `cdylib`, then runs
-`db::local::tests::sqlcipher_is_the_sqlite_we_actually_linked` natively.
+for `x86_64-pc-windows-msvc` and links the `cdylib`, then runs — natively on the
+target — `cargo test -p pollis-sqlcipher` and the whole `db::local::tests::`
+module. That second half is #992's evidence and is a *runtime* question no link
+can answer: `sqlcipher_is_the_sqlite_we_actually_linked` (SQLCipher is present),
+`the_local_database_file_is_encrypted_at_rest` (a message written through
+`LocalDb::open_for_user` does not appear in the file's bytes, the file does not
+begin with the plaintext SQLite header, and neither an unkeyed nor a
+wrongly-keyed connection can read it), and
+`a_plaintext_database_is_destroyed_not_opened`. The step greps for each of those
+three names, because libtest exits 0 when a filter matches nothing and a rename
+would otherwise turn the whole check into a silent no-op.
 
 It exists because `build-windows` used to live only in the tag-triggered
 `desktop-release.yml`. v1.10.0 was cut from a fully-green PR whose Windows link
@@ -118,6 +128,32 @@ check could have seen it. A `cargo check` would not have caught it either:
 `mls-tests.yml`; `windows-gate` is the always-reporting check, `link` is the
 heavy job. It also runs on pushes to `main`, which is the only trigger allowed to
 write the Windows rust-cache.
+
+### What the flows harness's local database is (#992)
+
+The flows binary runs the Delivery Service **in-process**, so it links `libsql`
+— and therefore a second sqlite3 amalgamation — beside `pollis-core`'s
+SQLCipher. The linker gives `libsql`'s the `sqlite3_*` symbols, SQLCipher's
+object is never pulled, and `PRAGMA key` is an unknown pragma there, which
+SQLite ignores silently. **Every client in the flows suite runs on an
+unencrypted local database.**
+
+That is a property of the harness, not of the product: `pollis-core`,
+`pollis-tui` and the desktop binary contain exactly one sqlite3 (#987/#988 took
+`libsql` out of the client for this among other reasons), and
+`db::local::tests::the_local_database_file_is_encrypted_at_rest` is what proves
+the shipped file is ciphertext. A green flows run is not evidence either way,
+which is why `tests/flows/linked_sqlite.rs` asserts the harness's state in both
+directions rather than leaving it to be rediscovered — if `libsql` ever leaves
+this binary those two tests fail, and the right response is to delete them.
+
+It also matters to `db::local::destroy_plaintext_database`, which disposes of
+legacy plaintext databases (#992). That step is gated on
+`sqlcipher_is_linked()`: destroying a plaintext file is an upgrade when the
+replacement will be encrypted and pure data loss when it will not, and in this
+binary it would loop forever — zeroing, on every open, the one
+`pollis_{user_id}.db` that two simulated devices of the same user share, out
+from under whichever of them still has it open.
 
 ### pollis-tui in CI (#487)
 

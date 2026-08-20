@@ -751,13 +751,17 @@ Rules that matter:
 
 ---
 
-## Local Database (SQLite, per-user, encrypted — except on Windows)
+## Local Database (SQLite, per-user, encrypted on every platform)
 
 Source: `pollis-core/src/db/local_schema.sql`
 
 File path: `pollis_{user_id}.db`, encrypted with a key from the device keystore.
 
-**Windows is plaintext (#991).** SQLCipher's OpenSSL cannot be linked next to the BoringSSL that `libwebrtc-sys` puts in the same image under MSVC (1,253 duplicate symbols), so `rusqlite` gets plain `bundled` on Windows and `PRAGMA key` is a silently-ignored unknown pragma there. This is not a new loss — a second sqlite3 amalgamation from `libsql` had been quietly winning the `sqlite3_*` symbols on every shipped Windows build until #988 removed it. Full reasoning: the rusqlite note in `pollis-core/Cargo.toml` and `docs/security-whitepaper.md` §7.0. Pinned in both directions by `sqlcipher_is_the_sqlite_we_actually_linked` (`pollis-core/src/db/local.rs`). Closing the gap is tracked in #992.
+**Windows links SQLCipher differently (#992).** SQLCipher's OpenSSL cannot be linked next to the BoringSSL that `libwebrtc-sys` puts in the same image under MSVC (1,253 duplicate symbols), so Windows takes `rusqlite`'s plain `sqlcipher` (linked) feature and gets the library from the `pollis-sqlcipher` workspace crate: the stock SQLCipher amalgamation compiled with `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT`, whose ~20 crypto primitives are implemented over the RustCrypto crates already in the graph. No OpenSSL enters the Windows image at all. The ciphertext is identical to every other platform's — AES-256-CBC pages, HMAC-SHA512, SQLCipher 4 defaults.
+
+Before #992 Windows wrote this file **in the clear**: a second sqlite3 amalgamation from `libsql` had been winning the `sqlite3_*` symbols on every shipped Windows build until #988 removed it, so `PRAGMA key` was a silently-ignored unknown pragma. `LocalDb::open_at` therefore checks every existing file for the unencrypted `SQLite format 3\0` header and, on a hit, overwrites the file and its `-wal`/`-shm`/`-journal` sidecars and recreates the database empty — never opening it, never falling back to plaintext.
+
+Full reasoning: the rusqlite note in `pollis-core/Cargo.toml` and `docs/security-whitepaper.md` §7.0. Pinned by `sqlcipher_is_the_sqlite_we_actually_linked` (now with no `cfg` exception on any platform), `the_local_database_file_is_encrypted_at_rest` and `a_plaintext_database_is_destroyed_not_opened` in `pollis-core/src/db/local.rs`, all three of which also run natively on `windows-latest` in `.github/workflows/windows-link.yml`.
 
 ### kv
 - `key` TEXT PK

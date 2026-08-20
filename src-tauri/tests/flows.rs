@@ -23,6 +23,10 @@ mod ds_surface;
 mod groups;
 #[path = "flows/heavy_churn.rs"]
 mod heavy_churn;
+// Pins what this binary's own sqlite3 is — see the module docs. It is the one
+// module here that tests the harness rather than the product.
+#[path = "flows/linked_sqlite.rs"]
+mod linked_sqlite;
 #[path = "flows/messages.rs"]
 mod messages;
 #[path = "flows/model.rs"]

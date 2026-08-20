@@ -257,6 +257,17 @@ name = "pollis-schema"
 expression = "LicenseRef-proprietary"
 license-files = []
 
+# The crate itself is ours; `vendor/sqlite3.c` inside it is the SQLCipher
+# amalgamation (SQLite: public domain; SQLCipher: BSD-3-Clause © Zetetic LLC),
+# recorded with its provenance and hash in
+# `pollis-sqlcipher/vendor/PROVENANCE.md`. cargo-deny reads crate metadata, not
+# vendored sources, so this entry describes the crate and that file describes
+# what it carries.
+[[licenses.clarify]]
+name = "pollis-sqlcipher"
+expression = "LicenseRef-proprietary"
+license-files = []
+
 [licenses.private]
 # Defense-in-depth: the clarify blocks above already mark every current
 # workspace crate proprietary. This additionally skips license checks for any

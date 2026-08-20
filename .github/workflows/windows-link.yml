@@ -36,6 +36,10 @@ on:
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
+      # The vendored SQLCipher amalgamation and the header its crypto provider
+      # is compiled against — neither is a .rs file, and both decide what the
+      # Windows link contains (#992).
+      - 'pollis-sqlcipher/**'
       - 'Cargo.lock'
       - '.cargo/config.toml'
       - 'rust-toolchain.toml'
@@ -137,10 +141,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Deliberately NO OpenSSL provisioning, mirroring the desktop-release
-      # Windows job since #991: the Windows target links plain `bundled` SQLite,
-      # so nothing in its graph wants OPENSSL_DIR. If a change re-enables
+      # Windows job. Since #992 the Windows target links SQLCipher from
+      # `pollis-sqlcipher`, whose crypto provider is RustCrypto — there is no
+      # OpenSSL anywhere in the Windows graph, which is exactly what keeps it
+      # from colliding with libwebrtc's BoringSSL. If a change re-enables
       # `bundled-sqlcipher` on Windows, libsqlite3-sys hard-panics here on the
-      # missing variable — which is the correct, immediate failure.
+      # missing OPENSSL_DIR — which is the correct, immediate failure.
 
       # No pnpm, no Tauri bundle, no signing: `pollis-core` is a plain cargo
       # crate and it is where the link happens. `--lib` builds every crate-type
@@ -151,20 +157,48 @@ jobs:
         run: cargo build -p pollis-core --lib --target x86_64-pc-windows-msvc
 
       # Linking is most of this job's value, but "which sqlite3 actually won the
-      # `sqlite3_*` symbols" is a RUNTIME question and can only be answered by
-      # executing on this target. Scoped to that one test on purpose: the rest
-      # of the unit suite has never run on Windows and would be adding a second,
-      # unrelated gate in the same change.
-      - name: Assert which sqlite3 Windows linked
+      # `sqlite3_*` symbols", and "are the bytes on disk ciphertext", are RUNTIME
+      # questions and can only be answered by executing on this target.
+      #
+      # The crypto provider's own suite: known-answer vectors for AES-256-CBC,
+      # HMAC-SHA1/256/512 and PBKDF2, plus a database written through the
+      # vendored SQLCipher and read back as raw bytes. These also run on Linux
+      # in `mls-tests.yml`; running them again HERE is what proves the MSVC build
+      # of the same code behaves the same.
+      - name: SQLCipher crypto provider (pollis-sqlcipher)
+        run: cargo test -p pollis-sqlcipher --target x86_64-pc-windows-msvc
+
+      # The application's own database path, which is the claim that actually
+      # matters: `LocalDb::open_for_user` — not a hand-built connection — must
+      # produce a file with no plaintext in it, that the wrong key cannot read.
+      # Scoped to `db::local` on purpose: the rest of the unit suite has never
+      # run on Windows and would be a second, unrelated gate.
+      - name: Assert the local database is encrypted at rest
         shell: bash
         run: |
-          set -euo pipefail
-          out="$(cargo test -p pollis-core --lib --target x86_64-pc-windows-msvc -- \
-            --exact db::local::tests::sqlcipher_is_the_sqlite_we_actually_linked --nocapture 2>&1)"
+          set -uo pipefail
+          # Captured rather than streamed so the assertions below can read it —
+          # and printed before the exit check, so a failure still leaves the log
+          # in the job output instead of an empty red step.
+          out="$(cargo test -p pollis-core --lib --target x86_64-pc-windows-msvc -- db::local::tests:: 2>&1)"
+          rc=$?
           echo "$out"
-          # libtest EXITS 0 when a filter matches nothing, so renaming the test
-          # would silently turn this step into a no-op. Demand that it ran.
-          grep -q "1 passed" <<< "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::db::local tests failed on Windows"
+            exit "$rc"
+          fi
+          # libtest EXITS 0 when a filter matches nothing, so renaming or
+          # deleting these would silently turn this step into a no-op. Demand
+          # that each of the three load-bearing ones appears in the run; with
+          # rc == 0 already established, appearing means it passed.
+          for t in sqlcipher_is_the_sqlite_we_actually_linked \
+                   the_local_database_file_is_encrypted_at_rest \
+                   a_plaintext_database_is_destroyed_not_opened; do
+            if ! printf '%s\n' "$out" | grep -q "db::local::tests::$t"; then
+              echo "::error::$t did not run on Windows"
+              exit 1
+            fi
+          done
 
       # Prove the artifact exists rather than trusting the exit code alone.
       - name: Verify the DLL was produced

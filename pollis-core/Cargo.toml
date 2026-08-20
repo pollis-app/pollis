@@ -64,7 +64,7 @@ pollis-api = { path = "../pollis-api" }
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 async-trait = "0.1"
 # NOTE: rusqlite is declared *per target* below, and the feature set differs on
-# every one of the three. All of it is one question — how does SQLCipher get its
+# every one of the four. All of it is one question — where does SQLCipher get its
 # crypto, given that libwebrtc-sys already puts a whole BoringSSL in this crate's
 # link?
 #
@@ -81,31 +81,41 @@ async-trait = "0.1"
 #            libcrypto to link, and no libwebrtc either (mobile drops `media`
 #            and uses the native LiveKit SDK), so vendoring is both necessary
 #            and safe.
-#   Windows  `bundled` — SQLCipher is NOT AVAILABLE HERE, and the local database
-#            is therefore NOT encrypted at rest on Windows. See below (#991).
+#   Windows  the plain `sqlcipher` (linked, NOT bundled) feature, resolving to
+#            the `pollis-sqlcipher` crate — which builds the same SQLCipher
+#            amalgamation with `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT` and backs that
+#            provider's ~20 primitives with the RustCrypto crates already in
+#            this graph. No OpenSSL is linked at all, so there is nothing for
+#            BoringSSL to collide with (#992).
 #
-# Why Windows cannot have SQLCipher (#991): there is no shared system libcrypto
-# on Windows, so `bundled-sqlcipher` links a static one — and MSVC resolves a
-# static archive by pulling whole object files. SQLCipher built against OpenSSL
-# 3 headers uses the provider API (`EVP_CIPHER_fetch`), which BoringSSL does not
-# implement, so the first unresolved symbol drags in OpenSSL's provider core and
-# from there 169 objects and the entire X.509/PEM/RSA/EC surface — 1,253
-# `LNK2005 already defined in libwebrtc_sys...(bcm.obj)` errors. Unlike ELF,
-# where a duplicate definition in a shared object is simply not used, MSVC makes
-# it a hard error. There is no feature combination that avoids this: the two
-# libraries implement the same C API and both must be in the same image.
+# Why Windows needed its own crate (#991, #992): there is no shared system
+# libcrypto on Windows, so `bundled-sqlcipher` links a static one — and MSVC
+# resolves a static archive by pulling whole object files. SQLCipher built
+# against OpenSSL 3 headers reaches the provider API (`EVP_CIPHER_fetch`), which
+# BoringSSL does not implement, so the first unresolved symbol drags in
+# OpenSSL's provider core and from there 169 objects and the entire
+# X.509/PEM/RSA/EC surface — 1,253 `LNK2005 already defined in
+# libwebrtc_sys...(bcm.obj)` errors. Unlike ELF, where a duplicate definition in
+# a shared object is simply not used, MSVC makes it a hard error, and no feature
+# combination avoids it: the two libraries implement the same C API and both
+# must be in the same image. Aiming SQLCipher at the BoringSSL that is already
+# there is worse, not better — BoringSSL changed `PKCS5_PBKDF2_HMAC` and friends
+# from `int` lengths to `size_t`, so the call would link and then pass 32-bit
+# arguments into 64-bit parameters.
 #
-# This is NOT a new loss. Until #988 the graph also contained libsql, whose
-# `libsql-ffi` bundles its own sqlite3 amalgamation; it won every `sqlite3_*`
-# symbol, SQLCipher's object was never pulled, `PRAGMA key` was an unknown
-# pragma (which SQLite ignores SILENTLY), and every shipped Windows build has
-# written a plaintext database while believing otherwise. #988 removed libsql,
-# SQLCipher's object became the only candidate, and the link exploded — which is
-# how any of this was found. Declaring `bundled` here changes no Windows
-# behaviour; it makes the existing state explicit, keeps every current Windows
-# user's database readable, and is pinned in both directions by
-# `sqlcipher_is_the_sqlite_we_actually_linked` in `src/db/local.rs`.
-# `docs/security-whitepaper.md` §7.0 states the gap; #992 tracks closing it.
+# `bundled_bindings` (rusqlite calls it `modern_sqlite`) is what makes the
+# linked mode usable: libsqlite3-sys then takes its declarations from its own
+# `sqlcipher/bindgen_bundled_version.rs` rather than running bindgen over a
+# header we would have to ship. `pollis-sqlcipher/vendor/` holds the matching
+# amalgamation and PROVENANCE.md explains how the two are kept in step.
+#
+# NOTHING in a Windows build may enable `libsqlite3-sys/bundled*` — cargo unions
+# features, so one crate asking for `bundled-sqlcipher` puts a SECOND sqlite3 in
+# the image and re-opens exactly the ambiguity that made every Windows database
+# plaintext until #992. src-tauri's dev-dependency is target-gated for this
+# reason. Both halves are pinned by
+# `sqlcipher_is_the_sqlite_we_actually_linked` and
+# `the_local_database_file_is_encrypted_at_rest` in `src/db/local.rs`.
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 # The account identity key and every Pollis-owned signature moved to ML-DSA-44
@@ -305,11 +315,20 @@ jni = "0.21"
 # free-threaded capture session, and BGRA frame buffers, without the raw
 # D3D11 staging-texture/Map boilerplate. WGC needs Win10 1803+.
 [target.'cfg(target_os = "windows")'.dependencies]
-# Plain `bundled`, NOT `bundled-sqlcipher` — see the long note above the
-# [dependencies] table. Feature-unified with the desktop entry below, so that
-# entry's cfg has to exclude Windows or the union would put `bundled-sqlcipher`
-# back and the link would break again.
-rusqlite = { version = "0.37", features = ["bundled"] }
+# `sqlcipher` (link against an external SQLCipher), NOT `bundled-sqlcipher` —
+# see the long note above the [dependencies] table. `modern_sqlite` is
+# rusqlite's name for `libsqlite3-sys/bundled_bindings`, which supplies the
+# declarations that linked mode would otherwise want a header for. Feature
+# union across the workspace must never add a `bundled*` here, so the desktop
+# entry below excludes Windows and src-tauri's dev-dependency is target-gated.
+rusqlite = { version = "0.37", features = ["sqlcipher", "modern_sqlite"] }
+# What `-l sqlcipher` above resolves to: the SQLCipher amalgamation built with
+# `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT` and a crypto provider written against the
+# RustCrypto crates this graph already has, so no OpenSSL enters the image
+# alongside libwebrtc's BoringSSL (#992). It is named in `src/db/local.rs` as
+# well — a dependency nothing references does not reach the link, and the
+# provider symbols have to.
+pollis-sqlcipher = { path = "../pollis-sqlcipher" }
 windows-capture = "2"
 # Raw GDI for picker thumbnail capture (BitBlt for displays,
 # PrintWindow for windows). Same major windows-rs version as
@@ -374,6 +393,10 @@ required-features = ["cli"]
 # 0.26 are already in the lockfile (reqwest + quinn); no new supply-chain crates.
 [dev-dependencies]
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# Scratch data directory for the `db::local` at-rest tests, which have to open a
+# database through `open_for_user` and then read the bytes it left on disk.
+# Already in the workspace lockfile via src-tauri's test harness.
+tempfile = "3"
 
 # Picks up `[workspace.lints]` from the root Cargo.toml, which declares the
 # `kani` cfg the proof harnesses in this crate are gated on.
