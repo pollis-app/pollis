@@ -231,6 +231,50 @@ fn the_wrong_key_cannot_read_the_database() {
     assert_eq!(wrong.query_one("SELECT body FROM message"), None);
 }
 
+/// The tests above fit in a handful of pages. A database large enough to span
+/// many of them, written and then re-read across a close, is what actually
+/// exercises the provider's CBC chaining, per-page IVs and per-page MACs at
+/// volume — a provider that got the IV or the chaining wrong on any page but the
+/// first would still pass a single-page round trip.
+#[test]
+fn a_multi_page_database_round_trips() {
+    const ROWS: i64 = 4000;
+    let dir = scratch("many-pages");
+    let path = dir.path().join("big.db");
+
+    {
+        let db = Db::open(&path);
+        db.key(KEY);
+        db.must_exec("CREATE TABLE message (id INTEGER PRIMARY KEY, body TEXT)");
+        db.must_exec("BEGIN");
+        for i in 0..ROWS {
+            db.must_exec(&format!("INSERT INTO message (id, body) VALUES ({i}, '{MARKER}-{i}')"));
+        }
+        db.must_exec("COMMIT");
+    }
+
+    let bytes = std::fs::read(&path).expect("read database file");
+    assert!(bytes.len() > 64 * 1024, "the fixture is only {} bytes — not multi-page", bytes.len());
+    assert!(
+        !bytes.windows(MARKER.len()).any(|w| w == MARKER.as_bytes()),
+        "a row body appears verbatim in a {}-byte database",
+        bytes.len()
+    );
+
+    let db = Db::open(&path);
+    db.key(KEY);
+    assert_eq!(db.query_one("SELECT count(*) FROM message").as_deref(), Some("4000"));
+    // Both ends and the middle, so a page decrypted with the wrong chaining
+    // anywhere in the file shows up.
+    for id in [0, ROWS / 2, ROWS - 1] {
+        assert_eq!(
+            db.query_one(&format!("SELECT body FROM message WHERE id = {id}")).as_deref(),
+            Some(format!("{MARKER}-{id}").as_str())
+        );
+    }
+    assert_eq!(db.query_one("PRAGMA integrity_check").as_deref(), Some("ok"));
+}
+
 /// SQLCipher 4's defaults are what make the file above ciphertext; a build that
 /// silently negotiated something weaker would still pass the tests above.
 #[test]
