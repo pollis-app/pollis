@@ -875,7 +875,7 @@ pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Resul
     let mut tmp = target.clone();
     let final_ext = target.extension().and_then(|s| s.to_str()).unwrap_or("enc");
     tmp.set_extension(format!("{final_ext}.tmp"));
-    tokio::fs::write(&tmp, &encrypted)
+    crate::private_fs::write_async(&tmp, encrypted)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("write emoji cache: {e}")))?;
     if let Err(e) = tokio::fs::rename(&tmp, &target).await {

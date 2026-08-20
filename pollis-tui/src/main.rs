@@ -96,13 +96,24 @@ fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
     // First run: the data dir may not exist yet (pollis-core creates it later,
     // during identity setup) — without this the redirect would silently no-op
     // and the whole first session would render over log spam.
-    std::fs::create_dir_all(&dir).ok();
+    pollis_core::private_fs::create_dir_all(&dir).ok();
     let path = dir.join("pollis-tui.log");
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .ok()?;
+    // Owner-only, and created that way rather than chmod-ed afterwards. Every
+    // line this file receives is one some code path wrote to stderr, and `dir`
+    // is the OS temp directory whenever `POLLIS_DATA_DIR` is unset — a
+    // world-readable log in a world-writable directory.
+    let file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(pollis_core::private_fs::FILE_MODE)
+            .open(&path)
+            .ok()?
+    };
+    // The mode above applies only when the open CREATED the file, so a log left
+    // by an older build keeps whatever it had. Tighten it through the handle.
+    let _ = pollis_core::private_fs::restrict_open_handle(&file);
     // SAFETY: dup2 onto fd 2 is the standard daemon-style redirect; the source
     // fd stays open (leaked) so fd 2 never dangles.
     if unsafe { libc::dup2(file.as_raw_fd(), 2) } == -1 {

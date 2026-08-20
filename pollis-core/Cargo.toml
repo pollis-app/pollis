@@ -289,6 +289,10 @@ webrtc-audio-processing = { version = "2", features = ["bundled"], optional = tr
 # desktop links the system one.
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl"] }
+# `db::local`'s disposal path needs `O_NOFOLLOW`, whose value is per-platform,
+# so libc has to be present on EVERY unix target rather than only the desktop
+# ones the table further down covers.
+libc = "0.2"
 
 # iOS-only: Keychain Services so the file-backed keystore's master key lives in
 # the iOS Keychain (SEP-encrypted at rest, ThisDeviceOnly → excluded from

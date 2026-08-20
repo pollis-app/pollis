@@ -1019,7 +1019,7 @@ mod file_backend {
         use std::io::Write;
 
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            crate::private_fs::create_dir_all(parent)
                 .map_err(|e| Error::Keystore(format!("create dir: {e}")))?;
         }
         let json = serde_json::to_string(map)
@@ -1038,7 +1038,10 @@ mod file_backend {
         // complete new encrypted one, and never a partial mix of the two.
         let tmp = tmp_path(path);
         {
-            let mut f = std::fs::File::create(&tmp)
+            // Owner-only from creation; `rename` carries the mode onto the
+            // store. The bytes are ciphertext, but the wrapped identity keys
+            // are still nobody else's business to hold a copy of.
+            let mut f = crate::private_fs::create_file(&tmp)
                 .map_err(|e| Error::Keystore(format!("open {}: {e}", tmp.display())))?;
             f.write_all(&data)
                 .map_err(|e| Error::Keystore(format!("write {}: {e}", tmp.display())))?;

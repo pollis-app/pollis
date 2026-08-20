@@ -76,7 +76,7 @@ fn write_accounts_index(index: &AccountsIndex) -> Result<()> {
 
     let path = index_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        crate::private_fs::create_dir_all(parent)
             .map_err(|e| Error::Other(anyhow::anyhow!("create accounts dir: {e}")))?;
     }
     let data = serde_json::to_string_pretty(index)
@@ -84,7 +84,9 @@ fn write_accounts_index(index: &AccountsIndex) -> Result<()> {
 
     let tmp = path.with_extension("json.tmp");
     {
-        let mut f = std::fs::File::create(&tmp)
+        // Owner-only from creation: this file holds the user's real email
+        // address, and `rename` carries the temp file's mode onto the target.
+        let mut f = crate::private_fs::create_file(&tmp)
             .map_err(|e| Error::Other(anyhow::anyhow!("open accounts.json.tmp: {e}")))?;
         f.write_all(data.as_bytes())
             .map_err(|e| Error::Other(anyhow::anyhow!("write accounts.json.tmp: {e}")))?;

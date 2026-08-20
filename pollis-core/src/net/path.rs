@@ -780,10 +780,12 @@ impl GuardBook {
             return;
         };
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            let _ = crate::private_fs::create_dir_all(parent);
         }
         // Best effort: losing the pin file costs a re-pin, never correctness.
-        if let Err(e) = std::fs::write(path, bytes) {
+        // Owner-only: the guard book records which relays this device has
+        // pinned, i.e. where its owner connects from.
+        if let Err(e) = crate::private_fs::write(path, bytes) {
             eprintln!("[overlay] could not persist guard pins: {e}");
         }
     }
