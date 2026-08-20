@@ -59,6 +59,10 @@
     "listLabel": "提及建议",
     "matching": "匹配 <hl>@{{query}}</hl> 的成员"
   },
+  "emojiSuggest": {
+    "listLabel": "表情建议",
+    "matching": "匹配 <hl>:{{query}}</hl> 的表情"
+  },
   "a11y": {
     "avatar": "头像",
     "loading": "加载中",

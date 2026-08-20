@@ -59,6 +59,10 @@
     "listLabel": "Suggestions de mention",
     "matching": "Membres correspondant à <hl>@{{query}}</hl>"
   },
+  "emojiSuggest": {
+    "listLabel": "Suggestions d'émojis",
+    "matching": "Émojis correspondant à <hl>:{{query}}</hl>"
+  },
   "a11y": {
     "avatar": "Avatar",
     "loading": "Chargement",

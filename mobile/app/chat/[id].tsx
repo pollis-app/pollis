@@ -32,6 +32,7 @@ import {
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { useReadReceipts } from "../../hooks/useReadReceipts";
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
+import { useUsableEmoji } from "../../hooks/queries/useEmoji";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
 import { formatMessagePermalink } from "../../lib/permalinks";
@@ -228,6 +229,9 @@ function TextChat(props: ChatViewProps = {}) {
   // Mention candidates come from the visible roster only (#886); the
   // resolution set for rendering adds `all` and the reader's own name so
   // self-mentions highlight.
+  // The composer resolves `:shortcode:` against these before send, which is
+  // also the set the picker offers — one source, one permission rule.
+  const { data: usableEmoji } = useUsableEmoji();
   const mentionCandidates = useMentionCandidates(
     kind,
     conversationId,
@@ -583,6 +587,7 @@ function TextChat(props: ChatViewProps = {}) {
           sendPending={sendMessage.isPending}
           editable={!!kind && !!conversationId}
           mentionCandidates={mentionCandidates}
+          customEmoji={usableEmoji}
           onAttach={() => void onAttach()}
           pendingAttachments={pendingAttachments}
           onRemoveAttachment={(id) =>

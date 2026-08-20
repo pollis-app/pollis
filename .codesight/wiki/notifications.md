@@ -247,7 +247,7 @@ modal, a portal, or a fixed overlay.
 | `frontend/src/utils/notify.ts` | Dispatcher + category table |
 | `frontend/src/utils/mentions.ts` | Mention parsing + ranking; mirrors the Rust matcher |
 | `frontend/src/hooks/queries/useMentionCandidates.ts` | Roster-derived mention pool (the no-leak boundary) |
-| `frontend/src/components/ui/MentionGhost.tsx` | Terminal skin's inline ghost completion |
+| `frontend/src/components/ui/InlineGhost.tsx` | Terminal skin's inline ghost completion (shared with `:shortcode:` completion) |
 | `frontend/src/components/ui/MentionSuggestList.tsx` | Refined skin's Slack-style suggestion list |
 | `frontend/src/components/Message/MessageBody.tsx` | Splits mention tokens out, delegates the rest to `LinkifiedText` |
 | `pollis-core/src/commands/messages/send.rs` | `mention_audience()` — who gets woken, + the inbox fanout |

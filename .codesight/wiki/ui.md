@@ -389,6 +389,59 @@ handle is nearer to is the one that moves), so the same component works under
 `dir="rtl"`, where the sidebar is drawn on the right and grows leftwards, without
 knowing the reading direction.
 
+### Composer completions: `@mention` and `:shortcode:`
+
+`ChatInput` carries **two** autocomplete tracks and they are built to the same
+shape, so learning one is learning the other:
+
+| | mentions (#843) | emoji shortcodes |
+| --- | --- | --- |
+| trigger | `@` at a word start | `:` at a word start |
+| parser | `utils/mentions.ts` → `mentionQueryAt` | `components/Emoji/emojiShortcodeQuery.ts` → `shortcodeQueryAt` |
+| refined skin | `ui/MentionSuggestList` above the composer | `ui/EmojiSuggestList`, same anchoring |
+| terminal skin | `ui/InlineGhost`, Tab accepts | `ui/InlineGhost`, Tab accepts |
+| candidates | the conversation's roster | custom emoji the user may send, then the standard table |
+
+**A trigger only opens at the start of the string or after whitespace.** That one
+rule is what keeps `http://example.com` and `10:30` from ever reading as a
+shortcode, and `a@b.com` from reading as a mention; both parsers share it and both
+have negative tests for it (`frontend/tests/emoji-shortcode-query.test.ts`).
+
+**Enter / Tab / Esc have exactly one owner.** `handleKeyDown` tests the mention
+track first and the emoji track second, and an open mention query suppresses the
+emoji one outright. The two cannot in fact both be open — neither body alphabet
+contains the other's trigger character — but the precedence is written down so a
+future widening of either alphabet has one place to be reasoned about.
+
+**The alphabets are not the same.** A custom emoji shortcode is `[a-z0-9_]{2,32}`,
+enforced by pollis-core and the DS. The standard aliases vendored from gemoji also
+use `+` and `-` (`:+1:`, `:-1:`, `:e-mail:`), so the composer's body class is
+`[A-Za-z0-9_+-]`. That widens what the *composer will look up*, never what a custom
+shortcode may be — a query containing `+` simply cannot match a custom emoji.
+
+**Custom emoji beat standard ones**, in the suggestion list and in direct
+substitution alike: a group that uploaded its own `:tada:` means that one. Same
+rule `emojiSearch.ts` already applies in the picker.
+
+**Substitution happens in the composer, before send, so the wire format is
+untouched.** Typing the closing `:` of a complete shortcode replaces the whole
+`:name:` on the spot, Slack-style — a standard emoji becomes the literal Unicode
+character, a custom one becomes the existing `<:shortcode:content_hash>` token.
+There is no new grammar on the wire, nothing to parse in Rust, and no migration.
+Accepting from the list or the ghost adds a trailing space (the word is finished);
+typing the colon yourself does not (you are mid-word).
+
+**The 1500-entry table stays out of the startup chunk.** `emojiData.ts` is the
+largest module in the bundle and #874 code-split it behind the picker's lazy
+import; the composer is always mounted, so `components/Emoji/emojiShortcodeIndex.ts`
+is the *only* module in this path that imports it, and `useShortcodeEntries` pulls
+it in with a dynamic import once the composer takes focus. `emojiShortcodeQuery.ts`
+itself imports nothing but a type, which is also what makes it unit-testable under
+`node --test`.
+
+**Skin-tone variants (`:wave::skin-tone-3:`) are out of scope.** Completions use the
+tone already stored by the picker; there is no tone syntax in the composer.
+
 ## Components
 
 > Generated from `frontend/src` by `scripts/ui-inventory.mjs` — the article said
@@ -398,7 +451,7 @@ knowing the reading direction.
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**149 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**150 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -502,7 +555,7 @@ knowing the reading direction.
 - **BuildVerifyLine** — props: status, detail, testId — `frontend/src/components/Security/BuildVerifyLine.tsx`
 - **KeyChangeBanner** — props: peerUserId, peerLabel — `frontend/src/components/Security/KeyChangeBanner.tsx`
 
-### `components/ui` (26)
+### `components/ui` (27)
 
 - **AudioPlayer** — props: src, title, className, autoPlay, loop, preload — `frontend/src/components/ui/AudioPlayer.tsx`
 - **Avatar** — props: avatarKey, size, alt, testId, variant, presence — `frontend/src/components/ui/Avatar.tsx`
@@ -511,12 +564,13 @@ knowing the reading direction.
 - **ChatInput** — props: onSend, placeholder, disabled, autoFocus, className, maxAttachments, onValueChange, draftKey, canNotifyAll, onHistoryUp — `frontend/src/components/ui/ChatInput.tsx`
 - **Checkbox** — props: label, checked, onChange, disabled, className — `frontend/src/components/ui/Checkbox.tsx`
 - **DotMatrix** — props: algorithm, dotSize, spacing, speed, className, style — `frontend/src/components/ui/DotMatrix.tsx`
+- **EmojiSuggestList** — props: entries, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/EmojiSuggestList.tsx`
 - **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The centred "nothing here" line; hand-rolled a dozen times before it existed (#874). Not a loading state.
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick — `frontend/src/components/ui/InlineAudioPlayer.tsx`
+- **InlineGhost** — props: value, ghost, focused, scrollTop, testId — `frontend/src/components/ui/InlineGhost.tsx`
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
 - **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874).
 - **LoadingSpinner** — props: size, className — `frontend/src/components/ui/LoaderSpinner.tsx`
-- **MentionGhost** — props: value, ghost, focused, scrollTop — `frontend/src/components/ui/MentionGhost.tsx`
 - **MentionSuggestList** — props: candidates, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/MentionSuggestList.tsx`
 - **NavigableGrid** — props: items, getKey, renderCell, onActivate, minCellWidth, maxCellWidth, aspect, gap, autoFocus, emptyLabel, testId — `frontend/src/components/ui/NavigableGrid.tsx`
 - **NavigableList** — props: items, getKey, renderRow, controls, trailing, onEnterRow, onClickRow, isLoading, loadingLabel, emptyLabel, rowTestId, testId, autoFocus — `frontend/src/components/ui/NavigableList.tsx`

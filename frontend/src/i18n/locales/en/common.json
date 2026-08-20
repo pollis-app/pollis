@@ -74,6 +74,10 @@
     "listLabel": "Mention suggestions",
     "matching": "Members matching <hl>@{{query}}</hl>"
   },
+  "emojiSuggest": {
+    "listLabel": "Emoji suggestions",
+    "matching": "Emoji matching <hl>:{{query}}</hl>"
+  },
   "a11y": {
     "avatar": "Avatar",
     "loading": "Loading",

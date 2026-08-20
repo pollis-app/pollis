@@ -1,6 +1,6 @@
 import React from "react";
 
-interface MentionGhostProps {
+interface InlineGhostProps {
   /** The textarea's full current value. Rendered invisibly to position the ghost. */
   value: string;
   /** The completion suffix shown after the caret, e.g. "na" for "@da" → "@dana". */
@@ -9,11 +9,15 @@ interface MentionGhostProps {
   focused: boolean;
   /** The textarea's scrollTop, so the mirror stays aligned on a wrapped message. */
   scrollTop: number;
+  /** Which completion track this ghost belongs to — mentions, or `:shortcodes:`. */
+  testId: string;
 }
 
 /**
  * Terminal skin's inline autosuggest (#843) — the completion appears as
- * dimmed text directly after the caret and Tab accepts it.
+ * dimmed text directly after the caret and Tab accepts it. Shared by both
+ * completion tracks: `@mention` and `:shortcode:` alike, since the only thing
+ * that differs between them is the string being ghosted.
  *
  * This is a MIRROR, not a pop-over: an absolutely-positioned, pointer-events-
  * none copy of the textarea's box that renders the current value with
@@ -28,11 +32,12 @@ interface MentionGhostProps {
  * a line simply doesn't offer one. That is the terminal idiom this skin is
  * imitating, not a limitation worked around.
  */
-export const MentionGhost: React.FC<MentionGhostProps> = ({
+export const InlineGhost: React.FC<InlineGhostProps> = ({
   value,
   ghost,
   focused,
   scrollTop,
+  testId,
 }) => {
   if (!ghost) {
     return null;
@@ -54,7 +59,7 @@ export const MentionGhost: React.FC<MentionGhostProps> = ({
             text, so the ghost dims the bg colour; unfocused it dims the
             normal foreground. */}
         <span
-          data-testid="mention-ghost"
+          data-testid={testId}
           className={focused ? "text-bg opacity-60" : "text-muted"}
         >
           {ghost}
