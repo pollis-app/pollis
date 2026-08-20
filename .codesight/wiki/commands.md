@@ -33,8 +33,11 @@ Until #987 the split was "writes through the Delivery Service, reads direct to
 Turso": every shipped binary carried a whole-database read token, and 102 call
 sites across 34 files opened `state.remote_db` to run their own `SELECT`.
 That is gone. **Every remote read is now a `POST /v1/…` on `pollis-delivery`**,
-exactly like the writes, and `pollis-core` does not depend on `libsql` at all —
-so a client-side query is not a policy violation any more, it is a compile error.
+exactly like the writes, and neither `pollis-core` nor the shipping `pollis`
+binary links `libsql` at all — so a client-side query is not a policy violation
+any more, it is a compile error. (`pollis` keeps it optional behind
+`test-harness`, for the flows harness's process-local "remote"; both graphs are
+walked by `pollis-core/tests/no_client_side_remote_reads.rs`.)
 
 Where the client half lives:
 

@@ -61,7 +61,7 @@ os-keystore = ["pollis-core/os-keystore"]
 # scope. Not enabled in release builds — run the harness with
 # `cargo test --features test-harness --test flows` (default features), or
 # headless with `--no-default-features --features test-harness`.
-test-harness = ["tauri/test", "pollis-core/test-harness"]
+test-harness = ["tauri/test", "pollis-core/test-harness", "dep:libsql"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -103,9 +103,14 @@ serde_json = "1"
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 dotenvy = "0.15"
-# Used by src/test_harness.rs (compiled under feature = "test-harness") for
-# direct Turso access + anyhow! sites; and by tests/flows.rs.
-libsql = { version = "0.9", features = ["remote"] }
+# OPTIONAL, and pulled in only by `test-harness` (#987). The shipping desktop
+# binary holds no database credential and links no database driver: every
+# remote read and write is a signed POST to the Delivery Service. libsql
+# survives here solely for src/test_harness.rs and tests/flows.rs, where the
+# harness stands up a process-local "remote" the DS reads from. Making it
+# optional is what keeps `libsql` — and the h2 0.3 / hyper 0.14 stack it drags
+# behind it — out of the graph a user actually installs.
+libsql = { version = "0.9", features = ["remote"], optional = true }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 

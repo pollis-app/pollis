@@ -432,8 +432,13 @@ Source: `pollis-core/src/commands/ds_reads.rs`, `pollis-core/src/commands/mls/ds
 `pollis-delivery/src/{reads,directory,account_reads}.rs`.
 
 **Since #987 the client cannot reach the database.** Not "is not allowed to" —
-cannot: `pollis-core` does not depend on `libsql`, and the binary bakes no
-`TURSO_URL`, `TURSO_TOKEN`, `LOG_DB_URL` or `LOG_DB_TOKEN`. Every remote read is
+cannot: neither `pollis-core` nor `pollis` — the crate that becomes the
+installed binary — links a database driver, and the binary bakes no
+`TURSO_URL`, `TURSO_TOKEN`, `LOG_DB_URL` or `LOG_DB_TOKEN`. (`pollis` keeps an
+*optional* `libsql`, reached only through its `test-harness` feature, which the
+flows harness needs to stand up a process-local "remote" and no release build
+selects; `pollis-core/tests/no_client_side_remote_reads.rs` walks both graphs
+and fails if a driver appears in either.) Every remote read is
 a typed `POST /v1/read/…` (or `/v1/directory/…`) to the Delivery Service, carried
 on the SAME ML-DSA-44 device-signed transport as the writes (§10.1), and the DS
 holds the only database credential.

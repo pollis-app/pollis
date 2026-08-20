@@ -1,4 +1,5 @@
-//! `pollis-core` must not be able to reach a database at all (#987).
+//! The client must not be able to reach a database at all (#987) — neither
+//! `pollis-core`, nor `pollis`, the crate that becomes the installed binary.
 //!
 //! The sibling of `no_client_side_remote_writes.rs`, and strictly stronger. That
 //! one scans source text for `INSERT`/`UPDATE`/`DELETE` against a remote table —
@@ -22,7 +23,7 @@
 //!
 //! # How it checks
 //!
-//! `cargo tree -p pollis-core -e normal`, which resolves features FOR THIS
+//! `cargo tree -p <crate> -e normal`, which resolves features FOR THAT
 //! PACKAGE — not the workspace union, which is why `cargo metadata` is the wrong
 //! tool here: its `resolve` graph reports every feature any workspace member
 //! turns on, so `verifiable-log-builder` appears with its database reader
@@ -42,12 +43,12 @@ use std::process::Command;
 const BANNED: [&str; 2] = ["libsql", "libsql-hrana"];
 
 /// Every package in `pollis-core`'s NORMAL dependency graph, one name per line.
-fn normal_deps(extra_args: &[&str]) -> Vec<String> {
+fn normal_deps(package: &str, extra_args: &[&str]) -> Vec<String> {
     let mut cmd = Command::new(env!("CARGO"));
     cmd.args([
         "tree",
         "-p",
-        "pollis-core",
+        package,
         "-e",
         "normal",
         "--prefix",
@@ -74,15 +75,15 @@ fn normal_deps(extra_args: &[&str]) -> Vec<String> {
         .collect()
 }
 
-fn assert_no_driver(label: &str, extra_args: &[&str]) {
-    let deps = normal_deps(extra_args);
+fn assert_no_driver(package: &str, label: &str, extra_args: &[&str]) {
+    let deps = normal_deps(package, extra_args);
 
     // Sanity: the walk found a real graph. Without this, a `cargo tree` output
     // change makes the test pass by seeing nothing.
     assert!(
         deps.iter().any(|d| d == "pollis-api") && deps.iter().any(|d| d == "reqwest"),
-        "[{label}] cargo tree did not resolve pollis-core's real graph — it is the \
-         whole basis of this test. Saw {} line(s).",
+        "[{package} / {label}] cargo tree did not resolve the real graph — it is \
+         the whole basis of this test. Saw {} line(s).",
         deps.len()
     );
 
@@ -91,7 +92,7 @@ fn assert_no_driver(label: &str, extra_args: &[&str]) {
     // entirely, the check below would pass for the wrong reason.
     assert!(
         deps.iter().any(|d| d == "verifiable-log-serve"),
-        "[{label}] verifiable-log-serve is no longer a dependency, so this test's \
+        "[{package} / {label}] verifiable-log-serve is no longer a dependency, so this test's \
          most important case — a database driver arriving through it — has stopped \
          being checked. Re-point the assertion or delete it deliberately."
     );
@@ -104,7 +105,7 @@ fn assert_no_driver(label: &str, extra_args: &[&str]) {
 
     assert!(
         offenders.is_empty(),
-        "[{label}] pollis-core links {offenders:?}. Since #987 the client holds NO \
+        "[{package} / {label}] {package} links {offenders:?}. Since #987 the client holds NO \
          database credential and speaks only to the Delivery Service; a driver in \
          its graph means either a direct dependency came back or a transitive edge \
          reintroduced one — which is how it happened the first time \
@@ -116,7 +117,22 @@ fn assert_no_driver(label: &str, extra_args: &[&str]) {
 
 #[test]
 fn pollis_core_does_not_link_a_database_driver() {
-    assert_no_driver("default features", &[]);
+    assert_no_driver("pollis-core", "default features", &[]);
+}
+
+/// The library is only half the answer — `pollis` is the crate that becomes the
+/// installed binary, and it can declare a driver of its own that `pollis-core`
+/// never sees. It did: the flows harness needs `libsql` to stand up its
+/// process-local "remote", and the dependency was unconditional, so every
+/// shipped desktop build linked the driver (and the h2 0.3 / hyper 0.14 stack
+/// behind it) to serve a test. It is now optional and reached only through
+/// `test-harness`, which no release build selects.
+///
+/// Default features only, deliberately: `--all-features` turns on
+/// `test-harness`, where the driver is supposed to be.
+#[test]
+fn the_shipping_desktop_binary_does_not_link_a_database_driver() {
+    assert_no_driver("pollis", "default features", &[]);
 }
 
 /// The same, with EVERY feature on. A driver behind an optional feature is still
@@ -124,5 +140,5 @@ fn pollis_core_does_not_link_a_database_driver() {
 /// by real builds.
 #[test]
 fn no_feature_of_pollis_core_pulls_in_a_database_driver() {
-    assert_no_driver("--all-features", &["--all-features"]);
+    assert_no_driver("pollis-core", "--all-features", &["--all-features"]);
 }
