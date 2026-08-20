@@ -369,7 +369,8 @@ jobs:
   # Until now these tests ran on Linux (the `tests` job above) and natively on
   # `windows-latest` (`windows-link.yml`), and on no macOS runner anywhere — the
   # only macOS jobs in the repo are `mobile-core-check`'s iOS *cross-compile*
-  # check and the tag-triggered release build, neither of which executes a test.
+  # check and the tag-triggered release builds (desktop, CLI, verifier), none of
+  # which executes a test.
   # So the platform whose crypto provider is the odd one out was also the
   # platform with no evidence.
   #

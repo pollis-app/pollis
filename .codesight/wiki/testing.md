@@ -110,7 +110,8 @@ The workflow has a second heavy job, `macos-at-rest` (#998), gated on the same
 as `windows-link.yml` does. It exists because until #998 **no macOS runner in
 this repo executed a single test** — the only macOS jobs were
 `mobile-core-check`'s iOS cross-compile `cargo check` and the tag-triggered
-release build — while macOS is the one desktop platform whose SQLCipher crypto
+release builds (desktop, CLI, verifier), none of which runs a test — while macOS
+is the one desktop platform whose SQLCipher crypto
 provider is CommonCrypto, chosen by `libsqlite3-sys`'s build script and
 flippable to OpenSSL by an `OPENSSL_DIR` on the runner. `--no-default-features`
 drops `media` and `os-keystore`, neither of which the at-rest path touches;
