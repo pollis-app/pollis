@@ -303,8 +303,8 @@ fn ds_bad_request() -> axum::response::Response {
     (axum::http::StatusCode::BAD_REQUEST, "invalid body").into_response()
 }
 
-/// The `/v1/commits` submit handler, driven against the SHARED `RemoteDb` so
-/// the DS writes land on the exact handle the clients read from. Mirrors
+/// The `/v1/commits` submit handler, driven against the SHARED `Db` that also
+/// answers every client read, so a write is visible to the next read. Mirrors
 /// `pollis_delivery`'s real `submit` arm: verify the signature over the raw
 /// body, bind `sender_id` to the authenticated user, then submit — PLUS the
 /// harness-only lost-response fault injection the #411 test depends on.
@@ -404,10 +404,11 @@ async fn delivery_submit(
 /// wrappers and a 70-line route table, all of them `gate → parse → apply →
 /// map outcome` around the same `pollis_delivery::*` functions the real handlers
 /// call. The only thing that forced the duplication was the DB handle type
-/// (`Arc<Db>` here, `Arc<pollis_delivery::db::Db>` there), and
-/// `RemoteDb::shared_database` + `Db::from_shared` remove it: both now wrap the
-/// SAME libsql `Database`, so the DS writes through the very handle the clients
-/// read from — which was the reason for the copy in the first place.
+/// (`Arc<Db>` here, `Arc<pollis_delivery::db::Db>` there). #918 removed it by
+/// sharing one handle; #987 removed the question entirely, because the clients
+/// hold no database handle to disagree with — the harness builds ONE
+/// `pollis_delivery::db::Db` and `Arc::clone`s it into the router, and every
+/// client read is a signed POST to that router.
 ///
 /// The copy was not free. It silently omitted ~10 routes: `/v1/invite-links/*`
 /// 404'd under test while working in production, and custom emoji (#848) had no

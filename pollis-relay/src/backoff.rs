@@ -14,14 +14,14 @@
 //! every device woke to refetch within a second of every other device, forever —
 //! a structural lockstep, not just an outage-recovery one.
 //!
-//! Deliberately NOT a full retry helper. `RemoteDb::with_retry` is the repo's
-//! ONE retry seam, and it is narrow on purpose: it reconnects a dropped libsql
-//! stream and retries a single idempotent statement once (its four call sites
-//! are listed on the function). The schedules that don't use it don't use it for
-//! real reasons (see the survey in #875): they retry different error types, on
-//! different delays, some forever. What they all genuinely share is this —
-//! spread the wake-up — so this is the piece that gets factored out, and nothing
-//! else.
+//! Deliberately NOT a full retry helper. The repo used to have exactly one
+//! retry seam — `RemoteDb::with_retry`, which reconnected a dropped libsql
+//! stream and retried a single idempotent statement once — and #987 deleted it
+//! along with the client's database handle, so there is no sanctioned retry
+//! helper at all now. The schedules that never used it didn't for real reasons
+//! (see the survey in #875): they retry different error types, on different
+//! delays, some forever. What they all genuinely share is this — spread the
+//! wake-up — so this is the piece that gets factored out, and nothing else.
 
 use std::time::Duration;
 

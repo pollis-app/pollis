@@ -2,9 +2,10 @@
 //! another client, decrypted end-to-end over real MLS — driven purely through
 //! `pollis_tui::sync::sync_once`.
 //!
-//! Two clients share ONE writable main `RemoteDb` + ONE log `RemoteDb` + ONE
-//! in-process `pollis-delivery`, exactly like the flows harness's shared world.
-//! Each client has its OWN read-only `query_only_view` + its OWN `AppState`.
+//! Two clients share ONE in-process `pollis-delivery` over ONE main + ONE log
+//! `pollis_delivery::db::Db`, exactly like the flows harness's shared world.
+//! Since #987 neither client holds a database handle of its own — each has its
+//! OWN `AppState` and reaches the shared world only through signed POSTs.
 //!
 //! ## Conversation type: DM (not group), and why
 //!

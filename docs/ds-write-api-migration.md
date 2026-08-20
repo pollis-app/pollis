@@ -1,6 +1,12 @@
 # DS Write-API Migration — Inventory + Design (Slice 3)
 
-**Status:** design (no code changes in this slice)
+**Status:** design, **superseded in part by #987.** The "reads stay direct"
+half of the goal below no longer holds: #987 moved every remote READ behind the
+DS too and deleted the client's database credential, so the client is not
+"read-only against Turso" — it has no Turso connection at all. Read this as the
+historical record of the WRITE migration, which is still accurate. The read half
+is documented in `docs/security-whitepaper.md` §8 and
+`.codesight/wiki/commands.md`.
 **Goal:** make the desktop/mobile client **read-only against Turso** and move **every
 remote write** behind the Delivery Service (`pollis-delivery`). After this slice the
 client connects to Turso for `SELECT` only; all `INSERT`/`UPDATE`/`DELETE` against the

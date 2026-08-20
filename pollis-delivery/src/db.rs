@@ -144,9 +144,9 @@ impl Drop for ConnGuard {
 /// then passed or failed on how deeply the call under test nested its checkouts.
 ///
 /// Each entry is issued with `query`, not `execute`: several PRAGMAs return the
-/// resulting value as a row, which `execute` rejects. This mirrors
-/// `pollis_core::db::remote::RemoteDb::conn`, which has always re-stamped its
-/// per-connection PRAGMAs on every checkout.
+/// resulting value as a row, which `execute` rejects. This mirrors the client's
+/// old `RemoteDb::conn`, which re-stamped its per-connection PRAGMAs on every
+/// checkout for the same reason, until #987 deleted the client's handle.
 type PerConnPragmas = &'static [&'static str];
 
 /// Production (remote Turso). PRAGMAs are the server's business, and each entry
