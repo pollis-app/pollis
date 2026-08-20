@@ -59,6 +59,10 @@
     "listLabel": "Підказки згадок",
     "matching": "Учасники за запитом <hl>@{{query}}</hl>"
   },
+  "emojiSuggest": {
+    "listLabel": "Підказки емодзі",
+    "matching": "Емодзі за запитом <hl>:{{query}}</hl>"
+  },
   "a11y": {
     "avatar": "Аватар",
     "loading": "Завантаження",

@@ -59,6 +59,10 @@
     "listLabel": "Подсказки упоминаний",
     "matching": "Участники по запросу <hl>@{{query}}</hl>"
   },
+  "emojiSuggest": {
+    "listLabel": "Подсказки эмодзи",
+    "matching": "Эмодзи по запросу <hl>:{{query}}</hl>"
+  },
   "a11y": {
     "avatar": "Аватар",
     "loading": "Загрузка",

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { View, Text, TextInput, Pressable, ScrollView } from "react-native";
 import { Icon } from "../icons";
 import { Avatar } from "../ui";
@@ -9,6 +9,18 @@ import {
   rankMentionCandidates,
   type MentionCandidate,
 } from "../../lib/mentions";
+import {
+  applyShortcode,
+  completedShortcodeAt,
+  customShortcodeEntries,
+  rankShortcodeEntries,
+  resolveShortcode,
+  shortcodeQueryAt,
+  standardShortcodeEntries,
+  type ShortcodeEntry,
+} from "../../lib/emojiShortcodes";
+import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
+import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import type { PickedAttachment } from "../../lib/attachments";
 
 /**
@@ -16,6 +28,18 @@ import type { PickedAttachment } from "../../lib/attachments";
  * `mentionCandidates` is provided, typing `@…` opens a suggestion list
  * above the input (#886) — candidates come from the visible roster only,
  * ranked like desktop (prefix beats substring, alphabetical within rank).
+ *
+ * Typing `:…` opens the same list for emoji, and typing the closing `:` of a
+ * complete shortcode substitutes it outright, Slack-style. Both tracks mirror
+ * desktop: a trigger only opens at a word start (so `http://` and `10:30` are
+ * inert), custom emoji beat standard ones, and everything is substituted HERE,
+ * before send — a standard emoji becomes the literal character, a custom one
+ * the existing `<:shortcode:hash>` token, so the wire format is unchanged.
+ *
+ * PRECEDENCE: an open mention query suppresses the emoji one. The two cannot
+ * in fact both be open — neither body alphabet contains the other's trigger —
+ * but the order is fixed so a future widening has one place to be reasoned
+ * about.
  */
 export function Composer({
   draft,
@@ -24,6 +48,7 @@ export function Composer({
   sendPending,
   editable,
   mentionCandidates,
+  customEmoji,
   onAttach,
   pendingAttachments,
   onRemoveAttachment,
@@ -35,6 +60,8 @@ export function Composer({
   sendPending: boolean;
   editable: boolean;
   mentionCandidates?: MentionCandidate[];
+  /** Every custom emoji the user may send. Omitted, only standard ones complete. */
+  customEmoji?: CustomEmoji[];
   onAttach?: () => void;
   pendingAttachments?: PickedAttachment[];
   onRemoveAttachment?: (id: string) => void;
@@ -60,6 +87,61 @@ export function Composer({
     // RN moves the native caret to the end after a programmatic value
     // change; track the logical caret so the query closes either way.
     setCaret(next.caret);
+  };
+
+  // The standard half is ~1600 rows off a table this app already bundles for
+  // the picker, so it is built once per mount rather than per keystroke.
+  const shortcodeEntries = useMemo(
+    () => [...customShortcodeEntries(customEmoji ?? []), ...standardShortcodeEntries()],
+    [customEmoji],
+  );
+
+  const emojiQuery = mentionQuery
+    ? null
+    : shortcodeQueryAt(draft, Math.min(caret, draft.length));
+  const emojiSuggestions = emojiQuery
+    ? rankShortcodeEntries(shortcodeEntries, emojiQuery.query)
+    : [];
+
+  const acceptEmoji = (entry: ShortcodeEntry) => {
+    if (!emojiQuery) {
+      return;
+    }
+    const next = applyShortcode(
+      draft,
+      emojiQuery.start,
+      emojiQuery.end,
+      entry.insertText,
+      true,
+    );
+    onChangeDraft(next.text);
+    setCaret(next.caret);
+  };
+
+  // Slack's direct substitution, on the way through: the ':' that CLOSES a
+  // known shortcode is swallowed and the emoji takes its place. Gated on a
+  // single-character insertion so a paste ending in a colon is left alone.
+  // RN's `onChangeText` carries no caret, so this only fires for a colon typed
+  // at the END of the draft — the overwhelmingly common case, and editing back
+  // into the middle of a line still has the suggestion list.
+  const handleChangeText = (next: string) => {
+    if (next.length === draft.length + 1 && next.endsWith(":")) {
+      const closed = completedShortcodeAt(next, next.length);
+      const entry = closed ? resolveShortcode(shortcodeEntries, closed.name) : undefined;
+      if (closed && entry) {
+        const applied = applyShortcode(
+          next,
+          closed.start,
+          closed.end,
+          entry.insertText,
+          false,
+        );
+        onChangeDraft(applied.text);
+        setCaret(applied.caret);
+        return;
+      }
+    }
+    onChangeDraft(next);
   };
 
   return (
@@ -102,6 +184,69 @@ export function Composer({
                   }}
                 >
                   @{candidate.username}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+      {emojiSuggestions.length > 0 ? (
+        <View
+          testID="list-emoji-suggestions"
+          style={{
+            marginHorizontal: 12,
+            marginBottom: 4,
+            borderWidth: 1,
+            borderColor: semantic.hairStrong,
+            borderRadius: r.sm,
+            backgroundColor: semantic.cardBg,
+            maxHeight: 220,
+          }}
+        >
+          <ScrollView keyboardShouldPersistTaps="always">
+            {emojiSuggestions.map((entry) => (
+              <Pressable
+                key={`${entry.custom ? "c" : "s"}:${entry.shortcode}`}
+                testID={`row-emoji-${entry.shortcode}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Emoji :${entry.shortcode}:`}
+                onPress={() => acceptEmoji(entry)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                }}
+              >
+                {entry.custom && entry.contentHash ? (
+                  <CustomEmojiImage
+                    shortcode={entry.shortcode}
+                    contentHash={entry.contentHash}
+                    size={20}
+                  />
+                ) : (
+                  <Text style={{ fontSize: 18 }}>{entry.char}</Text>
+                )}
+                <Text
+                  style={{
+                    fontFamily: ty.body.fontFamily,
+                    fontSize: 14,
+                    color: semantic.ink,
+                  }}
+                >
+                  :{entry.shortcode}:
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    fontFamily: ty.body.fontFamily,
+                    fontSize: 12,
+                    color: semantic.mute,
+                    flexShrink: 1,
+                  }}
+                >
+                  {entry.label}
                 </Text>
               </Pressable>
             ))}
@@ -185,7 +330,7 @@ export function Composer({
           testID="input-composer"
           accessibilityLabel="Message"
           value={draft}
-          onChangeText={onChangeDraft}
+          onChangeText={handleChangeText}
           onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
           placeholder="Type a message…"
           placeholderTextColor={semantic.mute}

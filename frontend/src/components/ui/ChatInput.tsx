@@ -26,8 +26,18 @@ import {
 } from "../../utils/mentions";
 import { useMentionCandidates } from "../../hooks/queries/useMentionCandidates";
 import { useSkin } from "../../hooks/queries/usePreferences";
-import { MentionGhost } from "./MentionGhost";
+import {
+  applyShortcode,
+  completedShortcodeAt,
+  rankShortcodeEntries,
+  resolveShortcode,
+  shortcodeQueryAt,
+  type ShortcodeEntry,
+} from "../Emoji/emojiShortcodeQuery";
+import { useShortcodeEntries } from "../Emoji/useShortcodeEntries";
+import { InlineGhost } from "./InlineGhost";
 import { MentionSuggestList } from "./MentionSuggestList";
+import { EmojiSuggestList } from "./EmojiSuggestList";
 
 // Attachment carries a filesystem path so Rust can read the file directly —
 // no bytes-over-IPC bottleneck, no size limit.
@@ -488,10 +498,51 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   // Refined skin: the Slack-style list. Terminal never opens one.
   const showSuggestList = skin === "refined" && suggestions.length > 0;
 
+  // ── :shortcode: autocomplete and substitution ────────────────────────────
+  //
+  // PRECEDENCE: the composer now has two completion tracks, and exactly one
+  // may claim Enter / Tab / Esc at a time. Mentions win — they are tested
+  // first here and first in `handleKeyDown`, and an open mention query
+  // suppresses the emoji one outright.
+  //
+  // In practice the two cannot both be open: a query opens on '@' or ':' at
+  // the start of a word, and neither body alphabet contains the other's
+  // trigger character, so no caret position sits inside both. The ordering is
+  // stated anyway so that widening either alphabet has one obvious place to be
+  // reasoned about rather than two handlers quietly fighting over a key.
+  const [emojiDismissed, setEmojiDismissed] = useState(false);
+  const emojiQuery =
+    emojiDismissed || mentionQuery ? null : shortcodeQueryAt(message, caret);
+  // Loaded while the composer is focused rather than on the first colon: the
+  // standard half arrives over a dynamic import, and `:tada:` typed straight
+  // out has to resolve to the group's own emoji on the FIRST try, not on the
+  // second once a chunk landed. Focus is still after first paint, so the table
+  // stays out of the startup chunk exactly as #874 requires.
+  const shortcodeEntries = useShortcodeEntries(isFocused || emojiQuery !== null);
+  const emojiSuggestions = emojiQuery
+    ? rankShortcodeEntries(shortcodeEntries, emojiQuery.query)
+    : [];
+
+  // Terminal skin: same rule as the mention ghost — a prefix match, offered
+  // only with the caret at the end of the line. The closing ':' is part of the
+  // ghost so what is shown is the `:joy:` that typing it out would produce.
+  const emojiGhostTarget =
+    skin === "terminal" && emojiQuery && caret === message.length
+      ? emojiSuggestions.find((e) => e.shortcode.startsWith(emojiQuery.query))
+      : undefined;
+  const emojiGhostText = emojiGhostTarget
+    ? `${emojiGhostTarget.shortcode.slice(emojiQuery!.query.length)}:`
+    : "";
+
+  const showEmojiList = skin === "refined" && emojiSuggestions.length > 0;
+
+  // One highlight for both lists, because only one is ever open.
+  const activeListLength = showSuggestList ? suggestions.length : emojiSuggestions.length;
+
   // Keep the highlight in range as the candidate list narrows on each keystroke.
   useEffect(() => {
-    setActiveIndex((prev) => (prev < suggestions.length ? prev : 0));
-  }, [suggestions.length]);
+    setActiveIndex((prev) => (prev < activeListLength ? prev : 0));
+  }, [activeListLength]);
 
   useEffect(() => {
     const pending = pendingCaretRef.current;
@@ -509,6 +560,23 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     if (next.text === message) {
       return;
     }
+    pendingCaretRef.current = next.caret;
+    setMessage(next.text);
+    setDraft(draftKey, next.text);
+    onValueChange?.(next.text);
+    setActiveIndex(0);
+  }, [message, caret, draftKey, onValueChange]);
+
+  // Accepting from the list or the ghost writes the emoji plus a trailing
+  // space: the word is finished, and the user carries on typing. Typing the
+  // closing ':' yourself does NOT add one — see the substitution path in
+  // `onChange` — because that happens mid-word.
+  const acceptEmoji = useCallback((entry: ShortcodeEntry) => {
+    const query = shortcodeQueryAt(message, caret);
+    if (!query) {
+      return;
+    }
+    const next = applyShortcode(message, query.start, query.end, entry.insertText, true);
     pendingCaretRef.current = next.caret;
     setMessage(next.text);
     setDraft(draftKey, next.text);
@@ -572,6 +640,48 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         e.preventDefault();
         e.stopPropagation();
         setMentionDismissed(true);
+        return;
+      }
+    }
+
+    // `:shortcode:` list — the same key contract as the mention list, and
+    // reached only when no mention query is open (see the precedence note
+    // where `emojiQuery` is computed).
+    if (showEmojiList) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIndex((i) => (i + 1) % emojiSuggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIndex((i) => (i - 1 + emojiSuggestions.length) % emojiSuggestions.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        acceptEmoji(emojiSuggestions[activeIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setEmojiDismissed(true);
+        return;
+      }
+    }
+
+    // Terminal skin: Tab accepts the ghosted shortcode.
+    if (emojiGhostTarget) {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        acceptEmoji(emojiGhostTarget);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setEmojiDismissed(true);
         return;
       }
     }
@@ -661,6 +771,19 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         />
       )}
 
+      {/* Refined skin's `:shortcode:` list. Same anchoring, and it never
+          co-exists with the mention list — the two queries are mutually
+          exclusive. */}
+      {showEmojiList && emojiQuery && (
+        <EmojiSuggestList
+          entries={emojiSuggestions}
+          activeIndex={activeIndex}
+          query={emojiQuery.query}
+          onSelect={acceptEmoji}
+          onHover={setActiveIndex}
+        />
+      )}
+
       {/* Attachment previews */}
       {attachments.length > 0 && (
         <div
@@ -732,12 +855,39 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             value={message}
             onChange={(e) => {
               const next = e.target.value;
+              const nextCaret = e.target.selectionStart ?? next.length;
+              // Any edit re-opens suggestions that Esc had hidden.
+              setMentionDismissed(false);
+              setEmojiDismissed(false);
+              // Slack's direct substitution: the moment the user types the ':'
+              // that CLOSES a shortcode they know by heart, the emoji replaces
+              // the whole `:name:` and no list is involved. Gated on a
+              // single-character insertion so a paste that happens to end in a
+              // colon is left exactly as it was pasted.
+              if (next.length === message.length + 1 && next[nextCaret - 1] === ":") {
+                const closed = completedShortcodeAt(next, nextCaret);
+                const entry = closed
+                  ? resolveShortcode(shortcodeEntries, closed.name)
+                  : undefined;
+                if (closed && entry) {
+                  const applied = applyShortcode(
+                    next,
+                    closed.start,
+                    closed.end,
+                    entry.insertText,
+                    false,
+                  );
+                  pendingCaretRef.current = applied.caret;
+                  setMessage(applied.text);
+                  setDraft(draftKey, applied.text);
+                  onValueChange?.(applied.text);
+                  return;
+                }
+              }
               setMessage(next);
               setDraft(draftKey, next);
               onValueChange?.(next);
-              setCaret(e.target.selectionStart ?? next.length);
-              // Any edit re-opens suggestions that Esc had hidden.
-              setMentionDismissed(false);
+              setCaret(nextCaret);
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
             onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
@@ -765,11 +915,21 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             }}
             aria-label={t("composer.inputLabel")}
           />
-          <MentionGhost
+          {/* Two ghosts, at most one of which is ever non-empty — the
+              component renders nothing without ghost text. */}
+          <InlineGhost
             value={message}
             ghost={ghostText}
             focused={isFocused}
             scrollTop={scrollTop}
+            testId="mention-ghost"
+          />
+          <InlineGhost
+            value={message}
+            ghost={emojiGhostText}
+            focused={isFocused}
+            scrollTop={scrollTop}
+            testId="emoji-ghost"
           />
         </div>
 

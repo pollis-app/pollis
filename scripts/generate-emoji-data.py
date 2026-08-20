@@ -54,6 +54,58 @@ the CLDR group names are not available to read. Instead:
     than a prettified CLDR short name — "WHITE UP POINTING BACKHAND INDEX"
     matches more useful queries than "backhand index pointing up".
 
+Where the shortcodes come from
+-----------------------------
+``unicodedata.name()`` is a *name*, not a shortcode: it gives
+"face with tears of joy", and nobody types ``:face_with_tears_of_joy:``. The
+shortcode people actually type — ``:joy:``, ``:tada:``, ``:100:``, ``:+1:`` —
+comes from the gemoji/GitHub set that Slack and Discord both broadly follow,
+and no amount of string-munging a Unicode name produces it.
+
+So the aliases are **vendored**, in ``scripts/emoji-shortcodes.json``, for the
+same reasons the emoji table itself is generated rather than installed: a pip
+or npm dependency would rewrite the frozen lockfile and drag a supply-chain
+review into a self-contained UI feature, while a checked-in table is static,
+diffable, auditable and has no install step. The JSON carries its own
+provenance header (source, pinned version, sha256 of the upstream file, and the
+MIT licence it is used under: Copyright (c) 2019 GitHub, Inc.).
+
+Its shape is ``alias -> hyphen-joined uppercase codepoints``, e.g.
+``"joy": "1F602"`` and ``"gb": "1F1EC-1F1E7"``, with U+FE0F stripped so the keys
+line up with the bare bases this file emits. Aliases are lowercase
+``[a-z0-9_+-]``; note that ``+`` and ``-`` are in that set (``:+1:``, ``:-1:``,
+``:e-mail:``) and are NOT legal in a *custom* emoji shortcode, which stays
+``[a-z0-9_]{2,32}``. Single-character aliases (``:v:``, ``:o:``, ``:x:``) are
+kept: they are real, and the two-character minimum before the composer starts
+suggesting is a UI rule, not a data rule.
+
+An alias whose target emoji is not in the emitted table (ZWJ sequences,
+keycaps, skin-toned variants — none of which this generator enumerates) is
+simply dropped, so the emitted set is always a subset of what is renderable.
+
+To refresh the vendored table against a newer gemoji release::
+
+    curl -sSLO https://raw.githubusercontent.com/github/gemoji/<tag>/db/emoji.json
+    python3 - <<'PY'
+    import json, re
+    src = json.load(open("emoji.json"))
+    ok = re.compile(r"^[a-z0-9_+-]+$")
+    table = {}
+    for entry in src:
+        char = entry["emoji"].replace("️", "")
+        key = "-".join(f"{ord(c):04X}" for c in char)
+        for alias in entry["aliases"]:
+            if ok.match(alias):
+                table[alias] = key
+    doc = json.load(open("scripts/emoji-shortcodes.json"))
+    doc["shortcodes"] = dict(sorted(table.items()))
+    open("scripts/emoji-shortcodes.json", "w").write(
+        json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+    PY
+
+then update the ``_version`` / ``_sha256`` fields by hand and re-run this
+script.
+
 Known approximation limits
 --------------------------
 This is a good approximation of the official CLDR groups, not a reproduction
@@ -104,6 +156,10 @@ OUTPUT_PATH = REPO_ROOT / "frontend" / "src" / "components" / "Emoji" / "emojiDa
 # frontend/mobile boundary — mobile is a standalone Expo project). Both are
 # written on every run so they cannot drift.
 MOBILE_OUTPUT_PATH = REPO_ROOT / "mobile" / "components" / "emoji" / "emojiData.ts"
+
+# The vendored gemoji alias table. See "Where the shortcodes come from" above
+# for its provenance, licence and refresh recipe.
+SHORTCODES_PATH = REPO_ROOT / "scripts" / "emoji-shortcodes.json"
 
 # Category ids and their human-readable labels, in picker order.
 CATEGORY_LABELS: list[tuple[str, str]] = [
@@ -540,6 +596,23 @@ def display_name(codepoint: int) -> str | None:
     return raw.lower().replace("-", " ").replace("_", " ")
 
 
+def load_shortcodes() -> tuple[dict[str, list[str]], str]:
+    """Invert the vendored alias table into ``char -> sorted aliases``.
+
+    Aliases are sorted rather than kept in gemoji's own order so the output is
+    a pure function of the checked-in JSON: two aliases for one emoji must not
+    swap places because upstream reordered a list.
+    """
+    payload = json.loads(SHORTCODES_PATH.read_text(encoding="utf-8"))
+    by_char: dict[str, list[str]] = {}
+    for alias, key in payload["shortcodes"].items():
+        char = "".join(chr(int(part, 16)) for part in key.split("-"))
+        by_char.setdefault(char, []).append(alias)
+    for aliases in by_char.values():
+        aliases.sort()
+    return by_char, str(payload["_version"])
+
+
 def read_zoneinfo_table(path: Path) -> dict[str, str]:
     """Parse tzdata's iso3166.tab: ``XX<TAB>Country Name``, ``#`` comments."""
     names: dict[str, str] = {}
@@ -587,9 +660,10 @@ def flag_char(code: str) -> str:
     )
 
 
-def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str]:
+def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str, str]:
     """Assemble every entry, in category order then codepoint order."""
     tonable_bases = expand(EMOJI_MODIFIER_BASE_RANGES)
+    shortcodes, shortcode_version = load_shortcodes()
     entries: list[dict[str, object]] = []
     counts: dict[str, int] = {}
     claimed: set[int] = set()
@@ -614,6 +688,7 @@ def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str]:
                     "name": name,
                     "category": category_id,
                     "tonable": codepoint in tonable_bases,
+                    "shortcodes": shortcodes.get(chr(codepoint), []),
                 }
             )
             count += 1
@@ -630,12 +705,13 @@ def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str]:
                 "name": f"{country_names[code].lower()} flag",
                 "category": "flags",
                 "tonable": False,
+                "shortcodes": shortcodes.get(flag_char(code), []),
             }
         )
         flag_count += 1
     counts["flags"] = flag_count
 
-    return entries, counts, source
+    return entries, counts, source, shortcode_version
 
 
 def ts_string(value: str) -> str:
@@ -644,10 +720,17 @@ def ts_string(value: str) -> str:
     return f'"{escaped}"'
 
 
-def render(entries: list[dict[str, object]], counts: dict[str, int], source: str) -> str:
+def render(
+    entries: list[dict[str, object]],
+    counts: dict[str, int],
+    source: str,
+    shortcode_version: str,
+) -> str:
     """Render the whole TypeScript module."""
     total = len(entries)
     summary = ", ".join(f"{cid} {counts[cid]}" for cid, _label in CATEGORY_LABELS)
+    with_shortcodes = sum(1 for entry in entries if entry["shortcodes"])
+    alias_total = sum(len(entry["shortcodes"]) for entry in entries)
 
     lines: list[str] = []
     lines.append("// GENERATED FILE — DO NOT EDIT BY HAND.")
@@ -658,7 +741,9 @@ def render(entries: list[dict[str, object]], counts: dict[str, int], source: str
     lines.append("//")
     lines.append(f"// Unicode data version: {unicodedata.unidata_version}")
     lines.append(f"// Country names from:   {source}")
+    lines.append(f"// Shortcodes from:      scripts/emoji-shortcodes.json ({shortcode_version})")
     lines.append(f"// Entries:              {total} ({summary})")
+    lines.append(f"// With shortcodes:      {with_shortcodes} entries, {alias_total} aliases")
     lines.append("//")
     lines.append("// Names come straight from `unicodedata.name()`, lowercased, and double as")
     lines.append("// the search keywords — there is deliberately no separate keyword field.")
@@ -668,6 +753,10 @@ def render(entries: list[dict[str, object]], counts: dict[str, int], source: str
     lines.append("// `char` is the bare base codepoint with no U+FE0F variation selector. Entries")
     lines.append("// drawn from the older BMP symbol blocks default to text presentation, so a")
     lines.append("// renderer wanting a colour glyph should append U+FE0F at display time.")
+    lines.append("//")
+    lines.append("// `shortcodes` are the `:joy:`-style aliases, vendored from gemoji (MIT) — see")
+    lines.append("// the generator's \"Where the shortcodes come from\" section. They may contain")
+    lines.append("// `+` and `-`, which a CUSTOM emoji shortcode (`[a-z0-9_]{2,32}`) may not.")
     lines.append("")
     lines.append("export type EmojiCategoryId =")
     for index, (category_id, _label) in enumerate(CATEGORY_LABELS):
@@ -687,6 +776,11 @@ def render(entries: list[dict[str, object]], counts: dict[str, int], source: str
     lines.append("  readonly category: EmojiCategoryId;")
     lines.append("  /** True when this base emoji accepts a Fitzpatrick skin-tone modifier. */")
     lines.append("  readonly tonable: boolean;")
+    lines.append("  /**")
+    lines.append('   * `:shortcode:` aliases, e.g. ["+1", "thumbsup"]. Often empty — only the')
+    lines.append("   * emoji gemoji names have one. Every alias is unique across the table.")
+    lines.append("   */")
+    lines.append("  readonly shortcodes: readonly string[];")
     lines.append("}")
     lines.append("")
     lines.append("export const EMOJI_CATEGORIES: readonly EmojiCategory[] = [")
@@ -710,6 +804,9 @@ def render(entries: list[dict[str, object]], counts: dict[str, int], source: str
     lines.append("  name: string,")
     lines.append("  category: EmojiCategoryId,")
     lines.append("  tonable: 0 | 1,")
+    lines.append("  // Space-joined rather than a nested array literal: 1500+ inline arrays cost")
+    lines.append("  // far more bytes than they buy, and no shortcode can contain a space.")
+    lines.append("  shortcodes: string,")
     lines.append("];")
     lines.append("")
     lines.append("const EMOJI_ROWS: readonly EmojiRow[] = [")
@@ -718,15 +815,17 @@ def render(entries: list[dict[str, object]], counts: dict[str, int], source: str
         name = ts_string(str(entry["name"]))
         category = ts_string(str(entry["category"]))
         tonable = "1" if entry["tonable"] else "0"
-        lines.append(f"  [{char}, {name}, {category}, {tonable}],")
+        codes = ts_string(" ".join(entry["shortcodes"]))
+        lines.append(f"  [{char}, {name}, {category}, {tonable}, {codes}],")
     lines.append("];")
     lines.append("")
     lines.append("export const STANDARD_EMOJI: readonly StandardEmoji[] = EMOJI_ROWS.map(")
-    lines.append("  ([char, name, category, tonable]): StandardEmoji => ({")
+    lines.append("  ([char, name, category, tonable, shortcodes]): StandardEmoji => ({")
     lines.append("    char,")
     lines.append("    name,")
     lines.append("    category,")
     lines.append("    tonable: tonable === 1,")
+    lines.append('    shortcodes: shortcodes === "" ? [] : shortcodes.split(" "),')
     lines.append("  }),")
     lines.append(");")
     lines.append("")
@@ -760,8 +859,8 @@ def render(entries: list[dict[str, object]], counts: dict[str, int], source: str
 
 
 def main() -> None:
-    entries, counts, source = build_entries()
-    rendered = render(entries, counts, source)
+    entries, counts, source, shortcode_version = build_entries()
+    rendered = render(entries, counts, source, shortcode_version)
     for out_path in (OUTPUT_PATH, MOBILE_OUTPUT_PATH):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(rendered, encoding="utf-8")
@@ -773,6 +872,8 @@ def main() -> None:
         print(f"  {category_id:<9} {label:<11} {counts[category_id]:>5}")
     print(f"  {'TOTAL':<21} {len(entries):>5}")
     print(f"  {'skin-tone bases':<21} {tonable_total:>5}")
+    alias_total = sum(len(entry["shortcodes"]) for entry in entries)
+    print(f"  {'shortcode aliases':<21} {alias_total:>5}")
     print(f"wrote {OUTPUT_PATH}")
 
 

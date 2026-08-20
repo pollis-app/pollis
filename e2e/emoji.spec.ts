@@ -17,7 +17,10 @@
  *     `ChatInput.insertAtCursor` and it had no test — appending to the end
  *     would still look fine in a screenshot and be wrong for every user who
  *     ever goes back to fix a sentence;
- *   - a `<:name:hash>` token in a message body is an image, not literal text.
+ *   - a `<:name:hash>` token in a message body is an image, not literal text;
+ *   - `:shortcode:` autocomplete and substitution in the composer: the trigger
+ *     rules (including the `http://` and `10:30` negatives), custom-beats-
+ *     standard, and both skins' acceptance idiom.
  */
 
 import { test, expect, type Page } from "@playwright/test";
@@ -31,6 +34,11 @@ const CHANNEL_ID = "c_general";
 const PARROT_HASH = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
 const SHIPIT_HASH = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
 const PARROT_TOKEN = `<:partyparrot:${PARROT_HASH}>`;
+
+// Deliberately named after a STANDARD alias (`:tada:` is 🎉 in the gemoji set
+// this repo vendors). A group that uploaded its own must win.
+const TADA_HASH = "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef";
+const TADA_TOKEN = `<:tada:${TADA_HASH}>`;
 
 // A hash nothing has stored — the deleted / not-yet-fetched case.
 const MISSING_HASH = "1111111111111111111111111111111111111111111111111111111111111111";
@@ -54,6 +62,16 @@ const CUSTOM_EMOJI = [
     content_type: "image/webp",
     animated: false,
     size_bytes: 2048,
+    created_by: ME.id,
+  },
+  {
+    group_id: GROUP_ID,
+    group_name: "emoji",
+    shortcode: "tada",
+    content_hash: TADA_HASH,
+    content_type: "image/webp",
+    animated: false,
+    size_bytes: 1024,
     created_by: ME.id,
   },
 ];
@@ -310,6 +328,123 @@ for (const skin of SKINS) {
       await expect(second.getByTestId("custom-emoji-fallback")).toHaveText(":ghost:");
 
       await page.screenshot({ path: `artifacts/emoji-message-${skin}.png` });
+    });
+  });
+
+  test.describe(`:shortcode: autocomplete — ${skin} skin`, () => {
+    // The standard half of the index arrives over a dynamic import fired on
+    // composer focus. Typing a partial query and waiting for the completion to
+    // appear is the honest "it is live" signal; every test below starts here so
+    // none of them races the chunk.
+    async function typeAndWait(page: Page, text: string) {
+      await composer(page).click();
+      await composer(page).pressSequentially(text);
+      if (skin === "terminal") {
+        await expect(page.getByTestId("emoji-ghost")).toBeVisible();
+      } else {
+        await expect(page.getByTestId("emoji-suggest-list")).toBeVisible();
+      }
+    }
+
+    test("a partial shortcode offers a completion, and accepting inserts the emoji", async ({
+      page,
+    }) => {
+      await openChannel(page, skin);
+      await typeAndWait(page, ":jo");
+
+      if (skin === "terminal") {
+        // fish-style: the tail of the word, closing colon included, so what is
+        // shown is the `:joy:` that typing it out would have produced.
+        await expect(page.getByTestId("emoji-ghost")).toHaveText("y:");
+        // No pop-over list in this skin, ever.
+        await expect(page.getByTestId("emoji-suggest-list")).toHaveCount(0);
+        await composer(page).press("Tab");
+      } else {
+        await expect(page.getByTestId("emoji-option-joy")).toBeVisible();
+        await composer(page).press("Enter");
+      }
+
+      // Accepting from the list or the ghost finishes the word, so a space
+      // follows. Enter accepted the suggestion rather than sending.
+      await expect(composer(page)).toHaveValue("\u{1F602} ");
+      await expect(page.getByTestId("message-content")).toHaveCount(2);
+
+      await page.screenshot({ path: `artifacts/emoji-shortcode-${skin}.png` });
+    });
+
+    test("typing the closing colon substitutes on the spot", async ({ page }) => {
+      await openChannel(page, skin);
+      await typeAndWait(page, "ship it :jo");
+      await composer(page).pressSequentially("y:");
+
+      // Mid-word, so no trailing space — and the emoji is the literal
+      // character, which is what keeps the wire format unchanged.
+      await expect(composer(page)).toHaveValue("ship it \u{1F602}");
+    });
+
+    test("a group's own :tada: beats the standard one", async ({ page }) => {
+      await openChannel(page, skin);
+      await typeAndWait(page, ":tad");
+
+      if (skin === "refined") {
+        // Custom outranks standard at equal tier, so it is the first row.
+        const first = page.getByTestId("emoji-suggest-list").getByRole("option").first();
+        await expect(first).toHaveAttribute("data-testid", "emoji-option-tada");
+        await expect(first.getByTestId("custom-emoji")).toBeVisible();
+      }
+
+      await composer(page).pressSequentially("a:");
+      // The wire token, not 🎉.
+      await expect(composer(page)).toHaveValue(TADA_TOKEN);
+    });
+
+    test("a colon that is not a trigger stays literal", async ({ page }) => {
+      await openChannel(page, skin);
+      await composer(page).click();
+
+      // The two cases the trigger rule exists for. Neither opens a completion
+      // and neither is rewritten on the closing colon.
+      await composer(page).pressSequentially("http://example.com/x: and 10:30:");
+      await expect(composer(page)).toHaveValue("http://example.com/x: and 10:30:");
+      await expect(page.getByTestId("emoji-suggest-list")).toHaveCount(0);
+      await expect(page.getByTestId("emoji-ghost")).toHaveCount(0);
+
+      // A single letter is below the suggestion floor, and an emoticon has no
+      // body characters at all.
+      await composer(page).fill("");
+      await composer(page).pressSequentially("hi :j :)");
+      await expect(page.getByTestId("emoji-suggest-list")).toHaveCount(0);
+      await expect(page.getByTestId("emoji-ghost")).toHaveCount(0);
+    });
+
+    test("Escape dismisses the completion without clearing the draft", async ({
+      page,
+    }) => {
+      await openChannel(page, skin);
+      await typeAndWait(page, ":jo");
+
+      await composer(page).press("Escape");
+      await expect(page.getByTestId("emoji-suggest-list")).toHaveCount(0);
+      await expect(page.getByTestId("emoji-ghost")).toHaveCount(0);
+      await expect(composer(page)).toHaveValue(":jo");
+
+      // Typing brings it back — Esc dismisses the token, not the feature.
+      await composer(page).pressSequentially("y");
+      if (skin === "terminal") {
+        await expect(page.getByTestId("emoji-ghost")).toBeVisible();
+      } else {
+        await expect(page.getByTestId("emoji-suggest-list")).toBeVisible();
+      }
+    });
+
+    test("a mention query keeps the emoji track shut", async ({ page }) => {
+      await openChannel(page, skin);
+      await composer(page).click();
+      await composer(page).pressSequentially("@da");
+
+      // Mentions win the composer outright: no emoji list, no emoji ghost.
+      await expect(page.getByTestId("emoji-suggest-list")).toHaveCount(0);
+      await expect(page.getByTestId("emoji-ghost")).toHaveCount(0);
     });
   });
 }
