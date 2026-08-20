@@ -113,7 +113,8 @@ other; a genuinely shared home needs a crate below both, which does not exist ye
 |-------|----------|--------------|
 | **Turso** (remote) | Users, groups, channels, membership, public keys, encrypted message envelopes, MLS commit log, MLS welcomes, GroupInfo | Message plaintext, private keys |
 | **SQLite** (local, per-user, encrypted) | Decrypted messages, MLS group state (`mls_kv`), preferences cache | User profiles, groups, channels (fetched from remote) |
-| **Device keystore** | ML-DSA-44 account identity key pair (private half is its 32-byte seed, so the wrapped blob is the same size it was under Ed25519), session token, device ID, DB encryption key | Anything in plaintext — see below |
+| **Device keystore** | ML-DSA-44 account identity key pair (private half is its 32-byte seed, so the wrapped blob is the same size it was under Ed25519), session token, device ID, DB encryption key, the account's login email (`login_email_{uid}`, #997) | Anything in plaintext — see below |
+| **`accounts.json`** (local, unencrypted, guarded by file permissions alone) | Per account: opaque `user_id` ULID, `username`, `avatar_url`, `last_seen`; plus `last_active_user`. The only store readable pre-unlock | Any secret, and any PII — the login email moved to the keystore in #997 (`docs/security-whitepaper.md` §1.1.1) |
 
 ### The device keystore has two backends (#882)
 

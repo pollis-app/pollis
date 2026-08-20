@@ -8,6 +8,16 @@ use ulid::Ulid;
 
 const DEVICE_ID_KEY: &str = "device_id";
 
+/// Per-user keystore slot holding this account's login address (#997).
+///
+/// It used to sit in plaintext in `accounts.json` — the one field on the device
+/// that maps an opaque account id to a person, and the only one outside every
+/// protection the product has. The keystore is the right home and costs nothing:
+/// every reader of the address already runs at a moment where the keystore is
+/// reachable, including [`stable_device_id_for_reenrollment`], which reads
+/// [`DEVICE_ID_KEY`] from it at exactly this pre-unlock point.
+const LOGIN_EMAIL_KEY: &str = "login_email";
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserProfile {
     pub id: String,
@@ -337,7 +347,8 @@ async fn verify_otp_ds(
         enrollment_required,
     };
 
-    crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
+    crate::accounts::upsert_account(&profile.id, &profile.username, None)?;
+    store_login_email(state, &profile.id, &profile.email).await;
 
     Ok(profile)
 }
@@ -404,7 +415,135 @@ async fn ensure_device_id(
     Ok(device_id)
 }
 
-/// Resolve an email address to a `user_id` from the LOCAL accounts index.
+/// Read a user's login address out of the per-user keystore (#997).
+///
+/// `None` on ANY failure, deliberately. The whitepaper §4 records that transient
+/// keychain / secret-service errors used to bounce returning users back to OTP,
+/// so a hiccup here must degrade — to "type your email", which is the screen a
+/// brand-new device sees anyway — and never propagate as an error out of a call
+/// whose other results are perfectly good.
+async fn login_email_for_user(state: &Arc<AppState>, user_id: &str) -> Option<String> {
+    let bytes = state
+        .keystore
+        .load_for_user(LOGIN_EMAIL_KEY, user_id)
+        .await
+        .unwrap_or(None)?;
+    String::from_utf8(bytes).ok()
+}
+
+/// Persist a user's login address in the per-user keystore, next to every other
+/// per-user secret. Called by each site that also calls `upsert_account`.
+///
+/// Best-effort for the same reason [`login_email_for_user`] is: a keystore
+/// hiccup must not fail a login that has otherwise fully succeeded. A miss costs
+/// the login screen's one-click chip and the returning-device `device_id` reuse,
+/// and both re-establish on the next successful login.
+///
+/// Returns whether the address actually landed, which only the upgrade path
+/// below cares about — it must not erase the plaintext copy on disk until the
+/// keystore has taken one.
+async fn store_login_email(state: &Arc<AppState>, user_id: &str, email: &str) -> bool {
+    match state
+        .keystore
+        .store_for_user(LOGIN_EMAIL_KEY, user_id, email.as_bytes())
+        .await
+    {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("[auth] could not persist the login address for {user_id}: {e}");
+            false
+        }
+    }
+}
+
+/// Read the accounts index, first moving any pre-#997 plaintext login address it
+/// still carries into the per-user keystore and erasing it from the file.
+///
+/// This is the upgrade path, and it is load-bearing rather than cosmetic. Every
+/// install that predates #997 has the address in `accounts.json` and nowhere
+/// else; without this it would lose the pre-unlock email → `user_id` resolution
+/// — #419's returning-device path — and the login screen's "continue as" chip
+/// until the user signed in by OTP again. It runs at the three places that need
+/// the address, all of which are already async with `state` in hand.
+///
+/// Ordering is deliberate: keystore write first, disk erase second. An address
+/// already in the keystore wins over the file's copy, because every writer since
+/// the upgrade has kept the keystore current. If ANY account's keystore write
+/// fails, nothing is erased and the next launch simply tries again — a failed
+/// migration must never be a lost address.
+async fn read_accounts_index_migrated(
+    state: &Arc<AppState>,
+) -> Result<crate::accounts::AccountsIndex> {
+    let index = crate::accounts::read_accounts_index()?;
+
+    if adopt_legacy_login_emails(state, &index.accounts).await {
+        if let Err(e) = crate::accounts::forget_legacy_emails() {
+            eprintln!("[auth] could not erase legacy login addresses from accounts.json: {e}");
+        }
+    }
+
+    Ok(index)
+}
+
+/// Move every pre-#997 address these accounts still carry into the keystore.
+///
+/// Returns whether the file is now safe to rewrite without them: true only when
+/// at least one legacy address was seen AND every one of them is now in the
+/// keystore. Split from [`read_accounts_index_migrated`] at the index read, for
+/// the same reason [`user_id_for_email_among`] is — the keystore is hermetic per
+/// `AppState`, the on-disk index is process-global.
+async fn adopt_legacy_login_emails(
+    state: &Arc<AppState>,
+    accounts: &[crate::accounts::AccountInfo],
+) -> bool {
+    let mut saw_legacy = false;
+    let mut adopted_all = true;
+
+    for account in accounts {
+        let Some(legacy) = account.legacy_email.as_deref() else {
+            continue;
+        };
+        saw_legacy = true;
+        // A keystore entry wins over the file's copy: every writer since the
+        // upgrade has kept the keystore current, and the file's is frozen at
+        // whatever the last pre-upgrade login wrote.
+        if login_email_for_user(state, &account.user_id).await.is_some() {
+            continue;
+        }
+        if !store_login_email(state, &account.user_id, legacy).await {
+            adopted_all = false;
+        }
+    }
+
+    saw_legacy && adopted_all
+}
+
+/// Match an email against the login addresses the keystore holds for `accounts`.
+///
+/// Split off from [`local_user_id_for_email`] at the index read so the matching
+/// rule itself is testable: the index lives at the process-global data dir,
+/// which unit tests in this crate cannot claim without fighting each other over
+/// it, while the keystore is per-`AppState` and therefore hermetic.
+///
+/// N is the number of accounts that have signed in on this device — three or so
+/// at the outside — so the linear scan of keystore reads is not worth indexing.
+async fn user_id_for_email_among(
+    state: &Arc<AppState>,
+    accounts: &[crate::accounts::AccountInfo],
+    email: &str,
+) -> Option<String> {
+    for account in accounts {
+        let Some(stored) = login_email_for_user(state, &account.user_id).await else {
+            continue;
+        };
+        if stored.eq_ignore_ascii_case(email) {
+            return Some(account.user_id.clone());
+        }
+    }
+    None
+}
+
+/// Resolve an email address to a `user_id` using only local state.
 ///
 /// The only such lookup available pre-unlock: the local DB is closed (so there
 /// is no device signer) and no OTP has run (so there is no session), which
@@ -412,17 +551,14 @@ async fn ensure_device_id(
 /// `SELECT id FROM users WHERE email = ?` that used to serve these call sites.
 /// `None` means "this machine has not signed into that address before", which is
 /// exactly the condition under which both callers want the fresh-device path.
-fn local_user_id_for_email(email: &str) -> Option<String> {
-    let index = crate::accounts::read_accounts_index().ok()?;
-    index
-        .accounts
-        .iter()
-        .find(|a| {
-            a.email
-                .as_deref()
-                .is_some_and(|e| e.eq_ignore_ascii_case(email))
-        })
-        .map(|a| a.user_id.clone())
+///
+/// The candidate `user_id`s come from `accounts.json`; the addresses they are
+/// matched against come from the keystore (#997), which is readable at this
+/// moment for exactly the reason [`stable_device_id_for_reenrollment`] — the
+/// caller below — can already read [`DEVICE_ID_KEY`] out of it here.
+async fn local_user_id_for_email(state: &Arc<AppState>, email: &str) -> Option<String> {
+    let index = read_accounts_index_migrated(state).await.ok()?;
+    user_id_for_email_among(state, &index.accounts, email).await
 }
 
 /// For a RETURNING, not-yet-enrolled device, return its existing stable
@@ -438,7 +574,7 @@ fn local_user_id_for_email(email: &str) -> Option<String> {
 /// enrollment check reads the keystore, not the still-locked DB, so it is valid
 /// here pre-unlock (same call site semantics as the `enrollment_required` calc).
 async fn stable_device_id_for_reenrollment(state: &Arc<AppState>, email: &str) -> Option<String> {
-    let user_id = local_user_id_for_email(email)?;
+    let user_id = local_user_id_for_email(state, email).await?;
 
     let enrolled = crate::commands::account_identity::has_local_account_identity(state, &user_id)
         .await
@@ -553,12 +689,16 @@ pub async fn verify_email_change(
         }
     };
 
-    // Mirror the new email into the local accounts index so the login screen's
-    // "continue as" picker shows the new address. Runs after the swap succeeds.
+    // Mirror the new email into the keystore so the login screen's "continue as"
+    // picker offers the new address, and so the pre-unlock
+    // `local_user_id_for_email` resolution follows the account. Runs after the
+    // swap succeeds. Touch the accounts index too — it carries the `last_seen`
+    // and username this flow can also have changed.
     if let Some(username) = username {
-        if let Err(e) = crate::accounts::upsert_account(&user_id, &username, Some(&trimmed), None) {
+        if let Err(e) = crate::accounts::upsert_account(&user_id, &username, None) {
             eprintln!("[auth] email-change accounts.json mirror failed: {e}");
         }
+        store_login_email(state, &user_id, &trimmed).await;
     }
 
     Ok(())
@@ -614,7 +754,7 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     }
 
     // Identify the last active user from the local accounts index.
-    let index = crate::accounts::read_accounts_index()?;
+    let index = read_accounts_index_migrated(state).await?;
     let account = match index
         .last_active_user
         .and_then(|uid| index.accounts.iter().find(|a| a.user_id == uid).cloned())
@@ -626,9 +766,16 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         }
     };
 
+    // The address is a keystore read now (#997), not a field of the index. Empty
+    // on a keystore miss, exactly as an absent `email` field used to be — the
+    // downstream `UserProfile.email` contract is unchanged.
+    let email = login_email_for_user(state, &account.user_id)
+        .await
+        .unwrap_or_default();
+
     let mut profile = UserProfile {
         id: account.user_id.clone(),
-        email: account.email.clone().unwrap_or_default(),
+        email,
         username: account.username.clone(),
         new_secret_key: None,
         enrollment_required: false,
@@ -793,7 +940,7 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
     // below would degenerate into a fresh candidate anyway, and the standard
     // first-device DS bootstrap (verify_otp_ds via verify_otp) is the correct
     // path. That covers both a brand-new dev account and a clean dev machine.
-    let user_id = match local_user_id_for_email(&email) {
+    let user_id = match local_user_id_for_email(state, &email).await {
         Some(uid) => uid,
         None => {
             eprintln!(
@@ -872,7 +1019,8 @@ async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfil
             .await
             .unwrap_or(false);
 
-    crate::accounts::upsert_account(&user_id, &username, Some(&email), None)?;
+    crate::accounts::upsert_account(&user_id, &username, None)?;
+    store_login_email(state, &user_id, &email).await;
 
     eprintln!("[auth] DEV_EMAIL: DS-enrolled device {device_id} for {user_id}");
     Ok(UserProfile {
@@ -988,6 +1136,7 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
             let _ = state.keystore.delete_for_user("account_id_key_wrapped", uid).await;
             let _ = state.keystore.delete_for_user("pin_meta", uid).await;
             let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, uid).await;
+            let _ = state.keystore.delete_for_user(LOGIN_EMAIL_KEY, uid).await;
             let data_dir = crate::db::local::dirs_path();
             let db_path = data_dir.join(format!("pollis_{uid}.db"));
             if db_path.exists() {
@@ -1090,6 +1239,7 @@ pub async fn delete_account(
     let _ = state.keystore.delete_for_user("account_id_key_wrapped", &user_id).await;
     let _ = state.keystore.delete_for_user("pin_meta", &user_id).await;
     let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, &user_id).await;
+    let _ = state.keystore.delete_for_user(LOGIN_EMAIL_KEY, &user_id).await;
     *state.device_id.lock().await = None;
     *state.unlock.lock().await = None;
 
@@ -1102,8 +1252,34 @@ pub async fn delete_account(
 
 /// Return the list of accounts that have previously signed in on this device.
 /// Used by the login screen to show a "continue as" picker.
-pub fn list_known_accounts() -> Result<crate::accounts::AccountsIndex> {
-    crate::accounts::read_accounts_index()
+///
+/// The index supplies the identity and display fields; the login address is
+/// rehydrated per account from the keystore (#997), which is why this is async
+/// and takes `state`. The JSON it produces is identical to what the raw index
+/// serialized to before that move, so the renderer is untouched.
+///
+/// A per-account keystore read that fails yields `email: None` for that account
+/// and nothing more — see [`login_email_for_user`]. The picker then renders that
+/// chip disabled and the user types their address, which is strictly better than
+/// failing the whole call and hiding every OTHER account's chip too.
+pub async fn list_known_accounts(state: &Arc<AppState>) -> Result<crate::accounts::KnownAccounts> {
+    let index = read_accounts_index_migrated(state).await?;
+
+    let mut accounts = Vec::with_capacity(index.accounts.len());
+    for account in &index.accounts {
+        accounts.push(crate::accounts::KnownAccount {
+            user_id: account.user_id.clone(),
+            username: account.username.clone(),
+            email: login_email_for_user(state, &account.user_id).await,
+            avatar_url: account.avatar_url.clone(),
+            last_seen: account.last_seen.clone(),
+        });
+    }
+
+    Ok(crate::accounts::KnownAccounts {
+        accounts,
+        last_active_user: index.last_active_user,
+    })
 }
 
 /// Delete all local data on this computer: per-user databases, keystore
@@ -1131,6 +1307,7 @@ pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
         "account_id_key",
         "account_id_key_wrapped",
         "pin_meta",
+        LOGIN_EMAIL_KEY,
     ];
     for account in &index.accounts {
         for key in &per_user_keys {
@@ -1328,6 +1505,234 @@ pub async fn is_current_device_registered(
     )
     .await?;
     Ok(rows.iter().any(|d| d.device_id == device_id))
+}
+
+/// The pre-unlock email → `user_id` resolution, after #997 moved the address
+/// out of `accounts.json` and into the per-user keystore.
+///
+/// Everything here runs against a bare `AppState`: `local_db` is `None`,
+/// `unlock` is `None`, `device_id` is `None`. That is not incidental — it is the
+/// exact state the callers run in (no signer, no session, no DS credential), and
+/// it is the whole reason a locally-resolvable address has to exist at all.
+#[cfg(test)]
+mod prelock_email_resolution {
+    use super::*;
+    use crate::accounts::AccountInfo;
+    use crate::config::Config;
+    use crate::keystore::{InMemoryKeystore, Keystore};
+
+    fn locked_state() -> Arc<AppState> {
+        let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
+        Arc::new(AppState::new_with_parts(
+            Config::for_test().expect("test config"),
+            keystore,
+        ))
+    }
+
+    fn account(user_id: &str, username: &str) -> AccountInfo {
+        AccountInfo {
+            user_id: user_id.to_string(),
+            username: username.to_string(),
+            avatar_url: None,
+            last_seen: "2026-08-01T10:00:00+00:00".to_string(),
+            legacy_email: None,
+        }
+    }
+
+    /// An entry as a pre-#997 `accounts.json` deserializes to it.
+    fn legacy_account(user_id: &str, username: &str, email: &str) -> AccountInfo {
+        AccountInfo {
+            legacy_email: Some(email.to_string()),
+            ..account(user_id, username)
+        }
+    }
+
+    async fn assert_fully_locked(state: &Arc<AppState>) {
+        assert!(state.local_db.lock().await.is_none(), "local DB must be closed");
+        assert!(state.unlock.lock().await.is_none(), "no unlocked session");
+        assert!(state.device_id.lock().await.is_none(), "no device id yet");
+    }
+
+    /// The returning-device path (#419): a machine that has signed into this
+    /// address before resolves its `user_id` with nothing open.
+    #[tokio::test]
+    async fn a_returning_address_resolves_with_the_database_closed() {
+        let state = locked_state();
+        let accounts = vec![account("01USER_A", "alice"), account("01USER_B", "bob")];
+        store_login_email(&state, "01USER_A", "alice@example.com").await;
+        store_login_email(&state, "01USER_B", "bob@example.com").await;
+
+        assert_fully_locked(&state).await;
+
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "bob@example.com").await,
+            Some("01USER_B".to_string())
+        );
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "alice@example.com").await,
+            Some("01USER_A".to_string())
+        );
+    }
+
+    /// Case-insensitivity is the property that made a masked address unusable
+    /// here: `***@example.com` would compare equal for BOTH accounts below and
+    /// resolve to an arbitrary one. Real addresses cannot collide, so the
+    /// resolution stays exact even when two accounts share a domain.
+    #[tokio::test]
+    async fn matching_is_case_insensitive_and_never_collides_on_the_domain() {
+        let state = locked_state();
+        let accounts = vec![account("01USER_A", "alice"), account("01USER_B", "bob")];
+        store_login_email(&state, "01USER_A", "Alice@Example.com").await;
+        store_login_email(&state, "01USER_B", "bob@example.com").await;
+
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "ALICE@EXAMPLE.COM").await,
+            Some("01USER_A".to_string())
+        );
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "BOB@example.com").await,
+            Some("01USER_B".to_string())
+        );
+    }
+
+    /// An address this machine has never signed into resolves to `None` — the
+    /// signal both callers read as "fresh device, take the first-device path".
+    #[tokio::test]
+    async fn an_unknown_address_does_not_resolve() {
+        let state = locked_state();
+        let accounts = vec![account("01USER_A", "alice")];
+        store_login_email(&state, "01USER_A", "alice@example.com").await;
+
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "stranger@example.com").await,
+            None
+        );
+    }
+
+    /// An account present in the index but with no keystore entry — a legacy
+    /// install whose address is only in the pre-#997 `accounts.json`, or a
+    /// keystore that failed to answer — must not stall the scan or resolve to
+    /// the wrong account. It is skipped, and the account behind it still wins.
+    #[tokio::test]
+    async fn an_account_without_a_stored_address_is_skipped_not_matched() {
+        let state = locked_state();
+        let accounts = vec![account("01LEGACY", "legacy"), account("01USER_B", "bob")];
+        store_login_email(&state, "01USER_B", "bob@example.com").await;
+
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "legacy@example.com").await,
+            None
+        );
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "bob@example.com").await,
+            Some("01USER_B".to_string())
+        );
+    }
+
+    /// The whole point of the move: the address lives in the keystore, and
+    /// `AccountInfo` — everything `accounts.json` serializes — has no field that
+    /// can hold it. This is the invalid state the change makes unrepresentable.
+    #[tokio::test]
+    async fn the_address_is_readable_from_the_keystore_and_absent_from_the_index() {
+        let state = locked_state();
+        let entry = account("01USER_A", "alice");
+        store_login_email(&state, "01USER_A", "alice@example.com").await;
+
+        assert_eq!(
+            login_email_for_user(&state, "01USER_A").await,
+            Some("alice@example.com".to_string())
+        );
+
+        let serialized = serde_json::to_string(&entry).expect("serialize");
+        assert!(
+            !serialized.contains("alice@example.com") && !serialized.contains("email"),
+            "the index entry must not be able to carry an address: {serialized}"
+        );
+    }
+
+    /// The upgrade path. An install that predates #997 has the address on disk
+    /// and nowhere else; after one migrated read it is in the keystore and the
+    /// returning-device resolution works from there — which is the whole reason
+    /// the move could not simply DROP the field.
+    #[tokio::test]
+    async fn a_legacy_address_is_adopted_into_the_keystore_and_then_resolves() {
+        let state = locked_state();
+        let accounts = vec![
+            legacy_account("01USER_A", "alice", "alice@example.com"),
+            legacy_account("01USER_B", "bob", "bob@example.com"),
+        ];
+
+        // Before the migration the keystore knows nothing, so nothing resolves.
+        assert_eq!(login_email_for_user(&state, "01USER_A").await, None);
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "alice@example.com").await,
+            None
+        );
+
+        assert!(
+            adopt_legacy_login_emails(&state, &accounts).await,
+            "every legacy address was adopted, so the file may be rewritten"
+        );
+
+        assert_fully_locked(&state).await;
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "alice@example.com").await,
+            Some("01USER_A".to_string())
+        );
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "bob@example.com").await,
+            Some("01USER_B".to_string())
+        );
+    }
+
+    /// An index with nothing legacy in it must not authorize a rewrite — the
+    /// erase step is for files that actually carry an address, and a launch that
+    /// finds none should leave the file untouched.
+    #[tokio::test]
+    async fn an_index_with_no_legacy_address_authorizes_no_rewrite() {
+        let state = locked_state();
+        let accounts = vec![account("01USER_A", "alice")];
+
+        assert!(!adopt_legacy_login_emails(&state, &accounts).await);
+    }
+
+    /// The keystore is the newer copy once the upgrade has run: a stale address
+    /// still sitting in the file must not overwrite the one a later email change
+    /// wrote to the keystore.
+    #[tokio::test]
+    async fn a_stale_file_address_never_overwrites_the_keystore() {
+        let state = locked_state();
+        let accounts = vec![legacy_account("01USER_A", "alice", "old@example.com")];
+        store_login_email(&state, "01USER_A", "new@example.com").await;
+
+        assert!(adopt_legacy_login_emails(&state, &accounts).await);
+
+        assert_eq!(
+            login_email_for_user(&state, "01USER_A").await,
+            Some("new@example.com".to_string())
+        );
+    }
+
+    /// Deleting the account clears the address with everything else, so a wiped
+    /// account leaves nothing behind to resolve.
+    #[tokio::test]
+    async fn deleting_the_stored_address_unresolves_the_account() {
+        let state = locked_state();
+        let accounts = vec![account("01USER_A", "alice")];
+        store_login_email(&state, "01USER_A", "alice@example.com").await;
+
+        state
+            .keystore
+            .delete_for_user(LOGIN_EMAIL_KEY, "01USER_A")
+            .await
+            .expect("delete");
+
+        assert_eq!(login_email_for_user(&state, "01USER_A").await, None);
+        assert_eq!(
+            user_id_for_email_among(&state, &accounts, "alice@example.com").await,
+            None
+        );
+    }
 }
 
 #[cfg(test)]
