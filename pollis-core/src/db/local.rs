@@ -332,6 +332,42 @@ mod tests {
         LocalDb::open_in_memory().expect("in-memory db")
     }
 
+    /// The entire at-rest story (`docs/security-whitepaper.md` §7) rests on one
+    /// unchecked assumption: that the `sqlite3_*` symbols this crate calls at
+    /// runtime are the ones `libsqlite3-sys`'s `bundled-sqlcipher` build
+    /// compiled. Nothing enforced it. If ANOTHER SQLite lands in the same link
+    /// and wins those symbols — a second `sqlite3` amalgamation from any
+    /// dependency does exactly that, since the linker takes the first
+    /// definition and never pulls the second — then `PRAGMA key` becomes an
+    /// UNKNOWN pragma, and SQLite ignores unknown pragmas SILENTLY. Every write
+    /// still succeeds; the file is just plaintext. There is no error, no
+    /// warning, and no behavioural difference until someone reads the file.
+    ///
+    /// `PRAGMA cipher_version` exists only in SQLCipher, so it is the one
+    /// question whose answer distinguishes the two builds. Asserting it here
+    /// makes "the app believes it is encrypting and is not" a state the test
+    /// suite cannot leave standing.
+    #[test]
+    fn sqlcipher_is_the_sqlite_we_actually_linked() {
+        let conn = Connection::open_in_memory().expect("open");
+        let version = conn
+            .query_row("PRAGMA cipher_version", [], |row| row.get::<_, String>(0))
+            .optional()
+            .expect("query cipher_version");
+
+        let linked = version
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|v| !v.is_empty());
+        assert!(
+            linked,
+            "`PRAGMA cipher_version` answered nothing ({version:?}): the linked sqlite3 is NOT \
+             SQLCipher. `PRAGMA key` is being silently ignored and pollis_<user>.db is PLAINTEXT \
+             on this platform. Check what else in the dependency graph ships an sqlite3 \
+             amalgamation."
+        );
+    }
+
     /// #825: gaining `message.thread_id` must NOT cost the user their history.
     ///
     /// Builds a database with the pre-thread `message` shape, puts a message in
