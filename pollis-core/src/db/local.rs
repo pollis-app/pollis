@@ -565,6 +565,55 @@ mod tests {
         );
     }
 
+    /// `docs/security-whitepaper.md` §7.0 states, per platform, which crypto
+    /// provider SQLCipher takes its AES and HMAC from. That table records a
+    /// build outcome, not a source-level fact, and on macOS the outcome is
+    /// decided by the environment: `libsqlite3-sys`'s build script selects
+    /// CommonCrypto only when it finds no OpenSSL, so an `OPENSSL_DIR` (or
+    /// `OPENSSL_LIB_DIR` + `OPENSSL_INCLUDE_DIR`) present on a build machine
+    /// moves macOS onto OpenSSL instead — nothing in the source tree changes
+    /// and every other test still passes.
+    ///
+    /// `PRAGMA cipher_provider` is the build answering that question about
+    /// itself, so ask it. This does not decide whether the database is
+    /// encrypted — [`the_local_database_file_is_encrypted_at_rest`] does that —
+    /// it decides that the documented provider and the compiled one are the
+    /// same provider.
+    ///
+    /// The pragma answers only once a codec is attached, so key the connection
+    /// first.
+    #[test]
+    fn the_crypto_provider_is_the_one_this_platform_documents() {
+        let expected = if cfg!(target_os = "windows") {
+            // `pollis-sqlcipher`, compiled `-DSQLCIPHER_CRYPTO_LIBTOMCRYPT`
+            // against the RustCrypto-backed provider in its `abi` module. It
+            // reports upstream's provider name; `cipher_provider_version` is
+            // the honest one and that crate's own suite pins it.
+            "libtomcrypt"
+        } else if cfg!(target_os = "macos") {
+            "commoncrypto"
+        } else {
+            // Linux links the system OpenSSL; iOS/Android vendor a static one.
+            "openssl"
+        };
+
+        let conn = Connection::open_in_memory().expect("open");
+        conn.execute_batch(&format!("PRAGMA key = \"x'{}'\"", hex::encode(TEST_KEY)))
+            .expect("apply key");
+        let provider: String = conn
+            .query_row("PRAGMA cipher_provider", [], |row| row.get(0))
+            .expect("query cipher_provider");
+        let provider = provider.trim();
+
+        assert_eq!(
+            provider, expected,
+            "SQLCipher was compiled against the `{provider}` crypto provider, but \
+             docs/security-whitepaper.md §7.0 documents `{expected}` for this platform. Either \
+             the build environment changed which provider libsqlite3-sys selected (an OPENSSL_* \
+             variable on the build machine does exactly this on macOS), or §7.0 is now wrong."
+        );
+    }
+
     /// The premise the plaintext-disposal gate rests on, in the configuration
     /// that ships. `sqlcipher_is_linked` exists to keep a binary carrying a
     /// SECOND sqlite3 from destroying databases it cannot replace with anything

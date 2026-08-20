@@ -46,10 +46,15 @@
 //! `sqlcipher_is_the_sqlite_we_actually_linked` test in
 //! `pollis-core/src/db/local.rs` is what holds that true.
 //!
-//! On every other target this crate compiles no C and links nothing:
-//! Linux/macOS/mobile keep `bundled-sqlcipher` exactly as before. The Rust in
-//! [`abi`] is still built and still unit-tested there, which is the point — the
-//! crypto is verified by known-answer tests on every platform's CI, not only on
-//! the one that ships it.
+//! Windows is the only target that *links* this crate into the application:
+//! `pollis-core` depends on it under `cfg(target_os = "windows")` only, and
+//! Linux/macOS/mobile keep `bundled-sqlcipher` exactly as before, so nothing
+//! here reaches those binaries. The build script, however, compiles
+//! `vendor/sqlite3.c` on **every** target — `cfg.compile("sqlcipher")` is
+//! unconditional — and that is deliberate: it is what lets `tests/sqlcipher.rs`
+//! drive a real encrypted database through this provider on the ordinary Linux
+//! gate, so a crypto mistake fails there in seconds instead of surviving until
+//! a Windows job runs. The C is built (and linked into this crate's own test
+//! binaries) everywhere; it is shipped nowhere but Windows.
 
 pub mod abi;

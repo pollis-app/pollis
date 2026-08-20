@@ -761,7 +761,7 @@ File path: `pollis_{user_id}.db`, encrypted with a key from the device keystore.
 
 Before #992 Windows wrote this file **in the clear**: a second sqlite3 amalgamation from `libsql` had been winning the `sqlite3_*` symbols on every shipped Windows build until #988 removed it, so `PRAGMA key` was a silently-ignored unknown pragma. `LocalDb::open_at` therefore checks every existing file for the unencrypted `SQLite format 3\0` header and, on a hit, overwrites the file and its `-wal`/`-shm`/`-journal` sidecars and recreates the database empty — never opening it, never falling back to plaintext.
 
-Full reasoning: the rusqlite note in `pollis-core/Cargo.toml` and `docs/security-whitepaper.md` §7.0. Pinned by `sqlcipher_is_the_sqlite_we_actually_linked` (now with no `cfg` exception on any platform), `the_local_database_file_is_encrypted_at_rest` and `a_plaintext_database_is_destroyed_not_opened` in `pollis-core/src/db/local.rs`, all three of which also run natively on `windows-latest` in `.github/workflows/windows-link.yml`.
+Full reasoning: the rusqlite note in `pollis-core/Cargo.toml` and `docs/security-whitepaper.md` §7.0. Pinned by `sqlcipher_is_the_sqlite_we_actually_linked` (now with no `cfg` exception on any platform), `the_local_database_file_is_encrypted_at_rest`, `a_plaintext_database_is_destroyed_not_opened` and `the_crypto_provider_is_the_one_this_platform_documents` (#NNN) in `pollis-core/src/db/local.rs`. All four run on Linux in `mls-tests.yml`, natively on `windows-latest` in `.github/workflows/windows-link.yml`, and — since #NNN — natively on `macos-latest` in `mls-tests.yml`'s `macos-at-rest` job, which is the first macOS runner in this repo to execute a test at all.
 
 ### kv
 - `key` TEXT PK

@@ -95,13 +95,28 @@ data-dir section](#the-process-wide-data-dir--never-set_var)).
 1. `cargo test -p pollis-schema` — the remote schema itself (#924). Seconds-cheap, no system deps, and it is the definition every other job stamps its databases from: it is the only automatic check that every migration file on disk is *listed*, that versions are unique and ascending, and that `single_db_scripts()` keeps main-then-log order (what a single-DB deploy depends on).
 2. `cargo test -p pollis-api` — the client/server wire contract (#875, #922), whose `compile_fail` doctests are the guarantee that a mistyped request **or response** body cannot compile.
 3. `cargo test -p pollis-delivery` — DS serializer + route coverage.
-4. `cargo test -p pollis-core` — MLS unit tests, and the local-database at-rest tests (#992): `the_local_database_file_is_encrypted_at_rest` writes a message through `LocalDb::open_for_user` and then reads the file's raw bytes back.
+4. `cargo test -p pollis-core` — MLS unit tests, and the local-database at-rest tests (#992): `the_local_database_file_is_encrypted_at_rest` writes a message through `LocalDb::open_for_user` and then reads the file's raw bytes back, and `the_crypto_provider_is_the_one_this_platform_documents` (#NNN) asks `PRAGMA cipher_provider` whether the build got the provider `docs/security-whitepaper.md` §7.0 documents for this platform.
 5. `cargo test -p pollis-sqlcipher` — the SQLCipher crypto provider the **Windows** build links (#992): known-answer vectors (RFC 6070, RFC 4231/2202, NIST SP 800-38A) plus a real encrypted database driven straight through the vendored amalgamation. It only ships on Windows, but its C is compiled on every target precisely so this runs here — a provider mistake fails in seconds on Linux rather than 25 minutes later in `windows-link.yml`.
 6. `cargo test -p pollis-tui` — see below.
 7. `cargo test --features test-harness --test flows` — the integration harness.
 8. `cargo clippy --workspace --all-targets -- -D warnings` — the Rust lint gate (#912). Runs last so the test signal lands first, and inside this job because the toolchain, apt deps and cargo cache are already there. `rust-toolchain.toml` lists `components = ["clippy"]`, so `cargo clippy` works on a dev box with no extra step; the job pins `dtolnay/rust-toolchain@1.96.0` (the action exports `RUSTUP_TOOLCHAIN` and would otherwise override the pin) so a new stable's new lints cannot turn an untouched PR red.
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so one failure still lets the rest report.
+
+The workflow has a second heavy job, `macos-at-rest` (#NNN), gated on the same
+`changes` decision and reported by the same `gate`. It runs
+`cargo test -p pollis-core --lib --no-default-features -- db::local::tests::` on
+`macos-latest` and greps the log for the four load-bearing test names, exactly
+as `windows-link.yml` does. It exists because until #NNN **no macOS runner in
+this repo executed a single test** — the only macOS jobs were
+`mobile-core-check`'s iOS cross-compile `cargo check` and the tag-triggered
+release build — while macOS is the one desktop platform whose SQLCipher crypto
+provider is CommonCrypto, chosen by `libsqlite3-sys`'s build script and
+flippable to OpenSSL by an `OPENSSL_DIR` on the runner. `--no-default-features`
+drops `media` and `os-keystore`, neither of which the at-rest path touches;
+`cargo tree -i libsqlite3-sys` is identical with and without `media`, so the
+"which sqlite3 won the symbols" question is unchanged, and the job stays minutes
+long on a runner billed at 10x.
 
 ### What `windows-link.yml` runs (#991, #992)
 
@@ -115,9 +130,10 @@ can answer: `sqlcipher_is_the_sqlite_we_actually_linked` (SQLCipher is present),
 `LocalDb::open_for_user` does not appear in the file's bytes, the file does not
 begin with the plaintext SQLite header, and neither an unkeyed nor a
 wrongly-keyed connection can read it), and
-`a_plaintext_database_is_destroyed_not_opened`. The step greps for each of those
-three names, because libtest exits 0 when a filter matches nothing and a rename
-would otherwise turn the whole check into a silent no-op.
+`a_plaintext_database_is_destroyed_not_opened`, plus
+`the_crypto_provider_is_the_one_this_platform_documents` (#NNN). The step greps
+for each of those four names, because libtest exits 0 when a filter matches
+nothing and a rename would otherwise turn the whole check into a silent no-op.
 
 It exists because `build-windows` used to live only in the tag-triggered
 `desktop-release.yml`. v1.10.0 was cut from a fully-green PR whose Windows link
