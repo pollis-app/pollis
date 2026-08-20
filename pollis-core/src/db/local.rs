@@ -154,6 +154,12 @@ impl LocalDb {
 /// The 16 bytes an unencrypted SQLite file begins with. SQLCipher encrypts the
 /// header along with everything else, so finding this at offset 0 means the
 /// codec never engaged when the file was written.
+///
+/// There is exactly one way a genuinely encrypted database could still start
+/// with it — `PRAGMA cipher_plaintext_header_size`, which deliberately leaves
+/// the header readable so tools can identify the file. Pollis never sets it, and
+/// if that ever changes this check has to change with it or it will start
+/// destroying good databases.
 const SQLITE_PLAINTEXT_HEADER: &[u8; 16] = b"SQLite format 3\0";
 
 /// Sidecars SQLite keeps beside the main file. The `-wal` in particular holds
