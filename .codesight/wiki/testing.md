@@ -23,12 +23,15 @@ reach:
 | `message-window.test.ts` | no px load-more constant in `MessageList` (#934) |
 | `ui-inventory.test.ts` | `.codesight/wiki/ui.md`'s inventory is regenerated, not hand-patched (#933) |
 | `commands::r2::tests` (Rust) | the media-cache sweep never returns to window focus (#930) |
+| `no-plaintext-temp-files.test.ts` | the renderer never writes a user's file to a temp dir; `writeFile` is only ever aimed at a save-dialog path; a queued attachment's bytes are a user file **or** staged, never a path this app invented (#1000) |
+| `media_server::tests::serve_media_never_builds_a_response_body_itself` (Rust) | every response carrying decrypted media goes through the one builder that attaches `Cache-Control: no-store` (#1000) |
 
 A guard is a poor substitute for a behavioural test and a good complement to
 one. Each of the above is paired with something that exercises the real
 behaviour — the rem threshold's arithmetic, the cap's actual eviction, the
-inventory's round-trip — so a guard passing on broken code is not enough to
-make the suite green.
+inventory's round-trip, the staging registry's own lifecycle tests, a real HTTP
+`GET` against a real spawned media server — so a guard passing on broken code is
+not enough to make the suite green.
 
 > The harness is built on top of Tauri's test machinery (`tauri::test::get_ipc_response` + `MockRuntime`). Tauri is the shipping shell, so the harness drives the real command logic through the same dispatch path the app uses, headlessly — `pollis-core` is the unit under test, reached through the `#[tauri::command]` shims exactly as at runtime.
 

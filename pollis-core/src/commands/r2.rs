@@ -1355,7 +1355,7 @@ mod tests {
         );
     }
 
-    // ── The media-cache wipe (#994) ───────────────────────────────────────
+    // ── The media-cache wipe (#1000) ───────────────────────────────────────
 
     /// Put one cache file in `<root>/<user>/` and return its path.
     fn seed_cache_entry(user: &str, name: &str) -> PathBuf {

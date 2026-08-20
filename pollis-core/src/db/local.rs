@@ -258,7 +258,7 @@ fn sqlcipher_is_linked(conn: &Connection) -> bool {
 /// always open.
 fn destroy_plaintext_database(db_path: &std::path::Path) -> Result<bool> {
     // ONE resolution of the path, and every destructive step below runs on the
-    // handle it produced (#994). Resolving `db_path` separately for the header
+    // handle it produced (#1000). Resolving `db_path` separately for the header
     // probe, the `stat`, the write and the unlink — which is what this used to
     // do — is four chances for the file underneath to become a different one,
     // and `File::open`/`fs::metadata`/`OpenOptions::open` all follow a symlink

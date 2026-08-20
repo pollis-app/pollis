@@ -499,7 +499,7 @@ mod tests {
         let _ = (sent, dropped);
     }
 
-    // ── Cache directives (#994) ───────────────────────────────────────────
+    // ── Cache directives (#1000) ───────────────────────────────────────────
 
     /// Bring up the real server over a real cached file and return
     /// `(base_url, content_hash)`.

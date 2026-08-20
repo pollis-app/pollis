@@ -347,8 +347,14 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 - `get_public_file_url(key)` → URL — resolves a public object to a loopback media-server URL, caching the bytes on disk encrypted at rest under the same content-addressed scheme attachments and custom emoji use. The key IS the expected digest, so the integrity check is free and mandatory (these objects are stored unencrypted). Returns `""` — the same sentinel `get_media_url` uses — for a LEGACY key that carries no digest, or when the media server isn't up; the frontend falls back to `download_file` for those.
 - ~~`presign_upload(key, content_type)`~~ — **does not exist** under that name as of 2026-08-03 (#714). Presigning is server-side: the DS secrets broker mints URLs via `POST /v1/r2/presign` (see `delete_r2_object` below and `docs/secrets-broker.md`).
 - `get_media_url(r2_key, content_hash, content_type)` → URL — builds the loopback media-server URL (`http://127.0.0.1:<port>/<token>/<hash>`) for a cached item; errors if the server isn't started or there is no active unlock. See `pollis-core/src/media_server.rs`.
-- `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso.
+- `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso. `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here.
+- `upload_media_staged(staged_id, filename, content_type)` — the same upload for bytes with no path: a paste, or a drop the webview surfaced as a `File`. Reads them from the in-memory staging registry (`commands/staging.rs`) and releases them **only on success**, so a failed upload is a retry rather than a lost paste.
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) used by `delete_message` to purge orphaned attachments. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
+
+## staging (`commands/staging.rs`)
+In-memory custody of attachment bytes that arrive through the webview with no filesystem path (#1000). The renderer used to manufacture one by writing the raw file into the OS temp directory as `pollis-<ts>-<original filename>`; nothing ever deleted it, so the plaintext of every file a user had ever pasted stayed there under its own name. There is no file now — bytes go into a process-global registry keyed by an opaque id, bounded by `STAGED_MAX_TOTAL_BYTES` (512 MiB, which refuses rather than evicting), and released on upload success, on removal, on composer unmount, and wholesale by `lock` / `logout` / `wipe_local_data`.
+- `stage_attachment(<raw IPC body>)` → `{ id, size_bytes }` — the payload is the `Uint8Array` itself (`tauri::ipc::Request`, same shape as `terminal_write`), not a JSON number array.
+- `discard_staged_attachment(staged_id)` → `bool` — release bytes the composer will not send.
 
 ## emoji (`commands/emoji.rs`)
 Custom per-group emoji (#848). Remote metadata lives in `custom_emoji_object` (content-addressed, one row per stored image) + `group_emoji` (one row per group that uses it); writes go through the DS (`POST /v1/emoji/{create,remove,gc}`). The objects are **unencrypted** in R2, deliberately — see the module docs and migration `000015_custom_emoji.sql`. `create` names its actor as `created_by` and `remove` as `actor_id` (both filled from `current_user_id`) — neither did before #875, so both 403'd on an unsigned deployment; see "Every DS write body must NAME ITS ACTOR" at the top of this page.
@@ -387,7 +393,7 @@ Regenerate with:
 sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 ```
 
-- **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image_to_temp`
+- **`(lib.rs, no module)`** — `hide_window`, `read_clipboard_files`, `read_clipboard_image`
 - **`autolock`** — `report_user_activity`, `set_auto_lock_timeout`
 - **`auth`** — `delete_account`, `dev_login`, `get_identity`, `get_session`, `initialize_identity`, `is_current_device_registered`, `list_known_accounts`, `list_user_devices`, `logout`, `request_email_change_otp`, `request_otp`, `revoke_device`, `verify_email_change`, `verify_otp`, `wipe_local_data`
 - **`blocks`** — `block_user`, `list_blocked_users`, `unblock_user`
@@ -404,7 +410,8 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`mls`** — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 - **`overlay`** — `get_overlay_mode`, `set_overlay_mode`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
-- **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_public_file`
+- **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
+- **`staging`** — `discard_staged_attachment`, `stage_attachment`
 - **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
 - **`safety`** — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
 - **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`, `subscribe_screen_share_frames`
@@ -431,7 +438,7 @@ Prose above covers roughly half of these; this index covers all of them, so a na
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
 
-**`(root)`** (4) — `hide_window`, `read_clipboard_files`, `read_clipboard_image_to_temp`, `write_clipboard_text`
+**`(root)`** (4) — `hide_window`, `read_clipboard_files`, `read_clipboard_image`, `write_clipboard_text`
 
 **`tray`** (4) — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
 
@@ -469,7 +476,9 @@ than hand-edit.
 
 **`livekit`** (12) — `cancel_call`, `connect_rooms`, `get_livekit_token`, `get_livekit_url`, `get_livekit_view_token`, `list_voice_participants`, `list_voice_room_counts`, `publish_ping`, `publish_typing`, `publish_voice_presence`, `start_call`, `subscribe_realtime`
 
-**`r2`** (7) — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_public_file`
+**`r2`** (8) — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
+
+**`staging`** (2) — `discard_staged_attachment`, `stage_attachment`
 
 **`update`** (2) — `is_update_required`, `mark_update_required`
 
