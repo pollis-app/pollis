@@ -53,7 +53,7 @@ fn candidate_ids(rows: &[DeviceRow], identity_version: i64) -> Vec<String> {
     let mut ids: Vec<String> = stale_cert_candidates(rows, identity_version)
         .expect("stale_cert_candidates")
         .into_iter()
-        .map(|(did, _, _)| did)
+        .map(|d| d.device_id)
         .collect();
     ids.sort();
     ids

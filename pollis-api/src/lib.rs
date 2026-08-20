@@ -563,8 +563,9 @@ mod tests {
         round_trip(
             &groups::RedeemInviteLinkResponse::Ok {
                 group_id: "g1".into(),
+                group_name: Some("Team".into()),
             },
-            r#"{"status":"ok","group_id":"g1"}"#,
+            r#"{"status":"ok","group_id":"g1","group_name":"Team"}"#,
         );
         round_trip(
             &broker::LivekitTokenResponse {

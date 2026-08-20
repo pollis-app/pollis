@@ -425,7 +425,6 @@ async fn delivery_submit(
 /// test would hit a dead port (connection refused). Owning the server on a
 /// separate thread + runtime decouples its lifetime from the per-test runtimes,
 /// so the single shared DS stays up for the whole `cargo test` process.
-
 async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
     use std::sync::mpsc;
 

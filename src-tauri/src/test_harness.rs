@@ -270,7 +270,7 @@ pub async fn bootstrap_schema(conn: &libsql::Connection) -> Result<()> {
         .is_some();
 
     if !has_baseline {
-        run_sql_script(&conn, BASELINE, "baseline").await?;
+        run_sql_script(conn, BASELINE, "baseline").await?;
     }
 
     conn.execute(
@@ -308,7 +308,7 @@ pub async fn bootstrap_schema(conn: &libsql::Connection) -> Result<()> {
         if already {
             continue;
         }
-        run_sql_script(&conn, sql, &format!("migration {version}_{description}")).await?;
+        run_sql_script(conn, sql, &format!("migration {version}_{description}")).await?;
         conn.execute(
             "INSERT INTO schema_migrations (version, description) VALUES (?1, ?2)",
             (

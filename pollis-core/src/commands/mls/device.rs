@@ -373,9 +373,23 @@ pub async fn ensure_device_cert(
     Ok(true)
 }
 
+/// One device that needs its cross-signing cert re-signed: its id and both leaf
+/// signing keys, decoded from the base64 the DS serves.
+///
+/// A named type rather than a tuple because the v2 cert (#668) binds BOTH leaf
+/// keys and the two are the same shape — an accidental swap at a call site would
+/// produce a cert that verifies against the wrong key and fails only for the
+/// device it was minted for.
+pub struct StaleCertDevice {
+    pub device_id: String,
+    /// Ed25519 leaf signing key (classic MLS suite).
+    pub mls_signature_pub: Vec<u8>,
+    /// ML-DSA-44 leaf signing key (PQ suite, #668).
+    pub mls_signature_pub_pq: Vec<u8>,
+}
+
 /// The stale-cert candidate set for `user_id` at account identity version
-/// `identity_version`: the `(device_id, mls_signature_pub, mls_signature_pub_pq)`
-/// of every `user_device` row that still needs re-signing.
+/// `identity_version`: every `user_device` row that still needs re-signing.
 ///
 /// "Stale" means `cert_identity_version IS NULL` or
 /// `cert_identity_version < identity_version` — the cert was signed under a
@@ -405,7 +419,7 @@ pub async fn ensure_device_cert(
 pub fn stale_cert_candidates(
     rows: &[pollis_api::account_reads::DeviceRow],
     identity_version: i64,
-) -> crate::error::Result<Vec<(String, Vec<u8>, Vec<u8>)>> {
+) -> crate::error::Result<Vec<StaleCertDevice>> {
     let mut out = Vec::new();
     for row in rows {
         if row.revoked_at.is_some() {
@@ -428,11 +442,11 @@ pub fn stale_cert_candidates(
         if !stale {
             continue;
         }
-        out.push((
-            row.device_id.clone(),
-            super::ds_reads::decode_b64("mls_signature_pub", sig)?,
-            super::ds_reads::decode_b64("mls_signature_pub_pq", pq)?,
-        ));
+        out.push(StaleCertDevice {
+            device_id: row.device_id.clone(),
+            mls_signature_pub: super::ds_reads::decode_b64("mls_signature_pub", sig)?,
+            mls_signature_pub_pq: super::ds_reads::decode_b64("mls_signature_pub_pq", pq)?,
+        });
     }
     Ok(out)
 }
@@ -480,7 +494,12 @@ pub async fn resign_stale_device_certs(
     // re-sign never touches `mls_signature_pub` — only the cert columns — so it
     // cannot change a device's DS-auth credential.
     let mut signed: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(devices.len());
-    for (device_id, sig_pub_bytes, pq_sig_pub_bytes) in devices {
+    for StaleCertDevice {
+        device_id,
+        mls_signature_pub: sig_pub_bytes,
+        mls_signature_pub_pq: pq_sig_pub_bytes,
+    } in devices
+    {
         let issued_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())

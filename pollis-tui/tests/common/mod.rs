@@ -92,7 +92,7 @@ async fn bootstrap_schema(conn: &libsql::Connection) -> anyhow::Result<()> {
         if already {
             continue;
         }
-        run_sql_script(&conn, sql).await?;
+        run_sql_script(conn, sql).await?;
         conn.execute(
             "INSERT INTO schema_migrations (version, description) VALUES (?1, ?2)",
             (
