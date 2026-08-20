@@ -403,7 +403,12 @@ pub async fn set_pin(
     // Wipe the media cache on unlock. If a different user previously cached
     // media on this device, their files were encrypted under their db_key
     // and are unreadable to us — purge them so they don't consume cap space.
-    crate::commands::r2::clear_media_cache();
+    //
+    // Scoped to `user_id` explicitly rather than to whichever user the cache
+    // happened to be pointed at: `load_user_db_with_key` below is what sets
+    // that, so a wipe reading it here resolved the empty `_anon` directory and
+    // cleared nothing at all.
+    crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::User(&user_id));
 
     // Rotate the loopback media server token. Any URL the previous
     // session handed out becomes invalid the moment the new token is
@@ -647,8 +652,12 @@ pub async fn unlock(
         account_id_key: unlocked.account_id_key,
     });
 
-    // Wipe the media cache on unlock — see equivalent comment in `set_pin`.
-    crate::commands::r2::clear_media_cache();
+    // Wipe the media cache on unlock — see equivalent comment in `set_pin`,
+    // including why the user is named here instead of read from the cache's own
+    // ambient state.
+    crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::User(
+        &unlocked.user_id,
+    ));
 
     // Rotate the loopback media server token so URLs minted under the
     // pre-unlock (or previous-session) token stop working. See the
@@ -806,6 +815,10 @@ pub async fn lock(state: &Arc<AppState>) -> Result<()> {
     // stop resolving. The cache files stay (encrypted at rest) — a
     // subsequent unlock under the same `db_key` can still read them.
     *state.media_server_token.lock().await = None;
+    // Release any attachment the composer had staged but not sent. These are
+    // plaintext bytes the user pasted; they live in memory only, and a session
+    // ending is exactly when they stop being anyone's business.
+    crate::commands::staging::discard_all_staged();
     state.unload_user_db().await;
     Ok(())
 }

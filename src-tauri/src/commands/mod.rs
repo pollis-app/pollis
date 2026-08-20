@@ -23,6 +23,7 @@ pub mod pin;
 pub mod r2;
 pub mod relay_serving;
 pub mod safety;
+pub mod staging;
 pub mod terminal;
 pub mod transparency;
 pub mod update;

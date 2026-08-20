@@ -2,13 +2,15 @@
  * Filesystem bridge — narrow subset of `@tauri-apps/plugin-fs`.
  *
  * Only the three calls the renderer actually uses today are exposed:
- *   - writeFile(path, bytes): save a downloaded attachment / drop a paste
- *     into temp dir before `send_message` reads it.
+ *   - writeFile(path, bytes): save a downloaded attachment to the location the
+ *     user picked in the save dialog. NOT for staging a paste — pasted bytes go
+ *     to `bridge/staging.ts`, which never puts them on a disk.
  *   - readFile(path) -> bytes: image/video preview pre-send.
  *   - stat(path) -> { size, isFile, isDirectory, modifiedAtMs }: filter
  *     directories out of dropped paths before treating them as files.
  *
- * All paths are user-chosen (via dialog) or in the OS temp dir.
+ * Every path here is user-chosen — a dialog result, or a file the OS dropped
+ * on the window.
  */
 
 export async function writeFile(

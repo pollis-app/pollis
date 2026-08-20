@@ -19,6 +19,11 @@ pub async fn upload_media(path: String, filename: String, content_type: String, 
 }
 
 #[tauri::command]
+pub async fn upload_media_staged(staged_id: String, filename: String, content_type: String, state: State<'_, Arc<AppState>>) -> Result<MediaUploadResult> {
+    pollis_core::commands::r2::upload_media_staged(staged_id, filename, content_type, &state).await
+}
+
+#[tauri::command]
 pub async fn upload_public_file(prefix: String, data: Vec<u8>, content_type: String, state: State<'_, Arc<AppState>>) -> Result<UploadResult> {
     pollis_core::commands::r2::upload_public_file(prefix, data, content_type, &state).await
 }

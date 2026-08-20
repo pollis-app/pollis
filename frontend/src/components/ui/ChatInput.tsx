@@ -2,12 +2,12 @@ import React, { useState, useRef, useCallback, useEffect, useImperativeHandle } 
 import { useTranslation } from "react-i18next";
 import {
   dialogOpen,
-  writeFile,
   readFile,
   stat,
-  tempDir,
   readClipboardFiles,
-  readClipboardImageToTemp,
+  readClipboardImage,
+  stageAttachment,
+  discardStagedAttachment,
 } from "../../bridge";
 import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
 import { EmojiPickerButton } from "../Emoji/EmojiPickerButton";
@@ -39,17 +39,44 @@ import { InlineGhost } from "./InlineGhost";
 import { MentionSuggestList } from "./MentionSuggestList";
 import { EmojiSuggestList } from "./EmojiSuggestList";
 
-// Attachment carries a filesystem path so Rust can read the file directly —
-// no bytes-over-IPC bottleneck, no size limit.
+/**
+ * Where the bytes of a queued attachment are, and the only two answers there
+ * are.
+ *
+ * A discriminated union rather than an optional `path`, because the two cases
+ * are not the same thing wearing different values:
+ *
+ * - `path` is a file the USER already has — a picker selection or an OS drag
+ *   and drop. This app did not create it and must never delete it.
+ * - `staged` is bytes the webview handed us with no path of its own — a paste,
+ *   or a drop the webview surfaced as a `File`. They live in the backend's
+ *   memory (`pollis_core::commands::staging`).
+ *
+ * This used to be one `path` field for both, because the second case wrote the
+ * bytes to the OS temp directory under the file's original name to manufacture
+ * one. Nothing deleted those files, so the plaintext of every file a user had
+ * ever pasted was still sitting in `/tmp`. With no path there is nothing to
+ * forget to delete.
+ */
+export type AttachmentSource =
+  | { kind: "path"; path: string }
+  | { kind: "staged"; id: string };
+
 export interface Attachment {
   id: string;
-  path: string;      // absolute filesystem path (empty while loading)
+  // null only while the source is still being prepared (`loading`).
+  source: AttachmentSource | null;
   name: string;
   size: number;      // bytes (0 if unknown)
   mimeType: string;
   preview?: string;  // blob URL for image/video poster previews
   type: "image" | "video" | "audio" | "file";
-  loading?: boolean; // true while path/preview is still being prepared
+  loading?: boolean; // true while source/preview is still being prepared
+}
+
+/** The staged handle of an attachment, or null when its bytes are a real file. */
+export function stagedIdOf(attachment: Attachment): string | null {
+  return attachment.source?.kind === "staged" ? attachment.source.id : null;
 }
 
 export interface ChatInputHandle {
@@ -93,18 +120,6 @@ function typeFromMime(mime: string): Attachment["type"] {
   if (mime.startsWith("video/")) { return "video"; }
   if (mime.startsWith("audio/")) { return "audio"; }
   return "file";
-}
-
-/// Write a browser File to the OS temp directory and return its path.
-/// Used for paste and drag-and-drop, where no filesystem path is available.
-async function writeToTemp(file: File): Promise<string> {
-  const dir = await tempDir();
-  const name = `pollis-${Date.now()}-${file.name}`;
-  // Use forward slashes; on Windows Tauri normalises the separator.
-  const path = `${dir}/${name}`;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  await writeFile(path, bytes);
-  return path;
 }
 
 const PREVIEW_SIZE = 80;
@@ -266,7 +281,11 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   // ── Shared path-based attachment builder (picker + OS drag-drop) ─────────
   const handlePaths = useCallback(async (paths: string[]) => {
     // De-dupe against already-queued paths.
-    const existingPaths = new Set(attachments.map((a) => a.path).filter(Boolean));
+    const existingPaths = new Set(
+      attachments
+        .map((a) => (a.source?.kind === "path" ? a.source.path : null))
+        .filter((p): p is string => p !== null),
+    );
     const newPaths = paths.filter((p) => !existingPaths.has(p));
     const remaining = maxAttachments - attachments.length;
     const candidates = newPaths.slice(0, remaining);
@@ -287,14 +306,17 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     const toProcess = checks.filter((p): p is string => p !== null);
     if (toProcess.length === 0) { return; }
 
-    // Add stubs immediately so the user sees cards right away.
-    const stubs: Attachment[] = toProcess.map((p) => {
+    // Add stubs immediately so the user sees cards right away. Typed with the
+    // narrowed source so the preview loaders below can read `source.path`
+    // without re-checking a discriminant this function just set.
+    type PathStub = Attachment & { source: { kind: "path"; path: string } };
+    const stubs: PathStub[] = toProcess.map((p) => {
       const name = p.split(/[\\/]/).pop() ?? p;
       const mime = mimeFromName(name);
       const type = typeFromMime(mime);
       return {
         id: `${Date.now()}-${Math.random()}`,
-        path: p,
+        source: { kind: "path", path: p },
         name,
         size: 0,
         mimeType: mime,
@@ -313,7 +335,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         .map(async (stub) => {
           let preview: string | undefined;
           try {
-            const bytes = await readFile(stub.path);
+            const bytes = await readFile(stub.source.path);
             preview = URL.createObjectURL(new Blob([bytes], { type: stub.mimeType }));
           } catch {
             // no preview, fall back to file icon
@@ -331,7 +353,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         .map(async (stub) => {
           let preview: string | undefined;
           try {
-            const bytes = await readFile(stub.path);
+            const bytes = await readFile(stub.source.path);
             const blobSrc = URL.createObjectURL(new Blob([bytes], { type: stub.mimeType }));
             preview = (await captureVideoPoster(blobSrc))?.url;
             // Revoke the full-video blob URL — we only needed it for the poster.
@@ -365,7 +387,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     }
   }, [attachments.length, maxAttachments, handlePaths, t]);
 
-  // ── Paste (File objects, written to temp first) ───────────────────────────
+  // ── Paste (File objects, staged in the backend's memory) ──────────────────
   const handleBrowserFile = useCallback(async (file: File) => {
     if (attachments.length >= maxAttachments) { return; }
     // De-dupe by name+size — pasted files have no stable path.
@@ -384,7 +406,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       ...prev,
       {
         id,
-        path: "",
+        source: null,
         name: file.name,
         size: file.size,
         mimeType: mime,
@@ -394,7 +416,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       },
     ]);
 
-    // For videos, capture a poster frame concurrently with writeToTemp.
+    // For videos, capture a poster frame concurrently with the staging call.
     let videoPoster: string | undefined;
     if (isVid) {
       const blobSrc = URL.createObjectURL(file);
@@ -402,23 +424,40 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       URL.revokeObjectURL(blobSrc);
     }
 
-    const path = await writeToTemp(file).catch((err) => {
-      console.error("[ChatInput] writeToTemp failed:", err);
+    // Hand the bytes to the backend. This is the call that used to write the
+    // file into the OS temp directory under its own name and leave it there
+    // forever; the bytes now sit in the backend's memory and the only handle
+    // to them is an opaque id.
+    const staged = await stageAttachment(
+      new Uint8Array(await file.arrayBuffer()),
+    ).catch((err) => {
+      console.error("[ChatInput] stageAttachment failed:", err);
       return null;
     });
 
-    if (!path) {
+    if (!staged) {
       if (preview) { URL.revokeObjectURL(preview); }
       if (videoPoster) { URL.revokeObjectURL(videoPoster); }
       setAttachments((prev) => prev.filter((a) => a.id !== id));
       return;
     }
 
-    setAttachments((prev) =>
-      prev.map((a) => a.id === id
-        ? { ...a, path, preview: preview ?? videoPoster, loading: false }
-        : a)
-    );
+    setAttachments((prev) => {
+      // The card was removed while its bytes were in flight — release them
+      // rather than leaving an entry nothing will ever upload or discard.
+      if (!prev.some((a) => a.id === id)) {
+        void discardStagedAttachment(staged.id);
+        return prev;
+      }
+      return prev.map((a) => a.id === id
+        ? {
+            ...a,
+            source: { kind: "staged", id: staged.id } as const,
+            preview: preview ?? videoPoster,
+            loading: false,
+          }
+        : a);
+    });
   }, [attachments, maxAttachments]);
 
   useImperativeHandle(ref, () => ({
@@ -738,10 +777,13 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       // WebKitGTK doesn't expose clipboard images as DataTransferItem files
       // the way macOS WebKit does, so screenshots / "copy image" from a
       // browser fall through to here. Fetch the raster image from the OS
-      // clipboard, write it to temp, and import as an attachment.
-      readClipboardImageToTemp().then((path) => {
-        if (path) {
-          handlePaths([path]);
+      // clipboard as PNG bytes and import it on the same staging path a
+      // pasted `File` takes — no temp file on either route.
+      readClipboardImage().then((bytes) => {
+        if (bytes) {
+          handleBrowserFile(
+            new File([bytes], "pasted-image.png", { type: "image/png" }),
+          );
         }
       }).catch(() => { /* no image on clipboard */ });
     }).catch(() => { /* clipboard unreadable */ });
@@ -751,8 +793,31 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     setAttachments((prev) => {
       const att = prev.find((a) => a.id === id);
       if (att?.preview) { URL.revokeObjectURL(att.preview); }
+      // Release the bytes, not just the card. The old code revoked the preview
+      // blob URL and dropped the array entry, and left the file it had written
+      // to the OS temp directory exactly where it was.
+      const stagedId = att ? stagedIdOf(att) : null;
+      if (stagedId) { void discardStagedAttachment(stagedId); }
       return prev.filter((a) => a.id !== id);
     });
+  }, []);
+
+  // Unmount with attachments still queued — navigating away mid-compose,
+  // switching channels, closing a thread. Whatever is staged goes with the
+  // composer that staged it.
+  //
+  // Reads through a ref so the effect can depend on nothing and therefore run
+  // only on unmount; a dependency on `attachments` would fire this on every
+  // keystroke that changed the list and discard bytes still in use.
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  useEffect(() => {
+    return () => {
+      for (const att of attachmentsRef.current) {
+        const stagedId = stagedIdOf(att);
+        if (stagedId) { void discardStagedAttachment(stagedId); }
+      }
+    };
   }, []);
 
   return (

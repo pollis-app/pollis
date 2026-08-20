@@ -34,6 +34,20 @@ pub const MEDIA_CACHE_MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 /// Set once at app startup from the Tauri shim (`app_data_dir()`).
 static MEDIA_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// The one cache root every test in this binary shares.
+///
+/// [`MEDIA_CACHE_DIR`] is a `OnceLock` — production installs it once at
+/// startup — so a test cannot have a root of its own. Tests scope themselves by
+/// using their own user directory underneath this one instead.
+#[cfg(test)]
+pub(crate) fn test_cache_root() -> &'static Path {
+    let root = MEDIA_CACHE_DIR.get_or_init(|| {
+        std::env::temp_dir().join(format!("pollis-cache-root-{}", std::process::id()))
+    });
+    let _ = crate::private_fs::create_dir_all(root);
+    root
+}
+
 /// Per-user scope for the cache. Two clients on the same machine each have
 /// their own `db_key`; without per-user scoping they'd share `MEDIA_CACHE_DIR`
 /// and try (and fail) to decrypt each other's entries — 500 from the media
@@ -74,7 +88,7 @@ fn media_cache_dir() -> Result<PathBuf> {
         .and_then(|g| g.clone())
         .unwrap_or_else(|| "_anon".to_string());
     let path = root.join(user);
-    let _ = std::fs::create_dir_all(&path);
+    let _ = crate::private_fs::create_dir_all(&path);
     Ok(path)
 }
 
@@ -276,24 +290,64 @@ pub fn cache_total_bytes() -> u64 {
     total
 }
 
-/// Wipe every file in the media cache directory. Called on logout so
-/// decrypted images and other media don't sit on disk past a session end —
-/// the cache itself is plaintext at rest, so it must follow the same
-/// lifecycle as the keystore unlock. The directory itself stays so a
-/// subsequent re-login doesn't have to re-create it.
-pub fn clear_media_cache() {
+/// Which slice of the media cache a wipe covers.
+///
+/// The scope is a PARAMETER, and that is the whole point. The wipe used to read
+/// [`CURRENT_CACHE_USER`] itself, so which directory it hit depended on where in
+/// a lifecycle sequence the caller happened to sit — and every caller sat on the
+/// wrong side of it. `logout` called it after `unload_user_db` (which clears the
+/// ambient user), and both PIN paths called it before the load that sets one, so
+/// all three resolved `media-cache/_anon/`, an empty directory, and left the real
+/// `media-cache/<user_id>/` untouched. Naming the user at the call site makes the
+/// ordering unable to matter.
+#[derive(Clone, Copy, Debug)]
+pub enum CacheScope<'a> {
+    /// One user's cache directory. What logout and both unlock paths want: this
+    /// person's decrypted media stops being on disk, and a second client signed
+    /// in as somebody else on the same machine keeps its own.
+    User(&'a str),
+    /// The whole cache root — every user's directory and the pre-sign-in `_anon`
+    /// bucket. "Wipe this computer", and logout when the accounts index is too
+    /// corrupt to say who was signed in.
+    Everything,
+}
+
+/// Wipe the media cache, so decrypted media doesn't sit on disk past the session
+/// that fetched it. The cache root itself stays, so a subsequent sign-in doesn't
+/// have to re-create it.
+///
+/// Resolves the root directly rather than through `media_cache_dir()`: that
+/// helper appends the ambient user, which is the coupling [`CacheScope`] exists
+/// to remove.
+pub fn clear_media_cache(scope: CacheScope<'_>) {
     note_cache_dir_walk();
-    let dir = match media_cache_dir() {
-        Ok(d) => d,
-        Err(_) => return,
+    let root = match MEDIA_CACHE_DIR.get() {
+        Some(r) => r,
+        // No cache root was ever installed (pollis-tui, headless, tests), so
+        // there is nothing on disk to wipe.
+        None => return,
     };
-    let entries = match std::fs::read_dir(&dir) {
+    match scope {
+        CacheScope::User(user_id) => remove_dir_contents(&root.join(user_id)),
+        CacheScope::Everything => remove_dir_contents(root),
+    }
+}
+
+/// Empty a directory of both files and subdirectories, keeping the directory.
+fn remove_dir_contents(dir: &Path) {
+    let entries = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(_) => return,
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let _ = std::fs::remove_file(&path);
+        // Under `CacheScope::Everything` the entries are the per-user
+        // directories, so a plain `remove_file` there would delete nothing.
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(&path);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 }
 
@@ -447,7 +501,7 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
     let encrypted = cache_encrypt(Vec::from(bytes), &db_key, content_hash.as_bytes())?;
 
     let dir = media_cache_dir()?;
-    std::fs::create_dir_all(&dir)
+    crate::private_fs::create_dir_all(&dir)
         .map_err(|e| Error::Other(anyhow::anyhow!("create cache dir: {e}")))?;
 
     // Atomic write, mirroring `get_media_url`: a half-written cache file would
@@ -455,7 +509,7 @@ pub async fn get_public_file_url(key: String, state: &Arc<AppState>) -> Result<S
     let mut tmp = target.clone();
     let final_ext = target.extension().and_then(|s| s.to_str()).unwrap_or("enc");
     tmp.set_extension(format!("{final_ext}.tmp"));
-    tokio::fs::write(&tmp, &encrypted)
+    crate::private_fs::write_async(&tmp, encrypted)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("write public cache: {e}")))?;
     if let Err(e) = tokio::fs::rename(&tmp, &target).await {
@@ -482,17 +536,41 @@ pub struct MediaUploadResult {
     pub height: Option<u32>,
 }
 
+/// Where an upload's plaintext lives, and who is allowed to release it.
+///
+/// Both variants are read once and then let go before the R2 PUT (#915) — the
+/// difference is what "let go" means. `Owned` bytes belong to this call and are
+/// dropped; `Staged` bytes belong to `commands::staging`, which keeps them
+/// until the upload has actually succeeded so a failed PUT is a retry rather
+/// than a lost paste.
+enum Plaintext {
+    Owned(Vec<u8>),
+    Staged(std::sync::Arc<zeroize::Zeroizing<Vec<u8>>>),
+}
+
+impl Plaintext {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Plaintext::Owned(v) => v,
+            Plaintext::Staged(v) => v,
+        }
+    }
+
+    /// Let go of this call's hold on the plaintext, so the longest step in the
+    /// function — the PUT — does not run with both buffers resident.
+    fn release(self) {
+        drop(self);
+    }
+}
+
 /// Upload a media file using convergent encryption.
 ///
 /// Reads the file from the filesystem path (no bytes over IPC), so arbitrarily
-/// large files work without memory or serialisation overhead.
-///
-/// Convergent encryption: SHA-256(plaintext) → deterministic AES-256-GCM key
-/// via HKDF.  Same file uploaded by any user produces identical ciphertext →
-/// identical R2 object → cross-user deduplication.
-///
-/// Dedup check against Turso's `attachment_object` table before uploading, so
-/// the second upload of the same file by any user skips the R2 PUT entirely.
+/// large files work without memory or serialisation overhead. This is the path
+/// for a file the USER already has on disk — a picker selection or an OS drag
+/// and drop. Bytes that arrived through the webview have no path and go through
+/// [`upload_media_staged`] instead; nothing in this crate writes a file in
+/// order to have a path to pass here.
 pub async fn upload_media(
     path: String,
     filename: String,
@@ -503,10 +581,53 @@ pub async fn upload_media(
     let data = tokio::fs::read(&path).await
         .map_err(|e| Error::Other(anyhow::anyhow!("read file {path}: {e}")))?;
 
-    let size_bytes = data.len();
+    upload_plaintext(Plaintext::Owned(data), filename, content_type, state).await
+}
+
+/// Upload an attachment the renderer staged in memory (`commands::staging`) —
+/// a paste, or a drop the webview surfaced as a `File` rather than a path.
+///
+/// The staged bytes are released here, and only on success: an upload that
+/// fails leaves them staged so the user's paste survives a retry. See
+/// `commands::staging` for why they are in memory rather than in a temp file.
+pub async fn upload_media_staged(
+    staged_id: String,
+    filename: String,
+    content_type: String,
+    state: &Arc<AppState>,
+) -> Result<MediaUploadResult> {
+    let bytes = crate::commands::staging::peek_staged(&staged_id).ok_or_else(|| {
+        Error::Other(anyhow::anyhow!(
+            "no staged attachment {staged_id}: it was already uploaded, discarded, or the              session ended"
+        ))
+    })?;
+
+    let result =
+        upload_plaintext(Plaintext::Staged(bytes), filename, content_type, state).await;
+    if result.is_ok() {
+        crate::commands::staging::discard_staged(&staged_id);
+    }
+    result
+}
+
+/// The shared upload core.
+///
+/// Convergent encryption: SHA-256(plaintext) → deterministic AES-256-GCM key
+/// via HKDF.  Same file uploaded by any user produces identical ciphertext →
+/// identical R2 object → cross-user deduplication.
+///
+/// Dedup check against Turso's `attachment_object` table before uploading, so
+/// the second upload of the same file by any user skips the R2 PUT entirely.
+async fn upload_plaintext(
+    data: Plaintext,
+    filename: String,
+    content_type: String,
+    state: &Arc<AppState>,
+) -> Result<MediaUploadResult> {
+    let size_bytes = data.as_slice().len();
 
     // SHA-256 of plaintext — the dedup + key-derivation anchor.
-    let hash_bytes = sha256_bytes(&data);
+    let hash_bytes = sha256_bytes(data.as_slice());
     let content_hash = hex::encode(hash_bytes);
 
     // Deterministic R2 key: same content → same path in R2.
@@ -529,7 +650,7 @@ pub async fn upload_media(
 
     // Compute blurhash + dimensions before data is consumed.
     let (blurhash, width, height) = if content_type.starts_with("image/") {
-        match compute_image_meta(&data) {
+        match compute_image_meta(data.as_slice()) {
             Ok((bh, w, h)) => (Some(bh), Some(w), Some(h)),
             Err(e) => {
                 eprintln!("[upload_media] image meta failed for {filename}: {e}");
@@ -553,13 +674,13 @@ pub async fn upload_media(
     if !already_uploaded {
         // Encrypt with chunked AES-256-GCM, then upload via a DS-minted
         // presigned PUT (the client holds no R2 credentials).
-        let ciphertext = encrypt_chunked(&data, &enc_key, &enc_nonce);
+        let ciphertext = encrypt_chunked(data.as_slice(), &enc_key, &enc_nonce);
         // Release the plaintext BEFORE the presign round trip and the upload
         // (#915). Everything derived from it — hash, key, blurhash, dimensions,
         // size — was computed above, and the PUT is the longest-lived step in
         // the function: holding both buffers across it doubled the resident cost
         // of an upload for the entire duration of the transfer.
-        drop(data);
+        data.release();
 
         let put_url = presign_r2(state, "put", &r2_key).await?;
         let overlay = state.overlay_handle();
@@ -714,7 +835,7 @@ pub async fn get_media_url(
     }
 
     let dir = media_cache_dir()?;
-    if let Err(e) = std::fs::create_dir_all(&dir) {
+    if let Err(e) = crate::private_fs::create_dir_all(&dir) {
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
         return Err(Error::Other(anyhow::anyhow!("create cache dir: {e}")));
     }
@@ -759,7 +880,7 @@ pub async fn get_media_url(
         .and_then(|s| s.to_str())
         .unwrap_or("enc");
     tmp.set_extension(format!("{final_ext}.tmp"));
-    if let Err(e) = tokio::fs::write(&tmp, &encrypted).await {
+    if let Err(e) = crate::private_fs::write_async(&tmp, encrypted).await {
         let _ = tokio::fs::remove_file(&tmp).await;
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
         return Err(Error::Other(anyhow::anyhow!("write cache tmp: {e}")));
@@ -1231,6 +1352,79 @@ mod tests {
             !module.contains(&banned),
             "`enforce_cache_cap_now` existed only to be called from window focus (#930); \
              re-exporting it re-opens that door — the cap belongs to the write path"
+        );
+    }
+
+    // ── The media-cache wipe (#994) ───────────────────────────────────────
+
+    /// Put one cache file in `<root>/<user>/` and return its path.
+    fn seed_cache_entry(user: &str, name: &str) -> PathBuf {
+        let dir = test_cache_root().join(user);
+        crate::private_fs::create_dir_all(&dir).expect("create user cache dir");
+        let path = dir.join(name);
+        std::fs::write(&path, b"decrypted-media-bytes").expect("seed cache entry");
+        path
+    }
+
+    /// The property the wipe never actually had: a file that was in the cache
+    /// beforehand is not there afterwards.
+    ///
+    /// It failed on every caller because the directory was resolved from
+    /// ambient state — `CURRENT_CACHE_USER`, which `unload_user_db` had already
+    /// cleared by the time logout wiped, and which the PIN paths had not yet
+    /// set. `_anon/` was empty, so the wipe reported nothing and removed
+    /// nothing. Naming the user is what fixes it, so this test names one and
+    /// deliberately points the ambient user somewhere else first.
+    #[test]
+    fn wiping_one_user_removes_that_user_s_files() {
+        let _serial = serialise_sweeps();
+        let entry = seed_cache_entry("wipe-user-a", "aaaa.png.enc");
+        assert!(entry.exists());
+
+        // The ambient user is wrong — as it is at every real call site.
+        set_cache_user(None);
+
+        clear_media_cache(CacheScope::User("wipe-user-a"));
+
+        assert!(
+            !entry.exists(),
+            "the wipe left the user's cached media on disk"
+        );
+    }
+
+    /// And it removes only that user's files: a second client signed in as
+    /// somebody else on the same machine keeps its cache.
+    #[test]
+    fn wiping_one_user_leaves_another_user_s_files() {
+        let _serial = serialise_sweeps();
+        let mine = seed_cache_entry("wipe-user-b", "bbbb.png.enc");
+        let theirs = seed_cache_entry("wipe-user-c", "cccc.png.enc");
+
+        clear_media_cache(CacheScope::User("wipe-user-b"));
+
+        assert!(!mine.exists());
+        assert!(
+            theirs.exists(),
+            "wiping one user's cache emptied another user's"
+        );
+    }
+
+    /// `Everything` reaches into the per-user subdirectories. The root's own
+    /// entries are DIRECTORIES, so the old `remove_file`-per-entry loop would
+    /// have deleted nothing at all here.
+    #[test]
+    fn wiping_everything_reaches_inside_the_per_user_directories() {
+        let _serial = serialise_sweeps();
+        let one = seed_cache_entry("wipe-all-d", "dddd.png.enc");
+        let two = seed_cache_entry("wipe-all-e", "eeee.png.enc");
+
+        clear_media_cache(CacheScope::Everything);
+
+        assert!(!one.exists(), "a per-user cache file survived a full wipe");
+        assert!(!two.exists(), "a per-user cache file survived a full wipe");
+        assert!(
+            test_cache_root().exists(),
+            "the cache root itself must stay so the next sign-in need not recreate it"
         );
     }
 }

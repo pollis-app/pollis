@@ -11,12 +11,12 @@
  *  - `bridge/dialog.ts`         — dialogOpen / dialogSave
  *  - `bridge/fs.ts`             — writeFile / readFile / stat
  *  - `bridge/shell.ts`          — shellOpen
- *  - `bridge/app.ts`            — getVersion / tempDir / relaunch / exit /
- *                                 convertFileSrc
+ *  - `bridge/app.ts`            — getVersion / relaunch / exit / convertFileSrc
  *  - `bridge/notifications.ts`  — isPermissionGranted / requestPermission /
  *                                 sendNotification
- *  - `bridge/clipboard.ts`      — readClipboardFiles / readClipboardImageToTemp /
+ *  - `bridge/clipboard.ts`      — readClipboardFiles / readClipboardImage /
  *                                 writeClipboardText
+ *  - `bridge/staging.ts`        — stageAttachment / discardStagedAttachment
  *  - `bridge/updater.ts`        — check
  *  - `bridge/tray.ts`           — tray / menu-bar
  *
@@ -69,7 +69,7 @@ export { writeFile, readFile, stat, type FileInfo } from "./bridge/fs";
 export { shellOpen } from "./bridge/shell";
 
 // App / path / process.
-export { getVersion, tempDir, relaunch, exit, convertFileSrc } from "./bridge/app";
+export { getVersion, relaunch, exit, convertFileSrc } from "./bridge/app";
 
 // Notifications.
 export {
@@ -82,9 +82,16 @@ export {
 // Clipboard wrappers for the custom Tauri IPCs in src-tauri/src/lib.rs.
 export {
   readClipboardFiles,
-  readClipboardImageToTemp,
+  readClipboardImage,
   writeClipboardText,
 } from "./bridge/clipboard";
+
+// In-memory attachment staging (src-tauri/src/commands/staging.rs).
+export {
+  stageAttachment,
+  discardStagedAttachment,
+  type StagedAttachment,
+} from "./bridge/staging";
 
 // Updater.
 export { check, type PollisUpdate, type DownloadEvent } from "./bridge/updater";
