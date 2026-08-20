@@ -176,18 +176,28 @@ jobs:
       - name: Assert the local database is encrypted at rest
         shell: bash
         run: |
-          set -euo pipefail
-          out="$(cargo test -p pollis-core --lib --target x86_64-pc-windows-msvc -- \
-            db::local::tests:: --nocapture 2>&1)"
+          set -uo pipefail
+          # Captured rather than streamed so the assertions below can read it —
+          # and printed before the exit check, so a failure still leaves the log
+          # in the job output instead of an empty red step.
+          out="$(cargo test -p pollis-core --lib --target x86_64-pc-windows-msvc -- db::local::tests:: 2>&1)"
+          rc=$?
           echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::db::local tests failed on Windows"
+            exit "$rc"
+          fi
           # libtest EXITS 0 when a filter matches nothing, so renaming or
-          # deleting these tests would silently turn this step into a no-op.
-          # Demand that each of the three load-bearing ones actually ran.
+          # deleting these would silently turn this step into a no-op. Demand
+          # that each of the three load-bearing ones appears in the run; with
+          # rc == 0 already established, appearing means it passed.
           for t in sqlcipher_is_the_sqlite_we_actually_linked \
                    the_local_database_file_is_encrypted_at_rest \
                    a_plaintext_database_is_destroyed_not_opened; do
-            grep -q "db::local::tests::$t \.\.\. ok" <<< "$out" \
-              || { echo "::error::$t did not run on Windows"; exit 1; }
+            if ! printf '%s\n' "$out" | grep -q "db::local::tests::$t"; then
+              echo "::error::$t did not run on Windows"
+              exit 1
+            fi
           done
 
       # Prove the artifact exists rather than trusting the exit code alone.
