@@ -10,7 +10,7 @@
 # to be exempted with a job-level `paths-ignore`, but a path-filtered workflow
 # does not run AT ALL on an exempt PR — so a *required* status check would sit
 # pending forever and wedge every frontend-only PR. This workflow therefore
-# ALWAYS triggers and ALWAYS reports, in three jobs:
+# ALWAYS triggers and ALWAYS reports, in four jobs:
 #   1. `changes` — a seconds-cheap decision job (no checkout, no toolchain, no
 #      apt) that asks the PR's changed-file list whether any NON-exempt file was
 #      touched. Ignore-list, not allow-list: the exemptions are exactly the old
@@ -19,11 +19,15 @@
 #   2. `tests`   — the heavy native build+test job, gated on that decision. Its
 #      runner, caching, system deps, env, and steps are byte-for-byte unchanged;
 #      on an exempt PR it is simply skipped.
-#   3. `gate`    — `needs: tests`, `if: always()`. Green when the heavy job passed
-#      OR was legitimately skipped as exempt; red when it failed, was cancelled,
-#      or the decision job itself failed (fail-closed). Because it always runs it
-#      always reports, so it — NOT `tests` — is the check to mark required in
-#      branch protection.
+#   3. `macos-at-rest` — the local-database at-rest tests on `macos-latest`,
+#      gated on the same decision. macOS is the third desktop platform and the
+#      only one whose SQLCipher crypto provider is CommonCrypto, and nothing
+#      ran these tests there until #998.
+#   4. `gate`    — `needs: [tests, macos-at-rest]`, `if: always()`. Green when
+#      both heavy jobs passed OR were legitimately skipped as exempt; red when
+#      either failed, was cancelled, or the decision job itself failed
+#      (fail-closed). Because it always runs it always reports, so it — NOT the
+#      heavy jobs — is the check to mark required in branch protection.
 name: MLS & delivery tests
 
 on:
@@ -360,11 +364,92 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
+  # The local database's at-rest guarantee, on the third desktop platform (#998).
+  #
+  # Until now these tests ran on Linux (the `tests` job above) and natively on
+  # `windows-latest` (`windows-link.yml`), and on no macOS runner anywhere — the
+  # only macOS jobs in the repo are `mobile-core-check`'s iOS *cross-compile*
+  # check and the tag-triggered release builds (desktop, CLI, verifier), none of
+  # which executes a test.
+  # So the platform whose crypto provider is the odd one out was also the
+  # platform with no evidence.
+  #
+  # macOS is worth its own job precisely because of that provider. Linux and
+  # mobile take SQLCipher's primitives from OpenSSL and Windows from the
+  # RustCrypto provider in `pollis-sqlcipher`; macOS is the only one on
+  # CommonCrypto, and it is selected by `libsqlite3-sys`'s build script at build
+  # time, not by anything in this repository — an `OPENSSL_DIR` (or
+  # `OPENSSL_LIB_DIR` + `OPENSSL_INCLUDE_DIR`) on the machine flips it to
+  # OpenSSL silently. `the_crypto_provider_is_the_one_this_platform_documents`
+  # is what turns that into a red job instead of a quiet divergence from
+  # docs/security-whitepaper.md §7.0.
+  #
+  # `--no-default-features` on purpose: it drops `media` (libwebrtc, cpal,
+  # rodio, the vendored webrtc-audio-processing C++ build) and `os-keystore`,
+  # none of which the at-rest path touches — `LocalDb::open_for_user` takes the
+  # 32-byte key as an argument. It does NOT weaken what the tests prove:
+  # `cargo tree -i libsqlite3-sys` is identical with and without `media`
+  # (rusqlite is the only path to it either way), so the "which sqlite3 won the
+  # symbols" question the tests answer is the same question the shipping build
+  # asks. What it buys is the job finishing in minutes on a runner billed at 10x
+  # instead of pulling the whole native media stack onto it.
+  macos-at-rest:
+    needs: changes
+    if: ${{ needs.changes.outputs.run_tests == 'true' }}
+    runs-on: macos-latest
+    env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      # The PINNED toolchain, like every other Rust job here: a gate that tests
+      # on a different rustc than the release builds with is not a gate.
+      - uses: dtolnay/rust-toolchain@1.96.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-at-rest
+          # Only `main` WRITES the cache; PR branches restore from it. The repo
+          # has been over GitHub's 10 GiB cache budget before (#759).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Deliberately NO OpenSSL provisioning, and nothing here may add any: on
+      # Apple targets `libsqlite3-sys` picks CommonCrypto only when it finds no
+      # OpenSSL. See the provider test named below.
+      - name: Assert the local database is encrypted at rest
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Captured rather than streamed so the assertions below can read it —
+          # and printed before the exit check, so a failure still leaves the log
+          # in the job output instead of an empty red step.
+          out="$(cargo test -p pollis-core --lib --no-default-features -- db::local::tests:: 2>&1)"
+          rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::db::local tests failed on macOS"
+            exit "$rc"
+          fi
+          # libtest EXITS 0 when a filter matches nothing, so renaming or
+          # deleting these would silently turn this step into a no-op. Demand
+          # that each of the four load-bearing ones appears in the run; with
+          # rc == 0 already established, appearing means it passed.
+          for t in sqlcipher_is_the_sqlite_we_actually_linked \
+                   the_local_database_file_is_encrypted_at_rest \
+                   the_crypto_provider_is_the_one_this_platform_documents \
+                   a_plaintext_database_is_destroyed_not_opened; do
+            if ! printf '%s\n' "$out" | grep -q "db::local::tests::$t"; then
+              echo "::error::$t did not run on macOS"
+              exit 1
+            fi
+          done
+
   # The always-reporting required check. Runs on every trigger regardless of what
-  # `tests` did, and collapses the outcome into a single pass/fail. Fail-closed:
-  # the only way to green is a genuine pass or a genuine exemption.
+  # the heavy jobs did, and collapses the outcome into a single pass/fail.
+  # Fail-closed: the only way to green is a genuine pass or a genuine exemption.
   gate:
-    needs: [changes, tests]
+    needs: [changes, tests, macos-at-rest]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -373,8 +458,9 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           RUN_TESTS: ${{ needs.changes.outputs.run_tests }}
           TESTS_RESULT: ${{ needs.tests.result }}
+          MACOS_RESULT: ${{ needs.macos-at-rest.result }}
         run: |
-          echo "changes=$CHANGES_RESULT run_tests=$RUN_TESTS tests=$TESTS_RESULT"
+          echo "changes=$CHANGES_RESULT run_tests=$RUN_TESTS tests=$TESTS_RESULT macos=$MACOS_RESULT"
           # The decision must have completed cleanly; if it failed or was
           # cancelled we cannot trust the exemption verdict, so fail closed.
           if [ "$CHANGES_RESULT" != "success" ]; then
@@ -382,27 +468,31 @@ jobs:
             exit 1
           fi
           if [ "$RUN_TESTS" = "true" ]; then
-            # A Rust/workspace change: the heavy job MUST have run and passed.
+            # A Rust/workspace change: BOTH heavy jobs MUST have run and passed.
             # Anything else (failure / cancelled / skipped) is a hard fail — this
             # is the one outcome we must never let go green.
-            if [ "$TESTS_RESULT" = "success" ]; then
-              echo "Heavy MLS tests passed."
-              exit 0
+            if [ "$TESTS_RESULT" != "success" ]; then
+              echo "::error::Heavy MLS tests were required but their result was '$TESTS_RESULT' — failing."
+              exit 1
             fi
-            echo "::error::Heavy MLS tests were required but their result was '$TESTS_RESULT' — failing."
-            exit 1
+            if [ "$MACOS_RESULT" != "success" ]; then
+              echo "::error::macOS at-rest tests were required but their result was '$MACOS_RESULT' — failing."
+              exit 1
+            fi
+            echo "Heavy MLS tests and macOS at-rest tests passed."
+            exit 0
           fi
-          # Exempt PR (frontend/website/docs/markdown only): the heavy job was
+          # Exempt PR (frontend/website/docs/markdown only): the heavy jobs were
           # legitimately not run.
-          if [ "$TESTS_RESULT" = "skipped" ]; then
-            echo "Exempt PR — no Rust/workspace change, heavy MLS tests correctly skipped."
+          if [ "$TESTS_RESULT" = "skipped" ] && [ "$MACOS_RESULT" = "skipped" ]; then
+            echo "Exempt PR — no Rust/workspace change, heavy jobs correctly skipped."
             exit 0
           fi
-          # Defensive: exemption said skip but the job somehow ran — honour its
-          # actual result rather than assuming.
-          if [ "$TESTS_RESULT" = "success" ]; then
-            echo "Heavy MLS tests ran and passed."
+          # Defensive: exemption said skip but the jobs somehow ran — honour
+          # their actual results rather than assuming.
+          if [ "$TESTS_RESULT" = "success" ] && [ "$MACOS_RESULT" = "success" ]; then
+            echo "Heavy jobs ran and passed."
             exit 0
           fi
-          echo "::error::Unexpected state (run_tests=$RUN_TESTS tests=$TESTS_RESULT) — failing closed."
+          echo "::error::Unexpected state (run_tests=$RUN_TESTS tests=$TESTS_RESULT macos=$MACOS_RESULT) — failing closed."
           exit 1

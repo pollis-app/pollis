@@ -189,10 +189,11 @@ jobs:
           fi
           # libtest EXITS 0 when a filter matches nothing, so renaming or
           # deleting these would silently turn this step into a no-op. Demand
-          # that each of the three load-bearing ones appears in the run; with
+          # that each of the four load-bearing ones appears in the run; with
           # rc == 0 already established, appearing means it passed.
           for t in sqlcipher_is_the_sqlite_we_actually_linked \
                    the_local_database_file_is_encrypted_at_rest \
+                   the_crypto_provider_is_the_one_this_platform_documents \
                    a_plaintext_database_is_destroyed_not_opened; do
             if ! printf '%s\n' "$out" | grep -q "db::local::tests::$t"; then
               echo "::error::$t did not run on Windows"
