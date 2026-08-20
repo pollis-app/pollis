@@ -189,10 +189,12 @@ const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(8);
 /// with zero I/O. Both halves are loaded from LOCAL state: the device signing key
 /// from the open local DB (openmls storage), and the cert is minted on the spot
 /// from the locally-held account identity key (`load_account_id_key`). Minting
-/// locally — rather than reading the published `user_device.device_cert` through
-/// `remote_db` — is deliberate: once the mode is applied, `remote_db` itself
-/// routes through THIS shim, so reading the cert from it to *build* a circuit
-/// would recurse into the very circuit being built. The minted cert is
+/// locally — rather than reading the published `user_device.device_cert` from
+/// the server — is deliberate: once the mode is applied, every remote read is a
+/// DS request that routes through THIS shim, so fetching the cert to *build* a
+/// circuit would recurse into the very circuit being built. (Before #987 the
+/// recursing caller was `remote_db`; replacing it with a signed POST changed
+/// which client recurses, not whether it does.) The minted cert is
 /// cryptographically identical in what the relay checks (the current account key
 /// certifying the real device key), and a device with NO account key yet
 /// (pre-enrollment / locked / no user) simply can't mint one → `connect` errors →

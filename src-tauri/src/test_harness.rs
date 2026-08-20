@@ -21,8 +21,10 @@ use crate::state::AppState;
 /// Build a headless tauri app that has the full production command surface
 /// registered and the given `AppState` managed. Each client in a multi-client
 /// test owns a distinct `App<MockRuntime>` and therefore a distinct `AppState`
-/// (distinct keystore, distinct `device_id`, distinct local DB handle), while
-/// sharing the same underlying `Arc<RemoteDb>` against test Turso.
+/// (distinct keystore, distinct `device_id`, distinct local DB handle). Since
+/// #987 they share no database handle at all — there is none to share: each
+/// reaches the same in-process Delivery Service over HTTP, exactly as a shipped
+/// client reaches the real one.
 ///
 /// The returned `App` is NOT `run()` — tests drive commands directly via
 /// [`invoke`] / [`invoke_unit`].
