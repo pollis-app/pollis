@@ -47,7 +47,6 @@ export default function RootLayout() {
       r2Endpoint: process.env.EXPO_PUBLIC_R2_ENDPOINT,
       r2PublicUrl: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
       livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL,
-      resendApiKey: process.env.EXPO_PUBLIC_RESEND_API_KEY,
       pollisDeliveryUrl: process.env.EXPO_PUBLIC_POLLIS_DELIVERY_URL,
     })
       .then(() => setBridgeReady(true))

@@ -102,7 +102,11 @@ export interface InitConfig {
   // no longer carries them. Only the non-secret ws URL remains (the SFU dial URL,
   // also returned by the DS token endpoint).
   livekitUrl?: string;
-  resendApiKey?: string;
+  // No Resend key (#995). The DS sends the OTP mail; the core has no
+  // `resend_api_key` field to receive one and never did. Reading the env var
+  // here was the one thing that made Expo inline it into the bundle — the other
+  // stale `EXPO_PUBLIC_*` secrets are unreferenced and so never reach a build.
+  // Never re-add it.
   // Delivery Service base URL (api-dev.pollis.com / api.pollis.com). Since #987
   // this is the ONLY backend: OTP bootstrap, every remote read and every remote
   // write go through it. Optional in the type only because the Rust side
@@ -138,7 +142,6 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
     r2_endpoint: config.r2Endpoint ?? "",
     r2_public_url: config.r2PublicUrl ?? "",
     livekit_url: config.livekitUrl ?? "",
-    resend_api_key: config.resendApiKey ?? "",
     pollis_delivery_url: config.pollisDeliveryUrl ?? "",
   });
   await pollisNative.initPollis(configJson);

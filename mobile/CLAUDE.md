@@ -197,9 +197,17 @@ so before any store build check `mobile/.env`:
 - `EXPO_PUBLIC_POLLIS_DELIVERY_URL` **must** be `https://api.pollis.com` (prod
   DS), not api-dev.
 - `EXPO_PUBLIC_LIVEKIT_API_KEY` / `EXPO_PUBLIC_LIVEKIT_API_SECRET` /
-  `EXPO_PUBLIC_RESEND_API_KEY` must **not** exist in `.env` — the code stopped
-  reading them in #393, but a stale var would still be inlined into the bundle
-  as plaintext. Delete them.
+  `EXPO_PUBLIC_RESEND_API_KEY` / `EXPO_PUBLIC_R2_ACCESS_KEY_ID` /
+  `EXPO_PUBLIC_R2_SECRET_KEY` / `EXPO_PUBLIC_TURSO_TOKEN` must **not** exist in
+  `.env`. Delete them.
+  **Be precise about why, because this bullet used to get it wrong:** Expo
+  inlines an `EXPO_PUBLIC_*` value only where code *references* it. An
+  unreferenced var sits in `.env` doing nothing and never reaches a bundle. So
+  the danger is never the file on its own — it is a `process.env.EXPO_PUBLIC_…`
+  read that outlives the secret it was written for. That is exactly what #995
+  found: the Resend key had been "moved server-side" in #393, but
+  `app/_layout.tsx` still read it, so it alone kept getting inlined while the
+  others were inert. Grep for the read, not just for the var.
 
 ### iOS
 
@@ -506,15 +514,26 @@ Current state:
   navigation to `/(auth)/email`). On-device testing of realtime + push is
   still pending.
 
-## ⚠️ Secrets architecture — KNOWN CRITICAL ISSUE (do before any public release)
+## Secrets architecture — settled (#393, #987, #995)
 
-Local dev currently feeds real credentials to the Rust bridge via
-`EXPO_PUBLIC_*` env vars (`mobile/.env`, gitignored). **Expo inlines every
-`EXPO_PUBLIC_*` value into the JS bundle at build time**, so they ship inside
-the APK/IPA in plaintext — `unzip` + grep recovers them. This is fine for a dev
-build on a trusted device; it is **not shippable**. What leaks today:
+This was for a long time the mobile app's blocking release risk, and it is now
+closed. Kept because the reasoning is what stops it coming back.
 
-- ✅ **Resend key** — DONE, moved server-side (OTP runs on the DS).
+The hazard: **Expo inlines an `EXPO_PUBLIC_*` value into the JS bundle wherever
+code references it**, so anything referenced ships inside the APK/IPA in
+plaintext and `unzip` + grep recovers it. Note the precise rule — *referenced*,
+not merely *present in `.env`*. A var nothing reads is inert; a read that
+outlives its secret is the actual leak. The client now holds **no secret of any
+kind**, and every credential below moved server-side rather than being scoped
+down:
+
+- ✅ **Resend key** — server half moved in #393 (OTP runs on the DS); the client
+  half was missed until **#995**, which deleted `resendApiKey` from `InitConfig`,
+  the init-JSON mapping and `app/_layout.tsx`. Until then it was the one secret
+  still being inlined, because it was the one still being read — `pollis-core`'s
+  `InitConfig` has no `resend_api_key` field, so serde parsed and discarded it.
+  This section claimed "✅ DONE" for the whole of that window, which is the real
+  lesson: mark a bullet done against the code, not against the intent.
 - ✅ **R2 keys** — DONE (#393). `r2_access_key_id` / `r2_secret_access_key` are
   gone from the bundle; `commands/r2.rs` presigns every get/put/delete via the DS
   (`POST /v1/r2/presign`) and only the non-secret `EXPO_PUBLIC_R2_ENDPOINT` /
@@ -533,12 +552,12 @@ build on a trusted device; it is **not shippable**. What leaks today:
   "true per-user row scoping needs per-user DBs (#261)" line this bullet used to
   end on is moot — there is no client token left to scope.
 
-The fix is an **authorized-secrets broker** — a thin server-side endpoint (a
-Cloudflare Worker fits; CF is already in the stack) that holds the real secrets
-and never ships them to the client:
+The fix was an **authorized-secrets broker** — a server-side endpoint (the DS)
+that holds the real secrets and never ships them to the client:
 
-1. **Bootstrap (pre-auth):** `POST /otp/request` + `/otp/verify` run server-side
-   (server calls Resend). The phone never holds the Resend key.
+1. **Bootstrap (pre-auth):** ✅ DONE — `POST /otp/request` + `/otp/verify` run
+   server-side (the DS calls Resend). The phone never holds the Resend key; the
+   last client-side remnant of one went in #995.
 2. **Post-auth, scoped + short-lived creds:**
    - **Turso:** ✅ DONE — and then deleted (#987). The client reads through the
      DS and holds no token; the mint endpoint is gone with it.
