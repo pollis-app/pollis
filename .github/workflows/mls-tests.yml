@@ -256,6 +256,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test -p pollis-core --features test-harness
 
+      # The Windows crypto provider (#992), exercised on Linux. `pollis-sqlcipher`
+      # only SHIPS on Windows, but it compiles its SQLCipher amalgamation on
+      # every target precisely so this step exists: the known-answer vectors for
+      # AES-256-CBC / HMAC / PBKDF2, and a real encrypted database whose bytes
+      # are read back off the disk. A provider mistake therefore fails here in
+      # seconds instead of surviving until the Windows job runs.
+      - name: SQLCipher crypto provider (pollis-sqlcipher)
+        if: ${{ !cancelled() }}
+        run: cargo test -p pollis-sqlcipher
+
       # pollis-tui unit + smoke tests (the headless in-process-DS rig — no
       # webkit/ALSA). Nothing ran these before, so DS-spine changes could regress
       # the TUI's sync path unnoticed (#487). The smoke rig applies the same

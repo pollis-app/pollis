@@ -6587,6 +6587,7 @@ dependencies = [
  "pollis-capture-proto",
  "pollis-core",
  "pollis-delivery",
+ "pollis-sqlcipher",
  "proptest",
  "rusqlite",
  "serde",
@@ -6704,6 +6705,7 @@ dependencies = [
  "pollis-device-cert",
  "pollis-relay",
  "pollis-schema",
+ "pollis-sqlcipher",
  "quinn",
  "rand 0.8.6",
  "rand_core 0.6.4",
@@ -6715,6 +6717,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.26.4",
@@ -6803,6 +6806,20 @@ name = "pollis-schema"
 version = "1.1.0"
 dependencies = [
  "libsql",
+]
+
+[[package]]
+name = "pollis-sqlcipher"
+version = "1.1.0"
+dependencies = [
+ "aes",
+ "cc",
+ "hmac 0.12.1",
+ "pbkdf2",
+ "rand 0.8.6",
+ "sha1",
+ "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]

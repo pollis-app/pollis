@@ -1,6 +1,16 @@
 use rusqlite::{Connection, OptionalExtension};
 use crate::error::{Error, Result};
 
+// Windows takes rusqlite's LINKED `sqlcipher` feature, so `libsqlite3-sys`
+// only emits `-l sqlcipher` and compiles nothing; `pollis-sqlcipher` is what
+// supplies that library, along with the `#[no_mangle]` crypto provider it calls
+// back into (#992, and the long note in Cargo.toml). Cargo would build the
+// crate regardless, but a dependency no Rust code names does not get its rlib
+// onto the link line — so naming it here is what actually puts SQLCipher in the
+// binary. Nothing to import: the contact surface is C symbols.
+#[cfg(target_os = "windows")]
+use pollis_sqlcipher as _;
+
 // Bump this string when an existing table's shape changes incompatibly OR
 // encryption changes. On mismatch the old DB file is DELETED and recreated from
 // scratch — which throws away the device's MLS state and message history, so it
@@ -34,6 +44,15 @@ impl LocalDb {
 
     fn open_at(db_path: &std::path::Path, key: &[u8]) -> Result<Self> {
         let key_pragma = format!("PRAGMA key = \"x'{}'\"", hex::encode(key));
+
+        // #992: a database written by a build whose `PRAGMA key` did nothing.
+        // Every Windows client before this change wrote one, and a developer or
+        // test machine may still hold one anywhere. SQLCipher cannot open it —
+        // it would surface as `NotADatabase` and fall into the wipe below — but
+        // "cannot open" is not good enough on its own, because that path leaves
+        // the plaintext pages sitting on the disk until the filesystem gets
+        // round to reusing them. Detect it explicitly and destroy it.
+        destroy_plaintext_database(db_path)?;
 
         // A DB is "fresh" if the file didn't exist or we wipe it below. Tracked
         // because `auto_vacuum=INCREMENTAL` can only be set before any table is
@@ -129,6 +148,107 @@ impl LocalDb {
 // setting in `ui_state` (never synced to remote, unlike the `preferences` table).
 // This is bounded *local* history only — it never deletes anything remote and is
 // orthogonal to MLS epoch visibility.
+
+// ── Plaintext-database disposal (#992) ───────────────────────────────────────
+
+/// The 16 bytes an unencrypted SQLite file begins with. SQLCipher encrypts the
+/// header along with everything else, so finding this at offset 0 means the
+/// codec never engaged when the file was written.
+const SQLITE_PLAINTEXT_HEADER: &[u8; 16] = b"SQLite format 3\0";
+
+/// Sidecars SQLite keeps beside the main file. The `-wal` in particular holds
+/// recently written pages in the clear on a plaintext database, so removing only
+/// the main file would leave message bodies behind.
+const DB_SIDECAR_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
+
+/// Destroy `db_path` if — and only if — it is an unencrypted SQLite database.
+///
+/// **Recreate empty, not migrate.** `ATTACH ... KEY` + `sqlcipher_export` would
+/// preserve the contents, but it is a multi-statement conversion with a window
+/// where both a plaintext and an encrypted copy exist, and there is no
+/// production Windows user base to preserve anything for. Starting empty is
+/// already one of the three sanctioned history losses ("a new device starts
+/// empty", CLAUDE.md), it cannot half-succeed, and it ends with no plaintext on
+/// disk — which a migration only achieves if its cleanup also works.
+///
+/// Idempotent: a missing file, an encrypted file, or anything that is not a
+/// SQLite database at all is left exactly as it was found. A failure to read or
+/// remove is propagated rather than swallowed — the one thing this must never do
+/// is decide it cannot deal with a plaintext database and open it anyway.
+fn destroy_plaintext_database(db_path: &std::path::Path) -> Result<()> {
+    if !is_plaintext_sqlite(db_path)? {
+        return Ok(());
+    }
+
+    shred_and_remove(db_path)?;
+    for suffix in DB_SIDECAR_SUFFIXES {
+        let mut sidecar = db_path.as_os_str().to_owned();
+        sidecar.push(suffix);
+        shred_and_remove(std::path::Path::new(&sidecar))?;
+    }
+    Ok(())
+}
+
+/// Whether the file at `path` starts with the plaintext SQLite magic. A file
+/// shorter than the header, or no file at all, is not one.
+fn is_plaintext_sqlite(path: &std::path::Path) -> Result<bool> {
+    use std::io::Read;
+
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => {
+            return Err(Error::Other(anyhow::anyhow!("probe local db {path:?}: {e}")));
+        }
+    };
+    let mut header = [0u8; SQLITE_PLAINTEXT_HEADER.len()];
+    match file.read_exact(&mut header) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
+        Err(e) => {
+            return Err(Error::Other(anyhow::anyhow!("probe local db {path:?}: {e}")));
+        }
+    }
+    Ok(&header == SQLITE_PLAINTEXT_HEADER)
+}
+
+/// Overwrite a file's bytes, flush, then unlink it.
+///
+/// The overwrite is best-effort by nature: on a copy-on-write or log-structured
+/// filesystem, and on any SSD doing wear levelling, the old blocks may survive
+/// the rewrite. It still closes the easy case — the plaintext is gone from the
+/// path the file occupied and from any later read of that path — and it costs
+/// one pass over a file that is about to be deleted anyway.
+fn shred_and_remove(path: &std::path::Path) -> Result<()> {
+    use std::io::Write;
+
+    let len = match std::fs::metadata(path) {
+        Ok(meta) => meta.len(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(Error::Other(anyhow::anyhow!("stat plaintext db {path:?}: {e}")));
+        }
+    };
+
+    if len > 0 {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|e| Error::Other(anyhow::anyhow!("open plaintext db {path:?}: {e}")))?;
+        let zeros = [0u8; 64 * 1024];
+        let mut written = 0u64;
+        while written < len {
+            let chunk = std::cmp::min(zeros.len() as u64, len - written) as usize;
+            file.write_all(&zeros[..chunk])
+                .map_err(|e| Error::Other(anyhow::anyhow!("shred {path:?}: {e}")))?;
+            written += chunk as u64;
+        }
+        file.sync_all().map_err(|e| Error::Other(anyhow::anyhow!("sync {path:?}: {e}")))?;
+    }
+
+    std::fs::remove_file(path)
+        .map_err(|e| Error::Other(anyhow::anyhow!("remove plaintext db {path:?}: {e}")))
+}
 
 /// `ui_state` key holding the retention window in days (text integer).
 const RETENTION_KEY: &str = "message_retention_days";
@@ -344,13 +464,15 @@ mod tests {
     /// warning, and no behavioural difference until someone reads the file.
     ///
     /// `PRAGMA cipher_version` exists only in SQLCipher, so it is the one
-    /// question whose answer distinguishes the two builds. It is asserted in
-    /// BOTH directions, per platform, because both answers are wrong somewhere:
-    /// Linux/macOS/mobile must have SQLCipher, and Windows deliberately must
-    /// NOT (it cannot link one — see the long note in `Cargo.toml`, #991). A
-    /// one-way assert would let the Windows gap re-open silently on the other
-    /// platforms, or let Windows quietly acquire encryption while the docs and
-    /// the upgrade path still say it has none.
+    /// question whose answer distinguishes the two builds — and since #992 the
+    /// answer must be the same on EVERY platform. There is no longer a `cfg`
+    /// here and there must not be one again: Windows was the exception, Windows
+    /// is where the plaintext databases came from, and an exception is exactly
+    /// what let it stand for a year.
+    ///
+    /// This is necessary but not sufficient. It says a SQLCipher build is
+    /// present; it says nothing about whether the pages that reach the disk are
+    /// ciphertext. [`the_local_database_file_is_encrypted_at_rest`] settles that.
     #[test]
     fn sqlcipher_is_the_sqlite_we_actually_linked() {
         let conn = Connection::open_in_memory().expect("open");
@@ -364,7 +486,6 @@ mod tests {
             .map(str::trim)
             .is_some_and(|v| !v.is_empty());
 
-        #[cfg(not(target_os = "windows"))]
         assert!(
             linked,
             "`PRAGMA cipher_version` answered nothing ({version:?}): the linked sqlite3 is NOT \
@@ -372,17 +493,203 @@ mod tests {
              on this platform. Check what else in the dependency graph ships an sqlite3 \
              amalgamation and is winning the `sqlite3_*` symbols."
         );
+    }
 
-        #[cfg(target_os = "windows")]
+    /// Every path below goes through [`LocalDb::open_for_user`] — the function
+    /// the application itself calls — rather than a hand-built `Connection`, so
+    /// a regression that keys a test connection while leaving the real one bare
+    /// cannot hide here.
+    ///
+    /// `set_data_dir` is process-global, so all of these share one scratch
+    /// directory (set exactly once) and separate themselves by user id instead.
+    fn scratch_data_dir() -> &'static std::path::Path {
+        static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let dir = DIR.get_or_init(|| {
+            let dir = tempfile::Builder::new().prefix("pollis-local-db").tempdir().expect("tempdir");
+            set_data_dir(dir.path());
+            dir
+        });
+        dir.path()
+    }
+
+    fn db_file(user_id: &str) -> std::path::PathBuf {
+        scratch_data_dir().join(format!("pollis_{user_id}.db"))
+    }
+
+    /// Every byte the database and its sidecars have on disk right now.
+    fn on_disk_bytes(user_id: &str) -> Vec<u8> {
+        let base = db_file(user_id);
+        let mut bytes = std::fs::read(&base).expect("read database file");
+        for suffix in DB_SIDECAR_SUFFIXES {
+            let mut sidecar = base.as_os_str().to_owned();
+            sidecar.push(suffix);
+            if let Ok(extra) = std::fs::read(std::path::Path::new(&sidecar)) {
+                bytes.extend_from_slice(&extra);
+            }
+        }
+        bytes
+    }
+
+    const TEST_KEY: &[u8; 32] = b"pollis-local-db-test-key-32bytes";
+    const WRONG_KEY: &[u8; 32] = b"pollis-local-db-test-key-32byteS";
+
+    /// The claim `docs/security-whitepaper.md` §7 makes, checked against the
+    /// bytes rather than against a pragma.
+    ///
+    /// `PRAGMA cipher_version` answering only proves the library is present. The
+    /// question that matters is whether a message written through the ordinary
+    /// application path is readable in the file afterwards — which is exactly
+    /// what was NOT true on Windows before #992, with every pragma and every
+    /// write reporting success the whole time.
+    #[test]
+    fn the_local_database_file_is_encrypted_at_rest() {
+        const USER: &str = "encrypted-at-rest";
+        const MARKER: &str = "TOP-SECRET-PLAINTEXT-MARKER-4f2a91";
+
+        {
+            let db = LocalDb::open_for_user(USER, TEST_KEY).expect("open");
+            db.conn()
+                .execute(
+                    "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+                     VALUES ('m1', 'c1', 'u1', X'00', ?1, '2024-01-01T00:00:00Z')",
+                    rusqlite::params![MARKER],
+                )
+                .expect("insert");
+            // Push the WAL into the main file so "on disk" means what it says.
+            reclaim(db.conn()).expect("checkpoint");
+        }
+
+        let bytes = on_disk_bytes(USER);
+        assert!(!bytes.is_empty(), "the database file is empty");
+
         assert!(
-            !linked,
-            "SQLCipher is linked on Windows ({version:?}) — which this build is not supposed to \
-             be able to do. If that is now genuinely possible, this is good news and three things \
-             must change together: the rusqlite feature note in Cargo.toml, \
-             docs/security-whitepaper.md §7.0, and the upgrade path — every existing Windows \
-             pollis_<user>.db is PLAINTEXT and SQLCipher will refuse to open it, which wipes the \
-             device's history and MLS state unless it is migrated first."
+            !bytes.windows(MARKER.len()).any(|w| w == MARKER.as_bytes()),
+            "the message body appears verbatim in {} bytes of pollis_{USER}.db — the local \
+             database is NOT encrypted at rest",
+            bytes.len()
         );
+
+        let header = std::fs::read(db_file(USER)).expect("read database file");
+        assert_ne!(
+            &header[..16],
+            SQLITE_PLAINTEXT_HEADER,
+            "pollis_{USER}.db begins with the plaintext SQLite magic — `PRAGMA key` did nothing"
+        );
+
+        // Encrypted is only half of it: the key has to be what unlocks it.
+        let unkeyed = Connection::open(db_file(USER)).expect("open unkeyed");
+        assert!(
+            unkeyed.query_row("SELECT count(*) FROM message", [], |r| r.get::<_, i64>(0)).is_err(),
+            "an unkeyed connection read the message table"
+        );
+        drop(unkeyed);
+
+        let wrong = Connection::open(db_file(USER)).expect("open");
+        wrong
+            .execute_batch(&format!("PRAGMA key = \"x'{}'\"", hex::encode(WRONG_KEY)))
+            .expect("apply key");
+        assert!(
+            wrong.query_row("SELECT count(*) FROM message", [], |r| r.get::<_, i64>(0)).is_err(),
+            "a connection with the wrong key read the message table"
+        );
+        drop(wrong);
+
+        // ...and the right key still works, so this is encryption and not
+        // corruption.
+        let reopened = LocalDb::open_for_user(USER, TEST_KEY).expect("reopen");
+        let stored: String = reopened
+            .conn()
+            .query_row("SELECT content FROM message WHERE id = 'm1'", [], |row| row.get(0))
+            .expect("message survived the round trip");
+        assert_eq!(stored, MARKER);
+    }
+
+    /// #992's upgrade path. A database left behind by a build that wrote
+    /// plaintext must be destroyed on the next open — not opened, not silently
+    /// fallen back to, and not left on the disk in the clear.
+    #[test]
+    fn a_plaintext_database_is_destroyed_not_opened() {
+        const USER: &str = "plaintext-legacy";
+        const MARKER: &str = "LEGACY-PLAINTEXT-MARKER-8b3c07";
+
+        std::fs::create_dir_all(scratch_data_dir()).expect("data dir");
+        let path = db_file(USER);
+
+        // Exactly what a pre-#992 Windows client produced: SQLCipher is linked,
+        // but nothing ever keys the connection, so it behaves as stock SQLite.
+        {
+            let plain = Connection::open(&path).expect("create plaintext db");
+            plain.execute_batch("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT)").unwrap();
+            plain
+                .execute("INSERT INTO kv (key, value) VALUES ('secret', ?1)", rusqlite::params![
+                    MARKER
+                ])
+                .unwrap();
+        }
+        assert!(is_plaintext_sqlite(&path).unwrap(), "the fixture is not a plaintext database");
+
+        let db = LocalDb::open_for_user(USER, TEST_KEY).expect("open over a plaintext database");
+        db.conn()
+            .execute(
+                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, sent_at)
+                 VALUES ('m1', 'c1', 'u1', X'00', '2024-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("the recreated database is usable");
+        reclaim(db.conn()).expect("checkpoint");
+        drop(db);
+
+        assert!(!is_plaintext_sqlite(&path).unwrap(), "the database is still plaintext");
+        let bytes = on_disk_bytes(USER);
+        assert!(
+            !bytes.windows(MARKER.len()).any(|w| w == MARKER.as_bytes()),
+            "the old plaintext row is still readable on disk"
+        );
+
+        // Idempotent: the second open finds an encrypted database and leaves it
+        // alone rather than destroying it again.
+        let again = LocalDb::open_for_user(USER, TEST_KEY).expect("reopen");
+        let count: i64 =
+            again.conn().query_row("SELECT count(*) FROM message", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1, "the second open wiped a perfectly good encrypted database");
+    }
+
+    /// The disposal helper on its own, over the cases `open_at` hands it.
+    #[test]
+    fn destroying_a_plaintext_database_is_narrow_and_idempotent() {
+        let dir = tempfile::Builder::new().prefix("plaintext-probe").tempdir().unwrap();
+
+        // Absent: nothing to do, and not an error.
+        let missing = dir.path().join("absent.db");
+        destroy_plaintext_database(&missing).expect("absent file");
+        assert!(!missing.exists());
+
+        // Too short to carry the header: left alone.
+        let stub = dir.path().join("stub.db");
+        std::fs::write(&stub, b"SQLite").unwrap();
+        destroy_plaintext_database(&stub).expect("short file");
+        assert!(stub.exists(), "a file too short to be a database was deleted");
+
+        // Not a database at all: left alone.
+        let other = dir.path().join("notes.txt");
+        std::fs::write(&other, b"this is not a database, it is a note about one").unwrap();
+        destroy_plaintext_database(&other).expect("non-database");
+        assert!(other.exists(), "an unrelated file was deleted");
+
+        // Plaintext, with a sidecar: both go, and running it twice is fine.
+        let plain = dir.path().join("plain.db");
+        std::fs::write(&plain, {
+            let mut bytes = SQLITE_PLAINTEXT_HEADER.to_vec();
+            bytes.extend_from_slice(b"pages full of message bodies");
+            bytes
+        })
+        .unwrap();
+        let wal = dir.path().join("plain.db-wal");
+        std::fs::write(&wal, b"recently written pages, also in the clear").unwrap();
+        destroy_plaintext_database(&plain).expect("plaintext database");
+        assert!(!plain.exists(), "the plaintext database survived");
+        assert!(!wal.exists(), "the plaintext WAL survived");
+        destroy_plaintext_database(&plain).expect("second run must be a no-op");
     }
 
     /// #825: gaining `message.thread_id` must NOT cost the user their history.

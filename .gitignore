@@ -21,6 +21,12 @@ pollis
 
 # Dependency directories
 vendor/
+# ...except this one, which is not a fetched dependency directory: it holds the
+# SQLCipher amalgamation the Windows build compiles, checked in on purpose so
+# the library that encrypts the local database is in the tree and not fetched
+# at build time (#992). A directory has to be re-included before the files
+# inside it can be.
+!pollis-sqlcipher/vendor/
 
 # Go workspace file
 go.work

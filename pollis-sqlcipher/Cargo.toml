@@ -1,0 +1,35 @@
+[package]
+name = "pollis-sqlcipher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+# Every primitive SQLCipher's provider asks for, from crates already in this
+# workspace's lockfile — `aes` and `hmac` and `sha2` are direct pollis-core
+# dependencies, `sha1` and `pbkdf2` arrive transitively. Nothing new enters the
+# supply chain to give Windows encryption.
+#
+# `default-features = false` on pbkdf2 drops its `simple` feature, which would
+# pull `password-hash` for a PHC-string API nothing here uses.
+aes = "0.8"
+sha1 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+pbkdf2 = { version = "0.11", default-features = false }
+# `rand::rngs::OsRng` only — the provider's randomness comes straight from the
+# operating system rather than from a userspace PRNG we would have to seed.
+rand = "0.8"
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+# Scratch directories for tests/sqlcipher.rs, which has to write a real file and
+# then read its bytes back. Already in the workspace lockfile.
+tempfile = "3"
+
+[lints]
+workspace = true
