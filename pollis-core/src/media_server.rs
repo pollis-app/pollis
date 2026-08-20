@@ -164,46 +164,86 @@ async fn serve_media(
                     // Zero-copy: shares `plaintext`'s allocation, no memcpy.
                     let slice = plaintext.slice(start as usize..=end as usize);
                     let len = end - start + 1;
-                    let mut resp = Response::builder()
-                        .status(StatusCode::PARTIAL_CONTENT)
-                        .header(header::CONTENT_TYPE, content_type)
-                        .header(header::CONTENT_LENGTH, len.to_string())
-                        .header(
-                            header::CONTENT_RANGE,
-                            format!("bytes {start}-{end}/{total_len}"),
-                        )
-                        .header(header::ACCEPT_RANGES, "bytes")
-                        .body(Body::from(slice))
-                        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
-                    add_cors_headers(resp.headers_mut());
-                    return resp;
+                    return media_response(
+                        Response::builder()
+                            .status(StatusCode::PARTIAL_CONTENT)
+                            .header(header::CONTENT_TYPE, content_type)
+                            .header(header::CONTENT_LENGTH, len.to_string())
+                            .header(
+                                header::CONTENT_RANGE,
+                                format!("bytes {start}-{end}/{total_len}"),
+                            )
+                            .header(header::ACCEPT_RANGES, "bytes"),
+                        Body::from(slice),
+                    );
                 }
                 Ok(None) => {
                     // Header present but unparseable as a range we accept —
                     // fall through to the full-body 200 response.
                 }
                 Err(()) => {
-                    let mut resp = Response::builder()
-                        .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                        .header(header::CONTENT_RANGE, format!("bytes */{total_len}"))
-                        .body(Body::empty())
-                        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
-                    add_cors_headers(resp.headers_mut());
-                    return resp;
+                    return media_response(
+                        Response::builder()
+                            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                            .header(header::CONTENT_RANGE, format!("bytes */{total_len}")),
+                        Body::empty(),
+                    );
                 }
             }
         }
     }
 
-    let mut resp = Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_LENGTH, total_len.to_string())
-        .header(header::ACCEPT_RANGES, "bytes")
-        .body(Body::from(plaintext))
+    media_response(
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::CONTENT_LENGTH, total_len.to_string())
+            .header(header::ACCEPT_RANGES, "bytes"),
+        Body::from(plaintext),
+    )
+}
+
+/// Finish a response from `serve_media` — the single place a body of decrypted
+/// media bytes becomes a `Response`.
+///
+/// Every exit of `serve_media` that carries or describes plaintext goes through
+/// here, so the headers below cannot be attached to two of three paths: the
+/// function takes the half-built `Builder`, and the `Body` never meets it
+/// anywhere else.
+fn media_response(builder: axum::http::response::Builder, body: Body) -> Response {
+    let mut resp = builder
+        .body(body)
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    add_no_store_headers(resp.headers_mut());
     add_cors_headers(resp.headers_mut());
     resp
+}
+
+/// Keep decrypted bytes out of the webview's own on-disk HTTP cache.
+///
+/// A 200 with no cache directives at all is *storable by default* (RFC 9111
+/// §3): it has a 200 status, a `GET` method and a `Content-Length`, and nothing
+/// forbids storage — so WebKitGTK, WKWebView and WebView2 are each entitled to
+/// write the response body into their own disk cache, and did. That cache is
+/// the browser engine's, not ours: nothing in this app knows where it is, the
+/// media-cache wipe on logout does not reach it, and its contents are the
+/// plaintext this server exists to decrypt in memory.
+///
+/// `no-store` is the directive that forbids it, and it is the one that has to be
+/// on the 206 range path too — video seeking is served entirely from there, so a
+/// header attached only to the full-body 200 would leave every video the user
+/// scrubbed sitting in the engine's cache.
+///
+/// `Pragma: no-cache` rides along for HTTP/1.0-era caches that predate
+/// `Cache-Control`. It is redundant for every engine this app ships against and
+/// costs 18 bytes a response; it is here because the cost of being wrong about
+/// which intermediary is in the path is a plaintext copy on someone's disk.
+fn add_no_store_headers(headers: &mut HeaderMap) {
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
+    );
+    headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
 }
 
 fn add_cors_headers(headers: &mut HeaderMap) {
@@ -457,5 +497,141 @@ mod tests {
         // accessor wires to the two atomics without panicking.
         let (sent, dropped) = frame_fanout_counters();
         let _ = (sent, dropped);
+    }
+
+    // ── Cache directives (#994) ───────────────────────────────────────────
+
+    /// Bring up the real server over a real cached file and return
+    /// `(base_url, content_hash)`.
+    ///
+    /// Everything here is the shipped path: `cache_encrypt` writes the file,
+    /// `find_cached_file` locates it, `serve_media` decrypts it, and the
+    /// assertions read the headers off an actual HTTP response — so a response
+    /// builder that stops attaching a header fails this test rather than
+    /// passing a unit check on a helper nothing calls.
+    async fn serving_one_cached_file() -> (String, String) {
+        use crate::commands::pin::UnlockState;
+
+        const USER: &str = "media-server-headers";
+        let db_key = vec![7u8; 32];
+        // 64 hex chars — `serve_media` rejects anything else before it touches
+        // the filesystem.
+        let content_hash = "b".repeat(64);
+
+        let state = Arc::new(AppState::new_with_parts(
+            crate::config::Config::for_test().expect("test config"),
+            Arc::new(crate::keystore::InMemoryKeystore::new()),
+        ));
+        *state.unlock.lock().await = Some(UnlockState {
+            user_id: USER.to_string(),
+            db_key: zeroize::Zeroizing::new(db_key.clone()),
+            account_id_key: zeroize::Zeroizing::new(vec![9u8; 32]),
+        });
+        let token = fresh_token();
+        *state.media_server_token.lock().await = Some(token.clone());
+
+        let dir = r2cmd::test_cache_root().join(USER);
+        crate::private_fs::create_dir_all(&dir).expect("cache dir");
+        r2cmd::set_cache_user(Some(USER));
+        let plaintext = vec![0xABu8; 4096];
+        let encrypted = r2cmd::cache_encrypt(plaintext, &db_key, content_hash.as_bytes())
+            .expect("cache encrypt");
+        std::fs::write(dir.join(format!("{content_hash}.png.enc")), &encrypted)
+            .expect("write cache file");
+
+        let port = spawn(state).await.expect("spawn media server");
+        (format!("http://127.0.0.1:{port}/{token}"), content_hash)
+    }
+
+    /// The webview must not be allowed to keep a copy.
+    ///
+    /// A 200 carrying `Content-Type` and `Content-Length` and no cache
+    /// directives is storable by default (RFC 9111 §3), so WebKitGTK, WKWebView
+    /// and WebView2 each wrote decrypted images, audio and video into their own
+    /// on-disk cache — one nothing in this app clears, not even the media-cache
+    /// wipe on logout.
+    ///
+    /// Both paths, in one test on purpose: the 206 is the one a video seek
+    /// takes, and it is the one a response-builder refactor is most likely to
+    /// leave behind.
+    #[tokio::test]
+    async fn decrypted_bytes_are_never_storable_by_the_webview() {
+        let (base, hash) = serving_one_cached_file().await;
+        let client = reqwest::Client::new();
+
+        let full = client
+            .get(format!("{base}/{hash}"))
+            .send()
+            .await
+            .expect("full-body request");
+        assert_eq!(full.status().as_u16(), 200);
+        assert_no_store("200", full.headers());
+        assert_eq!(full.bytes().await.expect("body").len(), 4096);
+
+        let ranged = client
+            .get(format!("{base}/{hash}"))
+            .header(reqwest::header::RANGE, "bytes=0-127")
+            .send()
+            .await
+            .expect("range request");
+        assert_eq!(
+            ranged.status().as_u16(),
+            206,
+            "the fixture must actually exercise the range path"
+        );
+        assert_no_store("206", ranged.headers());
+        assert_eq!(ranged.bytes().await.expect("body").len(), 128);
+
+        // The 416 carries no body, but it does describe one; it goes through
+        // the same funnel and is checked here so the funnel has no exceptions.
+        let unsatisfiable = client
+            .get(format!("{base}/{hash}"))
+            .header(reqwest::header::RANGE, "bytes=99999-")
+            .send()
+            .await
+            .expect("unsatisfiable range request");
+        assert_eq!(unsatisfiable.status().as_u16(), 416);
+        assert_no_store("416", unsatisfiable.headers());
+    }
+
+    fn assert_no_store(which: &str, headers: &reqwest::header::HeaderMap) {
+        let cache_control = headers
+            .get(reqwest::header::CACHE_CONTROL)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(
+            cache_control.contains("no-store"),
+            "the {which} response is storable: Cache-Control was {cache_control:?}"
+        );
+        assert_eq!(
+            headers
+                .get(reqwest::header::PRAGMA)
+                .and_then(|v| v.to_str().ok()),
+            Some("no-cache"),
+            "the {which} response lost its Pragma fallback"
+        );
+    }
+
+    /// The structural half of the guarantee: `serve_media` does not build a
+    /// response body itself, so a new exit path cannot ship without the
+    /// directives. Every body it returns is constructed by `media_response`,
+    /// which is the only place the headers are attached.
+    #[test]
+    fn serve_media_never_builds_a_response_body_itself() {
+        let source = include_str!("media_server.rs");
+        let start = source
+            .find("async fn serve_media(")
+            .expect("serve_media must exist");
+        let end = source[start..]
+            .find("\n/// Finish a response from `serve_media`")
+            .expect("media_response must follow serve_media");
+        let body = &source[start..start + end];
+        assert!(
+            !body.contains(".body("),
+            "`serve_media` builds a response body directly. Every response it returns carries \
+             (or describes) decrypted media bytes, and `media_response` is what attaches \
+             `Cache-Control: no-store` to them — a body built anywhere else is a path the \
+             webview may cache to disk."
+        );
     }
 }
