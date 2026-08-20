@@ -129,6 +129,32 @@ check could have seen it. A `cargo check` would not have caught it either:
 heavy job. It also runs on pushes to `main`, which is the only trigger allowed to
 write the Windows rust-cache.
 
+### What the flows harness's local database is (#992)
+
+The flows binary runs the Delivery Service **in-process**, so it links `libsql`
+— and therefore a second sqlite3 amalgamation — beside `pollis-core`'s
+SQLCipher. The linker gives `libsql`'s the `sqlite3_*` symbols, SQLCipher's
+object is never pulled, and `PRAGMA key` is an unknown pragma there, which
+SQLite ignores silently. **Every client in the flows suite runs on an
+unencrypted local database.**
+
+That is a property of the harness, not of the product: `pollis-core`,
+`pollis-tui` and the desktop binary contain exactly one sqlite3 (#987/#988 took
+`libsql` out of the client for this among other reasons), and
+`db::local::tests::the_local_database_file_is_encrypted_at_rest` is what proves
+the shipped file is ciphertext. A green flows run is not evidence either way,
+which is why `tests/flows/linked_sqlite.rs` asserts the harness's state in both
+directions rather than leaving it to be rediscovered — if `libsql` ever leaves
+this binary those two tests fail, and the right response is to delete them.
+
+It also matters to `db::local::destroy_plaintext_database`, which disposes of
+legacy plaintext databases (#992). That step is gated on
+`sqlcipher_is_linked()`: destroying a plaintext file is an upgrade when the
+replacement will be encrypted and pure data loss when it will not, and in this
+binary it would loop forever — zeroing, on every open, the one
+`pollis_{user_id}.db` that two simulated devices of the same user share, out
+from under whichever of them still has it open.
+
 ### pollis-tui in CI (#487)
 
 `.github/workflows/mls-tests.yml` also runs `cargo test -p pollis-tui` — the

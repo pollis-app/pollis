@@ -167,6 +167,38 @@ const SQLITE_PLAINTEXT_HEADER: &[u8; 16] = b"SQLite format 3\0";
 /// the main file would leave message bodies behind.
 const DB_SIDECAR_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
 
+/// Whether the `sqlite3` this binary actually linked is SQLCipher — i.e.
+/// whether `PRAGMA key` does anything at all.
+///
+/// In every **shipped** build this is true, and it is not a runtime question
+/// there: [`tests::sqlcipher_is_the_sqlite_we_actually_linked`] fails the build
+/// if it ever stops being, on Linux, macOS and Windows alike, with no `cfg`
+/// exception. Asking at runtime covers the one case a manifest cannot decide —
+/// a binary that links a **second** sqlite3 beside ours, where the linker picks
+/// which one answers `sqlite3_*`.
+///
+/// Exactly one such binary exists: the integration harness in
+/// `src-tauri/tests/flows`, which runs the Delivery Service in-process and so
+/// pulls in `libsql`'s own amalgamation. That one wins the symbols, the harness
+/// client's local database is plaintext, and `flows::the_harness_links_a_second_
+/// sqlite3` in that suite pins the fact rather than leaving it to be
+/// rediscovered. No `pollis-core`, `pollis-tui` or desktop binary contains a
+/// second sqlite3 — #987/#988 removed `libsql` from the client precisely so.
+///
+/// Asked on a caller-supplied connection, never on a scratch in-memory one:
+/// `Connection::open_in_memory()` would run `sqlite3_initialize()` at a moment
+/// of this function's choosing, and libsql calls `sqlite3_config` on first use
+/// and panics if sqlite3 is already initialised (`.codesight/wiki/testing.md`,
+/// "libsql local DBs cannot go in pollis-core's `--lib` tests"). The one caller
+/// hands it a connection the open path was going to make anyway.
+fn sqlcipher_is_linked(conn: &Connection) -> bool {
+    conn.query_row("PRAGMA cipher_version", [], |row| row.get::<_, String>(0))
+        .optional()
+        .ok()
+        .flatten()
+        .is_some_and(|v| !v.trim().is_empty())
+}
+
 /// Destroy `db_path` if — and only if — it is an unencrypted SQLite database.
 ///
 /// **Recreate empty, not migrate.** `ATTACH ... KEY` + `sqlcipher_export` would
@@ -181,8 +213,40 @@ const DB_SIDECAR_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
 /// SQLite database at all is left exactly as it was found. A failure to read or
 /// remove is propagated rather than swallowed — the one thing this must never do
 /// is decide it cannot deal with a plaintext database and open it anyway.
+///
+/// It is an **upgrade** step, and it is gated on [`sqlcipher_is_linked`] because
+/// that is what makes it an upgrade rather than plain data loss. Destroying a
+/// plaintext database is worth doing when the replacement will be encrypted. In
+/// a binary with no codec the replacement is another plaintext file, so the
+/// "upgrade" is an endless destroy-and-recreate that additionally pulls the file
+/// out from under any connection another client in the same process already
+/// holds open — which is exactly what it did to the flows harness's
+/// multi-device tests, where two simulated devices share one
+/// `pollis_{user_id}.db`. A build that can encrypt is a build-time guarantee
+/// (see [`sqlcipher_is_linked`]), so on every shipped platform this gate is
+/// always open.
 fn destroy_plaintext_database(db_path: &std::path::Path) -> Result<()> {
     if !is_plaintext_sqlite(db_path)? {
+        return Ok(());
+    }
+
+    // The same `Connection::open(db_path)` the open path is about to make; see
+    // [`sqlcipher_is_linked`] for why the question is not asked on a scratch
+    // in-memory database instead.
+    let probe = Connection::open(db_path)?;
+    let encrypts = sqlcipher_is_linked(&probe);
+    drop(probe);
+
+    if !encrypts {
+        // Loud, because the only way to get here is a binary carrying a second
+        // sqlite3 that won the symbols, and every database it writes is
+        // plaintext regardless of what this function does about the old one.
+        eprintln!(
+            "[db] {db_path:?} is an UNENCRYPTED database and this binary has no SQLCipher \
+             (`PRAGMA cipher_version` answers nothing), so the file is left alone — replacing \
+             it would only produce another plaintext one. Something in this link is shipping a \
+             second sqlite3 amalgamation; see db::local::sqlcipher_is_linked."
+        );
         return Ok(());
     }
 
@@ -498,6 +562,22 @@ mod tests {
              SQLCipher. `PRAGMA key` is being silently ignored and pollis_<user>.db is PLAINTEXT \
              on this platform. Check what else in the dependency graph ships an sqlite3 \
              amalgamation and is winning the `sqlite3_*` symbols."
+        );
+    }
+
+    /// The premise the plaintext-disposal gate rests on, in the configuration
+    /// that ships. `sqlcipher_is_linked` exists to keep a binary carrying a
+    /// SECOND sqlite3 from destroying databases it cannot replace with anything
+    /// better — it must never be the thing that quietly switches encryption off
+    /// here, where `pollis-core` is the only sqlite3 in the link.
+    #[test]
+    fn the_plaintext_gate_is_open_in_this_build() {
+        let conn = Connection::open_in_memory().expect("open");
+        assert!(
+            sqlcipher_is_linked(&conn),
+            "`sqlcipher_is_linked()` is false in pollis-core's own test binary, so \
+             `destroy_plaintext_database` would decline to act. Nothing here links a second \
+             sqlite3; if that changed, the local database is no longer encrypted either."
         );
     }
 
