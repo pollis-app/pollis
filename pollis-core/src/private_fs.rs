@@ -175,6 +175,14 @@ mod tests {
 
     #[test]
     fn created_files_are_owner_only() {
+        // The platform predicate and the platform's actual behaviour, asserted
+        // against each other: a `#[cfg(not(unix))]` branch that swallowed the
+        // mode everywhere would still pass every assertion below on its own.
+        assert!(
+            owner_only_is_enforced_by_mode(),
+            "this is the unix build, so the mode is what enforces owner-only here"
+        );
+
         let dir = scratch("file");
         create_dir_all(&dir).unwrap();
         let path = dir.join("secret");
