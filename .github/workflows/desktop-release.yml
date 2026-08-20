@@ -301,12 +301,14 @@ jobs:
 
       # #991 deleted the "Install OpenSSL via vcpkg" step that used to sit here
       # (a ~7-minute from-source build of openssl:x64-windows-static-md). Its
-      # only consumer was libsqlite3-sys's `bundled-sqlcipher` feature, which
-      # the Windows target no longer enables: SQLCipher's OpenSSL cannot be
-      # linked next to libwebrtc's BoringSSL under MSVC, so Windows builds plain
-      # `bundled` SQLite. `openssl-sys` is not in the Windows dependency graph
-      # at all (`cargo tree -p pollis --target x86_64-pc-windows-msvc -i
-      # openssl-sys` prints nothing), so nothing else here wants OPENSSL_DIR.
+      # only consumer was libsqlite3-sys's `bundled-sqlcipher` feature, and the
+      # Windows target does not enable it: SQLCipher's OpenSSL cannot be linked
+      # next to libwebrtc's BoringSSL under MSVC. Since #992 Windows DOES ship
+      # SQLCipher — from the `pollis-sqlcipher` crate, whose crypto provider is
+      # RustCrypto — so there is still no OpenSSL anywhere in the Windows
+      # dependency graph (`cargo tree -p pollis --target x86_64-pc-windows-msvc
+      # -i openssl-sys` prints nothing) and nothing here wants OPENSSL_DIR.
+      # Adding it back would not help and would not be used.
       # See the rusqlite note in pollis-core/Cargo.toml.
 
       - name: Install Artifact Signing client + SignTool
