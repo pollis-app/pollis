@@ -76,8 +76,11 @@ frontend/src/
 
 mobile/              # Standalone Expo/RN app (NOT a pnpm workspace member) —
                      #   consumes pollis-core via uniffi (modules/pollis-native)
-  eas.json           # EAS build profiles (dev/preview/production); fingerprint
-                     #   runtimeVersion so a native-core change can't ship a bad OTA
+  eas.json           # EAS build profiles (dev/preview/production). Linked to the
+                     #   @pollis/mobile EAS project (projectId in app.json), which
+                     #   is what lets a device mint a push token at all (#707).
+                     #   fingerprint runtimeVersion lives in app.json, NOT here —
+                     #   a profile carrying it makes EAS CLI reject the whole file
   modules/pollis-native/  # uniffi-bindgen-react-native turbo module (JSI bridge)
 
 website/             # Static marketing site (Cloudflare Pages, not part of the app)
@@ -88,10 +91,10 @@ builds a real Android APK. The `android-build` job in
 `.github/workflows/mobile-core-check.yml` runs the full chain on `ubuntu-latest`
 — uniffi binding gen + a 3-ABI `cargo-ndk` cross-compile of `pollis-core`,
 `expo prebuild`, then `gradlew :app:assembleRelease` — and uploads the APK
-artifact. It uses `expo prebuild` + Gradle directly (no `eas build`, no EAS
-account) and signs with the throwaway debug keystore; distribution signing is
-blocked (Play console / Apple account #723). See `docs/deployments.md` and
-`mobile/CLAUDE.md`.
+artifact. It uses `expo prebuild` + Gradle directly (never `eas build`, so the
+job needs no account, token or queue) and signs with the throwaway debug
+keystore; distribution signing is blocked (Play console / Apple account #723).
+See `docs/deployments.md` and `mobile/CLAUDE.md`.
 
 **Shared Rust primitives.** `pollis-core/src/util.rs` and
 `pollis-delivery/src/util.rs` hold the crate-wide odds and ends — currently just

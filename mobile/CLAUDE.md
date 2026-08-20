@@ -118,20 +118,26 @@ carries is a stale prior artifact.
 ## Build profiles + CI (`eas.json`, #706 / PL-18)
 
 `eas.json` holds the three conventional EAS profiles (`development` / `preview` /
-`production`), authored for **when an EAS account exists** — nothing here uses
-them yet.
+`production`). Since #707 the app is linked to a real EAS project,
+**`@pollis/mobile`** — `expo.owner` plus `expo.extra.eas.projectId` in
+`app.json`, written by `eas init`.
 
 - `cli.appVersionSource: "local"` — the version lives in `app.json`; no EAS
   server holds it.
-- **`runtimeVersion.policy: "fingerprint"` on every profile.** `pollis-core` is
+- **`runtimeVersion.policy: "fingerprint"`, in `app.json`.** `pollis-core` is
   a native Rust lib reached over uniffi, so a JS-only OTA is unsafe the moment
   the core changes. `fingerprint` ties the runtime version to a hash of the
   native layer, so any native change forces a fresh binary instead of letting an
   incompatible OTA land on an old one — `sdkVersion`/`appVersion` would allow
   exactly that. Do not switch it without understanding this.
-- **No `credentials` block, no `extra.eas.projectId`** — both need accounts this
-  repo does not have (`projectId` also gates push, #344). Do not add
-  placeholders.
+  **It belongs to the app config, not to a build profile:** `runtimeVersion` is
+  not in the eas.json schema, and a profile carrying it makes current EAS CLI
+  reject the entire file (`"build.<profile>.runtimeVersion" is not allowed`) —
+  so every `eas` command fails, not just builds. It sat that way until #707.
+- **No `credentials` block** — EAS holds the credentials remotely
+  (`credentialsSource: "remote"`); do not add placeholders. The push
+  credentials themselves (APNs key, FCM v1 service account) are uploaded to EAS
+  by hand, see below.
 
 **CI builds a real APK** (the first thing that ever did): the `android-build`
 job in `.github/workflows/mobile-core-check.yml` runs the same chain as the
@@ -140,8 +146,9 @@ workstation dev loop above — `ubrn build android --and-generate`, then
 stock `ubuntu-latest` runner, and uploads the APK as `pollis-android-apk`. It
 installs the RN-pinned NDK (`27.1.12297006`) + CMake (`3.22.1`) so Gradle and
 `cargo-ndk` agree, and pins the ubrn CLI to `0.31.0-2` (template alignment, see
-below). It uses `expo prebuild` + Gradle **directly, never `eas build`** — no
-EAS account. The release APK is signed with the throwaway **debug keystore** the
+below). It uses `expo prebuild` + Gradle **directly, never `eas build`** — that
+predates the EAS project and still holds: the job needs no account, no token and
+no queue. The release APK is signed with the throwaway **debug keystore** the
 Expo template generates (no signing secret); real upload signing is blocked
 (needs the Play console).
 
@@ -459,23 +466,38 @@ Current state:
   signer — the LiveKit API secret was removed from the bundle (#393). Activates
   foreground realtime once `EXPO_PUBLIC_LIVEKIT_URL` is set (#185). On-device
   verification still pending.
-- **Push backend (code DONE; credentials pending).** The Rust side is wired and
-  compiles for host + `aarch64-apple-ios-sim`:
+- **Push backend (code DONE; per-platform credentials pending).**
   - `push_token` Turso table — migration `000006_push_token.sql` (additive
     `CREATE TABLE`/`CREATE INDEX`; ships to prod via the release pipeline's
     `db-apply.sh`).
   - `register_push_token` — `bridge.rs` arm → `commands::push::register_push_token`
     (upsert keyed on the token, so a re-register reassigns ownership).
-  - Content-free fanout — `commands::push::notify_new_message`, spawned
-    fire-and-forget from `send_message` after the LiveKit publish. Resolves
-    conversation members (minus sender), looks up their tokens, and POSTs a
-    batched, **content-free** alert to Expo (`{conversationId, kind}` only —
-    no plaintext/sender; generic "New message" body). Desktop runs it too
-    (no tokens → no-op), which is what lets a desktop send wake a phone.
-  - **Still operational (need EAS, not code):** `eas init` to populate
-    `expo.extra.eas.projectId` in `app.json` (the JS degrades gracefully
-    without it), plus APNs key / FCM v1 service-account credentials in EAS.
-    On-device delivery test is the final gate (#344).
+  - Content-free fan-out — **`pollis_delivery::push::notify_new_message`, in the
+    DS, not the client** (#987 moved it off every client so nobody needs a
+    credential that can read other people's `push_token` rows). Driven by the
+    `push_to` field on `POST /v1/messages/send`. Payload is `{conversationId,
+    kind}` and a generic "New message" body — never plaintext or sender.
+  - The DS authenticates the send with `EXPO_TOKEN` (#707), wired through the
+    full Doppler → sync script → wrangler → `worker/index.ts` → container chain
+    that `scripts/check-ds-config-chain.py` enforces. Optional until "Enhanced
+    Security for Push Notifications" is enabled on the Expo account; required
+    the moment it is, so set it **before** flipping enforcement.
+  - **EAS project — DONE (#707):** `@pollis/mobile`, `projectId` in `app.json`.
+    Registration therefore works now; before this it could not, on any device.
+  - **Platform credentials — DONE (#707), and EAS holds them, not this repo.**
+    iOS: an APNs `.p8` that `eas credentials -p ios` generated on the Apple
+    Developer Portal (key `DZB37YSPU7`) and kept; the material was never
+    downloaded, so re-running that command is the only way to see or replace it.
+    Android: an FCM v1 service-account key for Firebase project `pollis-38b6f`,
+    uploaded the same way. That JSON is a live credential and stays out of the
+    repo — but `google-services.json` **is** committed here (public identifiers
+    only) and wired as `expo.android.googleServicesFile`, because without it
+    `getExpoPushTokenAsync` throws on Android: the Expo token wraps an FCM
+    device token it could not otherwise obtain. If its `package_name` ever
+    drifts from `expo.android.package`, the Google Services Gradle plugin fails
+    the `android-build` job rather than shipping silent-dead push.
+  - **The one thing left:** delivery to a *locked physical device*, which needs
+    a store-signed build (PL-24).
 - **webrtc Expo config plugin** + an AndroidManifest mic/camera **removal** rule
   so the data-only realtime path adds no voice/video permission.
 - ~~**`device_revoked`** self-sign-out on the inbox connection~~ — **DONE.**

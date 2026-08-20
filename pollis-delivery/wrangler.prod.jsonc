@@ -68,7 +68,8 @@
     { "binding": "R2_ACCESS_KEY_ID", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_R2_ACCESS_KEY_ID" },
     { "binding": "R2_SECRET_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_R2_SECRET_KEY" },
     { "binding": "R2_BUCKET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_R2_BUCKET" },
-    { "binding": "POLLIS_DS_METRICS_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_POLLIS_DS_METRICS_TOKEN" }
+    { "binding": "POLLIS_DS_METRICS_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_POLLIS_DS_METRICS_TOKEN" },
+    { "binding": "EXPO_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_EXPO_TOKEN" }
   ],
   "routes": [{ "pattern": "api.pollis.com", "custom_domain": true }]
 }

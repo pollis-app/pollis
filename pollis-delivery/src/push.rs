@@ -40,6 +40,37 @@ const EXPO_BATCH: usize = 100;
 
 const BIND_CHUNK: usize = 100;
 
+/// The Expo access token the fan-out authenticates with (`EXPO_TOKEN`).
+///
+/// Optional while the Expo account leaves push sends unauthenticated, and
+/// REQUIRED the moment "Enhanced Security for Push Notifications" is switched on
+/// there: with it on, Expo rejects any send that does not carry the token, which
+/// is what stops someone who has scraped an `ExponentPushToken[...]` off a device
+/// from pushing to our users themselves. Set it BEFORE enabling enforcement —
+/// the other order silently drops every push in between.
+///
+/// Read once, like every other DS env value; the DS never reloads its
+/// environment.
+fn expo_token() -> Option<&'static str> {
+    static TOKEN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    TOKEN
+        .get_or_init(|| std::env::var("EXPO_TOKEN").ok().filter(|s| !s.is_empty()))
+        .as_deref()
+}
+
+/// The POST for one batch, bearing the access token when one is configured.
+///
+/// Split out from the send loop so the "token set => `Authorization` present,
+/// token unset => absent" invariant is testable without touching the process
+/// environment, which no parallel test can do safely.
+fn expo_request(token: Option<&str>, chunk: &[serde_json::Value]) -> reqwest::RequestBuilder {
+    let req = crate::util::http_post(crate::util::Upstream::ExpoPush, EXPO_PUSH_URL).json(chunk);
+    match token {
+        Some(token) => req.bearer_auth(token),
+        None => req,
+    }
+}
+
 /// Wake every other member of a conversation with a content-free notification.
 ///
 /// `mention_only` narrows the recipients to a subset — used by per-user
@@ -101,14 +132,11 @@ pub async fn notify_new_message(
         })
         .collect();
 
+    let token = expo_token();
     for chunk in messages.chunks(EXPO_BATCH) {
         // Through `util::http_post`, which forces a deadline (#913). A push
         // nobody is waiting on must never be the thing that pins a handler open.
-        match crate::util::http_post(crate::util::Upstream::ExpoPush, EXPO_PUSH_URL)
-            .json(chunk)
-            .send()
-            .await
-        {
+        match expo_request(token, chunk).send().await {
             Ok(r) if !r.status().is_success() => {
                 let status = r.status();
                 let body = r.text().await.unwrap_or_default();
@@ -180,4 +208,33 @@ async fn is_dm(conn: &Connection, conversation_id: &str) -> anyhow::Result<bool>
         )
         .await?;
     Ok(rows.next().await?.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `Authorization` header the fan-out would actually put on the wire.
+    fn authorization(token: Option<&str>) -> Option<String> {
+        let req = expo_request(token, &[]).build().expect("request builds");
+        req.headers()
+            .get(reqwest::header::AUTHORIZATION)
+            .map(|v| v.to_str().expect("header is ascii").to_string())
+    }
+
+    #[test]
+    fn a_configured_token_is_sent_as_a_bearer() {
+        assert_eq!(
+            authorization(Some("expo-secret")).as_deref(),
+            Some("Bearer expo-secret")
+        );
+    }
+
+    /// Without a token the header must be ABSENT rather than empty — an empty
+    /// bearer is a credential Expo would reject once enforcement is on, and it
+    /// would read as "authenticated" to anyone auditing the call.
+    #[test]
+    fn no_authorization_header_without_a_token() {
+        assert_eq!(authorization(None), None);
+    }
 }

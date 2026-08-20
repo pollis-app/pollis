@@ -96,6 +96,10 @@ const SECRET_KEYS = [
   // it, the route stays default-closed, and the endpoint 404s however correctly
   // the secret is set in Doppler and bound in wrangler.
   "POLLIS_DS_METRICS_TOKEN",
+  // #707: authenticates the content-free push fan-out to Expo. Absent
+  // here means the DS sends unauthenticated, which Expo rejects outright
+  // once Enhanced Security for Push Notifications is enabled.
+  "EXPO_TOKEN",
 ] as const;
 
 interface SecretStoreBinding {

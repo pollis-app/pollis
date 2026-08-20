@@ -34,7 +34,8 @@
       "R2_ACCESS_KEY_ID",
       "R2_SECRET_KEY",
       "R2_BUCKET",
-      "POLLIS_DS_METRICS_TOKEN"
+      "POLLIS_DS_METRICS_TOKEN",
+      "EXPO_TOKEN"
     ],
     "dev_only": ["DEV_OTP"]
   },

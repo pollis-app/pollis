@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "32547883680",
+    "project_id": "pollis-38b6f",
+    "storage_bucket": "pollis-38b6f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32547883680:android:a9ba0f92fb42e49bf497c5",
+        "android_client_info": {
+          "package_name": "com.pollis.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDUj8tawyzOOHh322VIqEkOvpO1nOQVKp0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

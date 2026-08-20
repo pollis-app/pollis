@@ -11,6 +11,11 @@
 //!   DEV_OTP             dev/harness override — skip the email send and force this
 //!                       exact OTP code (optional).
 //!   OTP_TTL_SECS        OTP lifetime in seconds (optional, default 600).
+//!   EXPO_TOKEN   Expo access token the content-free push fan-out
+//!                       authenticates with (#707). Optional today; REQUIRED
+//!                       once "Enhanced Security for Push Notifications" is
+//!                       enabled on the Expo account, which rejects any
+//!                       unauthenticated send. Read by `push::expo_token`.
 //!
 //! `RESEND_API_KEY` / `DEV_OTP` / `OTP_TTL_SECS` are read by
 //! `OtpConfig::from_env` inside `build_router_with_log_db`.

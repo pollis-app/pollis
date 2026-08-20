@@ -4,6 +4,9 @@
     "slug": "mobile",
     "scheme": "pollis",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -81,6 +84,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.pollis.mobile",
+      "googleServicesFile": "./google-services.json",
       "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA"
@@ -125,6 +129,13 @@
           "microphonePermission": false
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "74bee5ea-4d9b-4a1b-9fb3-5e1775f35990"
+      }
+    },
+    "owner": "pollis"
   }
 }
