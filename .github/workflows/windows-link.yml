@@ -67,11 +67,14 @@ jobs:
               - '!learn/**'
               - '!specs/**'
               - '!e2e/**'
-            # ...but a change to THIS workflow, or to the Windows half of the
-            # release workflow (which owns the vcpkg OpenSSL flavour this job
-            # mirrors), must still run it.
+            # ...but a change to THIS workflow, or to the release workflow that
+            # owns the vcpkg OpenSSL flavour this job mirrors, must still run it.
+            # One pattern per filter, deliberately: `predicate-quantifier: every`
+            # applies to EVERY filter in this block, so a two-pattern filter would
+            # demand a file matching both names and could never fire.
             harness:
               - '.github/workflows/windows-link.yml'
+            release:
               - '.github/workflows/desktop-release.yml'
       - name: Decide whether the Windows link gate must run
         id: decide
@@ -79,14 +82,15 @@ jobs:
           EVENT: ${{ github.event_name }}
           FILTERED: ${{ steps.filter.outputs.rust }}
           HARNESS: ${{ steps.filter.outputs.harness }}
+          RELEASE: ${{ steps.filter.outputs.release }}
         run: |
           if [ "$EVENT" = "pull_request" ]; then
-            if [ "$FILTERED" = "true" ] || [ "$HARNESS" = "true" ]; then
+            if [ "$FILTERED" = "true" ] || [ "$HARNESS" = "true" ] || [ "$RELEASE" = "true" ]; then
               echo "run_link=true" >> "$GITHUB_OUTPUT"
             else
               echo "run_link=false" >> "$GITHUB_OUTPUT"
             fi
-            echo "rust=$FILTERED harness=$HARNESS"
+            echo "rust=$FILTERED harness=$HARNESS release=$RELEASE"
           else
             echo "run_link=true" >> "$GITHUB_OUTPUT"
           fi
