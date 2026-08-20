@@ -102,6 +102,23 @@ data-dir section](#the-process-wide-data-dir--never-set_var)).
 
 Every step after the first carries `if: ${{ !cancelled() }}`, so one failure still lets the rest report.
 
+### What `windows-link.yml` runs (#991)
+
+Everything above is Linux. `.github/workflows/windows-link.yml` is the only gate
+that meets the **MSVC linker** before a release does: it builds `pollis-core`
+for `x86_64-pc-windows-msvc` and links the `cdylib`, then runs
+`db::local::tests::sqlcipher_is_the_sqlite_we_actually_linked` natively.
+
+It exists because `build-windows` used to live only in the tag-triggered
+`desktop-release.yml`. v1.10.0 was cut from a fully-green PR whose Windows link
+could not resolve at all — 1,253 duplicate symbols between SQLCipher's OpenSSL
+and libwebrtc's BoringSSL, plus two unresolved C-runtime imports — and no PR
+check could have seen it. A `cargo check` would not have caught it either:
+**this entire failure class only exists at link time.** Same three-job shape as
+`mls-tests.yml`; `windows-gate` is the always-reporting check, `link` is the
+heavy job. It also runs on pushes to `main`, which is the only trigger allowed to
+write the Windows rust-cache.
+
 ### pollis-tui in CI (#487)
 
 `.github/workflows/mls-tests.yml` also runs `cargo test -p pollis-tui` — the

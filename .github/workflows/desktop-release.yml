@@ -299,12 +299,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Install OpenSSL via vcpkg
-        shell: bash
-        run: |
-          vcpkg install openssl:x64-windows-static-md
-          echo "OPENSSL_DIR=$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md" >> $GITHUB_ENV
-          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+      # #991 deleted the "Install OpenSSL via vcpkg" step that used to sit here
+      # (a ~7-minute from-source build of openssl:x64-windows-static-md). Its
+      # only consumer was libsqlite3-sys's `bundled-sqlcipher` feature, which
+      # the Windows target no longer enables: SQLCipher's OpenSSL cannot be
+      # linked next to libwebrtc's BoringSSL under MSVC, so Windows builds plain
+      # `bundled` SQLite. `openssl-sys` is not in the Windows dependency graph
+      # at all (`cargo tree -p pollis --target x86_64-pc-windows-msvc -i
+      # openssl-sys` prints nothing), so nothing else here wants OPENSSL_DIR.
+      # See the rusqlite note in pollis-core/Cargo.toml.
 
       - name: Install Artifact Signing client + SignTool
         shell: pwsh

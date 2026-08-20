@@ -1,0 +1,213 @@
+# Windows compile+link gate for PRs (#991).
+#
+# Why this workflow exists: `build-windows` lived ONLY in the tag-triggered
+# `desktop-release.yml`, so the first time any PR's Rust ever met the MSVC
+# linker was the release itself. v1.10.0 shipped a fully-green PR that could
+# not link on Windows at all — a dependency change in #988 altered which
+# static libraries the MSVC linker consults, and nothing in CI could see it
+# until the release job ran. This job compiles AND LINKS the exact artifact
+# that broke (`pollis_core.dll`, the cdylib crate-type) for
+# x86_64-pc-windows-msvc on every Rust-touching PR.
+#
+# It must LINK, not just `cargo check`. Every failure mode in this class —
+# duplicate symbols between SQLCipher's OpenSSL and libwebrtc's bundled
+# BoringSSL, C-runtime mismatches, a missing native lib — is invisible to
+# type-checking and only appears when link.exe resolves symbols.
+#
+# Merge-blocking design copied from `mls-tests.yml` (#698): a seconds-cheap
+# `changes` decision job, the heavy job gated on it, and an always-reporting
+# `windows-gate` that collapses the outcome. Mark `windows-gate` — not `link` —
+# as the required status check; a path-filtered workflow does not run at all on
+# an exempt PR, so a required check on the heavy job would wedge every
+# frontend-only PR at "pending" forever.
+name: Windows link
+
+on:
+  # No paths filter here: the workflow must always run so `windows-gate` always
+  # reports. Exemption is decided inside the `changes` job instead.
+  pull_request:
+  # `main` too, and this one IS path-filtered. Two reasons: it re-checks the
+  # merge result (a PR can be green and its merge commit not be), and it is the
+  # only trigger that may WRITE the rust-cache — GitHub scopes a cache to the
+  # branch that created it, with the default branch's caches visible to all, so
+  # without this every PR would link the whole native stack from cold.
+  push:
+    branches: [main]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/config.toml'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/windows-link.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # dorny/paths-filter reads the PR's changed-file list via the API (no checkout).
+  pull-requests: read
+
+concurrency:
+  group: windows-link-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Seconds-cheap gatekeeper: decide whether the Windows build needs to run.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run_link: ${{ steps.decide.outputs.run_link }}
+    steps:
+      # Same ignore-list as mls-tests.yml: a changed file trips `rust` only if
+      # it is NOT under an exempt surface, so any real Rust/workspace change
+      # (including Cargo.toml / Cargo.lock / .cargo/config.toml, which is where
+      # this whole class of bug is introduced) runs the gate.
+      - name: Detect non-exempt changes (PRs only)
+        id: filter
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: dorny/paths-filter@v3
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            rust:
+              - '!frontend/**'
+              - '!website/**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!.github/**'
+              - '!scripts/**'
+              - '!.codesight/**'
+              - '!infra/**'
+              - '!learn/**'
+              - '!specs/**'
+              - '!e2e/**'
+            # ...but a change to THIS workflow, or to the release workflow whose
+            # Windows job this one mirrors, must still run it.
+            # One pattern per filter, deliberately: `predicate-quantifier: every`
+            # applies to EVERY filter in this block, so a two-pattern filter would
+            # demand a file matching both names and could never fire.
+            harness:
+              - '.github/workflows/windows-link.yml'
+            release:
+              - '.github/workflows/desktop-release.yml'
+      - name: Decide whether the Windows link gate must run
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          FILTERED: ${{ steps.filter.outputs.rust }}
+          HARNESS: ${{ steps.filter.outputs.harness }}
+          RELEASE: ${{ steps.filter.outputs.release }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            if [ "$FILTERED" = "true" ] || [ "$HARNESS" = "true" ] || [ "$RELEASE" = "true" ]; then
+              echo "run_link=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run_link=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "rust=$FILTERED harness=$HARNESS release=$RELEASE"
+          else
+            echo "run_link=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  link:
+    needs: changes
+    if: ${{ needs.changes.outputs.run_link == 'true' }}
+    runs-on: windows-latest
+    env:
+      # A dev-profile link is what we need — it resolves the same native
+      # libraries against the same CRT as the release build, and it references
+      # MORE symbols than the LTO'd release build does, so it can only be
+      # stricter about what has to resolve. Debuginfo is dead weight for a
+      # link check and makes the (large) native stack slower to write out.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      # The PINNED toolchain, matching rust-toolchain.toml and the
+      # desktop-release Windows job. A gate that links on a different rustc
+      # than the release does is not a gate.
+      - uses: dtolnay/rust-toolchain@1.96.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-link
+          # Only `main` WRITES the cache; PR branches restore from it and get
+          # the same speedup without each branch storing its own copy (the repo
+          # has been over GitHub's 10 GiB cache budget before — #759).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Deliberately NO OpenSSL provisioning, mirroring the desktop-release
+      # Windows job since #991: the Windows target links plain `bundled` SQLite,
+      # so nothing in its graph wants OPENSSL_DIR. If a change re-enables
+      # `bundled-sqlcipher` on Windows, libsqlite3-sys hard-panics here on the
+      # missing variable — which is the correct, immediate failure.
+
+      # No pnpm, no Tauri bundle, no signing: `pollis-core` is a plain cargo
+      # crate and it is where the link happens. `--lib` builds every crate-type
+      # the manifest declares, which includes the `cdylib` — that DLL link is
+      # the step that failed the v1.10.0 release, and it is the whole point of
+      # this job.
+      - name: Link pollis-core for x86_64-pc-windows-msvc
+        run: cargo build -p pollis-core --lib --target x86_64-pc-windows-msvc
+
+      # Linking is most of this job's value, but "which sqlite3 actually won the
+      # `sqlite3_*` symbols" is a RUNTIME question and can only be answered by
+      # executing on this target. Scoped to that one test on purpose: the rest
+      # of the unit suite has never run on Windows and would be adding a second,
+      # unrelated gate in the same change.
+      - name: Assert which sqlite3 Windows linked
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(cargo test -p pollis-core --lib --target x86_64-pc-windows-msvc -- \
+            --exact db::local::tests::sqlcipher_is_the_sqlite_we_actually_linked --nocapture 2>&1)"
+          echo "$out"
+          # libtest EXITS 0 when a filter matches nothing, so renaming the test
+          # would silently turn this step into a no-op. Demand that it ran.
+          grep -q "1 passed" <<< "$out"
+
+      # Prove the artifact exists rather than trusting the exit code alone.
+      - name: Verify the DLL was produced
+        shell: bash
+        run: |
+          set -euo pipefail
+          dll="target/x86_64-pc-windows-msvc/debug/pollis_core.dll"
+          test -f "$dll" || { echo "::error::$dll was not produced"; exit 1; }
+          ls -la "$dll"
+
+  # The always-reporting check. Runs on every trigger regardless of what `link`
+  # did, and collapses the outcome into a single pass/fail. Fail-closed.
+  windows-gate:
+    needs: [changes, link]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate gate
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUN_LINK: ${{ needs.changes.outputs.run_link }}
+          LINK_RESULT: ${{ needs.link.result }}
+        run: |
+          echo "changes=$CHANGES_RESULT run_link=$RUN_LINK link=$LINK_RESULT"
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "::error::Decision job did not succeed ($CHANGES_RESULT) — failing closed."
+            exit 1
+          fi
+          if [ "$RUN_LINK" = "true" ]; then
+            if [ "$LINK_RESULT" = "success" ]; then
+              echo "Windows link passed."
+              exit 0
+            fi
+            echo "::error::Windows link was required but its result was '$LINK_RESULT' — failing."
+            exit 1
+          fi
+          if [ "$LINK_RESULT" = "skipped" ]; then
+            echo "Exempt PR — no Rust/workspace change, Windows link correctly skipped."
+            exit 0
+          fi
+          if [ "$LINK_RESULT" = "success" ]; then
+            echo "Windows link ran and passed."
+            exit 0
+          fi
+          echo "::error::Unexpected state (run_link=$RUN_LINK link=$LINK_RESULT) — failing closed."
+          exit 1

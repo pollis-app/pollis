@@ -751,11 +751,13 @@ Rules that matter:
 
 ---
 
-## Local Database (SQLite, per-user, encrypted)
+## Local Database (SQLite, per-user, encrypted — except on Windows)
 
 Source: `pollis-core/src/db/local_schema.sql`
 
 File path: `pollis_{user_id}.db`, encrypted with a key from the device keystore.
+
+**Windows is plaintext (#991).** SQLCipher's OpenSSL cannot be linked next to the BoringSSL that `libwebrtc-sys` puts in the same image under MSVC (1,253 duplicate symbols), so `rusqlite` gets plain `bundled` on Windows and `PRAGMA key` is a silently-ignored unknown pragma there. This is not a new loss — a second sqlite3 amalgamation from `libsql` had been quietly winning the `sqlite3_*` symbols on every shipped Windows build until #988 removed it. Full reasoning: the rusqlite note in `pollis-core/Cargo.toml` and `docs/security-whitepaper.md` §7.0. Pinned in both directions by `sqlcipher_is_the_sqlite_we_actually_linked` (`pollis-core/src/db/local.rs`). Closing the gap is tracked in #992.
 
 ### kv
 - `key` TEXT PK

@@ -15,7 +15,7 @@
 | The user's device | Network (any path between the device and any remote service) |
 | The device keystore — the OS keychain (Keychain / Secret Service / Credential Manager) where one exists, otherwise a machine-bound encrypted file (§3.5), which is weaker | Turso (libSQL) — the remote relational database |
 | The signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the version the user installed | Cloudflare R2 — object storage for attachments |
-| The local SQLCipher database file | LiveKit — SFU and signalling for voice and realtime events |
+| The local SQLCipher database file — **encrypted on Linux/macOS/mobile only; on Windows it is plaintext, see §7.0** | LiveKit — SFU and signalling for voice and realtime events |
 | The user-held Secret Key (printed once, expected to be stored offline) | Resend — outbound email transit for OTPs |
 | — | The Delivery Service (`pollis-delivery`) — the sole writer to the remote database, and the broker that now holds the Resend, R2 and LiveKit credentials on the client's behalf (§4, §9.3, §10.1) |
 | The user-held PIN (in the user's head) | Anyone with read access to a copy of `accounts.json` or the keystore who does not also have the PIN |
@@ -412,6 +412,16 @@ Source: `pollis-core/src/db/local.rs`.
 - **Key application:** `PRAGMA key = "x'{hex}'";` with the 32-byte raw key; this skips SQLCipher's own KDF and uses the raw key directly as the page key — appropriate because the input is a CSPRNG-generated 32-byte uniform key, not a passphrase.
 - **Path:** `pollis_{user_id}.db` under the OS-appropriate data dir (Linux `~/.local/share/pollis`, macOS `~/Library/Application Support/com.pollis.app`, Windows `%APPDATA%\pollis`). PRAGMAs: `journal_mode=WAL`, `foreign_keys=ON`.
 - **Schema-version semantics:** if `LOCAL_SCHEMA_VERSION` mismatches, the DB file is wiped and recreated. The wipe is *narrow* — it triggers only on missing schema-version row, version-string mismatch, or `SqliteError::NotADatabase` (wrong key). Any other rusqlite error surfaces, refusing to eat the local database on an unfamiliar failure.
+
+### 7.0 Platform caveat: **on Windows the local database is NOT encrypted** (#991)
+
+Everything above describes Linux, macOS and mobile. On **Windows** the shipped build links plain SQLite, `PRAGMA key` is an unknown pragma — which SQLite ignores silently, without an error — and `pollis_{user_id}.db` is written in the clear. A Windows device therefore holds decrypted message plaintext and MLS group state at rest with no key protecting the file; the `db_key` in the keystore still exists but guards nothing. Message transport, the MLS tree, and everything server-side are unaffected — this is purely at-rest protection on one platform.
+
+Why it cannot currently be fixed by configuration: Windows has no shared system libcrypto, so `bundled-sqlcipher` would link a **static** one, and MSVC resolves a static archive by pulling whole object files. SQLCipher compiled against OpenSSL 3 headers reaches the provider API (`EVP_CIPHER_fetch`), which BoringSSL does not implement; the first such symbol drags in OpenSSL's provider core and, transitively, 169 objects covering the whole X.509/PEM/RSA/EC surface — most of which the BoringSSL that `libwebrtc-sys` puts in the same image for voice/video also defines. That is 1,253 hard `LNK2005` duplicate-symbol errors. ELF simply prefers one definition; MSVC makes it fatal. Vendoring OpenSSL makes it worse, not better.
+
+How long this has been true, and how it was found: until #988 the dependency graph also contained `libsql`, whose `libsql-ffi` bundles its own sqlite3 amalgamation. It won every `sqlite3_*` symbol, so SQLCipher's object was never pulled into the link and the conflict never materialised — and neither did the encryption. Every Windows build Pollis has shipped behaved this way. #988 removed `libsql`, SQLCipher's object became the only candidate, and the Windows release link failed outright, which is what surfaced it. #991 makes the state explicit (`rusqlite` gets plain `bundled` on Windows, with the reasoning in `pollis-core/Cargo.toml`) rather than leaving it accidental, and pins it in both directions with `sqlcipher_is_the_sqlite_we_actually_linked` in `pollis-core/src/db/local.rs` — that test now fails if Linux/macOS ever lose SQLCipher *or* if Windows silently gains it.
+
+Closing the gap is tracked as #992. It is a separate piece of work, and not just a build change: every existing Windows database is plaintext, so a build that starts encrypting must migrate those files (`sqlcipher_export`) or it will present as `NotADatabase`, trip the narrow wipe above, and destroy the device's history and MLS state.
 
 ### 7.1 What's local-only
 
