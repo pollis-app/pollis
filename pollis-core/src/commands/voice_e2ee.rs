@@ -70,7 +70,7 @@ async fn resolve_mls_group_id(
 
     // A channel resolves to its owning group; anything else (a DM id) is its own
     // MLS group.
-    crate::commands::ds_reads::resolve_mls_group(state, channel_id).await
+    crate::commands::mls::ds_reads::resolve_mls_group(state, channel_id).await
 }
 
 /// Public entry point used at voice-join time. Returns

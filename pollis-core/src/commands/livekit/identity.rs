@@ -111,7 +111,7 @@ pub(crate) async fn pin_local_identity(
 /// Look up the avatar_url for a single user_id from the remote DB.
 /// Best-effort — returns None on any failure (offline, no row, etc.).
 pub(crate) async fn lookup_avatar_url(
-    state: &std::sync::Arc<AppState>,
+    state: &Arc<AppState>,
     user_id: &str,
 ) -> Option<String> {
     crate::commands::ds_reads::users(state, vec![user_id.to_string()], None)
@@ -127,7 +127,7 @@ pub(crate) async fn lookup_avatar_url(
 /// has no recognised user — which since #836 also covers a wire pseudonym that
 /// could not be resolved — or if the lookup fails.
 pub(crate) async fn lookup_avatar_url_for_identity(
-    state: &std::sync::Arc<AppState>,
+    state: &Arc<AppState>,
     identity: &str,
 ) -> Option<String> {
     let user_id = user_id_from_identity(identity)?;
@@ -139,7 +139,7 @@ pub(crate) async fn lookup_avatar_url_for_identity(
 /// with `avatar_url = None`, because a missing avatar must never cost the
 /// roster.
 pub(super) async fn enrich_participants_with_avatars(
-    state: &std::sync::Arc<AppState>,
+    state: &Arc<AppState>,
     mut participants: Vec<VoiceParticipantInfo>,
 ) -> Vec<VoiceParticipantInfo> {
     if participants.is_empty() {
@@ -152,7 +152,7 @@ pub(super) async fn enrich_participants_with_avatars(
     if user_ids.is_empty() {
         return participants;
     }
-    let by_id: std::collections::HashMap<String, Option<String>> =
+    let by_id: HashMap<String, Option<String>> =
         match crate::commands::ds_reads::users(state, user_ids, None).await {
             Ok(users) => users.into_iter().map(|u| (u.id, u.avatar_url)).collect(),
             Err(e) => {
