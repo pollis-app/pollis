@@ -958,11 +958,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let dir = dest_dir.strip_prefix("file://").unwrap_or(&dest_dir);
             let (bytes, _content_type) =
                 emoji::download_verified_emoji(&content_hash, &state()?).await?;
-            tokio::fs::create_dir_all(dir)
-                .await
+            crate::private_fs::create_dir_all(std::path::Path::new(dir))
                 .map_err(|e| BridgeError::Bridge(format!("create emoji dir: {e}")))?;
             let path = std::path::Path::new(dir).join(&content_hash);
-            tokio::fs::write(&path, &bytes)
+            crate::private_fs::write_async(&path, bytes)
                 .await
                 .map_err(|e| BridgeError::Bridge(format!("write emoji file: {e}")))?;
             ok(format!("file://{}", path.display()))
@@ -1000,11 +999,10 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let bytes =
                 crate::commands::r2::download_media(r2_key, content_hash.clone(), &state()?)
                     .await?;
-            tokio::fs::create_dir_all(dir)
-                .await
+            crate::private_fs::create_dir_all(std::path::Path::new(dir))
                 .map_err(|e| BridgeError::Bridge(format!("create media dir: {e}")))?;
             let path = std::path::Path::new(dir).join(&content_hash);
-            tokio::fs::write(&path, &bytes)
+            crate::private_fs::write_async(&path, bytes)
                 .await
                 .map_err(|e| BridgeError::Bridge(format!("write media file: {e}")))?;
             ok(format!("file://{}", path.display()))

@@ -35,7 +35,7 @@ impl LocalDb {
     /// Open the per-user database at `pollis_{user_id}.db`.
     pub fn open_for_user(user_id: &str, key: &[u8]) -> Result<Self> {
         let data_dir = dirs_path();
-        std::fs::create_dir_all(&data_dir)
+        crate::private_fs::create_dir_all(&data_dir)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create data dir: {e}")))?;
 
         let db_path = data_dir.join(format!("pollis_{user_id}.db"));
@@ -52,12 +52,15 @@ impl LocalDb {
         // "cannot open" is not good enough on its own, because that path leaves
         // the plaintext pages sitting on the disk until the filesystem gets
         // round to reusing them. Detect it explicitly and destroy it.
-        destroy_plaintext_database(db_path)?;
+        let destroyed = destroy_plaintext_database(db_path)?;
 
-        // A DB is "fresh" if the file didn't exist or we wipe it below. Tracked
-        // because `auto_vacuum=INCREMENTAL` can only be set before any table is
-        // created on a fresh DB; an existing DB has to be converted via VACUUM.
-        let mut is_fresh = !db_path.exists();
+        // A DB is "fresh" if the file didn't exist, was just destroyed above, or
+        // we wipe it below. Tracked because `auto_vacuum=INCREMENTAL` can only be
+        // set before any table is created on a fresh DB; an existing DB has to be
+        // converted via VACUUM. `destroyed` is carried separately from
+        // `db_path.exists()` because a destroyed database can still leave a
+        // zero-length file behind — see `dispose`.
+        let mut is_fresh = destroyed || !db_path.exists();
 
         // Check if the stored schema version matches. If not, wipe and recreate.
         //
@@ -66,7 +69,7 @@ impl LocalDb {
         // mismatch. Any *other* rusqlite failure (lock contention mid-open,
         // transient I/O) is surfaced instead — we refuse to eat the local
         // database on an error we don't understand.
-        if db_path.exists() {
+        if !destroyed && db_path.exists() {
             let conn = Connection::open(db_path)?;
             // Key must be applied before any SQL — required for SQLCipher.
             conn.execute_batch(&key_pragma)?;
@@ -91,9 +94,12 @@ impl LocalDb {
 
             if should_wipe {
                 drop(conn);
-                std::fs::remove_file(db_path).map_err(|e| {
-                    crate::error::Error::Other(anyhow::anyhow!("remove stale db: {e}"))
-                })?;
+                // Through the shredder, sidecars included. This arm is also
+                // where a PLAINTEXT database lands whenever
+                // `sqlcipher_is_linked` declined to answer, and removing the
+                // main file alone left a `-wal` full of message bodies next to
+                // the fresh encrypted database that replaced it.
+                destroy_unusable_database(db_path)?;
                 is_fresh = true;
             }
         }
@@ -122,6 +128,13 @@ impl LocalDb {
             "INSERT OR REPLACE INTO kv (key, value) VALUES ('schema_version', ?1)",
             rusqlite::params![LOCAL_SCHEMA_VERSION],
         )?;
+
+        // The database file and its WAL sidecars are created by the SQLite VFS,
+        // which knows nothing about `private_fs` and opens at the process
+        // umask — so they are tightened here, once the connection (and
+        // therefore the `-wal`/`-shm` pair) exists. The WAL holds recently
+        // written pages; it is exactly as private as the database.
+        restrict_database_files(db_path);
 
         Ok(Self { conn })
     }
@@ -192,11 +205,25 @@ const DB_SIDECAR_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
 /// "libsql local DBs cannot go in pollis-core's `--lib` tests"). The one caller
 /// hands it a connection the open path was going to make anyway.
 fn sqlcipher_is_linked(conn: &Connection) -> bool {
-    conn.query_row("PRAGMA cipher_version", [], |row| row.get::<_, String>(0))
-        .optional()
-        .ok()
-        .flatten()
-        .is_some_and(|v| !v.trim().is_empty())
+    match conn.query_row("PRAGMA cipher_version", [], |row| row.get::<_, String>(0)) {
+        Ok(v) => !v.trim().is_empty(),
+        // Stock SQLite does not know this pragma and answers with no rows at
+        // all. That is the "no codec" ANSWER, not a failure.
+        Err(rusqlite::Error::QueryReturnedNoRows) => false,
+        // Anything else is a question that could not be asked. It still reads
+        // as "no codec", because declining to destroy is the safe direction —
+        // but it must not be silent, because the caller then leaves a plaintext
+        // database on the disk on the strength of it, and the wipe that
+        // eventually removes it has to be the one that takes the sidecars too.
+        Err(e) => {
+            eprintln!(
+                "[db] could not ask whether SQLCipher is linked (`PRAGMA cipher_version`: {e}); \
+                 assuming it is not, so a plaintext database at this path is left in place \
+                 rather than destroyed."
+            );
+            false
+        }
+    }
 }
 
 /// Destroy `db_path` if — and only if — it is an unencrypted SQLite database.
@@ -206,13 +233,17 @@ fn sqlcipher_is_linked(conn: &Connection) -> bool {
 /// where both a plaintext and an encrypted copy exist, and there is no
 /// production Windows user base to preserve anything for. Starting empty is
 /// already one of the three sanctioned history losses ("a new device starts
-/// empty", CLAUDE.md), it cannot half-succeed, and it ends with no plaintext on
-/// disk — which a migration only achieves if its cleanup also works.
+/// empty", CLAUDE.md), and it ends with no plaintext on disk — which a
+/// migration only achieves if its cleanup also works.
 ///
 /// Idempotent: a missing file, an encrypted file, or anything that is not a
-/// SQLite database at all is left exactly as it was found. A failure to read or
-/// remove is propagated rather than swallowed — the one thing this must never do
-/// is decide it cannot deal with a plaintext database and open it anyway.
+/// SQLite database at all is left exactly as it was found. A failure to read is
+/// propagated rather than swallowed — the one thing this must never do is
+/// decide it cannot deal with a plaintext database and open it anyway.
+///
+/// Returns whether it destroyed anything, so the caller knows the file it is
+/// about to open is a blank slate — including in the one case where the bytes
+/// are gone but the (now zero-length) file is not, described in [`dispose`].
 ///
 /// It is an **upgrade** step, and it is gated on [`sqlcipher_is_linked`] because
 /// that is what makes it an upgrade rather than plain data loss. Destroying a
@@ -225,14 +256,40 @@ fn sqlcipher_is_linked(conn: &Connection) -> bool {
 /// `pollis_{user_id}.db`. A build that can encrypt is a build-time guarantee
 /// (see [`sqlcipher_is_linked`]), so on every shipped platform this gate is
 /// always open.
-fn destroy_plaintext_database(db_path: &std::path::Path) -> Result<()> {
-    if !is_plaintext_sqlite(db_path)? {
-        return Ok(());
+fn destroy_plaintext_database(db_path: &std::path::Path) -> Result<bool> {
+    // ONE resolution of the path, and every destructive step below runs on the
+    // handle it produced (#1000). Resolving `db_path` separately for the header
+    // probe, the `stat`, the write and the unlink — which is what this used to
+    // do — is four chances for the file underneath to become a different one,
+    // and `File::open`/`fs::metadata`/`OpenOptions::open` all follow a symlink
+    // planted at the last component while `remove_file` does not. A link at
+    // `pollis_<uid>.db` therefore aimed the zeroing at whatever SQLite database
+    // it pointed to and then deleted only the link.
+    let (mut file, meta) = match open_regular_no_follow(db_path)? {
+        Target::Missing => return Ok(false),
+        Target::NotRegular => {
+            // Never write through it, and — unlike the disposal in `open_at` —
+            // never unlink it either: nothing here has established that the
+            // thing it points at is a plaintext database, and this function's
+            // contract is to leave everything else exactly as found.
+            eprintln!(
+                "[db] {db_path:?} is not a regular file (a symlink, or something stranger), so \
+                 the plaintext-database check is skipped rather than aimed at whatever it \
+                 points to."
+            );
+            return Ok(false);
+        }
+        Target::Regular(f, m) => (f, m),
+    };
+
+    if !starts_with_plaintext_header(&mut file, db_path)? {
+        return Ok(false);
     }
 
-    // The same `Connection::open(db_path)` the open path is about to make; see
-    // [`sqlcipher_is_linked`] for why the question is not asked on a scratch
-    // in-memory database instead.
+    // Whether `PRAGMA key` does anything is a property of THIS BINARY, not of
+    // the file, so re-resolving the path for the probe cannot mislead the
+    // answer — and see [`sqlcipher_is_linked`] for why the question is not
+    // asked on a scratch in-memory database instead.
     let probe = Connection::open(db_path)?;
     let encrypts = sqlcipher_is_linked(&probe);
     drop(probe);
@@ -247,64 +304,224 @@ fn destroy_plaintext_database(db_path: &std::path::Path) -> Result<()> {
              it would only produce another plaintext one. Something in this link is shipping a \
              second sqlite3 amalgamation; see db::local::sqlcipher_is_linked."
         );
-        return Ok(());
+        return Ok(false);
     }
 
-    shred_and_remove(db_path)?;
+    dispose(db_path, file, &meta, Zero::Yes)?;
+    // Sidecars are disposed of by path — each is its own single open — and the
+    // `-wal` in particular holds recently written pages in the clear.
     for suffix in DB_SIDECAR_SUFFIXES {
-        let mut sidecar = db_path.as_os_str().to_owned();
-        sidecar.push(suffix);
-        shred_and_remove(std::path::Path::new(&sidecar))?;
+        dispose_path(&sidecar_path(db_path, suffix), Zero::Yes)?;
+    }
+    Ok(true)
+}
+
+/// Remove a database file and its sidecars because the open path has decided
+/// the database is unusable — the wrong SQLCipher key, no `kv` row, an
+/// incompatible [`LOCAL_SCHEMA_VERSION`].
+///
+/// Zeroes the bytes first when they are plaintext. That is not a hypothetical:
+/// [`sqlcipher_is_linked`] answers "no" for any error at all, and a build where
+/// it declines drops a plaintext database straight into this path via
+/// `NotADatabase` — which used to `remove_file` the main file alone and leave a
+/// `-wal` full of message bodies beside it.
+fn destroy_unusable_database(db_path: &std::path::Path) -> Result<()> {
+    let zero = match open_regular_no_follow(db_path)? {
+        Target::Regular(mut file, meta) => {
+            let zero = if starts_with_plaintext_header(&mut file, db_path)? {
+                Zero::Yes
+            } else {
+                Zero::No
+            };
+            dispose(db_path, file, &meta, zero)?;
+            zero
+        }
+        // A symlink here IS unlinked — the path has to stop being a database
+        // for the open below to recreate one — but the unlink removes the link
+        // itself and never touches what it points at, and nothing is ever
+        // written through it.
+        Target::NotRegular => {
+            eprintln!(
+                "[db] {db_path:?} is not a regular file; removing the entry at that path \
+                 (never following it) so a fresh encrypted database can take its place."
+            );
+            std::fs::remove_file(db_path).map_err(|e| {
+                Error::Other(anyhow::anyhow!("remove stale db {db_path:?}: {e}"))
+            })?;
+            Zero::No
+        }
+        Target::Missing => Zero::No,
+    };
+
+    for suffix in DB_SIDECAR_SUFFIXES {
+        dispose_path(&sidecar_path(db_path, suffix), zero)?;
     }
     Ok(())
 }
 
-/// Whether the file at `path` starts with the plaintext SQLite magic. A file
-/// shorter than the header, or no file at all, is not one.
-fn is_plaintext_sqlite(path: &std::path::Path) -> Result<bool> {
-    use std::io::Read;
+/// Tighten the database file and its WAL sidecars to owner-only.
+///
+/// The SQLite VFS creates all three, so [`crate::private_fs`] never sees them
+/// at creation time; this is the one place that catches them afterwards.
+/// Best-effort and never fatal: a mode that could not be set is worth a line on
+/// stderr, not a failed login on a database that is otherwise fine. On Windows
+/// it is a documented no-op — see the module docs on `private_fs`.
+fn restrict_database_files(db_path: &std::path::Path) {
+    let mut paths = vec![db_path.to_path_buf()];
+    paths.extend(DB_SIDECAR_SUFFIXES.iter().map(|s| sidecar_path(db_path, s)));
+    for path in paths {
+        if let Err(e) = crate::private_fs::restrict_existing(&path) {
+            eprintln!("[db] could not restrict permissions on {path:?}: {e}");
+        }
+    }
+}
 
-    let mut file = match std::fs::File::open(path) {
+fn sidecar_path(db_path: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    let mut sidecar = db_path.as_os_str().to_owned();
+    sidecar.push(suffix);
+    std::path::PathBuf::from(sidecar)
+}
+
+/// Whether [`dispose`] overwrites a file's bytes before unlinking it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Zero {
+    Yes,
+    No,
+}
+
+/// What a path the disposal helpers looked at turned out to be. Produced by
+/// exactly one `open`, so the file identity every later step acts on is the one
+/// this call resolved.
+enum Target {
+    /// Nothing at that path.
+    Missing,
+    /// Something is there, but it is not a regular file — a symlink (which the
+    /// no-follow open refused to traverse), a directory, a device node. Never
+    /// written through.
+    NotRegular,
+    /// An open read/write handle on a regular file, plus the metadata read
+    /// FROM that handle rather than from the path.
+    Regular(std::fs::File, std::fs::Metadata),
+}
+
+/// Open `path` read/write without traversing a symlink at the final component,
+/// and only hand back a handle when what opened is a regular file.
+///
+/// `O_NOFOLLOW` on unix and `FILE_FLAG_OPEN_REPARSE_POINT` on Windows;
+/// `symlink_metadata` — which never traverses — is the portable floor that
+/// classifies whatever the open refused, and the `is_file()` check on the
+/// handle's own metadata catches the rest (directories, fifos, devices).
+fn open_regular_no_follow(path: &std::path::Path) -> Result<Target> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Open the reparse point itself instead of its target, so a Windows
+        // symlink or junction at this path is classified below rather than
+        // followed. (0x0020_0000 = FILE_FLAG_OPEN_REPARSE_POINT; naming the
+        // constant here keeps a `windows-sys` dependency out of this crate.)
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+
+    let file = match opts.open(path) {
         Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Target::Missing),
+        Err(e) => {
+            // `O_NOFOLLOW` reports a symlink as ELOOP (ENOTDIR on some
+            // systems); a directory reports EISDIR. Ask the path what it is
+            // without traversing it, and treat anything that is not a regular
+            // file as untouchable rather than as an error.
+            if matches!(std::fs::symlink_metadata(path), Ok(m) if !m.file_type().is_file()) {
+                return Ok(Target::NotRegular);
+            }
+            return Err(Error::Other(anyhow::anyhow!("open local db {path:?}: {e}")));
+        }
+    };
+    let meta = file
+        .metadata()
+        .map_err(|e| Error::Other(anyhow::anyhow!("stat local db {path:?}: {e}")))?;
+    if !meta.file_type().is_file() {
+        return Ok(Target::NotRegular);
+    }
+    Ok(Target::Regular(file, meta))
+}
+
+/// Whether the open file starts with the plaintext SQLite magic. Reads through
+/// the handle — never re-opening the path — and leaves the cursor back at
+/// offset 0 for the overwrite that may follow. A file shorter than the header
+/// is not one.
+fn starts_with_plaintext_header(
+    file: &mut std::fs::File,
+    path: &std::path::Path,
+) -> Result<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut header = [0u8; SQLITE_PLAINTEXT_HEADER.len()];
+    let read = match file.read_exact(&mut header) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => false,
         Err(e) => {
             return Err(Error::Other(anyhow::anyhow!("probe local db {path:?}: {e}")));
         }
     };
-    let mut header = [0u8; SQLITE_PLAINTEXT_HEADER.len()];
-    match file.read_exact(&mut header) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
-        Err(e) => {
-            return Err(Error::Other(anyhow::anyhow!("probe local db {path:?}: {e}")));
-        }
-    }
-    Ok(&header == SQLITE_PLAINTEXT_HEADER)
+    file.seek(SeekFrom::Start(0))
+        .map_err(|e| Error::Other(anyhow::anyhow!("rewind local db {path:?}: {e}")))?;
+    Ok(read && &header == SQLITE_PLAINTEXT_HEADER)
 }
 
-/// Overwrite a file's bytes, flush, then unlink it.
+/// [`dispose`], for a path not already open — the sidecars. A path with
+/// nothing at it is not an error: a `-wal` exists only while a connection is
+/// open, and the caller should not have to know which sidecars are there.
+fn dispose_path(path: &std::path::Path, zero: Zero) -> Result<()> {
+    match open_regular_no_follow(path)? {
+        Target::Missing => Ok(()),
+        Target::NotRegular => {
+            eprintln!("[db] {path:?} is not a regular file; leaving it alone.");
+            Ok(())
+        }
+        Target::Regular(file, meta) => dispose(path, file, &meta, zero),
+    }
+}
+
+/// Overwrite an open file's bytes (when `zero` says so), truncate it, then
+/// unlink the path — but only while the path still names the same file the
+/// handle does.
 ///
 /// The overwrite is best-effort by nature: on a copy-on-write or log-structured
 /// filesystem, and on any SSD doing wear levelling, the old blocks may survive
 /// the rewrite. It still closes the easy case — the plaintext is gone from the
 /// path the file occupied and from any later read of that path — and it costs
 /// one pass over a file that is about to be deleted anyway.
-fn shred_and_remove(path: &std::path::Path) -> Result<()> {
-    use std::io::Write;
+///
+/// **The unlink may fail after the bytes are already gone, and that is
+/// tolerated.** SQLite's Windows VFS opens without `FILE_SHARE_DELETE`, so a
+/// connection another process (or another client inside this one) holds makes
+/// `DeleteFile` fail with a sharing violation even though every write
+/// succeeded. Propagating that would abort `open_for_user` with the database
+/// already destroyed and no way forward. Instead the file is left truncated to
+/// zero length — the plaintext is gone either way — and the caller treats a
+/// destroyed database as a fresh one, which is exactly what a zero-length file
+/// then opens as. Without a preceding overwrite there is nothing to salvage
+/// and the error is propagated as before.
+fn dispose(
+    path: &std::path::Path,
+    mut file: std::fs::File,
+    meta: &std::fs::Metadata,
+    zero: Zero,
+) -> Result<()> {
+    use std::io::{Seek, SeekFrom, Write};
 
-    let len = match std::fs::metadata(path) {
-        Ok(meta) => meta.len(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => {
-            return Err(Error::Other(anyhow::anyhow!("stat plaintext db {path:?}: {e}")));
-        }
-    };
-
-    if len > 0 {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(path)
-            .map_err(|e| Error::Other(anyhow::anyhow!("open plaintext db {path:?}: {e}")))?;
+    if zero == Zero::Yes {
+        let len = meta.len();
+        file.seek(SeekFrom::Start(0))
+            .map_err(|e| Error::Other(anyhow::anyhow!("rewind {path:?}: {e}")))?;
         let zeros = [0u8; 64 * 1024];
         let mut written = 0u64;
         while written < len {
@@ -313,11 +530,63 @@ fn shred_and_remove(path: &std::path::Path) -> Result<()> {
                 .map_err(|e| Error::Other(anyhow::anyhow!("shred {path:?}: {e}")))?;
             written += chunk as u64;
         }
-        file.sync_all().map_err(|e| Error::Other(anyhow::anyhow!("sync {path:?}: {e}")))?;
+        file.sync_all()
+            .map_err(|e| Error::Other(anyhow::anyhow!("sync {path:?}: {e}")))?;
+        // Truncate through the same handle, so that if the unlink below cannot
+        // run there is an EMPTY file left rather than a file-sized run of
+        // zeros — which `open_at` opens as a fresh database and SQLite would
+        // otherwise reject as `NotADatabase` forever.
+        file.set_len(0)
+            .map_err(|e| Error::Other(anyhow::anyhow!("truncate {path:?}: {e}")))?;
     }
+    drop(file);
 
+    match remove_if_unchanged(path, meta) {
+        Ok(()) => Ok(()),
+        Err(e) if zero == Zero::Yes => {
+            eprintln!(
+                "[db] {path:?} was overwritten and emptied but could not be unlinked ({e}); \
+                 continuing — the bytes are gone and the empty file opens as a fresh database."
+            );
+            Ok(())
+        }
+        Err(e) => Err(Error::Other(anyhow::anyhow!("remove {path:?}: {e}"))),
+    }
+}
+
+/// Unlink `path`, unless something moved a different file (or a symlink) into
+/// it since the handle was opened.
+///
+/// `remove_file` never follows a symlink, so the worst a swap could do is
+/// delete the attacker's link rather than their target — but deleting a file
+/// this process never inspected is still not something to do quietly. On unix
+/// the check is exact (same device, same inode); elsewhere it is the portable
+/// floor — the path must still be a regular file, which `symlink_metadata`
+/// answers without traversing.
+fn remove_if_unchanged(path: &std::path::Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
+    let now = match std::fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let same = {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            now.file_type().is_file() && now.dev() == meta.dev() && now.ino() == meta.ino()
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = meta;
+            now.file_type().is_file()
+        }
+    };
+    if !same {
+        return Err(std::io::Error::other(
+            "the path no longer names the file that was opened; refusing to unlink it",
+        ));
+    }
     std::fs::remove_file(path)
-        .map_err(|e| Error::Other(anyhow::anyhow!("remove plaintext db {path:?}: {e}")))
 }
 
 /// `ui_state` key holding the retention window in days (text integer).
@@ -1114,5 +1383,211 @@ mod tests {
         insert_message(conn, "m1", "datetime('now','-100 days')");
         conn.execute("DELETE FROM message", []).unwrap();
         reclaim(conn).expect("reclaim should succeed after a delete");
+    }
+
+    /// Path-based mirror of [`starts_with_plaintext_header`], for assertions
+    /// only. The production path deliberately has no such function: it resolves
+    /// a path exactly once and asks the resulting handle.
+    fn is_plaintext_sqlite(path: &std::path::Path) -> Result<bool> {
+        match open_regular_no_follow(path)? {
+            Target::Regular(mut f, _) => starts_with_plaintext_header(&mut f, path),
+            _ => Ok(false),
+        }
+    }
+
+    /// A symlink planted at the database path must not aim the shredder at
+    /// whatever it points to.
+    ///
+    /// `File::open`, `fs::metadata` and `OpenOptions::open` all follow a
+    /// symlink; `remove_file` does not. The old disposal path used the first
+    /// three to find, zero and truncate "the database" and the fourth to delete
+    /// it — so a link at `pollis_<uid>.db` destroyed any SQLite file its owner
+    /// could write and then tidied the link away, leaving nothing to show what
+    /// had happened.
+    #[test]
+    #[cfg(unix)]
+    fn a_symlink_at_the_database_path_never_reaches_its_target() {
+        const USER: &str = "symlink-victim";
+        let dir = scratch_data_dir();
+        let victim = dir.join("someone-elses-notes.db");
+
+        // A plaintext SQLite file — i.e. exactly what the disposal path is
+        // built to destroy, so nothing but the symlink check stands between it
+        // and the shredder.
+        let mut bytes = SQLITE_PLAINTEXT_HEADER.to_vec();
+        bytes.extend_from_slice(b"pages the user cares about");
+        std::fs::write(&victim, &bytes).expect("write victim");
+
+        let link = db_file(USER);
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&victim, &link).expect("plant symlink");
+
+        // The narrow helper first: it must decline, not act.
+        assert!(
+            !destroy_plaintext_database(&link).expect("disposal must not fail"),
+            "the disposal path acted on a symlink"
+        );
+        assert_eq!(
+            std::fs::read(&victim).expect("victim still readable"),
+            bytes,
+            "the shredder followed a symlink and destroyed its target"
+        );
+
+        // And the whole open path, which is what a real user reaches: it may
+        // remove the LINK so a real database can take that name, but the file
+        // the link pointed at must come through byte-identical.
+        let db = LocalDb::open_for_user(USER, TEST_KEY).expect("open over a planted symlink");
+        drop(db);
+        assert_eq!(
+            std::fs::read(&victim).expect("victim still readable"),
+            bytes,
+            "opening the local database destroyed the symlink's target"
+        );
+        assert!(
+            !std::fs::symlink_metadata(&link).expect("db path exists").is_symlink(),
+            "the database path is still a symlink, so the next open writes through it"
+        );
+    }
+
+    /// A directory (or anything else that is not a regular file) at the
+    /// database path is left alone by the narrow disposal helper too.
+    #[test]
+    fn a_directory_at_the_database_path_is_left_alone() {
+        let dir = scratch_data_dir().join("not-a-file.db");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create directory");
+        assert!(!destroy_plaintext_database(&dir).expect("must not fail"));
+        assert!(dir.is_dir(), "a directory at the database path was removed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The Windows half-state, exercised where it can be provoked.
+    ///
+    /// SQLite's Windows VFS opens without `FILE_SHARE_DELETE`, so an unlink can
+    /// fail with the bytes already overwritten. The docstring used to claim the
+    /// operation "cannot half-succeed"; it can, and propagating the error left
+    /// `open_for_user` with a destroyed database and no way forward. A
+    /// read-only parent directory reproduces the same shape on unix: the write
+    /// succeeds, the unlink does not.
+    #[test]
+    #[cfg(unix)]
+    fn an_unlink_that_fails_after_the_shred_is_tolerated() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = scratch_data_dir().join("readonly-parent");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let path = dir.join("pollis_locked.db");
+        let mut bytes = SQLITE_PLAINTEXT_HEADER.to_vec();
+        bytes.extend_from_slice(b"message bodies, in the clear");
+        std::fs::write(&path, &bytes).expect("write plaintext db");
+
+        // Deny writes to the DIRECTORY (which is what unlink needs) while
+        // leaving the FILE writable (which is what the overwrite needs).
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500))
+            .expect("chmod dir");
+        // Running as root ignores the mode entirely, so there is nothing to
+        // provoke — skip rather than assert something untrue.
+        let root_ignores_the_mode = std::fs::write(dir.join("probe"), b"x").is_ok();
+        if root_ignores_the_mode {
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+
+        let destroyed = destroy_plaintext_database(&path)
+            .expect("a failed unlink after a successful shred must not be an error");
+        assert!(destroyed, "the caller must be told the database is gone");
+        assert_eq!(
+            std::fs::metadata(&path).expect("file still there").len(),
+            0,
+            "the plaintext must be gone even when the file could not be unlinked"
+        );
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("restore");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The `sqlcipher_is_linked`-declined fallback: `open_at` reaches
+    /// `NotADatabase`, wipes, and must take the sidecars with it.
+    ///
+    /// It used to `remove_file` the main database alone, so a `-wal` full of
+    /// recently written message bodies stayed on the disk next to the fresh
+    /// encrypted database that replaced it — plaintext at rest, produced by the
+    /// very step meant to remove it.
+    #[test]
+    fn wiping_an_unusable_database_takes_the_sidecars_with_it() {
+        const USER: &str = "unusable-with-sidecars";
+        let path = db_file(USER);
+        let _ = std::fs::remove_file(&path);
+
+        // A file SQLCipher cannot open under our key, so `open_at`'s version
+        // probe answers `NotADatabase` — the same arm a plaintext database
+        // reaches whenever the disposal step above declined to act.
+        std::fs::write(&path, b"not a database under any key at all").expect("write");
+        let wal = std::path::PathBuf::from({
+            let mut s = path.as_os_str().to_owned();
+            s.push("-wal");
+            s
+        });
+        const MARKER: &str = "WAL-PLAINTEXT-MARKER-6c1d40";
+        std::fs::write(&wal, MARKER).expect("write wal");
+
+        let db = LocalDb::open_for_user(USER, TEST_KEY).expect("open replaces the unusable file");
+        drop(db);
+
+        let leftover = std::fs::read(&wal).unwrap_or_default();
+        assert!(
+            !leftover.windows(MARKER.len()).any(|w| w == MARKER.as_bytes()),
+            "the stale plaintext WAL survived the wipe"
+        );
+    }
+
+    /// The mode on the files SQLite creates. `private_fs` never sees them — the
+    /// VFS opens them — so `open_at` is the only place that can tighten them.
+    #[test]
+    #[cfg(unix)]
+    fn the_database_and_its_sidecars_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        const USER: &str = "owner-only-db";
+        let db = LocalDb::open_for_user(USER, TEST_KEY).expect("open");
+        db.conn()
+            .execute(
+                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, sent_at)
+                 VALUES ('m1', 'c1', 'u1', X'00', '2024-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("insert so the WAL exists");
+
+        let base = db_file(USER);
+        let mut checked = 0;
+        let mut paths = vec![base.clone()];
+        paths.extend(DB_SIDECAR_SUFFIXES.iter().map(|s| sidecar_path(&base, s)));
+        for path in paths {
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            assert_eq!(
+                meta.permissions().mode() & 0o777,
+                0o600,
+                "{path:?} is readable by other local users"
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 2,
+            "expected the database and at least one sidecar to exist, checked {checked}"
+        );
+
+        assert_eq!(
+            std::fs::symlink_metadata(scratch_data_dir())
+                .expect("data dir")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700,
+            "the data directory itself is traversable by other local users"
+        );
     }
 }

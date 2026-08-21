@@ -86,7 +86,8 @@ pub async fn request_otp(
     email: String,
 ) -> Result<()> {
     eprintln!(
-        "[auth] request_otp: email={email} → delivery_url={:?}",
+        "[auth] request_otp: email={} → delivery_url={:?}",
+        crate::util::mask_email(&email),
         state.config.pollis_delivery_url
     );
     let resp = crate::commands::mls::ds_post_plain(
@@ -165,7 +166,8 @@ async fn verify_otp_ds(
     // 1. verify-otp: DS validates the OTP, creates/loads the account, mints a
     //    session. Unauthenticated (the OTP itself is the proof).
     eprintln!(
-        "[auth] verify_otp: email={email} → delivery_url={:?}",
+        "[auth] verify_otp: email={} → delivery_url={:?}",
+        crate::util::mask_email(&email),
         state.config.pollis_delivery_url
     );
     let resp = crate::commands::mls::ds_post_plain(
@@ -1121,7 +1123,22 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     // the active session's db_key, so they would already be opaque to
     // any future user — but logout is the natural lifecycle boundary
     // and an empty cache costs nothing.
-    crate::commands::r2::clear_media_cache();
+    //
+    // Named explicitly, from the `user_id` this function read out of the
+    // accounts index at the top: `unload_user_db` above has already cleared the
+    // ambient cache user, and a wipe that read it would resolve the empty
+    // `_anon` directory and leave this user's media exactly where it was. An
+    // index too corrupt to name anyone means nobody can say which directory is
+    // this session's, so all of them go.
+    crate::commands::r2::clear_media_cache(match user_id.as_deref() {
+        Some(uid) => crate::commands::r2::CacheScope::User(uid),
+        None => crate::commands::r2::CacheScope::Everything,
+    });
+
+    // Release any attachment the composer had staged but not sent. These are
+    // plaintext bytes the user pasted; they live in memory only, and a session
+    // ending is exactly when they stop being anyone's business.
+    crate::commands::staging::discard_all_staged();
 
     // Clear the media-server token. Any URL handed to the webview
     // during this session 403s from here on.
@@ -1320,6 +1337,20 @@ pub async fn wipe_local_data(state: &Arc<AppState>) -> Result<()> {
     if data_dir.exists() {
         let _ = std::fs::remove_dir_all(&data_dir);
     }
+
+    // 5. And the media cache, which is NOT under that directory. The shell
+    //    installs the cache root from Tauri's `app_data_dir().join("media-cache")`
+    //    — `~/.local/share/pollis/…` on Linux and `%APPDATA%\pollis\…` on
+    //    Windows against a `dirs_path()` that resolves elsewhere (only macOS
+    //    happens to make the two coincide). Removing the data directory alone
+    //    therefore left every cached image, video and voice clip on the disk of a
+    //    computer whose owner asked for all of it to be gone.
+    crate::commands::r2::clear_media_cache(crate::commands::r2::CacheScope::Everything);
+
+    // Release any attachment the composer had staged but not sent. These are
+    // plaintext bytes the user pasted; they live in memory only, and a session
+    // ending is exactly when they stop being anyone's business.
+    crate::commands::staging::discard_all_staged();
 
     eprintln!("[wipe] local data wiped for {} account(s)", index.accounts.len());
     Ok(())

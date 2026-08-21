@@ -32,6 +32,31 @@ This fits the "media is Rust-first" architecture (see [overview.md](./overview.m
 the renderer's WebRTC is intentionally unused; IPC carries UI events only, never
 media bytes.
 
+## Every media response is `no-store` (#1000)
+
+The plaintext this server hands out must not end up in the WebView's own
+on-disk HTTP cache — a cache the app does not own, does not know the location
+of, and never clears (the media-cache wipe on logout reaches
+`media-cache/<user>/`, not WebKitGTK's or WebView2's store).
+
+A 200 carrying `Content-Type` and `Content-Length` and **no** cache directives
+is storable by default (RFC 9111 §3), which is exactly what `serve_media` used
+to return, so every image, audio clip and video the user opened was eligible to
+be written to disk in the clear by the engine. Every response now carries
+`Cache-Control: no-store, no-cache, must-revalidate, max-age=0` plus
+`Pragma: no-cache`.
+
+Structurally, not by discipline: `serve_media` builds no response bodies
+itself. All three exits (200, 206, 416) hand a half-built `Builder` to
+`media_response`, which is the single place the cache directives and the CORS
+headers are attached. The **206 matters as much as the 200** — video seeking is
+served entirely from the range path, so directives attached only to the full
+body would leave every scrubbed video in the engine's cache.
+`decrypted_bytes_are_never_storable_by_the_webview` asserts the headers on real
+HTTP responses from a real spawned server, and
+`serve_media_never_builds_a_response_body_itself` keeps the funnel from growing
+a second exit.
+
 ## The cache cap is enforced on writes, never on window focus (#930)
 
 The cache is capped at 500 MB and evicted oldest-mtime-first

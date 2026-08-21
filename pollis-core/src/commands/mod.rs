@@ -59,6 +59,7 @@ pub mod r2;
 // image of `overlay` above, and independent of it.
 pub mod relay_serving;
 pub mod safety;
+pub mod staging;
 pub mod transparency;
 #[cfg(feature = "media")]
 pub mod sfx;

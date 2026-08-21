@@ -34,14 +34,14 @@ use std::path::{Path, PathBuf};
 const CA_BUNDLE: &[u8] = include_bytes!("../assets/cacert.pem");
 
 pub fn install(data_dir: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(data_dir)?;
+    crate::private_fs::create_dir_all(data_dir)?;
     let bundle_path = data_dir.join("cacert.pem");
     let needs_write = match std::fs::metadata(&bundle_path) {
         Ok(m) => m.len() as usize != CA_BUNDLE.len(),
         Err(_) => true,
     };
     if needs_write {
-        std::fs::write(&bundle_path, CA_BUNDLE)?;
+        crate::private_fs::write(&bundle_path, CA_BUNDLE)?;
     }
     set_env("SSL_CERT_FILE", &bundle_path);
     Ok(())

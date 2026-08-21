@@ -1113,6 +1113,21 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return user;
     }
 
+    // In-memory attachment staging (src-tauri/src/commands/staging.rs). There
+    // is no backend here to hold bytes, so a stage answers with a handle and a
+    // discard answers true — enough for the composer's bookkeeping to run.
+    case 'stage_attachment':
+      stagedAttachmentCount += 1;
+      return { id: `mock-staged-${stagedAttachmentCount}`, size_bytes: 0 };
+
+    case 'discard_staged_attachment':
+      return true;
+
+    // No OS clipboard under Playwright; an empty body is "no image", which is
+    // exactly what the real command answers in that case.
+    case 'read_clipboard_image':
+      return new Uint8Array();
+
     // These are no-ops or stubs for commands not needed in frontend tests
     case 'search_user_by_username':
     case 'invite_to_group':
@@ -1130,6 +1145,8 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
   }
 }
+
+let stagedAttachmentCount = 0;
 
 export function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   // Settled on the microtask queue, not through `setTimeout`. Real IPC hands

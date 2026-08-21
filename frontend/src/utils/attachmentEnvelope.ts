@@ -1,4 +1,4 @@
-import { invoke } from "../bridge";
+import { invoke, discardStagedAttachment } from "../bridge";
 import { blurhashFromUrl } from "./imageProcessing";
 import type { Attachment } from "../components/ui/ChatInput";
 
@@ -59,15 +59,48 @@ export async function buildMessageContent(
       }),
   );
 
-  const results = await Promise.all(
-    attachments.map((att) =>
-      invoke<MediaUploadResult>("upload_media", {
-        path: att.path,
-        filename: att.name,
-        contentType: att.mimeType,
+  // Two upload commands, one per source kind, because there is exactly one
+  // place an attachment's bytes can be: a file the user already has, or the
+  // in-memory staging area (`pollis_core::commands::staging`). A successful
+  // staged upload releases its own bytes; a failed one leaves them staged so a
+  // retry still has something to send.
+  let results: MediaUploadResult[];
+  try {
+    results = await Promise.all(
+      attachments.map((att) => {
+        if (!att.source) {
+          return Promise.reject(
+            new Error(`attachment ${att.name} has no bytes to upload yet`),
+          );
+        }
+        if (att.source.kind === "staged") {
+          return invoke<MediaUploadResult>("upload_media_staged", {
+            stagedId: att.source.id,
+            filename: att.name,
+            contentType: att.mimeType,
+          });
+        }
+        return invoke<MediaUploadResult>("upload_media", {
+          path: att.source.path,
+          filename: att.name,
+          contentType: att.mimeType,
+        });
       }),
-    ),
-  );
+    );
+  } catch (err) {
+    // The send has failed and the composer cleared itself the moment it handed
+    // these over, so nothing will retry them — release the bytes rather than
+    // leaving entries no reference points at. Uploads that already succeeded
+    // released their own; discarding an id twice is a no-op.
+    await Promise.all(
+      attachments.map((att) =>
+        att.source?.kind === "staged"
+          ? discardStagedAttachment(att.source.id).catch(() => false)
+          : Promise.resolve(false),
+      ),
+    );
+    throw err;
+  }
 
   const envelope: Record<string, unknown> = {
     _att: results.map((r, i) => {

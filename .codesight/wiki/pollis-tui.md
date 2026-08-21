@@ -87,6 +87,15 @@ pollis-tui (binary `pollis`)
   `~/.local/share/pollis-tui`) so the TUI's file keystore + local SQLCipher DB do
   not share identity with the desktop app — it enrolls as its own device with its
   own `device_id` and MLS leaf.
+- **The stderr log is owner-only, and its directory matters.** `main.rs` `dup2`s
+  fd 2 into `pollis-tui.log` so `pollis-core`'s `eprintln!` output does not
+  scroll over the TUI. The file lands in `POLLIS_DATA_DIR` — and in the OS temp
+  directory when that is unset, which is world-*writable*. It is created 0600
+  (`pollis_core::private_fs::FILE_MODE`), and one left by an older build is
+  tightened through the open handle. The two `auth` log lines that carried the
+  account's email now mask it (`pollis_core::util::mask_email`, the same shape
+  the DS uses in `pollis-delivery/src/redact.rs`), so a signup no longer writes
+  the user's real address into it in the clear (#1000).
 - **Input isolation.** `crossterm::event::read` is blocking, so it runs on a
   dedicated OS thread that forwards key *presses* over an mpsc channel; the tokio
   loop never blocks on stdin. Only `KeyEventKind::Press` is forwarded (some

@@ -1,6 +1,6 @@
 /**
- * Clipboard bridge — the two custom `#[tauri::command]`s
- * `read_clipboard_files` and `read_clipboard_image_to_temp` (implemented in
+ * Clipboard bridge — the custom `#[tauri::command]`s `read_clipboard_files`,
+ * `read_clipboard_image` and `write_clipboard_text` (implemented in
  * `src-tauri/src/lib.rs`) get bridge wrappers so callers don't reach past the
  * bridge to `invoke` them directly.
  */
@@ -11,11 +11,26 @@ export async function readClipboardFiles(): Promise<string[]> {
   return invoke<string[]>("read_clipboard_files");
 }
 
-export async function readClipboardImageToTemp(): Promise<string | null> {
-  // The Tauri command returns an empty string when no image is on the
-  // clipboard. Normalise to null.
-  const path = await invoke<string>("read_clipboard_image_to_temp");
-  return path && path.length > 0 ? path : null;
+/**
+ * Raster image on the OS clipboard, as PNG bytes — or null when there is none.
+ *
+ * Bytes, not a path. The command used to save the PNG into the OS temp
+ * directory and hand back its location, and nothing ever deleted the file, so
+ * every screenshot a user pasted stayed on disk in the clear. The caller turns
+ * these bytes into a `File` and stages them with `stageAttachment`, which keeps
+ * them in the backend's memory instead.
+ */
+export async function readClipboardImage(): Promise<Uint8Array<ArrayBuffer> | null> {
+  // The Tauri command answers with an empty body when the clipboard holds no
+  // image; the raw response arrives as an ArrayBuffer.
+  const bytes = await invoke<ArrayBuffer | Uint8Array | number[]>(
+    "read_clipboard_image",
+  );
+  const array: Uint8Array<ArrayBuffer> =
+    bytes instanceof Uint8Array
+      ? new Uint8Array(bytes)
+      : new Uint8Array(bytes as ArrayBuffer);
+  return array.byteLength > 0 ? array : null;
 }
 
 /**

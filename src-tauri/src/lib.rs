@@ -208,22 +208,30 @@ fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
     }
 }
 
-/// Read a raster image from the OS clipboard, encode it as PNG, and write
-/// it to a temporary file. Returns the absolute path, or an empty string
-/// if the clipboard does not contain image data.
+/// Read a raster image from the OS clipboard and return it as PNG bytes.
+/// Empty when the clipboard holds no image data.
 ///
 /// Used as a fallback for clipboard content that the WebKit paste event
 /// doesn't expose as `DataTransferItem` files — notably screenshots and
 /// images copied from a browser on Linux. macOS WebKit surfaces these as
 /// JS File objects directly, so this is mainly a Linux/Windows path.
+///
+/// It used to save the PNG into the OS temp directory as
+/// `pollis-paste-<nanos>.png` and hand back the path. Nothing ever deleted it,
+/// so every screenshot a user had ever pasted stayed in `/tmp` in the clear.
+/// Returning the bytes means the renderer can build its preview and hand them
+/// straight to `stage_attachment`, and the image never touches a disk at all —
+/// see `pollis_core::commands::staging`.
 #[cfg(feature = "native-shell")]
 #[tauri::command]
-async fn read_clipboard_image_to_temp(app: tauri::AppHandle) -> String {
+async fn read_clipboard_image(app: tauri::AppHandle) -> tauri::ipc::Response {
     use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let empty = || tauri::ipc::Response::new(Vec::<u8>::new());
 
     let image = match app.clipboard().read_image() {
         Ok(img) => img,
-        Err(_) => return String::new(),
+        Err(_) => return empty(),
     };
 
     let width = image.width();
@@ -232,22 +240,18 @@ async fn read_clipboard_image_to_temp(app: tauri::AppHandle) -> String {
 
     let buffer = match image::RgbaImage::from_raw(width, height, rgba) {
         Some(buf) => buf,
-        None => return String::new(),
+        None => return empty(),
     };
 
-    let path = std::env::temp_dir().join(format!(
-        "pollis-paste-{}.png",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-
-    if buffer.save(&path).is_err() {
-        return String::new();
+    let mut png = std::io::Cursor::new(Vec::new());
+    if buffer
+        .write_to(&mut png, image::ImageFormat::Png)
+        .is_err()
+    {
+        return empty();
     }
 
-    path.to_string_lossy().into_owned()
+    tauri::ipc::Response::new(png.into_inner())
 }
 
 /// Write plain text to the OS clipboard.
@@ -384,7 +388,7 @@ pub fn run() {
             // pumping decrypted bytes through the JSON IPC.
             if let Ok(data_dir) = app.path().app_data_dir() {
                 let cache_dir = data_dir.join("media-cache");
-                let _ = std::fs::create_dir_all(&cache_dir);
+                let _ = pollis_core::private_fs::create_dir_all(&cache_dir);
                 pollis_core::commands::r2::set_media_cache_dir(cache_dir);
             }
 
@@ -466,7 +470,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             hide_window,
             read_clipboard_files,
-            read_clipboard_image_to_temp,
+            read_clipboard_image,
             write_clipboard_text,
             tray::tray_set_unread,
             tray::tray_set_close_to_tray,
@@ -615,6 +619,9 @@ commands::livekit::get_livekit_token,
             commands::r2::upload_public_file,
             commands::r2::get_public_file_url,
             commands::r2::upload_media,
+            commands::r2::upload_media_staged,
+            commands::staging::stage_attachment,
+            commands::staging::discard_staged_attachment,
             commands::r2::download_file,
             commands::r2::download_media,
             commands::r2::get_media_url,
@@ -723,13 +730,19 @@ commands::livekit::get_livekit_token,
             if let tauri::RunEvent::Reopen { .. } = _event {
                 show_on_reopen(_app);
             }
-            // Wipe the plaintext media cache on app exit. The cache holds
-            // decrypted bytes (image / video / audio) and is not encrypted
-            // at rest, so it must not survive a graceful shutdown — the
-            // next attacker with file-system access would otherwise be
-            // able to read every media file the user viewed.
+            // Wipe the media cache on app exit. Its files are AES-GCM
+            // encrypted under the session's `db_key`, but exit is a lifecycle
+            // boundary and media the user viewed has no reason to outlive the
+            // process that fetched it.
+            //
+            // `Everything`, not one user: this is the process going away, so
+            // there is no session left to keep a cache warm for. A second
+            // instance signed in as somebody else simply re-fetches — every
+            // read path treats a missing cache file as a cache miss.
             if let tauri::RunEvent::ExitRequested { .. } = _event {
-                pollis_core::commands::r2::clear_media_cache();
+                pollis_core::commands::r2::clear_media_cache(
+                    pollis_core::commands::r2::CacheScope::Everything,
+                );
                 // Also kill any active screen-share helper subprocess.
                 // kill_on_drop on the Child handle would normally take
                 // care of this when AppState is dropped, but Tauri does
