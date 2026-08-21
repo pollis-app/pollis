@@ -185,6 +185,10 @@ CLASSIFIED='{
   "31903478733": {
     "class": "false_red",
     "evidence": "The tag was not yet in the binaries tree (found: false) and 0 bytes differed. v1.9.5 reproduced byte-identically; the red was the wait-loop bug."
+  },
+  "32276578948": {
+    "class": "environment_drift",
+    "evidence": "v1.9.9, and the cleanest example of §6 yet — unlike v1.9.3 this one needed no diagnosis, because the post-#944 workflow classified it itself while it ran. It recorded: logged payload 6e76b988…, rebuilt c4f06c33…, release on ubuntu22@20260810.260.1+helper:ubuntu24@20260810.271.1, rebuild on ubuntu22@20260817.266.1+helper:ubuntu24@20260810.271.1 — a re-imaged ubuntu-22.04 label a week later — and printed \"verdict: environment_drift\". The run'"'"'s own vendored/Pollis-built split is the part that settles it: \"vendored host libraries (usr/lib/, copied off the runner by linuxdeploy): 1\" and \"ONLY vendored host libraries differ. Nothing built from Pollis source\". The single differing library is libpng16, and the ELF diff shows shifted symbol addresses (png_set_cHRM 0x1ef20 → 0x1eec0, png_write_rows 0x27560 → 0x27500) — a genuinely different upstream build of libpng vendored off a different image, not a rebuilt Pollis artifact. Nothing built from Pollis source differed at all, so this is a strictly narrower drift than v1.9.3, which also permuted the CSP hash order inside usr/bin/pollis (§6a). Still red, because an inconclusive rebuild is not a passing one. Full write-up: docs/reproducible-builds-residuals.md §6."
   }
 }'
 

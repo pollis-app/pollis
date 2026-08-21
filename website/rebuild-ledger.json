@@ -1,11 +1,41 @@
 {
-  "generated_at": "2026-08-17T14:05:43Z",
+  "generated_at": "2026-08-21T20:10:36Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "564353ae",
     "date": "2026-08-16"
   },
   "runs": [
+    {
+      "tag": "v1.10.0",
+      "conclusion": "skipped",
+      "created_at": "2026-08-20T04:21:25Z",
+      "event": "workflow_run",
+      "run_id": "32331586990",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32331586990",
+      "classification": null,
+      "evidence": null
+    },
+    {
+      "tag": "v1.9.9",
+      "conclusion": "failure",
+      "created_at": "2026-08-19T16:33:23Z",
+      "event": "workflow_run",
+      "run_id": "32276578948",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32276578948",
+      "classification": "environment_drift",
+      "evidence": "v1.9.9, and the cleanest example of §6 yet — unlike v1.9.3 this one needed no diagnosis, because the post-#944 workflow classified it itself while it ran. It recorded: logged payload 6e76b988…, rebuilt c4f06c33…, release on ubuntu22@20260810.260.1+helper:ubuntu24@20260810.271.1, rebuild on ubuntu22@20260817.266.1+helper:ubuntu24@20260810.271.1 — a re-imaged ubuntu-22.04 label a week later — and printed \"verdict: environment_drift\". The run's own vendored/Pollis-built split is the part that settles it: \"vendored host libraries (usr/lib/, copied off the runner by linuxdeploy): 1\" and \"ONLY vendored host libraries differ. Nothing built from Pollis source\". The single differing library is libpng16, and the ELF diff shows shifted symbol addresses (png_set_cHRM 0x1ef20 → 0x1eec0, png_write_rows 0x27560 → 0x27500) — a genuinely different upstream build of libpng vendored off a different image, not a rebuilt Pollis artifact. Nothing built from Pollis source differed at all, so this is a strictly narrower drift than v1.9.3, which also permuted the CSP hash order inside usr/bin/pollis (§6a). Still red, because an inconclusive rebuild is not a passing one. Full write-up: docs/reproducible-builds-residuals.md §6."
+    },
+    {
+      "tag": "v1.9.8",
+      "conclusion": "success",
+      "created_at": "2026-08-17T19:36:36Z",
+      "event": "workflow_run",
+      "run_id": "32061295629",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32061295629",
+      "classification": null,
+      "evidence": null
+    },
     {
       "tag": "v1.9.3",
       "conclusion": "success",
