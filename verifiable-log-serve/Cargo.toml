@@ -16,7 +16,18 @@ name = "verifiable-log-serve"
 # failure. Cut `pollis-verify-v0.6.0`. (The builder's output format also changed,
 # but it inherits the workspace `1.1.0` placeholder that tracks nothing — the
 # on-the-wire break is signalled by `format_version`, not the builder's version.)
-version = "0.6.0"
+#
+# 0.7.0 (#806, #944): a FEATURE release, not a break — nothing in the existing
+# served bundle changed shape, so a 0.6.0 binary still verifies a 0.7.0 tree.
+# #806 splits the anchor from the signer: `keyset.rs` adds root-signed key sets
+# (`KeySetStatement`, `KEYSET_DOMAIN`, `KEYSET_FORMAT_VERSION = 1`) so the log's
+# signing key can rotate without rotating the pinned root an auditor trusts. That
+# is a NEW artifact carrying its own format version alongside the bundle, which is
+# why `bundle::FORMAT_VERSION` is untouched and the bump is minor. #944 adds the
+# rebuild verdict classification (`environment_drift` vs a real divergence), which
+# needs `pollis-verify release --json` to surface `toolchain.runner_image`. The
+# monitor CLI was reworked alongside both. Cut `pollis-verify-v0.7.0`.
+version = "0.7.0"
 edition.workspace = true
 rust-version.workspace = true
 description = "Serve layer for the verifiable log (Key Transparency #330): turns a signed monitor bundle into an immutable static artifact tree, a dev HTTP server, and a fetch-over-HTTP remote verifier. Slice 3."
