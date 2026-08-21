@@ -673,6 +673,60 @@ mod tests {
         );
     }
 
+    /// PBKDF2 at lengths that are not exactly one hash block.
+    ///
+    /// Every other KDF vector here derives `dkLen == hLen` — 20 bytes for
+    /// SHA-1, 64 for SHA-512 — so `T_2` is never computed and the truncation
+    /// path is never taken. An implementation that derives `T_1` and then pads
+    /// or truncates it to whatever was asked for passes all of them.
+    ///
+    /// `dkLen < hLen` is not a hypothetical either: SQLCipher derives the
+    /// per-database HMAC subkey as `PBKDF2-HMAC-SHA512(page_key, salt ^ 0x3a,
+    /// 2, key_sz)` — 32 bytes out of a 64-byte hash — and does so on EVERY
+    /// connection, including `pollis-core`'s, which supplies a raw key and so
+    /// skips PBKDF2 for the page key but still runs it for the HMAC key
+    /// (`sqlcipher_cipher_ctx_key_derive` in `vendor/sqlite3.c`; the passphrase
+    /// path derives the 32-byte page key the same way). That path had no
+    /// coverage at all.
+    ///
+    /// The SHA-1 vectors are RFC 6070 §2. The embedded NULs in the 16-byte case
+    /// are load-bearing twice: they are the RFC's own input, and they prove the
+    /// stated lengths are honoured rather than the inputs being read as C
+    /// strings.
+    #[test]
+    fn pbkdf2_derives_lengths_that_are_not_one_hash_block() {
+        // dkLen 25 > hLen 20 — two blocks, the second one truncated.
+        assert_eq!(
+            hex(&pbkdf2_kat(
+                HASH_SHA1,
+                b"passwordPASSWORDpassword",
+                b"saltSALTsaltSALTsaltSALTsaltSALTsalt",
+                4096,
+                25,
+            )),
+            "3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038"
+        );
+        // dkLen 16 < hLen 20 — one block, truncated.
+        assert_eq!(
+            hex(&pbkdf2_kat(HASH_SHA1, b"pass\0word", b"sa\0lt", 4096, 16)),
+            "56fa6aa75548099dcc37d7f03425e0c3"
+        );
+        // dkLen 32 < hLen 64 — the exact shape SQLCipher 4 derives its page key
+        // with, and the one a truncation bug would break in production.
+        assert_eq!(
+            hex(&pbkdf2_kat(HASH_SHA512, b"password", b"salt", 4096, 32)),
+            "d197b1b33db0143e018b12f3d1d1479e6cdebdcc97c5c0f87f6902e072f457b5"
+        );
+        // dkLen 100 > hLen 64 — two SHA-512 blocks, the second truncated.
+        assert_eq!(
+            hex(&pbkdf2_kat(HASH_SHA512, b"password", b"salt", 1, 100)),
+            "867f70cf1ade02cff3752599a3a53dc4af34c7a669815ae5d513554e1c8cf252\
+             c02d470a285a0501bad999bfe943c08f050235d7d68b1da55e63f73b60a57fce\
+             7b532e206c2967d4c7d2ffa460539fc4d4e5eec70125d74c6c7cf86d25284f29\
+             7907fcea"
+        );
+    }
+
     /// NIST SP 800-38A §F.2.5/F.2.6, CBC-AES256.
     #[test]
     fn aes_256_cbc_matches_nist() {
@@ -787,6 +841,96 @@ mod tests {
             let mut dst = [0u8; 17];
             assert_eq!(cbc_encrypt(src.as_ptr(), dst.as_mut_ptr(), 17, &mut handle), CRYPT_ERROR);
             assert_eq!(cbc_done(&mut handle), CRYPT_OK);
+        }
+    }
+
+    /// Every byte the PRNG reports having written must actually have been
+    /// written.
+    ///
+    /// [`fortuna_reads_from_the_os`] cannot see a partial fill. It asks only
+    /// that a read is not all-zero and that two reads differ, and a read that
+    /// fills the first 16 bytes of a 32-byte buffer with real randomness
+    /// carries both of those on its prefix while leaving half the key as
+    /// whatever the caller's buffer already held.
+    ///
+    /// So ask the question directly: pre-fill with a sentinel and see which
+    /// positions ever change. A position the PRNG never touches keeps the
+    /// sentinel in EVERY trial; a position it does touch keeps it with
+    /// probability 1/256, so a false "never written" across 64 trials has
+    /// probability 256^-64 and this cannot flake. The odd lengths are in the
+    /// list because a fill rounded down to a block boundary is the shape a
+    /// buffered PRNG gets wrong.
+    #[test]
+    fn fortuna_writes_every_byte_it_reports() {
+        const SENTINEL: u8 = 0xAA;
+        const TRIALS: usize = 64;
+        let mut prng = PrngState { started: 0 };
+        unsafe {
+            assert_eq!(fortuna_start(&mut prng), CRYPT_OK);
+        }
+        for len in [1usize, 7, 15, 16, 17, 31, 32, 33, 64] {
+            let mut ever_written = vec![false; len];
+            for _ in 0..TRIALS {
+                let mut buf = vec![SENTINEL; len];
+                let got = unsafe { fortuna_read(buf.as_mut_ptr(), len as c_ulong, &mut prng) };
+                assert_eq!(got as usize, len, "a {len}-byte read reported {got}");
+                for (i, b) in buf.iter().enumerate() {
+                    if *b != SENTINEL {
+                        ever_written[i] = true;
+                    }
+                }
+            }
+            for (i, written) in ever_written.iter().enumerate() {
+                assert!(
+                    written,
+                    "byte {i} of a {len}-byte read was never written across {TRIALS} trials"
+                );
+            }
+        }
+        unsafe {
+            assert_eq!(fortuna_done(&mut prng), CRYPT_OK);
+        }
+    }
+
+    /// The PRNG has to be unpredictable, not merely non-repeating.
+    ///
+    /// A counter satisfies [`fortuna_reads_from_the_os`] completely: successive
+    /// reads differ and none is all-zero. What separates a counter from
+    /// randomness is WHERE it varies — a counter moves in its low-order bytes
+    /// and holds every other position constant read after read. Scoring each
+    /// byte position independently sees that immediately.
+    ///
+    /// Across 64 uniform draws a position is expected to take ~57 of the 256
+    /// values, so a threshold of 16 is far below anything randomness produces
+    /// and far above the 1 a constant or a high-order counter byte produces.
+    #[test]
+    fn fortuna_does_not_merely_count() {
+        const TRIALS: usize = 64;
+        const LEN: usize = 32;
+        const MIN_DISTINCT: usize = 16;
+        let mut prng = PrngState { started: 0 };
+        let mut seen: Vec<std::collections::BTreeSet<u8>> = vec![Default::default(); LEN];
+        unsafe {
+            assert_eq!(fortuna_start(&mut prng), CRYPT_OK);
+            for _ in 0..TRIALS {
+                let mut buf = [0u8; LEN];
+                assert_eq!(
+                    fortuna_read(buf.as_mut_ptr(), LEN as c_ulong, &mut prng) as usize,
+                    LEN
+                );
+                for (i, b) in buf.iter().enumerate() {
+                    seen[i].insert(*b);
+                }
+            }
+            assert_eq!(fortuna_done(&mut prng), CRYPT_OK);
+        }
+        for (i, values) in seen.iter().enumerate() {
+            assert!(
+                values.len() >= MIN_DISTINCT,
+                "byte {i} took only {} distinct values across {TRIALS} reads — \
+                 that is a counter or a constant, not a PRNG",
+                values.len()
+            );
         }
     }
 

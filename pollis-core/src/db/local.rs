@@ -1590,4 +1590,103 @@ mod tests {
             "the data directory itself is traversable by other local users"
         );
     }
+
+    // ── Cross-provider interop fixtures ──────────────────────────────────────
+
+    /// The passphrase `pollis-sqlcipher/tests/fixtures/openssl-passphrase.db`
+    /// is keyed with. Duplicated in `pollis-sqlcipher/tests/sqlcipher.rs`,
+    /// which is the crate that reads these files back.
+    const FIXTURE_PASSPHRASE: &str = "pollis-interop-fixture-passphrase";
+    /// The raw key `openssl-rawkey.db` is keyed with — the shape
+    /// [`LocalDb::open_for_user`] itself uses.
+    const FIXTURE_RAW_KEY: &[u8; 32] = b"pollis-interop-fixture-key-32byt";
+    /// Rows per fixture. Enough that the table spans several pages, so the
+    /// reader decrypts and MAC-checks pages beyond the salt-bearing first one.
+    const FIXTURE_ROWS: i64 = 64;
+
+    /// The body stored at `id`. Deterministic so the reader can assert exact
+    /// values rather than merely that something came back.
+    fn fixture_body(id: i64) -> String {
+        format!("interop-row-{id:03}-{}", "ab".repeat(96))
+    }
+
+    /// Regenerates the cross-provider fixtures that
+    /// `pollis-sqlcipher/tests/sqlcipher.rs` reads.
+    ///
+    /// # Why this lives here and not in `pollis-sqlcipher`
+    ///
+    /// The point of the fixture is that a **different implementation** wrote
+    /// it. `pollis-sqlcipher` links its own RustCrypto provider, so a database
+    /// it generated and then read back would prove nothing: a provider that
+    /// derives the wrong key derives the *same* wrong key on both sides, and
+    /// the round trip succeeds. That is precisely the failure the round-trip
+    /// tests over there cannot see.
+    ///
+    /// On Linux and macOS `pollis-core` takes rusqlite with
+    /// `bundled-sqlcipher`, which compiles SQLCipher against the system
+    /// OpenSSL (CommonCrypto on Apple) — an independent implementation of the
+    /// same spec. A file written here and read there proves the two agree on
+    /// the KDF, the page cipher and the per-page MAC, byte for byte.
+    ///
+    /// # Regenerating
+    ///
+    /// Ignored because it writes into the source tree; the checked-in files are
+    /// the artifact. There is no reason to re-run it unless the fixture
+    /// contents or SQLCipher's parameters deliberately change:
+    ///
+    /// ```text
+    /// cargo test -p pollis-core --lib --no-default-features \
+    ///     -- --ignored db::local::tests::regenerate_the_cross_provider_fixtures --nocapture
+    /// ```
+    ///
+    /// It does not exist on Windows, and that is the enforcement rather than a
+    /// convention: there `pollis-core` links `pollis-sqlcipher` itself, so a
+    /// fixture generated on Windows would be written by the very provider it is
+    /// meant to check, silently turning the interop test back into a round
+    /// trip. A `cfg` cannot be run past by someone who did not read this.
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    #[ignore = "writes fixtures into the source tree; run deliberately"]
+    fn regenerate_the_cross_provider_fixtures() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../pollis-sqlcipher/tests/fixtures");
+        std::fs::create_dir_all(&dir).expect("create fixtures dir");
+
+        for (name, key_pragma) in [
+            ("openssl-passphrase.db", format!("PRAGMA key = '{FIXTURE_PASSPHRASE}'")),
+            (
+                "openssl-rawkey.db",
+                format!("PRAGMA key = \"x'{}'\"", hex::encode(FIXTURE_RAW_KEY)),
+            ),
+        ] {
+            let path = dir.join(name);
+            let _ = std::fs::remove_file(&path);
+
+            let conn = Connection::open(&path).expect("open fixture");
+            conn.execute_batch(&key_pragma).expect("apply key");
+            // A rollback journal rather than WAL, so the fixture is one
+            // self-contained file with no sidecar to check in beside it.
+            conn.execute_batch("PRAGMA journal_mode = DELETE").expect("journal mode");
+            conn.execute_batch(
+                "CREATE TABLE interop (id INTEGER PRIMARY KEY, body TEXT NOT NULL)",
+            )
+            .expect("create table");
+            for id in 1..=FIXTURE_ROWS {
+                conn.execute(
+                    "INSERT INTO interop (id, body) VALUES (?1, ?2)",
+                    rusqlite::params![id, fixture_body(id)],
+                )
+                .expect("insert");
+            }
+            drop(conn);
+
+            let bytes = std::fs::read(&path).expect("read fixture");
+            assert_ne!(
+                &bytes[..16],
+                SQLITE_PLAINTEXT_HEADER,
+                "{name} was written in plaintext — this build's SQLCipher is not encrypting"
+            );
+            println!("wrote {} ({} bytes)", path.display(), bytes.len());
+        }
+    }
 }

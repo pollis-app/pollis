@@ -123,6 +123,14 @@ impl Db {
         let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
         self.must_exec(&format!("PRAGMA key = \"x'{hex}'\""));
     }
+
+    /// Keying with a passphrase rather than raw bytes, which is what puts the
+    /// full `kdf_iter`-round PBKDF2 on the page key. `pollis-core` never does
+    /// this, but the interop fixtures do, so that the expensive derivation is
+    /// compared against another implementation too.
+    fn key_passphrase(&self, passphrase: &str) {
+        self.must_exec(&format!("PRAGMA key = '{passphrase}'"));
+    }
 }
 
 const KEY: &[u8; 32] = b"0123456789abcdef0123456789abcdef";
@@ -291,4 +299,100 @@ fn the_cipher_parameters_are_sqlcipher_4_defaults() {
         Some("PBKDF2_HMAC_SHA512")
     );
     assert_eq!(db.query_one("PRAGMA kdf_iter").as_deref(), Some("256000"));
+}
+
+// ── Cross-provider interop ───────────────────────────────────────────────────
+
+/// Keep in step with `db::local::tests` in `pollis-core`, which writes the
+/// fixtures these constants describe.
+const FIXTURE_PASSPHRASE: &str = "pollis-interop-fixture-passphrase";
+const FIXTURE_RAW_KEY: &[u8; 32] = b"pollis-interop-fixture-key-32byt";
+const FIXTURE_ROWS: i64 = 64;
+
+fn fixture_body(id: i64) -> String {
+    format!("interop-row-{id:03}-{}", "ab".repeat(96))
+}
+
+/// Copy a checked-in fixture somewhere writable. SQLCipher wants to journal
+/// even for reads, and the fixture is an artifact — a test that mutated it in
+/// place would quietly rewrite the thing it is checking against.
+fn fixture_copy(dir: &Path, name: &str) -> std::path::PathBuf {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name);
+    let dst = dir.join(name);
+    std::fs::copy(&src, &dst)
+        .unwrap_or_else(|e| panic!("copy fixture {}: {e}", src.display()));
+    dst
+}
+
+/// The check no round trip can perform: read a database **somebody else
+/// encrypted**.
+///
+/// Every other test in this file writes with this provider and reads with this
+/// provider. That cannot distinguish correct SQLCipher from self-consistent
+/// nonsense — a provider deriving the wrong key derives the same wrong key on
+/// both sides, so the data comes back and the file is still not SQLCipher 4.
+/// The mutation that motivated this (#1002) was exactly that shape: a PBKDF2
+/// mishandling `dkLen` ≠ `hLen` passed all 14 tests here.
+///
+/// These fixtures were written by `pollis-core`'s SQLCipher, which on Linux and
+/// macOS is compiled against OpenSSL/CommonCrypto rather than `src/abi.rs`. If
+/// this provider can read them, the two agree on PBKDF2-HMAC-SHA512 key
+/// derivation, AES-256-CBC page encryption and the per-page HMAC — across
+/// several pages, so page 1's salt handling is not the only thing exercised.
+/// If it cannot, one of them is wrong, and until now nothing would have said so.
+#[test]
+fn a_database_another_implementation_encrypted_reads_back() {
+    let dir = scratch("interop");
+
+    for (name, keying) in [
+        ("openssl-passphrase.db", Keying::Passphrase),
+        ("openssl-rawkey.db", Keying::Raw),
+    ] {
+        let path = fixture_copy(dir.path(), name);
+        let db = Db::open(&path);
+        match keying {
+            Keying::Passphrase => db.key_passphrase(FIXTURE_PASSPHRASE),
+            Keying::Raw => db.key(FIXTURE_RAW_KEY),
+        }
+
+        assert_eq!(
+            db.query_one("SELECT count(*) FROM interop").as_deref(),
+            Some(FIXTURE_ROWS.to_string().as_str()),
+            "{name}: this provider could not read a database OpenSSL's SQLCipher wrote — \
+             the two disagree about SQLCipher 4"
+        );
+
+        // First row, a row past the first page, and the last one.
+        for id in [1, FIXTURE_ROWS / 2, FIXTURE_ROWS] {
+            assert_eq!(
+                db.query_one(&format!("SELECT body FROM interop WHERE id = {id}")).as_deref(),
+                Some(fixture_body(id).as_str()),
+                "{name}: row {id} decrypted to the wrong bytes"
+            );
+        }
+    }
+}
+
+/// The fixtures have to still be encrypted, or the test above would pass by
+/// reading plaintext and prove nothing about the crypto at all.
+#[test]
+fn the_interop_fixtures_are_themselves_ciphertext() {
+    for name in ["openssl-passphrase.db", "openssl-rawkey.db"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name);
+        let bytes = std::fs::read(&path).expect("read fixture");
+        assert_ne!(
+            &bytes[..16],
+            b"SQLite format 3\0",
+            "{name} is a plaintext SQLite file"
+        );
+        assert!(
+            !bytes.windows(11).any(|w| w == b"interop-row"),
+            "{name} contains its row bodies in the clear"
+        );
+    }
+}
+
+enum Keying {
+    Passphrase,
+    Raw,
 }

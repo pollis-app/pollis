@@ -78,8 +78,9 @@ async fn every_lifecycle_wipe_actually_empties_this_user_s_media_cache() {
         Arc::new(InMemoryKeystore::new()),
     ));
 
-    // A known account, as `verify_otp` would have left one.
-    pollis_core::accounts::upsert_account(USER, "cache-tester", Some("t@example.com"), None)
+    // A known account, as `verify_otp` would have left one. No email: since
+    // #999 the accounts index does not carry one, and the keystore does.
+    pollis_core::accounts::upsert_account(USER, "cache-tester", None)
         .expect("seed accounts index");
 
     // ── Phase 1: set_pin ─────────────────────────────────────────────────
