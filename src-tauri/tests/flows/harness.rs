@@ -1091,7 +1091,7 @@ impl TestClient {
     /// so flipping the active user immediately before dispatch is race-free.
     fn activate(&self) {
         if let Some(p) = &self.profile {
-            let _ = pollis_lib::accounts::upsert_account(&p.id, &p.username, None, None);
+            let _ = pollis_lib::accounts::upsert_account(&p.id, &p.username, None);
         }
     }
 

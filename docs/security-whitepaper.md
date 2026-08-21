@@ -19,10 +19,68 @@
 | The user-held Secret Key (printed once, expected to be stored offline) | Resend — outbound email transit for OTPs |
 | — | The Delivery Service (`pollis-delivery`) — the sole writer to the remote database, and the broker that now holds the Resend, R2 and LiveKit credentials on the client's behalf (§4, §9.3, §10.1) |
 | The user-held PIN (in the user's head) | Anyone with read access to a copy of `accounts.json` or the keystore who does not also have the PIN |
+| `accounts.json` — the local "who has signed in on this device" index (§1.1.1) | — |
 
 The application is built and shipped by the operators of the Pollis services. The trust delegation is the same as Signal Desktop or WhatsApp Desktop: the binary is trusted at install time, after which the cryptographic protocol is what defends against the *server* side of the same operator. Binary integrity now rests on two layers. The first is platform code-signing (Apple Developer ID + notarization on macOS, Azure Trusted Signing on Windows — see `.codesight/wiki/windows-signing.md`); the auto-update path verifies the same OS-native signature on every downloaded installer before launch (Gatekeeper on macOS, Authenticode on Windows), so an attacker who tampers with a release artifact in transit cannot get the running binary to install it.
 
 The second layer, **now shipped**, is **binary transparency**. Every released build's reproducible pre-signature payload *and* its signed artifact are content-hashed and appended as leaves to a third append-only, ML-DSA-44-signed Merkle tree — served alongside the commit-log and account-key trees (§6.9) at **https://verify.pollis.com/v1/binaries**, under its own domain-separated STH context so a binary head can never be replayed as a commit-log or account-key head. Anyone can confirm that every artifact published for a given release tag is provably included in that log by running `pollis-verify release <tag>`, which trusts **only** the pinned log key (ML-DSA-44, rotated to fresh material in #732) — not Pollis, not Turso, not the host serving the files. Code-signing proves only "the holder of Pollis's key produced these bytes"; the transparency log additionally makes the *set of bytes Pollis has ever published for a release* public and non-repudiable, so a compromised or compelled operator cannot quietly ship a targeted per-user build — its hash is either logged (permanently, publicly, and cross-checkable by any monitor) or conspicuously absent from the log. **Honest limits** (full design in `docs/verifiable-builds-design.md`; P0–P2 shipped, and P5 Linux reproducibility + independent rebuilder, P3 keyless SLSA/cosign provenance, and P4 in-app verify all shipped in #484): the log records a correct leaf structure — both hashes plus the pinned build recipe — and the release pipeline appends them; and the **Linux AppImage payload is now reproducible modulo a documented residual list** (`docs/reproducible-builds-residuals.md`), with the toolchain pinned to an exact version, absolute build paths remapped out of the binary, and a `SOURCE_DATE_EPOCH` derived from the tag commit. An independent, fork-runnable rebuilder (`.github/workflows/rebuild-verify.yml`) rebuilds that payload from public source at a tag and asserts the reproduced hash is the one logged, trusting **only** the pinned key. **This is demonstrated, not merely implemented:** at `v1.8.4` the rebuild matched the logged payload `1a4213a1…` exactly, and the rebuilder now runs automatically after every release, so the property is continuously checked rather than asserted. Two honest bounds on that result: it is the *Linux AppImage payload* only, and reproduction currently requires building at the same filesystem path, because `--remap-path-prefix` is a rustc flag and does not cover C/C++ compiled through `cc-rs` (`docs/reproducible-builds-residuals.md`). **macOS and Windows payload reproducibility remains best-effort** (cross-platform, not asserted by the rebuilder), and the signing/notarization outer layer is non-reproducible *by construction* — transparency-logged and cryptographically bound to the payload, not reproduced. On **macOS and Windows**, however, the logged payload digest is now **recomputable by anyone holding the public `.dmg` / `.exe`** (#750): it is defined as the shipped artifact with that platform's per-signing material normalized back out — on macOS the stapled notarization ticket, each Mach-O code signature and the `_CodeSignature` manifests; on Windows the Authenticode certificate table and the PE checksum signtool recomputes over it, stripped from every executable inside the installer — so a third party can open the release, apply the same normalization, and check the result against the log. This is the ordinary reproducible-builds treatment of signatures (exclude, don't reproduce; cf. F-Droid's "identical apart from the signature"). It replaced a scheme that hashed a separate unsigned build existing only inside CI, which no outside party could obtain and therefore could not check — and which additionally made each release conditional on the Rust compiler emitting identical bytes across two compiles of one source tree, a gate that failed a real release twice in a row for reasons unrelated to that release's soundness. It does **not** by itself establish that the macOS or Windows bytes rebuild from source — that remains best-effort, pending a matching-platform reproducer and the compiler-determinism work itemized in `docs/reproducible-builds-residuals.md`. **A second, independent transparency anchor now ships (P3, #484):** every released installer and updater bundle additionally carries a keyless **SLSA v1 build-provenance attestation** (GitHub's `actions/attest-build-provenance`) *and* a **cosign signature**, both anchored in the **public Rekor** log and cryptographically bound to Pollis's **GitHub Actions OIDC identity** — published next to the artifact on `cdn.pollis.com`, the attestation at exactly the `provenance_uri` each binaries-log leaf records. Anyone can run `cosign verify-blob` (or a SLSA verifier) and confirm the bytes were produced by the pinned Pollis release workflow, checked against Rekor, with **no Pollis-held key on that verification path** — defense in depth against a compromised or compelled Pollis signing key, and a transparency anchor Pollis does not control. This proves *build provenance* and adds a *non-Pollis* anchor; it does **not**, by itself, prove the bytes reproduce from source — that remains the reproducibility story above. Remaining gaps, itemized in the residual list: the client no longer bakes any R2 or LiveKit credentials — those moved off-client in the #506 secrets-broker cutover — so the only baked credentials left are the publishable read-only Turso token and an **optional** observability log-DB token. It is that optional log-DB token that, when a release bakes it, still prevents a *fully secretless* third party from bit-reproducing even the Linux payload (a party given the published recipe reproduces it, as before). (An optional in-app **"Verify this build"** affordance on the Security page already lets the running app confirm its own payload is published in the log — P4, #484.) For the platforms and inputs not yet reproducible, the log still proves *what* Pollis published for a tag; independent proof that those bytes *match public source* holds today for the Linux payload (given the recipe, on a matching runner) and is the remaining work elsewhere.
+
+#### 1.1.1 `accounts.json`
+
+The one client-side store that is neither encrypted nor machine-bound. It is
+called out here because until #997 it appeared in this document *only* on the
+untrusted side of the table above — as something an attacker might read, with no
+statement of what it holds or what protects it. That omission is how it came to
+hold a plaintext email address.
+
+**What it holds, per account:** the account's `user_id` (an opaque 128-bit
+ULID), the `username` and `avatar_url` the user chose — which every peer they
+talk to already sees — and a `last_seen` timestamp; plus one top-level
+`last_active_user`. That is the complete list.
+
+**What protects it:** file permissions, and nothing else. It is **not**
+encrypted, **not** machine-bound, and **not** in the keystore. Owner-only mode
+is what it should carry, and the separate client-wide file-permission hardening
+is what sets that; today it is created at the process umask, so on a default
+Linux or macOS box it is world-readable. Either way a same-UID attacker or a
+full-disk image reads it — and both of those already have the keystore, whose
+contents are worth far more.
+
+**Why that is acceptable:** the file holds no secret and no PII — an argument
+that does not lean on the mode at all, which is the point. Every field is
+either an opaque identifier or a display string the user publishes to their
+contacts anyway, so a reader learns *that this machine has accounts* and their
+opaque ids — not who owns them. Its job is bootstrap: it is the only store
+readable pre-unlock (local DB closed, no signer, no session, hence no
+credential of any kind), and `get_session` / `get_unlock_state` need a `user_id`
+before any credential exists.
+
+**The login address is not in it (#997).** It used to be: the single field that
+mapped an opaque id to a *person*, and the input to OTP sign-in and the recovery
+flow. It now lives in the per-user keystore slot `login_email_{user_id}`, under
+the same protection as the account identity key and the DB key. The pre-unlock
+email → `user_id` resolution still reaches it, because the keystore is readable
+at exactly that moment — `device_id_{user_id}` is already read there, for the
+returning-device path. Masking and hashing were both rejected for that
+resolution: it is a case-insensitive *equality* test, so every masked address at
+a shared domain collides and would resolve a returning user to an arbitrary
+account, and email is low-entropy enough that a hash buys
+confirmation-resistance rather than secrecy while still costing the login
+screen's one-click "continue as" chip.
+
+An install that predates #997 still has the address in its file. The first
+launch on the new build moves it into the keystore and then rewrites the index
+without it — keystore write first, erase second, and nothing is erased unless
+every address was taken, so an interrupted or failed migration retries on the
+next launch rather than losing the address. Until that point ordinary writes
+carry the field through untouched, for the same reason. Nothing ever *sets* the
+field, so the erase is final.
+
+Corrupt-index snapshots (`accounts.bad-<unix-ms>.json`, written when the file
+fails to parse) inherit the same contents and the same permissions, and are pruned to
+the newest three on the next successful write. A snapshot taken from a
+pre-migration file therefore still carries the old address; the prune bounds how
+many such copies can survive, where previously they accumulated forever.
 
 ### 1.2 What the server can and cannot see
 
@@ -506,7 +564,11 @@ credentials is pure attack surface.
 - **Three reads are unsigned, because no credential exists at that moment.**
   `POST /v1/auth/account-probe` runs pre-PIN at launch (local DB closed, no
   signer, no session) and answers `{ exists, has_identity, identity_version }`
-  for a 128-bit ULID the caller read out of its own `accounts.json`.
+  for a 128-bit ULID the caller read out of its own `accounts.json`. That
+  argument rests on the id being unguessable and on the file it came from being
+  non-sensitive; §1.1.1 now states both on the record, including the #997 move
+  of the login address out of that file, so an endpoint reachable with no
+  credential is answering about an opaque identifier and nothing else.
   `POST /v1/read/enrollment` is gated on possession of the enrollment
   `request_id` — a session cannot serve it, because the DS session TTL and the
   enrollment TTL are both 600s and the session is minted strictly earlier, so a

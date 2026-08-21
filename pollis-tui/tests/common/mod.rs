@@ -481,7 +481,7 @@ impl TestClient {
         // every subsequent DB/keystore touch) lands in THIS device's dir.
         self.use_dir();
         if let Some(p) = &self.profile {
-            let _ = accounts::upsert_account(&p.id, &p.username, None, None);
+            let _ = accounts::upsert_account(&p.id, &p.username, None);
         }
     }
 

@@ -274,7 +274,7 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             auth::logout(&state()?, delete).await?;
             ok(())
         }
-        "list_known_accounts" => ok(auth::list_known_accounts()?),
+        "list_known_accounts" => ok(auth::list_known_accounts(&state()?).await?),
         "request_email_change_otp" => {
             let user_id: String = arg(&args, "userId")?;
             let new_email: String = arg(&args, "newEmail")?;

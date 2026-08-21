@@ -158,7 +158,7 @@ Email OTP via Resend proves control of an email address. It is **not** the devic
 
 The unlock factor is a 4-digit PIN, local to the device. The PIN is fed through Argon2id (m=64 MiB, t=3, p=1, output 32 bytes) to derive a KEK; the KEK uses XChaCha20-Poly1305 to wrap the SQLCipher key and the account-identity Ed25519 private. 10 wrong attempts wipe the wrapped blobs and force re-enrollment via Secret Key recovery. The PIN never leaves the device.
 
-`accounts.json` records "who has signed in on this device" with crash-safe atomic writes (tempfile + fsync + rename) and loud parse-failure handling.
+`accounts.json` records "who has signed in on this device" with crash-safe atomic writes (tempfile + fsync + rename) and loud parse-failure handling. It is the only store readable pre-unlock, so it is deliberately kept to the minimum that bootstrap needs: per account an opaque `user_id` ULID, `username`, `avatar_url` and `last_seen`, plus `last_active_user`. No secret, no PII — the login address moved to the per-user keystore slot `login_email_{user_id}` in #997, which is where `local_user_id_for_email` reads it to resolve a returning user pre-unlock (`docs/security-whitepaper.md` §1.1.1). A file written by an older build still carries it; the first migrated read adopts it into the keystore and rewrites the file without it (keystore write first, erase only if every address was taken). A parse failure snapshots the file to `accounts.bad-<unix-ms>.json`; the next successful write prunes those to the newest three.
 
 ### Multi-device enrollment
 

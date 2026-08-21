@@ -59,8 +59,8 @@ pub async fn delete_account(state: State<'_, Arc<AppState>>, user_id: String) ->
 }
 
 #[tauri::command]
-pub fn list_known_accounts() -> Result<crate::accounts::AccountsIndex> {
-    pollis_core::commands::auth::list_known_accounts()
+pub async fn list_known_accounts(state: State<'_, Arc<AppState>>) -> Result<crate::accounts::KnownAccounts> {
+    pollis_core::commands::auth::list_known_accounts(&state).await
 }
 
 #[tauri::command]
