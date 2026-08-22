@@ -211,23 +211,76 @@ so before any store build check `mobile/.env`:
 
 ### iOS
 
+Whole path, verified end-to-end 2026-08-21 (Xcode 26.4.1, iPhoneOS SDK 26.4) —
+`Pollis.ipa`, 31 MB, signed `Apple Distribution: Daniel Kral (9JF7WWYMU2)`:
+
 ```bash
-cd mobile
+# 1. Rust core → xcframework. RUN FROM modules/pollis-native, not mobile/ —
+#    ubrn resolves package.json from the CWD, and mobile/package.json has no
+#    `repository` field, so from the app root it panics instead of building.
+cd mobile/modules/pollis-native
+uniffi-bindgen-react-native build ios --config ubrn.config.yaml --and-generate \
+  --release --no-sim
+# `--release` matters: the debug staticlib is 700 MB against 140 MB.
+# `--no-sim` builds only the ios-arm64 slice a store build needs; it also LEAVES
+# the xcframework without simulator slices, so re-run without it before going
+# back to `pnpm expo run:ios` on a simulator.
+
+# 2. Native project + pods
+cd ../..
 pnpm expo prebuild -p ios
 cd ios && pod install && cd ..
+
+# 3. Archive UNSIGNED, then sign on export.
 xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis \
   -configuration Release -destination 'generic/platform=iOS' \
   archive -archivePath build/Pollis.xcarchive \
-  DEVELOPMENT_TEAM=9JF7WWYMU2 -allowProvisioningUpdates
+  DEVELOPMENT_TEAM=9JF7WWYMU2 CODE_SIGNING_ALLOWED=NO
 xcodebuild -exportArchive -archivePath build/Pollis.xcarchive \
   -exportOptionsPlist store/ExportOptions.plist -exportPath build/export \
   -allowProvisioningUpdates
 ```
 
+`CODE_SIGNING_ALLOWED=NO` on the archive is deliberate: automatic *archive*
+signing wants a development profile, and the team has zero registered devices,
+so it fails. Signing at export instead needs only a distribution cert, which
+`-allowProvisioningUpdates` cloud-mints from the Xcode Apple ID session (no EAS
+account exists, deliberately — `eas.json` is vestigial).
+
 `store/ExportOptions.plist` (committed — `ios/` is generated, so it can't live
 there) sets `method: app-store-connect`, `teamID: 9JF7WWYMU2`,
 `uploadSymbols: true`. Upload the resulting `.ipa` with Xcode Organizer or
 `xcrun altool`/Transporter.
+
+Worth checking on the exported `.ipa` before an upload — all four held on the
+2026-08-21 build:
+
+```bash
+unzip -q build/export/Pollis.ipa -d /tmp/ipa
+codesign -dvvv /tmp/ipa/Payload/Pollis.app          # Authority=Apple Distribution
+codesign -d --entitlements :- /tmp/ipa/Payload/Pollis.app   # get-task-allow=false
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' /tmp/ipa/Payload/Pollis.app/Info.plist
+strings /tmp/ipa/Payload/Pollis.app/main.jsbundle | grep -o 'https://api[a-z.-]*pollis.com'
+```
+
+That last one is the one people forget: it is the only direct proof the shipped
+JS bundle inlined the **prod** DS and not api-dev.
+
+**Deployment target.** `.cargo/config.toml` pins
+`IPHONEOS_DEPLOYMENT_TARGET = "15.1"` in its global `[env]` table, matching
+`platform :ios` in `ios/Podfile`. Without it, rustc targets iOS 10.0 while cc-rs
+builds the vendored OpenSSL 3.5 + SQLCipher against the current SDK, and the
+`libpollis_core.dylib` link dies on `___chkstk_darwin` (a libSystem stub that
+only exists from iOS 12). It bites **only in release** — a debug link at 10.0
+succeeds — which is why it can sit latent until someone cuts a store build.
+
+Note it has to be the GLOBAL `[env]` table: cargo has no
+`[target.<triple>.env]`, and that spelling silently parses as a build-script
+`links` override for a native library named "env". Two blocks in that file still
+use it for `MACOSX_DEPLOYMENT_TARGET` and are therefore inert — a separate
+latent bug, not this one. `mobile-core-check.yml`'s ios-check job guards against
+both mistakes by reading the min-version back off the built artifact rather than
+trusting the config file. Keep the value in lockstep with the Podfile.
 
 **Encryption export compliance:** `app.json` sets
 `ITSAppUsesNonExemptEncryption: true` deliberately. `false` means "no
