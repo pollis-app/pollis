@@ -60,3 +60,9 @@ modules/pollis-native/PollisNativeFramework.xcframework/
 # Maestro e2e runtime (#619)
 .maestro/.env
 .maestro/artifacts/
+
+# Store-build outputs: `xcodebuild archive` writes build/Pollis.xcarchive and
+# `-exportArchive` writes build/export/Pollis.ipa here (~284 MB together). Both
+# are reproducible from the recipe in CLAUDE.md and must never be committed —
+# the .ipa in particular is a signed, distributable binary.
+/build/
