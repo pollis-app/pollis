@@ -21,16 +21,30 @@ tags:
     id: "input-user-search"
 - inputText: "${MAESTRO_PEER_HANDLE}"
 - takeScreenshot: dms-02-search
-# The exact-match result row starts the DM when tapped.
+# The result row starts the DM when tapped. Match the id as a REGEX PREFIX:
+# the app emits `row-user-<userId>`, not `row-user-<handle>`, and the user id
+# is not knowable ahead of time. This used to tap `row-user-${MAESTRO_PEER_HANDLE}`
+# with `optional: true`, which could never match — so the flow silently walked
+# past it and "sent" a message into whatever screen it was still on. A step
+# that cannot fail is not a test; `optional` is deliberately gone.
+#
+# Tapping the handle TEXT is not an alternative: the same string is in the
+# search box we just typed into, and tapping that opens iOS's text-selection
+# popover instead of navigating.
+- extendedWaitUntil:
+    visible:
+      id: "row-user-.*"
+    timeout: 20000
 - tapOn:
-    id: "row-user-${MAESTRO_PEER_HANDLE}"
-    optional: true
+    id: "row-user-.*"
 - takeScreenshot: dms-03-opened
+- extendedWaitUntil:
+    visible:
+      id: "input-composer"
+    timeout: 30000
 - tapOn:
     id: "input-composer"
-    optional: true
 - inputText: "hello peer"
 - tapOn:
     id: "btn-send"
-    optional: true
 - takeScreenshot: dms-04-sent

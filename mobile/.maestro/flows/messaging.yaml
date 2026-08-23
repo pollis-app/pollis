@@ -7,6 +7,12 @@ tags:
 # conversation to post into without a peer.
 
 - runFlow: ../subflows/sign-in.yaml
+# Navigate explicitly: sign-in guarantees the tab navigator, not which tab,
+# and btn-create-group only exists on the groups screen.
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
 
 # Make a group so we have a channel to post in.
 - tapOn:

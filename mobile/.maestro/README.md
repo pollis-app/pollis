@@ -15,8 +15,29 @@ form factors.
 ## Prerequisites (Mac)
 
 1. **Maestro** — `curl -Ls "https://get.maestro.mobile.dev" | bash`.
-2. **A DEV build of the app installed on each target device.** The build must
-   point at the **dev** Delivery Service and a dev LiveKit URL (baked at build
+1b. **A Java runtime.** Maestro is a JVM tool and dies with "Unable to locate a
+   Java Runtime" without one. `brew install openjdk@17` is keg-only, so
+   `/usr/libexec/java_home` cannot see it and installing alone is not enough —
+   export it:
+   ```bash
+   export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+   ```
+2. **A RELEASE build of the app, pointed at the dev DS.** Both halves matter.
+
+   *Release, not dev-client.* Every flow opens with `clearState`, which wipes
+   expo-dev-client's stored dev-server URL — so a `pnpm expo run:ios` build
+   boots to the **dev-client launcher menu** and the app never loads. The suite
+   cannot drive that build at all. A Release build embeds the JS bundle and has
+   no launcher. It is also the more honest target: these flows are
+   timing-sensitive and dev-mode JS is not what ships.
+   ```bash
+   cd mobile && pnpm expo run:ios --device <simulator-udid> --configuration Release
+   ```
+   Pass the simulator by **UDID** (`xcrun simctl list devices`) and boot it
+   first; a name that matches no *booted* simulator makes xcodebuild fall
+   through to a physical-device destination and fail.
+
+   *Dev DS.* The build must point at the dev Delivery Service (baked at build
    time, not Maestro env):
    ```
    EXPO_PUBLIC_POLLIS_DELIVERY_URL=https://api-dev.pollis.com
@@ -24,8 +45,12 @@ form factors.
    # No database credential is needed or read since #987 — the client speaks
    # only to the Delivery Service.
    ```
-   Build + install: `cd mobile && pnpm expo run:ios` / `run:android` (see
-   `mobile/CLAUDE.md` for the ubrn/native steps). App id: `com.pollis.mobile`.
+   See `mobile/CLAUDE.md` for the ubrn/native steps. App id: `com.pollis.mobile`.
+
+   *After changing the ubrn target set* (e.g. building simulator-only slices),
+   re-run `pod install`: CocoaPods bakes the xcframework's slice paths into a
+   generated copy script, so a stale script silently copies **nothing** and the
+   app dies at launch on a uniffi checksum mismatch.
 3. **Seed env** — `cp .maestro/env.example .maestro/.env` and fill it in. The dev
    DS must have a fixed `DEV_OTP` so `MAESTRO_OTP` is deterministic (no inbox
    polling). `.env` is gitignored.
@@ -82,6 +107,37 @@ is more robust):
   `row-channel-<id>` isn't known ahead of time.
 Add these in a #620 follow-up and switch the `tapOn: "TEXT"` calls to
 `tapOn: id:`.
+
+## Known issues found by the first real run (2026-08-22)
+
+The suite had never been executed anywhere before this. Fixed here:
+
+- **Non-idempotent accounts.** Every flow `clearState`s and then signs UP, so a
+  single fixed `MAESTRO_EMAIL` only worked on its first use ever — after that
+  the account existed, auth took the returning-device enrollment path, no
+  create-PIN screen appeared, and the flow died on `screen-auth-pin`. Seven of
+  eight flows failed for this one reason. `maestro-run.sh` now mints a fresh
+  disposable address per flow and runs each flow as its own invocation.
+  (Enrollment needs the recovery key, which the harness cannot hold, so
+  re-signing-up is the only self-contained option.)
+- **`dms.yaml` had a step that could not fail.** It tapped
+  `row-user-${MAESTRO_PEER_HANDLE}`, but the app emits `row-user-<userId>`.
+  With `optional: true` the flow walked straight past and "sent" a message into
+  whatever screen it was on. Now an id regex prefix, and not optional.
+- **`sign-in.yaml` asserted the wrong landing screen.** It waited for
+  `screen-groups`; it now waits for the tab bar and each flow taps the tab it
+  needs.
+
+Still open, needs app-side triage (not harness bugs):
+
+- **Sign-in lands on the Self tab.** `initializing.tsx:76` replaces to
+  `/(tabs)/groups` and nothing in the app routes to `/(tabs)/self`, yet Self is
+  what renders. Reproducible.
+- **A handle rename does not reach messages you then send.** `sender_username`
+  is denormalized onto each message at send time from a cached `currentUser`
+  (`hooks/queries/useMessages.ts`), so after changing your handle your own new
+  messages still carry the old one — including across an app restart — while
+  the conversation header shows the new one.
 
 ## Note on authoring vs running
 

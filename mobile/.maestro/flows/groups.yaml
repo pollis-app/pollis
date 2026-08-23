@@ -7,6 +7,11 @@ tags:
 # button TEXT where #620 left an action un-instrumented (noted in README gaps).
 
 - runFlow: ../subflows/sign-in.yaml
+# Navigate explicitly: sign-in guarantees the tab navigator, not which tab.
+- tapOn:
+    id: "tab-groups"
+- assertVisible:
+    id: "screen-groups"
 - takeScreenshot: groups-01-inbox
 
 # Create a group. NOTE: the "CREATE GROUP" submit has no testID yet (#620 gap),

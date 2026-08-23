@@ -40,11 +40,30 @@ ENV_ARGS=()
 if [ -f "$ENV_FILE" ]; then
   while IFS= read -r line; do
     case "$line" in ''|\#*) continue;; esac
+    case "$line" in MAESTRO_EMAIL=*) continue;; esac
     ENV_ARGS+=(-e "$line")
   done < "$ENV_FILE"
 else
   echo "WARN: $ENV_FILE missing — copy env.example and fill it in." >&2
 fi
+
+# MAESTRO_EMAIL is deliberately NOT taken from .env as-is. Every flow opens with
+# `clearState` and then signs UP, so a fixed address only works on its very
+# first use ever: from the second flow onward the account already exists, auth
+# takes the returning-device enrollment path, no create-PIN screen appears, and
+# the flow dies on `screen-auth-pin`. That is exactly what the first full run of
+# this suite hit — 7 of 8 flows failed that way, all for this one reason.
+#
+# So each flow gets its own brand-new disposable account, derived from the
+# configured address by extending its `+` tag. Enrollment needs the recovery
+# key, which the harness has no way to hold, so re-signing-up is the only
+# self-contained option.
+EMAIL_BASE="$(sed -n 's/^MAESTRO_EMAIL=//p' "$ENV_FILE" 2>/dev/null | head -1)"
+EMAIL_BASE="${EMAIL_BASE:-pollis-e2e+primary@example.com}"
+fresh_email() {
+  local local_part="${EMAIL_BASE%@*}" domain="${EMAIL_BASE#*@}"
+  echo "${local_part}-$(date +%Y%m%d%H%M%S)-$1@${domain}"
+}
 
 # Boot the device and pick the Maestro --device selector.
 DEVICE_SEL=()
@@ -72,7 +91,20 @@ DATE="$(date +%Y-%m-%d)"
 OUT="$MAE/artifacts/$DATE/$PLATFORM"
 mkdir -p "$OUT"
 
-echo "==> running: $TARGET  (platform=$PLATFORM)"
+# Collect the flows to run. `all` becomes an explicit LIST rather than handing
+# the directory to Maestro, because one invocation shares one `-e` environment
+# and every flow needs its own signup address (see fresh_email above). Running
+# them separately also attributes a failure to one flow instead of one batch.
+FLOW_FILES=()
+if [ "$FLOW" = "all" ]; then
+  for f in "$MAE"/flows/*.yaml; do
+    [ -e "$f" ] && FLOW_FILES+=("$f")
+  done
+else
+  FLOW_FILES=("$TARGET")
+fi
+
+echo "==> running ${#FLOW_FILES[@]} flow(s)  (platform=$PLATFORM)"
 # Maestro ignores cwd for screenshot output — takeScreenshot always lands
 # under its own ~/.maestro/tests/<run>/ debug tree regardless of `cd`.
 # --debug-output redirects that whole tree under DEBUG instead, then we
@@ -80,12 +112,25 @@ echo "==> running: $TARGET  (platform=$PLATFORM)"
 # screenshots/step-* = failure captures) into OUT below.
 DEBUG="$OUT/.debug"
 mkdir -p "$DEBUG"
-maestro "${DEVICE_SEL[@]}" test --debug-output "$DEBUG" "${ENV_ARGS[@]}" "$TARGET" || {
-  echo "!! flow reported failures — screenshots (incl. the failing state) are in $OUT" >&2
-}
+FAILED=()
+for f in "${FLOW_FILES[@]}"; do
+  fname="$(basename "$f" .yaml)"
+  echo "--> $fname"
+  maestro "${DEVICE_SEL[@]}" test --debug-output "$DEBUG" \
+    "${ENV_ARGS[@]}" -e MAESTRO_EMAIL="$(fresh_email "$fname")" "$f" || {
+    FAILED+=("$fname")
+    echo "!! $fname reported failures — screenshots (incl. the failing state) are in $OUT" >&2
+  }
+done
 
 find "$DEBUG" \( -path "*/takeScreenshot/*.png" -o -path "*/screenshots/*.png" \) -exec cp {} "$OUT/" \; 2>/dev/null || true
 rm -rf "$DEBUG"
 
 echo "==> screenshots in: $OUT"
 ls -1 "$OUT"/*.png 2>/dev/null || echo "(no screenshots captured)"
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+  echo "==> FAILED (${#FAILED[@]}/${#FLOW_FILES[@]}): ${FAILED[*]}" >&2
+  exit 1
+fi
+echo "==> all ${#FLOW_FILES[@]} flow(s) passed"

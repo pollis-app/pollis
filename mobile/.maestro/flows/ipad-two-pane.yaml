@@ -10,6 +10,9 @@ tags:
 # either a conversation or the "Select a conversation" placeholder.
 
 - runFlow: ../subflows/sign-in.yaml
+# Navigate explicitly: sign-in guarantees the tab navigator, not which tab.
+- tapOn:
+    id: "tab-groups"
 - assertVisible:
     id: "screen-groups"
 - takeScreenshot: ipad-01-groups-twopane

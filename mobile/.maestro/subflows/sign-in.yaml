@@ -69,7 +69,12 @@ appId: com.pollis.mobile
           id: "btn-continue"
 
 # --- Landed on the tabs ---
+# Assert the TAB BAR, not a particular tab. `initializing.tsx` replaces to
+# `/(tabs)/groups`, but the app was observed landing on Self after sign-in
+# (see the note in README "Known issues"), and a subflow whose job is "we are
+# signed in and inside the tab navigator" should not also be the thing that
+# encodes which tab wins that race. Flows that need a specific tab tap it.
 - extendedWaitUntil:
     visible:
-      id: "screen-groups"
-    timeout: 20000
+      id: "tab-groups"
+    timeout: 30000
