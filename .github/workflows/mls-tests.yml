@@ -249,13 +249,20 @@ jobs:
 
       # openmls-level MLS state-machine tests (mls/tests.rs, reconcile, etc.).
       #
-      # `--features test-harness` (#914): the feature exists so integration tests
-      # can build a real `RemoteDb` over a local file (`RemoteDb::connect_local`,
-      # gated `#[cfg(any(test, feature = "test-harness"))]`). Without it every
-      # pollis-core integration test that needs one silently could not exist —
-      # `tests/remote_with_retry.rs` compiled to nothing here while passing
-      # locally. The feature only ADDS test-only constructors; it changes no
-      # production behaviour, and the flows step below already runs with it.
+      # `--features test-harness` (#914): the feature exists so integration
+      # tests can reach constructors and overrides that are `#[cfg(any(test,
+      # feature = "test-harness"))]` — the in-memory MLS storage
+      # (`signal/mls_storage.rs`), the config overrides (`config.rs`), the R2
+      # stubs (`commands/r2.rs`) and the message test helpers. Without it those
+      # tests do not fail, they silently compile to nothing here while passing
+      # locally, which is the failure mode worth guarding against. The feature
+      # only ADDS test-only items; it changes no production behaviour, and the
+      # flows step below already runs with it.
+      #
+      # It used to be justified here by `RemoteDb::connect_local` and
+      # `tests/remote_with_retry.rs`. #987/#988 deleted `RemoteDb` and the
+      # client's database handle outright, so both are gone — the feature is
+      # still load-bearing for the reasons above.
       - name: MLS unit tests (pollis-core)
         if: ${{ !cancelled() }}
         run: cargo test -p pollis-core --features test-harness
