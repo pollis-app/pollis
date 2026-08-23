@@ -57,6 +57,15 @@ Smoke-tested on macOS Tahoe (26.4.1) + Xcode 26.4.1 + iOS 26.4 simulator. `versi
 
 **Expo SDK 55 requires Xcode 26 / macOS 26.** Earlier Xcode/macOS hits `@MainActor` parse errors in `expo-modules-core` (see [expo/expo#42525](https://github.com/expo/expo/issues/42525) — closed, won't fix). SDK 54 is the last line that supports Xcode 16.x if a downgrade is ever needed.
 
+**An Xcode update silently breaks every simulator build until you download the matching runtime.** Xcode auto-updated 26.4.1 → 26.6 mid-session on 2026-08-22; the new SDK is iOS 26.5, no iOS 26.5 *simulator runtime* was installed, and `xcodebuild` then enumerates **zero** simulator destinations. Every build fails with `Unable to find a destination matching the provided destination specifier`, and the only "ineligible" entry it prints is the physical-device placeholder — which reads like a code-signing problem and is not one. Booting an older-runtime simulator does **not** help. The fix is one command and an 8.5 GB download:
+
+```bash
+xcodebuild -downloadPlatform iOS
+xcodebuild -workspace ios/Pollis.xcworkspace -scheme Pollis -showdestinations   # sanity: should list simulators, not just the placeholder
+```
+
+Two related traps while you are in there: pass simulators to `expo run:ios` by **UDID** (`xcrun simctl list devices`) and boot them first — a name matching no booted simulator makes xcodebuild fall through to a device destination; and the store `.ipa` currently in `build/export` was produced under Xcode **26.4.1**, so a rebuild under 26.6 is not byte-identical.
+
 ### Dev loop — iOS
 
 ```bash

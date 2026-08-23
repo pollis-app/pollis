@@ -12,6 +12,21 @@ accounts work on both stores, and there is no way around it short of forming an 
 
 ---
 
+## 0. App record identifiers (App Store Connect → My Apps → +)
+
+Fill these once, when the app record is created. Chosen 2026-08-22.
+
+| Field | Value | Note |
+|---|---|---|
+| Platform | iOS | The universal binary covers iPad; there is no separate iPad record. |
+| Name | `Pollis` | Globally unique across the App Store — this form is where a clash surfaces. |
+| Primary language | English (U.S.) | |
+| Bundle ID | `com.pollis.mobile` | Already registered on team `9JF7WWYMU2`; pick it from the dropdown. |
+| **SKU** | `com.pollis.mobile` | **Permanent — cannot be changed after creation.** Internal only: never shown to users or reviewers, appears in sales/financial reports. Only has to be unique within the account, so it mirrors the bundle ID rather than inventing a second identifier to remember. |
+
+`ascAppId` appears under App Information once the record exists; it is what any
+later `eas submit` / Transporter automation would need.
+
 ## 1. Copy
 
 ### App name
@@ -293,15 +308,38 @@ landscape is acceptable there).
 
 ## 8. Pre-submission blockers (recap)
 
-1. **Mobile in-app account deletion UI** — required by both stores; core command exists, mobile
-   UI does not (§3).
-2. **`ITSAppUsesNonExemptEncryption` in `app.json`** — set to `true` when the owner adopts the
-   export position (§5).
-3. **BIS annual report + ANSSI France declaration** — file (or restrict France) before release
-   (§5).
-4. **SystemBootTime / `@livekit/react-native-webrtc` linkage check** at EAS build time — see
-   `docs/mobile-compliance-answers.md` §1; an undeclared required-reason API is an automatic
-   rejection (ITMS-91053).
-5. **Play closed-testing gate** — 12 testers / 14 days before production (§6).
-6. **EAS credentials** (`eas init`, APNs key, FCM service account) — push is content-free but
-   still needs real credentials (#344).
+Re-checked 2026-08-22 against the actual signed build. Four of the six are done;
+do not re-litigate them from this list's old wording.
+
+1. ~~**Mobile in-app account deletion UI**~~ — **DONE.** Self → Security carries the
+   typed-DELETE full-screen confirm → `delete_account` + best-effort `wipe_local_data`
+   → sign-out (App Store 5.1.1(v)).
+2. ~~**`ITSAppUsesNonExemptEncryption`**~~ — **DONE.** `app.json` sets it `true`, and the
+   signed IPA's `Info.plist` carries it. See §5 for why `true` is the honest answer.
+3. **BIS annual report + ANSSI France declaration** — still outstanding. File (or restrict
+   France) before release (§5). Operational, not code.
+4. ~~**SystemBootTime / required-reason APIs**~~ — **DONE, and verified in the binary**
+   rather than assumed. CocoaPods' privacy-manifest aggregation merges every pod's
+   manifest into the app's at build time; the shipped `Pollis.app/PrivacyInfo.xcprivacy`
+   declares:
+
+   | API category | Reasons |
+   |---|---|
+   | FileTimestamp | `C617.1`, `0A2A.1`, `3B52.1` |
+   | UserDefaults | `CA92.1` |
+   | DiskSpace | `E174.1`, `85F4.1` |
+   | SystemBootTime | `35F9.1` |
+
+   plus `NSPrivacyTracking: false` and 3 collected-data types. Re-verify after any
+   dependency change with:
+   ```bash
+   unzip -q build/export/Pollis.ipa -d /tmp/ipa
+   plutil -p /tmp/ipa/Payload/Pollis.app/PrivacyInfo.xcprivacy
+   ```
+   ITMS-91053 is an automatic rejection, so check the binary, never the intent.
+5. **Play closed-testing gate** — 12 testers / 14 days before production (§6). Android only.
+6. ~~**EAS credentials**~~ — **DONE (#707).** EAS holds the APNs key (`DZB37YSPU7`) and the
+   FCM v1 service account; `projectId` + `owner` are in `app.json`.
+
+So the iOS-side remainder is **§3 (export paperwork)** and **screenshots (§7)** — everything
+else on this list is satisfied.
