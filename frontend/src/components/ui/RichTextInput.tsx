@@ -54,6 +54,15 @@ export interface RichTextInputHandle {
   blur: () => void;
   /** Put the collapsed caret at a model offset. */
   setSelection: (caret: number) => void;
+  /**
+   * Splice text in at the last known selection, and take focus.
+   *
+   * The emoji picker's insertion path. A `<textarea>` keeps `selectionStart`
+   * across a blur, so the old code could read it after the user had clicked
+   * into the picker; a `contentEditable` does not, so the last in-element
+   * selection is remembered here instead.
+   */
+  insertText: (text: string) => void;
 }
 
 export interface RichTextInputProps {
@@ -269,6 +278,9 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
   const lastSerializedRef = useRef<string | null>(null);
   // Where to put the caret once the projection has been rebuilt.
   const pendingCaretRef = useRef<number | null>(null);
+  // The last selection that was actually inside this element, so an insertion
+  // fired from a control that stole focus still lands where the caret was.
+  const lastSelectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
 
   // The callbacks and the current value are read through refs so the native
   // listeners below can be registered once instead of being torn down and
@@ -310,8 +322,8 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     onChangeRef.current(next, caret);
   }, []);
 
-  /** The current selection as model offsets, or null when it is not in here. */
-  const selectionOffsets = useCallback((): { start: number; end: number } | null => {
+  /** The live selection as model offsets, or null when it is not in here. */
+  const liveOffsets = useCallback((): { start: number; end: number } | null => {
     const host = hostRef.current;
     const selection = document.getSelection();
     if (!host || !selection || selection.rangeCount === 0) {
@@ -321,11 +333,32 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) {
       return null;
     }
+    // A `Range` is always start-before-end, so no ordering fix is needed here —
+    // the backwards-drag case is normalized by the DOM before we see it.
     return {
       start: offsetOf(host, range.startContainer, range.startOffset),
       end: offsetOf(host, range.endContainer, range.endOffset),
     };
   }, []);
+
+  /**
+   * The selection to edit at: the live one, or the last one that was in here,
+   * clamped to the current value. Never null, so no edit path has to invent a
+   * behaviour for "there is no caret".
+   */
+  const selectionOffsets = useCallback((): { start: number; end: number } => {
+    const live = liveOffsets();
+    if (live) {
+      lastSelectionRef.current = live;
+      return live;
+    }
+    const length = valueRef.current.length;
+    const remembered = lastSelectionRef.current;
+    return {
+      start: Math.min(remembered.start, length),
+      end: Math.min(remembered.end, length),
+    };
+  }, [liveOffsets]);
 
   useImperativeHandle(
     ref,
@@ -335,9 +368,18 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
       setSelection: (caret: number) => {
         hostRef.current?.focus();
         applySelection(caret);
+        lastSelectionRef.current = { start: caret, end: caret };
+      },
+      insertText: (text: string) => {
+        // Read the offsets BEFORE taking focus: focusing can collapse the
+        // selection to the start of the element in some engines, and the point
+        // of this path is to insert where the caret was left.
+        const offsets = selectionOffsets();
+        hostRef.current?.focus();
+        replaceRange(offsets.start, offsets.end, text);
       },
     }),
-    [applySelection],
+    [applySelection, replaceRange, selectionOffsets],
   );
 
   // Re-project when — and only when — the DOM and the value disagree.
@@ -401,6 +443,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
       selection && host.contains(selection.focusNode)
         ? offsetOf(host, selection.focusNode, selection.focusOffset)
         : next.length;
+    lastSelectionRef.current = { start: caret, end: caret };
     onChangeRef.current(next, caret);
   }, []);
 
@@ -423,7 +466,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
         return;
       }
       const offsets = selectionOffsets();
-      if (!offsets || offsets.start !== offsets.end) {
+      if (offsets.start !== offsets.end) {
         return;
       }
       const target =
@@ -453,6 +496,10 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
       if (!host.contains(selection.focusNode)) {
         return;
       }
+      const live = liveOffsets();
+      if (live) {
+        lastSelectionRef.current = live;
+      }
       onSelectionChangeRef.current?.(
         offsetOf(host, selection.focusNode, selection.focusOffset),
         selection.isCollapsed,
@@ -460,7 +507,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     };
     document.addEventListener("selectionchange", handler);
     return () => document.removeEventListener("selectionchange", handler);
-  }, []);
+  }, [liveOffsets]);
 
   useEffect(() => {
     if (autoFocus) {
@@ -478,9 +525,6 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
       // depending on the engine; done here it is one character in the model.
       if (e.key === "Enter") {
         const offsets = selectionOffsets();
-        if (!offsets) {
-          return;
-        }
         e.preventDefault();
         replaceRange(offsets.start, offsets.end, "\n");
       }
@@ -500,9 +544,6 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
         return;
       }
       const offsets = selectionOffsets();
-      if (!offsets) {
-        return;
-      }
       replaceRange(offsets.start, offsets.end, text);
     },
     [onPaste, replaceRange, selectionOffsets],
@@ -537,7 +578,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
   const handleCut = useCallback(
     (e: React.ClipboardEvent) => {
       const offsets = selectionOffsets();
-      if (!writeSelection(e) || !offsets) {
+      if (!writeSelection(e)) {
         return;
       }
       replaceRange(offsets.start, offsets.end, "");

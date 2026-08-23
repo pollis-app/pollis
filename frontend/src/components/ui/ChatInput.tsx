@@ -35,7 +35,7 @@ import {
   type ShortcodeEntry,
 } from "../Emoji/emojiShortcodeQuery";
 import { useShortcodeEntries } from "../Emoji/useShortcodeEntries";
-import { InlineGhost } from "./InlineGhost";
+import { RichTextInput, type RichTextInputHandle } from "./RichTextInput";
 import { MentionSuggestList } from "./MentionSuggestList";
 import { EmojiSuggestList } from "./EmojiSuggestList";
 
@@ -219,24 +219,17 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   const [isFocused, setIsFocused] = useState(false);
   // Lightbox for previewing attachments before send.
   const [expandedPreview, setExpandedPreview] = useState<{ url: string; type: "image" | "video" } | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<RichTextInputHandle>(null);
 
   // Insert emoji text at the caret, not at the end — appending would be wrong
   // the moment someone picks an emoji mid-sentence, which is the common case.
+  //
+  // The splice itself lives in the input, which is the only thing that knows
+  // where the caret was: a `<textarea>` kept `selectionStart` across the blur
+  // the picker click causes, and a `contentEditable` does not. The resulting
+  // `onChange` runs the same draft / typing-indicator writes as a keystroke.
   const insertAtCursor = useCallback((text: string) => {
-    const el = textareaRef.current;
-    setMessage((prev) => {
-      const start = el?.selectionStart ?? prev.length;
-      const end = el?.selectionEnd ?? prev.length;
-      const next = prev.slice(0, start) + text + prev.slice(end);
-      // Restore the caret after React has painted the new value.
-      requestAnimationFrame(() => {
-        const caret = start + text.length;
-        el?.focus();
-        el?.setSelectionRange(caret, caret);
-      });
-      return next;
-    });
+    inputRef.current?.insertText(text);
   }, []);
 
   // Close preview lightbox on Escape.
@@ -257,7 +250,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   const prevExpandedPreviewRef = useRef(expandedPreview);
   useEffect(() => {
     if (prevExpandedPreviewRef.current && !expandedPreview) {
-      textareaRef.current?.focus();
+      inputRef.current?.focus();
     }
     prevExpandedPreviewRef.current = expandedPreview;
   }, [expandedPreview]);
@@ -273,7 +266,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   const prevAttachmentLengthRef = useRef(attachments.length);
   useEffect(() => {
     if (prevAttachmentLengthRef.current !== attachments.length) {
-      textareaRef.current?.focus();
+      inputRef.current?.focus();
     }
     prevAttachmentLengthRef.current = attachments.length;
   }, [attachments.length]);
@@ -383,7 +376,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       // Native file dialog steals focus and the webview doesn't restore
       // it — pull focus back to the chat input on every exit path
       // (success, cancel, or error) so the user can keep typing.
-      textareaRef.current?.focus();
+      inputRef.current?.focus();
     }
   }, [attachments.length, maxAttachments, handlePaths, t]);
 
@@ -462,7 +455,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   useImperativeHandle(ref, () => ({
     addFiles: (files: File[]) => { files.forEach(handleBrowserFile); },
-    focus: () => { textareaRef.current?.focus(); },
+    focus: () => { inputRef.current?.focus(); },
   }), [handleBrowserFile]);
 
   // Register as the active file-drop target while mounted, so AppShell only
@@ -485,13 +478,10 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     return () => window.removeEventListener("pollis:pathdrop", handler);
   }, [handlePaths]);
 
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      const maxH = 24 * 6;
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, maxH)}px`;
-    }
-  }, [message]);
+  // The auto-grow effect that used to measure `scrollHeight` on every keystroke
+  // is gone: a `contentEditable` sizes to its content on its own, so the clamp
+  // is `min-height` / `max-height` on the element (see the input row below) and
+  // the six-line ceiling is the same six lines it always was.
 
   const hasLoadingAttachments = attachments.some((a) => a.loading);
 
@@ -506,14 +496,15 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   const skin = useSkin();
   const mentionCandidates = useMentionCandidates();
   const [caret, setCaret] = useState(0);
+  // Whether the selection is a caret rather than a range. The ArrowUp
+  // hand-off needs it, and a contentEditable has no `selectionStart ===
+  // selectionEnd` to read it back off.
+  const [caretCollapsed, setCaretCollapsed] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   // Esc hides the suggestions for the current token; typing brings them back.
   const [mentionDismissed, setMentionDismissed] = useState(false);
-  // Mirrors the textarea's scroll so the terminal ghost stays aligned once
-  // the message wraps past the visible box.
-  const [scrollTop, setScrollTop] = useState(0);
   // Where to put the caret after a completion is inserted. Applied in the
-  // effect below, once React has committed the new value to the textarea.
+  // effect below, once React has committed the new value to the input.
   const pendingCaretRef = useRef<number | null>(null);
 
   const mentionQuery = mentionDismissed ? null : mentionQueryAt(message, caret);
@@ -585,13 +576,16 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
 
   useEffect(() => {
     const pending = pendingCaretRef.current;
-    if (pending === null || !textareaRef.current) {
+    if (pending === null || !inputRef.current) {
       return;
     }
     pendingCaretRef.current = null;
-    textareaRef.current.setSelectionRange(pending, pending);
-    textareaRef.current.focus();
+    // A passive effect, so it runs after RichTextInput's layout effect has
+    // rebuilt the projection — the offset it is given is meaningless against
+    // the previous DOM.
+    inputRef.current.setSelection(pending);
     setCaret(pending);
+    setCaretCollapsed(true);
   }, [message]);
 
   const acceptMention = useCallback((candidate: MentionCandidate) => {
@@ -636,7 +630,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     // Do NOT revoke preview blob URLs here — they may still be referenced by
     // optimistic message stubs in React Query cache. Let them be GC'd naturally.
     setAttachments([]);
-    textareaRef.current?.focus();
+    inputRef.current?.focus();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -729,15 +723,16 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     // LOGICAL line (no \n before the caret) — a soft-wrapped long first line
     // counts wholesale, which errs toward the REPL behavior over caret
     // movement, exactly like a shell with a wrapped prompt line.
+    //
+    // Read off the tracked selection rather than the element: a contentEditable
+    // has no `selectionStart`/`selectionEnd`, and `caret` / `caretCollapsed`
+    // are the same two numbers kept by RichTextInput's `selectionchange`.
     if (e.key === "ArrowUp" && onHistoryUp) {
-      const el = e.currentTarget as HTMLTextAreaElement;
-      const caret = el.selectionStart ?? 0;
-      const collapsed = el.selectionEnd === caret;
       const onFirstLine = !message.slice(0, caret).includes("\n");
-      if (collapsed && (message === "" || onFirstLine)) {
+      if (caretCollapsed && (message === "" || onFirstLine)) {
         if (onHistoryUp()) {
           e.preventDefault();
-          el.blur();
+          inputRef.current?.blur();
           return;
         }
       }
@@ -749,7 +744,10 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     }
   };
 
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+  // Returns true when the paste was a file and the text path must not run.
+  // RichTextInput has already prevented the browser's own (HTML) paste by the
+  // time this is called, so all this decides is whether plain text follows.
+  const handlePaste = useCallback((e: React.ClipboardEvent): boolean => {
     // Screenshots and images copied from web content come through as
     // DataTransferItem files — handle these synchronously.
     const items = e.clipboardData.items;
@@ -761,14 +759,13 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
       }
     }
     if (hasFiles) {
-      e.preventDefault();
-      return;
+      return true;
     }
 
     // For files copied from the OS file manager, WebKit doesn't expose the
     // clipboard data — go through the bridge to read it via the Rust OS
-    // clipboard command. We don't prevent default here so normal text paste
-    // still works alongside.
+    // clipboard command. This probe is async and does not claim the paste, so
+    // the text half is inserted alongside exactly as it was before.
     readClipboardFiles().then((paths) => {
       if (paths.length > 0) {
         handlePaths(paths);
@@ -787,6 +784,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         }
       }).catch(() => { /* no image on clipboard */ });
     }).catch(() => { /* clipboard unreadable */ });
+    return false;
   }, [handleBrowserFile, handlePaths]);
 
   const removeAttachment = useCallback((id: string) => {
@@ -911,16 +909,19 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
           className="h-8 flex items-center"
         />
 
-        {/* Positioning context for the terminal skin's inline ghost, which
-            mirrors this exact box. */}
+        {/* The composer's field. The ghost lives INSIDE it now (see
+            RichTextInput), so this box is no longer a positioning context for
+            an absolutely-positioned mirror — the mirror is gone.
+
+            At most one completion track ever offers a ghost (the two queries
+            are mutually exclusive, see the precedence note above), so the one
+            ghost slot carries both and keeps each track's own testid. */}
         <div className="relative flex-1 min-w-0">
-          <textarea
-            ref={textareaRef}
-            data-testid="message-input"
+          <RichTextInput
+            ref={inputRef}
+            testId="message-input"
             value={message}
-            onChange={(e) => {
-              const next = e.target.value;
-              const nextCaret = e.target.selectionStart ?? next.length;
+            onChange={(next, nextCaret) => {
               // Any edit re-opens suggestions that Esc had hidden.
               setMentionDismissed(false);
               setEmojiDismissed(false);
@@ -953,9 +954,12 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
               setDraft(draftKey, next);
               onValueChange?.(next);
               setCaret(nextCaret);
+              setCaretCollapsed(true);
             }}
-            onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
-            onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+            onSelectionChange={(nextCaret, collapsed) => {
+              setCaret(nextCaret);
+              setCaretCollapsed(collapsed);
+            }}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             onKeyDown={handleKeyDown}
@@ -963,38 +967,24 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
             placeholder={resolvedPlaceholder}
             disabled={disabled}
             autoFocus={autoFocus}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            rows={1}
-            className={`chat-input-textarea w-full px-2 py-1 resize-none font-mono text-sm transition-colors border-0${isFocused ? " is-focused" : ""}`}
+            ghost={ghostText || emojiGhostText}
+            ghostTestId={ghostText ? "mention-ghost" : "emoji-ghost"}
+            ghostClassName={isFocused ? "text-bg opacity-60" : "text-muted"}
+            className={`chat-input-textarea w-full px-2 py-1 font-mono text-sm transition-colors border-0 whitespace-pre-wrap break-words overflow-y-auto${isFocused ? " is-focused" : ""}`}
             style={{
               lineHeight: "1.5rem",
               minHeight: "1.5rem",
+              // Six lines, the same ceiling the measured auto-grow enforced —
+              // in rem now, so it tracks the user's font size instead of
+              // assuming a 16px root.
+              maxHeight: "9rem",
               borderRadius: "4px",
               background: isFocused ? "var(--c-accent)" : "var(--c-hover)",
               color: isFocused ? "var(--c-bg)" : "var(--c-text)",
               outline: "none",
               opacity: disabled ? 0.5 : 1,
             }}
-            aria-label={t("composer.inputLabel")}
-          />
-          {/* Two ghosts, at most one of which is ever non-empty — the
-              component renders nothing without ghost text. */}
-          <InlineGhost
-            value={message}
-            ghost={ghostText}
-            focused={isFocused}
-            scrollTop={scrollTop}
-            testId="mention-ghost"
-          />
-          <InlineGhost
-            value={message}
-            ghost={emojiGhostText}
-            focused={isFocused}
-            scrollTop={scrollTop}
-            testId="emoji-ghost"
+            ariaLabel={t("composer.inputLabel")}
           />
         </div>
 

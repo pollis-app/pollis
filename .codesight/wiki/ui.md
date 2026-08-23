@@ -574,7 +574,6 @@ tone already stored by the picker; there is no tone syntax in the composer.
 - **EmojiSuggestList** — props: entries, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/EmojiSuggestList.tsx`
 - **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The centred "nothing here" line; hand-rolled a dozen times before it existed (#874). Not a loading state.
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick — `frontend/src/components/ui/InlineAudioPlayer.tsx`
-- **InlineGhost** — props: value, ghost, focused, scrollTop, testId — `frontend/src/components/ui/InlineGhost.tsx`
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
 - **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874).
 - **LoadingSpinner** — props: size, className — `frontend/src/components/ui/LoaderSpinner.tsx`
@@ -586,6 +585,7 @@ tone already stored by the picker; there is no tone syntax in the composer.
 - **PresenceAvatar** — props: userId, avatarKey, size, alt, testId, variant — `frontend/src/components/ui/PresenceAvatar.tsx`
 - **PresenceDot** — props: userId, testId — `frontend/src/components/ui/PresenceDot.tsx`. Bare online/offline dot for rows with no avatar to anchor it (terminal sidebar DMs, right-panel members).
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
+- **RichTextInput** — props: value, onChange, onSelectionChange, onKeyDown, onPaste, onFocus, onBlur, placeholder, disabled, autoFocus, className, style, ariaLabel, testId, ghost, ghostTestId, ghostClassName — `frontend/src/components/ui/RichTextInput.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
 - **Switch** — props: label, checked, onChange, disabled, className, id, description — `frontend/src/components/ui/Switch.tsx`
 - **TerminalMenu** — props: items, onEsc, className, autoFocus — `frontend/src/components/ui/TerminalMenu.tsx`
