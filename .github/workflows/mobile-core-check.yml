@@ -94,8 +94,49 @@ jobs:
       # The macOS runner ships Xcode + the iPhoneOS SDK; cargo/cc pick them up
       # via xcrun with no extra env. Gates the `target_os = "ios"` branches
       # (ios_kek Keychain seal, mobile stubs) exactly like the android job.
+      #
+      # `build`, NOT `check`: mobile links a vendored OpenSSL + SQLCipher
+      # (rusqlite's `bundled-sqlcipher-vendored-openssl`), and a whole class of
+      # iOS breakage lives in the LINK, which `cargo check` never reaches.
+      # Building emits the cdylib and staticlib the xcframework is cut from, so
+      # the link is exercised. Android gets this coverage from the android-build
+      # job below; iOS has no artifact job, so it has to come from here.
       - name: Cross-compile pollis-core for ios
-        run: cargo check -p pollis-core --no-default-features --target aarch64-apple-ios
+        run: cargo build -p pollis-core --no-default-features --target aarch64-apple-ios
+
+      # The deployment target has to survive into the artifact, not merely sit
+      # in .cargo/config.toml looking correct. Both halves of that have failed:
+      # the value was once written to a `[target.<triple>.env]` table, which
+      # cargo silently ignores (it parses as a build-script `links` override for
+      # a library named "env"), leaving the real target at rustc's 10.0 default
+      # while the file claimed otherwise.
+      #
+      # It matters because cc-rs builds the vendored OpenSSL 3.5 + SQLCipher
+      # against the current iPhoneOS SDK. Link those objects at 10.0 and the
+      # release build dies on `___chkstk_darwin`, a libSystem stub that only
+      # exists from iOS 12. Note the failure is RELEASE-ONLY — the debug link
+      # above survives 10.0 quite happily — so the build step alone would not
+      # have caught it, and a release build is too heavy for a path-filtered
+      # gate. Reading the min-version straight off the artifact costs
+      # milliseconds and catches it in either profile.
+      - name: Assert the iOS deployment target reached the artifact
+        run: |
+          want=$(grep -E '^IPHONEOS_DEPLOYMENT_TARGET' .cargo/config.toml \
+            | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          otool -l target/aarch64-apple-ios/debug/libpollis_core.dylib > /tmp/otool.txt
+          got=$(awk '
+            /LC_BUILD_VERSION/        { mode="build"; next }
+            /LC_VERSION_MIN_IPHONEOS/ { mode="min";   next }
+            mode=="build" && $1=="minos"   { print $2; found=1; exit }
+            mode=="min"   && $1=="version" { print $2; found=1; exit }
+            END { if (!found) print "UNKNOWN" }' /tmp/otool.txt)
+          echo "expected=$want actual=$got"
+          if [ "$want" != "$got" ]; then
+            echo "::error::iOS deployment target did not reach the artifact." \
+              "IPHONEOS_DEPLOYMENT_TARGET must be in the GLOBAL [env] table of" \
+              ".cargo/config.toml; cargo has no [target.<triple>.env]."
+            exit 1
+          fi
 
   # Config/dependency health of the Expo project. Cheap (no Rust, no NDK, no
   # Gradle) so it gives fast independent signal and never holds up the APK
