@@ -18,7 +18,16 @@ import { invoke } from "../../bridge";
  */
 const inFlight = new Map<string, Promise<string>>();
 
-function resolveEmojiUrl(contentHash: string): Promise<string> {
+/**
+ * The promise for one hash's URL, shared across every caller.
+ *
+ * Exported because the composer's rich input builds its emoji nodes
+ * imperatively (a `contentEditable`'s children cannot be React's, or the caret
+ * dies on every reconciliation), so it has no component to hang `useEmojiImage`
+ * off — but it must hit the same in-flight cache, or a message full of the same
+ * emoji would resolve it once per node.
+ */
+export function resolveEmojiUrl(contentHash: string): Promise<string> {
   const cached = inFlight.get(contentHash);
   if (cached) {
     return cached;

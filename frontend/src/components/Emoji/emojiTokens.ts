@@ -74,6 +74,18 @@ export function splitEmojiSegments(text: string): EmojiSegment[] {
   return segments;
 }
 
+/**
+ * True when `text` is EXACTLY one custom-emoji reference and nothing else.
+ *
+ * `hasEmojiTokens` asks whether a message contains one; this asks whether a
+ * string *is* one, which is what the rich composer needs before it will trust
+ * an element's `data-emoji-token` attribute and copy it into the wire text. An
+ * anchored match, so neither leading nor trailing characters can ride along.
+ */
+export function isEmojiToken(text: string): boolean {
+  return /^<:[a-z0-9_]{2,32}:[0-9a-f]{64}>$/.test(text);
+}
+
 /** True when `text` carries at least one custom-emoji reference. */
 export function hasEmojiTokens(text: string): boolean {
   // A fresh regex: the module-level one is stateful because of /g.
