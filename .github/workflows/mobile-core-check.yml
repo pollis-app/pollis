@@ -173,6 +173,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Reclaim runner disk BEFORE anything writes to it. This job is the
+      # heaviest on the repo: a 3-ABI cargo-ndk build of pollis-core, each ABI
+      # carrying a vendored OpenSSL + SQLCipher, plus the NDK, an Expo prebuild
+      # and a Gradle release. `:app:packageRelease` is the last step and the one
+      # that runs out of room — and it fails as a bare
+      # `PackageAndroidArtifact$IncrementalSplitterRunnable` with NO message,
+      # which reads like a packaging bug and is not one. A cache miss on the
+      # Rust layer (any .cargo/config.toml edit invalidates Swatinem/rust-cache)
+      # is enough to tip it over, so the job cannot depend on a warm cache to
+      # fit. ubuntu-latest ships ~25 GB of preinstalled toolchains this job
+      # never touches; dropping them is the difference between fitting and not.
+      - name: Free runner disk space
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+            /opt/ghc /usr/local/.ghcup /usr/local/share/powershell \
+            /usr/share/swift /usr/local/share/boost || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          echo "after:"; df -h / | tail -1
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
