@@ -462,7 +462,19 @@ function TextChat(props: ChatViewProps = {}) {
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingVertical: 4 }}
+        // `flexGrow` + `justifyContent` anchor a SHORT thread to the visual
+        // top. Without them an inverted list pins its content to the visual
+        // bottom, so a new or nearly-empty conversation renders its handful of
+        // messages jammed against the composer with a large void under the
+        // header. Note the value looks inverted because it is: `inverted`
+        // flips the list, so `flex-end` in the flipped axis is the visual TOP.
+        // A thread taller than the viewport is unaffected — `flexGrow` only
+        // does anything while the content is shorter than the list.
+        contentContainerStyle={{
+          paddingVertical: 4,
+          flexGrow: 1,
+          justifyContent: "flex-end",
+        }}
         // With `inverted`, the "end" is the visual top — the oldest loaded
         // message. RN re-evaluates onEndReached on content-size changes as
         // well as scroll, so a prepend that leaves no scroll offset still
