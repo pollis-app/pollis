@@ -6,10 +6,12 @@ name: CLI Release (pollis-tui)
 # `cli/` prefix in R2, and never touches the desktop's install.sh /
 # latest.json / updater manifests.
 #
-# v1 is `workflow_dispatch` only — trigger it by hand to validate and
-# deploy without cutting a git tag or riding a full desktop release. A
-# `v*` tag trigger is intentionally NOT wired up yet (that would couple
-# CLI publishing to every desktop release before this pipeline is proven).
+# Triggers: a `v*` tag (so the CLI ships in lockstep with every desktop
+# release — #1011: staying dispatch-only let the published CLI drift 78
+# core files behind the desktop, still embedding a credential #988 had
+# removed), or `workflow_dispatch` to publish/backfill a version by hand
+# without cutting a tag. The tag trigger was withheld until the pipeline
+# was proven; it has shipped several times since.
 #
 # Secret discipline mirrors desktop-release.yml exactly: since #987 the shipped
 # client holds NO database credential of any kind. It talks only to the Delivery
@@ -17,6 +19,9 @@ name: CLI Release (pollis-tui)
 # does not link libsql — so there is no token to leak out of a binary and no
 # connection for a future read to open.
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
@@ -28,10 +33,13 @@ permissions:
   contents: read
 
 jobs:
-  # Resolve the version once so every build/publish job agrees. Uses the
-  # dispatch input when given, else the [workspace.package] version in the
-  # root Cargo.toml (the binary does not embed CARGO_PKG_VERSION today, so
-  # this drives artifact naming and the R2 paths, not the binary itself).
+  # Resolve the version once so every build/publish job agrees. Tag pushes
+  # use the tag itself (`v1.10.2` → `1.10.2`, matching the desktop release
+  # cut from the same tag); dispatches use the input when given, else the
+  # [workspace.package] version in the root Cargo.toml (the binary does not
+  # embed CARGO_PKG_VERSION today, so this drives artifact naming and the
+  # R2 paths, not the binary itself — beware that the workspace version is
+  # a placeholder, so give real dispatches an explicit version).
   resolve-version:
     runs-on: ubuntu-latest
     outputs:
@@ -42,7 +50,11 @@ jobs:
       - name: Resolve version
         id: resolve
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
           if [ -z "$VERSION" ]; then
             VERSION=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
           fi

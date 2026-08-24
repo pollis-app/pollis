@@ -63,7 +63,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 
 ### 2. CLI / terminal client (`pollis`)
 - **From:** `pollis-tui/` + `pollis-core/` (headless, no Tauri)
-- **Pipeline:** `.github/workflows/cli-release.yml` — `workflow_dispatch` (version input). Builds per-platform binaries (Linux glibc-dynamic, macOS aarch64, Windows), bakes prod creds via `option_env!` (read-only Turso token only).
+- **Pipeline:** `.github/workflows/cli-release.yml` — a `v*` tag push (in lockstep with the desktop release, #1011) or `workflow_dispatch` (explicit version input — the workspace Cargo.toml version it falls back to is a placeholder). Builds per-platform binaries (Linux glibc-dynamic, macOS aarch64, Windows). Bakes prod service *endpoints* (DS, R2, LiveKit URLs) via `option_env!`; since #987 it bakes **no database credential of any kind** — the client talks only to the Delivery Service.
 - **Ships to:** `cdn.pollis.com/releases/cli/<version>/…` + the `https://cdn.pollis.com/releases/cli/latest.json` manifest (which `cli-install.sh` fetches) + `cli-install.sh`. Install: `curl -fsSL https://cdn.pollis.com/releases/cli-install.sh | bash`.
 
 ### 3. Marketing website
