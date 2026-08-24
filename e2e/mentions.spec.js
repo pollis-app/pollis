@@ -108,6 +108,18 @@ async function openChannel(page, skin) {
 
 const composer = (page) => page.getByTestId("message-input");
 
+/**
+ * What the composer thinks the message is.
+ *
+ * The composer is a contentEditable now (a custom emoji has to render as an
+ * image while you type, which a `<textarea>` cannot do), so it has no `.value`
+ * for `toHaveValue` to read. `data-value` is the serialized wire text the
+ * component mirrors onto the element on every change — the exact string a send
+ * would put on the wire.
+ */
+const expectComposerValue = (page, value) =>
+  expect(composer(page)).toHaveAttribute("data-value", value);
+
 test.describe("terminal skin", () => {
   test("ghost-completes an @mention on Tab, with no pop-over", async ({ page }) => {
     await openChannel(page, "terminal");
@@ -128,7 +140,7 @@ test.describe("terminal skin", () => {
 
     // Tab accepts it, leaving a completed mention and a trailing space.
     await composer(page).press("Tab");
-    await expect(composer(page)).toHaveValue("hey @dana ");
+    await expectComposerValue(page, "hey @dana ");
     await expect(page.getByTestId("mention-ghost")).toHaveCount(0);
   });
 
@@ -144,7 +156,7 @@ test.describe("terminal skin", () => {
 
     // With no suggestion on offer, Enter goes back to sending.
     await composer(page).press("Enter");
-    await expect(composer(page)).toHaveValue("");
+    await expectComposerValue(page, "");
   });
 
   test("renders your own mention stronger than someone else's", async ({ page }) => {
@@ -187,7 +199,7 @@ test.describe("refined skin", () => {
     await expect(page.getByTestId("mention-option-dave")).toHaveAttribute("data-active", "true");
     await composer(page).press("Enter");
 
-    await expect(composer(page)).toHaveValue("hey @dave ");
+    await expectComposerValue(page, "hey @dave ");
     await expect(page.getByTestId("mention-suggest-list")).toHaveCount(0);
   });
 
@@ -199,14 +211,14 @@ test.describe("refined skin", () => {
     await expect(page.getByTestId("mention-suggest-list")).toBeVisible();
 
     await composer(page).press("Tab");
-    await expect(composer(page)).toHaveValue("hey @dana ");
+    await expectComposerValue(page, "hey @dana ");
 
     // Re-open, then dismiss with Escape — the text must survive untouched.
     await composer(page).pressSequentially("@da");
     await expect(page.getByTestId("mention-suggest-list")).toBeVisible();
     await composer(page).press("Escape");
     await expect(page.getByTestId("mention-suggest-list")).toHaveCount(0);
-    await expect(composer(page)).toHaveValue("hey @dana @da");
+    await expectComposerValue(page, "hey @dana @da");
   });
 
   test("renders your own mention stronger than someone else's", async ({ page }) => {

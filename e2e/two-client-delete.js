@@ -145,7 +145,7 @@ async function waitForMessage(browser, token, timeoutMs) {
 }
 
 async function sendMessage(browser, text) {
-  await h.setTestIdValue(browser, "message-input", text);
+  await h.setComposerText(browser, text);
   await h.clickTestId(browser, "message-send-button");
 }
 

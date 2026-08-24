@@ -406,7 +406,7 @@ shape, so learning one is learning the other:
 | trigger | `@` at a word start | `:` at a word start |
 | parser | `utils/mentions.ts` → `mentionQueryAt` | `components/Emoji/emojiShortcodeQuery.ts` → `shortcodeQueryAt` |
 | refined skin | `ui/MentionSuggestList` above the composer | `ui/EmojiSuggestList`, same anchoring |
-| terminal skin | `ui/InlineGhost`, Tab accepts | `ui/InlineGhost`, Tab accepts |
+| terminal skin | ghost node inside `ui/RichTextInput`, Tab accepts | same ghost node, Tab accepts |
 | candidates | the conversation's roster | custom emoji the user may send, then the standard table |
 
 **A trigger only opens at the start of the string or after whitespace.** That one
@@ -448,6 +448,56 @@ itself imports nothing but a type, which is also what makes it unit-testable und
 
 **Skin-tone variants (`:wave::skin-tone-3:`) are out of scope.** Completions use the
 tone already stored by the picker; there is no tone syntax in the composer.
+
+### The composer is a `contentEditable`, not a `<textarea>`
+
+`ui/RichTextInput` replaced the composer's textarea so that a custom emoji renders
+as an **inline image while you type** instead of showing seventy characters of
+`<:shortcode:content_hash>`. Sent messages always rendered correctly
+(`Emoji/EmojiText`); this was only ever an input problem.
+
+**The value is still one plain string.** That is the load-bearing decision. The
+DOM is a *projection* of the wire text and is read back into it after every edit
+(`ui/richInputModel.ts`), so mentions, `:shortcode:` completion, drafts, the
+`@all` hint, the history hand-off and the send path all still work on
+`(text, caret)` exactly as they did — none of them learned a document model, and
+no editor dependency was added (no Lexical, Slate or ProseMirror; the startup
+chunk is unchanged).
+
+**Serialization is the contract.** A text node contributes its characters; an
+element contributes its `data-emoji-token` attribute, and only when that attribute
+parses as a token; the ghost contributes nothing; a trailing `<br>` is an editing
+host's filler and contributes nothing. No branch emits an element's markup, so a
+`<`, `>` or `&` can reach the wire only by having been typed. Paste is
+intercepted and reads `text/plain` only — the `text/html` flavour is never parsed.
+`frontend/tests/rich-input-model.test.ts` pins the round trip, the near-token
+(`<:oops:>` stays literal), the forged-attribute case and the paste rules.
+
+**The children are built imperatively, not by React.** React reconciliation of a
+`contentEditable`'s children destroys the caret and there is no way to opt out.
+The element renders empty and the component owns everything inside it, which is
+also why the DOM is rebuilt *only* when the value disagrees with what was last
+serialized out of it — ordinary typing rebuilds nothing, so IME composition and
+the caret survive.
+
+**The inline ghost moved inside the editable.** The old `ui/InlineGhost` was an
+absolutely-positioned invisible mirror of the textarea; it worked only because it
+rendered identical text, and an emoji image of a different width breaks the
+line-wrapping it depends on. The completion is now a `contenteditable=false` span
+appended after the caret — which is exactly right, since the caller only offers a
+ghost with the caret at end-of-value. Both tracks keep their own testids
+(`mention-ghost`, `emoji-ghost`).
+
+**A caret next to an emoji is decided against the model, never the engine.**
+Backspace and forward-delete remove the token's whole byte range, because Chrome,
+WebKit and Gecko each do something different beside a `contenteditable=false`
+element. Arrow keys and drag-selection are left to the browser, which treats the
+node as an atom on its own.
+
+**Browser specs read `data-value`, not `.value`.** A `contentEditable` has no
+`.value` for Playwright's `toHaveValue`, so the component mirrors the serialized
+wire text onto that attribute on every change; `e2e/lib/harness.js` grows
+`setComposerText` for the same reason on the WebDriver side.
 
 ## Components
 
@@ -574,7 +624,6 @@ tone already stored by the picker; there is no tone syntax in the composer.
 - **EmojiSuggestList** — props: entries, activeIndex, query, onSelect, onHover — `frontend/src/components/ui/EmojiSuggestList.tsx`
 - **EmptyState** — props: children, testId, messageTestId, tone, background, actions — `frontend/src/components/ui/EmptyState.tsx`. The centred "nothing here" line; hand-rolled a dozen times before it existed (#874). Not a loading state.
 - **InlineAudioPlayer** — props: src, title, className, autoPlay, onClick — `frontend/src/components/ui/InlineAudioPlayer.tsx`
-- **InlineGhost** — props: value, ghost, focused, scrollTop, testId — `frontend/src/components/ui/InlineGhost.tsx`
 - **InputOtp** — props: length, value, onChange, disabled, autoFocus, mask — `frontend/src/components/ui/InputOtp.tsx`
 - **LinkifiedText** — props: text — `frontend/src/components/ui/LinkifiedText.tsx`. URL detection and `ensureProtocol` live in `frontend/src/utils/links.ts`, shared with `MediaLinkUnfurl`; the `/g` regex is reset inside the single shared scanner, which is what makes it safe to share (#874).
 - **LoadingSpinner** — props: size, className — `frontend/src/components/ui/LoaderSpinner.tsx`
@@ -586,6 +635,7 @@ tone already stored by the picker; there is no tone syntax in the composer.
 - **PresenceAvatar** — props: userId, avatarKey, size, alt, testId, variant — `frontend/src/components/ui/PresenceAvatar.tsx`
 - **PresenceDot** — props: userId, testId — `frontend/src/components/ui/PresenceDot.tsx`. Bare online/offline dot for rows with no avatar to anchor it (terminal sidebar DMs, right-panel members).
 - **RangeSlider** — props: label, value, onChange, min, max, step, disabled, className, id, sublabel, description — `frontend/src/components/ui/RangeSlider.tsx`
+- **RichTextInput** — props: value, onChange, onSelectionChange, onKeyDown, onPaste, onFocus, onBlur, placeholder, disabled, autoFocus, className, style, ariaLabel, testId, ghost, ghostTestId, ghostClassName — `frontend/src/components/ui/RichTextInput.tsx`
 - **ScrambleText** — props: text, placeholderLength, typeSpeed, scrambleInterval, className — `frontend/src/components/ui/ScrambleText.tsx`
 - **Switch** — props: label, checked, onChange, disabled, className, id, description — `frontend/src/components/ui/Switch.tsx`
 - **TerminalMenu** — props: items, onEsc, className, autoFocus — `frontend/src/components/ui/TerminalMenu.tsx`

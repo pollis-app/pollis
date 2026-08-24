@@ -323,6 +323,24 @@ input[type="range"]::-moz-range-thumb {
     color: color-mix(in srgb, var(--c-bg) 65%, transparent);
   }
 
+  /* The composer is a contentEditable now (RichTextInput), which has no
+     ::placeholder of its own — the same two colours, keyed on the `data-empty`
+     the component writes rather than on `:empty`, because an editing host keeps
+     a filler `<br>` inside itself and is therefore never `:empty`. */
+  .chat-input-textarea[data-empty="true"]::before {
+    content: attr(data-placeholder);
+    color: var(--c-text-muted);
+    pointer-events: none;
+    /* Out of flow, so the caret sits at the start of the line rather than after
+       the hint. */
+    position: absolute;
+    inset-inline-start: 0.5rem;
+  }
+
+  .chat-input-textarea.is-focused[data-empty="true"]::before {
+    color: color-mix(in srgb, var(--c-bg) 65%, transparent);
+  }
+
   .pollis-textarea {
     @apply pollis-input resize-none;
   }
@@ -439,6 +457,37 @@ input[type="range"]::-moz-range-thumb {
 }
 
 :root[data-skin="refined"] .chat-input-textarea.is-focused::placeholder {
+  color: var(--c-text-muted);
+}
+
+:root[data-skin="refined"] .chat-input-textarea.is-focused[data-empty="true"]::before {
+  color: var(--c-text-muted);
+}
+
+/* ── Composer's inline custom emoji ──────────────────────────────
+   One atom of the rich input: `contenteditable=false`, so the browser steps
+   over it whole and never puts a caret inside. `user-select: none` keeps a
+   drag-select from ending up half-inside the node; a selection that crosses it
+   still takes the whole element, which is what the serializer needs.
+   Sized in rem, matching CustomEmojiImage, so it tracks the font setting. */
+.rich-input-emoji {
+  display: inline-block;
+  vertical-align: -0.25em;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rich-input-emoji img {
+  display: block;
+  width: 1.375rem;
+  height: 1.375rem;
+  object-fit: contain;
+}
+
+/* The image could not be resolved — deleted emoji, or offline. Degrades to the
+   literal `:shortcode:`, exactly as a sent message does. */
+.rich-input-emoji-fallback {
+  font-family: var(--font-mono);
   color: var(--c-text-muted);
 }
 

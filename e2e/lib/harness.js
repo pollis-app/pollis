@@ -155,6 +155,22 @@ async function setTestIdValue(browser, testId, value) {
   await el.setValue(value);
 }
 
+// The chat composer, which is NOT a form control: it is a contentEditable, so
+// that a custom emoji can render as an inline image while you type. `setValue`
+// only works on inputs and textareas, so this clicks in and types, then waits
+// for the composer's own `data-value` mirror to catch up — which is also the
+// honest signal that the component (not just the DOM) saw the text.
+async function setComposerText(browser, text) {
+  await waitTestId(browser, "message-input");
+  const el = await browser.$('[data-testid="message-input"]');
+  await el.click();
+  await browser.keys([...text]);
+  await browser.waitUntil(
+    async () => (await el.getAttribute("data-value")) === text,
+    { timeout: 15000, timeoutMsg: `composer never reached ${JSON.stringify(text)}` },
+  );
+}
+
 // OTP / PIN: N separate <input maxlength=1> boxes, aria-label="OTP digit K".
 async function typeCode(browser, digits) {
   for (let i = 0; i < digits.length; i++) {
@@ -282,7 +298,7 @@ module.exports = {
   ROOT, UI_PORT, DS_PORT, DS_URL, DS_BIN, APP_BIN, TAURI_DRIVER,
   sleep, reap, waitPort, curl, warmVite, spawnVite, waitViteReady,
   readEnvFile, tursoEnv,
-  present, waitTestId, clickTestId, setTestIdValue, typeCode,
+  present, waitTestId, clickTestId, setTestIdValue, setComposerText, typeCode,
   presentSelector, waitSelector, clickSelector, setSelectorValue,
   clientPorts, startClient,
   makeShot, dumpFailure,

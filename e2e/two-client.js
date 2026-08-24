@@ -247,7 +247,7 @@ async function main() {
 
     // A → send the distinctive message and confirm it landed on A first.
     console.log(`[two-client] A: sending message with token ${token}`);
-    await h.setTestIdValue(A.browser, "message-input", `hello from A ${token}`);
+    await h.setComposerText(A.browser, `hello from A ${token}`);
     await h.clickTestId(A.browser, "message-send-button");
     await waitForMessage(A.browser, token, 30000);
     console.log("[two-client] A: message shown locally");
