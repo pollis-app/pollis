@@ -116,6 +116,71 @@ where
     Ok(Some((epoch, bytes)))
 }
 
+/// Parse a stored `mls_group_info` payload, accepting BOTH wire forms.
+///
+/// Current writers publish the `MlsMessage`-wrapped form (`export_group_info`
+/// and the commit bundle both hand back an `MlsMessageOut`). Rows written by
+/// earlier builds are a **bare `GroupInfo`**, and the two are not
+/// distinguishable by length or by a magic byte — but they are trivially
+/// distinguishable by parse, because the envelope's second field is a
+/// `WireFormat` while a bare `GroupInfo` has a `Ciphersuite` in that position.
+///
+/// That is exactly how this failed in the field, and the error is worth writing
+/// down because it looks like anything but what it is:
+///
+/// ```text
+/// stored group_info envelope failed to deserialize: UnknownValue(82)
+/// ```
+///
+/// `MlsMessageIn` reads `protocol_version` (u16) then `wire_format` (u16). A
+/// bare `GroupInfo` starts `GroupInfoTBS { group_context: GroupContext { .. } }`,
+/// and `GroupContext` starts `protocol_version` (u16) then `ciphersuite` (u16).
+/// So the version matches (`0x0001`, mls10), the reader advances, and reads the
+/// ciphersuite where the wire format should be. `82 == 0x0052 == CS_PQ`. The
+/// number in that error is not corruption and not a version skew: it is this
+/// build's own ciphersuite, being read at the wrong offset.
+///
+/// The consequence was total for an affected device: a device with no local
+/// group recovers by external-joining onto the published GroupInfo, so an
+/// unreadable GroupInfo means the group cannot be rejoined and nothing can be
+/// sent to it — with no error surfaced beyond "failed".
+///
+/// Falling back is safe rather than lenient. Both parses are strict, and the
+/// bare form is tried ONLY after the envelope form fails, so a well-formed
+/// envelope can never be reinterpreted. A payload that is neither still errors,
+/// and now says so with both reasons.
+fn parse_stored_group_info(group_info_bytes: &[u8]) -> Result<VerifiableGroupInfo> {
+    let mut env_reader: &[u8] = group_info_bytes;
+    let envelope_err = match MlsMessageIn::tls_deserialize(&mut env_reader) {
+        Ok(msg_in) => match msg_in.extract() {
+            MlsMessageBodyIn::GroupInfo(gi) => return Ok(gi),
+            other => {
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "expected GroupInfo in mls_group_info, got {:?}",
+                    std::mem::discriminant(&other)
+                )));
+            }
+        },
+        Err(e) => e,
+    };
+
+    // Legacy row: a bare GroupInfo with no MlsMessage envelope.
+    let mut bare_reader: &[u8] = group_info_bytes;
+    match VerifiableGroupInfo::tls_deserialize(&mut bare_reader) {
+        Ok(gi) => {
+            eprintln!(
+                "[mls] stored group_info is the legacy bare-GroupInfo form; accepted. \
+                 It will be republished in the envelope form on the next publish."
+            );
+            Ok(gi)
+        }
+        Err(bare_err) => Err(crate::error::Error::Other(anyhow::anyhow!(
+            "stored group_info failed to deserialize as an MlsMessage envelope \
+             ({envelope_err}) and as a bare GroupInfo ({bare_err})"
+        ))),
+    }
+}
+
 /// Whether the durably-published GroupInfo is stale relative to our local epoch
 /// and must be republished.
 ///
@@ -425,23 +490,8 @@ async fn external_join_attempt(
     // Deserialising the stored GroupInfo touches no crypto, so it happens before
     // (and outside) provider selection — and it is what tells us which suite the
     // group runs, since a recovering device has no local group left to ask.
-    let verifiable_group_info: VerifiableGroupInfo = {
-        let mut env_reader: &[u8] = &group_info_bytes;
-        let msg_in = MlsMessageIn::tls_deserialize(&mut env_reader).map_err(|e| {
-            crate::error::Error::Other(anyhow::anyhow!(
-                "stored group_info envelope failed to deserialize: {e}"
-            ))
-        })?;
-        match msg_in.extract() {
-            MlsMessageBodyIn::GroupInfo(gi) => gi,
-            other => {
-                return Err(crate::error::Error::Other(anyhow::anyhow!(
-                    "expected GroupInfo in mls_group_info, got {:?}",
-                    std::mem::discriminant(&other)
-                )));
-            }
-        }
-    };
+    let verifiable_group_info: VerifiableGroupInfo =
+        parse_stored_group_info(&group_info_bytes)?;
     let suite = verifiable_group_info.ciphersuite();
 
     let (commit_bytes, new_group_info_bytes): (Vec<u8>, Option<Vec<u8>>) = {
@@ -2187,6 +2237,88 @@ impl<'a> MlsDecryptor<'a> {
                 Some((app_msg.into_bytes(), sender_user_id))
             }
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod stored_group_info_parse_tests {
+    use super::parse_stored_group_info;
+    use openmls::prelude::*;
+    use tls_codec::Serialize as _;
+
+    // The exact byte prefix that broke a shipped build. A bare GroupInfo begins
+    // GroupContext { protocol_version: u16, ciphersuite: u16, .. }; the envelope
+    // reader reads protocol_version then WIRE FORMAT, so it consumes 0x0001,
+    // then reads the ciphersuite 0x0052 where a wire format belongs and reports
+    // `UnknownValue(82)`. This encodes the discriminating prefix directly so the
+    // regression is caught by shape, not by a whole-message fixture.
+    const CS_PQ_CODE_POINT: [u8; 2] = [0x00, 0x52];
+
+    // A bare-GroupInfo payload must NOT be mistaken for an envelope, and the
+    // number in that historical error must remain this build's own ciphersuite —
+    // if the suite is ever renumbered, this assert is the reminder that the
+    // legacy rows on the wire still carry the OLD code point and the fallback is
+    // what keeps them readable.
+    #[test]
+    fn pq_ciphersuite_is_the_value_that_looked_like_a_wire_format() {
+        let cs = u16::from(super::super::provider::CS_PQ);
+        assert_eq!(
+            cs.to_be_bytes(),
+            CS_PQ_CODE_POINT,
+            "CS_PQ moved; legacy stored GroupInfo rows still begin with the old \
+             code point, so parse_stored_group_info's fallback must stay"
+        );
+        assert_eq!(
+            cs, 82,
+            "82 is the UnknownValue seen in the field report; it is the \
+             ciphersuite read at the wire-format offset"
+        );
+    }
+
+    // Garbage that is neither form must still fail, and must name both attempts
+    // rather than silently returning something.
+    #[test]
+    fn rejects_a_payload_that_is_neither_form() {
+        let err = parse_stored_group_info(&[0xff, 0xff, 0xff, 0xff])
+            .expect_err("nonsense must not parse as either form");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("MlsMessage envelope") && msg.contains("bare GroupInfo"),
+            "error should report both parse attempts, got: {msg}"
+        );
+    }
+
+    // An empty row is a real possibility (a dropped publish) and must be an
+    // error, never a panic.
+    #[test]
+    fn rejects_empty_payload() {
+        assert!(parse_stored_group_info(&[]).is_err());
+    }
+
+    // Guards the premise of the whole fix: trying the envelope form FIRST can
+    // never swallow a bare GroupInfo, because the value sitting at the second
+    // field differs between them. Asserted against the wire-format space itself
+    // rather than a constructed message — WireFormat is a small enumeration and
+    // the ciphersuite is 0x0052, so the two can never collide.
+    #[test]
+    fn no_wire_format_can_collide_with_the_ciphersuite() {
+        let cs = u16::from(super::super::provider::CS_PQ);
+        for wire_format in [
+            WireFormat::PublicMessage,
+            WireFormat::PrivateMessage,
+            WireFormat::Welcome,
+            WireFormat::GroupInfo,
+            WireFormat::KeyPackage,
+        ] {
+            let encoded = wire_format.tls_serialize_detached().unwrap();
+            assert_eq!(encoded.len(), 2, "wire format is a u16 on the wire");
+            assert_ne!(
+                u16::from_be_bytes([encoded[0], encoded[1]]),
+                cs,
+                "a bare GroupInfo would be indistinguishable from this wire \
+                 format, making the envelope-then-bare probe ambiguous"
+            );
         }
     }
 }
