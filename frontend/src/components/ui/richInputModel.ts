@@ -27,10 +27,61 @@
  *
  * Everything here is pure and DOM-free — `SerializableNode` is the handful of
  * `Node` members the walker touches, which real DOM nodes satisfy structurally
- * and plain objects can satisfy in a test. `frontend/tests/` has no browser.
+ * and plain objects can satisfy in a test. `frontend/tests/` has no browser,
+ * and — the reason this module imports nothing at all — Node's test runner
+ * cannot resolve an extensionless relative import, so every module the unit
+ * tier covers has to stand alone. That is why the token pattern below is a
+ * second copy of `emojiTokens.ts`'s rather than an import of it. The copy is
+ * not left to review: `rich-input-model.test.ts` runs this splitter and
+ * `splitEmojiSegments` over one corpus and fails if they ever disagree about
+ * what a token is.
  */
 
-import { isEmojiToken, splitEmojiSegments } from "../Emoji/emojiTokens";
+/**
+ * `[a-z0-9_]{2,32}` then 64 lowercase hex, same as `emojiTokens.ts` and same as
+ * `parse_emoji_tokens` in `pollis-core/src/commands/emoji.rs`.
+ */
+const TOKEN_RE = /<:([a-z0-9_]{2,32}):([0-9a-f]{64})>/g;
+
+/** One parsed run of the value: ordinary text, or a custom-emoji reference. */
+type ValueSegment =
+  | { kind: "text"; text: string }
+  | { kind: "emoji"; shortcode: string; contentHash: string };
+
+/**
+ * Split wire text into alternating text and token segments.
+ *
+ * Byte-for-byte the same partition `splitEmojiSegments` produces, minus its
+ * "always return at least one segment" convenience, which the projection does
+ * not want — an empty value must project to no text node at all.
+ */
+function splitValue(text: string): ValueSegment[] {
+  const segments: ValueSegment[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(TOKEN_RE)) {
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      segments.push({ kind: "text", text: text.slice(cursor, start) });
+    }
+    segments.push({ kind: "emoji", shortcode: match[1], contentHash: match[2] });
+    cursor = start + match[0].length;
+  }
+  if (cursor < text.length) {
+    segments.push({ kind: "text", text: text.slice(cursor) });
+  }
+  return segments;
+}
+
+/**
+ * True when `text` is EXACTLY one custom-emoji reference and nothing else.
+ *
+ * Anchored, so neither leading nor trailing characters can ride along. This is
+ * what the serializer checks before it will trust an element's
+ * `data-emoji-token` and copy it into the wire text.
+ */
+export function isEmojiToken(text: string): boolean {
+  return /^<:[a-z0-9_]{2,32}:[0-9a-f]{64}>$/.test(text);
+}
 
 /** Carries a custom emoji node's exact wire token. The atom of the editor. */
 export const EMOJI_TOKEN_ATTR = "data-emoji-token";
@@ -144,7 +195,7 @@ export type RichRun =
  */
 export function richRuns(value: string): RichRun[] {
   const runs: RichRun[] = [];
-  for (const segment of splitEmojiSegments(value)) {
+  for (const segment of splitValue(value)) {
     if (segment.kind === "text") {
       if (segment.text.length > 0) {
         runs.push({ kind: "text", text: segment.text });
@@ -168,7 +219,7 @@ export interface OffsetRange {
 }
 
 /** Wire length of one segment — the token's own length, not the image's. */
-function segmentLength(segment: ReturnType<typeof splitEmojiSegments>[number]): number {
+function segmentLength(segment: ValueSegment): number {
   if (segment.kind === "text") {
     return segment.text.length;
   }
@@ -186,7 +237,7 @@ function segmentLength(segment: ReturnType<typeof splitEmojiSegments>[number]): 
  */
 export function emojiTokenBefore(value: string, caret: number): OffsetRange | null {
   let cursor = 0;
-  for (const segment of splitEmojiSegments(value)) {
+  for (const segment of splitValue(value)) {
     const length = segmentLength(segment);
     if (segment.kind === "emoji" && cursor + length === caret) {
       return { start: cursor, end: caret };
@@ -199,7 +250,7 @@ export function emojiTokenBefore(value: string, caret: number): OffsetRange | nu
 /** The emoji token starting exactly at `caret`, or null. Forward-delete's half. */
 export function emojiTokenAfter(value: string, caret: number): OffsetRange | null {
   let cursor = 0;
-  for (const segment of splitEmojiSegments(value)) {
+  for (const segment of splitValue(value)) {
     const length = segmentLength(segment);
     if (segment.kind === "emoji" && cursor === caret) {
       return { start: caret, end: caret + length };
