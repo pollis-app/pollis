@@ -165,7 +165,7 @@ async function main() {
     await createGroupWithChannel(browser, groupName, "general");
 
     // A message to react to.
-    await h.setTestIdValue(browser, "message-input", `emoji e2e ${stamp}`);
+    await h.setComposerText(browser, `emoji e2e ${stamp}`);
     await h.clickTestId(browser, "message-send-button");
     await h.waitSelector(browser, '[data-testid="message-content"]', 30000, "the sent message");
 

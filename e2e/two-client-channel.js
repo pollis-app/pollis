@@ -296,7 +296,7 @@ async function main() {
 
     // A: post the distinctive message; confirm it rendered locally first.
     console.log(`[two-client-channel] A: sending channel message (token ${token})`);
-    await h.setTestIdValue(A.browser, "message-input", `hello channel ${token}`);
+    await h.setComposerText(A.browser, `hello channel ${token}`);
     await h.clickTestId(A.browser, "message-send-button");
     await waitForChannelMessage(A.browser, groupName, channelName, token, 30000);
     await shot(A.browser, "two-client-channel-A-sent.png");

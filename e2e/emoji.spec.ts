@@ -153,6 +153,20 @@ async function openChannel(page: Page, skin: Skin) {
 
 const composer = (page: Page) => page.getByTestId("message-input");
 
+/**
+ * What the composer thinks the message is.
+ *
+ * The composer is a contentEditable now — a custom emoji renders as an inline
+ * image while you type, which a `<textarea>` cannot do — so it has no `.value`
+ * for `toHaveValue` to read. `data-value` is the serialized wire text the
+ * component mirrors onto the element on every change, i.e. the exact string a
+ * send would put on the wire. Asserting on it is what keeps these tests about
+ * the WIRE FORM rather than about what is drawn: the token below is what the
+ * message carries even though the composer is showing a parrot.
+ */
+const expectComposerValue = (page: Page, value: string) =>
+  expect(composer(page)).toHaveAttribute("data-value", value);
+
 /** Open the composer's picker and wait for the grid to have mounted. */
 async function openPicker(page: Page) {
   await page.getByTestId("emoji-picker-button").click();
@@ -269,7 +283,7 @@ for (const skin of SKINS) {
 
       // The wire token, spliced in mid-string. Appending would have produced
       // "hello world<:partyparrot:…>", which is the bug.
-      await expect(composer(page)).toHaveValue(`hello${PARROT_TOKEN} world`);
+      await expectComposerValue(page, `hello${PARROT_TOKEN} world`);
 
       // The picker stays open for a second pick (composer behaviour; the
       // reaction picker closes instead), and the caret is left after the
@@ -277,9 +291,45 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("emoji-picker")).toBeVisible();
       await page.getByTestId("emoji-picker-search").fill("shipit");
       await page.locator(`[data-emoji-id="c:${SHIPIT_HASH}"]`).click();
-      await expect(composer(page)).toHaveValue(
+      await expectComposerValue(
+        page,
         `hello${PARROT_TOKEN}<:shipit:${SHIPIT_HASH}> world`,
       );
+    });
+
+    test("a picked custom emoji is an image in the composer, not its token", async ({
+      page,
+    }) => {
+      await openChannel(page, skin);
+      await composer(page).click();
+      await composer(page).pressSequentially("ship it ");
+
+      await openPicker(page);
+      await page.getByTestId("emoji-picker-search").fill("partyparrot");
+      await page.locator(`[data-emoji-id="c:${PARROT_HASH}"]`).click();
+
+      // The point of the rich composer: what you SEE while typing is the
+      // emoji. Before this, the composer showed 70 characters of hex.
+      const inline = composer(page).getByTestId("composer-emoji");
+      await expect(inline).toBeVisible();
+      await expect(inline).toHaveAttribute("data-shortcode", "partyparrot");
+      // Actually decoded — a broken `<img>` is still "visible".
+      await expect
+        .poll(() =>
+          inline.locator("img").evaluate((el) => (el as HTMLImageElement).naturalWidth),
+        )
+        .toBeGreaterThan(0);
+      // None of the token's machinery is on screen…
+      await expect(composer(page)).not.toContainText(PARROT_HASH);
+      // …and all of it is still what would be sent.
+      await expectComposerValue(page, `ship it ${PARROT_TOKEN}`);
+
+      // Atomic: one Backspace takes the whole emoji, not one hex digit.
+      await composer(page).press("Backspace");
+      await expectComposerValue(page, "ship it ");
+      await expect(composer(page).getByTestId("composer-emoji")).toHaveCount(0);
+
+      await page.screenshot({ path: `artifacts/emoji-composer-inline-${skin}.png` });
     });
 
     test("a standard pick also lands at the caret", async ({ page }) => {
@@ -298,7 +348,7 @@ for (const skin of SKINS) {
       await expect(first).toHaveAttribute("aria-label", "grinning face");
       await first.click();
 
-      await expect(composer(page)).toHaveValue("hello\u{1F600} world");
+      await expectComposerValue(page, "hello\u{1F600} world");
     });
 
     test("a token in a message body renders as an image, not literal text", async ({
@@ -366,7 +416,7 @@ for (const skin of SKINS) {
 
       // Accepting from the list or the ghost finishes the word, so a space
       // follows. Enter accepted the suggestion rather than sending.
-      await expect(composer(page)).toHaveValue("\u{1F602} ");
+      await expectComposerValue(page, "\u{1F602} ");
       await expect(page.getByTestId("message-content")).toHaveCount(2);
 
       await page.screenshot({ path: `artifacts/emoji-shortcode-${skin}.png` });
@@ -379,7 +429,7 @@ for (const skin of SKINS) {
 
       // Mid-word, so no trailing space — and the emoji is the literal
       // character, which is what keeps the wire format unchanged.
-      await expect(composer(page)).toHaveValue("ship it \u{1F602}");
+      await expectComposerValue(page, "ship it \u{1F602}");
     });
 
     test("a group's own :tada: beats the standard one", async ({ page }) => {
@@ -395,7 +445,7 @@ for (const skin of SKINS) {
 
       await composer(page).pressSequentially("a:");
       // The wire token, not 🎉.
-      await expect(composer(page)).toHaveValue(TADA_TOKEN);
+      await expectComposerValue(page, TADA_TOKEN);
     });
 
     test("a colon that is not a trigger stays literal", async ({ page }) => {
@@ -405,13 +455,17 @@ for (const skin of SKINS) {
       // The two cases the trigger rule exists for. Neither opens a completion
       // and neither is rewritten on the closing colon.
       await composer(page).pressSequentially("http://example.com/x: and 10:30:");
-      await expect(composer(page)).toHaveValue("http://example.com/x: and 10:30:");
+      await expectComposerValue(page, "http://example.com/x: and 10:30:");
       await expect(page.getByTestId("emoji-suggest-list")).toHaveCount(0);
       await expect(page.getByTestId("emoji-ghost")).toHaveCount(0);
 
       // A single letter is below the suggestion floor, and an emoticon has no
       // body characters at all.
-      await composer(page).fill("");
+      // `fill("")` needs a form control; clear the contentEditable the way a
+      // person would.
+      await composer(page).press("ControlOrMeta+a");
+      await composer(page).press("Backspace");
+      await expectComposerValue(page, "");
       await composer(page).pressSequentially("hi :j :)");
       await expect(page.getByTestId("emoji-suggest-list")).toHaveCount(0);
       await expect(page.getByTestId("emoji-ghost")).toHaveCount(0);
@@ -426,7 +480,7 @@ for (const skin of SKINS) {
       await composer(page).press("Escape");
       await expect(page.getByTestId("emoji-suggest-list")).toHaveCount(0);
       await expect(page.getByTestId("emoji-ghost")).toHaveCount(0);
-      await expect(composer(page)).toHaveValue(":jo");
+      await expectComposerValue(page, ":jo");
 
       // Typing brings it back — Esc dismisses the token, not the feature.
       await composer(page).pressSequentially("y");
