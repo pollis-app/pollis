@@ -880,9 +880,11 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         </div>
       )}
 
-      {/* Input row — floor its height on the shared chrome-bar token so the
-          composer, in-channel voice bar, and sidebar Close all match. */}
-      <div className="flex items-start gap-1 px-2 py-1.5 min-h-bar">
+      {/* Input row — a single-line composer is exactly `--composer-h` (2rem
+          textarea box + py-1), and the sidebar / right-panel Close bars and
+          refined's voice strip floor on the same token, so all their borders
+          stay aligned with this one. */}
+      <div className="flex items-start gap-1 px-2 py-1 min-h-composer">
         <button
           onClick={handlePickFiles}
           disabled={disabled || attachments.length >= maxAttachments}

@@ -52,6 +52,7 @@ export default {
       // every row and divider had to spell them as an inline style.
       spacing: {
         bar: 'var(--bar-h)',
+        composer: 'var(--composer-h)',
         side: 'var(--side-w)',
         'msg-header': 'var(--msg-header-gap)',
         'msg-group': 'var(--msg-group-gap)',
