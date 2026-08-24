@@ -101,15 +101,28 @@ jobs:
       # Building emits the cdylib and staticlib the xcframework is cut from, so
       # the link is exercised. Android gets this coverage from the android-build
       # job below; iOS has no artifact job, so it has to come from here.
+      # The deployment-target pin is read from ubrn.config.yaml — the single
+      # checked-in source of truth — and applied the same way ubrn's own cargo
+      # invocations get it (it must not live in .cargo/config.toml's global
+      # [env], where it retargets macOS desktop builds to iPhone; that is what
+      # broke the v1.10.2 release).
       - name: Cross-compile pollis-core for ios
-        run: cargo build -p pollis-core --no-default-features --target aarch64-apple-ios
+        run: |
+          want=$(grep -oE 'IPHONEOS_DEPLOYMENT_TARGET="[0-9.]+"' \
+            mobile/modules/pollis-native/ubrn.config.yaml | sed -E 's/.*"([0-9.]+)"/\1/')
+          if [ -z "$want" ]; then
+            echo "::error::No IPHONEOS_DEPLOYMENT_TARGET pin in ubrn.config.yaml (ios cargoExtras)."
+            exit 1
+          fi
+          export IPHONEOS_DEPLOYMENT_TARGET="$want"
+          cargo build -p pollis-core --no-default-features --target aarch64-apple-ios
 
       # The deployment target has to survive into the artifact, not merely sit
-      # in .cargo/config.toml looking correct. Both halves of that have failed:
-      # the value was once written to a `[target.<triple>.env]` table, which
-      # cargo silently ignores (it parses as a build-script `links` override for
-      # a library named "env"), leaving the real target at rustc's 10.0 default
-      # while the file claimed otherwise.
+      # in ubrn.config.yaml looking correct. Both halves of that have failed:
+      # the value was once written to a `[target.<triple>.env]` table of
+      # .cargo/config.toml, which cargo silently ignores (it parses as a
+      # build-script `links` override for a library named "env"), leaving the
+      # real target at rustc's 10.0 default while the file claimed otherwise.
       #
       # It matters because cc-rs builds the vendored OpenSSL 3.5 + SQLCipher
       # against the current iPhoneOS SDK. Link those objects at 10.0 and the
@@ -121,8 +134,8 @@ jobs:
       # milliseconds and catches it in either profile.
       - name: Assert the iOS deployment target reached the artifact
         run: |
-          want=$(grep -E '^IPHONEOS_DEPLOYMENT_TARGET' .cargo/config.toml \
-            | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          want=$(grep -oE 'IPHONEOS_DEPLOYMENT_TARGET="[0-9.]+"' \
+            mobile/modules/pollis-native/ubrn.config.yaml | sed -E 's/.*"([0-9.]+)"/\1/')
           otool -l target/aarch64-apple-ios/debug/libpollis_core.dylib > /tmp/otool.txt
           got=$(awk '
             /LC_BUILD_VERSION/        { mode="build"; next }
@@ -133,8 +146,11 @@ jobs:
           echo "expected=$want actual=$got"
           if [ "$want" != "$got" ]; then
             echo "::error::iOS deployment target did not reach the artifact." \
-              "IPHONEOS_DEPLOYMENT_TARGET must be in the GLOBAL [env] table of" \
-              ".cargo/config.toml; cargo has no [target.<triple>.env]."
+              "The pin lives in ubrn.config.yaml's ios cargoExtras (cargo" \
+              "--config env.…) and this job must export it for its own cargo" \
+              "build; it must NOT be moved to .cargo/config.toml's global" \
+              "[env] (breaks macOS desktop builds), and cargo silently" \
+              "ignores [target.<triple>.env]."
             exit 1
           fi
 

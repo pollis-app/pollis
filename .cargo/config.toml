@@ -47,29 +47,20 @@ rustflags = ["-C", "target-feature=+crt-static"]
 # -fpermissive: Allows method names that shadow class names (Network() returning Network*)
 CXXFLAGS = "-std=c++17 -w -fpermissive"
 
-# iOS deployment target. rustc defaults `*-apple-ios` to a min-version of 10.0,
-# but cc-rs builds the vendored C — OpenSSL 3.5 + SQLCipher, pulled in by
-# mobile's `bundled-sqlcipher-vendored-openssl` rusqlite feature — against the
-# current iPhoneOS SDK. Linking those objects at 10.0 fails on
-# `___chkstk_darwin`, a libSystem stub that only exists from iOS 12, taking down
-# the whole `libpollis_core.dylib` link with an undefined-symbol wall
-# (`_sqlcipher_log`, `_ossl_ml_kem_encap_seed`, `_ossl_slh_fors_pk_from_sig`, ...).
-# This keeps the Rust and C halves on one min-version.
+# Do NOT put IPHONEOS_DEPLOYMENT_TARGET (or any *_DEPLOYMENT_TARGET) in this
+# global table. Apple clang infers the target PLATFORM from whichever
+# deployment-target variable is set whenever a compile has no explicit
+# `-target` — webrtc-audio-processing-sys's meson compiler probe is exactly
+# such a compile — so a global iOS pin retargets the macOS DESKTOP build to
+# iPhone and kills it at link ("building for 'iOS', but linking in dylib
+# built for 'macOS'"). That is what broke the v1.10.2 release.
 #
-# It lives in the GLOBAL [env] table on purpose: cargo has no
-# `[target.<triple>.env]` — that spelling parses as a build-script `links`
-# override for a native library named "env" and is silently ignored. Global is
-# harmless anyway, since rustc and clang only read this variable when the target
-# is iOS. Keep the value in lockstep with `platform :ios` in `mobile/ios/Podfile`.
-#
-# The failure is RELEASE-ONLY: a debug link at 10.0 succeeds, so neither the old
-# `cargo check` nor a debug `cargo build` in CI would flag it, and the first
-# thing to notice is the release xcframework build on a workstation. ios-check in
-# mobile-core-check.yml therefore does not try to reproduce the link error — it
-# reads the min-version back off the built artifact and fails if it disagrees
-# with the value here, which catches both a wrong value and a value cargo
-# silently ignored.
-IPHONEOS_DEPLOYMENT_TARGET = "15.1"
+# The iOS pin lives in mobile/modules/pollis-native/ubrn.config.yaml
+# (ios cargoExtras, via `cargo --config env.…`), which scopes it to iOS cargo
+# invocations; the ios-check job in mobile-core-check.yml reads it from there
+# and asserts it reaches the built artifact. It cannot be scoped here: cargo
+# has no `[target.<triple>.env]` (that spelling parses as a build-script
+# `links` override for a native library named "env" and is silently ignored).
 
 [target.x86_64-pc-windows-msvc.env]
 # Windows: Use /MT (static runtime) to match LiveKit WebRTC libraries

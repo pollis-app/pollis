@@ -16,7 +16,17 @@ android:
     - x86_64
 
 ios:
-  cargoExtras: ["--no-default-features"]
+  # The `--config env.…` pair pins the iOS deployment target for these cargo
+  # invocations only. rustc defaults `*-apple-ios` to a 10.0 min-version while
+  # cc-rs builds the vendored OpenSSL + SQLCipher against the current iPhoneOS
+  # SDK; linking those objects at 10.0 dies on `___chkstk_darwin` (a libSystem
+  # stub that only exists from iOS 12), release-only (#1007). It must NOT move
+  # to the global [env] table of .cargo/config.toml — there it retargets macOS
+  # desktop builds to iPhone (see the warning in that file). This value is the
+  # single checked-in source of truth: ios-check in mobile-core-check.yml reads
+  # it from here and asserts it reaches the built artifact. Keep it in lockstep
+  # with the Expo-generated Podfile's `platform :ios`.
+  cargoExtras: ["--no-default-features", "--config", 'env.IPHONEOS_DEPLOYMENT_TARGET="15.1"']
   targets:
     - aarch64-apple-ios
     - aarch64-apple-ios-sim

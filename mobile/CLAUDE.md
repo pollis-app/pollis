@@ -304,21 +304,27 @@ strings /tmp/ipa/Payload/Pollis.app/main.jsbundle | grep -o 'https://api[a-z.-]*
 That last one is the one people forget: it is the only direct proof the shipped
 JS bundle inlined the **prod** DS and not api-dev.
 
-**Deployment target.** `.cargo/config.toml` pins
-`IPHONEOS_DEPLOYMENT_TARGET = "15.1"` in its global `[env]` table, matching
-`platform :ios` in `ios/Podfile`. Without it, rustc targets iOS 10.0 while cc-rs
-builds the vendored OpenSSL 3.5 + SQLCipher against the current SDK, and the
+**Deployment target.** `modules/pollis-native/ubrn.config.yaml` pins
+`IPHONEOS_DEPLOYMENT_TARGET = "15.1"` via its ios `cargoExtras`
+(`cargo --config env.…`), matching `platform :ios` in the Expo-generated
+`ios/Podfile`. Without it, rustc targets iOS 10.0 while cc-rs builds the
+vendored OpenSSL 3.5 + SQLCipher against the current SDK, and the
 `libpollis_core.dylib` link dies on `___chkstk_darwin` (a libSystem stub that
 only exists from iOS 12). It bites **only in release** — a debug link at 10.0
 succeeds — which is why it can sit latent until someone cuts a store build.
 
-Note it has to be the GLOBAL `[env]` table: cargo has no
-`[target.<triple>.env]`, and that spelling silently parses as a build-script
-`links` override for a native library named "env". Two blocks in that file still
-use it for `MACOSX_DEPLOYMENT_TARGET` and are therefore inert — a separate
-latent bug, not this one. `mobile-core-check.yml`'s ios-check job guards against
-both mistakes by reading the min-version back off the built artifact rather than
-trusting the config file. Keep the value in lockstep with the Podfile.
+The pin used to live in the global `[env]` table of `.cargo/config.toml` and
+must never return there: Apple clang infers the target *platform* from
+whichever deployment-target env var is set when a compile has no explicit
+`-target`, so the global pin retargeted the macOS **desktop** build to iPhone
+and broke the v1.10.2 release inside webrtc-audio-processing-sys's meson
+probe. Cargo has no `[target.<triple>.env]` to scope it (that spelling
+silently parses as a build-script `links` override for a native library named
+"env" — two inert `MACOSX_DEPLOYMENT_TARGET` blocks in that file still make
+the mistake, a separate latent bug). `mobile-core-check.yml`'s ios-check job
+reads the pin from ubrn.config.yaml, exports it for its own cargo build, and
+asserts the min-version reached the built artifact. Keep the value in lockstep
+with the Podfile.
 
 **Encryption export compliance:** `app.json` sets
 `ITSAppUsesNonExemptEncryption: true` deliberately. `false` means "no
