@@ -201,7 +201,10 @@ for (const skin of SKINS) {
       // draft preserved.
       await page.keyboard.press("ArrowUp");
       await expect(page.getByTestId(`message-${OWN_ID}`)).toBeFocused();
-      await expect(input).toHaveValue("first line\nsecond line");
+      // The composer is a contentEditable (custom emoji render as inline
+      // images while you type), so its serialized wire text is mirrored onto
+      // `data-value` rather than readable as `.value`.
+      await expect(input).toHaveAttribute("data-value", "first line\nsecond line");
     });
   });
 }

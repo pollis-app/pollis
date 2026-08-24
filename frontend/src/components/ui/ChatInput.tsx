@@ -495,11 +495,11 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   // in — never a directory lookup. See useMentionCandidates for why.
   const skin = useSkin();
   const mentionCandidates = useMentionCandidates();
+  // Where the completion tracks think the caret is. Fed by the input's
+  // `selectionchange`, which is asynchronous — fine for deciding whether a
+  // suggestion list is open, and deliberately NOT what the ArrowUp hand-off
+  // reads (see `handleKeyDown`).
   const [caret, setCaret] = useState(0);
-  // Whether the selection is a caret rather than a range. The ArrowUp
-  // hand-off needs it, and a contentEditable has no `selectionStart ===
-  // selectionEnd` to read it back off.
-  const [caretCollapsed, setCaretCollapsed] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   // Esc hides the suggestions for the current token; typing brings them back.
   const [mentionDismissed, setMentionDismissed] = useState(false);
@@ -585,7 +585,6 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     // the previous DOM.
     inputRef.current.setSelection(pending);
     setCaret(pending);
-    setCaretCollapsed(true);
   }, [message]);
 
   const acceptMention = useCallback((candidate: MentionCandidate) => {
@@ -724,12 +723,16 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
     // counts wholesale, which errs toward the REPL behavior over caret
     // movement, exactly like a shell with a wrapped prompt line.
     //
-    // Read off the tracked selection rather than the element: a contentEditable
-    // has no `selectionStart`/`selectionEnd`, and `caret` / `caretCollapsed`
-    // are the same two numbers kept by RichTextInput's `selectionchange`.
+    // The selection is read from the input SYNCHRONOUSLY rather than off the
+    // `caret` state: a contentEditable reports caret moves through
+    // `selectionchange`, which is asynchronous, so two ArrowUps in quick
+    // succession would judge the second against the first one's stale offset
+    // and refuse to hand off. `<textarea>` had `selectionStart` for this.
     if (e.key === "ArrowUp" && onHistoryUp) {
-      const onFirstLine = !message.slice(0, caret).includes("\n");
-      if (caretCollapsed && (message === "" || onFirstLine)) {
+      const selection = inputRef.current?.selection() ?? { start: 0, end: 0 };
+      const collapsed = selection.start === selection.end;
+      const onFirstLine = !message.slice(0, selection.start).includes("\n");
+      if (collapsed && (message === "" || onFirstLine)) {
         if (onHistoryUp()) {
           e.preventDefault();
           inputRef.current?.blur();
@@ -954,11 +957,9 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
               setDraft(draftKey, next);
               onValueChange?.(next);
               setCaret(nextCaret);
-              setCaretCollapsed(true);
             }}
-            onSelectionChange={(nextCaret, collapsed) => {
+            onSelectionChange={(nextCaret) => {
               setCaret(nextCaret);
-              setCaretCollapsed(collapsed);
             }}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}

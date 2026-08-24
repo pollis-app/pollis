@@ -63,6 +63,16 @@ export interface RichTextInputHandle {
    * selection is remembered here instead.
    */
   insertText: (text: string) => void;
+  /**
+   * The selection right now, as model offsets.
+   *
+   * A key handler has to read this rather than the `onSelectionChange` state:
+   * `selectionchange` is asynchronous, so two arrow keys in quick succession
+   * would decide the second one against the first one's stale caret. A
+   * `<textarea>` had `selectionStart` to read synchronously; this is its
+   * replacement, and the ArrowUp history hand-off depends on it.
+   */
+  selection: () => { start: number; end: number };
 }
 
 export interface RichTextInputProps {
@@ -311,6 +321,12 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
+    // Recorded here rather than left to the `selectionchange` this fires:
+    // that event is async, and a picker click that moves focus away before it
+    // lands would leave the remembered caret at its pre-insertion offset. That
+    // is exactly how a second pick from the still-open picker ended up BEFORE
+    // the first one instead of after it.
+    lastSelectionRef.current = { start: caret, end: caret };
   }, []);
 
   /** Splice the model directly, bypassing whatever the browser would have done. */
@@ -319,6 +335,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     const next = current.slice(0, start) + text + current.slice(end);
     const caret = start + text.length;
     pendingCaretRef.current = caret;
+    lastSelectionRef.current = { start: caret, end: caret };
     onChangeRef.current(next, caret);
   }, []);
 
@@ -378,6 +395,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
         hostRef.current?.focus();
         replaceRange(offsets.start, offsets.end, text);
       },
+      selection: selectionOffsets,
     }),
     [applySelection, replaceRange, selectionOffsets],
   );
