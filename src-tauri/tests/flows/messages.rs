@@ -2250,3 +2250,162 @@ async fn threads_behave_the_same_in_dms_and_channels() {
     drop(alice);
     drop(bob);
 }
+
+/// Reactions, end to end through the real dispatch path — #931.
+///
+/// The reaction commands (`add_reaction` / `remove_reaction` / `get_reactions`)
+/// have been registered and callable for a long time with **no test anywhere**
+/// and, since #874 deleted the desktop UI, no desktop caller either. Mobile
+/// calls them, so they cannot simply be deleted — but "mobile uses it" is not
+/// evidence that the path still works, and the desktop UI is about to be built
+/// back on top of it. This is that evidence.
+///
+/// It exercises the whole seam rather than the Rust function in isolation:
+/// two real clients, a real MLS group, a real message, and reactions written
+/// and read back through the Delivery Service (`/v1/reactions/add`,
+/// `/v1/reactions/remove`, and the grouped read in `/v1/messages/lookup`),
+/// which is where #987 moved them.
+///
+/// What it pins down:
+///   - a reaction added by one member is visible to ANOTHER member, which is
+///     the whole point and the thing a local-only implementation would fake
+///   - grouping is by emoji, with `user_ids` accumulating across users
+///   - adding the same reaction twice is idempotent, not a duplicate or an
+///     error (the UNIQUE constraint is relied on by the UI's toggle)
+///   - removing is scoped to the (message, user, emoji) triple: it must not
+///     remove another user's identical reaction
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn reactions_round_trip_between_two_members() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Reactions").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+
+    let channel_id = alice.general_channel_id(&group_id).await;
+    let message_id = alice
+        .send_channel_message_id(&channel_id, "worth reacting to")
+        .await;
+
+    // Alice reacts. Bob must SEE it — a client-local store would pass a
+    // single-client assertion and fail this one.
+    alice
+        .invoke_json(
+            "add_reaction",
+            serde_json::json!({
+                "messageId": message_id,
+                "userId": alice_profile.id,
+                "emoji": "👍",
+            }),
+        )
+        .await;
+
+    let seen_by_bob = bob
+        .invoke_json("get_reactions", serde_json::json!({ "messageId": message_id }))
+        .await;
+    assert_eq!(
+        seen_by_bob.as_array().map(|a| a.len()),
+        Some(1),
+        "bob should see alice's reaction, got: {seen_by_bob:#?}"
+    );
+    assert_eq!(seen_by_bob[0]["emoji"], "👍");
+    assert_eq!(seen_by_bob[0]["count"], 1);
+
+    // Same emoji from a second user groups into ONE pill with two user_ids —
+    // this is what the pill UI renders, so it is the contract that matters.
+    bob.invoke_json(
+        "add_reaction",
+        serde_json::json!({
+            "messageId": message_id,
+            "userId": bob_profile.id,
+            "emoji": "👍",
+        }),
+    )
+    .await;
+
+    let grouped = alice
+        .invoke_json("get_reactions", serde_json::json!({ "messageId": message_id }))
+        .await;
+    assert_eq!(
+        grouped.as_array().map(|a| a.len()),
+        Some(1),
+        "the same emoji from two users must group into one entry, got: {grouped:#?}"
+    );
+    assert_eq!(grouped[0]["count"], 2, "count should accumulate: {grouped:#?}");
+
+    // Idempotent: the UI toggle relies on a repeat add being a no-op rather
+    // than an error or a duplicate row.
+    alice
+        .invoke_json(
+            "add_reaction",
+            serde_json::json!({
+                "messageId": message_id,
+                "userId": alice_profile.id,
+                "emoji": "👍",
+            }),
+        )
+        .await;
+    let after_repeat = alice
+        .invoke_json("get_reactions", serde_json::json!({ "messageId": message_id }))
+        .await;
+    assert_eq!(
+        after_repeat[0]["count"], 2,
+        "re-adding an existing reaction must not duplicate it: {after_repeat:#?}"
+    );
+
+    // Removal is scoped to one user. Alice unreacting must leave Bob's alone —
+    // a remove keyed only on (message, emoji) would wipe both and would pass
+    // every single-user test.
+    alice
+        .invoke_json(
+            "remove_reaction",
+            serde_json::json!({
+                "messageId": message_id,
+                "userId": alice_profile.id,
+                "emoji": "👍",
+            }),
+        )
+        .await;
+
+    let after_remove = bob
+        .invoke_json("get_reactions", serde_json::json!({ "messageId": message_id }))
+        .await;
+    assert_eq!(
+        after_remove.as_array().map(|a| a.len()),
+        Some(1),
+        "bob's reaction must survive alice's removal, got: {after_remove:#?}"
+    );
+    assert_eq!(
+        after_remove[0]["count"], 1,
+        "only alice's reaction should be gone: {after_remove:#?}"
+    );
+    let remaining: Vec<&str> = after_remove[0]["user_ids"]
+        .as_array()
+        .expect("user_ids")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert_eq!(
+        remaining,
+        vec![bob_profile.id.as_str()],
+        "the surviving reaction must be bob's"
+    );
+
+    drop(alice);
+    drop(bob);
+}

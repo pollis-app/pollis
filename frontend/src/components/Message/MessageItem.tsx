@@ -10,6 +10,7 @@ import { getUsernameColor } from "../../utils/usernameColor";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
 import { MessageActions } from "./MessageActions";
+import { MessageReactions } from "./MessageReactions";
 import { ReceiptIndicator } from "./ReceiptIndicator";
 import { probeRender } from "../../utils/renderProbe";
 import type { MessageRenderContext } from "./messageRenderContext";
@@ -278,6 +279,12 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           />
         </div>
 
+        {/* Reaction pills, plus the hover-revealed add trigger (#931). Sits
+            outside the body column so the pills align to the message text
+            rather than the avatar gutter. A deleted message keeps no
+            reactions: there is nothing left to react to. */}
+        {!isDeleted && <MessageReactions messageId={message.id} />}
+
         {/* Floating hover action toolbar */}
         {!isDeleted && (
           <MessageActions
@@ -439,6 +446,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
           ))}
         </div>
       )}
+
+      {/* Reaction pills + hover-revealed add trigger (#931), same as the
+          refined skin. Both rows already carry `group`, which is what reveals
+          the trigger on hover. */}
+      {!isDeleted && <MessageReactions messageId={message.id} />}
     </div>
   );
 });

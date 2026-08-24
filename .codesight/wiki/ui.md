@@ -508,7 +508,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**150 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**151 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -577,7 +577,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ThreadMessageRow** — props: message, isRoot — `frontend/src/components/Layout/RightPanel/ThreadMessageRow.tsx`
 - **ThreadPanel** — props: threadId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/ThreadPanel.tsx`
 
-### `components/Message` (13)
+### `components/Message` (14)
 
 - **AttachmentDisplay** — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
@@ -589,6 +589,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, copyLinkState, isSaved, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed.
 - **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
+- **MessageReactions** — props: messageId — `frontend/src/components/Message/MessageReactions.tsx`. Reaction pills plus the hover-revealed `+` trigger, rendered by **both** skins from `MessageItem` and gated on `!isDeleted`. Restored in #931 after #874 deleted it as a dead path: the Rust commands survived and mobile still called them, so the feature was live with no desktop UI. A pill toggles — clicking one you are already in removes your reaction, keyed on `(message, user, emoji)` so it never touches anyone else's. The emoji is run through `splitEmojiSegments` and a custom one renders via `CustomEmojiImage`, which is what lets a `<:name:hash>` reaction display as an image for a viewer who is not in the group that owns it (#848); reactions are stored as opaque strings, so a custom reaction simply *is* its wire token. The picker is `absolute` inside a `relative` wrapper — no portal, no backdrop — the same non-modal shape as `MessageActions` and `EmojiPickerButton`. The `+` trigger rests at `opacity-0 group-hover:opacity-60` and relies on the `group` class the message row already carries in both skins.
 - **ReceiptIndicator** — props: receipts, peerCount, visible — `frontend/src/components/Message/ReceiptIndicator.tsx`
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`
 - **ThreadReplyCount** — props: count, onOpen — `frontend/src/components/Message/ThreadReplyCount.tsx`
