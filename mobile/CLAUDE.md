@@ -195,10 +195,39 @@ schema, so listing them fails doctor's schema check for no behavioural gain.
 
 ## Store builds (no EAS — local `expo prebuild` + native tooling)
 
-Published as a private individual account, Apple team `9JF7WWYMU2`. Version
-bookkeeping is **local and explicit** in `app.json`: `ios.buildNumber` (string)
-and `android.versionCode` (int) — bump both by hand for every store upload
-(stores reject a re-used number), bump `version` for user-facing releases.
+Published as a private individual account, Apple team `9JF7WWYMU2`.
+
+**Version bookkeeping is derived — edit `package.json` `version`, nothing else.**
+`app.config.js` reads it and computes all three store fields, so they cannot
+drift apart the way three hand-bumped numbers do:
+
+| field | value | from |
+|---|---|---|
+| `expo.version` | `1.0.0` | `package.json` verbatim |
+| `expo.ios.buildNumber` | `"1000000"` | derived |
+| `expo.android.versionCode` | `1000000` | derived |
+
+```
+code = ((major * 100 + minor) * 100 + patch) * 100 + build     # build = $POLLIS_BUILD, default 0
+
+1.0.0            -> 1000000
+1.0.0 (build 1)  -> 1000001    same user-facing version, still uploadable
+1.0.1            -> 1000100    still strictly greater
+```
+
+The separate `build` counter exists because **both stores reject a reused build
+number, and only tell you after the upload.** Deriving the build number from
+the version alone would make the second upload of a version impossible — which
+is the common case, not the rare one: ship a TestFlight build, fix one thing,
+upload again, users still see 1.0.0. To re-upload an unchanged version, set
+`POLLIS_BUILD=1` (2, 3, …) for the prebuild; nothing else moves.
+
+`versionCode` must increase strictly across every release Play has ever seen,
+and this is monotonic in (major, minor, patch, build) provided minor/patch/build
+each stay under 100 — `app.config.js` throws rather than let a component wrap,
+because a versionCode that goes backwards cannot be fixed without a new package
+name. `app.json` keeps everything else (plugins, icons, privacy manifests); it
+no longer carries `version`, `ios.buildNumber` or `android.versionCode` at all.
 
 **Environment first.** `EXPO_PUBLIC_*` vars inline into the shipped JS bundle,
 so before any store build check `mobile/.env`:

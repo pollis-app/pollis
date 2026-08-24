@@ -3,7 +3,6 @@
     "name": "Pollis",
     "slug": "mobile",
     "scheme": "pollis",
-    "version": "1.0.0",
     "runtimeVersion": {
       "policy": "fingerprint"
     },
@@ -17,7 +16,6 @@
     },
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "1",
       "icon": {
         "light": "./assets/ios-light.png",
         "dark": "./assets/ios-dark.png",
@@ -85,7 +83,6 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.pollis.mobile",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA"
       ]
