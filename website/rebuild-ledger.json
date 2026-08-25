@@ -1,11 +1,41 @@
 {
-  "generated_at": "2026-08-21T20:10:36Z",
+  "generated_at": "2026-08-25T04:07:09Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "564353ae",
     "date": "2026-08-16"
   },
   "runs": [
+    {
+      "tag": "v1.10.2",
+      "conclusion": "success",
+      "created_at": "2026-08-24T18:16:47Z",
+      "event": "workflow_run",
+      "run_id": "32761505491",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32761505491",
+      "classification": null,
+      "evidence": null
+    },
+    {
+      "tag": "v1.10.2",
+      "conclusion": "skipped",
+      "created_at": "2026-08-24T17:00:51Z",
+      "event": "workflow_run",
+      "run_id": "32754159778",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32754159778",
+      "classification": null,
+      "evidence": null
+    },
+    {
+      "tag": "v1.10.1",
+      "conclusion": "success",
+      "created_at": "2026-08-21T21:08:50Z",
+      "event": "workflow_run",
+      "run_id": "32527089694",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32527089694",
+      "classification": null,
+      "evidence": null
+    },
     {
       "tag": "v1.10.0",
       "conclusion": "skipped",
@@ -173,8 +203,8 @@
       "event": "workflow_dispatch",
       "run_id": "31356925574",
       "run_url": "https://github.com/actuallydan/pollis/actions/runs/31356925574",
-      "classification": null,
-      "evidence": null
+      "classification": "environment_drift",
+      "evidence": "Recipe drift, not image drift — and not a finding against the shipped binary. The comparison was real: logged AppImage payload 1a4213a1…, rebuilt a5ee8d5e…, and the release (31335834158 build-linux) and this rebuild both ran on ubuntu22@20260720.234.2, so the runner image is ruled out. What differed is the build recipe: the log records LOG_DB_TOKEN empty in the build env, while the release baked that token into usr/bin/pollis — cause (5) of the v1.8.4 diagnosis in docs/reproducible-builds-residuals.md, whose recipe vars were being stood up that very morning. The diff matches exactly: the only differing file in the unpacked AppImage was usr/bin/pollis itself, with .text 64 bytes (0x40) smaller and every later section shifted — the documented signature of one absent baked constant (the 105,674,021 differing bytes are compression smear across the squashfs). Proven, not merely argued: run 31361471279, 84 minutes later — same tag, same workflow commit 226cc7a9, same ubuntu22@20260720.234.2 image, recipe var now populated — reproduced 1a4213a1… byte-for-byte. The source was never in question; the rebuild ran with an incomplete build environment. #987 has since removed LOG_DB_TOKEN from the client entirely."
     },
     {
       "tag": "v1.8.4",
@@ -183,8 +213,8 @@
       "event": "push",
       "run_id": "31335833629",
       "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335833629",
-      "classification": null,
-      "evidence": null
+      "classification": "false_red",
+      "evidence": "Same parse failure as 31335810940, from the same push of b48b6f0c — this is the run created at 21:03:22, the same second as the tag-triggered desktop-release run for v1.8.4 (31335834158). Zero jobs, run name fell back to the workflow path, no log exists, no build or comparison ever happened. Fixed by #798 (226cc7a9); v1.8.4 was subsequently proven to reproduce byte-identically (run 31361471279, payload 1a4213a1…)."
     },
     {
       "tag": "v1.8.4",
@@ -193,8 +223,8 @@
       "event": "push",
       "run_id": "31335810940",
       "run_url": "https://github.com/actuallydan/pollis/actions/runs/31335810940",
-      "classification": null,
-      "evidence": null
+      "classification": "false_red",
+      "evidence": "No comparison was ever performed — no job even started. v1.8.4 tags b48b6f0c, the very commit that introduced rebuild-verify.yml, and that first version of the file was unparseable by GitHub: the run has zero jobs (the Actions API reports total_count 0) and its name fell back to the raw workflow path .github/workflows/rebuild-verify.yml, which is also why gh run view finds no log. This run fired for the push of main at 21:02:50; a sibling (31335833629) fired 32 seconds later for the tag push. #798 (226cc7a9) repaired the unparseable workflow that night. Nothing was built and nothing was compared, so the red says nothing about the shipped bytes — and v1.8.4 in fact reproduces: run 31361471279 later rebuilt the Linux AppImage payload byte-for-byte (1a4213a1…) on the same runner image the release built on."
     }
   ]
 }

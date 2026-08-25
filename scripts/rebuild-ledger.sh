@@ -165,7 +165,9 @@ done < <(printf '%s' "$runs" | jq -r '.[] | [
 #
 # Three classes, because two were not enough (#944):
 #   false_red          the run never performed the comparison (the #939 wait-loop
-#                      bug); the build in fact reproduced byte-identically.
+#                      bug, or — v1.8.4's two push runs — a workflow file GitHub
+#                      could not even parse, so no job ran at all); the build in
+#                      fact reproduced byte-identically.
 #   environment_drift  the comparison was performed and the bytes differed, but
 #                      the rebuild did not run in the environment the release
 #                      recorded, so the divergence is not attributable to the
@@ -174,6 +176,18 @@ done < <(printf '%s' "$runs" | jq -r '.[] | [
 #                      The accusation. No run currently carries this class, and
 #                      that fact should be checked, not assumed.
 CLASSIFIED='{
+  "31335810940": {
+    "class": "false_red",
+    "evidence": "No comparison was ever performed — no job even started. v1.8.4 tags b48b6f0c, the very commit that introduced rebuild-verify.yml, and that first version of the file was unparseable by GitHub: the run has zero jobs (the Actions API reports total_count 0) and its name fell back to the raw workflow path .github/workflows/rebuild-verify.yml, which is also why gh run view finds no log. This run fired for the push of main at 21:02:50; a sibling (31335833629) fired 32 seconds later for the tag push. #798 (226cc7a9) repaired the unparseable workflow that night. Nothing was built and nothing was compared, so the red says nothing about the shipped bytes — and v1.8.4 in fact reproduces: run 31361471279 later rebuilt the Linux AppImage payload byte-for-byte (1a4213a1…) on the same runner image the release built on."
+  },
+  "31335833629": {
+    "class": "false_red",
+    "evidence": "Same parse failure as 31335810940, from the same push of b48b6f0c — this is the run created at 21:03:22, the same second as the tag-triggered desktop-release run for v1.8.4 (31335834158). Zero jobs, run name fell back to the workflow path, no log exists, no build or comparison ever happened. Fixed by #798 (226cc7a9); v1.8.4 was subsequently proven to reproduce byte-identically (run 31361471279, payload 1a4213a1…)."
+  },
+  "31356925574": {
+    "class": "environment_drift",
+    "evidence": "Recipe drift, not image drift — and not a finding against the shipped binary. The comparison was real: logged AppImage payload 1a4213a1…, rebuilt a5ee8d5e…, and the release (31335834158 build-linux) and this rebuild both ran on ubuntu22@20260720.234.2, so the runner image is ruled out. What differed is the build recipe: the log records LOG_DB_TOKEN empty in the build env, while the release baked that token into usr/bin/pollis — cause (5) of the v1.8.4 diagnosis in docs/reproducible-builds-residuals.md, whose recipe vars were being stood up that very morning. The diff matches exactly: the only differing file in the unpacked AppImage was usr/bin/pollis itself, with .text 64 bytes (0x40) smaller and every later section shifted — the documented signature of one absent baked constant (the 105,674,021 differing bytes are compression smear across the squashfs). Proven, not merely argued: run 31361471279, 84 minutes later — same tag, same workflow commit 226cc7a9, same ubuntu22@20260720.234.2 image, recipe var now populated — reproduced 1a4213a1… byte-for-byte. The source was never in question; the rebuild ran with an incomplete build environment. #987 has since removed LOG_DB_TOKEN from the client entirely."
+  },
   "31753766171": {
     "class": "environment_drift",
     "evidence": "Explained by #944, and not a finding against the shipped binary. The tag was published and the log verified (found: true), and the AppImage genuinely differed: logged 07bccca8…, rebuilt a6767a4c…. The cause is that the two builds ran on different CI machine images — the release on ubuntu22@20260810.260.1, the rebuild 36 minutes later on ubuntu22@20260720.234.2, because GitHub rolls a re-imaged ubuntu-22.04 label out gradually. (Both read from the two runs'"'"' own logs; this tag'"'"'s leaf predates #939 and records runner_image \"unknown\", which is why the workflow could not tell at the time.) An AppImage vendors the app'"'"'s system libraries off the build machine, and seven differed in real code — libgssapi_krb5, libk5crypto, libkrb5, libkrb5support, libsqlite3, libsystemd, libudev — with changed .text sizes and shifted symbol addresses, not merely new build ids. The 105,863,272 differing bytes are compression smear across a squashfs, not the size of the change. The only difference in anything built from Pollis source was the ORDER of the twelve CSP content hashes inside usr/bin/pollis: the same twelve values, permuted, because tauri-codegen emits them in filesystem readdir order. That the twelve digests are identical is itself proof the frontend bundle reproduced byte-for-byte. Nothing indicates the shipped binary differs from the tagged source. Proven, not merely argued: re-running the identical rebuild on 2026-08-17 landed on ubuntu22@20260810.260.1 — the exact image the release built on — and reproduced 07bccca8… byte-for-byte (run 32036282718). Same source, same tag, one variable changed, and the bytes match. Full write-up: docs/reproducible-builds-residuals.md §6 and §6a."
