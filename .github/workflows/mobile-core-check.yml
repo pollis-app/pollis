@@ -180,6 +180,14 @@ jobs:
         working-directory: mobile
         run: pnpm dlx expo-doctor
 
+      # Node's own runner over the pure modules under mobile/hooks — no Expo,
+      # no device, no RN renderer, so it belongs in the cheap job rather than
+      # behind a 3-ABI cargo-ndk build. Node 22 (above) strips the TS types, so
+      # there is no compile step to add.
+      - name: Unit tests
+        working-directory: mobile
+        run: pnpm test
+
   # The first end-to-end mobile build in CI: uniffi bindings + a 3-ABI
   # cargo-ndk cross-compile of pollis-core, Expo prebuild, Gradle release
   # assembly, and an uploaded APK. Everything runs on a stock ubuntu-latest

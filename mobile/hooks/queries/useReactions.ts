@@ -15,6 +15,7 @@ import {
   keepPreviousData,
 } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
+import { applyReactionToggle } from "./reactionOptimistic";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import type { ConversationKind } from "./useMessages";
@@ -93,6 +94,18 @@ export function useConversationReactions(
  * Toggle a reaction. The caller passes the resolved `mode` (derived from
  * whether the current user is already in the pill's `user_ids`); this hook
  * dispatches the intent and refreshes the conversation's reaction map.
+ *
+ * **Optimistic.** The pill moves on the tap, not on the round trip. The
+ * outcome of a reaction tap is fully known client-side — it adds you to that
+ * emoji or takes you off it — so waiting for `add_reaction` and then for the
+ * refetch it invalidates made a decided gesture feel unacknowledged twice
+ * over. `applyReactionToggle` computes exactly what the query will report, so
+ * the refetch that eventually replaces this confirms it rather than correcting
+ * it, and nothing visibly settles.
+ *
+ * The write is still the authority: a failure restores the snapshot taken
+ * before the tap, and `onSettled` invalidates either way so the server's answer
+ * is what survives.
  */
 export function useToggleReaction(
   conversationId: string | null,
@@ -116,7 +129,43 @@ export function useToggleReaction(
         emoji: vars.emoji,
       });
     },
-    onSuccess: () => {
+
+    onMutate: async (vars) => {
+      if (!currentUser || !conversationId || !kind) {
+        return { previous: [] };
+      }
+      // The live key carries the loaded-id list as a final segment, so match on
+      // the conversation PREFIX — otherwise the entry actually on screen is the
+      // one entry left un-updated.
+      const queryKey = reactionQueryKeys.conversation(kind, conversationId);
+
+      // An in-flight read would land after this write and overwrite it with
+      // pre-tap data.
+      await queryClient.cancelQueries({ queryKey });
+
+      const previous = queryClient.getQueriesData<Map<string, Reaction[]>>({
+        queryKey,
+      });
+      queryClient.setQueriesData<Map<string, Reaction[]>>(
+        { queryKey },
+        (old) =>
+          old === undefined
+            ? old
+            : applyReactionToggle(old, { ...vars, userId: currentUser.id }),
+      );
+      return { previous };
+    },
+
+    onError: (_error, _vars, context) => {
+      for (const [key, data] of context?.previous ?? []) {
+        queryClient.setQueryData(key, data);
+      }
+    },
+
+    // On both paths, not just success: a rolled-back failure still needs the
+    // server's version of the truth, and a success needs the reaction another
+    // device may have added in the meantime.
+    onSettled: () => {
       if (conversationId && kind) {
         queryClient.invalidateQueries({
           queryKey: reactionQueryKeys.conversation(kind, conversationId),

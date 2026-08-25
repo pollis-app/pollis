@@ -28,6 +28,27 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - Sora (UI) via `@expo-google-fonts/sora`. Monospace (crypto keys, e.g. the Security public-key line) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
 - Rust core via `pollis-native` Turbo Module (uniffi-bindgen-react-native)
 
+## Tests
+
+```bash
+cd mobile && pnpm test        # node --test over mobile/tests/
+```
+
+Node's own runner, no Jest and no RN renderer — it covers the **pure modules**
+under `hooks/`/`lib/` (the reaction-toggle reducer today), which is where the
+rules that are worth pinning actually live. Node 22 strips the TS types, so
+there is no compile step; imports carry an explicit `.ts` extension, which is
+why `tsconfig.json` sets `allowImportingTsExtensions` (and `noEmit`, which that
+option requires) rather than excluding `tests/` from typechecking the way
+`frontend/tsconfig.json` does.
+
+It runs in CI in the **`expo-doctor` job** of `mobile-core-check.yml` — the
+cheap one, with no Rust, NDK or Gradle — so a broken reducer fails in seconds
+instead of behind a 3-ABI cross-compile.
+
+Anything needing a device or a renderer stays out: Maestro (`.maestro/`) is the
+tier for that.
+
 ## Rust bridge (`modules/pollis-native`)
 
 The bridge is a local RN turbo-module that links our `pollis-core` Rust crate into the Expo app via JSI.

@@ -31,6 +31,15 @@ interface EmojiPickerProps {
   /** Reaction pickers close on pick; the composer's stays open for a second one. */
   closeOnSelect?: boolean;
   className?: string;
+  /**
+   * Pixel cap when the viewport cannot seat the panel at its natural height.
+   * Left undefined the panel keeps `h-[24rem]` exactly as before.
+   *
+   * A number rather than a class because it is computed from the trigger's
+   * position at open time — Tailwind cannot express it, and `h-[24rem]` still
+   * governs the ordinary case.
+   */
+  maxHeight?: number;
 }
 
 /** One picker section before it is flattened for keyboard navigation. */
@@ -59,7 +68,7 @@ interface Section {
  * ticket asks for.
  */
 export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
-  ({ onSelect, onClose, closeOnSelect = false, className = "" }) => {
+  ({ onSelect, onClose, closeOnSelect = false, className = "", maxHeight }) => {
     const { t } = useTranslation("emoji");
     const { currentUser } = appStore;
     const { data: customEmoji = [] } = useUsableEmoji(currentUser?.id ?? null);
@@ -262,6 +271,10 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
         role="dialog"
         aria-label={t("picker.label")}
         onKeyDown={handleKeyDown}
+        // `max-height` beats `height`, so the clamp shrinks the panel without
+        // touching its class. The grid is `flex-1 min-h-0 overflow-y-auto`, so
+        // the rows it loses become scroll rather than overflow.
+        style={maxHeight === undefined ? undefined : { maxHeight }}
         className={`panel-raised flex flex-col overflow-hidden w-[22rem] h-[24rem] ${className}`}
       >
         <div className="shrink-0 p-2 border-b border-line">
