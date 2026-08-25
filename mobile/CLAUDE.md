@@ -320,8 +320,8 @@ whichever deployment-target env var is set when a compile has no explicit
 and broke the v1.10.2 release inside webrtc-audio-processing-sys's meson
 probe. Cargo has no `[target.<triple>.env]` to scope it (that spelling
 silently parses as a build-script `links` override for a native library named
-"env" — two inert `MACOSX_DEPLOYMENT_TARGET` blocks in that file still make
-the mistake, a separate latent bug). `mobile-core-check.yml`'s ios-check job
+"env" — three inert blocks in that file made the same mistake until #1010
+removed them). `mobile-core-check.yml`'s ios-check job
 reads the pin from ubrn.config.yaml, exports it for its own cargo build, and
 asserts the min-version reached the built artifact. Keep the value in lockstep
 with the Podfile.

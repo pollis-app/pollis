@@ -11,21 +11,11 @@ rustflags = [
     "-C", "link-arg=-Wl,-rpath,/usr/lib/swift",
 ]
 
-[target.aarch64-apple-darwin.env]
-# Screen-share uses SCContentSharingPicker (macOS 14+) so the user can pick
-# display / window / app — matches xdg-desktop-portal on Linux. Bumped from
-# 12.3 for that. Swift Concurrency from /usr/lib/swift/ is still resolved via
-# the -rpath above.
-MACOSX_DEPLOYMENT_TARGET = "14.0"
-
 [target.x86_64-apple-darwin]
 rustflags = [
     "-C", "link-arg=-ObjC",
     "-C", "link-arg=-Wl,-rpath,/usr/lib/swift",
 ]
-
-[target.x86_64-apple-darwin.env]
-MACOSX_DEPLOYMENT_TARGET = "14.0"
 
 [target.x86_64-pc-windows-msvc]
 # Use static CRT to match LiveKit WebRTC libraries (which use /MT)
@@ -61,8 +51,10 @@ CXXFLAGS = "-std=c++17 -w -fpermissive"
 # and asserts it reaches the built artifact. It cannot be scoped here: cargo
 # has no `[target.<triple>.env]` (that spelling parses as a build-script
 # `links` override for a native library named "env" and is silently ignored).
-
-[target.x86_64-pc-windows-msvc.env]
-# Windows: Use /MT (static runtime) to match LiveKit WebRTC libraries
-# The prebuilt WebRTC libs from LiveKit use MT_StaticRelease
-CXXFLAGS = "/std:c++17 /MT /W0"
+#
+# Three such inert blocks were removed in #1010: MACOSX_DEPLOYMENT_TARGET=14.0
+# on both darwin triples (intended for SCContentSharingPicker, macOS 14+) and
+# CXXFLAGS = "/std:c++17 /MT /W0" for MSVC. No shipped build ever received
+# them and all builds work without them. If pinning the macOS min-version is
+# ever wanted, set it in desktop-release.yml's build-macos job env and assert
+# it off the built artifact with otool (the #1007/#1021 pattern) — not here.
