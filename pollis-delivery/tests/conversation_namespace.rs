@@ -390,6 +390,103 @@ async fn a_refused_group_creation_is_forbidden_not_an_error() {
     assert!(matches!(dup, WriteOutcome::Forbidden), "got {dup:?}");
 }
 
+// ── the guard triggers (#948) — the DATABASE refuses, no DS code in the path ─
+
+/// #948's definition of done, verbatim: a raw `INSERT INTO dm_channel` naming
+/// an existing group's id is refused BY THE DATABASE, with no pollis-delivery
+/// code in the path at all. #880's registry tests assert "no row was written
+/// whatever refused it"; this one asserts the refusal happens with the DS
+/// bypassed entirely — a writer that skips both the guard and the claim.
+#[tokio::test]
+async fn a_raw_insert_naming_a_groups_id_is_refused_by_the_database() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    apply_create_group(&conn, None, &group_body("victim-group", None, None))
+        .await
+        .expect("group");
+
+    let raw = conn
+        .execute(
+            "INSERT INTO dm_channel (id, created_by) VALUES ('victim-group', 'mallory-1')",
+            (),
+        )
+        .await;
+
+    assert!(
+        raw.is_err(),
+        "the database itself must refuse the row — the registry granted this \
+         id to a group"
+    );
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM dm_channel").await, 0);
+}
+
+/// A writer that simply skips the registry — a fresh id, never claimed — is
+/// refused too. Before #948 this insert committed and left a conversation the
+/// registry had never heard of.
+#[tokio::test]
+async fn a_raw_insert_with_an_unclaimed_id_is_refused_by_the_database() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+
+    for (sql, table) in [
+        ("INSERT INTO groups (id, name, owner_id) VALUES ('never-claimed', 'G', 'owner-1')", "groups"),
+        ("INSERT INTO channels (id, group_id, name) VALUES ('never-claimed', 'g', 'c')", "channels"),
+        ("INSERT INTO dm_channel (id, created_by) VALUES ('never-claimed', 'owner-1')", "dm_channel"),
+    ] {
+        assert!(
+            conn.execute(sql, ()).await.is_err(),
+            "an unclaimed insert into {table} must be refused by the database"
+        );
+    }
+}
+
+/// The positive control, so the two tests above cannot pass by refusing
+/// everything: claim first (what `claim_conversation_id` does, in the same
+/// transaction), then insert — exactly the production sequence — succeeds.
+#[tokio::test]
+async fn a_claimed_insert_still_succeeds() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+
+    conn.execute_batch(
+        "INSERT INTO conversation (id, kind) VALUES ('mine', 'dm');
+         INSERT INTO dm_channel (id, created_by) VALUES ('mine', 'owner-1');",
+    )
+    .await
+    .expect("claim-then-insert is the production sequence and must work");
+
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM dm_channel").await, 1);
+}
+
+/// The side door: renaming an existing row onto another conversation's id (or
+/// onto unclaimed territory) via UPDATE is refused the same way.
+#[tokio::test]
+async fn a_raw_update_cannot_rename_a_row_onto_another_conversations_id() {
+    let db = fresh().await;
+    let conn = db.conn().await.unwrap();
+    apply_create_group(&conn, None, &group_body("victim-group", None, None))
+        .await
+        .expect("group");
+    apply_create_dm(&conn, None, &dm_body("a-dm", OWNER))
+        .await
+        .expect("dm");
+
+    let onto_group = conn
+        .execute("UPDATE dm_channel SET id = 'victim-group' WHERE id = 'a-dm'", ())
+        .await;
+    let onto_unclaimed = conn
+        .execute("UPDATE dm_channel SET id = 'nowhere' WHERE id = 'a-dm'", ())
+        .await;
+
+    assert!(onto_group.is_err(), "renaming onto a group's id must be refused");
+    assert!(onto_unclaimed.is_err(), "renaming onto an unclaimed id must be refused");
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM dm_channel WHERE id = 'a-dm'").await,
+        1,
+        "the DM keeps its own id"
+    );
+}
+
 // ── the backfill ─────────────────────────────────────────────────────────────
 
 /// Every main-DB script up to but excluding #880's, i.e. the schema production

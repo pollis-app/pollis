@@ -1796,8 +1796,10 @@ mod tests {
         let conn = db();
         setup_users(&conn);
 
+        conn.execute("INSERT INTO conversation (id, kind) VALUES ('g1', 'group')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Solo Group', 'alice')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO conversation (id, kind) VALUES ('ch1', 'channel')", []).unwrap();
         conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('ch1', 'g1', 'general')", []).unwrap();
 
         // Simulate Phase 2 logic: check member count
@@ -1834,6 +1836,7 @@ mod tests {
         let conn = db();
         setup_users(&conn);
 
+        conn.execute("INSERT INTO conversation (id, kind) VALUES ('g1', 'group')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Team', 'alice')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'member')", []).unwrap();
@@ -1897,6 +1900,7 @@ mod tests {
         let conn = db();
         setup_users(&conn);
 
+        conn.execute("INSERT INTO conversation (id, kind) VALUES ('g1', 'group')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Team', 'alice')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'admin')", []).unwrap();
@@ -1941,6 +1945,7 @@ mod tests {
         let conn = db();
         setup_users(&conn);
 
+        conn.execute("INSERT INTO conversation (id, kind) VALUES ('g1', 'group')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Team', 'alice')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'member')", []).unwrap();
@@ -1971,15 +1976,18 @@ mod tests {
         setup_users(&conn);
 
         // Group 1: alice is sole member → should be deleted
+        conn.execute("INSERT INTO conversation (id, kind) VALUES ('g1', 'group')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Solo', 'alice')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
 
         // Group 2: alice is sole admin with bob → bob should be promoted
+        conn.execute("INSERT INTO conversation (id, kind) VALUES ('g2', 'group')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g2', 'Shared', 'alice')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g2', 'alice', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g2', 'bob', 'member')", []).unwrap();
 
         // Group 3: alice is member, carol is admin → just leave
+        conn.execute("INSERT INTO conversation (id, kind) VALUES ('g3', 'group')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g3', 'Other', 'carol')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g3', 'carol', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g3', 'alice', 'member')", []).unwrap();

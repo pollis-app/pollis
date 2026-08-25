@@ -1916,9 +1916,15 @@ mod gc_sql_tests {
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice')", ())
             .await
             .unwrap();
-        conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan')", ())
-            .await
-            .unwrap();
+        // Registry claim first: 000017's guard triggers refuse a channels row
+        // whose id the `conversation` registry did not grant (#948), so every
+        // fixture seeds the way production acquires a row.
+        conn.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
+        )
+        .await
+        .unwrap();
     }
 
     /// A revoked device with a STALE watermark row must not keep an envelope the
@@ -2254,9 +2260,12 @@ mod gc_sql_tests {
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g2', 'bob')", ())
             .await
             .unwrap();
-        conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c2', 'g2', 'chan')", ())
-            .await
-            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('c2', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('c2', 'g2', 'chan');",
+        )
+        .await
+        .unwrap();
         add_device(&conn, "bob", "b1", false).await;
         add_envelope(&conn, "eB", "c2", "-5 days").await;
 
@@ -2708,6 +2717,9 @@ mod roster_parity_tests {
     /// Watermarks are seeded only where a test needs them; membership and
     /// devices are the shared part.
     async fn fixture(conn: &Connection) {
+        // Registry claims first — 000017's guard triggers refuse unclaimed rows.
+        exec(conn, "INSERT INTO conversation (id, kind) VALUES ('c-main', 'channel')").await;
+        exec(conn, "INSERT INTO conversation (id, kind) VALUES ('c-other', 'channel')").await;
         exec(conn, "INSERT INTO channels (id, group_id, name) VALUES ('c-main', 'g-main', 'chan')").await;
         exec(conn, "INSERT INTO channels (id, group_id, name) VALUES ('c-other', 'g-other', 'chan')").await;
         for user in ["alice", "bob", "carol", "dave"] {
@@ -2843,6 +2855,7 @@ mod roster_parity_tests {
     #[tokio::test]
     async fn an_all_revoked_member_yields_the_empty_roster_on_both_paths() {
         let conn = conn().await;
+        exec(&conn, "INSERT INTO conversation (id, kind) VALUES ('c-dead', 'channel')").await;
         exec(&conn, "INSERT INTO channels (id, group_id, name) VALUES ('c-dead', 'g-dead', 'chan')").await;
         exec(&conn, "INSERT INTO group_member (group_id, user_id) VALUES ('g-dead', 'carol')").await;
         exec(
@@ -3551,9 +3564,12 @@ mod delete_scope_tests {
         )
         .await
         .unwrap();
-        c.execute("INSERT INTO dm_channel (id, created_by) VALUES ('mine', 'creator')", ())
-            .await
-            .unwrap();
+        c.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('mine', 'dm');
+             INSERT INTO dm_channel (id, created_by) VALUES ('mine', 'creator');",
+        )
+        .await
+        .unwrap();
         seed_envelope(&c, "victim-envelope", "someone-elses-conversation", "alice").await;
 
         let body = DeleteMessageBody {
@@ -3578,12 +3594,11 @@ mod delete_scope_tests {
     #[tokio::test]
     async fn admin_delete_cannot_reach_another_conversation() {
         let c = conn().await;
-        c.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'grp', 'owner')", ())
-            .await
-            .unwrap();
-        c.execute(
-            "INSERT INTO channels (id, group_id, name) VALUES ('my-channel', 'g1', 'chan')",
-            (),
+        c.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('g1', 'group');
+             INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'grp', 'owner');
+             INSERT INTO conversation (id, kind) VALUES ('my-channel', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('my-channel', 'g1', 'chan');",
         )
         .await
         .unwrap();
@@ -3622,9 +3637,12 @@ mod delete_scope_tests {
         )
         .await
         .unwrap();
-        c.execute("INSERT INTO dm_channel (id, created_by) VALUES ('mine', 'creator')", ())
-            .await
-            .unwrap();
+        c.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('mine', 'dm');
+             INSERT INTO dm_channel (id, created_by) VALUES ('mine', 'creator');",
+        )
+        .await
+        .unwrap();
         seed_envelope(&c, "my-envelope", "mine", "mallory").await;
 
         let body = DeleteMessageBody {

@@ -54,6 +54,14 @@ async fn fresh() -> common::TempDb {
     db.conn().await
         .unwrap()
         .execute(
+            "INSERT INTO conversation (id, kind) VALUES (?1, 'dm')",
+            libsql::params![CONV],
+        )
+        .await
+        .expect("claim");
+    db.conn().await
+        .unwrap()
+        .execute(
             "INSERT INTO dm_channel (id, created_by, created_at) VALUES (?1, 'alice', '2026-01-01')",
             libsql::params![CONV],
         )

@@ -1,0 +1,80 @@
+name: DB Audit (conversation namespace)
+
+# Read-only audit of the conversation-id namespace (#880 / #948) against a
+# live database, run where the credentials already live instead of
+# materializing them locally. Two queries, both SELECTs:
+#
+#   1. COLLISIONS — an id present in more than one of `groups` / `channels` /
+#      `dm_channel`. Any row is a SECURITY INCIDENT (an id that names two
+#      conversations means `is_member` has been answering for the wrong one),
+#      not a migration detail.
+#   2. REGISTRY GAPS — a row in any of the three tables whose id the
+#      `conversation` registry does not hold. Any row is a create path that
+#      did not claim (or a backfill gap); 000017's guard triggers would refuse
+#      such a row today, so gaps can only predate them.
+#
+# Both must return zero rows. This is the precondition check #948 requires
+# before (and the standing verification after) the guard triggers are live in
+# an environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "GitHub environment holding the DOPPLER_TOKEN (delivery-prod or delivery-dev)"
+        required: true
+        default: "delivery-prod"
+        type: choice
+        options:
+          - delivery-prod
+          - delivery-dev
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dopplerhq/cli-action@v3
+
+      - name: Run the namespace audit (read-only)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          TURSO_URL="$(doppler secrets get TURSO_URL --plain)"
+          TURSO_TOKEN="$(doppler secrets get TURSO_TOKEN --plain)"
+          HTTP_URL="${TURSO_URL/libsql:\/\//https:\/\/}"
+
+          q() {
+            curl -sS --fail-with-body -X POST "$HTTP_URL/v2/pipeline" \
+              -H "Authorization: Bearer $TURSO_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"$1\"}},{\"type\":\"close\"}]}" \
+              | jq -c '.results[0].response.result.rows'
+          }
+
+          echo "── collisions (an id in more than one table) ──"
+          COLLISIONS=$(q "SELECT id, COUNT(*) AS n FROM (SELECT id FROM groups UNION ALL SELECT id FROM channels UNION ALL SELECT id FROM dm_channel) GROUP BY id HAVING COUNT(*) > 1")
+          echo "$COLLISIONS"
+
+          echo "── registry gaps (a row the registry never granted) ──"
+          GAPS=$(q "SELECT x.id, x.kind FROM (SELECT id, 'group' AS kind FROM groups UNION ALL SELECT id, 'channel' FROM channels UNION ALL SELECT id, 'dm' FROM dm_channel) x LEFT JOIN conversation c ON c.id = x.id WHERE c.id IS NULL")
+          echo "$GAPS"
+
+          FAIL=0
+          if [ "$COLLISIONS" != "[]" ]; then
+            echo "::error::conversation-id COLLISIONS found — an id names more than one conversation. This is a security incident (see #948); do not install or rely on the guard constraints until resolved."
+            FAIL=1
+          fi
+          if [ "$GAPS" != "[]" ]; then
+            echo "::error::registry GAPS found — rows exist that the conversation registry never granted. A create path is not claiming, or the #880 backfill missed rows."
+            FAIL=1
+          fi
+          if [ "$FAIL" = "0" ]; then
+            echo "namespace audit clean: no collisions, no registry gaps"
+          fi
+          exit $FAIL

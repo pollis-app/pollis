@@ -360,6 +360,12 @@ mod tests {
 
     fn create_dm(conn: &Connection, id: &str, creator: &str, members: &[&str]) {
         let now = "2024-01-01T00:00:00Z";
+        // Registry claim first — 000017's guard triggers refuse a dm_channel
+        // row the `conversation` registry did not grant (#948).
+        conn.execute(
+            "INSERT INTO conversation (id, kind) VALUES (?1, 'dm')",
+            rusqlite::params![id],
+        ).unwrap();
         conn.execute(
             "INSERT INTO dm_channel (id, created_by, created_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![id, creator, now],

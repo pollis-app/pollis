@@ -724,9 +724,11 @@ async fn message_delete_works_when_ds_auth_is_disabled() {
     )
     .await
     .expect("seed user");
-    conn.execute(
-        "INSERT INTO dm_channel (id, created_by) VALUES ('conv-mine', 'mallory')",
-        (),
+    // Registry claim first: 000017's guard triggers refuse a dm_channel row
+    // the `conversation` registry did not grant (#948).
+    conn.execute_batch(
+        "INSERT INTO conversation (id, kind) VALUES ('conv-mine', 'dm');
+         INSERT INTO dm_channel (id, created_by) VALUES ('conv-mine', 'mallory');",
     )
     .await
     .expect("seed dm_channel");

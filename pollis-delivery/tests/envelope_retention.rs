@@ -173,7 +173,7 @@ async fn channel_gc_ignores_revoked_device_with_no_watermark() {
         .unwrap()
         .execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
-             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
+             INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
         )
         .await
         .unwrap();
@@ -294,7 +294,7 @@ async fn approve_join_request_skips_revoked_devices() {
     db.conn().await
         .unwrap()
         .execute_batch(
-            "INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');\
+            "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');\
              INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin');\
              INSERT INTO group_join_request (id, group_id, requester_id, status) \
                  VALUES ('jr1', 'g1', 'bob', 'pending');",
@@ -401,9 +401,12 @@ async fn revoke_device_cannot_delete_another_users_watermarks() {
 /// Seed a channel `c1` in group `g1` with the given members.
 async fn channel_with_members(db: &Db, members: &[&str]) {
     let conn = db.conn().await.unwrap();
-    conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan')", ())
-        .await
-        .unwrap();
+    conn.execute_batch(
+        "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
+         INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
+    )
+    .await
+    .unwrap();
     for m in members {
         conn.execute(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', ?1)",
@@ -824,11 +827,11 @@ async fn sweep_collects_quiet_conversations_and_spares_uncollected() {
         .execute_batch(
             // A channel every member device has caught up on.
             "INSERT INTO group_member (group_id, user_id) VALUES ('gA', 'alice');\
-             INSERT INTO channels (id, group_id, name) VALUES ('cA', 'gA', 'chan');\
+             INSERT INTO conversation (id, kind) VALUES ('cA', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('cA', 'gA', 'chan');\
              INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) \
                VALUES ('dB', 'bob', 'bob', datetime('now'));\
              INSERT INTO group_member (group_id, user_id) VALUES ('gC', 'carol');\
-             INSERT INTO channels (id, group_id, name) VALUES ('cC', 'gC', 'chan');",
+             INSERT INTO conversation (id, kind) VALUES ('cC', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('cC', 'gC', 'chan');",
         )
         .await
         .unwrap();
@@ -888,7 +891,7 @@ async fn dormant_device_stops_pinning_via_endpoint() {
         .execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
+             INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
         )
         .await
         .unwrap();
@@ -921,7 +924,7 @@ async fn a_returning_device_reports_and_pins_again() {
         db.conn().await.unwrap().execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
+             INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
         ).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
@@ -940,7 +943,7 @@ async fn a_returning_device_reports_and_pins_again() {
         db.conn().await.unwrap().execute_batch(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
+             INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');",
         ).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
@@ -983,7 +986,7 @@ async fn sweep_and_endpoint_agree_on_the_staleness_bound() {
         db.conn().await.unwrap().execute_batch(&format!(
             "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
              INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');\
-             INSERT INTO channels (id, group_id, name) VALUES ('{conv}', 'g1', 'chan');",
+             INSERT INTO conversation (id, kind) VALUES ('{conv}', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('{conv}', 'g1', 'chan');",
         )).await.unwrap();
         add_device(&db, "alice", "a1", false).await;
         add_device(&db, "bob", "b1", false).await;
@@ -1015,8 +1018,8 @@ async fn sweep_reports_identity_free_growth_metrics() {
     let db = fresh().await;
     db.conn().await.unwrap().execute_batch(
         "INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');\
-         INSERT INTO channels (id, group_id, name) VALUES ('big', 'g1', 'chan');\
-         INSERT INTO channels (id, group_id, name) VALUES ('small', 'g1', 'chan');",
+         INSERT INTO conversation (id, kind) VALUES ('big', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('big', 'g1', 'chan');\
+         INSERT INTO conversation (id, kind) VALUES ('small', 'channel');INSERT INTO channels (id, group_id, name) VALUES ('small', 'g1', 'chan');",
     ).await.unwrap();
     // Alice never reported anywhere → COUNT(ud) != COUNT(cw) → nothing collected,
     // so every envelope survives and the snapshot sees them all.

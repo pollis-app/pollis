@@ -63,6 +63,8 @@ async fn fresh() -> common::TempDb {
     conn.execute_batch(
         "INSERT INTO users (id, email, username) VALUES \
            ('admin-1','admin@x','admin'),('joiner-1','joiner@x','joiner'),('other-1','other@x','other');\
+         INSERT INTO conversation (id, kind) VALUES \
+           ('grp-1','group'),('grp-2','group'),('chan-1','channel');\
          INSERT INTO groups (id, name, owner_id) VALUES \
            ('grp-1','Group One','admin-1'),('grp-2','Group Two','other-1');\
          INSERT INTO channels (id, group_id, name) VALUES ('chan-1','grp-1', 'chan');\

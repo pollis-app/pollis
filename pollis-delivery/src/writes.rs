@@ -778,6 +778,15 @@ mod conversation_namespace_tests {
     use libsql::Connection;
 
 
+    /// 000017's guard triggers (#948) make an unregistered row in the three
+    /// tables unrepresentable going FORWARD — but the three-table legs of
+    /// `conversation_id_taken` exist for rows that PREDATE the registry, and
+    /// these tests pin exactly that state. So the fixture stops one migration
+    /// short of the triggers; seeding a bare table row on the full schema
+    /// would simply be refused by the database now (which is pinned by
+    /// tests/conversation_namespace.rs, not here).
+    const GUARD_TRIGGERS_VERSION: u32 = 17;
+
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let c = db.connect().unwrap();
@@ -785,7 +794,13 @@ mod conversation_namespace_tests {
         // backend turns it ON by default, so say so explicitly rather than
         // inherit a constraint no deploy has (`Db::connect_local` does the same).
         c.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
-        pollis_schema::apply::single_db(&c).await.expect("schema");
+        c.execute_batch(pollis_schema::BASELINE_SQL).await.expect("baseline");
+        for (_, _, sql) in pollis_schema::POST_BASELINE_MIGRATIONS
+            .iter()
+            .filter(|(v, _, _)| *v < GUARD_TRIGGERS_VERSION)
+        {
+            c.execute_batch(sql).await.expect("pre-948 schema");
+        }
         c
     }
 

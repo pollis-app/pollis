@@ -52,14 +52,22 @@ fn hash(seed: char) -> String {
 }
 
 async fn add_group(db: &Db, group: &str) {
-    db.conn().await
-        .unwrap()
-        .execute(
-            "INSERT OR IGNORE INTO groups (id) VALUES (?1)",
-            libsql::params![group.to_string()],
-        )
-        .await
-        .unwrap();
+    let conn = db.conn().await.unwrap();
+    // Registry claim first (also OR IGNORE — this helper is re-entrant per
+    // group): 000017's guard triggers refuse a groups row the `conversation`
+    // registry did not grant (#948).
+    conn.execute(
+        "INSERT OR IGNORE INTO conversation (id, kind) VALUES (?1, 'group')",
+        libsql::params![group.to_string()],
+    )
+    .await
+    .unwrap();
+    conn.execute(
+        "INSERT OR IGNORE INTO groups (id) VALUES (?1)",
+        libsql::params![group.to_string()],
+    )
+    .await
+    .unwrap();
 }
 
 async fn add_member(db: &Db, group: &str, user: &str, role: &str) {

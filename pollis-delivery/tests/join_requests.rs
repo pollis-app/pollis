@@ -45,6 +45,7 @@ async fn fresh() -> common::TempDb {
         "INSERT INTO users (id, email, username) VALUES \
            ('admin-1','admin@x','admin'),('member-1','member@x','member'),\
            ('stranger-1','stranger@x','stranger');\
+         INSERT INTO conversation (id, kind) VALUES ('grp-1','group');\
          INSERT INTO groups (id, name, owner_id) VALUES ('grp-1','Group One','admin-1');\
          INSERT INTO group_member (group_id, user_id, role) VALUES \
            ('grp-1','admin-1','admin'),('grp-1','member-1','member');",

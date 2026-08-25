@@ -156,20 +156,22 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     // A group the user belongs to, with one channel carrying a message.
     let gid = format!("{u}_g");
     let cid = format!("{u}_c");
+    // Claim precedes the row it names — 000017's guard triggers refuse an
+    // unclaimed insert (#948).
+    exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{gid}', 'group')")).await;
     exec(c, &format!(
         "INSERT INTO groups (id, name, owner_id) VALUES ('{gid}', 'G', '{u}')"
     )).await;
-    exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{gid}', 'group')")).await;
     exec(c, &format!(
         "INSERT INTO group_member (group_id, user_id, role) VALUES ('{gid}', '{u}', 'admin')"
     )).await;
     exec(c, &format!(
         "INSERT INTO user_groups (user_id, group_id, group_name) VALUES ('{u}', '{gid}', 'G')"
     )).await;
+    exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{cid}', 'channel')")).await;
     exec(c, &format!(
         "INSERT INTO channels (id, group_id, name) VALUES ('{cid}', '{gid}', 'general')"
     )).await;
-    exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{cid}', 'channel')")).await;
     exec(c, &format!(
         "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) \
          VALUES ('{u}_msg', '{cid}', '{u}', 'ct', '2026-01-01')"
@@ -234,8 +236,8 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
 
     // A DM.
     let dm = format!("{u}_dm");
-    exec(c, &format!("INSERT INTO dm_channel (id, created_by) VALUES ('{dm}', '{u}')")).await;
     exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{dm}', 'dm')")).await;
+    exec(c, &format!("INSERT INTO dm_channel (id, created_by) VALUES ('{dm}', '{u}')")).await;
     exec(c, &format!(
         "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) \
          VALUES ('{dm}', '{u}', '{u}')"

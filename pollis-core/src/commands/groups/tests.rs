@@ -18,11 +18,14 @@ fn setup(conn: &Connection) {
     conn.execute("INSERT INTO users (id, email, username) VALUES ('bob',   'bob@x.com',   'bob')", []).unwrap();
     conn.execute("INSERT INTO users (id, email, username) VALUES ('carol', 'carol@x.com', 'carol')", []).unwrap();
 
+    conn.execute("INSERT INTO conversation (id, kind) VALUES ('g1', 'group')", []).unwrap();
     conn.execute("INSERT INTO groups (id, name, description, owner_id) VALUES ('g1', 'Test Group', 'a group', 'alice')", []).unwrap();
     conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
     conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'member')", []).unwrap();
 
+    conn.execute("INSERT INTO conversation (id, kind) VALUES ('ch1', 'channel')", []).unwrap();
     conn.execute("INSERT INTO channels (id, group_id, name, channel_type) VALUES ('ch1', 'g1', 'general', 'text')", []).unwrap();
+    conn.execute("INSERT INTO conversation (id, kind) VALUES ('ch2', 'channel')", []).unwrap();
     conn.execute("INSERT INTO channels (id, group_id, name, channel_type) VALUES ('ch2', 'g1', 'random', 'text')", []).unwrap();
 }
 
@@ -82,6 +85,7 @@ fn list_user_groups_only_returns_member_groups() {
     setup(&conn);
 
     // carol's own group
+    conn.execute("INSERT INTO conversation (id, kind) VALUES ('g2', 'group')", []).unwrap();
     conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g2', 'Carol Group', 'carol')", []).unwrap();
     conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g2', 'carol', 'admin')", []).unwrap();
 
@@ -120,6 +124,7 @@ fn channel_type_defaults_to_text() {
     setup(&conn);
 
     // Insert channel without explicit channel_type
+    conn.execute("INSERT INTO conversation (id, kind) VALUES ('ch-no-type', 'channel')", []).unwrap();
     conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('ch-no-type', 'g1', 'untyped')", []).unwrap();
 
     let ct: String = conn.query_row(
@@ -786,6 +791,7 @@ fn list_groups_with_channels_group_without_channels() {
     setup(&conn);
 
     // Group with no channels
+    conn.execute("INSERT INTO conversation (id, kind) VALUES ('g-empty', 'group')", []).unwrap();
     conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g-empty', 'Empty', 'alice')", []).unwrap();
     conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g-empty', 'alice', 'admin')", []).unwrap();
 

@@ -65,18 +65,14 @@ async fn seed_channel_with_an_envelope_from_earlier_today(conn: &Connection) -> 
     )
     .await
     .expect("user");
-    conn.execute(
-        "INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'alice')",
-        (),
+    conn.execute_batch(
+        "INSERT INTO conversation (id, kind) VALUES ('g1', 'group');
+         INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'alice');
+         INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
+         INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'general');",
     )
     .await
-    .expect("group");
-    conn.execute(
-        "INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'general')",
-        (),
-    )
-    .await
-    .expect("channel");
+    .expect("group + channel");
     conn.execute(
         "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'owner')",
         (),

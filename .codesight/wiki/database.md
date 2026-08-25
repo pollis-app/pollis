@@ -181,18 +181,28 @@ used to motivate this paragraph was literally true and is now fixed —
 append-only regardless: id reuse is the attack, and not re-opening that window
 does not depend on teardown being complete.)
 
-**Not yet a foreign key** (follow-up: #948). Making the three tables reference
-this one means rebuilding each of them (SQLite's 12-step CREATE/copy/DROP/RENAME),
-which is not additive and so cannot ship in the same release. Two constraints
-shape that phase:
-- a *bare* FK per table would not be enough — `groups.id REFERENCES
-  conversation(id)` and `dm_channel.id REFERENCES conversation(id)` are both
-  satisfied by the same parent row, so the pair could still share an id. It needs
-  a constant `kind` column on each child and a composite `(id, kind)` FK;
-- production Turso runs with **`foreign_keys=OFF`**, so any FK is inert there.
-  The mechanism that actually enforces this on Turso is a `BEFORE INSERT` trigger
-  per table claiming the id — triggers fire regardless of the pragma, which the
-  commit-log DB already relies on (`migrations-log/000005`).
+**Enforced by triggers since `000017` (#948).** Each of the three tables now
+carries a `BEFORE INSERT` and a `BEFORE UPDATE OF id` guard trigger that
+`RAISE(ABORT)`s unless the registry holds exactly `(NEW.id, that table's
+kind)` — so a row the registry never granted, or one naming another kind's id,
+is refused **by the database**, with no `pollis-delivery` code in the path.
+Triggers rather than a foreign key for two reasons:
+- production Turso runs with **`foreign_keys=OFF`**, so any FK is inert there;
+  triggers fire regardless of the pragma, which the commit-log DB already
+  relies on (`migrations-log/000005`). A composite `(id, kind)` FK (a bare one
+  is satisfied by the same parent row for two children) would also mean
+  rebuilding all three tables — SQLite's non-additive 12-step dance;
+- the triggers are **validators, not claimers**: `claim_conversation_id`
+  remains the one writer (same transaction, so the trigger sees the
+  uncommitted claim), which made `000017` deployable against the running DS
+  with no code change. A claiming trigger would have double-inserted against
+  the live DS and failed every creation until the next deploy.
+Test fixtures that seed these tables raw must claim first — the registry
+insert precedes the row it names, exactly as production does. The DB-level
+refusal is pinned in `pollis-delivery/tests/conversation_namespace.rs` (the
+"guard triggers" section), and `db-audit.yml` (workflow_dispatch) runs the
+read-only collision + registry-gap audit against dev or prod where the
+credentials live.
 
 ### groups
 - `id` TEXT PK — also registered in `conversation` with `kind='group'` (#880)

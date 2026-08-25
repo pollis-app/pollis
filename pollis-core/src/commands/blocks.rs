@@ -259,7 +259,13 @@ mod tests {
         let conn = db();
         seed_users(&conn);
 
-        // Set up a DM between alice and bob — both accepted.
+        // Set up a DM between alice and bob — both accepted. Registry claim
+        // first — 000017's guard triggers refuse an unclaimed row (#948).
+        conn.execute(
+            "INSERT INTO conversation (id, kind) VALUES ('dm1', 'dm')",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO dm_channel (id, created_by, created_at) VALUES ('dm1', 'alice', '2024-01-01T00:00:00Z')",
             [],

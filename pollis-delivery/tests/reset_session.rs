@@ -242,6 +242,7 @@ async fn reset_recover_accepts_session_and_cleans_up() {
     {
         let conn = db.conn().await.unwrap();
         for sql in [
+            "INSERT INTO conversation (id, kind) VALUES ('g1', 'group')".to_string(),
             format!("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', '{user_id}')"),
             format!("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', '{user_id}', 'admin')"),
             "INSERT INTO users (id, email, username) VALUES ('other', 'o@x.com', 'other')".to_string(),
