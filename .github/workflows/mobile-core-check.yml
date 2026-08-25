@@ -281,8 +281,21 @@ jobs:
       # template, signs the release variant with the auto-generated debug
       # keystore (no signing secret needed). The output is installable but NOT
       # distribution-signed — Play upload signing is the blocked half of PL-18.
+      # 4g heap, not the Expo template's 2g default (android/ is prebuild
+      # output, so its gradle.properties cannot be edited in-repo):
+      # `:app:packageRelease` packages three ABIs of pollis-core native libs
+      # in one IncrementalSplitterRunnable worker, and at 2g that
+      # intermittently dies of OutOfMemoryError — usually surfaced as the
+      # task failing with a NULL message, because the OOM eats it. The
+      # runners have 16g.
       - name: Assemble release APK
         working-directory: mobile/android
+        env:
+          # Deliberately one token (no spaces): gradlew word-splits
+          # GRADLE_OPTS, and a quoted multi-flag jvmargs is fragile across
+          # wrapper versions. Metaspace reverts to the JVM's unbounded
+          # default, which is fine here.
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4096m
         run: ./gradlew :app:assembleRelease --no-daemon
 
       - name: Upload APK
