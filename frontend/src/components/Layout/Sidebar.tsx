@@ -343,7 +343,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
           onClick={onToggle}
           aria-label={t("sidebar.close", { shortcut: toggleSidebarLabel })}
           title={t("sidebar.close", { shortcut: toggleSidebarLabel })}
-          className="flex shrink-0 items-center gap-2 px-2.5 min-h-composer border-t border-line text-xs text-start cursor-pointer transition-colors text-muted hover:text-fg"
+          className="flex shrink-0 items-center gap-2 px-2.5 min-h-composer-flush border-t border-line text-xs text-start cursor-pointer transition-colors text-muted hover:text-fg"
         >
           <span className="flex-1">{t("common:actions.close")}</span>
           <kbd

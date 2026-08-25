@@ -53,6 +53,7 @@ export default {
       spacing: {
         bar: 'var(--bar-h)',
         composer: 'var(--composer-h)',
+        'composer-flush': 'var(--composer-flush-h)',
         side: 'var(--side-w)',
         'msg-header': 'var(--msg-header-gap)',
         'msg-group': 'var(--msg-group-gap)',

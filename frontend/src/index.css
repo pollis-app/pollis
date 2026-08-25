@@ -28,9 +28,18 @@
     --bar-h: 2.5rem;
     /* shared chrome bar height — sidebar section headers, voice stage header/footer */
     --composer-h: 2.5rem;
-    /* chat composer minimum (single-line) height — the sidebar / right-panel
-       Close bars and refined's sidebar voice strip floor on it so their
-       horizontal borders align with the composer's */
+    /* chat composer minimum (single-line) height — the height of the INPUT ROW
+       alone. `ChatInput` draws its top hairline on the root ABOVE that row, so
+       the composer's total footprint is this plus 1px. */
+    --composer-flush-h: calc(var(--composer-h) + 1px);
+    /* what a bottom bar must be to sit flush with the composer WHEN IT DRAWS
+       ITS OWN top hairline — the sidebar / right-panel Close bars and refined's
+       sidebar voice strip. They put `border-t` on the same element as the
+       height, and `box-sizing: border-box` then eats the hairline out of the
+       height instead of adding to it, which is how all three ended up exactly
+       1px shorter than the composer they are supposed to line up with. Use
+       `min-h-composer-flush` on any bar that borders itself;
+       `min-h-composer` only where the border is on a separate ancestor. */
 
     /* ── Surfaces (dark, hue-tinted) ──────────────────────────────── */
     --c-bg: hsl(var(--bg-h) var(--bg-s) var(--bg-l));

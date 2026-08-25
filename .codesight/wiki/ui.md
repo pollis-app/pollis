@@ -49,10 +49,36 @@ this sweep.
 | `--c-hover` / `--c-active` | `hover:bg-hover`, `bg-active` |
 | `--c-danger` | `text-danger`, `border-danger` |
 | `--c-voice-connected` | `text-connected` |
-| `--bar-h` / `--composer-h` / `--side-w` | `h-bar`, `min-h-bar`, `min-h-composer` (the composer's single-line height — the sidebar/right-panel Close bars and refined's sidebar voice strip floor on it so their borders align with the composer's), `w-side` (the side panels' DEFAULT width only — see [Resizable side panels](#resizable-side-panels-985)) |
+| `--bar-h` / `--composer-h` / `--composer-flush-h` / `--side-w` | `h-bar`, `min-h-bar`, `min-h-composer` / `min-h-composer-flush`, `w-side` (the side panels' DEFAULT width only — see [Resizable side panels](#resizable-side-panels-985)). **The two composer utilities are not interchangeable** — see below. |
 | `--radius-chip` / `--radius-control` | `rounded-chip`, `rounded-control` |
 | `--msg-header-gap` / `-group-gap` / `-divider-gap` / `--msg-row-pad-y` | `pt-msg-header`, `pt-msg-group`, `mt-msg-divider`, `pb-msg-row` |
 | `--lh` | `leading-msg` |
+
+### Bottom bars align with the composer, and border-box is the trap
+
+`--composer-h` is the height of the composer's **input row**. `ChatInput` draws
+its top hairline on the root *above* that row, so the composer's real footprint
+is `--composer-h` **+ 1px**.
+
+The sidebar Close bar, the right-panel Close bar and refined's profile strip each
+draw their own `border-t` on the **same element** that carries the height — and
+under `box-sizing: border-box` that hairline is taken *out of* the height rather
+than added to it. All three therefore rendered exactly 1px shorter than the
+composer they sit beside, visible as a broken seam where the sidebar meets the
+chat pane.
+
+`--composer-flush-h` (`calc(var(--composer-h) + 1px)`) is that height with the
+hairline added back:
+
+| The bar… | Utility |
+|---|---|
+| draws its own `border-t` | `min-h-composer-flush` |
+| has its border on an ancestor (only `ChatInput`) | `min-h-composer` |
+
+Both class names look equally plausible at the call site, so the choice is
+enforced rather than remembered: `frontend/tests/composer-bar-alignment.test.ts`
+fails on a `min-h-composer` next to a `border-t`, on a `min-h-composer-flush`
+without one, and on the token drifting from `--composer-h`.
 
 **If a utility is missing, add it to the theme** — that is what the bottom seven rows
 above are: tokens that had no utility, so every call site spelled them inline.

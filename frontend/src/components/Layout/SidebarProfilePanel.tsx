@@ -116,7 +116,7 @@ export const SidebarProfilePanel: React.FC = observer(() => {
       {inVoice && (
         <div
           data-testid="sidebar-voice-strip"
-          className="flex items-center gap-1.5 border-t border-line bg-surface-raised px-2.5 py-1 min-h-composer"
+          className="flex items-center gap-1.5 border-t border-line bg-surface-raised px-2.5 py-1 min-h-composer-flush"
         >
           <Volume2
             size={14}
