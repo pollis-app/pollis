@@ -869,3 +869,60 @@ pub async fn object_exists(
         exists: rows.next().await?.is_some(),
     }))
 }
+
+// ── POST /v1/read/read-cursors ───────────────────────────────────────────────
+
+/// POST `/v1/read/read-cursors` — this account's synced read-cursor blob (#844).
+///
+/// Device-signed and bound to the authenticated user. Serving the row to any
+/// caller would be *cryptographically* harmless — it is AES-256-GCM under a key
+/// derived from the account identity key, which the DS has never held — but it
+/// would still hand a stranger the blob's size and change rate, which is exactly
+/// the metadata this feature works to blunt. So it is scoped like every other
+/// per-account read in this module.
+///
+/// A missing row is `cursors: None`, not a 404: a first-run device has nothing
+/// to merge, and that is an ordinary state rather than an error.
+pub async fn read_cursors(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let parsed: ReadCursorsBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let who = match authed_user(
+        &state,
+        &headers,
+        &method,
+        &uri,
+        &body,
+        Some(parsed.user_id.as_str()),
+    )
+    .await?
+    {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+
+    let conn = state.db.conn().await?;
+    let mut rows = conn
+        .query(
+            "SELECT nonce, blob FROM read_cursor_sync WHERE user_id = ?1",
+            libsql::params![who],
+        )
+        .await?;
+    let cursors = match rows.next().await? {
+        Some(row) => Some(EncryptedReadCursors {
+            nonce: b64(&row.get::<Vec<u8>>(0)?),
+            blob: b64(&row.get::<Vec<u8>>(1)?),
+        }),
+        None => None,
+    };
+    Ok(ok_response::<ReadCursorsBody>(ReadCursorsResponse {
+        cursors,
+    }))
+}

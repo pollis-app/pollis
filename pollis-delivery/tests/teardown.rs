@@ -53,6 +53,7 @@ const USER_COLUMNS: &[(&str, &str)] = &[
     ("mls_key_package", "user_id"),
     ("mls_welcome", "recipient_id"),
     ("push_token", "user_id"),
+    ("read_cursor_sync", "user_id"),
     ("security_event", "user_id"),
     ("user_block", "blocker_id"),
     ("user_block", "blocked_id"),
@@ -136,6 +137,9 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     )).await;
     exec(c, &format!(
         "INSERT INTO user_preferences (user_id, preferences) VALUES ('{u}', '{{}}')"
+    )).await;
+    exec(c, &format!(
+        "INSERT INTO read_cursor_sync (user_id, nonce, blob) VALUES ('{u}', X'01', X'02')"
     )).await;
     exec(c, &format!(
         "INSERT INTO push_token (token, user_id, platform, updated_at) \

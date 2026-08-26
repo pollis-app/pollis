@@ -484,6 +484,26 @@ pub(crate) async fn security_events(
     Ok(ds_post_json(state, &body).await?.events)
 }
 
+// ── Read cursors (#844) ──────────────────────────────────────────────────────
+
+/// This account's synced read-cursor blob, or `None` when nothing has ever been
+/// pushed.
+///
+/// The bytes come back opaque and stay opaque until
+/// `commands::messages::read_state` decrypts them under the account identity
+/// key. Deliberately no defaulting here: a decode failure must surface rather
+/// than read as "no cursors", which would silently re-badge everything the human
+/// has already read on another device.
+pub(crate) async fn read_cursors(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<ar::ReadCursorsResponse> {
+    let body = ar::ReadCursorsBody {
+        user_id: user_id.to_string(),
+    };
+    ds_post_json(state, &body).await
+}
+
 // ── Objects ──────────────────────────────────────────────────────────────────
 
 pub(crate) async fn object_exists(

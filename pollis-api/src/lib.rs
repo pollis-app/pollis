@@ -286,6 +286,11 @@ endpoints! {
     Client   profile::RemoveDmMemberBody        => "/v1/dm/remove",                      StatusOk;
     Client   profile::LeaveDmBody               => "/v1/dm/leave",                       StatusOk;
 
+    // ── Read-cursor cross-device sync (#844) ─────────────────────────────────
+    // The body is an OPAQUE BLOB, unlike its plaintext neighbour
+    // `SavePreferencesBody`. See the type's docs for why the two differ.
+    Client   profile::SaveReadCursorsBody       => "/v1/read-cursors/save",              StatusOk;
+
     // ── Domain D — devices and key packages ──────────────────────────────────
     Client   devices::PublishKeyPackagesBody    => "/v1/key-packages",                   StatusOk;
     Client   devices::ClaimKeyPackageBody       => "/v1/key-packages/claim",             devices::ClaimKeyPackageResponse;
@@ -348,6 +353,7 @@ endpoints! {
     Client   account_reads::SecurityEventsBody   => "/v1/read/security-events",           account_reads::SecurityEventsResponse;
     Client   account_reads::EmojiReadBody        => "/v1/read/emoji",                     account_reads::EmojiReadResponse;
     Client   account_reads::ObjectExistsBody     => "/v1/read/objects",                   account_reads::ObjectExistsResponse;
+    Client   account_reads::ReadCursorsBody      => "/v1/read/read-cursors",             account_reads::ReadCursorsResponse;
 }
 
 /// The guarantee, executable: a body missing a field does not compile.

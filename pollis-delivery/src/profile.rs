@@ -42,6 +42,7 @@ use axum::{
     http::{HeaderMap, Method, Uri},
     response::{IntoResponse, Response},
 };
+use base64::Engine as _;
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
@@ -172,6 +173,123 @@ pub async fn apply_save_preferences(
     )
     .await?;
     Ok(WriteOutcome::Ok)
+}
+
+// ── POST /v1/read-cursors/save ───────────────────────────────────────────────
+
+/// Ceiling on one account's stored cursor blob.
+///
+/// The blob is the padded JSON of one `(conversation_id, last_read_at,
+/// last_read_message_id)` triple per conversation the user has read — call it
+/// ~120 bytes each, so 256 KiB is room for well over a thousand conversations
+/// with the padding overhead on top. It exists precisely BECAUSE the DS cannot
+/// inspect what it is storing: an opaque blob with no cap is a free per-account
+/// object store, and "the server cannot read it" must not quietly become "the
+/// server will hold anything you like".
+const READ_CURSOR_BLOB_MAX_BYTES: usize = 256 * 1024;
+
+/// AES-256-GCM nonce length. Fixed by the AEAD, so a body carrying any other
+/// length is malformed rather than merely unusual.
+const READ_CURSOR_NONCE_LEN: usize = 12;
+
+/// The result of a read-cursor push. Wider than [`WriteOutcome`] for the same
+/// reason [`crate::emoji::EmojiOutcome`] is: a malformed envelope is the
+/// caller's mistake (400), not a permission problem, and answering 403 would
+/// send the user to an admin for a permission that does not exist.
+#[derive(Debug)]
+pub enum ReadCursorOutcome {
+    Ok,
+    Forbidden,
+    /// The blob envelope is malformed. `&'static str` so no caller input is ever
+    /// interpolated into what is echoed back.
+    Invalid(&'static str),
+}
+
+fn read_cursor_outcome_response<B>(outcome: ReadCursorOutcome) -> Result<Response, AppError>
+where
+    B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
+{
+    Ok(match outcome {
+        ReadCursorOutcome::Ok => crate::writes::ok_response::<B>(pollis_api::StatusOk::Ok),
+        ReadCursorOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
+        ReadCursorOutcome::Invalid(why) => bad_request(why),
+    })
+}
+
+pub async fn save_read_cursors(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+    let parsed: SaveReadCursorsBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn().await?;
+    read_cursor_outcome_response::<SaveReadCursorsBody>(
+        apply_save_read_cursors(&conn, authed.as_deref(), &parsed).await?,
+    )
+}
+
+/// UPSERT the account's encrypted read-cursor blob (#844).
+///
+/// Authz: the actor may only write their OWN cursors (`user_id` bound to the
+/// authenticated user), exactly like preferences.
+///
+/// What is validated is the blob's ENVELOPE — base64 that decodes, a nonce of
+/// the one length AES-GCM has, a bounded ciphertext — and nothing whatever about
+/// its contents, because the DS holds no key for this row and the whole point of
+/// #844 is that it never will. The neighbouring `apply_save_preferences` stores
+/// its payload as readable JSON; this one deliberately cannot.
+///
+/// Last-writer-wins is deliberate. The merge that makes concurrent pushes safe
+/// is a `max()` over per-conversation positions performed on the CLIENT after
+/// decryption, and cursors only ever move forward, so the loser of a race is
+/// re-pushed by its own device rather than lost. The server cannot merge
+/// ciphertext and must not need to.
+pub async fn apply_save_read_cursors(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &SaveReadCursorsBody,
+) -> anyhow::Result<ReadCursorOutcome> {
+    let user = match resolve_actor(authed, Some(body.user_id.as_str())) {
+        Ok(u) => u,
+        Err(_) => return Ok(ReadCursorOutcome::Forbidden),
+    };
+    let nonce = match b64_decode(&body.nonce) {
+        Some(n) => n,
+        None => return Ok(ReadCursorOutcome::Invalid("nonce is not valid base64")),
+    };
+    if nonce.len() != READ_CURSOR_NONCE_LEN {
+        return Ok(ReadCursorOutcome::Invalid("nonce must be 12 bytes"));
+    }
+    let blob = match b64_decode(&body.blob) {
+        Some(b) => b,
+        None => return Ok(ReadCursorOutcome::Invalid("blob is not valid base64")),
+    };
+    if blob.is_empty() || blob.len() > READ_CURSOR_BLOB_MAX_BYTES {
+        return Ok(ReadCursorOutcome::Invalid("blob size out of range"));
+    }
+
+    conn.execute(
+        "INSERT INTO read_cursor_sync (user_id, nonce, blob, updated_at) \
+             VALUES (?1, ?2, ?3, datetime('now')) \
+         ON CONFLICT(user_id) DO UPDATE SET \
+             nonce = ?2, blob = ?3, updated_at = datetime('now')",
+        libsql::params![user, nonce, blob],
+    )
+    .await?;
+    Ok(ReadCursorOutcome::Ok)
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD.decode(s).ok()
 }
 
 // ── POST /v1/blocks/add ──────────────────────────────────────────────────────

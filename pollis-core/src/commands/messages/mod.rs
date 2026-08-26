@@ -173,7 +173,9 @@ pub use edit_delete::{delete_message, edit_message};
 pub use edit_delete::{delete_message_body, edit_message_as, send_redaction_as};
 
 // ── Receipts (delivery / read, DMs only — #857) ──────────────────────────────
-pub use read_state::{get_unread_counts, mark_conversation_read, ReadCursor, UnreadCount};
+pub use read_state::{
+    get_unread_counts, mark_conversation_read, sync_read_cursors, ReadCursor, UnreadCount,
+};
 pub use receipts::{get_conversation_receipts, mark_messages_read, MessageReceipts};
 
 // ── Reactions ────────────────────────────────────────────────────────────────

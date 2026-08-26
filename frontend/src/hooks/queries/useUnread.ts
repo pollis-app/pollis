@@ -63,6 +63,48 @@ export function useHydrateUnread(userId: string | null) {
 }
 
 /**
+ * Converge this device's read positions with the rest of the account, once, at
+ * startup (#844).
+ *
+ * Rust pulls the account's encrypted cursor blob from the DS, merges it into the
+ * local cursors (a `max()`, so nothing rewinds), and pushes the merged set back.
+ * The result is how many local cursors moved; when any did, the badge counts
+ * derived from them are stale and get refetched.
+ *
+ * ONCE, not on a timer. There is no `refetchInterval` here and there must not be
+ * one — `no-periodic-polling.test.ts` enforces that, and the ongoing direction is
+ * event-driven anyway: a cursor that advances schedules its own debounced push
+ * inside Rust. A device that misses an update picks it up at the next launch or
+ * resync rather than by asking every N seconds.
+ */
+export function useSyncReadCursors(userId: string | null) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const moved = await invoke<number>("sync_read_cursors", { userId });
+        if (!cancelled && moved) {
+          void queryClient.invalidateQueries({ queryKey: unreadQueryKeys.all });
+        }
+      } catch (e) {
+        // Offline, or the PIN is not entered yet so the account identity key
+        // that decrypts the blob is unavailable. Neither is an error the user
+        // can act on, and neither loses anything: the badges stay on this
+        // device's own cursors until the next launch or resync.
+        console.warn("read-cursor sync skipped", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, queryClient]);
+}
+
+/**
  * Mark a conversation read up to the newest message this device holds.
  *
  * Names the conversation, never a position — Rust resolves which message that

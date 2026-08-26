@@ -33,10 +33,21 @@
 //! stale update is a no-op rather than a regression that would re-badge
 //! messages the human already read.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
+use aes_gcm::aead::generic_array::GenericArray;
+use aes_gcm::aead::Aead;
+use aes_gcm::{Aes256Gcm, KeyInit};
+use base64::Engine as _;
+use hkdf::Hkdf;
+use rand::rngs::OsRng;
+use rand::RngCore;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 use crate::state::AppState;
@@ -220,11 +231,20 @@ pub async fn mark_conversation_read(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<bool> {
-    let guard = state.local_db.lock().await;
-    let db = guard
-        .as_ref()
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    mark_conversation_read_in(db.conn(), &conversation_id, &user_id)
+    let moved = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+        mark_conversation_read_in(db.conn(), &conversation_id, &user_id)?
+    };
+    // Only a cursor that actually moved is worth telling the other devices
+    // about. Re-opening a conversation you have already read all of is the
+    // common case and produces no write at all.
+    if moved {
+        schedule_read_cursor_push(state, &user_id);
+    }
+    Ok(moved)
 }
 
 /// The body of [`mark_conversation_read`], against a bare connection so it is
@@ -253,6 +273,233 @@ pub(crate) fn mark_conversation_read_in(
         Some((at, id)) => advance_read_cursor(conn, conversation_id, &at, &id),
         None => Ok(false),
     }
+}
+
+// ── Cross-device sync ────────────────────────────────────────────────────────
+//
+// # Why this is encrypted when preferences are not
+//
+// `commands::user` syncs preferences as PLAINTEXT JSON in Turso's
+// `user_preferences.preferences`, and that is a defensible trade: the operator
+// learns a theme name and a font size. A read cursor is not that. It is
+// `(conversation_id, last_read_at)` per conversation, rewritten every time a
+// human opens a conversation — a precise, timestamped log of WHICH conversations
+// this person reads and WHEN. Stored in the clear it would be a behavioural
+// profile strictly richer than the metadata the threat model already concedes:
+// an envelope row says a message was delivered; a plaintext cursor would say a
+// human sat down and read it, at 02:14, in that conversation and not the other
+// one. `docs/metadata-minimization-design.md` is the whole argument for not
+// handing the server that; syncing it as JSON would undo it in one column.
+//
+// # The key
+//
+// HKDF-SHA256 over the **account identity key**, which represents the human
+// rather than any one device: every device of the account already holds a copy
+// (transferred at enrollment) and the DS has never held it in the clear. So
+// every device derives the same key with no coordination, and the server derives
+// nothing. Then AES-256-GCM — the same construction as the `account_recovery`
+// wrap in `commands::account_identity`, with a different `info` string so the one
+// key cannot be repurposed across the two uses.
+//
+// The HKDF salt is the user id, not the random per-blob salt `account_recovery`
+// uses. That is the one deliberate divergence: a random salt would have to be
+// fetched and agreed before any device could decrypt, and the reason
+// `account_recovery` needs one — stretching a user-typed Secret Key — does not
+// apply to a 32-byte uniformly-random seed. A per-account non-secret salt still
+// gives domain separation between accounts.
+//
+// # What the server still learns, stated plainly
+//
+// That this user's blob CHANGED, roughly HOW BIG it is, and WHEN. Size is blunted
+// (not erased) by padding the plaintext to the same buckets message framing uses,
+// so a burst of conversations does not step the length one triple at a time.
+// Timing is inherent: a sync that must converge has to write when something
+// changes. Debouncing collapses a reading session into one write rather than one
+// per message, which is why it is a correctness-adjacent feature and not a
+// nicety.
+
+/// HKDF info string — binds this key to read-cursor sync so the account identity
+/// key cannot be repurposed between this and the `account_recovery` wrap.
+const READ_CURSOR_HKDF_INFO: &[u8] = b"pollis-read-cursor-sync-v1";
+
+const READ_CURSOR_NONCE_LEN: usize = 12;
+
+/// How long a burst of cursor advances is collapsed into one DS write.
+///
+/// Reading a busy channel advances the cursor once per message rendered; without
+/// this, opening it would be one signed HTTP write per message — a write
+/// amplification the DS sees, an obvious per-message timing signal, and a
+/// pointless battery cost. Five seconds is long enough to swallow a scroll and
+/// short enough that a second device picks the position up while the human is
+/// still in front of it.
+const PUSH_DEBOUNCE: Duration = Duration::from_secs(5);
+
+/// Is a debounced push already scheduled?
+///
+/// Process-global rather than per-`AppState` because the desktop app has exactly
+/// one signed-in account per process, and the push reads whatever is in the
+/// cursor table at the moment it fires — so a second advance arriving during the
+/// wait is carried by the push already scheduled and needs no second one. This is
+/// a **one-shot timer per burst**, not a poll: nothing is scheduled when nothing
+/// changes, which is what `frontend/tests/no-periodic-polling.test.ts` is about.
+static PUSH_SCHEDULED: AtomicBool = AtomicBool::new(false);
+
+/// Derive this account's cursor-sync key.
+fn derive_cursor_key(account_seed: &[u8], user_id: &str) -> Zeroizing<[u8; 32]> {
+    let hk = Hkdf::<Sha256>::new(Some(user_id.as_bytes()), account_seed);
+    let mut out = Zeroizing::new([0u8; 32]);
+    hk.expand(READ_CURSOR_HKDF_INFO, out.as_mut())
+        .expect("HKDF-SHA256 expand 32 bytes is always valid");
+    out
+}
+
+/// Encrypt a cursor list into the `(nonce, ciphertext)` the DS stores.
+///
+/// The plaintext is padded to a size bucket BEFORE encryption — reusing
+/// [`super::framing::pad`] rather than a second padding scheme, so there is one
+/// bucket ladder in the codebase and one place to reason about it.
+pub(crate) fn seal_cursors(
+    account_seed: &[u8],
+    user_id: &str,
+    cursors: &[ReadCursor],
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    let json = serde_json::to_vec(cursors)
+        .map_err(|e| Error::Other(anyhow::anyhow!("serialize read cursors: {e}")))?;
+    let padded = super::framing::pad(&json);
+
+    let key = derive_cursor_key(account_seed, user_id);
+    let mut nonce = [0u8; READ_CURSOR_NONCE_LEN];
+    OsRng.fill_bytes(&mut nonce);
+
+    let cipher = Aes256Gcm::new(GenericArray::from_slice(key.as_ref()));
+    let ciphertext = cipher
+        .encrypt(GenericArray::from_slice(&nonce), padded.as_slice())
+        .map_err(|e| Error::Crypto(format!("seal read cursors: {e}")))?;
+    Ok((nonce.to_vec(), ciphertext))
+}
+
+/// Recover a cursor list from what the DS handed back.
+pub(crate) fn open_cursors(
+    account_seed: &[u8],
+    user_id: &str,
+    nonce: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<ReadCursor>> {
+    if nonce.len() != READ_CURSOR_NONCE_LEN {
+        return Err(Error::Crypto(format!(
+            "read-cursor nonce has wrong length: {} (expected {READ_CURSOR_NONCE_LEN})",
+            nonce.len()
+        )));
+    }
+    let key = derive_cursor_key(account_seed, user_id);
+    let cipher = Aes256Gcm::new(GenericArray::from_slice(key.as_ref()));
+    let padded = cipher
+        .decrypt(GenericArray::from_slice(nonce), ciphertext)
+        .map_err(|e| Error::Crypto(format!("open read cursors: {e}")))?;
+    let json = super::framing::strip(&padded);
+    serde_json::from_slice(&json)
+        .map_err(|e| Error::Other(anyhow::anyhow!("parse read cursors: {e}")))
+}
+
+/// This device's copy of the account identity key seed, as HKDF input material.
+async fn account_seed(state: &Arc<AppState>, user_id: &str) -> Result<Zeroizing<Vec<u8>>> {
+    let key = crate::commands::account_identity::load_account_id_key(state, user_id).await?;
+    Ok(Zeroizing::new(key.to_seed().to_vec()))
+}
+
+fn b64(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Upload every cursor this device holds, encrypted.
+///
+/// The whole set every time rather than a delta: the payload is small, the merge
+/// on the other side is a `max()` that does not care whether it has seen an entry
+/// before, and a delta protocol would need an ordering the server cannot supply
+/// without reading the blob.
+pub(crate) async fn push_read_cursors(state: &Arc<AppState>, user_id: &str) -> Result<()> {
+    let cursors = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+        all_read_cursors(db.conn())?
+    };
+    // Nothing read yet on this device. Pushing an empty list would be harmless
+    // (the merge is a max) but would overwrite a blob another device wrote with
+    // real positions in it, costing a round trip to get them back.
+    if cursors.is_empty() {
+        return Ok(());
+    }
+
+    let seed = account_seed(state, user_id).await?;
+    let (nonce, blob) = seal_cursors(&seed, user_id, &cursors)?;
+    let body = pollis_api::profile::SaveReadCursorsBody {
+        user_id: user_id.to_string(),
+        nonce: b64(&nonce),
+        blob: b64(&blob),
+    };
+    crate::commands::mls::ds_post_ok(state, &body).await
+}
+
+/// Fetch the account's blob and merge the positions it carries into this device.
+///
+/// Returns how many local cursors actually moved.
+pub(crate) async fn pull_read_cursors(state: &Arc<AppState>, user_id: &str) -> Result<usize> {
+    let resp = crate::commands::ds_reads::read_cursors(state, user_id).await?;
+    let Some(stored) = resp.cursors else {
+        return Ok(0);
+    };
+    let nonce = crate::commands::ds_reads::decode_b64("read-cursor nonce", &stored.nonce)?;
+    let blob = crate::commands::ds_reads::decode_b64("read-cursor blob", &stored.blob)?;
+
+    let seed = account_seed(state, user_id).await?;
+    let incoming = open_cursors(&seed, user_id, &nonce, &blob)?;
+
+    let guard = state.local_db.lock().await;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+    merge_read_cursors(db.conn(), &incoming)
+}
+
+/// Queue a debounced push, unless one is already queued.
+///
+/// Fire-and-forget by design: a cursor that failed to reach the DS is a badge
+/// that clears late on the *other* device, never a message lost or a local state
+/// that is wrong, so it must not fail the call that marked the conversation read.
+/// The next advance schedules another attempt — lazy recovery, no retry helper,
+/// no timer that runs when nothing happened.
+fn schedule_read_cursor_push(state: &Arc<AppState>, user_id: &str) {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    if PUSH_SCHEDULED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let state = Arc::clone(state);
+    let user_id = user_id.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(PUSH_DEBOUNCE).await;
+        // Cleared BEFORE the push reads the table, so an advance that lands
+        // during the upload schedules the next one instead of being swallowed.
+        PUSH_SCHEDULED.store(false, Ordering::SeqCst);
+        if let Err(e) = push_read_cursors(&state, &user_id).await {
+            eprintln!("[read-cursor] push failed (will retry on the next advance): {e}");
+        }
+    });
+}
+
+/// Pull the other devices' read positions, merge them, and push the result.
+///
+/// Called once when the app comes up and whenever the client resyncs. Both
+/// directions in one command because they are two halves of one convergence: a
+/// device that only pulled would never publish what it read while it was the only
+/// one running.
+pub async fn sync_read_cursors(user_id: String, state: &Arc<AppState>) -> Result<usize> {
+    let merged = pull_read_cursors(state, &user_id).await?;
+    push_read_cursors(state, &user_id).await?;
+    Ok(merged)
 }
 
 #[cfg(test)]
@@ -499,5 +746,195 @@ mod tests {
         let fresh = db();
         assert_eq!(merge_read_cursors(&fresh, &back).unwrap(), 2);
         assert_eq!(all_read_cursors(&fresh).unwrap(), all);
+    }
+
+    // ── Cross-device sync crypto ─────────────────────────────────────────────
+
+    const SEED: &[u8; 32] = b"0123456789abcdef0123456789abcdef";
+
+    fn sample() -> Vec<ReadCursor> {
+        vec![
+            ReadCursor {
+                conversation_id: "01JCONVERSATIONALPHA0001".into(),
+                last_read_at: "2026-01-01T00:00:05Z".into(),
+                last_read_message_id: "m5".into(),
+            },
+            ReadCursor {
+                conversation_id: "01JCONVERSATIONBRAVO0002".into(),
+                last_read_at: "2026-01-02T00:00:00Z".into(),
+                last_read_message_id: "n7".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn a_sealed_cursor_list_opens_back_to_itself() {
+        let cursors = sample();
+        let (nonce, ct) = seal_cursors(SEED, ME, &cursors).unwrap();
+        assert_eq!(nonce.len(), READ_CURSOR_NONCE_LEN);
+        assert_eq!(open_cursors(SEED, ME, &nonce, &ct).unwrap(), cursors);
+    }
+
+    /// THE POINT OF THE WHOLE PHASE: what the DS stores must not name a
+    /// conversation. Preferences sync as readable JSON; if this ever regressed
+    /// to that, the server would hold a log of which conversations this human
+    /// reads and when.
+    #[test]
+    fn the_bytes_the_server_stores_do_not_contain_a_conversation_id() {
+        let cursors = sample();
+        let (nonce, ct) = seal_cursors(SEED, ME, &cursors).unwrap();
+
+        for c in &cursors {
+            assert!(
+                !contains(&ct, c.conversation_id.as_bytes()),
+                "conversation id {} appears verbatim in the blob the DS stores",
+                c.conversation_id
+            );
+            assert!(
+                !contains(&ct, c.last_read_at.as_bytes()),
+                "read timestamp {} appears verbatim in the blob the DS stores",
+                c.last_read_at
+            );
+            assert!(
+                !contains(&ct, c.last_read_message_id.as_bytes()),
+                "message id {} appears verbatim in the blob the DS stores",
+                c.last_read_message_id
+            );
+        }
+        // Nor may the JSON framing leak — that would mean the payload was not
+        // encrypted at all.
+        assert!(!contains(&ct, b"conversation_id"));
+        assert!(!contains(&nonce, b"conversation_id"));
+    }
+
+    /// The control for the test above: the same probe MUST be able to see a
+    /// conversation id when one really is present. Without this,
+    /// `the_bytes_the_server_stores_do_not_contain_a_conversation_id` would pass
+    /// against a broken `contains` that always returned false.
+    #[test]
+    fn the_plaintext_probe_can_see_a_conversation_id() {
+        let cursors = sample();
+        let json = serde_json::to_vec(&cursors).unwrap();
+        assert!(contains(&json, cursors[0].conversation_id.as_bytes()));
+        assert!(contains(&json, b"conversation_id"));
+    }
+
+    /// Another account's key — or a tampered blob — must not decrypt. AES-GCM's
+    /// tag is what makes "the DS cannot read it" also mean "the DS cannot
+    /// forge it", which matters because a forged cursor would silently mark
+    /// unread messages read.
+    #[test]
+    fn a_different_account_key_cannot_open_the_blob() {
+        let (nonce, ct) = seal_cursors(SEED, ME, &sample()).unwrap();
+        let other = b"ffffffffffffffffffffffffffffffff";
+        assert!(open_cursors(other, ME, &nonce, &ct).is_err());
+    }
+
+    #[test]
+    fn the_key_is_bound_to_the_user_and_to_this_use() {
+        let (nonce, ct) = seal_cursors(SEED, ME, &sample()).unwrap();
+        assert!(
+            open_cursors(SEED, THEM, &nonce, &ct).is_err(),
+            "the same seed under a different user id must not open the blob"
+        );
+        // The `info` string is what separates this key from the
+        // `account_recovery` wrap that uses the SAME account seed.
+        let mine = derive_cursor_key(SEED, ME);
+        let hk = Hkdf::<Sha256>::new(Some(ME.as_bytes()), SEED.as_slice());
+        let mut other = [0u8; 32];
+        hk.expand(b"pollis-account-key-wrap-v1", &mut other).unwrap();
+        assert_ne!(mine.as_ref(), &other);
+    }
+
+    #[test]
+    fn a_tampered_blob_is_rejected_rather_than_silently_truncated() {
+        let (nonce, mut ct) = seal_cursors(SEED, ME, &sample()).unwrap();
+        ct[0] ^= 0x01;
+        assert!(open_cursors(SEED, ME, &nonce, &ct).is_err());
+    }
+
+    #[test]
+    fn a_wrong_length_nonce_is_refused_before_any_decrypt() {
+        let (_, ct) = seal_cursors(SEED, ME, &sample()).unwrap();
+        assert!(open_cursors(SEED, ME, &[0u8; 11], &ct).is_err());
+    }
+
+    /// Padding is what stops the blob's LENGTH from counting the user's
+    /// conversations for the server. One cursor and several must land in the
+    /// same bucket.
+    #[test]
+    fn small_cursor_lists_all_share_one_size_bucket() {
+        let one = seal_cursors(SEED, ME, &sample()[..1]).unwrap().1;
+        let two = seal_cursors(SEED, ME, &sample()).unwrap().1;
+        let none = seal_cursors(SEED, ME, &[]).unwrap().1;
+        assert_eq!(one.len(), two.len(), "cursor count leaked through the length");
+        assert_eq!(none.len(), two.len(), "cursor count leaked through the length");
+    }
+
+    /// The control for the padding test: without padding these lengths DO
+    /// differ, so the assertion above is testing something real.
+    #[test]
+    fn unpadded_cursor_lists_have_different_lengths() {
+        let one = serde_json::to_vec(&sample()[..1]).unwrap();
+        let two = serde_json::to_vec(&sample()).unwrap();
+        assert_ne!(one.len(), two.len());
+    }
+
+    /// Two pushes of the SAME cursors must not produce the same ciphertext —
+    /// a fixed nonce under a fixed key is the classic AES-GCM catastrophe, and
+    /// it would also tell the server "nothing changed" for free.
+    #[test]
+    fn two_seals_of_the_same_cursors_differ() {
+        let (n1, c1) = seal_cursors(SEED, ME, &sample()).unwrap();
+        let (n2, c2) = seal_cursors(SEED, ME, &sample()).unwrap();
+        assert_ne!(n1, n2);
+        assert_ne!(c1, c2);
+    }
+
+    /// The end-to-end shape of a sync: device A seals, device B (same account,
+    /// therefore same seed) opens and merges, and B's positions move forward.
+    #[test]
+    fn a_second_device_merges_what_the_first_one_sealed() {
+        let a = db();
+        advance_read_cursor(&a, CONV, "2026-01-01T00:00:05Z", "m5").unwrap();
+        advance_read_cursor(&a, "c2", "2026-01-02T00:00:00Z", "n7").unwrap();
+        let (nonce, ct) = seal_cursors(SEED, ME, &all_read_cursors(&a).unwrap()).unwrap();
+
+        let b = db();
+        advance_read_cursor(&b, CONV, "2026-01-01T00:00:01Z", "m1").unwrap();
+        let incoming = open_cursors(SEED, ME, &nonce, &ct).unwrap();
+        assert_eq!(merge_read_cursors(&b, &incoming).unwrap(), 2);
+        assert_eq!(all_read_cursors(&b).unwrap(), all_read_cursors(&a).unwrap());
+
+        // And it is idempotent: replaying the same blob moves nothing.
+        assert_eq!(merge_read_cursors(&b, &incoming).unwrap(), 0);
+    }
+
+    /// A stale blob from a device that is behind must not rewind this device.
+    #[test]
+    fn a_stale_blob_from_another_device_cannot_rewind_this_one() {
+        let stale = vec![ReadCursor {
+            conversation_id: CONV.into(),
+            last_read_at: "2026-01-01T00:00:01Z".into(),
+            last_read_message_id: "m1".into(),
+        }];
+        let (nonce, ct) = seal_cursors(SEED, ME, &stale).unwrap();
+
+        let here = db();
+        advance_read_cursor(&here, CONV, "2026-01-01T00:00:09Z", "m9").unwrap();
+        let incoming = open_cursors(SEED, ME, &nonce, &ct).unwrap();
+        assert_eq!(merge_read_cursors(&here, &incoming).unwrap(), 0);
+        assert_eq!(
+            all_read_cursors(&here).unwrap()[0].last_read_message_id,
+            "m9"
+        );
+    }
+
+    /// Naive substring search over bytes — no `str` conversion, because the
+    /// ciphertext is not valid UTF-8 and a lossy conversion could hide a match.
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|w| w == needle)
     }
 }

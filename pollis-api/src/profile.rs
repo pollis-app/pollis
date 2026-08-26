@@ -138,3 +138,26 @@ pub struct AddBlock(pub BlockBody);
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RemoveBlock(pub BlockBody);
+
+// ── POST /v1/read-cursors/save ───────────────────────────────────────────────
+
+/// The caller's read cursors, encrypted, for the other devices on the account
+/// (#844).
+///
+/// **This is deliberately NOT shaped like [`SavePreferencesBody`].** Preferences
+/// cross this boundary as plaintext JSON and land in `user_preferences` in the
+/// clear, which is a defensible trade for a theme name. A read cursor is not: it
+/// is a timestamped record of which conversations a human reads and when, so it
+/// crosses as an opaque AEAD blob and the DS stores exactly the bytes it is
+/// handed. The server has no key for it and never will — see
+/// `pollis_core::commands::messages::read_state`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveReadCursorsBody {
+    /// The owner; when signed it must equal the authenticated user (you sync
+    /// only your OWN cursors).
+    pub user_id: String,
+    /// base64 — the 12-byte AES-256-GCM nonce.
+    pub nonce: String,
+    /// base64 — AES-256-GCM ciphertext + tag over the padded cursor list.
+    pub blob: String,
+}

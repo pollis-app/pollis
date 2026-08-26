@@ -357,6 +357,9 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<profile::AddDmMemberBody as DsRequest>::PATH, post(profile::add_dm_member))
         .route(<profile::RemoveDmMemberBody as DsRequest>::PATH, post(profile::remove_dm_member))
         .route(<profile::LeaveDmBody as DsRequest>::PATH, post(profile::leave_dm))
+        // The encrypted read-cursor push (#844). Its plaintext neighbour two
+        // lines up is `/v1/profile/preferences`; this one stores ciphertext.
+        .route(<profile::SaveReadCursorsBody as DsRequest>::PATH, post(profile::save_read_cursors))
         // Domain D (#419) — key-packages / device-cert re-sign / push tokens.
         // All land on the MAIN DB. Device registration + the FIRST cert publish
         // are bootstrap writes that stay on the client's direct path (see
@@ -442,6 +445,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route(<account_reads::SecurityEventsBody as DsRequest>::PATH, post(account_reads::security_events))
         .route(<account_reads::EmojiReadBody as DsRequest>::PATH, post(account_reads::emoji))
         .route(<account_reads::ObjectExistsBody as DsRequest>::PATH, post(account_reads::object_exists))
+        .route(<account_reads::ReadCursorsBody as DsRequest>::PATH, post(account_reads::read_cursors))
         // UNAUTHENTICATED, and it has to be: it runs before PIN entry, when the
         // local DB is closed (no signer), `device_id` is unset, and no OTP has
         // run (no session). Rate-limited on the tight `probe` tier. See #987

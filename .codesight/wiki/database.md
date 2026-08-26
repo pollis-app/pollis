@@ -375,6 +375,29 @@ anonymous-membership (not shipped — tracked in #489).
 - `preferences` TEXT NOT NULL DEFAULT '{}'
 - `updated_at` TEXT NOT NULL DEFAULT now
 
+### read_cursor_sync _(migration 000018, #844)_
+- `user_id` TEXT PK
+- `nonce` BLOB NOT NULL _(12-byte AES-256-GCM nonce, fresh per push)_
+- `blob` BLOB NOT NULL _(AES-256-GCM ciphertext + tag over the padded cursor JSON)_
+- `updated_at` TEXT NOT NULL DEFAULT now
+
+One row per account: the user's read positions, so a conversation read on the
+laptop is not unread on the phone. **Ciphertext, unlike its neighbour
+`user_preferences`,** and that difference is the whole point. Preferences in the
+clear cost the operator's knowledge of a theme name; a read cursor in the clear
+would be a timestamped log of which conversations a human reads and when — a
+behavioural profile richer than the envelope metadata the threat model already
+concedes. The client seals it with AES-256-GCM under a key derived by HKDF-SHA256
+from the **account identity key** (every device of the account holds a copy; the
+DS never has it in the clear), after padding the payload to the size buckets in
+`pollis_core::commands::messages::framing`. The DS validates only the envelope —
+base64, nonce length, ≤ 256 KiB — and stores the bytes verbatim
+(`pollis-delivery/tests/read_cursor_sync.rs` pins byte-exact custody, since a
+server that "helpfully" re-encoded the blob would break every other device's tag
+check). Last-writer-wins is safe because the merge is a client-side `max()` over
+per-conversation positions that only move forward. What the server still learns:
+that the blob changed, its size bucket, and when.
+
 ### message_reaction
 - `id` TEXT PK
 - `message_id` TEXT NOT NULL
@@ -807,6 +830,23 @@ See [Local message retention](#local-message-retention) below.
 ### preferences
 - `preferences` TEXT NOT NULL DEFAULT '{}' _(single row, local mirror of remote)_
 - `updated_at` TEXT NOT NULL DEFAULT now
+
+### read_cursor _(#844)_
+- `conversation_id` TEXT PK
+- `last_read_at` TEXT NOT NULL
+- `last_read_message_id` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL DEFAULT now
+
+Where the human has read up to, per conversation. Unread counts are DERIVED from
+it against the local `message` table rather than stored as a number — a count
+records *how many* without recording *which*, so it cannot be reconciled against
+the rows on disk nor merged with another device's idea of the same number. The
+position is a pair because `sent_at` alone is sender-supplied and can tie; it is
+compared as a row value so it matches the `ORDER BY sent_at DESC, id DESC` the
+message list itself uses. The cursor only ever moves FORWARD
+(`advance_read_cursor`), which is what makes the cross-device merge a `max()`
+with no locking and no conflict resolution. Synced to the other devices as
+ciphertext — see [`read_cursor_sync`](#read_cursor_sync-migration-000018-844).
 
 ### ui_state
 - `key` TEXT PK
