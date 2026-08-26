@@ -588,6 +588,8 @@ pub fn run() {
             commands::messages::remove_reaction,
             commands::messages::get_reactions,
             commands::messages::mark_messages_read,
+            commands::messages::get_unread_counts,
+            commands::messages::mark_conversation_read,
             commands::messages::get_conversation_receipts,
             commands::messages::delete_message,
             commands::messages::edit_message,

@@ -8,6 +8,7 @@ import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useMarkConversationRead } from "../hooks/queries/useUnread";
 import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "../bridge";
 import { voiceSession } from "../voice";
@@ -24,7 +25,7 @@ export const DMPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
   const setSelectedConversationId = appStore.setSelectedConversationId;
-  const markRead = appStore.markRead;
+  const markConversationRead = useMarkConversationRead(appStore.currentUser?.id ?? null);
   const currentUser = appStore.currentUser;
   const setOutgoingCall = appStore.setOutgoingCall;
   const outgoingCall = appStore.outgoingCall;
@@ -39,9 +40,11 @@ export const DMPage: React.FC = observer(() => {
     setSelectedConversationId(conversationId);
     // Same fix as ChannelPage: clear the unread badge on any nav path,
     // not just the DMs list click handler.
-    markRead(conversationId);
+    // Optimistic badge clear AND a durable cursor, so this DM stays read
+    // across a restart (#844).
+    markConversationRead.mutate(conversationId);
     return () => { setSelectedConversationId(null); };
-  }, [conversationId, setSelectedConversationId, markRead]);
+  }, [conversationId, setSelectedConversationId, markConversationRead]);
 
   // Read receipts (#857) — DMs only, which is why this is mounted here and not
   // in the shared MainContent. Deliberately NOT tied to the `markRead` call

@@ -203,6 +203,19 @@ class AppStore implements AppState {
     this.error = error;
   }
 
+  // Replace the whole badge set from the persisted cursors (#844).
+  //
+  // Whole-set replacement, not a merge: the query returns every conversation
+  // with something unread, so a conversation absent from it has nothing —
+  // merging would strand a badge that another device already cleared.
+  hydrateUnread(counts: { conversation_id: string; count: number }[]) {
+    const next: Record<string, number> = {};
+    for (const c of counts) {
+      next[c.conversation_id] = c.count;
+    }
+    this.unreadCounts = next;
+  }
+
   // Clears the unread count for a conversation or channel
   markRead(id: string) {
     if (!(id in this.unreadCounts)) {

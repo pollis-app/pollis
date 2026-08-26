@@ -12,6 +12,7 @@ import { useRightPanel } from "./RightPanel/useRightPanel";
 import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { useHydrateUnread } from "../../hooks/queries/useUnread";
 import { ScreenShareViewer } from "../Voice/ScreenShareViewer";
 import { screenShareSession } from "../../screenshare/screenShareSession";
 import { cameraSession } from "../../camera/cameraSession";
@@ -49,6 +50,9 @@ import type { RouterContext } from "../../types/router";
 const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
 
 export const AppShell: React.FC = observer(() => {
+  // Unread badges come from the persisted read cursor (#844), not from a
+  // counter that a restart would silently zero.
+  useHydrateUnread(appStore.currentUser?.id ?? null);
   const { t } = useTranslation("nav");
   probeRender("AppShell");
   const [isSyncing, setIsSyncing] = useState(false);

@@ -202,22 +202,57 @@ pub async fn get_unread_counts(user_id: String, state: &Arc<AppState>) -> Result
     unread_counts(db.conn(), &user_id)
 }
 
-/// Record that the human has read up to `message_id` in this conversation.
+/// Mark a conversation read up to the newest message this device holds for it.
 ///
-/// Takes the message's own `sent_at` rather than "now": the cursor is a
-/// position in the conversation, not a wall-clock moment, and using the clock
-/// would let a device with a fast clock mark unseen messages read.
-pub async fn set_read_cursor(
+/// The caller names the CONVERSATION, never a position. The renderer knows when
+/// the human opened a conversation; it has no business asserting which message
+/// that corresponds to, and letting it try would make a whole class of bugs
+/// representable — a cursor past a message that does not exist, a cursor
+/// derived from a partially-loaded page, a fast local clock marking unseen
+/// messages read. Resolving the position here from the rows ingest already
+/// stored means the only cursor that can ever be written is one this device can
+/// point at an actual message for.
+///
+/// Returns whether the cursor moved. A conversation with nothing from anyone
+/// else is a no-op rather than an error.
+pub async fn mark_conversation_read(
     conversation_id: String,
-    message_id: String,
-    sent_at: String,
+    user_id: String,
     state: &Arc<AppState>,
 ) -> Result<bool> {
     let guard = state.local_db.lock().await;
     let db = guard
         .as_ref()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    advance_read_cursor(db.conn(), &conversation_id, &sent_at, &message_id)
+    mark_conversation_read_in(db.conn(), &conversation_id, &user_id)
+}
+
+/// The body of [`mark_conversation_read`], against a bare connection so it is
+/// testable without an [`AppState`].
+pub(crate) fn mark_conversation_read_in(
+    conn: &Connection,
+    conversation_id: &str,
+    user_id: &str,
+) -> Result<bool> {
+    // The newest message from somebody else, by the same ordering the message
+    // list uses. Own and deleted messages are excluded for the same reason
+    // `unread_counts` excludes them: a cursor parked on one would be a position
+    // the unread query can never agree with.
+    let newest: Option<(String, String)> = conn
+        .query_row(
+            "SELECT sent_at, id FROM message
+             WHERE conversation_id = ?1 AND sender_id != ?2 AND deleted_at IS NULL
+             ORDER BY sent_at DESC, id DESC LIMIT 1",
+            rusqlite::params![conversation_id, user_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| Error::Other(anyhow::anyhow!("newest message lookup: {e}")))?;
+
+    match newest {
+        Some((at, id)) => advance_read_cursor(conn, conversation_id, &at, &id),
+        None => Ok(false),
+    }
 }
 
 #[cfg(test)]
@@ -333,6 +368,64 @@ mod tests {
         let conn = db();
         msg(&conn, "m1", ME, "2026-01-01T00:00:01Z");
         assert!(unread_counts(&conn, ME).unwrap().is_empty());
+    }
+
+    // ── Marking a conversation read ──────────────────────────────────────────
+
+    #[test]
+    fn opening_a_conversation_clears_it() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        msg(&conn, "m2", THEM, "2026-01-01T00:00:02Z");
+        assert_eq!(count(&conn), 2);
+
+        assert!(mark_conversation_read_in(&conn, CONV, ME).unwrap());
+        assert_eq!(count(&conn), 0);
+    }
+
+    /// The cursor lands on the newest message from someone ELSE. Parking it on
+    /// your own newer message would put it somewhere `unread_counts` — which
+    /// skips own messages — can never agree with.
+    #[test]
+    fn the_cursor_lands_on_a_message_the_unread_query_also_counts() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        msg(&conn, "m2", ME, "2026-01-01T00:00:02Z");
+
+        mark_conversation_read_in(&conn, CONV, ME).unwrap();
+        let cursors = all_read_cursors(&conn).unwrap();
+        assert_eq!(cursors[0].last_read_message_id, "m1");
+        assert_eq!(count(&conn), 0);
+    }
+
+    #[test]
+    fn a_conversation_with_nothing_from_anyone_else_is_a_no_op() {
+        let conn = db();
+        msg(&conn, "m1", ME, "2026-01-01T00:00:01Z");
+        assert!(!mark_conversation_read_in(&conn, CONV, ME).unwrap());
+        assert!(all_read_cursors(&conn).unwrap().is_empty());
+    }
+
+    /// Re-opening a conversation nothing has arrived in must not churn the
+    /// cursor — that would push a pointless sync to every other device.
+    #[test]
+    fn reopening_an_already_read_conversation_does_not_move_the_cursor() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        assert!(mark_conversation_read_in(&conn, CONV, ME).unwrap());
+        assert!(!mark_conversation_read_in(&conn, CONV, ME).unwrap());
+    }
+
+    /// A message that arrives after the conversation was read must badge again.
+    #[test]
+    fn a_new_arrival_after_reading_badges_again() {
+        let conn = db();
+        msg(&conn, "m1", THEM, "2026-01-01T00:00:01Z");
+        mark_conversation_read_in(&conn, CONV, ME).unwrap();
+        assert_eq!(count(&conn), 0);
+
+        msg(&conn, "m2", THEM, "2026-01-01T00:00:02Z");
+        assert_eq!(count(&conn), 1);
     }
 
     // ── Multi-device merge ───────────────────────────────────────────────────
