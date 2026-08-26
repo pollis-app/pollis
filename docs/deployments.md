@@ -7,7 +7,12 @@ the codebase actually *ships*. Keep it updated when a build/deploy pipeline
 changes.
 
 There are **4 shipped executables/sites**, **4 running backend services**, and
-**2 managed data layers**, plus **8 CI-only gates**.
+**2 managed data layers**. The repo's **36 workflows** split into: **10**
+build/deploy pipelines (the outputs above), **9** always-on CI gates, **12**
+dispatch-only E2E runs, and **5** dispatch-only verification / ops tools. Every
+one of the 36 is accounted for below — if you are about to delete a workflow
+because it "looks unused", check its row first; most of them are idle **by
+design**.
 
 ---
 
@@ -198,7 +203,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 
 ---
 
-## CI gates (build/verify only — never deployed)
+## CI gates (always-on: run themselves on PR/push — never deployed)
 
 | Workflow | Gates |
 |---|---|
@@ -208,17 +213,47 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 | `supply-chain.yml` | cargo-deny (advisories/licenses/bans/sources) + cargo-vet (dependency review provenance). Runs on every PR. |
 | `verifiable-log-tests.yml` | `cargo test` on the three `verifiable-log*` crates (transparency infra + `pollis-verify`). Pure Rust, no system deps. |
 | `tla.yml` | TLC exhaustively model-checks both TLA+ specs — Spec A CommitLog (invariants I1+I2) + Spec B Delivery (I3+I4) — plus a "teeth" check that each broken variant still produces a counterexample. JVM-only, no Rust build. Path-filtered to `specs/tla/**`. |
-| `e2e-smoke.yml` | WebDriver smoke of the **real Tauri binary**: does the app launch and show the login screen (`e2e/smoke.js`, no DS / shared-Turso dependency). `workflow_dispatch`-only — a full cargo build + virtual WebKitGTK window is too heavy for every push; run it before a release or after touching auth/bootstrap. |
 | `mobile-core-check.yml` | Two cross-compile gates (`android-check` / `ios-check`) build `pollis-core` for Android + iOS (aarch64, `--no-default-features`, matching the ubrn build) so mobile `#[cfg]` gate rot becomes red CI instead of a latent defect on the next mobile build. `ios-check` runs `cargo build`, not `cargo check`, because mobile links a vendored OpenSSL + SQLCipher and link-stage breakage is invisible to `check`; it then asserts the built artifact's minimum iOS version matches `IPHONEOS_DEPLOYMENT_TARGET` in `.cargo/config.toml`. That assertion is the one with teeth: a rustc/cc-rs deployment-target mismatch shipped once and blew up the release link on `___chkstk_darwin`, but the *debug* link survives it, so only reading the min-version back off the binary catches it without paying for a release build. Android gets link coverage from `android-build`; iOS has no artifact job, so it has to come from the gate. Plus (#706) an `android-build` job that assembles a real installable **APK** end to end (uniffi gen → 3-ABI `cargo-ndk` cross-compile → `expo prebuild` → Gradle release), uploaded as the `pollis-android-apk` artifact, and an `expo-doctor` config-health job. Path-filtered to `pollis-core/**` + `mobile/**` — never always-on. The APK is debug-keystore-signed only (Play upload signing is blocked, PL-18). |
-| `frontend-check.yml` | Renderer typecheck on every PR to `main`: filtered pnpm install of `frontend/` only, then plain `tsc` (noEmit — no vite build, no artifacts). A frontend change can no longer merge without a typecheck. |
+| `frontend-check.yml` | Renderer typecheck on every PR to `main`: filtered pnpm install of `frontend/` only, then plain `tsc` (noEmit — no vite build, no artifacts), plus the renderer's pure-helper unit tests (`frontend/tests/`, Node's built-in runner). A frontend change can no longer merge without a typecheck. |
+| `scripts-check.yml` | Shell/config consistency gate over `scripts/**`, the DS worker + wrangler configs, and the workflows themselves. Notably it pins `scripts/test-rebuild-verdict.sh` (both directions of the #944 rebuild verdict) and the `ds-config-manifest.json` ↔ `sync-ds-secrets.sh` ↔ wrangler-vars agreement that #760 exists to catch. Path-filtered, and one of the paths is `.github/workflows/**` — so editing any workflow runs it. |
 
-### Dispatch-only release-verification tooling (`workflow_dispatch`, take a released tag)
+### On-demand E2E (all `workflow_dispatch`-only — idle is the design, not decay)
+
+The **12** WebDriver E2E workflows drive the real Tauri binary (and, for the
+two-client ones, two isolated instances against one real `pollis-delivery` +
+libsql backend stood up in the job). **None run automatically, and several have
+never been dispatched at all** — a cheap-PR-tier + nightly-full-tier split is the
+remaining piece of #570 M4, deferred on cost (`path-to-launch-epic.md` PL-10:
+"The `e2e-*.yml` workflows stay dispatch-only by design"). A zero-run count here
+is therefore **not** evidence a workflow is dead; the scenario it runs is listed
+in `e2e/README.md` / `e2e/SCENARIOS.md` and the workflow is the only CI path to
+it. Dispatch them from the Actions tab after touching MLS delivery, DMs, the DS,
+or media.
+
+| Workflow | Scenario | Extra fixtures |
+|---|---|---|
+| `e2e-smoke.yml` | `e2e/smoke.js` — app launches, login screen renders | none (no DS, no DB) |
+| `e2e-full.yml` | `e2e/e2e.js` + `e2e/invalid-otp.js` — full signup, and wrong-OTP rejection | backend (libsql + real DS) |
+| `e2e-restart-persistence.yml` | `restart-persistence.js` — account survives a full app restart | backend |
+| `e2e-two-client.yml` | `two-client.js` — A's message converges into B's UI | backend |
+| `e2e-two-client-dm-reply.yml` | `two-client-dm-reply.js` — the reverse leg, B replies and A sees it | backend |
+| `e2e-two-client-delete.yml` | `two-client-delete.js` — delete-for-everyone flips B's delivered copy | backend |
+| `e2e-two-client-channel.yml` | `two-client-channel.js` — group + text channel, invite, accept, post, receive | backend |
+| `e2e-two-client-voice-channel.yml` | `two-client-voice-channel.js` — both join a voice channel, one leaves | backend + LiveKit + audio |
+| `e2e-two-client-call.yml` | `two-client-call.js` — place + accept a real 1:1 call | backend + LiveKit + audio |
+| `e2e-two-client-camera.yml` | `two-client-camera.js` — B sees A's remote camera tile | backend + LiveKit + audio + virtual camera |
+| `e2e-two-client-screenshare.yml` | `two-client-screenshare.js` — B sees A's remote screenshare tile | backend + LiveKit + audio (X11/Xvfb capture) |
+| `e2e-voice-channel-no-mic.yml` | `voice-channel-no-mic.js` — no capture device degrades to listen-only (S-NOMIC), forced with `POLLIS_DISABLE_MIC=1` | backend + LiveKit + audio |
+
+### Dispatch-only verification & ops tooling (`workflow_dispatch`; several take a released tag)
 
 | Workflow | Does |
 |---|---|
 | `attest-release.yml` | Backfills the binary-transparency attest step for an **already-published tag** — no rebuild (~2 min vs a ~40 min release). Deliberately duplicates `desktop-release.yml`'s built-in `attest-and-log` job: same `scripts/attest-binaries.sh`, the tag's commit timestamp, the published release assets. Idempotent — a tag already in the accumulator is a no-op. |
 | `aur-republish.yml` | Pushes an **already-published version** to the AUR — no rebuild (~1 min vs a ~40 min release): `gh workflow run aur-republish.yml -f version=1.8.5`. Hashes the `.deb` already on `cdn.pollis.com` and hands it to the same `scripts/publish-aur.sh` the release uses, so the PKGBUILD is identical to the one that release would have pushed. **Needed because the AUR's ssh gateway goes into maintenance for days at a time** and `desktop-release.yml`'s AUR step is `continue-on-error` (the installers are already on R2/GitHub by then, so an unreachable AUR must not fail a good release). One such window, ~2026-07-30 → 2026-08-11, silently left the AUR on v1.8.2 across three releases. Idempotent — republishing a version the AUR already has is a no-op. |
 | `rebuild-verify.yml` | The **third-party reproducer** (#484): rebuilds a released tag's Linux AppImage from public source with **no Pollis secrets** — runnable from a fork — and asserts the payload hash against the transparency log, trusting only the pinned log key. Log inclusion is verified in its own job (`verify-log-inclusion`), independent of the rebuild. **#877 fixed a false-red in that job**: `pollis-verify release` exits **0** for a tag that is not in the tree (`chain_valid` is vacuously true over an empty artifact set, with `found: false`), so the wait-for-log loop tested the exit code, broke on attempt 1, never waited, and then failed the ~40-minute rebuild against an empty report — v1.9.5 reproduced **byte-identically** and still went red. The loop now gates on `.found`, and the three outcomes (not published / log does not verify / did not reproduce) each fail with a distinct message. **#944 then split that last outcome three ways**, because "did not reproduce" was being published as an accusation in cases where the comparison's own precondition had failed. An AppImage vendors the app's system libraries off the build runner, and GitHub re-images the `ubuntu-22.04` label gradually, so a rebuild can land on a different image than the release and legitimately produce different bytes — which is exactly what happened to v1.9.3. The verdict step now reads `toolchain.runner_image` from the tag's own transparency leaf (surfaced by `pollis-verify release --json` since #944) and compares it against the image the rebuild ran on, reporting `did_not_reproduce` (same image, real finding), `environment_drift` (images differ, inconclusive) or `recipe_unrecorded` (the leaf predates #939 and records `unknown`). **All three still fail the run** — an inconclusive rebuild is not a passing one — and `scripts/test-rebuild-verdict.sh` (gated by `scripts-check.yml`) pins both directions, in particular that a same-image divergence still reports as the real finding. Bit-for-bit **reproduction** additionally needs the published build recipe supplied as non-secret repo `vars` (since #506 the only secret-shaped `option_env!` value left is the optional `LOG_DB_TOKEN` — see `docs/reproducible-builds-residuals.md`). |
+| `db-audit.yml` | Read-only audit of the conversation-id namespace (#880 / #948) against a **live** database, run where the credentials already live (the `delivery-prod` / `delivery-dev` GitHub environment's `DOPPLER_TOKEN`) rather than materializing them on a laptop. Two `SELECT`s, both of which must return zero rows: an id present in more than one of `groups`/`channels`/`dm_channel` (a **security incident** — `is_member` has been answering for the wrong conversation), and a row in any of the three whose id the `conversation` registry does not hold. It is the precondition check before 000017's guard triggers go live in an environment, and the standing verification after. |
+| `website-verify.yml` | Asserts **pollis.com is serving what `main` says** (#761) — content, not availability. Runs daily on a schedule *and* on dispatch, because Pages auto-deploy is off and `website-deploy.yml` is manual, so the site can silently lag `main` — and the pages that lag are the ones making cryptographic claims (#732 served a retired Ed25519 constant and showed every visitor a red tamper alarm; #720/#753/#757 had the Learn page contradicting itself in public). It also runs `scripts/rebuild-ledger.sh --check` and **fails when `rebuild-verify.yml` has run since `website/rebuild-ledger.json` was last published** — so a red run here usually means "regenerate and commit the ledger", not "the site is down". |
 
 ---
 

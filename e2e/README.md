@@ -629,6 +629,7 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `two-client-call.js` | `e2e-two-client-call.yml` | LiveKit + audio |
 | `two-client-camera.js` | `e2e-two-client-camera.yml` | LiveKit + audio + virtual camera |
 | `two-client-screenshare.js` | `e2e-two-client-screenshare.yml` | LiveKit + audio (X11 capture) |
+| `voice-channel-no-mic.js` | `e2e-voice-channel-no-mic.yml` | LiveKit + audio (`POLLIS_DISABLE_MIC=1`) |
 
 None run automatically. Wiring a cheap PR tier + a nightly full tier is the
 remaining piece of #570 M4 (deferred on cost); until then, dispatch them from
