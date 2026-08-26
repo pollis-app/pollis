@@ -384,6 +384,31 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
     migration runner's credential; only the CLIENT build stopped reading them.
     `TURSO_PLATFORM_TOKEN` / `TURSO_ORG` / `TURSO_DB` **can** go — they existed
     solely to mint client tokens at `/v1/turso/token`, which this change deletes.
+  - **Ordering (encrypted read-cursor sync, #844): the DS ships before the
+    client, same cycle.** Three things move together and the first two are the
+    ordering constraint. (1) Migration
+    `000018_read_cursor_sync.sql` adds the `read_cursor_sync` table — additive,
+    one new table, nothing existing touched — and migrate-then-ship means
+    whichever prod deploy runs first applies it. It must be applied before either
+    endpoint is live, or both 500 on a missing table. (2) Two new routes,
+    `POST /v1/read-cursors/save` and `POST /v1/read/read-cursors`. A new client
+    against an old DS gets 404 on both. (3) The client wiring, which rides a
+    desktop release.
+    **The straddle is soft in both directions, which is why this is a "deploy the
+    DS first" note rather than a coordinated cutover.** A new client against an
+    old DS keeps working on its own local cursor: badges are correct on the
+    device you are using and simply do not follow you to a second one — the pull
+    and the push both fail, are both logged and swallowed, and the next launch
+    retries. An old client against the new DS never calls either endpoint and is
+    unaffected; the table sits empty for that account. Nothing is lost either
+    way, because the cursor's source of truth is the LOCAL `read_cursor` table
+    and the remote blob is a convergence aid, not storage.
+    Deploy the DS (dev → verify → prod, **confirm `/version` shows the merged
+    SHA**), then cut the client release.
+    **No key material or secret changes.** The blob is sealed client-side under a
+    key derived from the account identity key, which the DS has never held and
+    gains no access to here — there is nothing to add to Doppler, and nothing an
+    operator can do to read the column.
 - [ ] **Relay pool** — `pollis-relay` / `pollis-device-cert` change? rebuild the GHCR image (`relay-image.yml`). On the **hydra pool** (post-#703) that workflow also records the new immutable build into the `intended-image` SSM param (GitHub OIDC, no standing creds) and the reconciler converges the fleet on its schedule — verify each `GET /version` reports the new `sha` and the CloudWatch `StaleBuildNodes` metric returns to 0. Operator-provisioned (non-hydra) hosts are still a manual roll per `docs/relay-operations.md`. A wire-breaking protocol bump additionally needs `expected_relay_protocol` bumped (coordinated release — see above).
 - [ ] **Mobile** — in development; not a released output yet, but note if a `pollis-core` change needs a `#[cfg]`/uniffi follow-up. `mobile-core-check.yml` gates both `#[cfg]` gate-rot (cross-compile) **and** the full Android build (`android-build` assembles the APK) — a `pollis-core` change that breaks the uniffi surface, the prebuild, or the Gradle assembly now shows up as red CI, not on the next workstation build. iOS has no artifact job; `ios-check` links (`cargo build`) and asserts the artifact's iOS min-version, but the `.ipa` itself is only ever built by hand on a Mac.
 - [ ] **pollis-verify CLI** — `verifiable-log*` change affecting verification? Bump `version` in `verifiable-log-serve/Cargo.toml`, then tag `pollis-verify-v<that version>` to fire `verifier-release.yml`. The workflow refuses to release if the two disagree (#670).

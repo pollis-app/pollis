@@ -76,6 +76,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "mls_commit_since",
     "mls_welcome",
     "push_token",
+    "read_cursor_sync",
     "security_event",
     "user_block",
     "user_device",
@@ -272,6 +273,10 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     // Account-scoped records.
     conn.execute("DELETE FROM account_recovery WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM user_preferences WHERE user_id = ?1", uid()).await?;
+    // The encrypted read-cursor blob (#844). Unreadable to the server, which is
+    // exactly why it would otherwise sit here forever: nothing about it looks
+    // like user data to anyone auditing the tables by eye.
+    conn.execute("DELETE FROM read_cursor_sync WHERE user_id = ?1", uid()).await?;
     conn.execute("DELETE FROM security_event WHERE user_id = ?1", uid()).await?;
 
     // Derived directory index (migration 000009). Nothing reads it today, which

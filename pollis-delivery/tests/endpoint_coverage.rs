@@ -106,7 +106,10 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         // database-token mint the client no longer has any use for. That last
         // one is the point of the migration: with no client connection left, an
         // endpoint that hands out database credentials is pure attack surface.
-        94,
+        //
+        // 96 since #844 added the encrypted read-cursor sync:
+        // `/v1/read-cursors/save` and `/v1/read/read-cursors`.
+        96,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

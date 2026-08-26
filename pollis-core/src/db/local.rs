@@ -27,6 +27,13 @@ use pollis_sqlcipher as _;
 const LOCAL_SCHEMA_VERSION: &str = "8";
 const SCHEMA: &str = include_str!("local_schema.sql");
 
+/// The local schema, for unit tests that need a real table set without going
+/// through [`LocalDb::open_for_user`] (which wants a keystore and a data dir).
+#[cfg(test)]
+pub(crate) fn schema_sql() -> &'static str {
+    SCHEMA
+}
+
 pub struct LocalDb {
     conn: Connection,
 }

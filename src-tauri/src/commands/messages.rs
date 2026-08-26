@@ -89,6 +89,21 @@ pub async fn mark_messages_read(conversation_id: String, user_id: String, messag
 }
 
 #[tauri::command]
+pub async fn get_unread_counts(user_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<UnreadCount>> {
+    pollis_core::commands::messages::get_unread_counts(user_id, &state).await
+}
+
+#[tauri::command]
+pub async fn mark_conversation_read(conversation_id: String, user_id: String, state: State<'_, Arc<AppState>>) -> Result<bool> {
+    pollis_core::commands::messages::mark_conversation_read(conversation_id, user_id, &state).await
+}
+
+#[tauri::command]
+pub async fn sync_read_cursors(user_id: String, state: State<'_, Arc<AppState>>) -> Result<usize> {
+    pollis_core::commands::messages::sync_read_cursors(user_id, &state).await
+}
+
+#[tauri::command]
 pub async fn get_conversation_receipts(conversation_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<MessageReceipts>> {
     pollis_core::commands::messages::get_conversation_receipts(conversation_id, &state).await
 }

@@ -6,6 +6,7 @@ import { MainContent } from "../components/Layout/MainContent";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useMarkConversationRead } from "../hooks/queries/useUnread";
 
 export const ChannelPage: React.FC = observer(() => {
   const { t } = useTranslation("channels");
@@ -13,7 +14,7 @@ export const ChannelPage: React.FC = observer(() => {
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/channels/$channelId" });
   const setSelectedChannelId = appStore.setSelectedChannelId;
   const setSelectedGroupId = appStore.setSelectedGroupId;
-  const markRead = appStore.markRead;
+  const markConversationRead = useMarkConversationRead(appStore.currentUser?.id ?? null);
   const pendingDeleteChannelId = appStore.pendingDeleteChannelId;
   const setPendingDeleteChannelId = appStore.setPendingDeleteChannelId;
 
@@ -29,9 +30,11 @@ export const ChannelPage: React.FC = observer(() => {
     // URL, breadcrumb back-nav, deep link. Previously markRead only fired
     // from the Group page's channel-list click handler, so a direct route
     // visit left the bottom-bar count stuck.
-    markRead(channelId);
+    // Clears the badge optimistically AND advances the persisted cursor, so
+    // the channel is still read after a restart (#844).
+    markConversationRead.mutate(channelId);
     return () => { setSelectedChannelId(null); };
-  }, [groupId, channelId, setSelectedGroupId, setSelectedChannelId, markRead]);
+  }, [groupId, channelId, setSelectedGroupId, setSelectedChannelId, markConversationRead]);
 
   useEffect(() => {
     return () => { setPendingDeleteChannelId(null); };

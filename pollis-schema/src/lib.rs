@@ -197,6 +197,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "conversation_guard_triggers",
         include_str!("../migrations/000017_conversation_guard_triggers.sql"),
     ),
+    (
+        18,
+        "read_cursor_sync",
+        include_str!("../migrations/000018_read_cursor_sync.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

@@ -457,3 +457,35 @@ pub enum ObjectKind {
 pub struct ObjectExistsResponse {
     pub exists: bool,
 }
+
+// ── POST /v1/read/read-cursors ───────────────────────────────────────────────
+
+/// This account's synced read-cursor blob, so a device can merge the other
+/// devices' read positions into its own (#844).
+///
+/// Device-signed, and the DS binds it to the authenticated user: the blob is
+/// undecryptable without the account identity key, but *serving* it to anyone
+/// who asks would still leak its size and change rate to an unauthenticated
+/// caller, so it is scoped like every other per-account read here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadCursorsBody {
+    /// Must equal the authenticated user; a mismatch is a 403.
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadCursorsResponse {
+    /// `None` → this account has never pushed a cursor blob. A first-run device
+    /// gets this and simply has nothing to merge; it is not an error.
+    #[serde(default)]
+    pub cursors: Option<EncryptedReadCursors>,
+}
+
+/// The stored blob, exactly as the DS holds it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptedReadCursors {
+    /// base64 — the 12-byte AES-256-GCM nonce.
+    pub nonce: String,
+    /// base64 — AES-256-GCM ciphertext + tag.
+    pub blob: String,
+}
