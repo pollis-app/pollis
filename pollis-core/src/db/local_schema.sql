@@ -185,6 +185,30 @@ CREATE TABLE IF NOT EXISTS contact_verification (
 -- Additive CREATE TABLE IF NOT EXISTS — this file is re-applied on every open,
 -- so existing databases gain the table with no LOCAL_SCHEMA_VERSION bump (a bump
 -- would DELETE the user's message history; see the comment in local.rs).
+-- Where the human has read up to, per conversation (#844).
+--
+-- A CURSOR, not a count. Unread state used to be an in-memory MobX field that
+-- only the live-event dispatcher wrote, so a restart marked everything read and
+-- anything that arrived while offline never badged at all — users silently
+-- missed messages. A count cannot survive a restart honestly because it has no
+-- way to say *which* messages it counted; a cursor can, and the count is then
+-- derived from the `message` rows that ingest has already stored.
+--
+-- The position is the pair `(last_read_at, last_read_message_id)`, matching the
+-- `ORDER BY sent_at DESC, id DESC` the message list itself uses — `sent_at`
+-- alone is a sender-supplied timestamp and two messages can share one.
+--
+-- The cursor only ever moves FORWARD (see `advance_read_cursor`). That is what
+-- makes multi-device merge a `max()` with no locking and no conflict
+-- resolution: applying the same or an older position is a no-op, so devices
+-- converge whatever order their updates arrive in.
+CREATE TABLE IF NOT EXISTS read_cursor (
+    conversation_id      TEXT PRIMARY KEY,
+    last_read_at         TEXT NOT NULL,
+    last_read_message_id TEXT NOT NULL,
+    updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS bookmark (
     message_id      TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL,
