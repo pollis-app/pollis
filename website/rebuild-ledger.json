@@ -1,11 +1,31 @@
 {
-  "generated_at": "2026-08-25T04:07:09Z",
+  "generated_at": "2026-08-27T22:48:40Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "564353ae",
     "date": "2026-08-16"
   },
   "runs": [
+    {
+      "tag": "v1.10.4",
+      "conclusion": "failure",
+      "created_at": "2026-08-27T21:48:36Z",
+      "event": "workflow_run",
+      "run_id": "33119829575",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/33119829575",
+      "classification": "environment_drift",
+      "evidence": "The workflow's own #944 verdict, confirmed by hand — and the strongest drift case yet: ZERO member files differ. v1.10.4's release (33117720048 build-linux) built on ubuntu22@20260824.273.3; this rebuild landed on the older ubuntu22@20260817.266.1 (mixed pool during GitHub's gradual image roll), same helper image ubuntu24@20260823.283.1 on both. Logged payload a3260af3…, rebuilt d43b090e… — but the unpacked AppImage diff by origin reports 0 differing vendored host libraries AND 0 differing files built from Pollis source: every byte of content is identical, and the only divergence is a handful of bytes in the squashfs container itself (offsets 932112, 107124192–95), i.e. the packaging tool between the two ubuntu22 images, not the code. The rebuild is internally deterministic: rerun 2026-08-27 22:26 reproduced d43b090e… byte-for-byte again on the same 20260817 image. Reruns cannot currently converge because the pool no longer hands out the release's 20260824 image alongside; the moment one does, this row can be upgraded to byte-for-byte the way v1.10.0's was."
+    },
+    {
+      "tag": "v1.10.3",
+      "conclusion": "success",
+      "created_at": "2026-08-25T19:02:06Z",
+      "event": "workflow_run",
+      "run_id": "32887256490",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/32887256490",
+      "classification": null,
+      "evidence": null
+    },
     {
       "tag": "v1.10.2",
       "conclusion": "success",
