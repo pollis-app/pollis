@@ -46,7 +46,9 @@
     "savedName": "Saved",
     "savedKeywords": "saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "Arcade",
-    "arcadeKeywords": "arcade game asteroids ship shoot easter egg play"
+    "arcadeKeywords": "arcade game asteroids ship shoot easter egg play",
+    "vaultName": "Vault",
+    "vaultKeywords": "vault note to self notes personal storage private encrypted files drive locker safe"
   },
   "page": {
     "title": "Search"

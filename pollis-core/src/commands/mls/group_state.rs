@@ -612,6 +612,13 @@ async fn external_join_attempt(
         );
     }
 
+    // Best-effort pin-key adopt (#99). Usually a no-op — our own external
+    // commit just advanced the epoch past the stored wrap, so the real adopt
+    // happens lazily once a key-holding member processes our join and
+    // re-wraps — but when the wrap somehow already matches (a re-join into a
+    // quiet group), this picks it up now.
+    crate::commands::pinned_messages::try_adopt_pin_key(state, conversation_id).await;
+
     eprintln!(
         "[mls] external_join_group: {user_id}:{device_id} joined {conversation_id} from epoch {stored_epoch}"
     );
@@ -807,6 +814,10 @@ pub async fn init_mls_group(
     if let Err(e) = publish_group_info(state, conversation_id).await {
         eprintln!("[mls] init_mls_group: publish_group_info failed (non-fatal): {e}");
     }
+
+    // Mint the conversation's pin master key while the creator is the sole
+    // member at epoch 0 (#99). Best-effort: on failure the first pin mints.
+    crate::commands::pinned_messages::mint_pin_key_for_new_group(state, conversation_id).await;
 
     Ok(())
 }
@@ -1608,6 +1619,9 @@ async fn process_one_generation<'h>(
             // The exporter secret is per-group, and we are now on a different
             // group entirely, so any live voice room must re-derive immediately.
             crate::commands::voice_e2ee::on_mls_epoch_changed(state, mls_group_id).await;
+            // Same trigger for the pin key: the successor lineage has a fresh
+            // exporter, so a cached Kpin must be re-wrapped under it (#99).
+            crate::commands::pinned_messages::maybe_rewrap_pin_key(state, mls_group_id).await;
             return Ok(true);
         }
     }
@@ -1621,6 +1635,14 @@ async fn process_one_generation<'h>(
     // `ensure_group_info_published` republishes only when the log DB's GroupInfo is
     // missing or behind us, so it subsumes the old `any_applied` republish too.
     ensure_group_info_published(state, mls_group_id).await;
+
+    // Pin-key durability backstop (#99), the sibling of the GroupInfo one
+    // above: if this device holds the conversation's Kpin and the epoch has
+    // moved past its last published wrap — its own advance here, or a
+    // committer that crashed before re-wrapping — publish a fresh wrap so a
+    // keyless device (an external joiner, a new enrollee) can unwrap at the
+    // current epoch. One local SELECT in the steady state.
+    crate::commands::pinned_messages::maybe_rewrap_pin_key(state, mls_group_id).await;
 
     if any_applied {
         // Voice E2EE: when the epoch advances for the MLS group currently

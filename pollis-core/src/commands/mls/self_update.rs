@@ -233,6 +233,8 @@ pub async fn self_update_group(
             // to the new exporter key — same hook the committer path in
             // reconcile fires for exactly the same reason.
             crate::commands::voice_e2ee::on_mls_epoch_changed(state, conversation_id).await;
+            // And the pin key's wrap moves to the new exporter too (#99).
+            crate::commands::pinned_messages::maybe_rewrap_pin_key(state, conversation_id).await;
             Ok(true)
         }
         PublishOutcome::LostRace => {

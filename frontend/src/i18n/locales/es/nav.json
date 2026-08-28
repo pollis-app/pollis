@@ -16,7 +16,8 @@
     "verified": "Contacto verificado",
     "dmAvatarAlt": "Avatar de {{name}}",
     "close": "Cerrar la barra lateral ({{shortcut}})",
-    "resize": "Redimensionar la barra lateral (arrastra; doble clic para restablecer)"
+    "resize": "Redimensionar la barra lateral (arrastra; doble clic para restablecer)",
+    "vault": "Baúl"
   },
   "profile": {
     "you": "Tú",
@@ -170,5 +171,11 @@
   },
   "terminal": {
     "shellFailed": "no se pudo iniciar la shell: {{error}}"
+  },
+  "pins": {
+    "heading": "Fijados",
+    "empty": "Aún no hay mensajes fijados.",
+    "unavailable": "Los mensajes fijados aún no están disponibles en este dispositivo; aparecerán cuando la conversación se sincronice.",
+    "unpin": "Dejar de fijar"
   }
 }

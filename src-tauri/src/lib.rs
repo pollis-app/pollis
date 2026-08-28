@@ -572,6 +572,17 @@ pub fn run() {
             commands::bookmarks::toggle_saved_message,
             commands::bookmarks::list_saved_messages,
             commands::bookmarks::resolve_message_permalink,
+            // Pinned messages (#99)
+            commands::pinned_messages::pin_message,
+            commands::pinned_messages::unpin_message,
+            commands::pinned_messages::list_pinned_messages,
+            // Vault (#107)
+            commands::vault::get_vault_messages,
+            commands::vault::send_vault_message,
+            commands::vault::edit_vault_message,
+            commands::vault::set_vault_message_pinned,
+            commands::vault::delete_vault_message,
+            commands::vault::search_vault_messages,
             commands::messages::list_messages,
             commands::messages::send_message,
             commands::messages::get_channel_messages,

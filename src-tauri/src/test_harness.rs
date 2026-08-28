@@ -117,6 +117,17 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::bookmarks::toggle_saved_message,
             crate::commands::bookmarks::list_saved_messages,
             crate::commands::bookmarks::resolve_message_permalink,
+            // Pinned messages (#99)
+            crate::commands::pinned_messages::pin_message,
+            crate::commands::pinned_messages::unpin_message,
+            crate::commands::pinned_messages::list_pinned_messages,
+            // Vault (#107)
+            crate::commands::vault::get_vault_messages,
+            crate::commands::vault::send_vault_message,
+            crate::commands::vault::edit_vault_message,
+            crate::commands::vault::set_vault_message_pinned,
+            crate::commands::vault::delete_vault_message,
+            crate::commands::vault::search_vault_messages,
             crate::commands::messages::list_messages,
             crate::commands::messages::send_message,
             crate::commands::messages::get_channel_messages,
@@ -438,6 +449,12 @@ pub async fn wipe_remote(remote: &libsql::Connection, log: &libsql::Connection) 
         "security_event",
         "account_recovery",
         "user_device",
+        // Pinned messages (#99) + vault (#107): refs before the rows they
+        // hang off, ciphertext tables before their conversations/users.
+        "pinned_message",
+        "pin_keystate",
+        "vault_attachment_ref",
+        "vault_message",
         "channels",
         "group_member",
         "groups",

@@ -181,6 +181,18 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     }
 
     adopt_undrainable_joins(state, &joined).await;
+
+    // Adopt each joined conversation's pin key (#99) BEFORE the post-join
+    // self-update below advances the epoch. Right now this device sits at
+    // exactly the epoch the adder's re-wrap targeted, so the unwrap succeeds;
+    // one commit later the window is gone and the device would have to wait
+    // for another member's re-wrap. Once adopted, this device's own epoch
+    // hooks keep the server wrap current — including for the self-update it
+    // is about to make.
+    for (conversation_id, _) in &joined {
+        crate::commands::pinned_messages::try_adopt_pin_key(state, conversation_id).await;
+    }
+
     self_update_joined_groups(state, user_id, &joined).await;
 
     Ok(())

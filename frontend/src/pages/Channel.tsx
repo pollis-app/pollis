@@ -1,8 +1,9 @@
 import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Pin, Trash2 } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
+import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -17,6 +18,7 @@ export const ChannelPage: React.FC = observer(() => {
   const markConversationRead = useMarkConversationRead(appStore.currentUser?.id ?? null);
   const pendingDeleteChannelId = appStore.pendingDeleteChannelId;
   const setPendingDeleteChannelId = appStore.setPendingDeleteChannelId;
+  const { togglePins } = useRightPanel();
 
   useEffect(() => {
     // selectedGroupId drives the LiveKit room id used by the typing
@@ -53,6 +55,15 @@ export const ChannelPage: React.FC = observer(() => {
         className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
       >
         <span className="flex-1">{title}</span>
+        <button
+          data-testid="channel-pins-trigger"
+          onClick={togglePins}
+          aria-label={t("channel.pinsLabel")}
+          title={t("channel.pinsLabel")}
+          className="icon-btn-sm flex-shrink-0 padding-0 me-2"
+        >
+          <Pin size={14} aria-hidden="true" />
+        </button>
         {isAdmin && channel && pendingDeleteChannelId !== channelId && (
           <div className="flex items-center gap-2">
             <button

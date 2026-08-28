@@ -12,7 +12,8 @@
     "fallbackTitle": "私信",
     "viewProfile": "查看 @{{name}} 的个人资料",
     "call": "呼叫 @{{name}}",
-    "returnToCall": "返回与 @{{name}} 的通话"
+    "returnToCall": "返回与 @{{name}} 的通话",
+    "pinsLabel": "置顶消息"
   },
   "settings": {
     "pageTitle": "对话设置",

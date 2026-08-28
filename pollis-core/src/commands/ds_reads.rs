@@ -504,6 +504,50 @@ pub(crate) async fn read_cursors(
     ds_post_json(state, &body).await
 }
 
+// ── Pinned messages (#99) ────────────────────────────────────────────────────
+
+/// The conversation's current wrapped pin key, or `None` when nobody has
+/// minted one. Deliberately no defaulting: a decode failure surfaces rather
+/// than reading as "no pins here".
+pub(crate) async fn read_pin_keystate(
+    state: &Arc<AppState>,
+    mls_conversation_id: &str,
+    user_id: &str,
+) -> Result<pollis_api::pins::PinKeystateResponse> {
+    let body = pollis_api::pins::PinKeystateBody {
+        conversation_id: mls_conversation_id.to_string(),
+        user_id: Some(user_id.to_string()),
+    };
+    ds_post_json(state, &body).await
+}
+
+/// One conversation's pins, newest first, ciphertext and all.
+pub(crate) async fn read_pins(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+) -> Result<pollis_api::pins::ListPinsResponse> {
+    let body = pollis_api::pins::ListPinsBody {
+        conversation_id: conversation_id.to_string(),
+        user_id: Some(user_id.to_string()),
+    };
+    ds_post_json(state, &body).await
+}
+
+// ── Vault (#107) ─────────────────────────────────────────────────────────────
+
+/// Every vault entry this account holds, as the DS stores them — opaque until
+/// `commands::vault` opens them under the account identity key.
+pub(crate) async fn read_vault(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<pollis_api::vault::VaultMessagesResponse> {
+    let body = pollis_api::vault::VaultMessagesBody {
+        user_id: user_id.to_string(),
+    };
+    ds_post_json(state, &body).await
+}
+
 // ── Objects ──────────────────────────────────────────────────────────────────
 
 pub(crate) async fn object_exists(

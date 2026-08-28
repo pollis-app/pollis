@@ -12,7 +12,8 @@
     "fallbackTitle": "Личное сообщение",
     "viewProfile": "Открыть профиль @{{name}}",
     "call": "Позвонить @{{name}}",
-    "returnToCall": "Вернуться к звонку с @{{name}}"
+    "returnToCall": "Вернуться к звонку с @{{name}}",
+    "pinsLabel": "Закреплённые сообщения"
   },
   "settings": {
     "pageTitle": "Настройки переписки",

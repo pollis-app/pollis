@@ -6,6 +6,8 @@ import {
   MoreHorizontal,
   MessagesSquare,
   Bookmark,
+  Pin,
+  PinOff,
   Link,
   Check,
   AlertCircle,
@@ -22,10 +24,14 @@ interface MessageActionsProps {
   isOwn: boolean;
   canModerate: boolean;
   isSaved: boolean;
+  /** Whether this message is pinned in its conversation (#99). */
+  isPinned: boolean;
   copyLinkState: CopyLinkState;
   onReply?: (messageId: string) => void;
   onOpenThread?: (messageId: string) => void;
   onToggleSave?: (messageId: string) => void;
+  /** Pin/unpin for everyone (#99) — any member gets this. */
+  onTogglePin?: (messageId: string) => void;
   onCopyLink?: (messageId: string) => void;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
@@ -51,10 +57,12 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   isOwn,
   canModerate,
   isSaved,
+  isPinned,
   copyLinkState,
   onReply,
   onOpenThread,
   onToggleSave,
+  onTogglePin,
   onCopyLink,
   onEdit,
   onDelete,
@@ -95,7 +103,8 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   }, [menuOpen]);
 
   const canDelete = (isOwn || canModerate) && !!onDelete;
-  const hasMenu = !!onOpenThread || !!onToggleSave || !!onCopyLink || canDelete;
+  const hasMenu =
+    !!onOpenThread || !!onToggleSave || !!onTogglePin || !!onCopyLink || canDelete;
 
   const copyLinkIcon =
     copyLinkState === "copied" ? Check : copyLinkState === "failed" ? AlertCircle : Link;
@@ -247,6 +256,21 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                 >
                   <Bookmark size={16} className="shrink-0" fill={isSaved ? "currentColor" : "none"} />
                   {isSaved ? t("actions.removeBookmark") : t("actions.save")}
+                </button>
+              )}
+              {onTogglePin && (
+                <button
+                  role="menuitem"
+                  data-testid="pin-button"
+                  onClick={closeAnd(() => onTogglePin(messageId))}
+                  className={`${menuRowClass} ${menuRowFocusClass} text-dim hover:text-fg`}
+                >
+                  {isPinned ? (
+                    <PinOff size={16} className="shrink-0" />
+                  ) : (
+                    <Pin size={16} className="shrink-0" />
+                  )}
+                  {isPinned ? t("actions.unpin") : t("actions.pin")}
                 </button>
               )}
               {onCopyLink && (

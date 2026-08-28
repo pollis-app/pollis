@@ -32,7 +32,8 @@
   "channel": {
     "fallbackTitle": "Канал",
     "renameLabel": "Переименовать канал",
-    "deleteLabel": "Удалить канал"
+    "deleteLabel": "Удалить канал",
+    "pinsLabel": "Закреплённые сообщения"
   },
   "createChannel": {
     "pageTitle": "Новый канал",

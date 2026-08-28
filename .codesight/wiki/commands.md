@@ -292,6 +292,65 @@ any of them.
   is therefore *cryptographic*, not a permission check — accepted loss (1) in
   `CLAUDE.md`.
 
+## pinned_messages (`commands/pinned_messages.rs`)
+
+Pinned messages (#99). Not `pin` — that module is the device-unlock PIN. Pins are
+per-conversation SHARED state, so unlike bookmarks they are DS-backed: the server
+stores a content snapshot per pin, sealed under the conversation's 32-byte pin master
+key (`Kpin`), which itself is stored server-side only WRAPPED under a KEK derived from
+the current MLS epoch's exporter secret (`export_secret("pollis-pin-kek")`). The
+plaintext `Kpin` is cached in the local encrypted DB (`pin_key_cache`) because
+`max_past_epochs = 0` destroys the previous exporter at every merge — a device that
+holds the key re-wraps it under the new exporter after each epoch advance
+(`maybe_rewrap_pin_key`, hooked at every `voice_e2ee::on_mls_epoch_changed` site plus
+a per-catch-up backstop next to `ensure_group_info_published`); a device that does not
+unwraps the stored wrap the moment its `(generation, epoch)` matches
+(`try_adopt_pin_key` fires right after a Welcome lands, before the post-join
+self-update moves the epoch). Minting is INSERT-ONLY on the DS so two racing minters
+can never fork the key. See `.codesight/wiki/mls.md` § "Pinned-message key state".
+
+- `pin_message(conversation_id, message_id, user_id)` — snapshot the message from the
+  local `message` row (a message this device cannot read cannot be pinned), seal under
+  `Kpin`, `POST /v1/pins/pin`. Mints the conversation's key on first use. Idempotent
+  per `(conversation_id, message_id)`.
+- `unpin_message(conversation_id, message_id, user_id)` — `POST /v1/pins/unpin`. Any
+  current member may unpin (Slack's model); idempotent.
+- `list_pinned_messages(conversation_id, user_id)` → `PinnedMessage[]` — newest first,
+  decrypted locally; `sender_username` resolved from the local `user_cache` when known.
+  Skips (with a log line) a pin that fails AEAD or whose decrypted snapshot names a
+  different message/conversation than its row — a spliced row must not render as a
+  relocated pin. Errors with "pin key not yet available" on a device that cannot
+  unwrap the current wrap yet (a fresh external joiner); that heals when any
+  key-holding member's next pass re-wraps.
+
+## vault (`commands/vault.rs`)
+
+The Vault (#107): a personal encrypted space that presents as a chat with yourself
+and syncs across the account's devices like cloud storage. Entries are sealed under
+HKDF-SHA256(account identity key seed, salt = user id, info = `pollis-vault-v1`) →
+AES-256-GCM over the padded entry JSON — the read-cursor construction (#844), per
+entry. Because the account key transfers at enrollment, a brand-new device decrypts
+the ENTIRE vault: the deliberate, cryptographic inversion of accepted loss (2)
+("a new device starts empty"). The pinned flag lives INSIDE the ciphertext, so
+pin/unpin is indistinguishable from an edit on the wire. Entry bodies are the same
+content string chat uses (plain text or the `_att` attachment envelope), so file
+drops ride the normal staged-upload/R2 pipeline; every save declares its attachment
+hashes so the DS's `vault_attachment_ref` rows keep the shared objects alive against
+attachment GC. Remote-first writes, local `vault_message` cache for offline reads;
+the remote is the source of truth (sync replaces the cache).
+
+- `get_vault_messages(user_id)` → `VaultMessage[]` — oldest first (chat order). Pulls
+  and replaces the local cache when the DS is reachable; serves the last synced state
+  when not. An entry this build cannot decrypt is hidden, never deleted.
+- `send_vault_message(user_id, content)` → `VaultMessage`
+- `edit_vault_message(id, new_content, user_id)` → `VaultMessage` — keeps `pinned` and
+  `created_at`.
+- `set_vault_message_pinned(id, pinned, user_id)` → `VaultMessage`
+- `delete_vault_message(id, user_id)` — hard delete, remote first; releases the
+  entry's attachment references.
+- `search_vault_messages(query, user_id)` → `VaultMessage[]` — case-insensitive
+  substring over the local cache; the server cannot search what it cannot read.
+
 ## mls (`commands/mls/`)
 Only three MLS commands are registered (`src-tauri/src/commands/mls.rs`):
 - `process_pending_commits(conversation_id, user_id)`
@@ -392,7 +451,7 @@ The mirror image of `overlay` (design §10.2, #813): `overlay` decides whether *
 
 ## Appendix A — full registered-command inventory (names only)
 
-Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, the two `messages` receipt commands added by #857, the two `autolock` commands added by #851, and the four added by #874 (`messages::read_last_messages`, `r2::upload_public_file`, `r2::get_public_file_url`, `device_enrollment::await_enrollment_approval`), and the three added by #1000 (`r2::upload_media_staged`, `staging::stage_attachment`, `staging::discard_staged_attachment`). **203 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
+Mechanically extracted from `tauri::generate_handler![…]` in `src-tauri/src/lib.rs` at `d13c906` on **2026-08-03** (#714), plus the two `relay_serving` commands added by #813, the six `emoji` commands added by #848, the two `messages` receipt commands added by #857, the two `autolock` commands added by #851, and the four added by #874 (`messages::read_last_messages`, `r2::upload_public_file`, `r2::get_public_file_url`, `device_enrollment::await_enrollment_approval`), and the three added by #1000 (`r2::upload_media_staged`, `staging::stage_attachment`, `staging::discard_staged_attachment`), and the nine added by #99/#107 (`pinned_messages::{pin_message, unpin_message, list_pinned_messages}`, `vault::{get_vault_messages, send_vault_message, edit_vault_message, set_vault_message_pinned, delete_vault_message, search_vault_messages}`). **212 commands.** Grouped by the `commands::<module>::` path used at the registration site; **names only — no descriptions are given here because they were not verified.** A name in this list that has no prose above is real and callable; read its implementation in `pollis-core/src/commands/` before using it.
 
 Regenerate with:
 
@@ -417,6 +476,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`mls`** — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 - **`overlay`** — `get_overlay_mode`, `set_overlay_mode`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
+- **`pinned_messages`** — `list_pinned_messages`, `pin_message`, `unpin_message`
 - **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
 - **`staging`** — `discard_staged_attachment`, `stage_attachment`
 - **`relay_serving`** — `get_relay_serving_status`, `set_relay_serving`
@@ -428,6 +488,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`tray`** — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
 - **`update`** — `is_update_required`, `mark_update_required`
 - **`user`** — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
+- **`vault`** — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `search_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
 - **`voice`** — `get_last_join_timings`, `get_voice_gate_state`, `join_voice_channel`, `leave_voice_channel`, `list_audio_devices`, `prepare_voice_connection`, `release_voice_ptt`, `set_remote_user_volume`, `set_voice_audio_processing`, `set_voice_input_device`, `set_voice_input_mode`, `set_voice_output_device`, `set_voice_ptt_held`, `subscribe_voice_events`, `toggle_voice_deafen`, `toggle_voice_mute`
 - **`voice_test`** — `play_test_tone`, `record_and_play_back`, `set_mic_test_monitor`, `start_mic_test`, `stop_mic_test`, `stop_test_playback`, `subscribe_voice_test_events`
 
@@ -440,7 +501,7 @@ _Back to [index.md](./index.md)_
 
 ## Complete registered-command index
 
-Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **203 commands** in 29 shim modules.
+Generated from `src-tauri/src/lib.rs`'s `invoke_handler!` — **212 commands** in 31 shim modules.
 Prose above covers roughly half of these; this index covers all of them, so a name that
 appears here but not above is registered and real, just undocumented. Regenerate rather
 than hand-edit.
@@ -455,6 +516,8 @@ than hand-edit.
 
 **`pin`** (4) — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 
+**`pinned_messages`** (3) — `list_pinned_messages`, `pin_message`, `unpin_message`
+
 **`autolock`** (2) — `report_user_activity`, `set_auto_lock_timeout`
 
 **`device_enrollment`** (10) — `approve_device_enrollment`, `await_enrollment_approval`, `finalize_device_enrollment`, `list_pending_enrollment_requests`, `list_security_events`, `poll_enrollment_status`, `recover_with_secret_key`, `reject_device_enrollment`, `reset_identity_and_recover`, `start_device_enrollment`
@@ -468,6 +531,8 @@ than hand-edit.
 **`relay_serving`** (2) — `get_relay_serving_status`, `set_relay_serving`
 
 **`user`** (5) — `get_preferences`, `get_user_profile`, `save_preferences`, `search_user_by_username`, `update_user_profile`
+
+**`vault`** (6) — `delete_vault_message`, `edit_vault_message`, `get_vault_messages`, `search_vault_messages`, `send_vault_message`, `set_vault_message_pinned`
 
 **`groups`** (27) — `accept_group_invite`, `approve_join_request`, `create_channel`, `create_group`, `create_group_invite_link`, `decline_group_invite`, `delete_channel`, `delete_group`, `get_group_join_requests`, `get_group_members`, `get_my_join_request`, `get_pending_invites`, `leave_group`, `list_group_channels`, `list_group_invite_links`, `list_user_groups`, `list_user_groups_with_channels`, `redeem_group_invite_link`, `reject_join_request`, `remove_member_from_group`, `request_group_access`, `revoke_group_invite_link`, `search_group_by_slug`, `send_group_invite`, `set_member_role`, `update_channel`, `update_group`
 

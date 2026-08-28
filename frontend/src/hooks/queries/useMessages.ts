@@ -97,7 +97,10 @@ type RawDmChannel = {
 // Parses structured attachment JSON embedded in message content.
 // Plain-text messages are returned as-is. Content with attachments looks like:
 //   {"_att":[{"key":"media/…","url":"…","name":"…","ct":"…","size":N,"bh":"…","w":N,"h":N}],"_txt":"caption"}
-function parseContent(raw: string | undefined): { text: string; attachments: Message['attachments'] } {
+// Exported for the surfaces that render the SAME content-string shape from
+// other sources — pinned-message snapshots (#99) and vault entries (#107) —
+// so there is one decoder for the envelope, not three.
+export function parseContent(raw: string | undefined): { text: string; attachments: Message['attachments'] } {
   if (!raw?.startsWith('{')) {
     return { text: raw ?? '', attachments: [] };
   }

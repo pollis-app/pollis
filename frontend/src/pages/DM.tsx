@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Phone, PhoneCall } from "lucide-react";
+import { Phone, PhoneCall, Pin } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
+import { useRightPanel } from "../components/Layout/RightPanel/useRightPanel";
 import type { PendingDmRequest } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
@@ -107,6 +108,7 @@ export const DMPage: React.FC = observer(() => {
   // create/answer the room), so only offer the call button when the peer
   // is online.
   const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
+  const { togglePins } = useRightPanel();
 
   // Pre-warm DNS / TLS / connection pool to LiveKit as soon as a callable
   // DM is open. The token cache won't apply (the real `call-<id>` room
@@ -189,6 +191,15 @@ export const DMPage: React.FC = observer(() => {
             t("conversation.fallbackTitle")
           )}
         </span>
+        <button
+          data-testid="dm-pins-trigger"
+          onClick={togglePins}
+          aria-label={t("conversation.pinsLabel")}
+          title={t("conversation.pinsLabel")}
+          className="icon-btn-sm flex-shrink-0 padding-0 me-2"
+        >
+          <Pin size={14} aria-hidden="true" />
+        </button>
         {canCall && (() => {
           // If there's a live outgoing 1:1 call to this exact user, the
           // button returns the user to the call room instead of starting

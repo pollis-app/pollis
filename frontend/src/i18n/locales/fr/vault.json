@@ -1,0 +1,40 @@
+{
+  "title": "Coffre",
+  "placeholder": "Déposez une note, un lien ou un fichier — vous seul pouvez le lire…",
+  "empty": "Votre coffre est vide. Les notes, liens et fichiers déposés ici sont chiffrés de bout en bout et vous suivent sur tous vos appareils.",
+  "searchPlaceholder": "Rechercher dans votre coffre…",
+  "searchEmpty": "Rien dans votre coffre ne correspond.",
+  "clearSearch": "Effacer la recherche",
+  "viewToggle": "Vue du coffre",
+  "viewChat": "Discussion",
+  "viewMedia": "Médias",
+  "entry": {
+    "pinned": "Épinglé",
+    "edited": "(modifié)",
+    "pin": "Épingler l’entrée",
+    "unpin": "Désépingler l’entrée",
+    "edit": "Modifier l’entrée",
+    "delete": "Supprimer l’entrée"
+  },
+  "edit": {
+    "heading": "Modifier l’entrée",
+    "cancel": "Annuler la modification",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…"
+  },
+  "delete": {
+    "heading": "Supprimer l’entrée",
+    "body": "Supprimer cette entrée de votre coffre sur tous vos appareils ? Cette action est irréversible.",
+    "cancel": "Annuler la suppression",
+    "confirm": "Supprimer",
+    "deleting": "Suppression…"
+  },
+  "media": {
+    "empty": "Aucun média dans votre coffre pour l’instant — déposez des images ou des fichiers dans la vue discussion.",
+    "filesHeading": "Fichiers",
+    "close": "Fermer la visionneuse",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "position": "{{index}} / {{total}}"
+  }
+}
