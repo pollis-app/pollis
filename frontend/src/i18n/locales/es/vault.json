@@ -1,0 +1,40 @@
+{
+  "title": "Baúl",
+  "placeholder": "Guarda una nota, un enlace o un archivo: solo tú puedes leerlo…",
+  "empty": "Tu baúl está vacío. Las notas, enlaces y archivos que guardes aquí están cifrados de extremo a extremo y te siguen a todos tus dispositivos.",
+  "searchPlaceholder": "Buscar en tu baúl…",
+  "searchEmpty": "Nada en tu baúl coincide con eso.",
+  "clearSearch": "Borrar búsqueda",
+  "viewToggle": "Vista del baúl",
+  "viewChat": "Chat",
+  "viewMedia": "Multimedia",
+  "entry": {
+    "pinned": "Fijado",
+    "edited": "(editado)",
+    "pin": "Fijar entrada",
+    "unpin": "Dejar de fijar",
+    "edit": "Editar entrada",
+    "delete": "Eliminar entrada"
+  },
+  "edit": {
+    "heading": "Editar entrada",
+    "cancel": "Cancelar edición",
+    "save": "Guardar",
+    "saving": "Guardando…"
+  },
+  "delete": {
+    "heading": "Eliminar entrada",
+    "body": "¿Eliminar esta entrada de tu baúl en todos los dispositivos? No se puede deshacer.",
+    "cancel": "Cancelar eliminación",
+    "confirm": "Eliminar",
+    "deleting": "Eliminando…"
+  },
+  "media": {
+    "empty": "Aún no hay multimedia en tu baúl: suelta imágenes o archivos en la vista de chat.",
+    "filesHeading": "Archivos",
+    "close": "Cerrar visor",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "position": "{{index}} / {{total}}"
+  }
+}

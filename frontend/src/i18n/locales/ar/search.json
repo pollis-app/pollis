@@ -46,7 +46,9 @@
     "savedName": "المحفوظات",
     "savedKeywords": "محفوظ إشارة مرجعية مفضلة مثبتة لاحقًا رابط دائم saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "الأركيد",
-    "arcadeKeywords": "أركيد لعبة كويكبات مركبة إطلاق بيضة عيد الفصح لعب arcade game asteroids ship shoot easter egg play"
+    "arcadeKeywords": "أركيد لعبة كويكبات مركبة إطلاق بيضة عيد الفصح لعب arcade game asteroids ship shoot easter egg play",
+    "vaultName": "الخزنة",
+    "vaultKeywords": "الخزنة vault ملاحظات تخزين شخصي خاص مشفر ملفات"
   },
   "page": {
     "title": "بحث"

@@ -290,6 +290,12 @@ const savedRoute = createRoute({
   component: SavedPage,
 });
 
+const vaultRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vault",
+  component: lazyRouteComponent(() => import("./pages/Vault"), "VaultPage"),
+});
+
 const arcadeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/arcade",
@@ -346,6 +352,7 @@ const routeTree = rootRoute.addChildren([
   updateRoute,
   callRoute,
   savedRoute,
+  vaultRoute,
   arcadeRoute,
   terminalRoute,
 ]);

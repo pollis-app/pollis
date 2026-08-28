@@ -217,3 +217,48 @@ CREATE TABLE IF NOT EXISTS bookmark (
 
 -- The saved-items surface lists newest-first across all conversations.
 CREATE INDEX IF NOT EXISTS idx_bookmark_created_at ON bookmark(created_at DESC);
+
+-- This device's plaintext copy of each conversation's pin master key (#99).
+--
+-- Kpin is the AES-256-GCM key every pin snapshot in a conversation is sealed
+-- under. It is held HERE in the clear because this database is the same trust
+-- domain that holds the MLS group state itself (SQLCipher at rest, key behind
+-- the PIN) — wrapping it again locally would protect it from nobody the MLS
+-- state is not already exposed to. The SERVER-side copy is always wrapped
+-- under the current epoch's exporter KEK.
+--
+-- (wrapped_generation, wrapped_epoch) records the newest (generation, epoch)
+-- pair THIS DEVICE has published a wrap at — the local-first staleness check:
+-- after an epoch advance, `maybe_rewrap_pin_key` compares these two columns
+-- against the local group with no network round trip, and only a device that
+-- is actually behind re-wraps and posts. `max_past_epochs = 0` makes this
+-- cache load-bearing, not a convenience: the previous epoch's exporter is
+-- destroyed at merge, so a device that lost Kpin cannot recover it from a
+-- stale server wrap — only from this row or from a peer's fresh re-wrap.
+CREATE TABLE IF NOT EXISTS pin_key_cache (
+    conversation_id    TEXT PRIMARY KEY,
+    kpin               BLOB NOT NULL,
+    wrapped_generation INTEGER NOT NULL DEFAULT 0,
+    wrapped_epoch      INTEGER NOT NULL DEFAULT 0,
+    updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Decrypted vault entries (#107) — the local cache of the remote
+-- `vault_message` rows, which are ciphertext under a key derived from the
+-- account identity key. Plaintext here for the same reason `message.content`
+-- is: this database is the trusted store. Replaced wholesale by each sync
+-- (the remote is the source of truth — the vault must behave like cloud
+-- storage, surviving any single device), which is also what lets the vault
+-- render offline from the last synced state.
+CREATE TABLE IF NOT EXISTS vault_message (
+    id         TEXT PRIMARY KEY,
+    -- The entry's content string — the same `{"_att":[...],"_txt":"..."}`
+    -- envelope shape chat messages use, so the renderer and the media grid
+    -- parse it with the exact same code.
+    content    TEXT NOT NULL,
+    pinned     INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_message_created ON vault_message(created_at DESC);

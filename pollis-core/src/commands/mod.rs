@@ -52,8 +52,12 @@ pub mod mls;
 pub mod overlay;
 // Push-notification backend (#344): token registration + the content-free
 // send_message fanout. Pure libsql + reqwest, so it compiles on every target.
+// Pinned messages (#99). NOT `pin` — that module is the device-unlock PIN.
+pub mod pinned_messages;
 pub mod push;
 pub mod r2;
+// The Vault (#107): personal encrypted storage, synced across devices.
+pub mod vault;
 // "Run a relay for others" (design §10.2, #813 D1): the consent + conditions
 // surface for letting THIS device forward other people's traffic. The mirror
 // image of `overlay` above, and independent of it.

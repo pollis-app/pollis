@@ -46,7 +46,9 @@
     "savedName": "收藏",
     "savedKeywords": "收藏 书签 标记 稍后 链接 saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "街机",
-    "arcadeKeywords": "街机 游戏 小行星 飞船 射击 彩蛋 arcade game asteroids ship shoot easter egg play"
+    "arcadeKeywords": "街机 游戏 小行星 飞船 射击 彩蛋 arcade game asteroids ship shoot easter egg play",
+    "vaultName": "保险库",
+    "vaultKeywords": "保险库 vault 笔记 个人 存储 私密 加密 文件 收藏"
   },
   "page": {
     "title": "搜索"

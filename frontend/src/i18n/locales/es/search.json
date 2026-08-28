@@ -46,7 +46,9 @@
     "savedName": "Guardados",
     "savedKeywords": "guardados marcador marcadores destacados fijados para después enlace permanente",
     "arcadeName": "Arcade",
-    "arcadeKeywords": "arcade juego asteroides nave disparar huevo de pascua jugar"
+    "arcadeKeywords": "arcade juego asteroides nave disparar huevo de pascua jugar",
+    "vaultName": "Baúl",
+    "vaultKeywords": "baúl vault notas personales almacenamiento privado cifrado archivos"
   },
   "page": {
     "title": "Buscar"

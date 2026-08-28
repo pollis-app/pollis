@@ -240,8 +240,8 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
     };
 
     use crate::commands::{
-        auth, blocks, bookmarks, device_enrollment, dm, emoji, groups, messages, pin, safety,
-        user,
+        auth, blocks, bookmarks, device_enrollment, dm, emoji, groups, messages, pin,
+        pinned_messages, safety, user, vault,
     };
 
     match cmd.as_str() {
@@ -795,6 +795,62 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
                 .await?)
         }
 
+        // ----- pinned messages (#99) -----
+        "pin_message" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let message_id: String = arg(&args, "messageId")?;
+            let user_id: String = arg(&args, "userId")?;
+            pinned_messages::pin_message(conversation_id, message_id, user_id, &state()?).await?;
+            ok(())
+        }
+        "unpin_message" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let message_id: String = arg(&args, "messageId")?;
+            let user_id: String = arg(&args, "userId")?;
+            pinned_messages::unpin_message(conversation_id, message_id, user_id, &state()?)
+                .await?;
+            ok(())
+        }
+        "list_pinned_messages" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(pinned_messages::list_pinned_messages(conversation_id, user_id, &state()?).await?)
+        }
+
+        // ----- vault (#107) -----
+        "get_vault_messages" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(vault::get_vault_messages(user_id, &state()?).await?)
+        }
+        "send_vault_message" => {
+            let user_id: String = arg(&args, "userId")?;
+            let content: String = arg(&args, "content")?;
+            ok(vault::send_vault_message(user_id, content, &state()?).await?)
+        }
+        "edit_vault_message" => {
+            let id: String = arg(&args, "id")?;
+            let new_content: String = arg(&args, "newContent")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(vault::edit_vault_message(id, new_content, user_id, &state()?).await?)
+        }
+        "set_vault_message_pinned" => {
+            let id: String = arg(&args, "id")?;
+            let pinned: bool = arg(&args, "pinned")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(vault::set_vault_message_pinned(id, pinned, user_id, &state()?).await?)
+        }
+        "delete_vault_message" => {
+            let id: String = arg(&args, "id")?;
+            let user_id: String = arg(&args, "userId")?;
+            vault::delete_vault_message(id, user_id, &state()?).await?;
+            ok(())
+        }
+        "search_vault_messages" => {
+            let query: String = arg(&args, "query")?;
+            let user_id: String = arg(&args, "userId")?;
+            ok(vault::search_vault_messages(query, user_id, &state()?).await?)
+        }
+
         // ----- dm -----
         "list_dm_channels" => {
             let user_id: String = arg(&args, "userId")?;
@@ -1060,6 +1116,15 @@ mod tests {
             "delete_account",
             "wipe_local_data",
             "upload_media",
+            "pin_message",
+            "unpin_message",
+            "list_pinned_messages",
+            "get_vault_messages",
+            "send_vault_message",
+            "edit_vault_message",
+            "set_vault_message_pinned",
+            "delete_vault_message",
+            "search_vault_messages",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }

@@ -20,6 +20,7 @@ pub mod messages;
 pub mod mls;
 pub mod overlay;
 pub mod pin;
+pub mod pinned_messages;
 pub mod r2;
 pub mod relay_serving;
 pub mod safety;
@@ -28,6 +29,7 @@ pub mod terminal;
 pub mod transparency;
 pub mod update;
 pub mod user;
+pub mod vault;
 
 // Media command shims. Each forwards to a pollis-core module that only exists
 // with the `media` feature on (pollis-core's `livekit_stub` lacks the command

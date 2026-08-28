@@ -25,7 +25,9 @@
     "edit": "Edit message",
     "delete": "Delete message",
     "deleteAsAdmin": "Delete message (admin)",
-    "more": "More actions"
+    "more": "More actions",
+    "pin": "Pin message",
+    "unpin": "Unpin message"
   },
   "thread": {
     "replyCount_one": "{{count}} reply",

@@ -25,7 +25,9 @@
     "edit": "Editar mensaje",
     "delete": "Eliminar mensaje",
     "deleteAsAdmin": "Eliminar mensaje (admin)",
-    "more": "Más acciones"
+    "more": "Más acciones",
+    "pin": "Fijar mensaje",
+    "unpin": "Dejar de fijar mensaje"
   },
   "thread": {
     "replyCount_one": "{{count}} respuesta",

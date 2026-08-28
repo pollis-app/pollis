@@ -41,6 +41,7 @@ pub mod invite_token;
 pub mod messages;
 pub mod otp;
 pub mod participant_id;
+pub mod pins;
 pub mod profile;
 pub mod push;
 pub mod ratelimit;
@@ -50,6 +51,7 @@ pub mod room_id;
 pub mod session;
 pub mod teardown;
 pub mod util;
+pub mod vault;
 pub mod writes;
 
 use std::sync::Arc;
@@ -360,6 +362,19 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // The encrypted read-cursor push (#844). Its plaintext neighbour two
         // lines up is `/v1/profile/preferences`; this one stores ciphertext.
         .route(<profile::SaveReadCursorsBody as DsRequest>::PATH, post(profile::save_read_cursors))
+        // Pinned messages (#99) — the wrapped pin-key state (Kpin, CAS on
+        // (generation, epoch)) and the pin snapshots sealed under it. Both
+        // ciphertext-only tables on the MAIN DB.
+        .route(<pins::UpsertPinKeystateBody as DsRequest>::PATH, post(pins::upsert_keystate))
+        .route(<pins::PinMessageBody as DsRequest>::PATH, post(pins::pin_message))
+        .route(<pins::UnpinMessageBody as DsRequest>::PATH, post(pins::unpin_message))
+        .route(<pins::PinKeystateBody as DsRequest>::PATH, post(pins::read_keystate))
+        .route(<pins::ListPinsBody as DsRequest>::PATH, post(pins::read_pins))
+        // The Vault (#107) — per-entry opaque blobs under the account identity
+        // key, the read-cursor construction applied per entry. MAIN DB.
+        .route(<vault::SaveVaultMessageBody as DsRequest>::PATH, post(vault::save_vault_message))
+        .route(<vault::DeleteVaultMessageBody as DsRequest>::PATH, post(vault::delete_vault_message))
+        .route(<vault::VaultMessagesBody as DsRequest>::PATH, post(vault::read_vault))
         // Domain D (#419) — key-packages / device-cert re-sign / push tokens.
         // All land on the MAIN DB. Device registration + the FIRST cert publish
         // are bootstrap writes that stay on the client's direct path (see

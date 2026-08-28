@@ -565,6 +565,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             onReply={handleReply}
             onEdit={handleEdit}
             onDelete={handleDelete}
+            // Pins (#99) key on the CHANNEL or DM id, not the MLS group id.
+            pinsConversationId={selectedChannelId ?? selectedConversationId ?? null}
             // TODO: scroll-to-message not yet implemented; prop left unwired
             getAuthorUsername={getAuthorUsername}
             hasMore={!!pageCursor}

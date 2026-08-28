@@ -16,6 +16,7 @@ import {
   Keyboard,
   Download,
   Bookmark,
+  Vault as VaultIcon,
 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -251,6 +252,17 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         />
 
         <ul>
+          {/* The Vault (#107): a chat with yourself, so it lives where people
+              look for Note to Self — at the top of the conversation list, not
+              buried under Account. */}
+          <Row
+            indent={1}
+            isActive={pathname === "/vault"}
+            leading={<VaultIcon {...iconProps} />}
+            label={t("sidebar.vault")}
+            testId="vault"
+            onClick={() => router.navigate({ to: "/vault" })}
+          />
           {dmConversations.map((c) => {
             const unread = unreadCounts[c.id] ?? 0;
             const verification = c.user2_id ? verificationByPeer.get(c.user2_id) : undefined;

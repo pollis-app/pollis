@@ -8,7 +8,7 @@
 // UI (scroll offset, drafts).
 
 /** The shape the panel is currently rendering. Derived, never parsed. */
-export type PanelKind = "members" | "thread" | "none";
+export type PanelKind = "members" | "thread" | "pins" | "none";
 
 export interface PanelSearch {
   /**
@@ -20,6 +20,15 @@ export interface PanelSearch {
    * and precisely the wrong one for the open state that used to sit beside it.
    */
   thread?: string;
+  /**
+   * `"1"` when the panel is showing the conversation's pinned messages (#99).
+   *
+   * Route-scoped for the same reason as `thread`: pins belong to the
+   * conversation being read, so navigating away drops back to the roster.
+   * A thread in the same URL wins — reading a thread is the more specific
+   * intent.
+   */
+  pins?: "1";
 }
 
 /**
@@ -32,9 +41,13 @@ export interface PanelSearch {
 export function validatePanelSearch(
   search: Record<string, unknown>,
 ): PanelSearch {
+  const out: PanelSearch = {};
   const thread = search.thread;
-  if (typeof thread !== "string" || thread.length === 0) {
-    return {};
+  if (typeof thread === "string" && thread.length > 0) {
+    out.thread = thread;
   }
-  return { thread };
+  if (search.pins === "1") {
+    out.pins = "1";
+  }
+  return out;
 }

@@ -26,7 +26,8 @@
   "channel": {
     "fallbackTitle": "频道",
     "renameLabel": "重命名频道",
-    "deleteLabel": "删除频道"
+    "deleteLabel": "删除频道",
+    "pinsLabel": "置顶消息"
   },
   "createChannel": {
     "pageTitle": "新建频道",

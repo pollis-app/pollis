@@ -36,7 +36,8 @@
   "channel": {
     "fallbackTitle": "قناة",
     "renameLabel": "إعادة تسمية القناة",
-    "deleteLabel": "حذف القناة"
+    "deleteLabel": "حذف القناة",
+    "pinsLabel": "الرسائل المثبتة"
   },
   "createChannel": {
     "pageTitle": "قناة جديدة",

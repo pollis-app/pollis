@@ -416,6 +416,47 @@ classic suite's DHKEM), so without
 self-update commit growth is linear in unmerged leaves — measured at 8→16 members,
 +10.6 KB unmerged vs +2.4 KB merged.
 
+## Pinned-message key state (#99)
+
+Each MLS conversation has one random 32-byte AES-256-GCM pin master key, `Kpin`.
+Pin snapshots are sealed directly under it, exactly once, at pin time. What
+rotates with the epoch is only the ~60-byte server-side WRAP of `Kpin`
+(`pin_keystate`, main DB): AES-256-GCM under a KEK derived from the current
+epoch's exporter — `export_secret("pollis-pin-kek", &[], 32)` — guarded by the
+same lexicographic `(generation, epoch)` CAS as `mls_group_info`.
+
+Because `max_past_epochs = 0` destroys the previous exporter at every merge, the
+re-wrap is **cache-based, not unwrap-based**: a device that holds `Kpin` keeps it
+in the local `pin_key_cache` table (same trust domain as `mls_kv`) and, after any
+epoch advance, wraps the CACHED key under the CURRENT exporter. The hook
+(`pinned_messages::maybe_rewrap_pin_key`) fires at every
+`voice_e2ee::on_mls_epoch_changed` site — committer reconcile, receiver replay,
+self-update, suite migration, generation hop — plus once per catch-up pass as a
+durability backstop beside `ensure_group_info_published`. Steady state is one
+local SELECT.
+
+How a device COMES to hold `Kpin`:
+- **group creation** — the creator mints it at epoch 0 (`init_mls_group`), as an
+  insert-only DS write (`mint: true`), so two racing minters can never fork the
+  key: exactly one insert wins and the loser refetches and adopts;
+- **first pin in a pre-#99 conversation** — the pinner mints on demand;
+- **Welcome join** — `try_adopt_pin_key` fires right after the Welcome applies,
+  BEFORE the post-join self-update advances the epoch, while the joiner still
+  sits at the exact epoch the adder's re-wrap targeted;
+- **external join** — the joiner's own commit advances the epoch past the stored
+  wrap, so it adopts lazily once any key-holding member processes its join and
+  re-wraps (pins read as "not yet available" until then — an honest intermediate
+  state, never a wrong one).
+
+The honest guarantee: any current member, including one enrolled long after a
+pin was created, reads every pin. A removed member cannot unwrap any wrap made
+after its removal, and the membership-gated DS reads refuse it the rows; but
+because `Kpin` itself never rotates, a removed member who extracted it while a
+member AND can read Turso directly (a breach) could open pins created after its
+removal. Rotating `Kpin` on removal would close that at O(pins) re-encryption
+per membership change — the issue explicitly traded that away, since a removed
+member could equally have cached every plaintext it ever saw.
+
 ## Multi-Device Enrollment
 
 When a new device (deviceC) enrolls for an existing user:

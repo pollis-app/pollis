@@ -16,7 +16,8 @@
     "verified": "已验证的联系人",
     "dmAvatarAlt": "{{name}} 的头像",
     "close": "关闭侧边栏（{{shortcut}}）",
-    "resize": "调整侧边栏宽度（拖动；双击重置）"
+    "resize": "调整侧边栏宽度（拖动；双击重置）",
+    "vault": "保险库"
   },
   "profile": {
     "you": "你",
@@ -163,5 +164,11 @@
   },
   "terminal": {
     "shellFailed": "无法启动 shell：{{error}}"
+  },
+  "pins": {
+    "heading": "置顶消息",
+    "empty": "暂无置顶消息。",
+    "unavailable": "此设备暂时无法读取置顶消息——会话同步后将显示。",
+    "unpin": "取消置顶"
   }
 }
