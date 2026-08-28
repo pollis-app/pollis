@@ -7,10 +7,11 @@ the codebase actually *ships*. Keep it updated when a build/deploy pipeline
 changes.
 
 There are **4 shipped executables/sites**, **4 running backend services**, and
-**2 managed data layers**. The repo's **36 workflows** split into: **10**
+**2 managed data layers**. The repo's **37 workflows** split into: **10**
 build/deploy pipelines (the outputs above), **9** always-on CI gates, **12**
-dispatch-only E2E runs, and **5** dispatch-only verification / ops tools. Every
-one of the 36 is accounted for below — if you are about to delete a workflow
+dispatch-only E2E runs, and **6** verification / ops tools (dispatchable; two of
+them, `website-verify.yml` and `status-probe.yml`, also run on a schedule). Every
+one of the 37 is accounted for below — if you are about to delete a workflow
 because it "looks unused", check its row first; most of them are idle **by
 design**.
 
@@ -88,17 +89,34 @@ design**.
     roster (first-party AWS only, four US regions, random 24 h placement, opt-in and off by default).
   - `device-security.html` — the lost/stolen-device path: how to revoke, and what a holder of the
     device can still read.
-  - `doc-page.css` — the shared long-form page shell these three use, so the layout lives once.
+  - `retention.html` — the public retention and deletion policy, derived from
+    `docs/metadata-retention-policy.md` (owner sign-off given 2026-08-28), including §6's answer to
+    "what happens to the permanent append-only ledger when I delete my account".
+  - `status.html` + `status.js` — the public status page: service observations, the incident record,
+    and the transparency publisher's own liveness, kept separate from the tree it serves.
+  - `doc-page.css` — the shared long-form page shell these pages use, so the layout lives once.
 - **`website/rebuild-ledger.json` must be regenerated after every release.** `scripts/rebuild-ledger.sh`
   rebuilds it from the public Actions API; `website-verify.yml` runs `--check` daily and **fails** when
   rebuild-verify has run since the ledger was last published. It is a committed file rather than a
   workflow write because `rebuild-verify.yml` deliberately holds **no** `secrets.*` — that is what lets a
   third party fork and run it — so it must not be given credentials to publish its own verdict.
-- **`docs/retention-public-draft.html` is the finished public retention policy, deliberately NOT in
-  `website/`.** Cloudflare Pages serves everything under `website/`, so a file placed there is public
-  whether or not anything links to it. It ships only when the owner signs off
-  `docs/metadata-retention-policy.md` (§10); the footer links are commented out and tagged
-  `TODO(#877): retention`. Owner sign-off is the only blocker — no code change is outstanding.
+- **`website/retention.html` is PUBLISHED** (owner sign-off 2026-08-28, #877; it was previously held
+  back in `docs/` precisely because Cloudflare Pages serves everything under `website/`, so "unlinked"
+  is not "unpublished"). `docs/metadata-retention-policy.md` stays the engineering source of truth —
+  every claim there cites its enforcing code — and the public page is derived from it. **Changing a
+  retention period means editing the code, then that document, then this page, then deploying the
+  site**; a published page that outlives the behaviour it describes is the exact defect the policy was
+  written to avoid.
+- **`website/status-history.json` is appended by a workflow, not by hand.** `scripts/status-probe.sh`
+  (run by `status-probe.yml` every 30 min) records a sample when the observed state changes and
+  otherwise every 20 h as a heartbeat, then commits it. It is a committed file for the same reason the
+  rebuild ledger is: the site is static and **the DS sends no CORS headers**, so a browser on pollis.com
+  cannot probe `api.pollis.com` at all — a client-side check would paint a false red on every load.
+  **`website/incidents.json`** is the hand-written incident index (format:
+  `docs/incidents/README.md`; validated by `scripts/check-incidents.py` in `scripts-check.yml`, which
+  also **fails when a postmortem comes due and is missing**). Neither file is published to users until
+  the site is deployed — `website-deploy.yml` is manual, so **filing an incident and not deploying
+  leaves the status page silent about it**, which is the single easiest mistake to make here.
 
 ### 4. pollis-verify (auditor CLI)
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)
@@ -200,6 +218,7 @@ design**.
 
 - **Turso** (libSQL) — two databases: the **main** DB (users, groups, membership, public keys, encrypted envelopes) and the **commit-log** DB (`mls_commit_log` / `mls_group_info` / `mls_welcome`). Schema is applied **migrate-then-ship** by whichever deploy touches prod first: the `apply-migrations` job in `desktop-release.yml` (client releases) **and** the `delivery-deploy-{dev,prod}.yml` deploys (DS releases) both run `db-apply.sh` before shipping. It's idempotent (tracks `schema_migrations`), so overlap is harmless, and additive-only migrations make early application safe for the still-running old code. Nobody applies to prod by hand. Numbered migrations in `pollis-schema/migrations/`; dev also auto-applies on merge via `db-migrate-dev.yml`.
 - **Cloudflare R2** — object storage behind **cdn.pollis.com**: desktop + CLI releases, install scripts, and the transparency-log static tree.
+- **Who holds all of the above, and what breaks in what order if they stop:** `docs/operational-continuity.md` (#877). It carries the singly-held asset register (every account and signing key in this file), the degradation ladder, and §4 on the failure mode specific to this design — a stalled transparency log being indistinguishable from a withheld one. The legal half (ownership, succession, escrow) is deferred to #723 and marked as such rather than answered.
 
 ---
 
@@ -253,7 +272,8 @@ or media.
 | `aur-republish.yml` | Pushes an **already-published version** to the AUR — no rebuild (~1 min vs a ~40 min release): `gh workflow run aur-republish.yml -f version=1.8.5`. Hashes the `.deb` already on `cdn.pollis.com` and hands it to the same `scripts/publish-aur.sh` the release uses, so the PKGBUILD is identical to the one that release would have pushed. **Needed because the AUR's ssh gateway goes into maintenance for days at a time** and `desktop-release.yml`'s AUR step is `continue-on-error` (the installers are already on R2/GitHub by then, so an unreachable AUR must not fail a good release). One such window, ~2026-07-30 → 2026-08-11, silently left the AUR on v1.8.2 across three releases. Idempotent — republishing a version the AUR already has is a no-op. |
 | `rebuild-verify.yml` | The **third-party reproducer** (#484): rebuilds a released tag's Linux AppImage from public source with **no Pollis secrets** — runnable from a fork — and asserts the payload hash against the transparency log, trusting only the pinned log key. Log inclusion is verified in its own job (`verify-log-inclusion`), independent of the rebuild. **#877 fixed a false-red in that job**: `pollis-verify release` exits **0** for a tag that is not in the tree (`chain_valid` is vacuously true over an empty artifact set, with `found: false`), so the wait-for-log loop tested the exit code, broke on attempt 1, never waited, and then failed the ~40-minute rebuild against an empty report — v1.9.5 reproduced **byte-identically** and still went red. The loop now gates on `.found`, and the three outcomes (not published / log does not verify / did not reproduce) each fail with a distinct message. **#944 then split that last outcome three ways**, because "did not reproduce" was being published as an accusation in cases where the comparison's own precondition had failed. An AppImage vendors the app's system libraries off the build runner, and GitHub re-images the `ubuntu-22.04` label gradually, so a rebuild can land on a different image than the release and legitimately produce different bytes — which is exactly what happened to v1.9.3. The verdict step now reads `toolchain.runner_image` from the tag's own transparency leaf (surfaced by `pollis-verify release --json` since #944) and compares it against the image the rebuild ran on, reporting `did_not_reproduce` (same image, real finding), `environment_drift` (images differ, inconclusive) or `recipe_unrecorded` (the leaf predates #939 and records `unknown`). **All three still fail the run** — an inconclusive rebuild is not a passing one — and `scripts/test-rebuild-verdict.sh` (gated by `scripts-check.yml`) pins both directions, in particular that a same-image divergence still reports as the real finding. Bit-for-bit **reproduction** additionally needs the published build recipe supplied as non-secret repo `vars` (since #506 the only secret-shaped `option_env!` value left is the optional `LOG_DB_TOKEN` — see `docs/reproducible-builds-residuals.md`). |
 | `db-audit.yml` | Read-only audit of the conversation-id namespace (#880 / #948) against a **live** database, run where the credentials already live (the `delivery-prod` / `delivery-dev` GitHub environment's `DOPPLER_TOKEN`) rather than materializing them on a laptop. Two `SELECT`s, both of which must return zero rows: an id present in more than one of `groups`/`channels`/`dm_channel` (a **security incident** — `is_member` has been answering for the wrong conversation), and a row in any of the three whose id the `conversation` registry does not hold. It is the precondition check before 000017's guard triggers go live in an environment, and the standing verification after. |
-| `website-verify.yml` | Asserts **pollis.com is serving what `main` says** (#761) — content, not availability. Runs daily on a schedule *and* on dispatch, because Pages auto-deploy is off and `website-deploy.yml` is manual, so the site can silently lag `main` — and the pages that lag are the ones making cryptographic claims (#732 served a retired Ed25519 constant and showed every visitor a red tamper alarm; #720/#753/#757 had the Learn page contradicting itself in public). It also runs `scripts/rebuild-ledger.sh --check` and **fails when `rebuild-verify.yml` has run since `website/rebuild-ledger.json` was last published** — so a red run here usually means "regenerate and commit the ledger", not "the site is down". |
+| `status-probe.yml` | The public status record's prober (#877). Every 30 min (+ dispatch) it curls `/health` and `/version` on the DS, the three transparency heads, the release manifest and the site, then appends to `website/status-history.json` **only when the observed state changes, or every 20 h as a heartbeat** — and commits the result to `main`. It also records the last `transparency-publish.yml` run's conclusion, which is a *different signal* from the head it serves: an STH timestamp is frozen per tree size, so an abandoned log and an idle one serve byte-identical files (`docs/operational-continuity.md` §4). It commits because the DS sends no CORS headers and a static page therefore cannot probe anything client-side. **If the push to `main` is ever rejected it fails loudly rather than skipping** — and `website-verify.yml` checks the record's freshness from a different workflow, because a monitor that goes quiet cannot be the thing that reports it went quiet. |
+| `website-verify.yml` | Asserts **pollis.com is serving what `main` says** (#761) — content, not availability. Runs daily on a schedule *and* on dispatch, because Pages auto-deploy is off and `website-deploy.yml` is manual, so the site can silently lag `main` — and the pages that lag are the ones making cryptographic claims (#732 served a retired Ed25519 constant and showed every visitor a red tamper alarm; #720/#753/#757 had the Learn page contradicting itself in public). It also runs `scripts/rebuild-ledger.sh --check` and **fails when `rebuild-verify.yml` has run since `website/rebuild-ledger.json` was last published** — so a red run here usually means "regenerate and commit the ledger", not "the site is down". **#877 added three more repo-local checks** on the same daily run: the status record is still being written (`status-probe.sh --check`, 48 h), the **transparency log is still being published** (the last successful `transparency-publish.yml` run, 48 h — the stalled-vs-withheld ambiguity in `docs/operational-continuity.md` §4), and `website/incidents.json` still parses (a malformed file renders as "no incidents" over incidents that *were* written down). |
 
 ---
 
