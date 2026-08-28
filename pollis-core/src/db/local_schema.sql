@@ -250,7 +250,12 @@ CREATE TABLE IF NOT EXISTS pin_key_cache (
 -- (the remote is the source of truth — the vault must behave like cloud
 -- storage, surviving any single device), which is also what lets the vault
 -- render offline from the last synced state.
-CREATE TABLE IF NOT EXISTS vault_message (
+--
+-- Named `vault_entry_cache`, NOT `vault_message`: the local and remote
+-- schemas keep DISJOINT table names by design, and the
+-- `no_client_side_remote_writes` guard depends on that disjointness to tell
+-- a local write from a banned remote one by table name alone.
+CREATE TABLE IF NOT EXISTS vault_entry_cache (
     id         TEXT PRIMARY KEY,
     -- The entry's content string — the same `{"_att":[...],"_txt":"..."}`
     -- envelope shape chat messages use, so the renderer and the media grid
@@ -261,4 +266,4 @@ CREATE TABLE IF NOT EXISTS vault_message (
     updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_vault_message_created ON vault_message(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vault_entry_cache_created ON vault_entry_cache(created_at DESC);

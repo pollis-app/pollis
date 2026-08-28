@@ -954,12 +954,14 @@ Load-bearing, not a convenience: `max_past_epochs = 0` destroys the previous
 exporter at merge, so a device that lost `Kpin` cannot recover it from a stale
 server wrap — only from this row or a peer's fresh re-wrap.
 
-### vault_message _(local cache, #107)_
+### vault_entry_cache _(local cache, #107)_
 - `id` TEXT PK, `content` TEXT NOT NULL _(decrypted entry body — same shape as `message.content`)_, `pinned` INTEGER, `created_at` / `updated_at` TEXT
 
 The decrypted mirror of the remote `vault_message` rows, replaced wholesale by
 each sync (the remote is the source of truth) — which is also what lets the
-vault render offline.
+vault render offline. Deliberately NOT named `vault_message`: local and remote
+table names stay disjoint so the `no_client_side_remote_writes` guard can tell
+the two apart by name alone.
 
 ### user_cache
 - `id` TEXT PK

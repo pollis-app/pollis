@@ -166,7 +166,7 @@ fn upsert_local(
     updated_at: &str,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO vault_message (id, content, pinned, created_at, updated_at) \
+        "INSERT INTO vault_entry_cache (id, content, pinned, created_at, updated_at) \
          VALUES (?1, ?2, ?3, ?4, ?5) \
          ON CONFLICT(id) DO UPDATE SET \
              content = excluded.content, \
@@ -182,7 +182,7 @@ fn upsert_local(
 fn list_local(conn: &Connection) -> Result<Vec<VaultMessage>> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, content, pinned, created_at, updated_at FROM vault_message \
+            "SELECT id, content, pinned, created_at, updated_at FROM vault_entry_cache \
              ORDER BY created_at ASC, id ASC",
         )
         .map_err(|e| Error::Other(anyhow::anyhow!("vault cache prepare: {e}")))?;
@@ -206,7 +206,7 @@ fn list_local(conn: &Connection) -> Result<Vec<VaultMessage>> {
 
 fn get_local(conn: &Connection, id: &str) -> Result<Option<VaultMessage>> {
     conn.query_row(
-        "SELECT id, content, pinned, created_at, updated_at FROM vault_message WHERE id = ?1",
+        "SELECT id, content, pinned, created_at, updated_at FROM vault_entry_cache WHERE id = ?1",
         rusqlite::params![id],
         |row| {
             Ok(VaultMessage {
@@ -264,7 +264,7 @@ pub(crate) async fn sync_vault(state: &Arc<AppState>, user_id: &str) -> Result<u
     // Remove local rows the server no longer holds (deleted from another
     // device). Chunked IN-list, mirroring the codebase's BIND_CHUNK habit.
     if keep_ids.is_empty() {
-        conn.execute("DELETE FROM vault_message", [])
+        conn.execute("DELETE FROM vault_entry_cache", [])
             .map_err(|e| Error::Other(anyhow::anyhow!("vault cache prune: {e}")))?;
     } else {
         let placeholders = keep_ids
@@ -273,7 +273,7 @@ pub(crate) async fn sync_vault(state: &Arc<AppState>, user_id: &str) -> Result<u
             .map(|(i, _)| format!("?{}", i + 1))
             .collect::<Vec<_>>()
             .join(",");
-        let sql = format!("DELETE FROM vault_message WHERE id NOT IN ({placeholders})");
+        let sql = format!("DELETE FROM vault_entry_cache WHERE id NOT IN ({placeholders})");
         conn.execute(&sql, rusqlite::params_from_iter(keep_ids.iter()))
             .map_err(|e| Error::Other(anyhow::anyhow!("vault cache prune: {e}")))?;
     }
@@ -473,7 +473,7 @@ pub async fn delete_vault_message(
         .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
     db.conn()
         .execute(
-            "DELETE FROM vault_message WHERE id = ?1",
+            "DELETE FROM vault_entry_cache WHERE id = ?1",
             rusqlite::params![id],
         )
         .map_err(|e| Error::Other(anyhow::anyhow!("vault cache delete: {e}")))?;

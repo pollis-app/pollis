@@ -24,7 +24,7 @@ async fn wipe_local_vault_cache(client: &TestClient) {
     let guard = client.state.local_db.lock().await;
     let db = guard.as_ref().expect("signed in");
     db.conn()
-        .execute("DELETE FROM vault_message", [])
+        .execute("DELETE FROM vault_entry_cache", [])
         .expect("wipe vault cache");
 }
 
