@@ -146,16 +146,22 @@ fn b64(bytes: &[u8]) -> String {
 
 // ── The exporter-derived KEK ─────────────────────────────────────────────────
 
-/// The current `(KEK, generation, epoch)` for a conversation, or `None` when
-/// no local MLS group exists (pre-join, evicted, or a conversation this
-/// device has never synced).
+/// The KEK exported from a group's CURRENT exporter, together with the
+/// `(generation, epoch)` pair that produced it — everything a wrap upload
+/// needs to say which exporter opens it.
+struct PinKek {
+    kek: Zeroizing<Vec<u8>>,
+    generation: i64,
+    epoch: i64,
+}
+
+/// The current [`PinKek`] for a conversation, or `None` when no local MLS
+/// group exists (pre-join, evicted, or a conversation this device has never
+/// synced).
 ///
 /// Pure sync — call inside a `local_db` guard scope; nothing here may cross
 /// an await (`PollisProvider` wraps a `!Send` connection).
-fn current_pin_kek(
-    conn: &Connection,
-    mls_conversation_id: &str,
-) -> Option<(Zeroizing<Vec<u8>>, i64, i64)> {
+fn current_pin_kek(conn: &Connection, mls_conversation_id: &str) -> Option<PinKek> {
     let generation = local_generation(conn, mls_conversation_id);
     let group = load_stored_group(conn, mls_conversation_id)?;
     let provider = PollisProvider::new(conn);
@@ -163,7 +169,11 @@ fn current_pin_kek(
     let kek = group
         .export_secret(provider.crypto(), PIN_KEK_EXPORT_LABEL, &[], KPIN_LEN)
         .ok()?;
-    Some((Zeroizing::new(kek), generation, epoch))
+    Some(PinKek {
+        kek: Zeroizing::new(kek),
+        generation,
+        epoch,
+    })
 }
 
 // ── Local Kpin cache ─────────────────────────────────────────────────────────
@@ -203,14 +213,13 @@ fn write_cache(
 
 // ── Keystate upload ──────────────────────────────────────────────────────────
 
-/// Wrap `kpin` under the KEK and post it. Returns the DS's `updated` answer.
+/// Wrap `kpin` under `kek.kek` and post it at `kek`'s `(generation, epoch)`.
+/// Returns the DS's `updated` answer.
 async fn post_keystate(
     state: &Arc<AppState>,
     mls_conversation_id: &str,
     kpin: &[u8],
-    kek: &[u8],
-    generation: i64,
-    epoch: i64,
+    kek: &PinKek,
     actor_id: &str,
     mint: bool,
 ) -> Result<bool> {
@@ -220,13 +229,13 @@ async fn post_keystate(
             .clone()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("no device id for pin keystate")))?
     };
-    let (nonce, wrapped) = seal(kek, kpin)?;
+    let (nonce, wrapped) = seal(&kek.kek, kpin)?;
     let body = pollis_api::pins::UpsertPinKeystateBody {
         conversation_id: mls_conversation_id.to_string(),
         wrapped_kpin: b64(&wrapped),
         nonce: b64(&nonce),
-        generation,
-        epoch,
+        generation: kek.generation,
+        epoch: kek.epoch,
         device_id,
         actor_id: Some(actor_id.to_string()),
         mint,
@@ -277,27 +286,26 @@ async fn ensure_kpin(
             let db = guard
                 .as_ref()
                 .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-            let Some((kek, generation, epoch)) = current_pin_kek(db.conn(), mls_conversation_id)
-            else {
+            let Some(kek) = current_pin_kek(db.conn(), mls_conversation_id) else {
                 return Ok(None);
             };
-            if ks.generation != generation || ks.epoch != epoch {
+            if ks.generation != kek.generation || ks.epoch != kek.epoch {
                 // Wrap from an epoch we are not at: with `max_past_epochs = 0`
                 // there is no exporter to open it with. A member's re-wrap
                 // heals this; report unavailable rather than guessing.
                 return Ok(None);
             }
-            let kpin = open(&kek, &nonce, &wrapped)?;
+            let kpin = open(&kek.kek, &nonce, &wrapped)?;
             if kpin.len() != KPIN_LEN {
                 return Err(Error::Crypto("unwrapped Kpin has wrong length".into()));
             }
-            write_cache(db.conn(), mls_conversation_id, &kpin, generation, epoch)?;
+            write_cache(db.conn(), mls_conversation_id, &kpin, kek.generation, kek.epoch)?;
             Ok(Some(Zeroizing::new(kpin)))
         }
         None if mint_if_absent => {
             let mut kpin = Zeroizing::new(vec![0u8; KPIN_LEN]);
             OsRng.fill_bytes(kpin.as_mut());
-            let (kek, generation, epoch) = {
+            let kek = {
                 let guard = state.local_db.lock().await;
                 let db = guard
                     .as_ref()
@@ -307,23 +315,13 @@ async fn ensure_kpin(
                     None => return Ok(None),
                 }
             };
-            let won = post_keystate(
-                state,
-                mls_conversation_id,
-                &kpin,
-                &kek,
-                generation,
-                epoch,
-                user_id,
-                true,
-            )
-            .await?;
+            let won = post_keystate(state, mls_conversation_id, &kpin, &kek, user_id, true).await?;
             if won {
                 let guard = state.local_db.lock().await;
                 let db = guard
                     .as_ref()
                     .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-                write_cache(db.conn(), mls_conversation_id, &kpin, generation, epoch)?;
+                write_cache(db.conn(), mls_conversation_id, &kpin, kek.generation, kek.epoch)?;
                 return Ok(Some(kpin));
             }
             // Lost the mint race: a row landed between our read and our
@@ -339,18 +337,17 @@ async fn ensure_kpin(
             let db = guard
                 .as_ref()
                 .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-            let Some((kek, generation, epoch)) = current_pin_kek(db.conn(), mls_conversation_id)
-            else {
+            let Some(kek) = current_pin_kek(db.conn(), mls_conversation_id) else {
                 return Ok(None);
             };
-            if ks.generation != generation || ks.epoch != epoch {
+            if ks.generation != kek.generation || ks.epoch != kek.epoch {
                 return Ok(None);
             }
-            let kpin = open(&kek, &nonce, &wrapped)?;
+            let kpin = open(&kek.kek, &nonce, &wrapped)?;
             if kpin.len() != KPIN_LEN {
                 return Err(Error::Crypto("unwrapped Kpin has wrong length".into()));
             }
-            write_cache(db.conn(), mls_conversation_id, &kpin, generation, epoch)?;
+            write_cache(db.conn(), mls_conversation_id, &kpin, kek.generation, kek.epoch)?;
             Ok(Some(Zeroizing::new(kpin)))
         }
         None => Ok(None),
@@ -370,7 +367,7 @@ async fn ensure_kpin(
 /// design: a failed re-wrap costs a new device some waiting, never
 /// correctness, and the next pass retries.
 pub async fn maybe_rewrap_pin_key(state: &Arc<AppState>, mls_conversation_id: &str) {
-    let staged: Option<(Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>, i64, i64)> = {
+    let staged: Option<(Zeroizing<Vec<u8>>, PinKek)> = {
         let guard = state.local_db.lock().await;
         let Some(db) = guard.as_ref() else {
             return;
@@ -385,16 +382,15 @@ pub async fn maybe_rewrap_pin_key(state: &Arc<AppState>, mls_conversation_id: &s
         let Some((kpin, wrapped_generation, wrapped_epoch)) = cached else {
             return;
         };
-        let Some((kek, generation, epoch)) = current_pin_kek(db.conn(), mls_conversation_id)
-        else {
+        let Some(kek) = current_pin_kek(db.conn(), mls_conversation_id) else {
             return;
         };
-        if (generation, epoch) <= (wrapped_generation, wrapped_epoch) {
+        if (kek.generation, kek.epoch) <= (wrapped_generation, wrapped_epoch) {
             return;
         }
-        Some((Zeroizing::new(kpin), kek, generation, epoch))
+        Some((Zeroizing::new(kpin), kek))
     };
-    let Some((kpin, kek, generation, epoch)) = staged else {
+    let Some((kpin, kek)) = staged else {
         return;
     };
 
@@ -402,18 +398,7 @@ pub async fn maybe_rewrap_pin_key(state: &Arc<AppState>, mls_conversation_id: &s
         Ok(u) => u,
         Err(_) => return,
     };
-    match post_keystate(
-        state,
-        mls_conversation_id,
-        &kpin,
-        &kek,
-        generation,
-        epoch,
-        &user_id,
-        false,
-    )
-    .await
-    {
+    match post_keystate(state, mls_conversation_id, &kpin, &kek, &user_id, false).await {
         // `updated == false` means somebody newer-or-equal already covered
         // this epoch — either way the server is current, so stop retrying.
         Ok(_) => {
@@ -421,7 +406,8 @@ pub async fn maybe_rewrap_pin_key(state: &Arc<AppState>, mls_conversation_id: &s
             let Some(db) = guard.as_ref() else {
                 return;
             };
-            if let Err(e) = conn_update_markers(db.conn(), mls_conversation_id, generation, epoch)
+            if let Err(e) =
+                conn_update_markers(db.conn(), mls_conversation_id, kek.generation, kek.epoch)
             {
                 eprintln!("[pins] cache marker update failed for {mls_conversation_id}: {e}");
             }
