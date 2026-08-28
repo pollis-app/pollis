@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { Volume2, VolumeX, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff, Video, VideoOff } from "lucide-react";
+import { Volume2, VolumeX, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff, Video, VideoOff, AudioLines } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 import { voiceSession } from "../../voice";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
@@ -193,6 +193,45 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       >
         {shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
       </PillButton>
+
+      {/* Whether the live share is carrying sound. An indicator, not a
+          control: audio is chosen before the share starts, and offering a
+          mid-share toggle here would imply the capture can be
+          renegotiated without restarting it, which it cannot. Absent
+          entirely for a share that never asked for sound, so the bar
+          gains no chrome for the common case. */}
+      {share.kind === "active" && share.audio.kind !== "off" ? (
+        <span
+          data-testid="voice-bar-share-audio-indicator"
+          className={`flex items-center px-1 ${
+            share.audio.kind === "live"
+              ? "text-accent"
+              : share.audio.kind === "unavailable"
+                ? "text-danger"
+                : "text-muted"
+          }`}
+          title={
+            share.audio.kind === "unavailable"
+              ? share.audio.reason
+              : share.audio.kind === "live"
+                ? t("share.audioLive")
+                : t("share.audioPending")
+          }
+          aria-label={
+            share.audio.kind === "unavailable"
+              ? t("share.audioOffLabel")
+              : share.audio.kind === "live"
+                ? t("share.audioLive")
+                : t("share.audioPending")
+          }
+        >
+          {share.audio.kind === "unavailable" ? (
+            <VolumeX size={12} />
+          ) : (
+            <AudioLines size={12} />
+          )}
+        </span>
+      ) : null}
 
       {/* Camera toggle — webcam published into the same voice room as a
           TrackSource::Camera track. With one camera it starts directly; with
