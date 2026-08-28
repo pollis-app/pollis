@@ -63,6 +63,8 @@ mod state;
 mod start_unix;
 #[cfg(target_os = "windows")]
 mod start_windows;
+#[cfg(target_os = "windows")]
+mod windows_audio;
 mod stop;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod unsupported;

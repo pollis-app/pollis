@@ -355,7 +355,27 @@ windows = { version = "0.62", features = [
     # SCAFFOLD stub; the real MF capture is a TODO (#394 Windows follow-up).
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
+    # Shared screen-share audio (#884), screenshare/windows_audio.rs:
+    # WASAPI process loopback. `Media_Audio` is the API itself
+    # (ActivateAudioInterfaceAsync + IAudioClient/IAudioCaptureClient);
+    # the activation parameters travel as a VT_BLOB PROPVARIANT, which is
+    # what pulls in `Com_StructuredStorage` and `System_Variant`;
+    # `Security` is what gates `CreateEventW` (its first parameter is a
+    # SECURITY_ATTRIBUTES pointer), and `System_Threading` supplies that
+    # plus the wait and GetCurrentProcessId.
+    "Win32_Media_Audio",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_System_Threading",
+    "Win32_Security",
 ] }
+# `#[implement]` expands to absolute `::windows_core::` paths, so the
+# umbrella crate's `windows::core` re-export is not enough — the macro
+# needs a crate by that name in the dependency list. Required by the
+# IActivateAudioInterfaceCompletionHandler implementation in
+# screenshare/windows_audio.rs. Same major version the `windows` 0.62
+# graph already resolves, so it adds no second copy to the link.
+windows-core = "0.62"
 
 # Desktop-only crates, excluded from the mobile (iOS/Android) build:
 # - nix: openpty(3) + pre_exec PTY for the in-app terminal pane. Replaced
