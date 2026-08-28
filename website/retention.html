@@ -1,41 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 
-<!--
-  ═══════════════════════════════════════════════════════════════════════════
-  NOT PUBLISHED. DO NOT MOVE THIS FILE INTO website/ WITHOUT OWNER SIGN-OFF.
-  ═══════════════════════════════════════════════════════════════════════════
-
-  This is the finished public rendering of docs/metadata-retention-policy.md,
-  prepared under #877. It is complete and every claim in it is traceable to
-  that document, which in turn cites the enforcing code or migration for each
-  retention period.
-
-  It lives in docs/ rather than website/ FOR ONE REASON ONLY: Cloudflare Pages
-  serves the whole of website/, so a file placed there is publicly reachable
-  whether or not anything links to it. "Unlinked" is not "unpublished". Putting
-  the finished page here is the only way to have it ready without shipping it.
-
-  THE SOLE BLOCKER IS OWNER SIGN-OFF.
-  docs/metadata-retention-policy.md §10 reserves three decisions to the owner:
-    1. whether the retention periods described are the intended policy;
-    2. the public wording derived from the document — which is this file;
-    3. the App Store / Play privacy-form answers that depend on §2, §3 and §4.
-  Its status line still reads "Engineering draft — owner sign-off required
-  before publication", and #877 deliberately did not flip it. A retention
-  policy is a statement a regulator or an app store holds you to, so it is
-  signed by a person, not merged by a contributor.
-
-  TO PUBLISH, once signed off:
-    1. Flip the status line in docs/metadata-retention-policy.md.
-    2. `git mv docs/retention-public-draft.html website/retention.html`
-    3. Uncomment the "Retention" footer links — grep the website/ directory for
-       "TODO(#877): retention" to find all of them.
-    4. Deploy the site (website-deploy.yml is manual by design).
-
-  Nothing else is outstanding. No code change is required.
--->
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -43,7 +8,11 @@
   <meta name="description"
     content="What Pollis's servers retain, for how long, what deletion actually removes, and what cannot be deleted." />
   <meta name="theme-color" content="#0f1117" />
-  <meta name="robots" content="noindex" />
+
+  <meta property="og:title" content="Pollis — What We Keep" />
+  <meta property="og:description"
+    content="Retention periods, what deleting your account removes, and what the permanent transparency ledger keeps anyway." />
+  <meta property="og:type" content="website" />
 
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 
@@ -219,6 +188,9 @@
         <a href="artifacts.html" class="footer-link">Artifacts</a>
         <a href="assurance.html" class="footer-link">Assurance</a>
         <a href="subprocessors.html" class="footer-link">Subprocessors</a>
+        <a href="privacy.html" class="footer-link">Privacy</a>
+        <a href="terms.html" class="footer-link">Terms</a>
+        <a href="status.html" class="footer-link">Status</a>
         <a href="learn.html" class="footer-link">Learn</a>
       </div>
     </div>
