@@ -210,7 +210,73 @@ jobs:
           git fetch --tags --quiet --depth=1 origin '+refs/tags/*:refs/tags/*' || true
           ./scripts/rebuild-ledger.sh --check
 
-      # 6. Staleness. Not a claim being wrong, but the condition that produces it.
+      # 6. The status record must still be being written (#877).
+      #
+      # /status renders a committed file appended by status-probe.yml. That
+      # workflow can stop for reasons that say nothing on their own: GitHub
+      # disables scheduled workflows on repositories inactive for 60 days, and a
+      # push to main can start being rejected. Either way the page keeps
+      # rendering its last sample and keeps LOOKING authoritative, which is
+      # precisely the "silence reads as compromise" failure the page exists to
+      # remove. So the freshness check deliberately lives in a DIFFERENT
+      # workflow from the prober — a monitor that goes quiet cannot be the thing
+      # that reports it went quiet.
+      #
+      # Offline and repo-local: it reads the committed record, not the site, so
+      # it fails on a dead prober even when the site is perfectly deployed.
+      - name: Status record is still being written (#877)
+        run: ./scripts/status-probe.sh --check
+
+      # 7. The transparency log is still being PUBLISHED (#877).
+      #
+      # This is the failure mode specific to Pollis's own design, written up in
+      # docs/operational-continuity.md §4. An STH's timestamp is FROZEN per tree
+      # size — transparency-publish.yml republishes an unchanged tree with the
+      # head it already had — so a healthy idle log, an abandoned publisher and a
+      # deliberately withheld publication all serve byte-identical files. No
+      # amount of polling verify.pollis.com can separate them.
+      #
+      # What separates them is the publisher's own run history, which is public.
+      # So it is checked here, in a workflow that is NOT the publisher, and a
+      # gap goes red rather than merely rendering as an "overdue" badge nobody
+      # is looking at. Warn-then-fail is deliberately not the shape: a log that
+      # has silently stopped anchoring new account keys is a correctness matter
+      # (docs/incidents/README.md §2), not a cosmetic one.
+      - name: Transparency log is still being published (#877)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runs="$(gh run list --workflow=transparency-publish.yml --limit 20 \
+            --json conclusion,createdAt,url 2>/dev/null || echo '[]')"
+          last_ok="$(jq -r '[.[] | select(.conclusion == "success")] | .[0].createdAt // ""' <<<"$runs")"
+          if [ -z "$last_ok" ]; then
+            echo "::error::transparency-publish.yml has no successful run in its last 20."
+            echo "::error::  The log is not being published. From outside, that is"
+            echo "::error::  indistinguishable from publication being WITHHELD — see"
+            echo "::error::  docs/operational-continuity.md §4 — so it is treated as a"
+            echo "::error::  correctness incident, not an availability blip."
+            exit 1
+          fi
+          age_h=$(( ( $(date -u +%s) - $(date -u -d "$last_ok" +%s) ) / 3600 ))
+          if [ "$age_h" -gt 48 ]; then
+            echo "::error::the transparency log was last published ${age_h}h ago (limit 48h)."
+            echo "::error::  It is scheduled daily. New account keys and commits are not"
+            echo "::error::  being anchored, and the served heads look IDENTICAL to a"
+            echo "::error::  healthy idle log, so nothing external will notice."
+            echo "::error::  Re-dispatch transparency-publish.yml and file an incident"
+            echo "::error::  (docs/incidents/README.md §2)."
+            exit 1
+          fi
+          echo "✓ transparency log last published ${age_h}h ago"
+
+      # 8. And the incident record still parses. It is rendered client-side, so
+      #    a malformed file publishes "no incidents" over incidents that were
+      #    written down — a silent, flattering failure.
+      - name: Public incident record parses (#877)
+        run: python3 ./scripts/check-incidents.py
+
+      # 9. Staleness. Not a claim being wrong, but the condition that produces it.
       #    Warn rather than fail: a deliberate hold on publishing is legitimate
       #    (#406), a *forgotten* one is what we are surfacing.
       - name: Warn if the deployed site lags main

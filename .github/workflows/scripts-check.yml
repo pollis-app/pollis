@@ -29,6 +29,11 @@ on:
       - "SECURITY.md"
       - "README.md"
       - ".github/workflows/scripts-check.yml"
+      # #877: the public incident record and the status prober behind
+      # pollis.com/status. A malformed record renders as "no incidents".
+      - "website/incidents.json"
+      - "website/status-history.json"
+      - "docs/incidents/**"
       - "pollis-delivery/worker/**"
       - "pollis-delivery/wrangler.dev.jsonc"
       - "pollis-delivery/wrangler.prod.jsonc"
@@ -57,6 +62,11 @@ on:
       - "key-set.json"
       - "SECURITY.md"
       - "README.md"
+      # #877: the public incident record and the status prober behind
+      # pollis.com/status. A malformed record renders as "no incidents".
+      - "website/incidents.json"
+      - "website/status-history.json"
+      - "docs/incidents/**"
       - "pollis-delivery/worker/**"
       - "pollis-delivery/wrangler.dev.jsonc"
       - "pollis-delivery/wrangler.prod.jsonc"
@@ -149,6 +159,16 @@ jobs:
           assert not bad, f"{len(bad)} incomplete statement(s); first: {bad[0][:120]!r}"
           print(f"ok: {len(paths)} file(s), {len(stmts)} complete statement(s)")
           EOF
+
+      # #877: the public incident record. It fails two ways that both publish a
+      # falsehood — malformed (the page renders "no incidents" over incidents
+      # that were written down) and overdue (a postmortem comes due and never
+      # appears, so a status page quietly becomes a marketing page). Offline.
+      - name: Public incident record is publishable (#877)
+        run: python3 ./scripts/check-incidents.py
+
+      - name: Incident-record check catches a missed postmortem (#877)
+        run: ./scripts/test-incidents-check.sh
 
       - name: Attest helper + payload-hash tests
         run: ./scripts/test-attest-helpers.sh
