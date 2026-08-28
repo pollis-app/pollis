@@ -15,8 +15,10 @@ import { voiceSession } from "../voice/VoiceSessionManager";
 import {
   clampScreenShareFps,
   getPreference,
+  SCREEN_SHARE_AUDIO_DEFAULT,
   SCREEN_SHARE_FPS_DEFAULT,
 } from "../hooks/queries/usePreferences";
+import { isMac } from "../utils/platform";
 import { playSfx, SFX } from "../utils/sfx";
 
 /** Capturable display reported by `enumerate_screen_sources`.
@@ -69,6 +71,18 @@ export type Selection =
   | { kind: "display"; id: number }
   | { kind: "window"; id: number };
 
+/** What "share the sound too" actually captures, which is not the same
+ *  thing on every OS — the picker says so rather than implying a
+ *  uniformity that doesn't exist.
+ *
+ *  - macOS: scoped to the same source as the video. Sharing a window
+ *    shares that app's audio; sharing a display shares the system mix.
+ *  - Linux / Windows: the whole system mix, whichever source is shared.
+ *
+ *  Pollis's own output is excluded on all three, so sharing sound during
+ *  a call never sends participants their own voices back. */
+export type SharedAudioScope = "source" | "system"; 
+
 /** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`.
  *  There is intentionally no "paused" / "stalled" concept on either end:
  *  when capture is idle (static content) the streamer simply stops
@@ -92,7 +106,11 @@ export type ScreenShareEvent =
        *  Optional/defaulted for compatibility with older backends. */
       source?: "screen" | "camera";
     }
-  | { type: "remote_stopped"; track_key: string };
+  | { type: "remote_stopped"; track_key: string }
+  /** The shared-audio track is publishing. */
+  | { type: "local_audio_started" }
+  /** Audio was requested and is not available; the video share continues. */
+  | { type: "local_audio_unavailable"; message: string };
 
 /**
  * Collapse a raw backend screen-share error string into a single clear
@@ -409,13 +427,49 @@ class ScreenShareSession {
 
   /** Start the share. Delegated to the Rust capture helper: on macOS the
    *  `selection` is the picker result; on Linux/Windows it must be undefined
-   *  so the system portal / WGC picker can show. */
-  async start(selection?: Selection): Promise<void> {
+   *  so the system portal / WGC picker can show.
+   *
+   *  `withAudio` also captures the source's sound. It is passed separately
+   *  rather than folded into `selection` because Linux has no selection to
+   *  fold it into — the portal dialog is its picker — and the backend
+   *  needs one unambiguous answer for both platforms. */
+  async start(selection?: Selection, withAudio = false): Promise<void> {
     const maxFramerate = await this.resolveMaxFramerate();
     await invoke("start_screen_share", {
       selection: selection ?? null,
       maxFramerate,
+      withAudio,
     });
+  }
+
+  /** What sharing sound captures on this platform. Drives the picker's
+   *  one-line explanation of the toggle. */
+  audioScope(): SharedAudioScope {
+    // macOS scopes audio to the ScreenCaptureKit content filter, so it
+    // follows the chosen window or display. The other two capture the
+    // system mix regardless.
+    return isMac ? "source" : "system";
+  }
+
+  /** Read the user's "share sound" preference. Consulted on the Linux
+   *  path, which has no in-app picker to carry the choice, and used as
+   *  the picker's remembered default everywhere else. Falls back to off
+   *  on any error or when signed out. */
+  async resolveWithAudio(): Promise<boolean> {
+    const userId = appStore.currentUser?.id;
+    if (!userId) {
+      return SCREEN_SHARE_AUDIO_DEFAULT;
+    }
+    try {
+      const json = await invoke<string>("get_preferences", { userId });
+      return getPreference<boolean>(
+        json,
+        "screen_share_audio",
+        SCREEN_SHARE_AUDIO_DEFAULT,
+      );
+    } catch {
+      return SCREEN_SHARE_AUDIO_DEFAULT;
+    }
   }
 
   /** Read the user's Screen Share framerate preference (fps). This is a
@@ -489,6 +543,15 @@ class ScreenShareSession {
           });
         }
         playSfx(SFX.ping);
+        break;
+      case "local_audio_started":
+        store.shareAudioStarted();
+        break;
+      case "local_audio_unavailable":
+        // Explicitly NOT `shareFailed`: the video share is unaffected and
+        // must keep running. The sharer sees a muted-speaker indicator
+        // with the reason; viewers just get a silent share.
+        store.shareAudioUnavailable(ev.message);
         break;
       case "remote_stopped":
         // The stop event carries only the track_key, not its source, so fan

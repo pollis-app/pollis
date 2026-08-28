@@ -55,7 +55,12 @@ export function toggleScreenShare(share: ShareState): void {
     try {
       const list = await screenShareSession.enumerate();
       if (list.displays.length + list.windows.length === 0) {
-        await screenShareSession.start();
+        // Linux: the portal dialog is the picker, so there is no in-app
+        // step to carry an audio toggle. The stored preference is the
+        // only place the choice can come from — set in Voice settings.
+        const withAudio = await screenShareSession.resolveWithAudio();
+        appStore.shareStartStarting(withAudio);
+        await screenShareSession.start(undefined, withAudio);
         return;
       }
       appStore.shareStartPicking(list);

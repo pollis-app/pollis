@@ -65,7 +65,14 @@
     "cancelLabel": "إلغاء مشاركة الشاشة",
     "noDisplays": "لا توجد شاشات متاحة.",
     "noWindows": "لا توجد نوافذ متاحة.",
-    "untitledWindow": "نافذة بلا عنوان"
+    "untitledWindow": "نافذة بلا عنوان",
+    "audioToggle": "Share sound",
+    "audioScopeSource": "Shares the audio of whatever you pick.",
+    "audioScopeSystem": "Shares everything your computer is playing.",
+    "audioExcludesCall": "The call itself is never included.",
+    "audioLive": "Sound on",
+    "audioPending": "Starting sound…",
+    "audioOffLabel": "Sharing without sound"
   },
   "camera": {
     "pickerHeading": "اختر كاميرا",
@@ -159,7 +166,9 @@
     "fpsHint": "{{hint}}. المعدل الأعلى أكثر سلاسة للفيديو والألعاب لكنه يستهلك معالجًا ونطاقًا تردديًا أكبر؛ اخفضه إلى 15 إطارًا/ثانية للمستندات أو للأجهزة والشبكات المحدودة. يسري المفعول في مشاركة الشاشة التالية.",
     "behaviorHeading": "السلوك",
     "autoJoinVoice": "الانضمام التلقائي إلى الصوت",
-    "autoJoinVoiceDescription": "الانضمام تلقائيًا إلى الصوت عند فتح قناة صوتية. عطّله لمعاينة من في القناة قبل الانضمام."
+    "autoJoinVoiceDescription": "الانضمام تلقائيًا إلى الصوت عند فتح قناة صوتية. عطّله لمعاينة من في القناة قبل الانضمام.",
+    "screenShareAudio": "Share sound by default",
+    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
   },
   "joinError": {
     "unreachable": "تعذّر الوصول إلى خادم الصوت — تحقق من اتصالك وحاول مرة أخرى.",
