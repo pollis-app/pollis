@@ -130,6 +130,8 @@ async fn run_mixer_task(
     apm_processor: Option<Arc<ApmProcessor>>,
     apm_frame_samples: usize,
     deafened: Arc<AtomicBool>,
+    apm_rate: u32,
+    shared_audio_render: crate::commands::screenshare::self_echo::SelfEchoSlot,
 ) {
     let mut interval = tokio::time::interval(Duration::from_millis(10));
     // Skip catch-up bursts: under sustained load we'd rather lose 10 ms than
@@ -212,6 +214,16 @@ async fn run_mixer_task(
         if let Some(apm) = &apm_processor {
             let _ = voice_apm::analyze_render(apm, &mix, apm_frame_samples);
         }
+
+        // The same signal, for a different subtraction: a screen share
+        // capturing system audio would otherwise re-publish this mix and
+        // every participant would hear themselves. Costs one uncontended
+        // lock per tick when no such share is running.
+        crate::commands::screenshare::self_echo::analyze_render(
+            &shared_audio_render,
+            &mix,
+            apm_rate,
+        );
 
         // Push to the cpal output ring. The output stream's callback
         // de-interleaves, so we duplicate mono → output_channels here.
@@ -311,9 +323,13 @@ pub(crate) async fn ensure_playback(
     // survives a mid-call output-device switch: this function tears the
     // mixer down and builds a new one, and a deafened user must stay
     // deafened across that rebuild.
-    let (track_buffers, user_volumes, output_capacity_samples, deafened) = {
+    let (track_buffers, user_volumes, output_capacity_samples, deafened, shared_audio_render) = {
         let voice = voice_arc.lock().await;
         let deafened = Arc::clone(&voice.deafened);
+        // Cloned off VoiceState for the same reason `deafened` is: this
+        // function rebuilds the mixer on an output-device switch, and a
+        // live share's echo canceller must survive that rebuild.
+        let shared_audio_render = Arc::clone(&voice.shared_audio_render);
         let pb = voice.playback.lock().unwrap();
         let cap = (sample_rate as usize) * (channels as usize) / 5; // 200 ms
         (
@@ -321,6 +337,7 @@ pub(crate) async fn ensure_playback(
             Arc::clone(&pb.user_volumes),
             cap,
             deafened,
+            shared_audio_render,
         )
     };
 
@@ -333,6 +350,8 @@ pub(crate) async fn ensure_playback(
         apm_for_mixer,
         apm_frame_samples,
         deafened,
+        apm_rate,
+        shared_audio_render,
     ));
 
     let voice = voice_arc.lock().await;

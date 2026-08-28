@@ -55,8 +55,18 @@ pub async fn start_screen_share(
     state: State<'_, Arc<AppState>>,
     selection: Option<pollis_capture_proto::Selection>,
     max_framerate: Option<u32>,
+    with_audio: Option<bool>,
 ) -> Result<()> {
-    pollis_core::commands::screenshare::start_screen_share(&state, selection, max_framerate).await
+    // `Option<bool>` rather than `bool` so a renderer that predates shared
+    // audio — or any caller that simply omits the argument — still
+    // deserializes into a video-only share instead of failing the invoke.
+    pollis_core::commands::screenshare::start_screen_share(
+        &state,
+        selection,
+        max_framerate,
+        with_audio.unwrap_or(false),
+    )
+    .await
 }
 
 #[tauri::command]

@@ -26,9 +26,14 @@ use livekit::{
 use crate::{error::Result, state::AppState};
 
 use super::{
+    audio::{
+        audio_error_message, emit, publish_shared_audio_track, SharedAudioResampler,
+        SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDIO_RATE_HZ,
+    },
     codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec, resolve_screenshare_encoding},
     fail_capture,
     helper_subprocess::spawn_and_accept_helper,
+    self_echo::SelfEchoCanceller,
     stop::stop_screen_share,
     RawSink, ScreenShareEvent, LOCAL_PREVIEW_KEY, PREVIEW_MIN_INTERVAL,
 };
@@ -48,7 +53,10 @@ pub async fn enumerate_screen_sources(
     // Discard any previous picker session that never got chosen.
     cancel_screen_share_picker(state).await.ok();
 
-    let mut session = spawn_and_accept_helper(state).await?;
+    // Video-only at spawn: on macOS the audio decision reaches the helper
+    // in the upcoming `Select`, because the user has not yet seen the
+    // picker (and its audio toggle) at this point in the flow.
+    let mut session = spawn_and_accept_helper(state, false).await?;
     let msg = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         read_msg(&mut session.reader),
@@ -113,10 +121,16 @@ pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
+/// `with_audio` is the one source of truth for whether this share carries
+/// the source's sound. It reaches the two helpers by different routes —
+/// stamped onto the outgoing `Selection` on macOS, passed as a spawn flag
+/// on Linux — so it is deliberately taken as its own argument rather than
+/// read back off whatever the renderer happened to put in the selection.
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     selection: Option<pollis_capture_proto::Selection>,
     max_framerate: Option<u32>,
+    with_audio: bool,
 ) -> Result<()> {
     use pollis_capture_proto::encode_select;
     use tokio::io::AsyncWriteExt;
@@ -151,8 +165,20 @@ pub async fn start_screen_share(
     };
     let mut session = match parked {
         Some(s) => s,
-        None => spawn_and_accept_helper(state).await?,
+        None => spawn_and_accept_helper(state, with_audio).await?,
     };
+
+    // Stamp the caller's audio decision onto the selection so the macOS
+    // helper — spawned back at enumeration time, before the toggle
+    // existed — learns it from the one message it is still waiting on.
+    let selection = selection.map(|sel| match sel {
+        pollis_capture_proto::Selection::Display { id, .. } => {
+            pollis_capture_proto::Selection::Display { id, with_audio }
+        }
+        pollis_capture_proto::Selection::Window { id, .. } => {
+            pollis_capture_proto::Selection::Window { id, with_audio }
+        }
+    });
 
     // macOS picker reply. The helper is parked between Sources and
     // Format; Select unblocks it. Linux helpers ignore this (no such
@@ -209,6 +235,12 @@ pub async fn start_screen_share(
     // zero-size artifact) before Format/Frame arrives.
     const MAX_SKIPPED_BEFORE_FORMAT: usize = 64;
     let mut skipped = 0usize;
+    // Audio can negotiate before video does — on Linux the portal's video
+    // stream waits on the user's pick while the audio node is already
+    // live. Remember an early announcement instead of discarding it;
+    // dropping it here would leave a share that requested sound silently
+    // without it, with no second announcement ever coming.
+    let mut early_audio_format: Option<(u32, u32)> = None;
     let (width, height) = loop {
         let read_result =
             tokio::time::timeout_at(deadline, pollis_capture_proto::read_msg(&mut reader)).await;
@@ -255,6 +287,24 @@ pub async fn start_screen_share(
             // Select here: none of them belong on the Linux screenshare path
             // (the picker is the OS portal dialog, not an in-app round-trip),
             // but tolerate any of them rather than fail the share.
+            // Audio negotiated first. Hold the format for the reader task
+            // and drop any frames that arrive before video is up — a few
+            // tens of milliseconds of the source's sound, from before
+            // anyone could see it.
+            Ok(Some(CaptureMsg::AudioFormat {
+                sample_rate,
+                channels,
+            })) => {
+                eprintln!(
+                    "[screenshare/audio] helper announced {sample_rate} Hz x{channels} \
+                     before video format"
+                );
+                early_audio_format = Some((sample_rate, channels));
+                continue;
+            }
+            Ok(Some(CaptureMsg::AudioFrame { .. })) => {
+                continue;
+            }
             Ok(Some(
                 other
                 @ (CaptureMsg::Sources(_)
@@ -288,6 +338,22 @@ pub async fn start_screen_share(
                 continue;
             }
             Ok(Some(CaptureMsg::Error { message })) => {
+                // Audio-only failure: the machine has no capturable
+                // output, or this platform's exclusion API is missing.
+                // The video share is untouched, so downgrade rather than
+                // tear down — the share the user asked for still works.
+                if let Some(reason) = audio_error_message(&message) {
+                    eprintln!("[screenshare/audio] unavailable: {reason}");
+                    early_audio_format = None;
+                    emit(
+                        state,
+                        ScreenShareEvent::LocalAudioUnavailable {
+                            message: reason.to_string(),
+                        },
+                    )
+                    .await;
+                    continue;
+                }
                 // The helper relays the failure cause as a prefixed string.
                 // Split the three distinct shapes the old code collapsed
                 // into one "permission" message:
@@ -425,8 +491,16 @@ pub async fn start_screen_share(
         let ss = state.screenshare.lock().await;
         (ss.events.clone(), ss.frames.clone())
     };
+    let state_for_task = Arc::clone(state);
+    let room_for_task = room.clone();
     let reader_task = tokio::spawn(async move {
         let mut last_preview: Option<std::time::Instant> = None;
+        // Shared-audio pump state, all `None`/inert until the helper
+        // announces an audio format. A share that never carries audio
+        // pays nothing for any of it.
+        let mut audio_source: Option<libwebrtc::audio_source::native::NativeAudioSource> = None;
+        let mut resampler: Option<SharedAudioResampler> = None;
+        let mut echo: Option<SelfEchoCanceller> = None;
         // No FPS cap: pipewire delivers at the source's native refresh
         // (144Hz+ on high-refresh displays) and we publish at the same
         // rate. The SW encoder absorbs that fine on modern hardware; if
@@ -440,6 +514,22 @@ pub async fn start_screen_share(
         // identical to one where the content happens to be unchanging.
         // We trade nothing on the user-visible side and save the
         // bandwidth + CPU of re-encoding identical pixels.
+        // Audio that negotiated ahead of video: publish it now, before
+        // the first frame, so the very first thing the share carries has
+        // sound.
+        if let Some((sample_rate, channels)) = early_audio_format {
+            start_shared_audio(
+                &state_for_task,
+                &room_for_task,
+                sample_rate,
+                channels,
+                &mut audio_source,
+                &mut resampler,
+                &mut echo,
+            )
+            .await;
+        }
+
         loop {
             match pollis_capture_proto::read_msg(&mut reader).await {
                 Ok(Some(CaptureMsg::Frame {
@@ -483,6 +573,50 @@ pub async fn start_screen_share(
                     // the new dimensions; LiveKit's NativeVideoSource
                     // tolerates per-frame size changes.
                 }
+                Ok(Some(CaptureMsg::AudioFormat {
+                    sample_rate,
+                    channels,
+                })) => {
+                    start_shared_audio(
+                        &state_for_task,
+                        &room_for_task,
+                        sample_rate,
+                        channels,
+                        &mut audio_source,
+                        &mut resampler,
+                        &mut echo,
+                    )
+                    .await;
+                }
+                Ok(Some(CaptureMsg::AudioFrame {
+                    sample_rate,
+                    channels,
+                    timestamp_us,
+                    pcm,
+                })) => {
+                    // A backend can renegotiate its rate mid-stream when
+                    // the default output device changes under a live
+                    // share. Follow it rather than resampling from a rate
+                    // that is no longer true.
+                    if let Some(r) = resampler.as_mut() {
+                        if r.src_rate() != sample_rate {
+                            eprintln!(
+                                "[screenshare/audio] source rate changed {} -> {sample_rate} Hz",
+                                r.src_rate()
+                            );
+                            r.set_src_rate(sample_rate);
+                        }
+                    }
+                    push_shared_audio(
+                        audio_source.as_ref(),
+                        resampler.as_mut(),
+                        echo.as_ref(),
+                        &pcm,
+                        channels,
+                        timestamp_us,
+                    )
+                    .await;
+                }
                 Ok(Some(CaptureMsg::Sources(_)))
                 | Ok(Some(CaptureMsg::Select(_)))
                 | Ok(Some(CaptureMsg::Cameras(_)))
@@ -491,6 +625,23 @@ pub async fn start_screen_share(
                     // never appear once frames are flowing. Ignore.
                 }
                 Ok(Some(CaptureMsg::Error { message })) => {
+                    // Losing audio mid-share must not end the share: the
+                    // user is still presenting, and the video half is
+                    // unaffected. Drop the pump and carry on silently.
+                    if let Some(reason) = audio_error_message(&message) {
+                        eprintln!("[screenshare/audio] stopped mid-share: {reason}");
+                        audio_source = None;
+                        resampler = None;
+                        echo = None;
+                        emit(
+                            &state_for_task,
+                            ScreenShareEvent::LocalAudioUnavailable {
+                                message: reason.to_string(),
+                            },
+                        )
+                        .await;
+                        continue;
+                    }
                     if let Some(ev) = &events_for_task {
                         let _ = ev.send(ScreenShareEvent::LocalError { message });
                     }
@@ -520,6 +671,81 @@ pub async fn start_screen_share(
         }
     }
     Ok(())
+}
+
+/// Publish the shared-audio track and stand up the pump behind it.
+/// Idempotent by construction: a second `AudioFormat` for a source that is
+/// already publishing only retunes the resampler, because republishing
+/// would hand every viewer a new track id for the same sound.
+async fn start_shared_audio(
+    state: &Arc<AppState>,
+    room: &Arc<Room>,
+    sample_rate: u32,
+    channels: u32,
+    audio_source: &mut Option<libwebrtc::audio_source::native::NativeAudioSource>,
+    resampler: &mut Option<SharedAudioResampler>,
+    echo: &mut Option<SelfEchoCanceller>,
+) {
+    eprintln!("[screenshare/audio] helper announced {sample_rate} Hz x{channels}");
+    if audio_source.is_some() {
+        if let Some(r) = resampler.as_mut() {
+            r.set_src_rate(sample_rate);
+        }
+        return;
+    }
+    let Some(source) = publish_shared_audio_track(state, room).await else {
+        return;
+    };
+    *resampler = Some(SharedAudioResampler::new(sample_rate));
+    // Linux only. macOS excludes our own process at the ScreenCaptureKit
+    // layer, so its capture never contains the call in the first place and
+    // running an echo canceller over it would only risk chewing into the
+    // material the user actually meant to share.
+    #[cfg(target_os = "linux")]
+    {
+        let slot = {
+            let voice = state.voice.lock().await;
+            Arc::clone(&voice.shared_audio_render)
+        };
+        *echo = SelfEchoCanceller::new(&slot);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = &echo;
+    }
+    *audio_source = Some(source);
+}
+
+/// Normalise one captured block and hand every whole 10 ms frame it
+/// completed to LiveKit.
+async fn push_shared_audio(
+    audio_source: Option<&libwebrtc::audio_source::native::NativeAudioSource>,
+    resampler: Option<&mut SharedAudioResampler>,
+    echo: Option<&SelfEchoCanceller>,
+    pcm: &[i16],
+    channels: u32,
+    timestamp_us: i64,
+) {
+    let (Some(source), Some(resampler)) = (audio_source, resampler) else {
+        return;
+    };
+    for mut frame in resampler.push(pcm, channels) {
+        // Subtract the call before publishing, never after: once the
+        // frame is in LiveKit's hands there is nothing left to fix.
+        if let Some(echo) = echo {
+            echo.process(&mut frame);
+        }
+        let frame = libwebrtc::prelude::AudioFrame {
+            data: frame.into(),
+            sample_rate: SHARED_AUDIO_RATE_HZ,
+            num_channels: 1,
+            samples_per_channel: SHARED_AUDIO_FRAME_SAMPLES as u32,
+        };
+        if let Err(e) = source.capture_frame(&frame).await {
+            eprintln!("[screenshare/audio] capture_frame error: {e:?}");
+        }
+    }
+    let _ = timestamp_us;
 }
 
 // A frame's geometry, timing and two optional sinks — a per-frame hot path where
