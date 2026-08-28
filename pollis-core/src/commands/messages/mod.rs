@@ -12,6 +12,7 @@ mod read;
 mod read_state;
 mod receipts;
 mod retention;
+mod search;
 mod send;
 mod types;
 // `watermark` (the `next_watermark` pure fn + `EnvKind`) is `pub` — not because
@@ -148,7 +149,7 @@ mod sent_at_format_tests {
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{
     ChannelMessage, ChannelPreview, Message, MessageCursor, MessagePage, MessageWithContext,
-    SearchResult, ThreadSummary,
+    SearchCorpus, SearchCursor, SearchPage, SearchResult, SearchSnippet, SearchSort, ThreadSummary,
 };
 
 // ── Send ─────────────────────────────────────────────────────────────────────
@@ -157,9 +158,12 @@ pub use send::send_message;
 // ── Read / list / search ─────────────────────────────────────────────────────
 pub use read::{
     get_channel_messages, get_dm_messages, list_messages, list_thread_summaries,
-    read_channel_messages, read_dm_messages,
-    read_last_messages, read_thread_messages, search_messages,
+    read_channel_messages, read_dm_messages, read_last_messages, read_messages_around,
+    read_thread_messages,
 };
+
+// ── Search (on-device FTS5 — #850) ───────────────────────────────────────────
+pub use search::{cache_conversations, rebuild_search_index, search_messages, CachedConversation};
 
 // ── Ingest (envelope pull + watermark + cleanup) ─────────────────────────────
 pub use ingest::{

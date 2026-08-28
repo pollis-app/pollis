@@ -1,5 +1,6 @@
 pub mod chunk;
 pub mod local;
+pub mod search_text;
 
 // The remote schema lives in `pollis-schema` (its `migrations/` and
 // `migrations-log/` directories are the production source of truth that

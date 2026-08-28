@@ -64,8 +64,18 @@ pub async fn ingest_dm_envelopes(user_id: String, dm_channel_id: String, state: 
 }
 
 #[tauri::command]
-pub async fn search_messages(query: String, limit: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<Vec<SearchResult>> {
-    pollis_core::commands::messages::search_messages(query, limit, &state).await
+pub async fn search_messages(query: String, conversation_id: Option<String>, sort: Option<SearchSort>, limit: Option<i64>, cursor: Option<SearchCursor>, state: State<'_, Arc<AppState>>) -> Result<SearchPage> {
+    pollis_core::commands::messages::search_messages(query, conversation_id, sort, limit, cursor, &state).await
+}
+
+#[tauri::command]
+pub async fn rebuild_search_index(state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::messages::rebuild_search_index(&state).await
+}
+
+#[tauri::command]
+pub async fn read_messages_around(conversation_id: String, message_id: String, limit: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<MessagePage> {
+    pollis_core::commands::messages::read_messages_around(conversation_id, message_id, limit, &state).await
 }
 
 #[tauri::command]

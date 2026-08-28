@@ -17,7 +17,7 @@ pub async fn list_user_groups_with_channels(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<GroupWithChannels>> {
-    Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
+    let groups: Vec<GroupWithChannels> = crate::commands::ds_reads::bootstrap(state, &user_id)
         .await?
         .groups
         .into_iter()
@@ -30,7 +30,34 @@ pub async fn list_user_groups_with_channels(
             channels: g.channels.into_iter().map(channel_from_wire).collect(),
             current_user_role: g.role,
         })
-        .collect())
+        .collect();
+
+    // Remember what these channel ids mean, so on-device search can render a
+    // name instead of a UUID and route a hit to the right page (#850). Channel
+    // names are remote-only and there is no embedded replica, so this is the
+    // moment they are knowable locally.
+    cache_channels(state, &groups).await;
+
+    Ok(groups)
+}
+
+/// Mirror the group tree into `conversation_cache`.
+async fn cache_channels(state: &Arc<AppState>, groups: &[GroupWithChannels]) {
+    let entries: Vec<crate::commands::messages::CachedConversation> = groups
+        .iter()
+        .flat_map(|g| {
+            g.channels
+                .iter()
+                .map(|c| crate::commands::messages::CachedConversation {
+                    id: c.id.clone(),
+                    kind: "channel",
+                    name: Some(c.name.clone()),
+                    group_id: Some(g.id.clone()),
+                    group_name: Some(g.name.clone()),
+                })
+        })
+        .collect();
+    crate::commands::messages::cache_conversations(state, &entries).await;
 }
 
 /// Every group the user belongs to, without their channels.

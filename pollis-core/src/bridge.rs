@@ -803,8 +803,21 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         // ----- search -----
         "search_messages" => {
             let q: String = arg(&args, "query")?;
+            let conversation_id: Option<String> = arg_opt(&args, "conversationId")?;
+            let sort: Option<messages::SearchSort> = arg_opt(&args, "sort")?;
             let limit: Option<i64> = arg_opt(&args, "limit")?;
-            ok(messages::search_messages(q, limit, &state()?).await?)
+            let cursor: Option<messages::SearchCursor> = arg_opt(&args, "cursor")?;
+            ok(messages::search_messages(q, conversation_id, sort, limit, cursor, &state()?).await?)
+        }
+        "rebuild_search_index" => {
+            messages::rebuild_search_index(&state()?).await?;
+            ok(())
+        }
+        "read_messages_around" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let message_id: String = arg(&args, "messageId")?;
+            let limit: Option<i64> = arg_opt(&args, "limit")?;
+            ok(messages::read_messages_around(conversation_id, message_id, limit, &state()?).await?)
         }
 
         // ----- blocks -----
