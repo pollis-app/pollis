@@ -391,7 +391,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isAc
   const cls = [
     "sticky top-0 z-[1] flex w-full h-bar items-center gap-1.5 px-2.5",
     "uppercase tracking-[0.08em] text-start cursor-pointer",
-    "transition-colors duration-75 bg-surface hover:bg-hover",
+    " bg-surface hover:bg-hover",
     isActive ? "text-accent" : "text-muted",
     bordered ? "mt-1 border-t border-line" : "",
     bordered || borderedBottom ? "border-b border-line" : "",

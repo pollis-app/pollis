@@ -245,7 +245,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     data-testid="search-result-item"
                     data-conversation-kind={result.conversation_kind ?? "unknown"}
                     onClick={() => onOpenResult(result)}
-                    className="w-full text-start px-4 py-3 transition-colors bg-transparent hover:bg-hover border-b border-line"
+                    className="w-full text-start px-4 py-3 bg-transparent hover:bg-hover border-b border-line"
                   >
                     {/* Sender and timestamp row */}
                     <div className="flex items-baseline justify-between gap-2 mb-1">

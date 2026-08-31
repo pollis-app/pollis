@@ -269,7 +269,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
             data-testid="breadcrumb-settings-button"
             onClick={() => router.navigate({ to: "/settings" })}
             aria-label={t("breadcrumb.settings")}
-            className={`flex items-center justify-center rounded-control p-1 transition-colors hover:bg-hover hover:text-accent ${isOnSettingsHub ? "text-accent" : "text-dim"}`}
+            className={`flex items-center justify-center rounded-control p-1 hover:bg-hover hover:text-accent ${isOnSettingsHub ? "text-accent" : "text-dim"}`}
           >
             <SettingsIcon size={18} />
           </button>
@@ -351,7 +351,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
         data-testid="breadcrumb-settings-button"
         onClick={() => router.navigate({ to: "/settings" })}
         aria-label={t("breadcrumb.settings")}
-        className={`flex items-center justify-center transition-colors bg-transparent hover:bg-hover hover:text-accent border-0 ${isOnSettingsHub ? "text-accent" : "text-fg"}`}
+        className={`flex items-center justify-center bg-transparent hover:bg-hover hover:text-accent border-0 ${isOnSettingsHub ? "text-accent" : "text-fg"}`}
         style={{
           width: 24,
           height: 24,
