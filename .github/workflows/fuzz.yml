@@ -1,0 +1,122 @@
+# Track-B coverage-guided fuzzing (#481, machine-checked-correctness §5.1),
+# on a schedule so it cannot silently rot again. The fuzz/ crate sat out of
+# band with no CI from #481 (July) until this workflow: in that window the
+# openmls pin drifted and the crate stopped BUILDING, and nobody noticed
+# because nothing ran it (#1042).
+#
+# Three triggers, three budgets:
+#   * weekly schedule — the real soak: unlimited runs, 10 min per target
+#     (5 targets ≈ 50 min), then the mutant "teeth" pass proving each
+#     property check still catches a deliberately broken implementation.
+#   * pull_request touching the fuzz surface — a short smoke (the script's
+#     defaults: 200k runs / 20s per target), so a change to fuzz/, the
+#     script, or this workflow proves the targets still build and run.
+#   * workflow_dispatch — the weekly soak shape, on demand.
+#
+# cargo-fuzz needs NIGHTLY while the repo pins 1.96.0 stable for reproducible
+# release builds; the fuzz crate is a detached workspace so this job's
+# toolchain never touches the release path. The nightly is PINNED (not
+# @nightly) so a broken upstream nightly cannot turn the weekly run red on
+# its own — bump it deliberately, like any other toolchain change.
+name: Fuzz (Track B)
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  pull_request:
+    paths:
+      - 'fuzz/**'
+      - 'scripts/fuzz-check.sh'
+      - '.github/workflows/fuzz.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compiling pollis-core (even headless) and pollis-delivery links the
+      # same system libs the Kani job installs — mirrors kani.yml.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libpipewire-0.3-dev \
+            libva-dev \
+            libdbus-1-dev \
+            cmake \
+            clang \
+            ninja-build
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-08-30
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz
+          workspaces: fuzz
+          # Only `main` writes the cache (schedule/dispatch run on main); PR
+          # branches restore from it. Same budget discipline as mls-tests.yml.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Swatinem caches $CARGO_HOME/bin, so after the first main run this is a
+      # no-op instead of a 2-minute compile.
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz >/dev/null 2>&1 || cargo install cargo-fuzz --locked
+
+      # PR smoke: the script's default short budget. Proves build + crash-free
+      # short run + the openmls pin-drift check in fuzz-check.sh.
+      - name: Fuzz smoke (PR)
+        if: github.event_name == 'pull_request'
+        env:
+          NIGHTLY: nightly-2026-08-30
+        run: ./scripts/fuzz-check.sh
+
+      # Weekly soak: unlimited runs, wall-clock bounded per target. A crash is
+      # a real property violation (P1–P3 no-skip, no-gap-apply,
+      # no-foreign-adopt, recovery-gate, retention floor).
+      - name: Fuzz soak (weekly)
+        if: github.event_name != 'pull_request'
+        env:
+          NIGHTLY: nightly-2026-08-30
+          FUZZ_RUNS: "-1"
+          FUZZ_MAX_TOTAL_TIME: "600"
+        run: ./scripts/fuzz-check.sh
+
+      # Teeth: each target's deliberately-broken mutant must crash fast — a
+      # green soak only means something if the property checks still bite.
+      - name: Mutant teeth (weekly)
+        if: github.event_name != 'pull_request'
+        env:
+          NIGHTLY: nightly-2026-08-30
+          FUZZ_MUTANT: "1"
+        run: ./scripts/fuzz-check.sh
+
+      # cargo-fuzz drops crashing inputs under fuzz/artifacts/<target>/ — the
+      # repro of record for any red run.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-artifacts
+          if-no-files-found: ignore
+          retention-days: 90
+          path: fuzz/artifacts/
