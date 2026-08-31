@@ -465,6 +465,10 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                 | Ok(Some(CaptureMsg::SelectCamera(_)))
                 | Ok(Some(CaptureMsg::Sources(_)))
                 | Ok(Some(CaptureMsg::Select(_))) => {}
+                // Shared audio belongs to screen share; a camera helper is
+                // never asked for it and has no track to publish it on.
+                Ok(Some(CaptureMsg::AudioFormat { .. }))
+                | Ok(Some(CaptureMsg::AudioFrame { .. })) => {}
                 Ok(Some(CaptureMsg::Error { message })) => {
                     eprintln!("[camera] helper error mid-stream: {message}");
                     break;

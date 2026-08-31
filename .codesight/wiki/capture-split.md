@@ -348,6 +348,121 @@ default; the driver adjusts and we publish whatever it gives. Verified at
   reader task, kill the helper (killing the macOS helper IS the SCK
   stop + picker deactivate, since SCK now lives entirely in it).
 
+## Shared audio (#884)
+
+A screen share can carry the source's sound. It is a **second LiveKit
+track**, published alongside the video with `TrackSource::ScreenshareAudio`
+— never mixed into the microphone track, and never routed through the
+microphone's APM. The invariant is enforced by
+`pollis-core/tests/shared_audio_never_reaches_the_mic.rs`.
+
+Opt-in, off by default (Slack/Discord/Zoom convention). The choice reaches
+the two helpers by different routes, because the platforms differ in when
+they can hear it:
+
+- **macOS** — carried on `Selection::with_audio`. The helper is spawned
+  during `enumerate_screen_sources`, before the user has seen the picker,
+  so `Select` is the first moment it can be told.
+- **Linux** — passed as `--audio` at spawn. There is no `Select` at all:
+  the xdg-desktop-portal dialog is the picker.
+- **Windows** — in-process, no helper involved.
+
+### What each platform actually captures
+
+| OS | Backend | Scope | Own audio excluded by |
+| --- | --- | --- | --- |
+| macOS | ScreenCaptureKit `capturesAudio` | The **content filter** — a window shares that app's audio, a display shares the system mix | `excludesCurrentProcessAudio` |
+| Linux | PipeWire, `stream.capture.sink` | Whole system (default sink monitor) | `screenshare::self_echo` (software AEC) |
+| Windows | WASAPI process loopback | Whole system, minus our process tree | `PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE` |
+
+The picker states the scope in one line when the toggle is on, because
+"share sound" genuinely means something different per OS.
+
+### Excluding ourselves is the load-bearing part
+
+During a call, whatever the machine is playing **includes the call**. A
+naive capture re-publishes every remote participant's voice back to them a
+few hundred milliseconds late — which is why the first attempt at Linux
+screenshare audio was pulled under #175 and left a note in
+`pollis-capture-linux/src/linux.rs` for years.
+
+macOS and Windows exclude our process at the OS. Linux has no equivalent:
+the sink monitor is a mix, so by the time we can read it our contribution
+is already summed in. It is removed instead by **subtraction**, in
+`pollis-core/src/commands/screenshare/self_echo.rs`:
+
+```
+voice mixer 10 ms mix ──→ analyze_render ─┐
+                                          ├─→ AEC ──→ published shared audio
+sink-monitor loopback ──→ run_capture ────┘
+```
+
+The render reference is the voice mixer's own output — the exact signal
+about to hit the speaker — parked in `VoiceState::shared_audio_render` so
+the mixer can find it across an output-device switch. The echo path is a
+pure digital loopback (linear, no room, no speaker distortion), so AEC3
+converges far better here than on the microphone. **AEC only**: NS and AGC
+are tuned for speech and would wreck music, which is most of what people
+share sound for.
+
+Windows deliberately has **no fallback** to plain endpoint loopback on
+builds older than Windows 10 20H1: `webrtc-audio-processing` has no MSVC
+build, so the software canceller is a stub there, and shipping a known
+echo is worse than shipping silence — the person it breaks the call for is
+not the person who turned it on. Those machines share video and report
+audio unavailable.
+
+### Wire + publish path
+
+`pollis-capture-proto` gains `0x07 AudioFormat { sample_rate, channels }`
+and `0x08 AudioFrame { sample_rate, channels, timestamp_us, i16 PCM }`.
+The parent normalises every platform's shape to one thing in
+`screenshare/audio.rs`: **downmix to mono → resample to 48 kHz → rebuffer
+to exact 10 ms frames**. Mono is not a compromise — the receiving mixer
+folds every remote track to mono anyway, so stereo would cost double the
+bandwidth for an identical result.
+
+`AudioFormat` is what triggers the publish, not the user's request: the
+track appears only once a backend has actually announced a source, so no
+viewer sees a speaker icon for a track that never carries a sample.
+
+### Failure is a downgrade, never a teardown
+
+A helper reports an audio-only problem through the same `0xFF Error`
+channel it uses for fatal capture failures, distinguished by an `audio:`
+prefix (`audio::audio_error_message`). The parent emits
+`LocalAudioUnavailable` and **keeps the video share running**. A laptop
+with no output device, a PipeWire-less session, or a pre-20H1 Windows box
+still shares its screen.
+
+`ScreenShareEvent` gains `LocalAudioStarted` and `LocalAudioUnavailable`;
+`ShareState.active` gains `audio: ShareAudioState`
+(`off | pending | live | unavailable`), shown as an indicator — not a
+control — in `VoiceBar`. Audio cannot be toggled mid-share, because the
+capture cannot be renegotiated without restarting it.
+
+### Receiving side
+
+Shared audio arrives as an ordinary remote audio track and mixes to the
+speaker like one. The publication's `TrackSource` is the only thing that
+distinguishes it, and `voice/lifecycle.rs` reads it to pass
+`is_shared_audio` into `register_remote_track`: such a track is **excluded
+from speaking detection and the level meter**, or a shared video would
+show the sharer talking continuously for its whole runtime.
+
+E2EE needs nothing new. Encryption is configured at the room
+(`RoomOptions::encryption`, keyed from the MLS exporter secret), so
+libwebrtc's `FrameCryptor` attaches to every track the participant
+publishes and rotates on every epoch advance. Shared audio is ciphertext
+to the SFU on exactly the same terms as the microphone.
+
+### Linux settings note
+
+Linux never shows the in-app picker, so it has nowhere to put a toggle.
+The choice lives in a stored preference (`screen_share_audio`, Voice
+settings) which the Linux start path reads directly and which seeds the
+picker's toggle on the other two platforms.
+
 ## Follow-up TODOs
 
 - **#281 Phase 2**: X11 XDamage (changed-region capture).
@@ -362,7 +477,15 @@ default; the driver adjusts and we publish whatever it gives. Verified at
   dispatch.
 - `pollis-capture-linux/src/x11.rs` — v1 xcb/SHM/RandR backend.
 - `pollis-capture-macos/src/macos.rs` — SCShareableContent enumeration
-  + SCContentFilter + SCStream/handler.
+  + SCContentFilter + SCStream/handler, and the SCK audio handler.
+- `pollis-capture-linux/src/audio.rs` — PipeWire sink-monitor capture
+  (its own connection, so it serves the X11 backend too).
+- `pollis-core/src/commands/screenshare/audio.rs` — downmix/resample/
+  rebuffer + the shared-audio track publish.
+- `pollis-core/src/commands/screenshare/self_echo.rs` — Linux self-echo
+  cancellation against the voice mixer's output.
+- `pollis-core/src/commands/screenshare/windows_audio.rs` — WASAPI
+  process loopback, own process tree excluded.
 - `frontend/src/components/Voice/ScreenSharePicker.tsx` — in-app picker
   UI (macOS path).
 - `pollis-core/src/commands/screenshare/` — shared parent pipeline,

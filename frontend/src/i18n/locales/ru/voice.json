@@ -63,7 +63,14 @@
     "cancelLabel": "Отменить показ экрана",
     "noDisplays": "Доступных экранов нет.",
     "noWindows": "Доступных окон нет.",
-    "untitledWindow": "Окно без названия"
+    "untitledWindow": "Окно без названия",
+    "audioToggle": "Share sound",
+    "audioScopeSource": "Shares the audio of whatever you pick.",
+    "audioScopeSystem": "Shares everything your computer is playing.",
+    "audioExcludesCall": "The call itself is never included.",
+    "audioLive": "Sound on",
+    "audioPending": "Starting sound…",
+    "audioOffLabel": "Sharing without sound"
   },
   "camera": {
     "pickerHeading": "Выберите камеру",
@@ -157,7 +164,9 @@
     "fpsHint": "{{hint}}. Чем выше, тем плавнее видео и игры, но выше нагрузка на процессор и сеть; для документов либо слабой машины или сети снизьте до 15 к/с. Применится при следующем показе экрана.",
     "behaviorHeading": "Поведение",
     "autoJoinVoice": "Автовход в голосовой канал",
-    "autoJoinVoiceDescription": "Автоматически подключаться к голосу при открытии голосового канала. Отключите, чтобы сначала посмотреть, кто в канале."
+    "autoJoinVoiceDescription": "Автоматически подключаться к голосу при открытии голосового канала. Отключите, чтобы сначала посмотреть, кто в канале.",
+    "screenShareAudio": "Share sound by default",
+    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
   },
   "joinError": {
     "unreachable": "Не удалось связаться с голосовым сервером — проверьте подключение и попробуйте снова.",

@@ -102,10 +102,14 @@ pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
+/// `with_audio` also captures the machine's audio output — everything
+/// except our own process tree, so the call is never re-published. See
+/// `super::windows_audio`.
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     selection: Option<pollis_capture_proto::Selection>,
     max_framerate: Option<u32>,
+    with_audio: bool,
 ) -> Result<()> {
     use std::sync::atomic::AtomicBool;
 
@@ -142,7 +146,7 @@ pub async fn start_screen_share(
             // Drop the lock before doing anything else.
             drop(ss);
             match sel {
-                pollis_capture_proto::Selection::Display { id } => {
+                pollis_capture_proto::Selection::Display { id, .. } => {
                     let monitor = cache
                         .displays
                         .into_iter()
@@ -154,7 +158,7 @@ pub async fn start_screen_share(
                         })?;
                     CaptureSource::Monitor(monitor)
                 }
-                pollis_capture_proto::Selection::Window { id } => {
+                pollis_capture_proto::Selection::Window { id, .. } => {
                     let window = cache
                         .windows
                         .into_iter()
@@ -277,7 +281,132 @@ pub async fn start_screen_share(
         }
     }
     let _ = events_sink;
+
+    // 4. Shared audio, if asked for. Started only after video is
+    //    confirmed running AND the session is stashed + announced: audio
+    //    startup must never delay LocalStarted, and a stop arriving while
+    //    audio is still activating must find a session to tear down.
+    if with_audio {
+        start_windows_audio(state, &room, std::sync::Arc::clone(&active_flag)).await;
+    }
     Ok(())
+}
+
+/// Stand up WASAPI process-loopback capture and the task that publishes
+/// what it produces.
+///
+/// Never fails the share: every problem here downgrades to video-only via
+/// `LocalAudioUnavailable`. The commonest one is a Windows 10 build older
+/// than 20H1, where the process-loopback pseudo-device does not exist.
+async fn start_windows_audio(
+    state: &Arc<AppState>,
+    room: &std::sync::Arc<livekit::Room>,
+    active: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    use super::audio::{emit, publish_shared_audio_track, SharedAudioResampler,
+        SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDIO_RATE_HZ};
+    use super::windows_audio::{run_loopback_capture, AudioBlock};
+
+    // 32 blocks ~= 300 ms of slack at WASAPI's default period. Deep
+    // enough that a scheduling hiccup on the publish side doesn't make
+    // the capture thread block, shallow enough that it can't hide a
+    // stalled consumer behind seconds of latency.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<AudioBlock>(32);
+    // Explicitly std's Result: this module imports `crate::error::Result`,
+    // which is a one-generic alias and not what this channel carries.
+    let (start_tx, start_rx) =
+        tokio::sync::oneshot::channel::<std::result::Result<(), String>>();
+    let active_for_thread = std::sync::Arc::clone(&active);
+    let capture_thread = std::thread::Builder::new()
+        .name("wasapi-screenshare-audio".into())
+        .spawn(move || {
+            // The activation and the capture client are both COM, and the
+            // callbacks arrive on system threads — MTA is the apartment
+            // for that. Failing to initialise is itself just an
+            // audio-only failure.
+            let com = unsafe {
+                windows::Win32::System::Com::CoInitializeEx(
+                    None,
+                    windows::Win32::System::Com::COINIT_MULTITHREADED,
+                )
+            };
+            if com.is_err() {
+                let _ = start_tx.send(Err("could not initialise audio COM".into()));
+                return;
+            }
+            // Signals `start_tx` itself, the moment the stream is up —
+            // then blocks in the capture loop until the share ends.
+            run_loopback_capture(tx, active_for_thread, start_tx);
+            unsafe { windows::Win32::System::Com::CoUninitialize() };
+        });
+    if capture_thread.is_err() {
+        emit(
+            state,
+            ScreenShareEvent::LocalAudioUnavailable {
+                message: "Could not start audio capture. Sharing without sound.".into(),
+            },
+        )
+        .await;
+        return;
+    }
+
+    // The thread reports on the oneshot as soon as the stream is running
+    // (or has failed to start) — milliseconds on the happy path. The outer
+    // timeout only guards a wedged audio service; the activation inside
+    // the thread already gives up after 2 s, so 5 s is a generous ceiling.
+    match tokio::time::timeout(std::time::Duration::from_millis(5_000), start_rx).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(reason))) => {
+            emit(
+                state,
+                ScreenShareEvent::LocalAudioUnavailable {
+                    message: format!("Sharing without sound: {reason}"),
+                },
+            )
+            .await;
+            return;
+        }
+        // Sender dropped without reporting (thread panicked or ended
+        // before the stream came up), or the outer timeout fired: either
+        // way there is no audio to publish.
+        Ok(Err(_)) | Err(_) => {
+            emit(
+                state,
+                ScreenShareEvent::LocalAudioUnavailable {
+                    message: "Audio capture stopped before it started. Sharing without sound."
+                        .into(),
+                },
+            )
+            .await;
+            return;
+        }
+    }
+
+    let Some(source) = publish_shared_audio_track(state, room).await else {
+        return;
+    };
+    let mut resampler = SharedAudioResampler::new(SHARED_AUDIO_RATE_HZ);
+    tokio::spawn(async move {
+        while let Some(block) = rx.recv().await {
+            if resampler.src_rate() != block.sample_rate {
+                resampler.set_src_rate(block.sample_rate);
+            }
+            for frame in resampler.push(&block.pcm, block.channels) {
+                // No echo canceller on this path, and none needed: the OS
+                // already excluded our process tree from the mix.
+                let frame = libwebrtc::prelude::AudioFrame {
+                    data: frame.into(),
+                    sample_rate: SHARED_AUDIO_RATE_HZ,
+                    num_channels: 1,
+                    samples_per_channel: SHARED_AUDIO_FRAME_SAMPLES as u32,
+                };
+                if let Err(e) = source.capture_frame(&frame).await {
+                    eprintln!("[screenshare/audio] capture_frame error: {e:?}");
+                }
+            }
+        }
+        eprintln!("[screenshare/audio] windows publish loop ended");
+    });
 }
 
 // ── Capture-thread driver ─────────────────────────────────────────────────

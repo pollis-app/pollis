@@ -36,6 +36,13 @@ const BANDS_EMIT_EVERY: u32 = 5;
 /// Drain a remote track's `NativeAudioStream` into a per-track ring buffer
 /// and emit speaking-state transitions. Runs as one tokio task per
 /// subscribed remote audio track. The mixer reads from the buffer.
+///
+/// `is_shared_audio` marks a screen share's soundtrack rather than a
+/// person's microphone. Such a track still mixes to the speaker exactly
+/// like any other, but it must NOT drive the speaking indicator or the
+/// level meter: those are attributed to a participant, and a shared video
+/// would otherwise show the sharer talking continuously for its whole
+/// runtime — while they sit silent.
 async fn run_drain_task(
     rtc_track: libwebrtc::audio_track::RtcAudioTrack,
     track_key: String,
@@ -43,6 +50,7 @@ async fn run_drain_task(
     voice_arc: Arc<tokio::sync::Mutex<VoiceState>>,
     participant_identity: String,
     sample_rate: u32,
+    is_shared_audio: bool,
 ) {
     let mut audio_stream = NativeAudioStream::new(rtc_track, sample_rate as i32, 1);
 
@@ -58,6 +66,19 @@ async fn run_drain_task(
 
     eprintln!("[voice] remote drain task started for {track_key}");
     while let Some(frame) = audio_stream.next().await {
+        // Shared audio is mixed but never attributed: skip straight to
+        // the buffer push, leaving the sharer's tile showing whether
+        // *they* are talking.
+        if is_shared_audio {
+            let mut buffers = track_buffers.lock().unwrap();
+            let buf = buffers.entry(track_key.clone()).or_default();
+            buf.extend(frame.data.iter().map(|&s| s as f32 / 32_768.0));
+            while buf.len() > TRACK_BUFFER_CAP_SAMPLES {
+                buf.pop_front();
+            }
+            continue;
+        }
+
         let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
 
         // Feed the same PCM to the band analyzer and publish a decimated
@@ -130,6 +151,8 @@ async fn run_mixer_task(
     apm_processor: Option<Arc<ApmProcessor>>,
     apm_frame_samples: usize,
     deafened: Arc<AtomicBool>,
+    apm_rate: u32,
+    shared_audio_render: crate::commands::screenshare::self_echo::SelfEchoSlot,
 ) {
     let mut interval = tokio::time::interval(Duration::from_millis(10));
     // Skip catch-up bursts: under sustained load we'd rather lose 10 ms than
@@ -212,6 +235,16 @@ async fn run_mixer_task(
         if let Some(apm) = &apm_processor {
             let _ = voice_apm::analyze_render(apm, &mix, apm_frame_samples);
         }
+
+        // The same signal, for a different subtraction: a screen share
+        // capturing system audio would otherwise re-publish this mix and
+        // every participant would hear themselves. Costs one uncontended
+        // lock per tick when no such share is running.
+        crate::commands::screenshare::self_echo::analyze_render(
+            &shared_audio_render,
+            &mix,
+            apm_rate,
+        );
 
         // Push to the cpal output ring. The output stream's callback
         // de-interleaves, so we duplicate mono → output_channels here.
@@ -311,9 +344,13 @@ pub(crate) async fn ensure_playback(
     // survives a mid-call output-device switch: this function tears the
     // mixer down and builds a new one, and a deafened user must stay
     // deafened across that rebuild.
-    let (track_buffers, user_volumes, output_capacity_samples, deafened) = {
+    let (track_buffers, user_volumes, output_capacity_samples, deafened, shared_audio_render) = {
         let voice = voice_arc.lock().await;
         let deafened = Arc::clone(&voice.deafened);
+        // Cloned off VoiceState for the same reason `deafened` is: this
+        // function rebuilds the mixer on an output-device switch, and a
+        // live share's echo canceller must survive that rebuild.
+        let shared_audio_render = Arc::clone(&voice.shared_audio_render);
         let pb = voice.playback.lock().unwrap();
         let cap = (sample_rate as usize) * (channels as usize) / 5; // 200 ms
         (
@@ -321,6 +358,7 @@ pub(crate) async fn ensure_playback(
             Arc::clone(&pb.user_volumes),
             cap,
             deafened,
+            shared_audio_render,
         )
     };
 
@@ -333,6 +371,8 @@ pub(crate) async fn ensure_playback(
         apm_for_mixer,
         apm_frame_samples,
         deafened,
+        apm_rate,
+        shared_audio_render,
     ));
 
     let voice = voice_arc.lock().await;
@@ -355,6 +395,7 @@ pub(crate) async fn register_remote_track(
     voice_arc: Arc<tokio::sync::Mutex<VoiceState>>,
     participant_identity: String,
     apm_rate: u32,
+    is_shared_audio: bool,
 ) {
     let track_buffers = {
         let voice = voice_arc.lock().await;
@@ -372,6 +413,7 @@ pub(crate) async fn register_remote_track(
         voice_for_task,
         identity_for_task,
         apm_rate,
+        is_shared_audio,
     ));
 
     let voice = voice_arc.lock().await;

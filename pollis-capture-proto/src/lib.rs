@@ -58,8 +58,25 @@
 //!     the helper delivers BGRA (alpha ignored) exactly like the screen
 //!     path, so the parent's I420 conversion + LiveKit publish is shared.
 //!
+//!   type 0x07  AudioFormat (helper -> parent)
+//!     payload := [ u32 sample_rate ][ u32 channels ]
+//!     Sent once when a shared-audio source is negotiated. Its ARRIVAL
+//!     is the signal that audio capture actually succeeded — the parent
+//!     publishes the second LiveKit track only after seeing it.
+//!
+//!   type 0x08  AudioFrame (helper -> parent)
+//!     payload := [ u32 sample_rate ][ u32 channels ][ i64 timestamp_us ]
+//!                [ i16 interleaved PCM ... ]
+//!     Signed 16-bit interleaved PCM at the announced rate/channel count.
+//!     The parent downmixes to mono and resamples to 48 kHz
+//!     (`screenshare::audio::normalize`) so all three platforms converge
+//!     on one publish path.
+//!
 //!   type 0xFF  Error
 //!     payload := utf-8 message
+//!     A message prefixed `audio:` is NON-FATAL: shared-audio capture
+//!     failed but video is unaffected, and the parent keeps the share
+//!     running. Every other prefix ends the capture.
 //!
 //! Lifecycle on macOS (screen): helper connects → Sources → (parent reads,
 //! shows picker) → Select → Format → Frame ... until the parent
@@ -87,7 +104,12 @@ pub const MSG_SELECT: u8 = 0x04;
 pub const MSG_CAMERAS: u8 = 0x05;
 /// User's camera pick from the in-app picker, parent → helper. JSON payload.
 pub const MSG_SELECT_CAMERA: u8 = 0x06;
-/// A fatal error from the helper, carrying a human-readable utf-8 string.
+/// Shared-audio format announcement, helper -> parent.
+pub const MSG_AUDIO_FORMAT: u8 = 0x07;
+/// A block of interleaved s16 shared audio, helper -> parent.
+pub const MSG_AUDIO_FRAME: u8 = 0x08;
+/// An error from the helper, carrying a human-readable utf-8 string.
+/// Fatal unless prefixed `audio:` — see the wire-protocol table above.
 pub const MSG_ERROR: u8 = 0xFF;
 
 /// Hard cap on a single message payload. An 8K BGRx frame is ~127 MB;
@@ -113,6 +135,17 @@ pub enum CaptureMsg {
     Select(Selection),
     Cameras(CameraList),
     SelectCamera(CameraSelection),
+    AudioFormat {
+        sample_rate: u32,
+        channels: u32,
+    },
+    AudioFrame {
+        sample_rate: u32,
+        channels: u32,
+        timestamp_us: i64,
+        /// Interleaved signed 16-bit PCM, `channels` samples per frame.
+        pcm: Vec<i16>,
+    },
     Error {
         message: String,
     },
@@ -168,11 +201,36 @@ pub struct SourceList {
 }
 
 /// What the user picked in the in-app picker. Parent → helper.
+///
+/// `with_audio` rides on the selection rather than on the helper's
+/// command line because the macOS helper is spawned during
+/// `enumerate_screen_sources` — before the user has seen the picker, and
+/// so before the audio toggle has been read. Linux has no Select round
+/// trip at all (the portal dialog is the picker), so its helper takes the
+/// same decision as an `--audio` flag at spawn time instead. Defaulted so
+/// a Select from an older frontend still deserializes as video-only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Selection {
-    Display { id: u32 },
-    Window { id: u32 },
+    Display {
+        id: u32,
+        #[serde(default)]
+        with_audio: bool,
+    },
+    Window {
+        id: u32,
+        #[serde(default)]
+        with_audio: bool,
+    },
+}
+
+impl Selection {
+    /// Whether the user asked for the source's audio alongside its video.
+    pub fn with_audio(&self) -> bool {
+        match self {
+            Self::Display { with_audio, .. } | Self::Window { with_audio, .. } => *with_audio,
+        }
+    }
 }
 
 /// A capturable video-capture device (webcam / capture card / virtual cam).
@@ -277,6 +335,39 @@ pub fn encode_select_camera(sel: &CameraSelection) -> Vec<u8> {
     buf
 }
 
+/// Serialize an AudioFormat message (helper → parent).
+pub fn encode_audio_format(sample_rate: u32, channels: u32) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(1 + 4 + 8);
+    buf.push(MSG_AUDIO_FORMAT);
+    buf.extend_from_slice(&8u32.to_le_bytes());
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&channels.to_le_bytes());
+    buf
+}
+
+/// Serialize a complete AudioFrame message (helper → parent). Audio
+/// blocks are small (a 20 ms stereo block at 48 kHz is 3.8 KB), so unlike
+/// video frames there is nothing to gain from a split header + payload
+/// write — one buffer keeps the call sites simple.
+pub fn encode_audio_frame(
+    sample_rate: u32,
+    channels: u32,
+    timestamp_us: i64,
+    pcm: &[i16],
+) -> Vec<u8> {
+    let payload_len = (4 + 4 + 8 + pcm.len() * 2) as u32;
+    let mut buf = Vec::with_capacity(1 + 4 + payload_len as usize);
+    buf.push(MSG_AUDIO_FRAME);
+    buf.extend_from_slice(&payload_len.to_le_bytes());
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&channels.to_le_bytes());
+    buf.extend_from_slice(&timestamp_us.to_le_bytes());
+    for s in pcm {
+        buf.extend_from_slice(&s.to_le_bytes());
+    }
+    buf
+}
+
 /// Serialize an Error message to its exact wire bytes.
 pub fn encode_error(message: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + 4 + message.len());
@@ -312,6 +403,19 @@ where
         CaptureMsg::Select(sel) => w.write_all(&encode_select(sel)).await,
         CaptureMsg::Cameras(list) => w.write_all(&encode_cameras(list)).await,
         CaptureMsg::SelectCamera(sel) => w.write_all(&encode_select_camera(sel)).await,
+        CaptureMsg::AudioFormat {
+            sample_rate,
+            channels,
+        } => w.write_all(&encode_audio_format(*sample_rate, *channels)).await,
+        CaptureMsg::AudioFrame {
+            sample_rate,
+            channels,
+            timestamp_us,
+            pcm,
+        } => {
+            w.write_all(&encode_audio_frame(*sample_rate, *channels, *timestamp_us, pcm))
+                .await
+        }
         CaptureMsg::Error { message } => w.write_all(&encode_error(message)).await,
     }
 }
@@ -422,6 +526,54 @@ where
                 )
             })?;
             Ok(Some(CaptureMsg::SelectCamera(sel)))
+        }
+        MSG_AUDIO_FORMAT => {
+            if payload_len != 8 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "audio format payload != 8",
+                ));
+            }
+            let mut buf = [0u8; 8];
+            r.read_exact(&mut buf).await?;
+            Ok(Some(CaptureMsg::AudioFormat {
+                sample_rate: u32::from_le_bytes(buf[0..4].try_into().unwrap()),
+                channels: u32::from_le_bytes(buf[4..8].try_into().unwrap()),
+            }))
+        }
+        MSG_AUDIO_FRAME => {
+            const HEAD: usize = 4 + 4 + 8;
+            if payload_len < HEAD {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "audio frame payload too short",
+                ));
+            }
+            let mut head = [0u8; HEAD];
+            r.read_exact(&mut head).await?;
+            let sample_rate = u32::from_le_bytes(head[0..4].try_into().unwrap());
+            let channels = u32::from_le_bytes(head[4..8].try_into().unwrap());
+            let timestamp_us = i64::from_le_bytes(head[8..16].try_into().unwrap());
+            let body_len = payload_len - HEAD;
+            // A half sample on the wire is a desync, not a short frame.
+            if body_len % 2 != 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "audio frame payload is not a whole number of s16 samples",
+                ));
+            }
+            let mut bytes = vec![0u8; body_len];
+            r.read_exact(&mut bytes).await?;
+            let pcm: Vec<i16> = bytes
+                .chunks_exact(2)
+                .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            Ok(Some(CaptureMsg::AudioFrame {
+                sample_rate,
+                channels,
+                timestamp_us,
+                pcm,
+            }))
         }
         MSG_ERROR => {
             let mut bytes = vec![0u8; payload_len];
@@ -546,14 +698,120 @@ mod tests {
 
     #[tokio::test]
     async fn select_roundtrip() {
-        match roundtrip(CaptureMsg::Select(Selection::Display { id: 7 })).await {
-            CaptureMsg::Select(Selection::Display { id }) => assert_eq!(id, 7),
+        match roundtrip(CaptureMsg::Select(Selection::Display {
+            id: 7,
+            with_audio: false,
+        }))
+        .await
+        {
+            CaptureMsg::Select(Selection::Display { id, with_audio }) => {
+                assert_eq!(id, 7);
+                assert!(!with_audio);
+            }
             _ => panic!("wrong variant"),
         }
-        match roundtrip(CaptureMsg::Select(Selection::Window { id: 13 })).await {
-            CaptureMsg::Select(Selection::Window { id }) => assert_eq!(id, 13),
+        match roundtrip(CaptureMsg::Select(Selection::Window {
+            id: 13,
+            with_audio: true,
+        }))
+        .await
+        {
+            CaptureMsg::Select(Selection::Window { id, with_audio }) => {
+                assert_eq!(id, 13);
+                assert!(with_audio);
+            }
             _ => panic!("wrong variant"),
         }
+    }
+
+    // A Select minted by a frontend built before shared audio existed
+    // carries no `with_audio` key at all. It must deserialize as a
+    // video-only share rather than failing the handshake — a helper and a
+    // renderer can be a release apart.
+    #[test]
+    fn select_without_with_audio_defaults_to_video_only() {
+        let sel: Selection = serde_json::from_str(r#"{"kind":"display","id":3}"#).unwrap();
+        assert!(!sel.with_audio());
+        assert!(matches!(sel, Selection::Display { id: 3, .. }));
+    }
+
+    #[tokio::test]
+    async fn audio_format_roundtrip() {
+        match roundtrip(CaptureMsg::AudioFormat {
+            sample_rate: 48_000,
+            channels: 2,
+        })
+        .await
+        {
+            CaptureMsg::AudioFormat {
+                sample_rate,
+                channels,
+            } => assert_eq!((sample_rate, channels), (48_000, 2)),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn audio_frame_roundtrip() {
+        // Includes both signs and both extremes so a byte-order or
+        // sign-extension slip in the s16 pack/unpack shows up.
+        let pcm: Vec<i16> = vec![0, 1, -1, i16::MAX, i16::MIN, 12_345, -12_345, 256];
+        match roundtrip(CaptureMsg::AudioFrame {
+            sample_rate: 44_100,
+            channels: 2,
+            timestamp_us: -42,
+            pcm: pcm.clone(),
+        })
+        .await
+        {
+            CaptureMsg::AudioFrame {
+                sample_rate,
+                channels,
+                timestamp_us,
+                pcm: got,
+            } => {
+                assert_eq!((sample_rate, channels), (44_100, 2));
+                assert_eq!(timestamp_us, -42);
+                assert_eq!(got, pcm);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    // An empty block is legal on the wire (a capture backend can hand us a
+    // zero-length period); it must decode as an empty frame, not an error.
+    #[tokio::test]
+    async fn empty_audio_frame_roundtrips() {
+        match roundtrip(CaptureMsg::AudioFrame {
+            sample_rate: 48_000,
+            channels: 1,
+            timestamp_us: 0,
+            pcm: Vec::new(),
+        })
+        .await
+        {
+            CaptureMsg::AudioFrame { pcm, .. } => assert!(pcm.is_empty()),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    // An odd payload length cannot be a whole number of s16 samples, so it
+    // is a stream desync. Truncating silently would emit a half-sample of
+    // noise on every subsequent block.
+    #[tokio::test]
+    async fn odd_length_audio_payload_is_rejected() {
+        let mut bytes = encode_audio_frame(48_000, 1, 0, &[1, 2, 3]);
+        // Drop one trailing byte and fix the declared length to match.
+        bytes.pop();
+        let payload_len = (bytes.len() - 5) as u32;
+        bytes[1..5].copy_from_slice(&payload_len.to_le_bytes());
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        tokio::io::AsyncWriteExt::write_all(&mut a, &bytes)
+            .await
+            .unwrap();
+        drop(a);
+        let err = read_msg(&mut b).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[tokio::test]
@@ -603,6 +861,8 @@ mod tests {
         assert_eq!(MSG_SELECT, 0x04);
         assert_eq!(MSG_CAMERAS, 0x05);
         assert_eq!(MSG_SELECT_CAMERA, 0x06);
+        assert_eq!(MSG_AUDIO_FORMAT, 0x07);
+        assert_eq!(MSG_AUDIO_FRAME, 0x08);
         assert_eq!(MSG_ERROR, 0xFF);
     }
 }

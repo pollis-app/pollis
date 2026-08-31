@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use libwebrtc::video_source::native::NativeVideoSource;
-use livekit::track::LocalVideoTrack;
+use libwebrtc::{audio_source::native::NativeAudioSource, video_source::native::NativeVideoSource};
+use livekit::track::{LocalAudioTrack, LocalVideoTrack};
 
 use crate::sink::EventSink;
 
@@ -31,6 +31,13 @@ pub struct ScreenShareState {
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
+    /// The shared-audio track, published only once the capture backend
+    /// has actually announced an audio format. A share with
+    /// `with_audio` requested but no audio available leaves these `None`
+    /// and runs video-only — the two tracks have independent lifetimes,
+    /// which is why they are not folded into one Option pair.
+    pub local_audio_track: Option<LocalAudioTrack>,
+    pub local_audio_source: Option<NativeAudioSource>,
     /// macOS picker phase: helper is spawned and has sent its `Sources`
     /// list; we're waiting on the user's pick from the in-app picker.
     /// `start_screen_share` consumes this (sends `Select`, transitions
@@ -95,6 +102,8 @@ impl ScreenShareState {
             frames: None,
             local_track: None,
             local_source: None,
+            local_audio_track: None,
+            local_audio_source: None,
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             picker_session: None,
             #[cfg(any(target_os = "linux", target_os = "macos"))]

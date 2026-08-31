@@ -32,8 +32,17 @@ use super::{fail_capture, state::HelperSession};
 /// reply) and read `Format`/`Frame` messages. Used by both
 /// `enumerate_screen_sources` (macOS picker phase) and
 /// `start_screen_share` (Linux/Windows direct path).
+///
+/// `with_audio` asks the helper to capture the shared source's audio
+/// alongside its video. It is a spawn-time flag rather than a protocol
+/// message because the Linux helper has no Select round trip at all — the
+/// portal dialog is its picker, so spawn is the only moment the parent can
+/// tell it anything. macOS ignores the flag and reads the same decision off
+/// `Selection::with_audio`, since its helper is spawned during enumeration,
+/// before the user has seen the audio toggle.
 pub(super) async fn spawn_and_accept_helper(
     state: &Arc<AppState>,
+    with_audio: bool,
 ) -> Result<HelperSession> {
     use tokio::net::UnixListener;
 
@@ -71,9 +80,12 @@ pub(super) async fn spawn_and_accept_helper(
         helper_path.display(),
         socket_path.display()
     );
-    let helper = tokio::process::Command::new(&helper_path)
-        .arg("--socket")
-        .arg(&socket_path)
+    let mut command = tokio::process::Command::new(&helper_path);
+    command.arg("--socket").arg(&socket_path);
+    if with_audio {
+        command.arg("--audio");
+    }
+    let helper = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())

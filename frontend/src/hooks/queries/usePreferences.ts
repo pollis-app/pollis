@@ -103,6 +103,18 @@ export interface PreferencesData {
    * constraints under Electron). Absent → `SCREEN_SHARE_FPS_DEFAULT`.
    */
   screen_share_max_fps?: number;
+  /**
+   * Whether a screen share also carries the machine's sound.
+   *
+   * A stored preference and not just picker-local state, for a reason
+   * that is easy to miss: Linux never shows the in-app picker — the
+   * xdg-desktop-portal dialog is the picker — so without this there is
+   * nowhere on that platform to turn shared audio on at all. It doubles
+   * as the remembered default for the picker's toggle everywhere else.
+   * Absent → off, matching Slack/Discord/Zoom: sharing sound is always an
+   * explicit act, never a surprise.
+   */
+  screen_share_audio?: boolean;
   auto_join_voice?: boolean;
   /** Whether the left sidebar is open by default at app start. */
   sidebar_open_by_default?: boolean;
@@ -201,6 +213,9 @@ export interface PreferencesData {
  */
 export const SCREEN_SHARE_FPS_OPTIONS = [15, 30, 60] as const;
 export const SCREEN_SHARE_FPS_DEFAULT = 30;
+
+/** Shared audio is opt-in. See `screen_share_audio`. */
+export const SCREEN_SHARE_AUDIO_DEFAULT = false;
 
 /** Snap an arbitrary value to the nearest allowed preset; default if invalid. */
 export function clampScreenShareFps(v: number | undefined): number {
@@ -391,6 +406,11 @@ export function usePreferences() {
         click_suppression: getPreference<boolean>(json, "click_suppression", APM_DEFAULTS.click_suppression),
         screen_share_max_fps: clampScreenShareFps(
           getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
+        ),
+        screen_share_audio: getPreference<boolean>(
+          json,
+          "screen_share_audio",
+          SCREEN_SHARE_AUDIO_DEFAULT,
         ),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
         // Read back explicitly: `save` stringifies the whole object, so a

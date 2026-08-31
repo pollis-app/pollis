@@ -63,7 +63,14 @@
     "cancelLabel": "Скасувати демонстрацію екрана",
     "noDisplays": "Немає доступних екранів.",
     "noWindows": "Немає доступних вікон.",
-    "untitledWindow": "Вікно без назви"
+    "untitledWindow": "Вікно без назви",
+    "audioToggle": "Share sound",
+    "audioScopeSource": "Shares the audio of whatever you pick.",
+    "audioScopeSystem": "Shares everything your computer is playing.",
+    "audioExcludesCall": "The call itself is never included.",
+    "audioLive": "Sound on",
+    "audioPending": "Starting sound…",
+    "audioOffLabel": "Sharing without sound"
   },
   "camera": {
     "pickerHeading": "Виберіть камеру",
@@ -157,7 +164,9 @@
     "fpsHint": "{{hint}}. Вища частота плавніша для відео та ігор, але навантажує процесор і канал; знизьте до 15 кадр/с для документів або слабкої машини чи мережі. Застосується під час наступної демонстрації екрана.",
     "behaviorHeading": "Поведінка",
     "autoJoinVoice": "Автоприєднання до голосу",
-    "autoJoinVoiceDescription": "Автоматично приєднуватися до голосу під час відкриття голосового каналу. Вимкніть, щоб спершу побачити, хто в каналі."
+    "autoJoinVoiceDescription": "Автоматично приєднуватися до голосу під час відкриття голосового каналу. Вимкніть, щоб спершу побачити, хто в каналі.",
+    "screenShareAudio": "Share sound by default",
+    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
   },
   "joinError": {
     "unreachable": "Не вдалося зв'язатися з голосовим сервером — перевірте з'єднання та спробуйте ще раз.",

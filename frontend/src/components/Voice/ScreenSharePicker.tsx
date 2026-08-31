@@ -12,6 +12,7 @@ import {
 } from "../../screenshare/screenShareSession";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
+import { Switch } from "../ui/Switch";
 
 /** Inline in-app picker for screen-share sources. Replaces the voice
  *  participant grid when `share.kind === 'picking'` — no modal, no
@@ -37,6 +38,25 @@ export const ScreenSharePicker: React.FC = observer(() => {
   // Tab between Displays and Windows. Default to Displays — most
   // screen shares are whole-monitor.
   const [tab, setTab] = useState<"displays" | "windows">("displays");
+
+  // Off by default, matching Slack/Discord/Zoom. Sharing sound you did not
+  // mean to share is a privacy surprise, so it is always an explicit act.
+  // Seeded from the stored preference so the choice sticks between shares
+  // — the same preference the Linux path reads, since it has no picker.
+  const [withAudio, setWithAudio] = useState(false);
+  const audioScope = screenShareSession.audioScope();
+
+  useEffect(() => {
+    let cancelled = false;
+    void screenShareSession.resolveWithAudio().then((v) => {
+      if (!cancelled) {
+        setWithAudio(v);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Esc cancels (matches the rest of the app's modal-replacement flows).
   useEffect(() => {
@@ -64,9 +84,9 @@ export const ScreenSharePicker: React.FC = observer(() => {
 
   async function handlePick(selection: Selection) {
     setBusy(true);
-    shareStartStarting();
+    shareStartStarting(withAudio);
     try {
-      await screenShareSession.start(selection);
+      await screenShareSession.start(selection, withAudio);
     } catch (e) {
       console.error("[screenshare] start:", e);
       shareFailed(friendlyScreenShareError(String(e)));
@@ -112,18 +132,44 @@ export const ScreenSharePicker: React.FC = observer(() => {
             </Button>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={handleCancel}
-          disabled={busy}
-          aria-label={t("share.cancelLabel")}
-          data-testid="screen-share-picker-cancel"
-        >
-          <X size={12} />
-          {t("common:actions.cancel")}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Switch
+            label={t("share.audioToggle")}
+            checked={withAudio}
+            onChange={setWithAudio}
+            disabled={busy}
+            data-testid="screen-share-audio-toggle"
+          />
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={handleCancel}
+            disabled={busy}
+            aria-label={t("share.cancelLabel")}
+            data-testid="screen-share-picker-cancel"
+          >
+            <X size={12} />
+            {t("common:actions.cancel")}
+          </Button>
+        </div>
       </header>
+
+      {/* What "share sound" captures genuinely differs by OS — macOS
+          follows the picked source, Linux and Windows take the system
+          mix — so the picker states it rather than letting the user
+          discover it after the fact. The second sentence is the one
+          people actually worry about. */}
+      {withAudio ? (
+        <div
+          className="px-3 py-2 border-b border-line text-muted"
+          data-testid="screen-share-audio-scope"
+        >
+          {audioScope === "source"
+            ? t("share.audioScopeSource")
+            : t("share.audioScopeSystem")}{" "}
+          {t("share.audioExcludesCall")}
+        </div>
+      ) : null}
 
       <div className="flex-1 overflow-auto p-3">
         {items.length === 0 ? (

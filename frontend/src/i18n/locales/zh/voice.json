@@ -60,7 +60,14 @@
     "cancelLabel": "取消屏幕共享",
     "noDisplays": "没有可用的显示器。",
     "noWindows": "没有可用的窗口。",
-    "untitledWindow": "无标题窗口"
+    "untitledWindow": "无标题窗口",
+    "audioToggle": "Share sound",
+    "audioScopeSource": "Shares the audio of whatever you pick.",
+    "audioScopeSystem": "Shares everything your computer is playing.",
+    "audioExcludesCall": "The call itself is never included.",
+    "audioLive": "Sound on",
+    "audioPending": "Starting sound…",
+    "audioOffLabel": "Sharing without sound"
   },
   "camera": {
     "pickerHeading": "选择摄像头",
@@ -154,7 +161,9 @@
     "fpsHint": "{{hint}}。帧率越高，视频和游戏画面越流畅，但会占用更多 CPU 和带宽；共享文档或设备/网络受限时可降到 15 fps。将在你下次共享屏幕时生效。",
     "behaviorHeading": "行为",
     "autoJoinVoice": "自动加入语音",
-    "autoJoinVoiceDescription": "打开语音频道时自动加入语音。关闭后可以先查看频道中有谁，再决定是否加入。"
+    "autoJoinVoiceDescription": "打开语音频道时自动加入语音。关闭后可以先查看频道中有谁，再决定是否加入。",
+    "screenShareAudio": "Share sound by default",
+    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
   },
   "joinError": {
     "unreachable": "无法连接到语音服务器 — 请检查网络后重试。",

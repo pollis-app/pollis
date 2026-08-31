@@ -14,6 +14,7 @@ import { Button } from "../components/ui/Button";
 import {
   preferencesToApmConfig,
   SCREEN_SHARE_FPS_DEFAULT,
+  SCREEN_SHARE_AUDIO_DEFAULT,
   SCREEN_SHARE_FPS_OPTIONS,
   usePreferences,
   type ApmConfig,
@@ -376,6 +377,12 @@ export const VoiceSettingsPage: React.FC = observer(() => {
     preferences.save({ ...preferences.query.data, screen_share_max_fps: fps });
   };
 
+  const screenShareAudio =
+    preferences.query.data?.screen_share_audio ?? SCREEN_SHARE_AUDIO_DEFAULT;
+  const handleScreenShareAudio = (enabled: boolean) => {
+    preferences.save({ ...preferences.query.data, screen_share_audio: enabled });
+  };
+
   return (
     <PageShell title={t("settings.title")} scrollable>
       <div data-testid="voice-settings-page" className="flex justify-center px-6 py-8">
@@ -689,6 +696,13 @@ export const VoiceSettingsPage: React.FC = observer(() => {
             {t("settings.screenShareHeading")}
           </h2>
           <ScreenShareFpsSelect value={screenShareFps} onChange={handleScreenShareFps} />
+          <Switch
+            label={t("settings.screenShareAudio")}
+            checked={screenShareAudio}
+            onChange={handleScreenShareAudio}
+            description={t("settings.screenShareAudioDescription")}
+            data-testid="screenshare-audio-preference"
+          />
         </section>
 
         <section className="flex flex-col gap-4 mb-12">

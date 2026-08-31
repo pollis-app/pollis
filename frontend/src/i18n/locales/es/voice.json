@@ -61,7 +61,14 @@
     "cancelLabel": "Cancelar compartir pantalla",
     "noDisplays": "No hay pantallas disponibles.",
     "noWindows": "No hay ventanas disponibles.",
-    "untitledWindow": "Ventana sin título"
+    "untitledWindow": "Ventana sin título",
+    "audioToggle": "Share sound",
+    "audioScopeSource": "Shares the audio of whatever you pick.",
+    "audioScopeSystem": "Shares everything your computer is playing.",
+    "audioExcludesCall": "The call itself is never included.",
+    "audioLive": "Sound on",
+    "audioPending": "Starting sound…",
+    "audioOffLabel": "Sharing without sound"
   },
   "camera": {
     "pickerHeading": "Elige una cámara",
@@ -155,7 +162,9 @@
     "fpsHint": "{{hint}}. Más fotogramas se ven más fluidos para vídeo y juegos, pero usan más CPU y ancho de banda; baja a 15 fps para documentos o si tu equipo o tu red van justos. Se aplica la próxima vez que compartas pantalla.",
     "behaviorHeading": "Comportamiento",
     "autoJoinVoice": "Unirse a voz automáticamente",
-    "autoJoinVoiceDescription": "Entra automáticamente en la voz al abrir un canal de voz. Desactívalo para ver quién hay en el canal antes de entrar."
+    "autoJoinVoiceDescription": "Entra automáticamente en la voz al abrir un canal de voz. Desactívalo para ver quién hay en el canal antes de entrar.",
+    "screenShareAudio": "Share sound by default",
+    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
   },
   "joinError": {
     "unreachable": "No se ha podido contactar con el servidor de voz: comprueba tu conexión e inténtalo de nuevo.",

@@ -13,6 +13,8 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     let room;
     let track;
     let source_to_drop;
+    let audio_track;
+    let audio_source_to_drop;
     let ev_opt;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     let mut helper;
@@ -32,6 +34,11 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         // would otherwise let the next reference drop free its backing
         // while in-flight handler calls are still firing.
         source_to_drop = ss.local_source.take();
+        // Same ordering rule as the video pair below: hold the source
+        // alive locally until after the track is unpublished, so an
+        // in-flight capture_frame can't outlive its backing.
+        audio_track = ss.local_audio_track.take();
+        audio_source_to_drop = ss.local_audio_source.take();
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             helper = ss.local_helper.take();
@@ -69,6 +76,15 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     let had_session = track.is_some() || source_to_drop.is_some();
     if !had_session {
         return Ok(());
+    }
+
+    // Stop the voice mixer feeding a render reference to a canceller
+    // nothing is reading any more. Unconditional and idempotent: the slot
+    // is only ever armed by a share, so clearing it here is the one place
+    // every stop path already converges on.
+    {
+        let voice = state.voice.lock().await;
+        super::self_echo::disarm(&voice.shared_audio_render);
     }
 
     // Linux + macOS: identical teardown. Abort the reader task, then
@@ -115,14 +131,23 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     // 3. Unpublish the track before dropping the source. LiveKit's track
     //    teardown can free the source's webrtc backing; doing it in this
     //    order avoids the "unpublish frees backing, handler crashes" race.
-    if let (Some(room), Some(track)) = (room, track) {
-        let sid = track.sid();
-        if let Err(e) = room.local_participant().unpublish_track(&sid).await {
-            eprintln!("[screenshare] unpublish error: {e}");
+    if let Some(room) = room {
+        if let Some(track) = track {
+            let sid = track.sid();
+            if let Err(e) = room.local_participant().unpublish_track(&sid).await {
+                eprintln!("[screenshare] unpublish error: {e}");
+            }
+        }
+        if let Some(track) = audio_track {
+            let sid = track.sid();
+            if let Err(e) = room.local_participant().unpublish_track(&sid).await {
+                eprintln!("[screenshare/audio] unpublish error: {e}");
+            }
         }
     }
-    // 4. Now the source can be dropped safely.
+    // 4. Now the sources can be dropped safely.
     drop(source_to_drop);
+    drop(audio_source_to_drop);
     if let Some(ev) = ev_opt {
         let _ = ev.send(ScreenShareEvent::LocalStopped);
     }

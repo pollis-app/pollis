@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use pollis_capture_proto::{
-    encode_error, encode_format, encode_frame_header, encode_sources, read_msg, CaptureMsg,
-    DisplaySource, Selection, SourceList, WindowSource,
+    encode_audio_format, encode_audio_frame, encode_error, encode_format, encode_frame_header,
+    encode_sources, read_msg, CaptureMsg, DisplaySource, Selection, SourceList, WindowSource,
 };
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -25,6 +25,14 @@ struct Args {
     /// enumeration/selection handshake.
     #[arg(long, value_enum, default_value_t = Mode::Screen)]
     mode: Mode,
+    /// Accepted for command-line parity with `pollis-capture-linux`, which
+    /// genuinely needs it — the portal dialog is its picker, so spawn is
+    /// the only moment its parent can ask for audio. Here the real answer
+    /// arrives later, on `Selection::with_audio`, because this helper is
+    /// spawned during enumeration and the user has not seen the audio
+    /// toggle yet. Either source turning it on turns it on.
+    #[arg(long, default_value_t = false)]
+    audio: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -64,6 +72,7 @@ pub fn run() -> Result<()> {
     // and the kernel reaps both threads.
     let socket = args.socket;
     let mode = args.mode;
+    let audio = args.audio;
     std::thread::Builder::new()
         .name("pollis-capture-tokio".into())
         .spawn(move || {
@@ -77,7 +86,7 @@ pub fn run() -> Result<()> {
                     std::process::exit(1);
                 }
             };
-            let result = rt.block_on(run_async(&socket, mode));
+            let result = rt.block_on(run_async(&socket, mode, audio));
             if let Err(e) = &result {
                 eprintln!("[capture-mac] {e}");
             }
@@ -114,7 +123,7 @@ fn run_main_loop() {
     app.run();
 }
 
-async fn run_async(socket_path: &str, mode: Mode) -> Result<()> {
+async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
     eprintln!("[capture-mac] connecting to parent socket {socket_path} (mode={mode:?})");
     let sock = UnixStream::connect(socket_path)
         .await
@@ -128,7 +137,7 @@ async fn run_async(socket_path: &str, mode: Mode) -> Result<()> {
     spawn_parent_death_watch();
 
     match mode {
-        Mode::Screen => run_screen(read_half, write_half).await,
+        Mode::Screen => run_screen(read_half, write_half, audio).await,
         Mode::Camera => crate::camera::run_camera(read_half, write_half).await,
     }
 }
@@ -167,6 +176,7 @@ pub(crate) async fn drain_to_socket(
 async fn run_screen(
     read_half: tokio::net::unix::OwnedReadHalf,
     mut write_half: tokio::net::unix::OwnedWriteHalf,
+    audio_flag: bool,
 ) -> Result<()> {
     // ── Phase 1: enumerate + send the source list ───────────────────────
     //
@@ -225,9 +235,14 @@ async fn run_screen(
         Err(e) => return Err(anyhow!("read Select: {e}")),
     };
     eprintln!("[capture-mac] received selection: {selection:?}");
+    let with_audio = audio_flag || selection.with_audio();
 
     // ── Phase 3: build SCContentFilter + SCStream, stream frames ────────
-    let (tx, rx) = mpsc::channel::<Wire>(2);
+    // 16 deep, not 2: with audio riding the same channel as video under
+    // try_send, a full channel drops whatever comes next — and a dropped
+    // 10 ms audio block is an audible click where a dropped video frame is
+    // just a stale pixel. Matches the Linux helper's depth.
+    let (tx, rx) = mpsc::channel::<Wire>(16);
     let stop = Arc::new(AtomicBool::new(false));
 
     // Start SCK on a dedicated blocking context: filter construction and
@@ -236,7 +251,13 @@ async fn run_screen(
     let stop_for_cap = Arc::clone(&stop);
     let tx_for_cap = tx.clone();
     let _cap_handle = tokio::task::spawn_blocking(move || {
-        if let Err(e) = start_capture(content_cache, selection, tx_for_cap.clone(), stop_for_cap) {
+        if let Err(e) = start_capture(
+            content_cache,
+            selection,
+            with_audio,
+            tx_for_cap.clone(),
+            stop_for_cap,
+        ) {
             eprintln!("[capture-mac] capture error: {e}");
             let _ =
                 tx_for_cap.blocking_send(Wire::Bytes(encode_error(&format!("capture: {e}"))));
@@ -377,6 +398,7 @@ fn enumerate_sources() -> Result<(SourceList, ContentCache)> {
 fn start_capture(
     cache: ContentCache,
     selection: Selection,
+    with_audio: bool,
     tx: mpsc::Sender<Wire>,
     stop: Arc<AtomicBool>,
 ) -> Result<()> {
@@ -387,7 +409,7 @@ fn start_capture(
     use screencapturekit::stream::sc_stream::SCStream;
 
     let (filter, width, height) = match selection {
-        Selection::Display { id } => {
+        Selection::Display { id, .. } => {
             let display = cache
                 .displays
                 .iter()
@@ -396,7 +418,7 @@ fn start_capture(
             let filter = SCContentFilter::create().with_display(display).build();
             (filter, display.width(), display.height())
         }
-        Selection::Window { id } => {
+        Selection::Window { id, .. } => {
             let window = cache
                 .windows
                 .iter()
@@ -420,11 +442,30 @@ fn start_capture(
     }
     eprintln!("[capture-mac] capturing {width}x{height}");
 
-    let config = SCStreamConfiguration::new()
+    let mut config = SCStreamConfiguration::new()
         .with_width(width)
         .with_height(height)
         .with_pixel_format(PixelFormat::BGRA)
         .with_shows_cursor(true);
+    if with_audio {
+        use screencapturekit::stream::configuration::{AudioChannelCount, AudioSampleRate};
+        config = config
+            .with_captures_audio(true)
+            // Scoped to the SAME SCContentFilter as the video, which is
+            // what makes macOS's answer to "whole system or one app?"
+            // fall out for free: sharing a window captures that
+            // application's audio, sharing a display captures the system
+            // mix. Linux and Windows have no equivalent and take the
+            // system mix either way.
+            .with_sample_rate(AudioSampleRate::Rate48000)
+            .with_channel_count(AudioChannelCount::Stereo)
+            // The single most important line in the audio path. Without
+            // it the capture contains Pollis's own output — meaning the
+            // call itself — and every participant hears themselves a few
+            // hundred milliseconds late. Linux has no equivalent, which
+            // is the entire reason `screenshare::self_echo` exists.
+            .with_excludes_current_process_audio(true);
+    }
     let mut stream = SCStream::new(&filter, &config);
 
     // Announce the format. The parent creates the LiveKit track from
@@ -438,6 +479,23 @@ fn start_capture(
         seen_first: std::sync::atomic::AtomicBool::new(false),
     };
     let _handler_id = stream.add_output_handler(handler, SCStreamOutputType::Screen);
+    if with_audio {
+        // Announced up front rather than on the first buffer: the parent
+        // publishes its LiveKit track off this message, and a silent
+        // source (a paused video, a muted app) would otherwise never
+        // produce one. `channels: 1` is what goes on the wire because the
+        // handler downmixes SCK's planar stereo — see
+        // `MacOsAudioHandler`.
+        tx.blocking_send(Wire::Bytes(encode_audio_format(48_000, 1)))
+            .map_err(|_| anyhow!("parent gone before audio format"))?;
+        let audio_handler = MacOsAudioHandler {
+            tx: tx.clone(),
+            stop: Arc::clone(&stop),
+            seen_first: std::sync::atomic::AtomicBool::new(false),
+        };
+        let _audio_id = stream.add_output_handler(audio_handler, SCStreamOutputType::Audio);
+        eprintln!("[capture-mac] shared audio enabled (48 kHz, current process excluded)");
+    }
     stream
         .start_capture()
         .map_err(|e| anyhow!("SCStream::start_capture: {e}"))?;
@@ -450,6 +508,83 @@ fn start_capture(
     eprintln!("[capture-mac] stopping SCStream");
     let _ = stream.stop_capture();
     Ok(())
+}
+
+/// ScreenCaptureKit's audio output handler.
+///
+/// SCK delivers **non-interleaved 32-bit float**: one `AudioBuffer` per
+/// channel, each holding `f32` samples for that channel alone. That is a
+/// different shape from every other audio surface in the codebase, so it
+/// is converted here — to interleaved s16 mono, which is what the wire
+/// protocol carries — rather than teaching the parent about planar float.
+struct MacOsAudioHandler {
+    tx: mpsc::Sender<Wire>,
+    stop: Arc<AtomicBool>,
+    seen_first: std::sync::atomic::AtomicBool,
+}
+
+impl screencapturekit::prelude::SCStreamOutputTrait for MacOsAudioHandler {
+    fn did_output_sample_buffer(
+        &self,
+        sample: screencapturekit::prelude::CMSampleBuffer,
+        output_type: screencapturekit::prelude::SCStreamOutputType,
+    ) {
+        use screencapturekit::prelude::SCStreamOutputType;
+
+        if !matches!(output_type, SCStreamOutputType::Audio) {
+            return;
+        }
+        if self.stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let Some(list) = sample.audio_buffer_list() else {
+            return;
+        };
+        let planes: Vec<&[u8]> = list.iter().map(|b| b.data()).filter(|d| !d.is_empty()).collect();
+        if planes.is_empty() {
+            return;
+        }
+        // Every plane holds the same number of samples; take the shortest
+        // so a truncated tail plane can't run the loop past its end.
+        let samples = planes.iter().map(|p| p.len() / 4).min().unwrap_or(0);
+        if samples == 0 {
+            return;
+        }
+        let channels = planes.len() as f32;
+        let mut pcm = Vec::with_capacity(samples);
+        for i in 0..samples {
+            let mut acc = 0.0f32;
+            for plane in &planes {
+                let off = i * 4;
+                acc += f32::from_le_bytes([
+                    plane[off],
+                    plane[off + 1],
+                    plane[off + 2],
+                    plane[off + 3],
+                ]);
+            }
+            // Average, not sum — see the same reasoning in the parent's
+            // `SharedAudioResampler`: summing correlated channels clips.
+            let mono = acc / channels;
+            pcm.push((mono * 32_767.0).clamp(-32_768.0, 32_767.0) as i16);
+        }
+        if !self.seen_first.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "[capture-mac] first audio buffer: {} planes, {samples} samples/plane",
+                planes.len()
+            );
+        }
+        let timestamp_us = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_micros() as i64)
+            .unwrap_or(0);
+        // try_send, matching the video path: if the socket has stalled we
+        // drop a block rather than block SCK's dispatch queue, which would
+        // stall video capture too.
+        let _ = self
+            .tx
+            .try_send(Wire::Bytes(encode_audio_frame(48_000, 1, timestamp_us, &pcm)));
+    }
 }
 
 struct MacOsFrameHandler {
