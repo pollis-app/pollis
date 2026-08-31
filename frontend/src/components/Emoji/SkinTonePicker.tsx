@@ -42,7 +42,7 @@ export const SkinTonePicker: React.FC<SkinTonePickerProps> = ({ toneIndex, onCha
             }
             data-testid={`emoji-skin-tone-${index}`}
             onClick={() => onChange(index)}
-            className="flex items-center justify-center w-5 h-5 text-sm leading-none transition-colors duration-75 hover:bg-hover rounded-chip"
+            className="flex items-center justify-center w-5 h-5 text-sm leading-none hover:bg-hover rounded-chip"
             style={{
               background: selected ? "var(--c-active)" : undefined,
             }}

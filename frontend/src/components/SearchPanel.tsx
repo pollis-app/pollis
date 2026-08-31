@@ -655,6 +655,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                     itemRefs.current[index] = el;
                   }}
                   data-testid="search-panel-result-item"
+                  data-item-id={item.id}
                   className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? "bg-active" : ""}`}
                   style={{
                     borderInlineStart: `3px solid ${isSelected ? "var(--c-accent)" : "transparent"}`,

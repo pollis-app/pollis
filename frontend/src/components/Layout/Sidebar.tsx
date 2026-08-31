@@ -16,7 +16,6 @@ import {
   Keyboard,
   Download,
   Bookmark,
-  Search,
   Vault as VaultIcon,
 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
@@ -151,7 +150,6 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 
   const isOnSettingsHub = pathname === "/settings";
   const settingsItems = [
-    { id: "search", label: t("sidebar.searchMessages"), icon: <Search {...iconProps} />, to: "/search" as const, isActive: pathname === "/search" },
     { id: "saved", label: t("sidebar.saved"), icon: <Bookmark {...iconProps} />, to: "/saved" as const, isActive: pathname === "/saved" },
     { id: "preferences", label: t("sidebar.preferences"), icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
     { id: "user", label: t("sidebar.userSettings"), icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
@@ -393,7 +391,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ testId, label, icon, isAc
   const cls = [
     "sticky top-0 z-[1] flex w-full h-bar items-center gap-1.5 px-2.5",
     "uppercase tracking-[0.08em] text-start cursor-pointer",
-    "transition-colors duration-75 bg-surface hover:bg-hover",
+    " bg-surface hover:bg-hover",
     isActive ? "text-accent" : "text-muted",
     bordered ? "mt-1 border-t border-line" : "",
     bordered || borderedBottom ? "border-b border-line" : "",

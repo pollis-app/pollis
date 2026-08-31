@@ -175,7 +175,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         // keyboard-focused row (or its action bar) reads exactly like a
         // hovered one, with zero per-keystroke re-render.
         tabIndex={-1}
-        className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header" : "pt-msg-group"} pb-msg-row hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75`}
+        className={`group relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 items-start px-4 ${isGroupStart ? "pt-msg-header" : "pt-msg-group"} pb-msg-row hover:bg-hover focus-within:bg-hover outline-none`}
       >
         {/* Left gutter: avatar on a group start, hover-only timestamp otherwise */}
         <div className="flex justify-center pt-0.5 select-none">
@@ -320,7 +320,7 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       aria-label={t("message.fromLabel", { name: displayName })}
       // tabIndex -1 + focus-within: see the refined row above.
       tabIndex={-1}
-      className="group relative px-4 py-1 hover:bg-hover focus-within:bg-hover outline-none transition-colors duration-75"
+      className="group relative px-4 py-1 hover:bg-hover focus-within:bg-hover outline-none"
     >
       {/* Reply thread indicator */}
       {message.reply_to_message_id && (

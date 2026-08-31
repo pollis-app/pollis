@@ -630,6 +630,7 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `two-client-camera.js` | `e2e-two-client-camera.yml` | LiveKit + audio + virtual camera |
 | `two-client-screenshare.js` | `e2e-two-client-screenshare.yml` | LiveKit + audio (X11 capture) |
 | `voice-channel-no-mic.js` | `e2e-voice-channel-no-mic.yml` | LiveKit + audio (`POLLIS_DISABLE_MIC=1`) |
+| `vault-search-style.spec.ts` | Vault, search and chrome style in BOTH skins, asserted on COMPUTED styles rather than class strings: the vault composer draws one border and adds no padding of its own, the Chat/Media toggle is rounded, the empty state takes the skin's own face (and therefore differs between skins), both vault placeholders resolve to the same face/size/weight, hover highlights carry no non-zero background transition, a search hit renders custom emoji as an image instead of its `<:name:hash>` source, the search box is the shared `TextInput`, the sidebar has no Search Messages row, and the voice bar names nobody when the only identities present are your own devices |
 
 None run automatically. Wiring a cheap PR tier + a nightly full tier is the
 remaining piece of #570 M4 (deferred on cost); until then, dispatch them from
