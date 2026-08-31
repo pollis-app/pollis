@@ -261,6 +261,12 @@ fn run(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
 // `AudioFormat::S16LE` are the same value on a little-endian target, so
 // listing both as patterns is an unreachable-arm warning rather than the
 // documentation it looks like.
+//
+// Note the asymmetry in libspa's constants — there is a native-endian
+// `S16` but no native-endian `F32`, only `F32LE`/`F32BE` and the PLANAR
+// `F32P`. `F32P` is deliberately absent below: it is a different memory
+// layout (one buffer per channel), so accepting it here would read
+// interleaved samples out of planar data and publish noise.
 fn to_s16(bytes: &[u8], format: pipewire::spa::param::audio::AudioFormat) -> Option<Vec<i16>> {
     use pipewire::spa::param::audio::AudioFormat;
 
@@ -272,7 +278,7 @@ fn to_s16(bytes: &[u8], format: pipewire::spa::param::audio::AudioFormat) -> Opt
                 .collect(),
         );
     }
-    if format == AudioFormat::F32LE || format == AudioFormat::F32 {
+    if format == AudioFormat::F32LE {
         return Some(
             bytes
                 .chunks_exact(4)
