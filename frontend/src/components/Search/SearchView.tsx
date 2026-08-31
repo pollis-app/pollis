@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchMessages } from "../../hooks/queries/useSearchMessages";
 import { formatShortDateTime } from "../../utils/format";
 import { Button } from "../ui/Button";
+import { TextInput } from "../ui/TextInput";
 import { EmojiText } from "../Emoji/EmojiText";
 import { MediaTile } from "../Layout/RightPanel/MediaTile";
 import { parseContent } from "../../hooks/queries/useMessages";
@@ -155,12 +156,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
   // conversation. It only becomes a value once the user overrides it.
   const [sort, setSort] = useState<SearchSort | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Auto-focus the input when the view mounts
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   // Debounce the input: wait 300 ms after the user stops typing before searching
   useEffect(() => {
@@ -239,16 +234,13 @@ export const SearchView: React.FC<SearchViewProps> = ({
     <div data-testid="search-view" className="flex flex-col h-full bg-bg">
       {/* Search input */}
       <div className="px-4 py-3 flex-shrink-0 border-b border-line">
-        <input
+        <TextInput
           data-testid="search-input"
-          ref={inputRef}
-          type="text"
-          className="pollis-input font-mono"
+          ariaLabel={t("view.placeholder")}
           placeholder={t("view.placeholder")}
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          autoComplete="off"
-          spellCheck={false}
+          onChange={setInputValue}
+          autoFocus
         />
         {inputValue.trim().length > 0 && inputValue.trim().length < 2 && (
           <p className="text-xs font-mono mt-1 text-muted">{t("view.minLength")}</p>

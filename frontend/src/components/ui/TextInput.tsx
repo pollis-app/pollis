@@ -2,7 +2,15 @@ import React, { useState } from "react";
 import { ChevronRight } from "lucide-react";
 
 interface TextInputProps {
-  label: string;
+  /**
+   * Visible label above the field. Omit it only for a field whose purpose is
+   * already obvious from context (a search box at the top of a search page);
+   * pass `ariaLabel` in that case so the control is still named for a screen
+   * reader.
+   */
+  label?: string;
+  /** Accessible name when there is no visible `label`. */
+  ariaLabel?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -20,6 +28,7 @@ interface TextInputProps {
 
 export const TextInput: React.FC<TextInputProps> = ({
   label,
+  ariaLabel,
   value,
   onChange,
   placeholder,
@@ -39,14 +48,16 @@ export const TextInput: React.FC<TextInputProps> = ({
 
   return (
     <div className={`relative w-full ${className}`}>
-      <label
-        htmlFor={inputId}
-        className="block text-xs font-sans font-medium mb-1.5 text-fg"
-        style={{ letterSpacing: "0.5px" }}
-      >
-        {label}
-        {required && <span className="ms-1 text-danger">*</span>}
-      </label>
+      {label && (
+        <label
+          htmlFor={inputId}
+          className="block text-xs font-sans font-medium mb-1.5 text-fg"
+          style={{ letterSpacing: "0.5px" }}
+        >
+          {label}
+          {required && <span className="ms-1 text-danger">*</span>}
+        </label>
+      )}
 
       <div className="relative">
         {isFocused && !disabled && (
@@ -70,6 +81,7 @@ export const TextInput: React.FC<TextInputProps> = ({
           autoCapitalize="off"
           spellCheck={false}
           required={required}
+          aria-label={label ? undefined : ariaLabel}
           aria-invalid={!!error}
           className={`w-full py-2 placeholder-leading-1 font-mono text-sm focus:outline-none focus:ring-4 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black transition-all bg-surface text-fg border-2 ${
             error ? "border-danger" : isFocused ? "border-line-strong" : "border-line"
