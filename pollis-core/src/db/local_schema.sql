@@ -307,6 +307,7 @@ CREATE TABLE IF NOT EXISTS conversation_cache (
 
 -- `in:#channel` / `in:@person` resolve a typed name back to a conversation id.
 CREATE INDEX IF NOT EXISTS idx_conversation_cache_name ON conversation_cache(name);
+
 -- This device's plaintext copy of each conversation's pin master key (#99).
 --
 -- Kpin is the AES-256-GCM key every pin snapshot in a conversation is sealed
