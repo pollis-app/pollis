@@ -267,14 +267,7 @@ pub async fn start_screen_share(
         }
     };
 
-    // 3. Shared audio, if asked for. Started only after video is
-    //    confirmed running, so a share never publishes sound for a
-    //    picture that failed to appear.
-    if with_audio {
-        start_windows_audio(state, &room, std::sync::Arc::clone(&active_flag)).await;
-    }
-
-    // 4. Stash for stop_screen_share + announce.
+    // 3. Stash for stop_screen_share + announce.
     {
         let mut ss = state.screenshare.lock().await;
         ss.local_source = Some(source);
@@ -288,6 +281,14 @@ pub async fn start_screen_share(
         }
     }
     let _ = events_sink;
+
+    // 4. Shared audio, if asked for. Started only after video is
+    //    confirmed running AND the session is stashed + announced: audio
+    //    startup must never delay LocalStarted, and a stop arriving while
+    //    audio is still activating must find a session to tear down.
+    if with_audio {
+        start_windows_audio(state, &room, std::sync::Arc::clone(&active_flag)).await;
+    }
     Ok(())
 }
 
@@ -311,7 +312,7 @@ async fn start_windows_audio(
     // the capture thread block, shallow enough that it can't hide a
     // stalled consumer behind seconds of latency.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AudioBlock>(32);
-    let (start_tx, start_rx) = tokio::sync::oneshot::channel::<Option<String>>();
+    let (start_tx, start_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
     let active_for_thread = std::sync::Arc::clone(&active);
     let capture_thread = std::thread::Builder::new()
         .name("wasapi-screenshare-audio".into())
@@ -327,18 +328,12 @@ async fn start_windows_audio(
                 )
             };
             if com.is_err() {
-                let _ = start_tx.send(Some("could not initialise audio COM".into()));
+                let _ = start_tx.send(Err("could not initialise audio COM".into()));
                 return;
             }
-            match run_loopback_capture(tx, active_for_thread) {
-                Ok(()) => {
-                    let _ = start_tx.send(None);
-                }
-                Err(e) => {
-                    eprintln!("[screenshare/audio] windows loopback: {e}");
-                    let _ = start_tx.send(Some(e));
-                }
-            }
+            // Signals `start_tx` itself, the moment the stream is up —
+            // then blocks in the capture loop until the share ends.
+            run_loopback_capture(tx, active_for_thread, start_tx);
             unsafe { windows::Win32::System::Com::CoUninitialize() };
         });
     if capture_thread.is_err() {
@@ -352,12 +347,13 @@ async fn start_windows_audio(
         return;
     }
 
-    // The capture thread only reports on the oneshot when it *ends*, so a
-    // healthy start is "nothing said within the activation window". Two
-    // and a half seconds covers the 2 s activation timeout inside the
-    // thread plus COM setup.
-    match tokio::time::timeout(std::time::Duration::from_millis(2_500), start_rx).await {
-        Ok(Ok(Some(reason))) => {
+    // The thread reports on the oneshot as soon as the stream is running
+    // (or has failed to start) — milliseconds on the happy path. The outer
+    // timeout only guards a wedged audio service; the activation inside
+    // the thread already gives up after 2 s, so 5 s is a generous ceiling.
+    match tokio::time::timeout(std::time::Duration::from_millis(5_000), start_rx).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(reason))) => {
             emit(
                 state,
                 ScreenShareEvent::LocalAudioUnavailable {
@@ -367,9 +363,10 @@ async fn start_windows_audio(
             .await;
             return;
         }
-        // Ended cleanly before it began, or the sender was dropped: either
+        // Sender dropped without reporting (thread panicked or ended
+        // before the stream came up), or the outer timeout fired: either
         // way there is no audio to publish.
-        Ok(_) => {
+        Ok(Err(_)) | Err(_) => {
             emit(
                 state,
                 ScreenShareEvent::LocalAudioUnavailable {
@@ -380,7 +377,6 @@ async fn start_windows_audio(
             .await;
             return;
         }
-        Err(_) => {}
     }
 
     let Some(source) = publish_shared_audio_track(state, room).await else {

@@ -103,19 +103,38 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivationHandler_Impl {
 /// `stop_screen_share` ends both halves with the one store it already
 /// does — there is no second flag to forget to flip.
 ///
-/// Returns `Err` with a human-readable reason on any failure to *start*;
-/// the caller reports that as an audio-only downgrade and keeps the video
-/// share alive. A failure once running ends the loop the same way.
+/// `started` fires the moment the capture stream is actually running:
+/// `Ok(())` right after `IAudioClient::Start()` succeeds, `Err(reason)` if
+/// anything before that fails. The caller must not learn "it started" from
+/// this function *returning* — that only happens when the share ends, so
+/// waiting on the return means waiting out a timeout on every healthy
+/// start while captured blocks pile up unconsumed.
 pub(super) fn run_loopback_capture(
     tx: tokio::sync::mpsc::Sender<AudioBlock>,
     active: Arc<AtomicBool>,
-) -> Result<(), String> {
-    unsafe { run_inner(tx, active) }.map_err(|e| format!("{e}"))
+    started: tokio::sync::oneshot::Sender<Result<(), String>>,
+) {
+    let mut started = Some(started);
+    if let Err(e) = unsafe { run_inner(tx, active, &mut started) } {
+        let msg = format!("{e}");
+        match started.take() {
+            // Failed before the stream came up: a startup failure the
+            // caller downgrades to video-only.
+            Some(s) => {
+                let _ = s.send(Err(msg));
+            }
+            // Failed once running — the caller has long moved on.
+            None => {
+                eprintln!("[screenshare/audio] windows loopback ended: {msg}");
+            }
+        }
+    }
 }
 
 unsafe fn run_inner(
     tx: tokio::sync::mpsc::Sender<AudioBlock>,
     active: Arc<AtomicBool>,
+    started: &mut Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
 ) -> WinResult<()> {
     // Ask the OS for "everything except us". `TargetProcessId` names the
     // root of the tree to exclude, so a helper subprocess of ours is
@@ -213,6 +232,9 @@ unsafe fn run_inner(
         "[screenshare/audio] WASAPI process loopback started \
          ({SHARED_AUDIO_RATE_HZ} Hz x{CAPTURE_CHANNELS}, own process tree excluded)"
     );
+    if let Some(s) = started.take() {
+        let _ = s.send(Ok(()));
+    }
 
     let result = capture_loop(&capture, ready, &tx, &active);
     let _ = audio_client.Stop();
