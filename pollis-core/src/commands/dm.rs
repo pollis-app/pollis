@@ -186,12 +186,38 @@ pub async fn list_dm_channels(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<Vec<DmChannel>> {
-    Ok(crate::commands::ds_reads::bootstrap(state, &user_id)
+    let dms: Vec<DmChannel> = crate::commands::ds_reads::bootstrap(state, &user_id)
         .await?
         .dms
         .into_iter()
         .map(dm_from_wire)
-        .collect())
+        .collect();
+
+    // Same reason the group tree caches its channels (#850): a local `message`
+    // row cannot say whether its conversation is a channel or a DM, and a DM's
+    // display name is the peer's username, which is only knowable here.
+    cache_dms(state, &user_id, &dms).await;
+
+    Ok(dms)
+}
+
+/// Mirror the DM list into `conversation_cache`, naming each one after the peer.
+async fn cache_dms(state: &Arc<AppState>, user_id: &str, dms: &[DmChannel]) {
+    let entries: Vec<crate::commands::messages::CachedConversation> = dms
+        .iter()
+        .map(|dm| crate::commands::messages::CachedConversation {
+            id: dm.id.clone(),
+            kind: "dm",
+            name: dm
+                .members
+                .iter()
+                .find(|m| m.user_id != user_id)
+                .and_then(|m| m.username.clone()),
+            group_id: None,
+            group_name: None,
+        })
+        .collect();
+    crate::commands::messages::cache_conversations(state, &entries).await;
 }
 
 /// The caller's still-unaccepted DMs — the request list. Same asymmetric block

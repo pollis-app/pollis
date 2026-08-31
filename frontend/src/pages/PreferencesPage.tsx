@@ -23,6 +23,7 @@ import {
   MESSAGE_RETENTION_OPTIONS,
   RETENTION_FOREVER,
 } from "../hooks/queries/useMessageRetention";
+import { useRebuildSearchIndex } from "../hooks/queries/useSearchMessages";
 import {
   useRelayServingStatus,
   useApplyRelayServing,
@@ -126,6 +127,8 @@ export const PreferencesPage: React.FC = observer(() => {
   // Device-local message retention window (see useMessageRetention). Selecting
   // an option fires the mutation immediately — the backend sweep is immediate.
   const retentionQuery = useMessageRetention();
+  // Manual repair for the local full-text search index (#850).
+  const rebuildSearchIndex = useRebuildSearchIndex();
   const setRetention = useSetMessageRetention();
   const retentionDays = retentionQuery.data ?? MESSAGE_RETENTION_OPTIONS[0].days;
 
@@ -883,6 +886,36 @@ export const PreferencesPage: React.FC = observer(() => {
               </div>
               <p className="text-xs font-mono text-muted">
                 {t("retention.description")}
+              </p>
+            </section>
+
+            {/* Message search index (#850) — device-local, inside the encrypted
+                database. The button is the escape hatch for the one failure a
+                contentless FTS5 index can have that nothing else repairs;
+                startup already rebuilds silently when `integrity-check` catches
+                it, so nobody should ever need this. It exists for when the
+                automatic repair is the thing that is wrong. */}
+            <section className="flex flex-col gap-4 mb-12">
+              <h2 className="text-xs font-mono font-medium uppercase tracking-widest text-fg pb-1 border-b border-line">
+                {t("searchIndex.heading")}
+              </h2>
+              <div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  data-testid="pref-rebuild-search-index"
+                  disabled={rebuildSearchIndex.isPending}
+                  onClick={() => rebuildSearchIndex.mutate()}
+                >
+                  {rebuildSearchIndex.isPending
+                    ? t("searchIndex.rebuilding")
+                    : t("searchIndex.rebuild")}
+                </Button>
+              </div>
+              <p className="text-xs font-mono text-muted">
+                {rebuildSearchIndex.isSuccess
+                  ? t("searchIndex.rebuilt")
+                  : t("searchIndex.description")}
               </p>
             </section>
 

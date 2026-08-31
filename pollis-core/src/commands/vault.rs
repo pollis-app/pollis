@@ -598,7 +598,7 @@ mod tests {
 
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(crate::db::local::schema_sql()).unwrap();
+        crate::db::local::apply_local_schema(&conn).unwrap();
         conn
     }
 

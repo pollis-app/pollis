@@ -366,6 +366,13 @@ impl AppState {
         }
 
         *self.local_db.lock().await = Some(db);
+        // Bring the full-text search index up to date for whatever history this
+        // database already holds (#850). Spawned rather than awaited, and
+        // chunked with a yield between chunks, because it is the one piece of
+        // open-path work whose cost scales with the corpus — 265 ms for 100k
+        // messages measured, which is 265 ms nobody should wait to sign in for.
+        // Resumable, so a quit part-way through costs nothing.
+        spawn_search_index_maintenance(self.local_db.clone());
         // Scope the media cache to this user. Two clients on the same machine
         // (dev workflow) otherwise share `app_data_dir/media-cache` but each
         // has its own db_key, so client B can't decrypt client A's cache
@@ -378,6 +385,9 @@ impl AppState {
     pub async fn unload_user_db(&self) {
         *self.local_db.lock().await = None;
         crate::commands::r2::set_cache_user(None);
+        // The corpus footer reading is per-account; the next user has a
+        // different history and must not be shown the previous one's count.
+        crate::commands::messages::invalidate_corpus_cache();
     }
 
     pub fn check_not_outdated(&self) -> crate::error::Result<()> {
@@ -386,6 +396,72 @@ impl AppState {
         }
         Ok(())
     }
+}
+
+/// Bring the local full-text search index up to date, off the sign-in path (#850).
+///
+/// Two jobs, in this order:
+///
+/// 1. **Auto-repair.** `integrity-check` on the FTS index. The delete side of a
+///    contentless index depends on `pollis_search_text` producing byte-identical
+///    output for the same body forever; if that ever stops being true the index
+///    drifts, and the only honest repair is to rebuild. Silent by design — the
+///    user did nothing wrong and there is nothing for them to decide. (The
+///    manual escape hatch is the "Rebuild search index" button in Settings.)
+/// 2. **Backfill.** Index whatever history predates the index, in chunks, with
+///    a yield between them so the local-DB mutex is never held long enough to
+///    sit in front of a send.
+///
+/// Best-effort throughout: search degrading to "fewer results than it could
+/// have" must never cost anyone a login or a message.
+fn spawn_search_index_maintenance(local_db: Arc<Mutex<Option<LocalDb>>>) {
+    tokio::spawn(async move {
+        {
+            let guard = local_db.lock().await;
+            let Some(db) = guard.as_ref() else {
+                return;
+            };
+            if !crate::db::local::search_index_is_healthy(db.conn()) {
+                eprintln!("[search] FTS index failed integrity-check; rebuilding");
+                if let Err(e) = crate::db::local::rebuild_search_index(db.conn()) {
+                    eprintln!("[search] index rebuild failed (non-fatal): {e}");
+                }
+                return;
+            }
+        }
+
+        loop {
+            let indexed = {
+                let guard = local_db.lock().await;
+                let Some(db) = guard.as_ref() else {
+                    return;
+                };
+                match crate::db::local::search_backfill_pending(db.conn()) {
+                    Ok(false) => return,
+                    Ok(true) => {}
+                    Err(e) => {
+                        eprintln!("[search] backfill state unreadable (non-fatal): {e}");
+                        return;
+                    }
+                }
+                match crate::db::local::backfill_search_index_chunk(db.conn()) {
+                    Ok(0) => {
+                        if let Err(e) = crate::db::local::finish_search_backfill(db.conn()) {
+                            eprintln!("[search] backfill finalisation failed (non-fatal): {e}");
+                        }
+                        return;
+                    }
+                    Ok(n) => n,
+                    Err(e) => {
+                        eprintln!("[search] backfill chunk failed (non-fatal): {e}");
+                        return;
+                    }
+                }
+            };
+            debug_assert!(indexed > 0);
+            tokio::task::yield_now().await;
+        }
+    });
 }
 
 #[cfg(test)]

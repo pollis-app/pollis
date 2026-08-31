@@ -53,6 +53,19 @@ type SearchResultItem =
       breadcrumb: string;
       path: string;
       keywords: string;
+    }
+  | {
+      // "Search messages for …" — the handoff to the full-text search page
+      // (#850). Cmd+K stays a NAVIGATOR: it jumps to places you already know
+      // the name of, instantly and locally. Message hits are a different
+      // question with a different answer shape — ranked, snippeted, filterable,
+      // paginated — and rendering them inline would make every keystroke run a
+      // real query and turn one list into two competing ones.
+      type: "messages";
+      id: string;
+      name: string;
+      breadcrumb: string;
+      query: string;
     };
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -221,6 +234,7 @@ const PAGE_RESULTS: PageResultSpec[] = [
   { id: "page-groups-new", nameKey: "pages.groupsNewName", keywordsKey: "pages.groupsNewKeywords", breadcrumb: "/groups/new", path: "/groups/new" },
   { id: "page-groups-search", nameKey: "pages.groupsSearchName", keywordsKey: "pages.groupsSearchKeywords", breadcrumb: "/groups/search", path: "/groups/search" },
   { id: "page-saved", nameKey: "pages.savedName", keywordsKey: "pages.savedKeywords", breadcrumb: "/saved", path: "/saved" },
+  { id: "page-search", nameKey: "pages.searchName", keywordsKey: "pages.searchKeywords", breadcrumb: "/search", path: "/search" },
   { id: "page-vault", nameKey: "pages.vaultName", keywordsKey: "pages.vaultKeywords", breadcrumb: "/vault", path: "/vault" },
   { id: "page-arcade", nameKey: "pages.arcadeName", keywordsKey: "pages.arcadeKeywords", breadcrumb: "/arcade", path: "/arcade" },
 ];
@@ -331,11 +345,29 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
     };
   }, [permalink, openPermalink, onClose]);
 
-  // Filter based on query
-  const filteredItems = useMemo(
-    () => filterResults(allItems, query),
-    [allItems, query]
-  );
+  // Filter based on query, with the message-search handoff appended.
+  //
+  // LAST, not first. Enter in this panel has always meant "go to the
+  // best-matching place", and this row is not a place — it is the door to a
+  // different question. Pinning it to the top would quietly redefine the
+  // default action of the app's most-used shortcut. It carries the query
+  // across, so `/search` opens already searching instead of asking the user to
+  // type it twice.
+  const filteredItems = useMemo(() => {
+    const matches = filterResults(allItems, query);
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      return matches;
+    }
+    const handoff: SearchResultItem = {
+      type: "messages",
+      id: "search-messages-handoff",
+      name: t("panel.searchMessagesFor", { query: trimmed }),
+      breadcrumb: "/search",
+      query: trimmed,
+    };
+    return [...matches, handoff];
+  }, [allItems, query, t]);
 
   // Reset selection when results change
   useEffect(() => {
@@ -384,6 +416,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
           to: "/groups/$groupId/voice/$channelId",
           params: { groupId: item.groupId, channelId: item.channelId },
         });
+      } else if (item.type === "messages") {
+        navigate({ to: "/search", search: { q: item.query } });
       } else if (item.type === "person") {
         if (item.conversationId) {
           navigate({
@@ -632,7 +666,9 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
                   <div
                     className={`flex-shrink-0 w-5 h-5 flex items-center justify-center ${isSelected ? "text-accent" : "text-dim"}`}
                   >
-                    {item.type === "channel" ? (
+                    {item.type === "messages" ? (
+                      <Search size={14} />
+                    ) : item.type === "channel" ? (
                       <Hash size={14} />
                     ) : item.type === "voice" ? (
                       <Volume2 size={14} />

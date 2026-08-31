@@ -20,7 +20,7 @@ use super::read::last_messages_sql;
 /// The local (device) SQLite schema, as `LocalDb::open` applies it.
 fn local_db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
-    conn.execute_batch(include_str!("../../db/local_schema.sql")).unwrap();
+    crate::db::local::apply_local_schema(&conn).unwrap();
     conn
 }
 

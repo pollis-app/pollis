@@ -17,6 +17,7 @@
     "dmAvatarAlt": "{{name}} avatar",
     "close": "Close sidebar ({{shortcut}})",
     "resize": "Resize sidebar (drag; double-click to reset)",
+    "searchMessages": "Search Messages",
     "vault": "Vault"
   },
   "profile": {

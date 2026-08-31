@@ -218,6 +218,107 @@ CREATE TABLE IF NOT EXISTS bookmark (
 -- The saved-items surface lists newest-first across all conversations.
 CREATE INDEX IF NOT EXISTS idx_bookmark_created_at ON bookmark(created_at DESC);
 
+-- ── Full-text message search (#850) ──────────────────────────────────────────
+--
+-- ADDITIVE ONLY. Every statement below is `IF NOT EXISTS` and this file is
+-- re-applied on every open, so an existing database gains the index with
+-- nothing lost. Bumping LOCAL_SCHEMA_VERSION to add it would DELETE the user's
+-- database including their MLS state — see the comment in `local.rs`.
+--
+-- `content=''` makes this a CONTENTLESS index: FTS5 stores the term dictionary
+-- and nothing else, which is what keeps the cost at ~11 MB per 100k messages
+-- and, more importantly, keeps a second copy of every plaintext message body
+-- out of the file. Snippets are cut in Rust from `message.content`, not by
+-- `snippet()`, which a contentless table cannot answer anyway.
+--
+-- `remove_diacritics 2` is what makes `cafe` find `café`, `resume` find
+-- `résumé` and `nandu` find `Ñandú`. CJK is handled a layer up, by
+-- `pollis_search_text` emitting overlapping bigrams — `unicode61` tokenises a
+-- whole Han run as one token and `trigram` needs three characters, so neither
+-- can find a two-character Chinese word.
+CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+    body,
+    content='',
+    tokenize="unicode61 remove_diacritics 2"
+);
+
+-- The index is maintained by TRIGGERS, not by the Rust write sites.
+--
+-- There are three INSERT sites, six UPDATE sites and one DELETE site on this
+-- table today. Covering them by hand is the "code discipline" rung CLAUDE.md
+-- ranks last, and a write path added next year would silently stop indexing.
+-- A trigger is a DB-level guarantee: a row cannot be written without the index
+-- learning about it. `db::local::tests::the_search_index_cannot_drift` is the
+-- invariant test.
+--
+-- Both the delete and the insert halves call `pollis_search_text`, which is
+-- registered on every connection in `local.rs`. A contentless FTS5 table is
+-- told what to remove by being handed the body it indexed, which is why that
+-- function must stay deterministic.
+CREATE TRIGGER IF NOT EXISTS message_fts_ai AFTER INSERT ON message
+WHEN new.content IS NOT NULL AND new.deleted_at IS NULL
+BEGIN
+    INSERT INTO message_fts (rowid, body) VALUES (new.rowid, pollis_search_text(new.content));
+END;
+
+-- Both delete-halves below additionally check `message_fts_docsize` — FTS5's
+-- own per-row shadow table — so the 'delete' command is only ever issued for a
+-- row the index actually holds. This is not an optimisation: until the
+-- backfill reaches a pre-existing row, that row is unindexed, and a contentless
+-- 'delete' against a rowid the index doesn't know HARD-ERRORS with
+-- SQLITE_CORRUPT ("database disk image is malformed"), aborting whatever write
+-- fired the trigger — the retention sweep on the very first post-upgrade open
+-- being the deterministic case.
+CREATE TRIGGER IF NOT EXISTS message_fts_ad AFTER DELETE ON message
+WHEN old.content IS NOT NULL AND old.deleted_at IS NULL
+BEGIN
+    INSERT INTO message_fts (message_fts, rowid, body)
+    SELECT 'delete', old.rowid, pollis_search_text(old.content)
+    WHERE old.rowid IN (SELECT rowid FROM message_fts_docsize);
+END;
+
+-- Edits, soft deletes (content set to NULL) and moderator deletes all arrive
+-- here. Remove whatever the old row contributed, then re-add the new row if it
+-- still has indexable text — the two halves are guarded independently so a
+-- delete does not try to un-index a row that was never indexed (NULL/tombstoned
+-- old content, or a pre-backfill row the index has not reached yet).
+CREATE TRIGGER IF NOT EXISTS message_fts_au AFTER UPDATE OF content, deleted_at ON message
+BEGIN
+    INSERT INTO message_fts (message_fts, rowid, body)
+    SELECT 'delete', old.rowid, pollis_search_text(old.content)
+    WHERE old.content IS NOT NULL AND old.deleted_at IS NULL
+      AND old.rowid IN (SELECT rowid FROM message_fts_docsize);
+
+    INSERT INTO message_fts (rowid, body)
+    SELECT new.rowid, pollis_search_text(new.content)
+    WHERE new.content IS NOT NULL AND new.deleted_at IS NULL;
+END;
+
+-- Local mirror of what a conversation id MEANS (#850).
+--
+-- Channel and group names are remote-only: `list_group_channels` and the
+-- bootstrap read both go to the Delivery Service, and there is no embedded
+-- replica. A local `message` row cannot even say whether its `conversation_id`
+-- is a channel or a DM. Without this table every search result page would need
+-- an N+1 network round trip to render a name, and search would be broken
+-- offline — so the two places that already list channels and DMs write what
+-- they learned here, exactly as `attach_sender_usernames_local` writes
+-- `user_cache`.
+--
+-- Best-effort and disposable: a miss renders the id, which is what search did
+-- for every result before this table existed.
+CREATE TABLE IF NOT EXISTS conversation_cache (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('channel', 'dm')),
+    name       TEXT,
+    group_id   TEXT,
+    group_name TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- `in:#channel` / `in:@person` resolve a typed name back to a conversation id.
+CREATE INDEX IF NOT EXISTS idx_conversation_cache_name ON conversation_cache(name);
+
 -- This device's plaintext copy of each conversation's pin master key (#99).
 --
 -- Kpin is the AES-256-GCM key every pin snapshot in a conversation is sealed
