@@ -312,7 +312,10 @@ async fn start_windows_audio(
     // the capture thread block, shallow enough that it can't hide a
     // stalled consumer behind seconds of latency.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AudioBlock>(32);
-    let (start_tx, start_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    // Explicitly std's Result: this module imports `crate::error::Result`,
+    // which is a one-generic alias and not what this channel carries.
+    let (start_tx, start_rx) =
+        tokio::sync::oneshot::channel::<std::result::Result<(), String>>();
     let active_for_thread = std::sync::Arc::clone(&active);
     let capture_thread = std::thread::Builder::new()
         .name("wasapi-screenshare-audio".into())
