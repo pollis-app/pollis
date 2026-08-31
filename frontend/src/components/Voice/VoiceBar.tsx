@@ -65,8 +65,19 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   // The local participant is flagged `isLocal` by VoiceSessionManager (which
   // owns the device-suffixed identity), so we read it off the list rather than
   // reconstructing `voice-${userId}`.
+  // Exclude every identity belonging to the local USER, not just the one
+  // marked `isLocal`. A second enrolled device — and the overlap window of a
+  // reconnect, where the outgoing identity lingers — is a different identity
+  // for the same person, so filtering on `isLocal` alone let the user's own
+  // other device count as somebody else. That is what put a speaker label on
+  // the bar for a room the user is sitting in alone, and, because
+  // `disambiguateVoiceNames` suffixes the second occurrence of a name, it
+  // rendered as "dan (1)".
   const localIdentity = voiceParticipants.find((p) => p.isLocal)?.identity ?? null;
-  const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter((id) => id !== localIdentity);
+  const localUserId = localIdentity ? userIdFromVoiceIdentity(localIdentity) : null;
+  const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter(
+    (id) => userIdFromVoiceIdentity(id) !== localUserId,
+  );
   const lastRemoteSpeakerId = remoteActiveSpeakerIds.at(-1);
 
   // Count distinct *users*, not raw participant entries: a user joined from two
