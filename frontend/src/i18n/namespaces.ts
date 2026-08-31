@@ -21,6 +21,7 @@ export const NAMESPACES = [
   "search",
   "emoji",
   "saved",
+  "vault",
   "errors",
   "arcade",
 ] as const;

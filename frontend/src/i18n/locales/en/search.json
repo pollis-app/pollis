@@ -49,7 +49,9 @@
     "arcadeName": "Arcade",
     "arcadeKeywords": "arcade game asteroids ship shoot easter egg play",
     "searchName": "Search Messages",
-    "searchKeywords": "search messages find full text history filter from in before after has attachment link"
+    "searchKeywords": "search messages find full text history filter from in before after has attachment link",
+    "vaultName": "Vault",
+    "vaultKeywords": "vault note to self notes personal storage private encrypted files drive locker safe"
   },
   "page": {
     "title": "Search"

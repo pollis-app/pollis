@@ -47,10 +47,14 @@ interface MessageItemProps {
    * pass them the affordances simply don't render. Wired from `MessageList`. */
   onToggleSave?: (messageId: string) => void;
   onCopyLink?: (messageId: string) => void;
+  /** Pin/unpin this message for every member (#99). Optional like the
+   * bookmark affordance — absent in surfaces without a conversation. */
+  onTogglePin?: (messageId: string) => void;
   /** Transient outcome of THIS message's last copy-link click (#889).
    *  `idle` for every message but the one just acted on. */
   copyLinkState?: "idle" | "copied" | "failed";
   isSaved?: boolean;
+  isPinned?: boolean;
   onScrollToReply?: (messageId: string) => void;
   /** Delivery / read receipts for THIS message (#857). Optional — when the
    * parent doesn't pass it no indicator renders. Wired from `MessageList`;
@@ -77,9 +81,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
   onEdit,
   onDelete,
   onToggleSave,
+  onTogglePin,
   onCopyLink,
   copyLinkState = "idle",
   isSaved = false,
+  isPinned = false,
   onScrollToReply,
   receipt,
   peerCount = 0,
@@ -293,10 +299,12 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             isOwn={isOwn}
             canModerate={canModerate}
             isSaved={isSaved}
+            isPinned={isPinned}
             copyLinkState={copyLinkState}
             onReply={onReply}
             onOpenThread={onOpenThread}
             onToggleSave={onToggleSave}
+            onTogglePin={onTogglePin}
             onCopyLink={onCopyLink}
             onEdit={onEdit}
             onDelete={onDelete}
@@ -415,10 +423,12 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             isOwn={isOwn}
             canModerate={canModerate}
             isSaved={isSaved}
+            isPinned={isPinned}
             copyLinkState={copyLinkState}
             onReply={onReply}
             onOpenThread={onOpenThread}
             onToggleSave={onToggleSave}
+            onTogglePin={onTogglePin}
             onCopyLink={onCopyLink}
             onEdit={onEdit}
             onDelete={onDelete}

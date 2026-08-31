@@ -75,6 +75,7 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     // transaction has committed.
     "mls_commit_since",
     "mls_welcome",
+    "pinned_message",
     "push_token",
     "read_cursor_sync",
     "security_event",
@@ -84,6 +85,8 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "user_groups",
     "user_preferences",
     "users",
+    "vault_attachment_ref",
+    "vault_message",
 ];
 
 /// Every table a conversation teardown clears — [`purge_conversation_rows`],
@@ -108,6 +111,8 @@ pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "mls_commit_since",
     "mls_group_info",
     "mls_welcome",
+    "pin_keystate",
+    "pinned_message",
     "user_dms",
     "user_groups",
 ];
@@ -157,6 +162,15 @@ pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
         "schema_migrations",
         "Migration bookkeeping. No user data.",
     ),
+    (
+        "pin_keystate",
+        "Conversation-owned, not user-owned (#99): the one wrapped pin key the \
+         REMAINING members unwrap to read the conversation's pins. Deleting it on \
+         a member's departure would strip everyone else's pin access; it goes with \
+         its conversation (CONVERSATION_PURGED_TABLES). Server-unreadable \
+         ciphertext; `updated_by_device_id` is diagnostic, and any member's next \
+         re-wrap replaces the row.",
+    ),
 ];
 
 /// Tables that deliberately survive a conversation (group / channel / DM)
@@ -175,6 +189,16 @@ pub const EXEMPT_FROM_CONVERSATION_PURGE: &[(&str, &str)] = &[
         "Shared and reference-counted; released, not deleted, by teardown.",
     ),
     ("schema_migrations", "Migration bookkeeping. No user data."),
+    (
+        "vault_message",
+        "User-owned, not conversation-owned (#107): the vault is a personal \
+         space with no conversation id. Purged with its account.",
+    ),
+    (
+        "vault_attachment_ref",
+        "User-owned via its vault entry (#107); purged with the account, and \
+         reaped by the envelope-GC sweep if ever orphaned.",
+    ),
 ];
 
 /// Delete every main-DB row keyed to `user_id`, **except** the `users` row
@@ -277,6 +301,22 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     // exactly why it would otherwise sit here forever: nothing about it looks
     // like user data to anyone auditing the tables by eye.
     conn.execute("DELETE FROM read_cursor_sync WHERE user_id = ?1", uid()).await?;
+    // The vault (#107): references first, while the subquery can still see the
+    // entries, then the entries. Dropping the references is what releases the
+    // shared attachment objects for collection, exactly like `attachment_ref`
+    // above.
+    conn.execute(
+        "DELETE FROM vault_attachment_ref WHERE vault_message_id IN \
+         (SELECT id FROM vault_message WHERE user_id = ?1)",
+        uid(),
+    )
+    .await?;
+    conn.execute("DELETE FROM vault_message WHERE user_id = ?1", uid()).await?;
+    // Pins this user placed (#99). The snapshot inside is ciphertext under the
+    // conversation's Kpin, but the row itself names the pinner in the clear, so
+    // it is removable and must be removed. The conversation keeps its other
+    // members' pins.
+    conn.execute("DELETE FROM pinned_message WHERE pinned_by = ?1", uid()).await?;
     conn.execute("DELETE FROM security_event WHERE user_id = ?1", uid()).await?;
 
     // Derived directory index (migration 000009). Nothing reads it today, which
@@ -395,6 +435,12 @@ pub async fn purge_conversation_rows(
     .await?;
     conn.execute("DELETE FROM message_envelope WHERE conversation_id = ?1", cid()).await?;
     conn.execute("DELETE FROM conversation_watermark WHERE conversation_id = ?1", cid()).await?;
+    // Pins live on the channel/DM id (#99); the keystate row lives on the MLS
+    // conversation id, which for a DM is this same id and for a group channel
+    // is the group id (removed by `purge_group` below). Both statements are
+    // no-ops where the id kind does not match.
+    conn.execute("DELETE FROM pinned_message WHERE conversation_id = ?1", cid()).await?;
+    conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", cid()).await?;
     Ok(())
 }
 
@@ -440,6 +486,11 @@ pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Ve
     conn.execute("DELETE FROM group_join_request WHERE group_id = ?1", gid()).await?;
     conn.execute("DELETE FROM group_member WHERE group_id = ?1", gid()).await?;
     conn.execute("DELETE FROM user_groups WHERE group_id = ?1", gid()).await?;
+
+    // The group's pin key (#99) — keyed by the MLS conversation id, which for
+    // a group is the group id itself (channels' pin rows went with
+    // `purge_conversation_rows` above).
+    conn.execute("DELETE FROM pin_keystate WHERE conversation_id = ?1", gid()).await?;
 
     // The anchor row last.
     conn.execute("DELETE FROM groups WHERE id = ?1", gid()).await?;

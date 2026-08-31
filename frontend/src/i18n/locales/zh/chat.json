@@ -25,7 +25,9 @@
     "edit": "编辑消息",
     "delete": "删除消息",
     "deleteAsAdmin": "删除消息（管理员）",
-    "more": "更多操作"
+    "more": "更多操作",
+    "pin": "置顶消息",
+    "unpin": "取消置顶"
   },
   "thread": {
     "replyCount_other": "{{count}} 条回复"

@@ -650,6 +650,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             onReply={handleReply}
             onEdit={handleEdit}
             onDelete={handleDelete}
+            // Pins (#99) key on the CHANNEL or DM id, not the MLS group id.
+            pinsConversationId={selectedChannelId ?? selectedConversationId ?? null}
             onScrollToMessage={handleScrollToMessage}
             getAuthorUsername={getAuthorUsername}
             hasMore={!!pageCursor}

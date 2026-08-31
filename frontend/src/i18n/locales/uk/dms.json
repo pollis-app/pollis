@@ -12,7 +12,8 @@
     "fallbackTitle": "Особисте повідомлення",
     "viewProfile": "Переглянути профіль @{{name}}",
     "call": "Подзвонити @{{name}}",
-    "returnToCall": "Повернутися до дзвінка з @{{name}}"
+    "returnToCall": "Повернутися до дзвінка з @{{name}}",
+    "pinsLabel": "Закріплені повідомлення"
   },
   "settings": {
     "pageTitle": "Налаштування розмови",

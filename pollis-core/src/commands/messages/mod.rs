@@ -176,6 +176,9 @@ pub use ingest::{
 
 // ── Edit / delete ────────────────────────────────────────────────────────────
 pub use edit_delete::{delete_message, edit_message};
+// The vault (#107) parses the same `_att` envelope out of its entries to
+// declare attachment references on save — one parser, not two.
+pub(crate) use edit_delete::parse_attachment_refs;
 #[cfg(feature = "test-harness")]
 pub use edit_delete::{delete_message_body, edit_message_as, send_redaction_as};
 

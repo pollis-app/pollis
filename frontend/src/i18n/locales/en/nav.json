@@ -17,7 +17,8 @@
     "dmAvatarAlt": "{{name}} avatar",
     "close": "Close sidebar ({{shortcut}})",
     "resize": "Resize sidebar (drag; double-click to reset)",
-    "searchMessages": "Search Messages"
+    "searchMessages": "Search Messages",
+    "vault": "Vault"
   },
   "profile": {
     "you": "You",
@@ -171,5 +172,11 @@
   },
   "terminal": {
     "shellFailed": "failed to start shell: {{error}}"
+  },
+  "pins": {
+    "heading": "Pinned",
+    "empty": "No pinned messages yet.",
+    "unavailable": "Pins are not available on this device yet — they will appear after the conversation syncs.",
+    "unpin": "Unpin"
   }
 }

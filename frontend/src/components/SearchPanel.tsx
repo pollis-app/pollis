@@ -235,6 +235,7 @@ const PAGE_RESULTS: PageResultSpec[] = [
   { id: "page-groups-search", nameKey: "pages.groupsSearchName", keywordsKey: "pages.groupsSearchKeywords", breadcrumb: "/groups/search", path: "/groups/search" },
   { id: "page-saved", nameKey: "pages.savedName", keywordsKey: "pages.savedKeywords", breadcrumb: "/saved", path: "/saved" },
   { id: "page-search", nameKey: "pages.searchName", keywordsKey: "pages.searchKeywords", breadcrumb: "/search", path: "/search" },
+  { id: "page-vault", nameKey: "pages.vaultName", keywordsKey: "pages.vaultKeywords", breadcrumb: "/vault", path: "/vault" },
   { id: "page-arcade", nameKey: "pages.arcadeName", keywordsKey: "pages.arcadeKeywords", breadcrumb: "/arcade", path: "/arcade" },
 ];
 

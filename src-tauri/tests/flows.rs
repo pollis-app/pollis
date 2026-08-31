@@ -31,6 +31,8 @@ mod linked_sqlite;
 mod messages;
 #[path = "flows/model.rs"]
 mod model;
+#[path = "flows/pinning.rs"]
+mod pinning;
 #[path = "flows/pq_key_packages.rs"]
 mod pq_key_packages;
 #[path = "flows/pq_migration.rs"]
@@ -41,6 +43,8 @@ mod rejoin;
 mod sealed_sender;
 #[path = "flows/security.rs"]
 mod security;
+#[path = "flows/vault.rs"]
+mod vault;
 // voice.rs compile-depends on the media command surface (voice_e2ee helpers +
 // the media-gated state.voice field), so it only builds with `media` on. Every
 // other flow module — MLS/adversarial/model/messaging/etc. — stays in the

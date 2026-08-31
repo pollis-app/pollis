@@ -12,7 +12,8 @@
     "fallbackTitle": "Mensaje directo",
     "viewProfile": "Ver el perfil de @{{name}}",
     "call": "Llamar a @{{name}}",
-    "returnToCall": "Volver a la llamada con @{{name}}"
+    "returnToCall": "Volver a la llamada con @{{name}}",
+    "pinsLabel": "Mensajes fijados"
   },
   "settings": {
     "pageTitle": "Ajustes de la conversación",

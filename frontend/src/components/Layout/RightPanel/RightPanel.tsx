@@ -5,6 +5,7 @@ import { appStore } from "../../../stores/appStore";
 import { useShortcutLabel } from "../../../keyboard";
 import { useRightPanel } from "./useRightPanel";
 import { MembersPanel } from "./MembersPanel";
+import { PinnedPanel } from "./PinnedPanel";
 import { ThreadPanel } from "./ThreadPanel";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePanelWidth } from "../usePanelWidth";
@@ -50,14 +51,21 @@ export const RightPanel: React.FC = observer(() => {
   const hasContext = Boolean(channelId || conversationId || groupId);
   // A thread is meaningless without the conversation it hangs off, so a
   // stale `?thread=` on a context-free route falls back to the roster
-  // rather than rendering an empty thread.
+  // rather than rendering an empty thread. Pins (#99) are conversation-scoped
+  // for the same reason.
   const shownThreadId = kind === "thread" && hasContext ? threadId : null;
+  const showPins =
+    kind === "pins" && hasContext && Boolean(channelId || conversationId);
 
   if (!isOpen) {
     return null;
   }
 
-  const label = shownThreadId ? t("panel.thread") : t("panel.details");
+  const label = shownThreadId
+    ? t("panel.thread")
+    : showPins
+      ? t("pins.heading")
+      : t("panel.details");
   // Two explicit keys rather than lowercasing `label` — casing rules are not
   // universal, and a translator needs the whole sentence either way.
   const closeLabel = shownThreadId
@@ -85,6 +93,8 @@ export const RightPanel: React.FC = observer(() => {
             channelId={channelId}
             conversationId={conversationId}
           />
+        ) : showPins ? (
+          <PinnedPanel channelId={channelId} conversationId={conversationId} />
         ) : (
           <MembersPanel
             groupId={groupId}

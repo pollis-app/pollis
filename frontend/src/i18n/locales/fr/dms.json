@@ -12,7 +12,8 @@
     "fallbackTitle": "Message privé",
     "viewProfile": "Voir le profil de @{{name}}",
     "call": "Appeler @{{name}}",
-    "returnToCall": "Revenir à l'appel avec @{{name}}"
+    "returnToCall": "Revenir à l'appel avec @{{name}}",
+    "pinsLabel": "Messages épinglés"
   },
   "settings": {
     "pageTitle": "Paramètres de la conversation",

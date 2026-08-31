@@ -16,7 +16,8 @@
     "verified": "Contact vérifié",
     "dmAvatarAlt": "Avatar de {{name}}",
     "close": "Fermer la barre latérale ({{shortcut}})",
-    "resize": "Redimensionner la barre latérale (glisser ; double-clic pour réinitialiser)"
+    "resize": "Redimensionner la barre latérale (glisser ; double-clic pour réinitialiser)",
+    "vault": "Coffre"
   },
   "profile": {
     "you": "Vous",
@@ -170,5 +171,11 @@
   },
   "terminal": {
     "shellFailed": "échec du démarrage du shell : {{error}}"
+  },
+  "pins": {
+    "heading": "Épinglés",
+    "empty": "Aucun message épinglé pour le moment.",
+    "unavailable": "Les messages épinglés ne sont pas encore disponibles sur cet appareil — ils apparaîtront après la synchronisation de la conversation.",
+    "unpin": "Désépingler"
   }
 }

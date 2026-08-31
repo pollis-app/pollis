@@ -76,7 +76,14 @@ export function useRightPanel() {
   }, [query.isSuccess, userId, seed]);
 
   const threadId = search.thread ?? null;
-  const kind: PanelKind = !isOpen ? "none" : threadId ? "thread" : "members";
+  const pinsOpen = search.pins === "1";
+  const kind: PanelKind = !isOpen
+    ? "none"
+    : threadId
+      ? "thread"
+      : pinsOpen
+        ? "pins"
+        : "members";
 
   const setThread = useCallback(
     (thread: string | undefined) => {
@@ -100,6 +107,23 @@ export function useRightPanel() {
     [navigate, pathname],
   );
 
+  const setPins = useCallback(
+    (pins: "1" | undefined) => {
+      navigate({
+        to: pathname,
+        // Opening pins drops any open thread — the two shapes share the slot,
+        // and keeping a stale `?thread=` would win the kind derivation.
+        search: (prev: Record<string, unknown>) => ({
+          ...prev,
+          pins,
+          thread: undefined,
+        }),
+        replace: true,
+      });
+    },
+    [navigate, pathname],
+  );
+
   // Only navigates when there is actually a thread to drop. Without the guard,
   // merely closing the panel would push a history entry on every route in the
   // app — reintroducing a coupling between the panel and the URL that this
@@ -111,12 +135,20 @@ export function useRightPanel() {
     setThread(undefined);
   }, [search.thread, setThread]);
 
+  const clearPins = useCallback(() => {
+    if (!search.pins) {
+      return;
+    }
+    setPins(undefined);
+  }, [search.pins, setPins]);
+
   const setPanel = useCallback(
-    (next: Exclude<PanelKind, "thread">) => {
+    (next: Exclude<PanelKind, "thread" | "pins">) => {
       rightPanelStore.setOpen(userId, next !== "none");
       clearThread();
+      clearPins();
     },
-    [userId, clearThread],
+    [userId, clearThread, clearPins],
   );
 
   const openThread = useCallback(
@@ -129,9 +161,20 @@ export function useRightPanel() {
     [userId, setThread],
   );
 
+  /** Toggle the pinned-messages panel (#99): open it, or drop back to the
+   * roster when it is already showing. */
+  const togglePins = useCallback(() => {
+    if (kind === "pins") {
+      setPins(undefined);
+      return;
+    }
+    rightPanelStore.setOpen(userId, true);
+    setPins("1");
+  }, [kind, userId, setPins]);
+
   const toggle = useCallback(() => {
     setPanel(isOpen ? "none" : "members");
   }, [isOpen, setPanel]);
 
-  return { kind, isOpen, threadId, setPanel, openThread, toggle };
+  return { kind, isOpen, threadId, setPanel, openThread, togglePins, toggle };
 }

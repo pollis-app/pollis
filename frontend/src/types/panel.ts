@@ -8,7 +8,7 @@
 // UI (scroll offset, drafts).
 
 /** The shape the panel is currently rendering. Derived, never parsed. */
-export type PanelKind = "members" | "thread" | "none";
+export type PanelKind = "members" | "thread" | "pins" | "none";
 
 export interface PanelSearch {
   /**
@@ -20,6 +20,15 @@ export interface PanelSearch {
    * and precisely the wrong one for the open state that used to sit beside it.
    */
   thread?: string;
+  /**
+   * `"1"` when the panel is showing the conversation's pinned messages (#99).
+   *
+   * Route-scoped for the same reason as `thread`: pins belong to the
+   * conversation being read, so navigating away drops back to the roster.
+   * A thread in the same URL wins — reading a thread is the more specific
+   * intent.
+   */
+  pins?: "1";
   /**
    * ULID of a message to scroll to and flash on arrival (#850).
    *
@@ -40,7 +49,7 @@ export interface PanelSearch {
    * A search query handed off from the Cmd+K navigator to `/search` (#850).
    *
    * Cmd+K stays a navigator; when what someone typed looks like words rather
-   * than a name, its first row hands the query to the full-text page. Carrying
+   * than a name, its last row hands the query to the full-text page. Carrying
    * it on the URL is what stops that handoff from asking them to type it twice.
    */
   q?: string;
@@ -60,6 +69,9 @@ export function validatePanelSearch(
   const thread = search.thread;
   if (typeof thread === "string" && thread.length > 0) {
     out.thread = thread;
+  }
+  if (search.pins === "1") {
+    out.pins = "1";
   }
   const message = search.message;
   if (typeof message === "string" && message.length > 0) {
