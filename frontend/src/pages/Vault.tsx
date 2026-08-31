@@ -187,7 +187,7 @@ export const VaultPage: React.FC = observer(() => {
         aria-selected={view === "chat"}
         data-testid="vault-view-chat"
         onClick={() => setView("chat")}
-        className={`flex items-center gap-1 border border-line px-2 py-0.5 text-2xs uppercase tracking-widest transition-colors ${
+        className={`flex items-center gap-1 rounded border border-line px-2 py-0.5 text-2xs uppercase tracking-widest ${
           view === "chat" ? "bg-accent text-bg" : "text-muted hover:text-fg"
         }`}
       >
@@ -200,7 +200,7 @@ export const VaultPage: React.FC = observer(() => {
         aria-selected={view === "media"}
         data-testid="vault-view-media"
         onClick={() => setView("media")}
-        className={`flex items-center gap-1 border border-line px-2 py-0.5 text-2xs uppercase tracking-widest transition-colors ${
+        className={`flex items-center gap-1 rounded border border-line px-2 py-0.5 text-2xs uppercase tracking-widest ${
           view === "media" ? "bg-accent text-bg" : "text-muted hover:text-fg"
         }`}
       >
