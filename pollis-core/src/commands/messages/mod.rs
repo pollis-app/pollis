@@ -163,7 +163,10 @@ pub use read::{
 };
 
 // ── Search (on-device FTS5 — #850) ───────────────────────────────────────────
-pub use search::{cache_conversations, rebuild_search_index, search_messages, CachedConversation};
+pub use search::{
+    cache_conversations, invalidate_corpus_cache, rebuild_search_index, search_messages,
+    CachedConversation,
+};
 
 // ── Ingest (envelope pull + watermark + cleanup) ─────────────────────────────
 pub use ingest::{

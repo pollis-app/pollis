@@ -16,7 +16,8 @@
     "verified": "Verified contact",
     "dmAvatarAlt": "{{name}} avatar",
     "close": "Close sidebar ({{shortcut}})",
-    "resize": "Resize sidebar (drag; double-click to reset)"
+    "resize": "Resize sidebar (drag; double-click to reset)",
+    "searchMessages": "Search Messages"
   },
   "profile": {
     "you": "You",

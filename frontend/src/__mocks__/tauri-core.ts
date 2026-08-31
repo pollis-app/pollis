@@ -458,6 +458,214 @@ function gateSnapshot(command?: string): Record<string, unknown> | null {
   };
 }
 
+/**
+ * What a conversation id means, the way `conversation_cache` answers it in
+ * production: derived from the same channel and DM lists the sidebar renders.
+ */
+function describeConversation(conversationId: string): {
+  kind: 'channel' | 'dm' | null;
+  name: string | null;
+  group_id: string | null;
+  group_name: string | null;
+} {
+  for (const group of store.groups) {
+    for (const channel of store.channels[group.id] ?? []) {
+      if (channel.id === conversationId) {
+        return {
+          kind: 'channel',
+          name: channel.name,
+          group_id: group.id,
+          group_name: group.name,
+        };
+      }
+    }
+  }
+  const dm = store.dmChannels.find((d) => d.id === conversationId);
+  if (dm) {
+    const peer = dm.members.find((m) => m.user_id !== store.session?.id);
+    return { kind: 'dm', name: peer?.username ?? null, group_id: null, group_name: null };
+  }
+  return { kind: null, name: null, group_id: null, group_name: null };
+}
+
+/** The caption plus attachment filenames, with transport metadata dropped —
+ *  the mock's `pollis_search_text` equivalent. */
+function searchableText(content: string): { text: string; hasAttachment: boolean } {
+  if (!content.trimStart().startsWith('{')) {
+    return { text: content, hasAttachment: false };
+  }
+  try {
+    const parsed = JSON.parse(content) as {
+      _txt?: string;
+      _att?: { name?: string }[];
+    };
+    if (parsed._txt === undefined && parsed._att === undefined) {
+      return { text: content, hasAttachment: false };
+    }
+    const names = (parsed._att ?? []).map((a) => a.name).filter(Boolean) as string[];
+    return {
+      text: [parsed._txt ?? '', ...names].filter(Boolean).join(' '),
+      hasAttachment: (parsed._att ?? []).length > 0,
+    };
+  } catch {
+    return { text: content, hasAttachment: false };
+  }
+}
+
+function searchMessagesMock(
+  rawQuery: string,
+  conversationId: string | null,
+  sort: 'recent' | 'relevant' | null,
+  limit: number,
+  offset: number,
+): unknown {
+  // Filters are lifted out the same way Rust does, so a spec can drive
+  // `from:` / `in:` / `has:attachment` against the mock.
+  const tokens = rawQuery.trim().split(/\s+/).filter(Boolean);
+  const terms: string[] = [];
+  let fromUser: string | null = null;
+  let inConversation: string | null = null;
+  let requireAttachment = false;
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    if (lower.startsWith('from:')) {
+      fromUser = token.slice(5).replace(/^@/, '').toLowerCase();
+    } else if (lower.startsWith('in:')) {
+      inConversation = token.slice(3).replace(/^[#@]/, '').toLowerCase();
+    } else if (lower === 'has:attachment') {
+      requireAttachment = true;
+    } else {
+      terms.push(lower);
+    }
+  }
+
+  const usernameFor = (userId: string): string | null => {
+    for (const members of Object.values(store.groupMembers)) {
+      const hit = members.find((m) => m.user_id === userId);
+      if (hit?.username) {
+        return hit.username;
+      }
+    }
+    for (const dm of store.dmChannels) {
+      const hit = dm.members.find((m) => m.user_id === userId);
+      if (hit?.username) {
+        return hit.username;
+      }
+    }
+    return store.session?.id === userId ? store.session.username ?? null : null;
+  };
+
+  const all: MockMessage[] = [];
+  for (const [conv, list] of Object.entries(store.messages)) {
+    if (conversationId && conv !== conversationId) {
+      continue;
+    }
+    all.push(...list);
+  }
+
+  const matched = all.filter((m) => {
+    if (!m.content) {
+      return false;
+    }
+    const { text, hasAttachment } = searchableText(m.content);
+    if (requireAttachment && !hasAttachment) {
+      return false;
+    }
+    if (fromUser && (usernameFor(m.sender_id) ?? m.sender_id).toLowerCase() !== fromUser) {
+      return false;
+    }
+    if (inConversation) {
+      const described = describeConversation(m.conversation_id);
+      if ((described.name ?? m.conversation_id).toLowerCase() !== inConversation) {
+        return false;
+      }
+    }
+    const haystack = text.toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  });
+
+  const at = (m: MockMessage) => String(m.sent_at);
+  const effectiveSort = sort ?? (conversationId ? 'recent' : 'relevant');
+  const ordered = [...matched].sort((a, b) => {
+    if (effectiveSort === 'recent') {
+      return at(b).localeCompare(at(a));
+    }
+    // "Relevance" here is term-occurrence count, tie-broken by recency. Not
+    // bm25 — the point is that the two orderings differ and the toggle changes
+    // which one the list is in.
+    const score = (m: MockMessage) => {
+      const haystack = searchableText(m.content ?? '').text.toLowerCase();
+      return terms.reduce((sum, term) => sum + haystack.split(term).length - 1, 0);
+    };
+    const delta = score(b) - score(a);
+    return delta !== 0 ? delta : at(b).localeCompare(at(a));
+  });
+
+  const page = ordered.slice(offset, offset + limit);
+  const results = page.map((m) => {
+    const { text, hasAttachment } = searchableText(m.content ?? '');
+    const described = describeConversation(m.conversation_id);
+    const lower = text.toLowerCase();
+    const highlights: [number, number][] = [];
+    for (const term of terms) {
+      let from = 0;
+      for (;;) {
+        const found = lower.indexOf(term, from);
+        if (found < 0) {
+          break;
+        }
+        highlights.push([found, found + term.length]);
+        from = found + term.length;
+      }
+    }
+    highlights.sort((a, b) => a[0] - b[0]);
+    const merged: [number, number][] = [];
+    for (const span of highlights) {
+      const last = merged[merged.length - 1];
+      if (last && span[0] <= last[1]) {
+        last[1] = Math.max(last[1], span[1]);
+      } else {
+        merged.push([...span] as [number, number]);
+      }
+    }
+    return {
+      message_id: m.id,
+      conversation_id: m.conversation_id,
+      conversation_kind: described.kind,
+      conversation_name: described.name,
+      group_id: described.group_id,
+      group_name: described.group_name,
+      sender_id: m.sender_id,
+      sender_username: usernameFor(m.sender_id),
+      thread_id: m.thread_id ?? null,
+      has_attachment: hasAttachment,
+      has_link: /https?:\/\/|www\./i.test(text),
+      content: m.content ?? '',
+      sent_at: String(m.sent_at),
+      snippet: { text, highlights: merged },
+    };
+  });
+
+  const returned = offset + results.length;
+  const searchable = all.filter((m) => m.content);
+  return {
+    results,
+    total: ordered.length,
+    next_cursor: returned < ordered.length ? { offset: returned } : null,
+    sort: effectiveSort,
+    corpus:
+      offset === 0
+        ? {
+            message_count: searchable.length,
+            earliest_sent_at:
+              searchable.map(at).sort()[0] ?? null,
+            retention_days: 0,
+            indexing: false,
+          }
+        : { message_count: 0, earliest_sent_at: null, retention_days: 0, indexing: false },
+  };
+}
+
 function handleCommand(command: string, args: Record<string, unknown>): unknown {
   switch (command) {
     case 'get_session':
@@ -528,6 +736,12 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_group_invites':
     case 'list_security_events':
     case 'get_pinned_messages':
+    // `MessageReactions` destructures with `= []`, which only covers
+    // `undefined` — the `null` an unhandled command returns reaches
+    // `reactions.length` and takes the whole message log down with it. It went
+    // unnoticed because the crash needs the query to have RESOLVED, so a spec
+    // that finished asserting first never saw it (#850).
+    case 'get_reactions':
       return [];
 
     // Threads (#825). Keyed by the root message id and by conversation id
@@ -853,6 +1067,39 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         conversation_id: conversationId,
         message_id: messageId,
       };
+    }
+
+    // ── On-device message search (#850) ──────────────────────────────────
+    //
+    // Mirrors the SHAPE of `pollis-core`'s FTS-backed search, not its ranking:
+    // there is no FTS5 in a browser, so matching here is a substring scan over
+    // the seeded messages. What the mock does reproduce is everything the UI
+    // depends on — the enriched result (kind, names, thread, attachment flag),
+    // the structured snippet with UTF-16 highlight ranges, the total count, the
+    // corpus footer numbers, offset pagination, and both orderings. Without
+    // this case `SearchView` was untestable under the mock runtime.
+
+    case 'search_messages': {
+      const { query, conversationId, sort, limit, cursor } = args as {
+        query: string;
+        conversationId?: string | null;
+        sort?: 'recent' | 'relevant' | null;
+        limit?: number;
+        cursor?: { offset: number } | null;
+      };
+      return searchMessagesMock(query, conversationId ?? null, sort ?? null, limit ?? 25, cursor?.offset ?? 0);
+    }
+
+    case 'rebuild_search_index':
+      return null;
+
+    // The jump-to-message read path. The mock holds every conversation in one
+    // array, so "the page around this message" is that array — which is the
+    // right answer for a spec, since the point of the command is that the
+    // target ends up loaded.
+    case 'read_messages_around': {
+      const { conversationId } = args as { conversationId: string; messageId: string };
+      return { messages: store.messages[conversationId] ?? [], next_cursor: null };
     }
 
     // ── Custom emoji (#848) ──────────────────────────────────────────────

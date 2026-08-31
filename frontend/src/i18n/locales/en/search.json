@@ -8,7 +8,8 @@
     "permalinkResolving": "Opening message…",
     "noMatches": "No matches found",
     "emptyHint": "Jump to a channel, voice channel, DM, user, or settings page",
-    "live": "[live]"
+    "live": "[live]",
+    "searchMessagesFor": "Search messages for \"{{query}}\""
   },
   "pages": {
     "userName": "User",
@@ -46,17 +47,40 @@
     "savedName": "Saved",
     "savedKeywords": "saved bookmark bookmarks starred pinned later permalink link",
     "arcadeName": "Arcade",
-    "arcadeKeywords": "arcade game asteroids ship shoot easter egg play"
+    "arcadeKeywords": "arcade game asteroids ship shoot easter egg play",
+    "searchName": "Search Messages",
+    "searchKeywords": "search messages find full text history filter from in before after has attachment link"
   },
   "page": {
     "title": "Search"
   },
   "view": {
-    "placeholder": "Search messages…",
+    "placeholder": "Search messages… try from:@alice in:#general has:attachment",
     "minLength": "Type at least 2 characters to search",
+    "filterHint": "Filters: from:@user  in:#channel  before:YYYY-MM-DD  after:  on:  has:attachment  has:link",
     "emptyHint": "Search your message history",
     "searching": "Searching…",
-    "noResults": "No results"
+    "loadMore": "Load more results",
+    "aboutResults": "About {{count}} result",
+    "aboutResults_other": "About {{count}} results",
+    "sortRecent": "Most recent",
+    "sortRelevant": "Most relevant",
+    "inThread": "in a thread",
+    "hasAttachment": "attachment",
+    "noResults": "No messages on this device match that.",
+    "noResultsWhy": "Search only ever covers what this device has decrypted — the server holds ciphertext and cannot search for you. A message can be missing because:",
+    "reasonNotIngested": "it is in a conversation you have not opened on this device yet",
+    "reasonBeforeJoin": "it was sent before you joined that conversation",
+    "reasonNewDevice": "it was sent before this device was added to your account",
+    "reasonRetention": "it falls outside your local message-history window",
+    "reasonDeleted": "it was deleted, which removes the text for good",
+    "corpus": "Searching {{count}} message stored on this device.",
+    "corpus_other": "Searching {{count}} messages stored on this device.",
+    "corpusWithDate": "Searching {{count}} message stored on this device, back to {{date}}.",
+    "corpusWithDate_other": "Searching {{count}} messages stored on this device, back to {{date}}.",
+    "indexing": "Still indexing older messages…",
+    "retentionLink": "History kept for {{days}} days — change",
+    "whyOnDevice": "Why search is on-device"
   },
   "group": {
     "title": "Find Group",

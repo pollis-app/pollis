@@ -16,6 +16,7 @@ import {
   Keyboard,
   Download,
   Bookmark,
+  Search,
 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -149,6 +150,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
 
   const isOnSettingsHub = pathname === "/settings";
   const settingsItems = [
+    { id: "search", label: t("sidebar.searchMessages"), icon: <Search {...iconProps} />, to: "/search" as const, isActive: pathname === "/search" },
     { id: "saved", label: t("sidebar.saved"), icon: <Bookmark {...iconProps} />, to: "/saved" as const, isActive: pathname === "/saved" },
     { id: "preferences", label: t("sidebar.preferences"), icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
     { id: "user", label: t("sidebar.userSettings"), icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },

@@ -385,6 +385,9 @@ impl AppState {
     pub async fn unload_user_db(&self) {
         *self.local_db.lock().await = None;
         crate::commands::r2::set_cache_user(None);
+        // The corpus footer reading is per-account; the next user has a
+        // different history and must not be shown the previous one's count.
+        crate::commands::messages::invalidate_corpus_cache();
     }
 
     pub fn check_not_outdated(&self) -> crate::error::Result<()> {

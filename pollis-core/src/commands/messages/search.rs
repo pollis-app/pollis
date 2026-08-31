@@ -805,6 +805,10 @@ async fn enrich(
 
 /// What this device actually holds, for the footer that says so (§6 of #850).
 async fn read_corpus(state: &Arc<AppState>) -> Result<SearchCorpus> {
+    if let Some(cached) = cached_corpus() {
+        return Ok(cached);
+    }
+
     let guard = state.local_db.lock().await;
     let db = guard
         .as_ref()
@@ -816,12 +820,67 @@ async fn read_corpus(state: &Arc<AppState>) -> Result<SearchCorpus> {
     )?;
     let retention_days = crate::db::local::get_message_retention_days(db.conn()).unwrap_or(0);
     let indexing = crate::db::local::search_backfill_pending(db.conn()).unwrap_or(false);
-    Ok(SearchCorpus {
+    let corpus = SearchCorpus {
         message_count,
         earliest_sent_at,
         retention_days,
         indexing,
+    };
+    store_corpus(&corpus);
+    Ok(corpus)
+}
+
+/// How long a corpus reading stays good enough to reuse.
+///
+/// `count(*) … WHERE content IS NOT NULL` cannot use an index — it is a full
+/// scan of the `message` table, ~10–20 ms at 100k rows. Cheap once; charged on
+/// EVERY debounced keystroke it would dominate a 2–3 ms query and undo the
+/// point of the whole ticket. The number it produces is a footer describing how
+/// much history this device holds, which moves by single messages over minutes,
+/// so a bounded staleness is not a correctness compromise — it is the honest
+/// shape of the quantity.
+const CORPUS_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+static CORPUS_CACHE: std::sync::Mutex<Option<(std::time::Instant, SearchCorpus)>> =
+    std::sync::Mutex::new(None);
+
+fn cached_corpus() -> Option<SearchCorpus> {
+    let guard = CORPUS_CACHE.lock().ok()?;
+    let (at, corpus) = guard.as_ref()?;
+    if at.elapsed() > CORPUS_TTL {
+        return None;
+    }
+    Some(SearchCorpus {
+        message_count: corpus.message_count,
+        earliest_sent_at: corpus.earliest_sent_at.clone(),
+        retention_days: corpus.retention_days,
+        indexing: corpus.indexing,
     })
+}
+
+fn store_corpus(corpus: &SearchCorpus) {
+    if let Ok(mut guard) = CORPUS_CACHE.lock() {
+        *guard = Some((
+            std::time::Instant::now(),
+            SearchCorpus {
+                message_count: corpus.message_count,
+                earliest_sent_at: corpus.earliest_sent_at.clone(),
+                retention_days: corpus.retention_days,
+                indexing: corpus.indexing,
+            },
+        ));
+    }
+}
+
+/// Drop the cached corpus reading.
+///
+/// Called on sign-out, because the next user's history is a different corpus and
+/// showing them the previous account's message count would be both wrong and a
+/// small leak.
+pub fn invalidate_corpus_cache() {
+    if let Ok(mut guard) = CORPUS_CACHE.lock() {
+        *guard = None;
+    }
 }
 
 // ── The conversation-name cache ──────────────────────────────────────────────

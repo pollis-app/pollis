@@ -206,13 +206,73 @@ export interface MessageAttachment {
   localPreviewUrl?: string; // Blob URL for optimistic display — never persisted or sent to server
 }
 
+// ─── On-device message search (#850) ─────────────────────────────────────────
+// Mirrors `pollis_core::commands::messages::types` field for field. Keep the
+// two in sync; the mobile copy lives in `mobile/hooks/queries/useSearch.ts`.
+
+/** `sent_at DESC`, or bm25 with a recency decay. */
+export type SearchSort = "recent" | "relevant";
+
+/**
+ * A snippet plus where to mark it.
+ *
+ * `highlights` are `[start, end)` pairs in UTF-16 code units — i.e. plain
+ * JavaScript string indices — so the renderer slices `text` directly and builds
+ * `<mark>` elements. Ranges rather than HTML: nothing a message body contains
+ * can become markup, and there is no `dangerouslySetInnerHTML` anywhere near
+ * search.
+ */
+export interface SearchSnippet {
+  text: string;
+  highlights: [number, number][];
+}
+
 export interface SearchResult {
   message_id: string;
   conversation_id: string;
+  /** `"channel"` | `"dm"`, or null when this device has never listed it. */
+  conversation_kind: "channel" | "dm" | null;
+  conversation_name: string | null;
+  group_id: string | null;
+  group_name: string | null;
   sender_id: string;
+  sender_username: string | null;
+  thread_id: string | null;
+  has_attachment: boolean;
+  has_link: boolean;
   content: string;
   sent_at: string;
-  snippet: string;
+  snippet: SearchSnippet;
+}
+
+export interface SearchCursor {
+  offset: number;
+}
+
+/**
+ * What this device actually holds — the numbers behind the results footer.
+ *
+ * Search covers this device's decrypted history and nothing else, because
+ * message bodies are E2EE and the server has only ciphertext. The UI says so
+ * out loud rather than letting "no results" imply "no such message".
+ */
+export interface SearchCorpus {
+  message_count: number;
+  earliest_sent_at: string | null;
+  /** Device-local retention window in days; `0` is Forever. */
+  retention_days: number;
+  /** The one-time index backfill is still running. */
+  indexing: boolean;
+}
+
+export interface SearchPage {
+  results: SearchResult[];
+  /** Total hits, not just this page. */
+  total: number;
+  next_cursor: SearchCursor | null;
+  sort: SearchSort;
+  /** Only populated on the first page. */
+  corpus: SearchCorpus;
 }
 
 export interface AccountInfo {

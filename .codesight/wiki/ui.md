@@ -631,7 +631,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 ### `components/Search` (1)
 
-- **SearchView** — props: onNavigateToConversation — `frontend/src/components/Search/SearchView.tsx`
+- **SearchView** — props: onOpenResult, onOpenRetentionSettings, initialQuery — `frontend/src/components/Search/SearchView.tsx`
 
 ### `components/Security` (3)
 

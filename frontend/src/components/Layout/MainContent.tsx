@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useMemo, useState, useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { X } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { observer } from "mobx-react-lite";
 import { invoke } from "../../bridge";
@@ -20,6 +20,7 @@ import type { Message, MessageAttachment } from "../../types";
 import { buildMessageContent } from "../../utils/attachmentEnvelope";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { messageNavStore } from "../../stores/messageNavStore";
+import { messageJumpStore } from "../../stores/messageJumpStore";
 import { TypingIndicator } from "../TypingIndicator";
 import { EmptyState } from "../ui/EmptyState";
 
@@ -87,6 +88,8 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   const acceptDmRequestMutation = useAcceptDMRequest();
   const blockUserMutation = useBlockUser();
   const navigate = useNavigate();
+  // Root-route search params — `?message=` is the jump target (#850).
+  const routeSearch = useSearch({ strict: false }) as { message?: string };
   const deleteChannelMutation = useDeleteChannel();
   const isDeletingThisChannel =
     !!selectedChannelId && pendingDeleteChannelId === selectedChannelId;
@@ -250,6 +253,13 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     [allMessages],
   );
 
+  // The whole log by id, read from callbacks rather than closed over. Pinned in
+  // a ref because this component re-renders on every keystroke in the edit bar
+  // (`editDraftValue` is local state), and a fresh callback identity re-renders
+  // the entire message list (#874).
+  const allMessagesRef = useRef(allMessages);
+  allMessagesRef.current = allMessages;
+
   const loadMore = useCallback(async () => {
     if (!pageCursor || loadingMore || !currentUser) {
       return;
@@ -324,6 +334,85 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     setLoadingMore(false);
   }, [olderPages]);
 
+  // ── Jump to a message that is not loaded (#850) ─────────────────────────
+  //
+  // A search hit or a reply quote almost by definition points at something
+  // older than the newest page. `MessageList.revealRow` can only reveal a row
+  // the query already holds, so a target outside the loaded window used to
+  // leave the jump pending forever — or, at best, waiting for the user to
+  // scroll back a page at a time.
+  //
+  // `read_messages_around` fetches N before and N after the anchor in one call
+  // (anchored on `sent_at`, the order the log renders in), and the page is
+  // merged into the same `olderPages` list `loadMore` writes, so nothing
+  // downstream has to know a jump happened.
+  const ensureMessageLoaded = useCallback(
+    async (messageId: string) => {
+      if (allMessagesRef.current.some((m) => m.id === messageId)) {
+        return;
+      }
+      const conversationId = selectedChannelId ?? selectedConversationId;
+      if (!conversationId) {
+        return;
+      }
+      const page = await invoke<RawMessagePage>("read_messages_around", {
+        conversationId,
+        messageId,
+        limit: 50,
+      });
+      if (page.messages.length === 0) {
+        return;
+      }
+      const fetched = page.messages.map(transformChannelMessage);
+      setOlderPages((prev) => {
+        const base = prev.logKey === logKey ? prev : NO_OLDER_PAGES;
+        const existingIds = new Set(base.messages.map((m) => m.id));
+        const newOnes = fetched.filter((m) => !existingIds.has(m.id));
+        return {
+          logKey,
+          messages: [...newOnes, ...base.messages],
+          // The around-page always sits older than the live newest page, so its
+          // continuation is the correct place for "load more" to resume from.
+          cursor: page.next_cursor ?? base.cursor,
+          fetched: true,
+        };
+      });
+    },
+    [logKey, selectedChannelId, selectedConversationId],
+  );
+
+  // Fired by `MessageList` whenever something asks to scroll to a message —
+  // a reply quote, or a queued jump. Best-effort: a message this device does
+  // not hold simply never arrives, and the log stays where it is.
+  const handleScrollToMessage = useCallback(
+    (messageId: string) => {
+      void ensureMessageLoaded(messageId).catch((error) => {
+        console.error("Failed to load the page around a message:", error);
+      });
+    },
+    [ensureMessageLoaded],
+  );
+
+  // `?message=` on the URL is the other door into the same jump: it survives a
+  // real navigation and a reload, where the MobX store cannot. Consumed once
+  // and then stripped from the URL, so a back-navigation does not re-flash.
+  const jumpMessageId = routeSearch.message;
+  useEffect(() => {
+    if (!jumpMessageId) {
+      return;
+    }
+    messageJumpStore.request(
+      selectedChannelId ?? selectedConversationId ?? "",
+      jumpMessageId,
+    );
+    handleScrollToMessage(jumpMessageId);
+    void navigate({
+      to: ".",
+      search: (prev: Record<string, unknown>) => ({ ...prev, message: undefined }),
+      replace: true,
+    });
+  }, [jumpMessageId, selectedChannelId, selectedConversationId, handleScrollToMessage, navigate]);
+
   const handleConfirmDelete = async () => {
     if (!pendingDeleteId) {
       return;
@@ -357,10 +446,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   // They are `useCallback`-pinned because this component re-renders on every
   // keystroke in the edit bar (`editDraftValue` is local state) — with fresh
   // identities that keystroke re-rendered the entire message log (#874).
-  // `allMessagesRef` keeps `handleEdit` stable across message arrivals too.
-  const allMessagesRef = useRef(allMessages);
-  allMessagesRef.current = allMessages;
-
   const handleEdit = useCallback((messageId: string) => {
     const message = allMessagesRef.current.find((m) => m.id === messageId);
     if (!message) {
@@ -565,7 +650,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             onReply={handleReply}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            // TODO: scroll-to-message not yet implemented; prop left unwired
+            onScrollToMessage={handleScrollToMessage}
             getAuthorUsername={getAuthorUsername}
             hasMore={!!pageCursor}
             isFetchingMore={loadingMore}
@@ -580,7 +665,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           messageId={replyToMessageId}
           allMessages={allMessages}
           onDismiss={() => setReplyToMessageId(null)}
-          // TODO: scroll-to-message not yet implemented; prop left unwired
+          onScrollToMessage={handleScrollToMessage}
         />
       )}
 

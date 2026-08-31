@@ -328,5 +328,12 @@
   "notify": {
     "enrollmentTitle": "New device sign-in",
     "enrollmentBody": "A new device is requesting access to your account"
+  },
+  "searchIndex": {
+    "heading": "Message search index",
+    "rebuild": "Rebuild search index",
+    "rebuilding": "Rebuilding…",
+    "rebuilt": "Search index rebuilt.",
+    "description": "Search runs entirely on this device, over an index stored inside the encrypted local database. It repairs itself at startup if it ever goes wrong; rebuild it by hand only if search is missing messages you know are here."
   }
 }

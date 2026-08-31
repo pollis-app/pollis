@@ -93,7 +93,7 @@ export default function Search() {
     (user.data ? 1 : 0) +
     filtered.groups.length +
     filtered.channels.length +
-    (messages.data?.length ?? 0);
+    (messages.data?.results.length ?? 0);
 
   const showEmpty =
     trimmed.length >= 2 &&
@@ -208,18 +208,18 @@ export default function Search() {
           </View>
         ) : null}
 
-        {(messages.data?.length ?? 0) > 0 ? (
+        {(messages.data?.results.length ?? 0) > 0 ? (
           <View>
             <SectionTitle>MESSAGES</SectionTitle>
-            {messages.data!.map((m) => (
+            {messages.data!.results.map((m) => (
               <ListRow
                 key={m.message_id}
                 testID={`row-message-${m.message_id}`}
                 minHeight={58}
-                glyph={<Avatar label={m.sender_id.slice(0, 2)} size="sm" />}
-                name={m.sender_id}
+                glyph={<Avatar label={(m.sender_username ?? m.sender_id).slice(0, 2)} size="sm" />}
+                name={m.sender_username ?? m.sender_id}
                 nameStyle={{ fontSize: 13, fontFamily: ty.rowN.fontFamily }}
-                sub={m.snippet || m.content}
+                sub={m.snippet.text || m.content}
                 end={
                   <Text style={ty.label}>
                     {new Date(m.sent_at)

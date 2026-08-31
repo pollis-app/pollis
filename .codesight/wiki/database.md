@@ -880,6 +880,37 @@ ciphertext — see [`read_cursor_sync`](#read_cursor_sync-migration-000018-844).
 - `updated_at` TEXT NOT NULL DEFAULT now
 - Username lookup cache so the UI can render a sender without a remote round trip. Not authoritative — `users` in Turso is.
 
+### conversation_cache _(#850)_
+- `id` TEXT PK — a channel id or a DM conversation id
+- `kind` TEXT NOT NULL CHECK (`channel` | `dm`)
+- `name` TEXT — the channel name, or the peer's username for a DM
+- `group_id` TEXT / `group_name` TEXT — channels only
+- `updated_at` TEXT NOT NULL DEFAULT now
+- What a conversation id MEANS, locally. Channel and group names are remote-only
+  and there is no embedded replica, so without this a search result can only
+  render a UUID, cannot tell a channel from a DM (and so cannot route), and needs
+  an N+1 round trip per page. Written by `list_user_groups_with_channels` and
+  `list_dm_channels` — the two reads that already list them — exactly as
+  `attach_sender_usernames_local` writes `user_cache`. Not authoritative; a miss
+  renders the id.
+
+### message_fts _(FTS5 virtual table, #850)_
+- `body` — the only column; `content=''` makes it **contentless**, so FTS5 keeps
+  the term dictionary and no copy of the message text.
+- `tokenize="unicode61 remove_diacritics 2"` — `cafe` matches `café`. CJK is
+  handled a layer up by `pollis_search_text`, which emits overlapping bigrams.
+- Maintained by three triggers on `message` (`message_fts_ai` / `_ad` / `_au`),
+  never by Rust call sites: there are ten write sites and a DB-level guarantee is
+  what stops an eleventh from silently skipping the index.
+- Both trigger halves call the `pollis_search_text` scalar function
+  (`db/search_text.rs`), registered by `db::local::apply_local_schema`. A
+  contentless index is told what to DELETE by being handed the body it indexed,
+  so that function must stay deterministic forever.
+- Additive `IF NOT EXISTS` DDL — `LOCAL_SCHEMA_VERSION` was not bumped, and must
+  not be for this: a bump deletes the whole DB file including MLS state.
+- Backfill state lives in `kv` under `search_index_backfilled`. Full article:
+  [Message Search](./search.md).
+
 ### mls_kv _(OpenMLS storage provider)_
 - PK: (`scope`, `key`)
 - `scope` TEXT NOT NULL
