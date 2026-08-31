@@ -1,11 +1,21 @@
 {
-  "generated_at": "2026-08-27T22:48:40Z",
+  "generated_at": "2026-08-31T16:15:27Z",
   "workflow": "rebuild-verify.yml",
   "false_red_fix": {
     "commit": "564353ae",
     "date": "2026-08-16"
   },
   "runs": [
+    {
+      "tag": "v1.11.0",
+      "conclusion": "success",
+      "created_at": "2026-08-31T08:20:06Z",
+      "event": "workflow_run",
+      "run_id": "33372419587",
+      "run_url": "https://github.com/actuallydan/pollis/actions/runs/33372419587",
+      "classification": null,
+      "evidence": null
+    },
     {
       "tag": "v1.10.4",
       "conclusion": "failure",
