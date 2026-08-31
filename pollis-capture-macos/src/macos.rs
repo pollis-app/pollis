@@ -238,7 +238,11 @@ async fn run_screen(
     let with_audio = audio_flag || selection.with_audio();
 
     // ── Phase 3: build SCContentFilter + SCStream, stream frames ────────
-    let (tx, rx) = mpsc::channel::<Wire>(2);
+    // 16 deep, not 2: with audio riding the same channel as video under
+    // try_send, a full channel drops whatever comes next — and a dropped
+    // 10 ms audio block is an audible click where a dropped video frame is
+    // just a stale pixel. Matches the Linux helper's depth.
+    let (tx, rx) = mpsc::channel::<Wire>(16);
     let stop = Arc::new(AtomicBool::new(false));
 
     // Start SCK on a dedicated blocking context: filter construction and

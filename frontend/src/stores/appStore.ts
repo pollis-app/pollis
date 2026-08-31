@@ -354,11 +354,19 @@ class AppStore implements AppState {
       console.warn('[voiceState] shareStartStarting ignored, share=', this.voiceState.share.kind);
       return;
     }
+    this.bufferedShareAudio = null;
     this.voiceState = {
       ...this.voiceState,
       share: { kind: 'starting', startedAt: performance.now(), withAudio },
     };
   }
+
+  /** An audio lifecycle event that arrived while the share was still
+   *  `starting`. The backend's audio events can precede LocalStarted (a
+   *  Linux portal error before the video format, for one), and dropping
+   *  them would leave the indicator stuck on `pending` forever — so the
+   *  last one is held here and consumed by shareStarted. */
+  private bufferedShareAudio: ShareAudioState | null = null;
 
   shareStarted(trackId: string, dimensions: { width: number; height: number } | null) {
     if (this.voiceState.kind !== 'joined' || this.voiceState.share.kind !== 'starting') {
@@ -367,10 +375,12 @@ class AppStore implements AppState {
     }
     // A share that asked for sound starts `pending`, not `live`: the
     // backend publishes the audio track only once a capture backend has
-    // actually announced a format, and says so with its own event.
+    // actually announced a format, and says so with its own event —
+    // which may already have arrived and been buffered.
     const audio: ShareAudioState = this.voiceState.share.withAudio
-      ? { kind: 'pending' }
+      ? this.bufferedShareAudio ?? { kind: 'pending' }
       : { kind: 'off' };
+    this.bufferedShareAudio = null;
     this.voiceState = {
       ...this.voiceState,
       share: { kind: 'active', trackId, dimensions, audio },
@@ -379,6 +389,9 @@ class AppStore implements AppState {
 
   shareAudioStarted() {
     if (this.voiceState.kind !== 'joined' || this.voiceState.share.kind !== 'active') {
+      if (this.voiceState.kind === 'joined' && this.voiceState.share.kind === 'starting') {
+        this.bufferedShareAudio = { kind: 'live' };
+      }
       return;
     }
     this.voiceState = {
@@ -393,6 +406,9 @@ class AppStore implements AppState {
    *  lose the thing the user actually came for. */
   shareAudioUnavailable(reason: string) {
     if (this.voiceState.kind !== 'joined' || this.voiceState.share.kind !== 'active') {
+      if (this.voiceState.kind === 'joined' && this.voiceState.share.kind === 'starting') {
+        this.bufferedShareAudio = { kind: 'unavailable', reason };
+      }
       return;
     }
     this.voiceState = {
@@ -416,6 +432,7 @@ class AppStore implements AppState {
       console.warn('[voiceState] shareFailed ignored, voice=', this.voiceState.kind);
       return;
     }
+    this.bufferedShareAudio = null;
     this.voiceState = {
       ...this.voiceState,
       share: { kind: 'failed', error },
@@ -429,6 +446,7 @@ class AppStore implements AppState {
     if (this.voiceState.kind !== 'joined') {
       return;
     }
+    this.bufferedShareAudio = null;
     this.voiceState = { ...this.voiceState, share: { kind: 'idle' } };
   }
 

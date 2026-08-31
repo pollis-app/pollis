@@ -81,7 +81,7 @@ export type Selection =
  *
  *  Pollis's own output is excluded on all three, so sharing sound during
  *  a call never sends participants their own voices back. */
-export type SharedAudioScope = "source" | "system"; 
+export type SharedAudioScope = "source" | "system";
 
 /** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`.
  *  There is intentionally no "paused" / "stalled" concept on either end:
