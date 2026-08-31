@@ -134,6 +134,64 @@ pub(crate) async fn lookup_avatar_url_for_identity(
     lookup_avatar_url(state, user_id).await
 }
 
+/// The distinct user ids an avatar batch should actually ask the DS about.
+///
+/// Split out of [`lookup_avatar_urls_for_identities`] because it is the half
+/// that can silently go wrong: an identity with no recognised user (an
+/// unresolved `v-…`/`w-…` pseudonym, or an internal participant like `server`)
+/// must be dropped rather than forwarded as if it were a user id, and two
+/// devices of the same person must collapse to one id instead of widening the
+/// request. Both are invisible in a passing happy path.
+fn avatar_lookup_user_ids(identities: &[String]) -> Vec<String> {
+    let mut user_ids: Vec<String> = identities
+        .iter()
+        .filter_map(|i| user_id_from_identity(i).map(|s| s.to_string()))
+        .collect();
+    user_ids.sort();
+    user_ids.dedup();
+    user_ids
+}
+
+/// Avatar URLs for a BATCH of internal participant identities, keyed by the
+/// identity that was passed in. ONE request, whatever the size of the room.
+///
+/// The join path seeds a whole roster at once, and calling
+/// [`lookup_avatar_url_for_identity`] in a loop there cost one DS round trip per
+/// person already in the channel — sequential, and squarely between the user and
+/// a usable call. Identities with no recognised user, and users with no avatar,
+/// are simply absent from the map.
+///
+/// Best-effort: on a failed lookup every caller gets `None`, because a missing
+/// avatar must never cost the roster.
+pub(crate) async fn lookup_avatar_urls_for_identities(
+    state: &Arc<AppState>,
+    identities: &[String],
+) -> HashMap<String, String> {
+    let user_ids = avatar_lookup_user_ids(identities);
+    if user_ids.is_empty() {
+        return HashMap::new();
+    }
+    let by_user: HashMap<String, String> =
+        match crate::commands::ds_reads::users(state, user_ids, None).await {
+            Ok(users) => users
+                .into_iter()
+                .filter_map(|u| u.avatar_url.map(|url| (u.id, url)))
+                .collect(),
+            Err(e) => {
+                eprintln!("[voice] batched avatar lookup failed: {e}");
+                return HashMap::new();
+            }
+        };
+    identities
+        .iter()
+        .filter_map(|identity| {
+            let uid = user_id_from_identity(identity)?;
+            let url = by_user.get(uid)?.clone();
+            Some((identity.clone(), url))
+        })
+        .collect()
+}
+
 /// Fill in `avatar_url` for each participant. ONE request per call, not per
 /// participant. Best-effort — if the lookup fails the participants are returned
 /// with `avatar_url = None`, because a missing avatar must never cost the
@@ -168,4 +226,50 @@ pub(super) async fn enrich_participants_with_avatars(
         }
     }
     participants
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn avatar_batch_collapses_a_users_two_devices_into_one_id() {
+        // The join path seeds the local participant plus every remote one, and
+        // one person on two devices is two identities. The request must not
+        // grow because of it.
+        let got = avatar_lookup_user_ids(&ids(&["voice-u1:dev-a", "voice-u1:dev-b"]));
+        assert_eq!(got, ids(&["u1"]));
+    }
+
+    #[test]
+    fn avatar_batch_drops_identities_that_name_no_user() {
+        // Unresolved wire pseudonyms and the DS's own participants are not
+        // people. Forwarding them would ask the directory about ids that cannot
+        // exist — a failure the per-identity helper used to absorb by returning
+        // None before any request was built.
+        let got = avatar_lookup_user_ids(&ids(&[
+            "v-abcdef",
+            "w-abcdef",
+            "server",
+            "pollis-ds",
+            "voice-u1:dev-a",
+        ]));
+        assert_eq!(got, ids(&["u1"]));
+    }
+
+    #[test]
+    fn avatar_batch_of_nothing_asks_for_nothing() {
+        assert!(avatar_lookup_user_ids(&[]).is_empty());
+        assert!(avatar_lookup_user_ids(&ids(&["v-abcdef"])).is_empty());
+    }
+
+    #[test]
+    fn avatar_batch_keeps_every_distinct_user() {
+        let got = avatar_lookup_user_ids(&ids(&["voice-u2:dev-a", "voice-u1:dev-a", "u3:dev-a"]));
+        assert_eq!(got, ids(&["u1", "u2", "u3"]));
+    }
 }

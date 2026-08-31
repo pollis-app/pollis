@@ -49,9 +49,14 @@ export type VoiceEvent =
 export interface JoinTimings {
   channel_id: string;
   jwt_mint_ms: number;
+  /** MLS resolve + catch-up + exporter-secret derivation. Runs before the
+   *  LiveKit connect, so it is pure added latency. */
+  e2ee_ms: number;
   room_connect_ms: number;
   mic_init_ms: number;
   first_publish_ms: number;
+  /** Pseudonym resolution + the batched avatar lookup for the seed roster. */
+  roster_ms: number;
   total_join_ms: number;
   join_started_at_ms: number;
 }
@@ -974,9 +979,11 @@ function formatJoinTimings(t: JoinTimings, intentToInvokeMs: number): string {
     `[voice/join] timings (channel=${t.channel_id}):`,
     `  intent_to_invoke: ${intentToInvokeMs}ms (setIntent → invoke('join_voice_channel'))`,
     `  ${pad('jwt_mint')}${t.jwt_mint_ms}ms`,
+    `  ${pad('e2ee')}${t.e2ee_ms}ms (MLS resolve + catch-up, blocks the connect)`,
     `  ${pad('room_connect')}${t.room_connect_ms}ms`,
-    `  ${pad('mic_init')}${t.mic_init_ms}ms`,
+    `  ${pad('mic_init')}${t.mic_init_ms}ms (concurrent with room_connect)`,
     `  ${pad('first_publish')}${t.first_publish_ms}ms`,
+    `  ${pad('roster')}${t.roster_ms}ms`,
     `  ${pad('total_join')}${t.total_join_ms}ms`,
   ].join('\n');
 }

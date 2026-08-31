@@ -246,9 +246,16 @@ impl PlaybackState {
 pub struct JoinTimings {
     pub channel_id: String,
     pub jwt_mint_ms: u64,
+    /// MLS group resolution + catch-up + exporter-secret derivation. Runs
+    /// BEFORE the LiveKit connect (the key has to be in `RoomOptions`), so it is
+    /// pure added latency and the phase most worth watching.
+    pub e2ee_ms: u64,
     pub room_connect_ms: u64,
     pub mic_init_ms: u64,
     pub first_publish_ms: u64,
+    /// Seeding the participant list: pseudonym resolution + the batched avatar
+    /// lookup for everyone already in the room.
+    pub roster_ms: u64,
     pub total_join_ms: u64,
     /// UNIX epoch ms when `join_voice_channel` started — useful for
     /// correlating with frontend click timestamps later.
