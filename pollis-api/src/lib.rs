@@ -99,8 +99,10 @@ pub mod emoji;
 pub mod groups;
 pub mod messages;
 pub mod otp;
+pub mod pins;
 pub mod profile;
 pub mod reads;
+pub mod vault;
 pub mod writes;
 
 /// A request body that knows the one path it is addressed at, and the one body
@@ -269,6 +271,23 @@ endpoints! {
     Client   groups::CreateJoinRequestBody      => "/v1/join-requests/create",           groups::JoinRequestCreated;
     Client   groups::ApproveJoinRequestBody     => "/v1/join-requests/approve",          groups::ReviewedJoinRequest;
     Client   groups::RejectJoinRequestBody      => "/v1/join-requests/reject",           groups::ReviewedJoinRequest;
+
+    // ── Pinned messages (#99) ────────────────────────────────────────────────
+    // Both content ciphertexts: pins are sealed under the conversation's Kpin,
+    // and the keystate row is Kpin itself wrapped under the MLS exporter KEK.
+    // The DS stores both and can open neither.
+    Client   pins::UpsertPinKeystateBody        => "/v1/pins/keystate",                  pins::PinKeystateUpserted;
+    Client   pins::PinMessageBody               => "/v1/pins/pin",                       StatusOk;
+    Client   pins::UnpinMessageBody             => "/v1/pins/unpin",                     StatusOk;
+    Client   pins::PinKeystateBody              => "/v1/read/pin-keystate",              pins::PinKeystateResponse;
+    Client   pins::ListPinsBody                 => "/v1/read/pins",                      pins::ListPinsResponse;
+
+    // ── Vault (#107) ─────────────────────────────────────────────────────────
+    // Opaque per-entry blobs under a key derived from the account identity
+    // key, same construction as `SaveReadCursorsBody` — see that type's docs.
+    Client   vault::SaveVaultMessageBody        => "/v1/vault/save",                     StatusOk;
+    Client   vault::DeleteVaultMessageBody      => "/v1/vault/delete",                   StatusOk;
+    Client   vault::VaultMessagesBody           => "/v1/read/vault",                     vault::VaultMessagesResponse;
 
     // ── Custom emoji (#848) ──────────────────────────────────────────────────
     Client   emoji::CreateEmojiBody             => "/v1/emoji/create",                   StatusOk;
@@ -631,6 +650,50 @@ mod tests {
                 }],
             },
             r#"{"identities":[{"identity":"v-x","user_id":"u1","name":"alice","kind":"voice"}]}"#,
+        );
+        // Pinned messages (#99): the CAS answer carries whether the wrap
+        // landed, and the read shapes carry ciphertext as base64 strings.
+        round_trip(
+            &pins::PinKeystateUpserted::Ok { updated: true },
+            r#"{"status":"ok","updated":true}"#,
+        );
+        round_trip(
+            &pins::PinKeystateResponse {
+                keystate: Some(pins::StoredPinKeystate {
+                    wrapped_kpin: "d3JhcA".into(),
+                    nonce: "bm9uY2U".into(),
+                    generation: 0,
+                    epoch: 7,
+                }),
+            },
+            r#"{"keystate":{"wrapped_kpin":"d3JhcA","nonce":"bm9uY2U","generation":0,"epoch":7}}"#,
+        );
+        round_trip(
+            &pins::ListPinsResponse {
+                pins: vec![pins::StoredPin {
+                    id: "p1".into(),
+                    conversation_id: "c1".into(),
+                    message_id: "m1".into(),
+                    pinned_by: "u1".into(),
+                    encrypted_content: "Y3Q".into(),
+                    nonce: "bm9uY2U".into(),
+                    pinned_at: "2026-01-01T00:00:00Z".into(),
+                }],
+            },
+            r#"{"pins":[{"id":"p1","conversation_id":"c1","message_id":"m1","pinned_by":"u1","encrypted_content":"Y3Q","nonce":"bm9uY2U","pinned_at":"2026-01-01T00:00:00Z"}]}"#,
+        );
+        // Vault (#107): opaque rows, byte-exact custody.
+        round_trip(
+            &vault::VaultMessagesResponse {
+                messages: vec![vault::StoredVaultMessage {
+                    id: "v1".into(),
+                    nonce: "bm9uY2U".into(),
+                    blob: "Y3Q".into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                    updated_at: "2026-01-02T00:00:00Z".into(),
+                }],
+            },
+            r#"{"messages":[{"id":"v1","nonce":"bm9uY2U","blob":"Y3Q","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-02T00:00:00Z"}]}"#,
         );
         round_trip(
             &otp::VerifyOtpResponse {

@@ -12,7 +12,8 @@
     "fallbackTitle": "رسالة مباشرة",
     "viewProfile": "عرض الملف الشخصي لـ ‎@{{name}}",
     "call": "الاتصال بـ ‎@{{name}}",
-    "returnToCall": "العودة إلى المكالمة مع ‎@{{name}}"
+    "returnToCall": "العودة إلى المكالمة مع ‎@{{name}}",
+    "pinsLabel": "الرسائل المثبتة"
   },
   "settings": {
     "pageTitle": "إعدادات المحادثة",

@@ -109,7 +109,12 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         //
         // 96 since #844 added the encrypted read-cursor sync:
         // `/v1/read-cursors/save` and `/v1/read/read-cursors`.
-        96,
+        //
+        // 104 since #99 added pinned messages (`/v1/pins/keystate`,
+        // `/v1/pins/pin`, `/v1/pins/unpin`, `/v1/read/pin-keystate`,
+        // `/v1/read/pins`) and #107 the vault (`/v1/vault/save`,
+        // `/v1/vault/delete`, `/v1/read/vault`).
+        104,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

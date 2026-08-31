@@ -28,7 +28,8 @@
   "channel": {
     "fallbackTitle": "Channel",
     "renameLabel": "Rename channel",
-    "deleteLabel": "Delete channel"
+    "deleteLabel": "Delete channel",
+    "pinsLabel": "Pinned messages"
   },
   "createChannel": {
     "pageTitle": "New Channel",

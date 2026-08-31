@@ -51,16 +51,20 @@ use crate::state::AppState;
 // so the two capture features share one frame-conversion + helper-location
 // implementation. Nothing behavioural is shared — camera owns its own
 // state, events, publish options, and lifecycle.
+pub(crate) mod audio;
 pub(crate) mod codec;
 mod commands;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) mod helper_subprocess;
 mod remote_video;
+pub(crate) mod self_echo;
 mod state;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod start_unix;
 #[cfg(target_os = "windows")]
 mod start_windows;
+#[cfg(target_os = "windows")]
+mod windows_audio;
 mod stop;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod unsupported;
@@ -133,6 +137,19 @@ pub enum ScreenShareEvent {
         source: RemoteVideoSource,
     },
     RemoteStopped { track_key: String },
+    /// The shared-audio track is live. Separate from `LocalStarted`
+    /// because audio negotiates on its own timeline: the OS can take a
+    /// moment longer to hand over an audio source than a video one, and
+    /// holding the whole share back for it would make every share feel
+    /// slower to start. The UI shows the share the instant video is up and
+    /// lights the audio indicator when this arrives.
+    LocalAudioStarted,
+    /// Audio was requested and cannot be delivered — no capturable output
+    /// device, a PipeWire-less Linux session, a Windows build predating
+    /// process-loopback capture. **The share keeps running**; this is a
+    /// downgrade to video-only, not a failure, and the UI says so without
+    /// tearing anything down.
+    LocalAudioUnavailable { message: String },
 }
 
 // ── Module-wide constants ─────────────────────────────────────────────────

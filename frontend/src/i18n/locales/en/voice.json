@@ -65,7 +65,14 @@
     "cancelLabel": "Cancel screen share",
     "noDisplays": "No displays available.",
     "noWindows": "No windows available.",
-    "untitledWindow": "Untitled window"
+    "untitledWindow": "Untitled window",
+    "audioToggle": "Share sound",
+    "audioScopeSource": "Shares the audio of whatever you pick.",
+    "audioScopeSystem": "Shares everything your computer is playing.",
+    "audioExcludesCall": "The call itself is never included.",
+    "audioLive": "Sound on",
+    "audioPending": "Starting sound…",
+    "audioOffLabel": "Sharing without sound"
   },
   "camera": {
     "pickerHeading": "Choose a camera",
@@ -159,7 +166,9 @@
     "fpsHint": "{{hint}}. Higher is smoother for video and gameplay but uses more CPU and bandwidth; drop to 15 fps for documents or a constrained machine/network. Takes effect on your next screen share.",
     "behaviorHeading": "Behavior",
     "autoJoinVoice": "Auto Join Voice",
-    "autoJoinVoiceDescription": "Automatically join voice when opening a voice channel. Disable to preview who's in the channel before joining."
+    "autoJoinVoiceDescription": "Automatically join voice when opening a voice channel. Disable to preview who's in the channel before joining.",
+    "screenShareAudio": "Share sound by default",
+    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
   },
   "joinError": {
     "unreachable": "Couldn't reach the voice server — check your connection and try again.",

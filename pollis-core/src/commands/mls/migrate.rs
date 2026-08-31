@@ -306,6 +306,11 @@ pub(super) async fn migrate_to_current_suite_if_due(
     // The exporter secret is per-group and we are now on a different group, so a
     // live voice room must re-derive immediately.
     crate::commands::voice_e2ee::on_mls_epoch_changed(state, conversation_id).await;
+    // The successor lineage's exporter is brand new, so the migrator — who by
+    // construction holds the conversation's Kpin if anyone does — re-wraps it
+    // under (successor generation, epoch) so pins cross the suite boundary
+    // (#99). Content is untouched, exactly like message history.
+    crate::commands::pinned_messages::maybe_rewrap_pin_key(state, conversation_id).await;
     drop(mls_guard);
 
     // Report our position on the NEW lineage so the retention floor follows us

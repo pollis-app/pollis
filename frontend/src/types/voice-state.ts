@@ -122,16 +122,36 @@ export type ShareState =
        *  show "stuck?" UI after N seconds and to cap the publish
        *  timeout from the outside. */
       startedAt: number;
+      /** Whether the user asked to share the source's sound. Carried
+       *  through `starting` because audio negotiates on its own timeline
+       *  and the `active` state has to know whether to wait for it or
+       *  report it off. */
+      withAudio: boolean;
     }
   | {
       kind: 'active';
       trackId: string;
       dimensions: { width: number; height: number } | null;
+      audio: ShareAudioState;
     }
   | {
       kind: 'failed';
       error: string;
     };
+
+/** Whether a live share is carrying the source's sound, and why not when
+ *  it isn't.
+ *
+ *  A union rather than a boolean because "audio is off" and "audio was
+ *  asked for and this machine cannot provide it" need different UI: the
+ *  first is silent, the second has to say so. `pending` is the window
+ *  between video going live and the OS handing over an audio source —
+ *  brief, but long enough to matter on a slow first activation. */
+export type ShareAudioState =
+  | { kind: 'off' }
+  | { kind: 'pending' }
+  | { kind: 'live' }
+  | { kind: 'unavailable'; reason: string };
 
 /** Local webcam lifecycle. Mirrors `ShareState` — only meaningful inside a
  *  `joined` voice state, since a camera publishes into the active voice

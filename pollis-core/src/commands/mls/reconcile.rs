@@ -1055,6 +1055,11 @@ pub async fn reconcile_group_mls_impl(
     // epoch's key while every other member has already rotated.
     if outcome.epoch_after > outcome.epoch_before {
         crate::commands::voice_e2ee::on_mls_epoch_changed(state, &conversation_id).await;
+        // Same trigger for the pin key (#99): the committer is exactly the
+        // device most likely to hold Kpin, and re-wrapping here is what lets
+        // a member added by THIS commit (Welcome, at the new epoch) unwrap
+        // immediately instead of waiting for a later pass.
+        crate::commands::pinned_messages::maybe_rewrap_pin_key(state, &conversation_id).await;
     }
 
     // Roster-change banners. Fire only when an actual epoch bump happened

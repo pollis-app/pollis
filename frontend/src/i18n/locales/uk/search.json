@@ -46,7 +46,9 @@
     "savedName": "Збережене",
     "savedKeywords": "збережене закладки закладка позначене пізніше посилання saved bookmarks",
     "arcadeName": "Аркада",
-    "arcadeKeywords": "аркада гра астероїди корабель стріляти пасхалка грати arcade game"
+    "arcadeKeywords": "аркада гра астероїди корабель стріляти пасхалка грати arcade game",
+    "vaultName": "Сейф",
+    "vaultKeywords": "сейф vault нотатки особисте сховище приватне зашифроване файли"
   },
   "page": {
     "title": "Пошук"

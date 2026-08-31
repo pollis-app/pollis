@@ -1,0 +1,40 @@
+{
+  "title": "Vault",
+  "placeholder": "Drop a note, link or file — only you can read it…",
+  "empty": "Your vault is empty. Notes, links and files you drop here are end-to-end encrypted and follow you to every device.",
+  "searchPlaceholder": "Search your vault…",
+  "searchEmpty": "Nothing in your vault matches that.",
+  "clearSearch": "Clear search",
+  "viewToggle": "Vault view",
+  "viewChat": "Chat",
+  "viewMedia": "Media",
+  "entry": {
+    "pinned": "Pinned",
+    "edited": "(edited)",
+    "pin": "Pin entry",
+    "unpin": "Unpin entry",
+    "edit": "Edit entry",
+    "delete": "Delete entry"
+  },
+  "edit": {
+    "heading": "Edit entry",
+    "cancel": "Cancel edit",
+    "save": "Save",
+    "saving": "Saving…"
+  },
+  "delete": {
+    "heading": "Delete entry",
+    "body": "Delete this entry from your vault on every device? This cannot be undone.",
+    "cancel": "Cancel delete",
+    "confirm": "Delete",
+    "deleting": "Deleting…"
+  },
+  "media": {
+    "empty": "No media in your vault yet — drop images or files into the chat view.",
+    "filesHeading": "Files",
+    "close": "Close viewer",
+    "previous": "Previous",
+    "next": "Next",
+    "position": "{{index}} / {{total}}"
+  }
+}

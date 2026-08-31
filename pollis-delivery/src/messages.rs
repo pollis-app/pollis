@@ -1270,6 +1270,7 @@ pub async fn sweep_envelope_gc(conn: &Connection, stale: &str) -> anyhow::Result
     // never named a real envelope. Runs unconditionally: even a fully-pruned DB
     // (the loop visited nothing) may hold such orphans.
     conn.execute(REAP_ORPHANED_ATTACHMENT_REFS_SQL, ()).await?;
+    conn.execute(REAP_ORPHANED_VAULT_REFS_SQL, ()).await?;
     Ok(SweepReport {
         visited: conversations.len(),
         metrics,
@@ -1325,11 +1326,22 @@ fn min_opt(a: Option<String>, b: Option<String>) -> Option<String> {
 // A declaration whose `message_id` names an envelope that never existed (a forged
 // register) or has already gone simply never counts — it is inert, and reaped in
 // bulk by [`sweep_envelope_gc`] so `attachment_ref` stays bounded.
+//
+// The second leg is the VAULT's (#107): a `vault_attachment_ref` row joined to a
+// live `vault_message` keeps the object alive by exactly the same construction —
+// the reference derives from the entry's existence, `/v1/vault/save` replaces the
+// set on every save, and `/v1/vault/delete` drops it with the entry. Without this
+// leg, a file that lives only in someone's vault counts as unreferenced the
+// moment any client's cleanup pass looks at its hash, and a personal "cloud
+// drive" that silently loses files is not one.
 macro_rules! live_ref_exists {
     () => {
-        "EXISTS (SELECT 1 FROM attachment_ref ar \
-                 JOIN message_envelope me ON me.id = ar.message_id \
-                 WHERE ar.content_hash = ?1)"
+        "(EXISTS (SELECT 1 FROM attachment_ref ar \
+                  JOIN message_envelope me ON me.id = ar.message_id \
+                  WHERE ar.content_hash = ?1) \
+          OR EXISTS (SELECT 1 FROM vault_attachment_ref var \
+                     JOIN vault_message vm ON vm.id = var.vault_message_id \
+                     WHERE var.content_hash = ?1))"
     };
 }
 
@@ -1353,6 +1365,14 @@ const COLLECT_UNREFERENCED_OBJECT_SQL: &str = concat!(
 const REAP_ORPHANED_ATTACHMENT_REFS_SQL: &str = "\
 DELETE FROM attachment_ref \
  WHERE NOT EXISTS (SELECT 1 FROM message_envelope me WHERE me.id = attachment_ref.message_id)";
+
+/// The vault leg of the same hygiene: reap reference rows whose vault entry is
+/// gone. `/v1/vault/delete` already removes them inline, so this only catches
+/// rows orphaned by account teardown or a crash between the two deletes — the
+/// liveness predicate is correct either way.
+const REAP_ORPHANED_VAULT_REFS_SQL: &str = "\
+DELETE FROM vault_attachment_ref \
+ WHERE NOT EXISTS (SELECT 1 FROM vault_message vm WHERE vm.id = vault_attachment_ref.vault_message_id)";
 
 pub async fn register_attachment(
     State(state): State<AppState>,

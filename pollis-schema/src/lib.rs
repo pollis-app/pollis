@@ -202,6 +202,16 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "read_cursor_sync",
         include_str!("../migrations/000018_read_cursor_sync.sql"),
     ),
+    (
+        19,
+        "pinned_messages",
+        include_str!("../migrations/000019_pinned_messages.sql"),
+    ),
+    (
+        20,
+        "vault_message",
+        include_str!("../migrations/000020_vault_message.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

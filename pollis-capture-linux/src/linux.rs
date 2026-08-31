@@ -22,6 +22,12 @@ struct Args {
     /// skips the session-type probe entirely (V4L2 is display-agnostic).
     #[arg(long, value_enum, default_value_t = Mode::Screen)]
     mode: Mode,
+    /// Also capture the machine's audio output and stream it alongside the
+    /// video. A spawn-time flag rather than a protocol message because the
+    /// portal dialog is this helper's picker — there is no Select round
+    /// trip to carry the decision on, unlike macOS. Ignored in camera mode.
+    #[arg(long, default_value_t = false)]
+    audio: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -142,10 +148,10 @@ pub fn run() -> Result<()> {
         .enable_all()
         .build()?;
 
-    rt.block_on(async move { run_async(&args.socket, args.mode).await })
+    rt.block_on(async move { run_async(&args.socket, args.mode, args.audio).await })
 }
 
-async fn run_async(socket_path: &str, mode: Mode) -> Result<()> {
+async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
     eprintln!("[capture] connecting to parent socket {socket_path} (mode={mode:?})");
     let mut sock = UnixStream::connect(socket_path)
         .await
@@ -163,12 +169,12 @@ async fn run_async(socket_path: &str, mode: Mode) -> Result<()> {
     let backend = probe_backend().await;
 
     match backend {
-        Backend::Portal => run_portal(&mut sock).await,
+        Backend::Portal => run_portal(&mut sock, audio).await,
         Backend::X11 => {
             // The X11 backend is synchronous (xcb + SHM) and has no
             // async work; run it on a blocking thread and bridge frames
             // back over the same channel-to-socket drain.
-            run_x11(&mut sock).await
+            run_x11(&mut sock, audio).await
         }
         Backend::Unsupported => {
             // Distinct from user-denial. The parent maps this onto a
@@ -190,7 +196,7 @@ async fn run_async(socket_path: &str, mode: Mode) -> Result<()> {
 /// unchanged from before the split — only the wire encode now goes
 /// through the shared `pollis-capture-proto` crate instead of the
 /// hand-rolled `write_msg`/`send_error` that used to live here.
-async fn run_portal(sock: &mut UnixStream) -> Result<()> {
+async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
     eprintln!("[capture] opening portal (waits for user picker)");
 
     let (node_id, fd) = match open_portal().await {
@@ -234,21 +240,34 @@ async fn run_portal(sock: &mut UnixStream) -> Result<()> {
     // task (async world) that owns the socket. Capacity 2 with
     // last-frame-wins backpressure: if the socket can't keep up we drop
     // frames rather than block the capture thread.
-    let (tx, mut rx) = mpsc::channel::<CaptureMsg>(2);
+    //
+    // Deeper when audio shares the channel: a dropped video frame is a
+    // stale pixel the viewer never notices, but a dropped audio block is
+    // an audible click, and at capacity 2 a burst of video would evict
+    // every block behind it.
+    let (tx, mut rx) = mpsc::channel::<CaptureMsg>(if audio { 16 } else { 2 });
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
 
     eprintln!("[capture] spawning pipewire video thread");
+    let tx_for_video = tx.clone();
     let pw_thread = std::thread::Builder::new()
         .name("pollis-capture-pw".into())
         .spawn(move || {
             eprintln!("[capture/pw] thread entered");
-            if let Err(e) = pw::run_pipewire(node_id, fd, tx, stop_for_thread) {
+            if let Err(e) = pw::run_pipewire(node_id, fd, tx_for_video, stop_for_thread) {
                 eprintln!("[capture/pw] error: {e}");
             }
             eprintln!("[capture/pw] thread exiting");
         })
         .context("spawn pipewire thread")?;
+
+    // Audio rides the same channel to the same socket, on its own thread
+    // and its own PipeWire connection. Never fails the share: the helper
+    // reports an `audio:`-prefixed error and the parent downgrades to
+    // video-only.
+    let audio_thread = audio.then(|| crate::audio::spawn(tx.clone(), Arc::clone(&stop)));
+    drop(tx);
 
     let result: Result<()> = async {
         while let Some(msg) = rx.recv().await {
@@ -263,32 +282,44 @@ async fn run_portal(sock: &mut UnixStream) -> Result<()> {
 
     stop.store(true, Ordering::Relaxed);
     drop(pw_thread);
+    drop(audio_thread);
     result
 }
 
 /// The X11 backend (issue #281). Spawns the synchronous xcb/SHM capture
 /// loop on its own thread and drains its frames to the socket exactly
 /// the way the portal path drains the pipewire thread.
-async fn run_x11(sock: &mut UnixStream) -> Result<()> {
+async fn run_x11(sock: &mut UnixStream, audio: bool) -> Result<()> {
     eprintln!("[capture] starting X11 (xcb/SHM/RandR) backend");
 
-    let (tx, mut rx) = mpsc::channel::<CaptureMsg>(2);
+    // Deeper than the portal path's 2: video keeps last-frame-wins
+    // semantics, but audio cannot be dropped as freely — a discarded
+    // block is an audible gap, not a stale pixel — and here the two share
+    // one channel.
+    let (tx, mut rx) = mpsc::channel::<CaptureMsg>(if audio { 16 } else { 2 });
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
 
+    let tx_for_video = tx.clone();
     let x11_thread = std::thread::Builder::new()
         .name("pollis-capture-x11".into())
         .spawn(move || {
             eprintln!("[capture/x11] thread entered");
-            if let Err(e) = crate::x11::run_x11_capture(tx.clone(), stop_for_thread) {
+            if let Err(e) = crate::x11::run_x11_capture(tx_for_video.clone(), stop_for_thread) {
                 eprintln!("[capture/x11] error: {e}");
-                let _ = tx.blocking_send(CaptureMsg::Error {
+                let _ = tx_for_video.blocking_send(CaptureMsg::Error {
                     message: format!("x11: {e}"),
                 });
             }
             eprintln!("[capture/x11] thread exiting");
         })
         .context("spawn x11 thread")?;
+
+    // PipeWire audio is a kernel/session-level service, independent of the
+    // display server — so an Xorg session shares sound exactly the way a
+    // Wayland one does.
+    let audio_thread = audio.then(|| crate::audio::spawn(tx.clone(), Arc::clone(&stop)));
+    drop(tx);
 
     let result: Result<()> = async {
         while let Some(msg) = rx.recv().await {
@@ -303,6 +334,7 @@ async fn run_x11(sock: &mut UnixStream) -> Result<()> {
 
     stop.store(true, Ordering::Relaxed);
     drop(x11_thread);
+    drop(audio_thread);
     result
 }
 
@@ -670,9 +702,11 @@ mod pw {
             .unwrap_or(0)
     }
 
-    // Audio thread removed — see issue #175. The system sink monitor
-    // capture worked end-to-end but loops voice back through the
-    // call. Per-window audio needs the portal's `accept_audio` option
-    // (no loopback by construction) which requires raw zbus calls
-    // because ashpd doesn't expose it. Re-add when that lands.
+    // Audio lives in `crate::audio`, not here. It was pulled from this
+    // module under issue #175 because sink-monitor capture loops the call
+    // back to everyone on it; #884 restores it with that loop cancelled in
+    // the parent, where the exact played signal is known — see
+    // `pollis-core`'s `screenshare::self_echo`. It also no longer shares
+    // this connection: audio must work on the X11 backend too, and that
+    // path has no portal fd.
 }

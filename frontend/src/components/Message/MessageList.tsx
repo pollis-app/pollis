@@ -21,6 +21,10 @@ import {
   useSavedMessageIds,
   useToggleSavedMessage,
 } from "../../hooks/queries/useBookmarks";
+import {
+  usePinnedMessageIds,
+  useTogglePinnedMessage,
+} from "../../hooks/queries/usePins";
 import { useMessagePermalink } from "../../hooks/useMessagePermalink";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { useConversationReceipts } from "../../hooks/queries/useReceipts";
@@ -151,6 +155,10 @@ interface MessageListProps {
    * composer. Only the surface that owns the app's main composer passes it —
    * exactly one mounted list may lend the nav store its context. */
   focusComposer?: () => void;
+  /** The channel or DM id pins are recorded against (#99) — NOT the MLS
+   * group id `conversationId` carries. Omit on surfaces without pinning
+   * (search results, threads) and the affordance doesn't render. */
+  pinsConversationId?: string | null;
 }
 
 export const MessageList: React.FC<MessageListProps> = observer(({
@@ -162,6 +170,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   onReply,
   onOpenThread,
   threadReplyCounts,
+  pinsConversationId = null,
   onEdit,
   onDelete,
   onScrollToMessage,
@@ -489,6 +498,9 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   // ── Saved messages + permalinks (#854) ──────────────────────────────────
   const savedMessageIds = useSavedMessageIds();
   const toggleSavedMutation = useToggleSavedMessage();
+  // ── Pinned messages (#99): one query + one id-set for the whole list. ────
+  const pinnedMessageIds = usePinnedMessageIds(pinsConversationId);
+  const togglePinMutation = useTogglePinnedMessage();
   const { copyPermalink } = useMessagePermalink();
   // Which message's copy-link button is currently showing an outcome, and
   // which outcome (#889). One at a time: the affordance is per-message but the
@@ -518,6 +530,25 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   toggleSavedRef.current = toggleSavedMutation;
   const handleToggleSave = useCallback((messageId: string) => {
     toggleSavedRef.current.mutate(messageId);
+  }, []);
+
+  // Same ref-pinning as the bookmark toggle, same reason (#874).
+  const togglePinRef = useRef(togglePinMutation);
+  togglePinRef.current = togglePinMutation;
+  const pinnedIdsRef = useRef(pinnedMessageIds);
+  pinnedIdsRef.current = pinnedMessageIds;
+  const pinsConversationIdRef = useRef(pinsConversationId);
+  pinsConversationIdRef.current = pinsConversationId;
+  const handleTogglePin = useCallback((messageId: string) => {
+    const conversationId = pinsConversationIdRef.current;
+    if (!conversationId) {
+      return;
+    }
+    togglePinRef.current.mutate({
+      conversationId,
+      messageId,
+      isPinned: pinnedIdsRef.current.has(messageId),
+    });
   }, []);
 
   const sortedMessagesRef = useRef(sortedMessages);
@@ -825,6 +856,8 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         onScrollToReply={scrollToMessage}
         isSaved={savedMessageIds.has(message.id)}
         onToggleSave={handleToggleSave}
+        isPinned={pinnedMessageIds.has(message.id)}
+        onTogglePin={pinsConversationId ? handleTogglePin : undefined}
         onCopyLink={handleCopyLink}
         copyLinkState={
           copyLinkState?.messageId === message.id ? copyLinkState.state : "idle"

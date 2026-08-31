@@ -1,5 +1,17 @@
 # Turso Full-Text Search: Research Findings
 
+> **Superseded in part by #850, and the conclusion held.** Message search now
+> exists and it is entirely on-device: an FTS5 contentless index inside the
+> encrypted local SQLCipher database, kept in sync by triggers. See
+> [`.codesight/wiki/search.md`](../../.codesight/wiki/search.md). What is still
+> current below is the *reasoning* — server-side search over E2EE bodies is
+> impossible by construction and must never be proposed. What is stale is the
+> line about `search_messages` doing "the right thing" with a `LIKE` query: that
+> was a 40–57 ms full table scan at 100k rows with no ranking, no filters and no
+> index, and it is gone. Also note the client no longer holds a database handle
+> at all (#987), so the "metadata FTS on Turso" opportunity below would today be
+> a Delivery Service endpoint, not a client query.
+
 ## Summary
 
 Turso has built a native full-text search (FTS) engine, but it lives in their **new in-process "turso" database** (a complete Rust rewrite of SQLite), not in the older **libSQL fork** that Pollis currently uses via the `libsql` crate. For the hosted Turso cloud product, traditional SQLite **FTS5** virtual tables are supported and work via the `libsql` crate. The new Tantivy-powered FTS is experimental and not yet available on hosted Turso cloud.

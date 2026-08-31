@@ -319,6 +319,13 @@ pub struct VoiceState {
     /// MLS epoch the current voice key was derived at. Suppresses duplicate
     /// rotations and lets the rotation hook skip when nothing has changed.
     pub e2ee_epoch: u64,
+    /// Where a screen share capturing system audio parks its echo
+    /// canceller so the mixer can feed it the signal about to hit the
+    /// speaker. See `commands::screenshare::self_echo` for why the shared
+    /// audio has to have the call subtracted out of it. `None` whenever no
+    /// share is capturing audio, which is the overwhelming majority of the
+    /// time — the mixer's cost is then one uncontended lock per 10 ms tick.
+    pub shared_audio_render: crate::commands::screenshare::self_echo::SelfEchoSlot,
 }
 
 impl Default for VoiceState {
@@ -351,6 +358,7 @@ impl VoiceState {
             e2ee_key_provider: None,
             e2ee_mls_group_id: None,
             e2ee_epoch: 0,
+            shared_audio_render: Arc::new(Mutex::new(None)),
         }
     }
 }

@@ -956,6 +956,7 @@
           </div>
           <ul class="ln-toc-list">
             <li><a href="#attachments">Photos and files, encrypted before they leave</a><span class="ln-toc-time">4 min</span></li>
+            <li><a href="#on-device-search">Why search happens on your device</a><span class="ln-toc-time">3 min</span></li>
           </ul>
         </div>
 
@@ -1604,6 +1605,67 @@ Time runs left to right throughout: a one-way key chain that will not reverse, t
           decrypts on demand in <a
             href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/media_server.rs"
             target="_blank" rel="noopener noreferrer">media_server.rs</a>.
+        </p>
+      </section>
+
+      <!-- ═══ On-device search (#850) ═════════════════════════════════════ -->
+      <section class="ln-section" id="on-device-search">
+        <div class="ln-eyebrow">Files &amp; media</div>
+        <h2>Why search happens on your device</h2>
+
+        <div class="ln-prose">
+          <p>Every other chat app searches your messages on its servers. Pollis cannot, and that is
+            the point. Your message bodies are encrypted before they leave your device and the server
+            only ever holds the ciphertext — so there is nothing there for a server-side search to
+            read. A search box that worked on the server would be a search box that proved the
+            encryption did not.</p>
+          <p>So search runs entirely on your machine. Pollis keeps a full-text index inside the same
+            encrypted local database that holds your decrypted messages, updates it as messages
+            arrive, edit and delete, and queries it locally. Nothing about what you searched for, or
+            what you found, is sent anywhere. Nobody can be asked to hand it over, because nobody
+            else has it.</p>
+          <p>That has a real consequence, and it is better to say it plainly than to let you discover
+            it: <strong>search covers what this device holds, which is less than everything you have
+            ever been part of.</strong> A message can be missing for reasons that have nothing to do
+            with your search terms.</p>
+        </div>
+
+        <dl class="ln-sees">
+          <div class="ln-sees-row"><dt>Before you joined</dt><dd>The group encryption Pollis uses
+            (MLS) gives a new member no ability to read anything sent before they arrived. There is no
+            key for it, on any device, ever. See <a href="#joining-leaving">joining and leaving</a>.</dd></div>
+          <div class="ln-sees-row"><dt>A brand-new device</dt><dd>Adding a device starts it empty.
+            Pollis deliberately has no server-side backup of your message keys — that backup is the
+            thing that would let the server, or anyone who compelled it, read your history.</dd></div>
+          <div class="ln-sees-row"><dt>Conversations you have not opened here</dt><dd>Messages land in
+            a device's local store when that device reads the conversation. A channel you have never
+            scrolled on this laptop has nothing stored on it yet.</dd></div>
+          <div class="ln-sees-row"><dt>Outside your history window</dt><dd>If you set a local
+            retention window (30, 90 or 365 days), older messages are deleted from this device. Search
+            then covers exactly that window. The default is Forever.</dd></div>
+          <div class="ln-sees-row"><dt>Deleted messages</dt><dd>Deleting a message removes its text
+            from the local database. It is not recoverable, and it is not searchable. That is the
+            correct behaviour for a delete.</dd></div>
+        </dl>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The trade this makes</div>
+          <p>An on-device index is a second copy of your message text, in searchable form, sitting on
+            your disk — so it lives inside the encrypted database with everything else, never in a
+            separate file beside it. It also costs disk: roughly 40% on top of what your messages
+            already take. In exchange, searching is instant, works with no network at all, and is
+            invisible to the server by construction rather than by promise. Filenames of things you
+            were sent are searchable too; their <em>contents</em> are not, which would mean decrypting
+            and reading every file you have ever received.</p>
+        </div>
+
+        <p class="ln-deeper">
+          The rigorous version: the SQLite FTS5 index and the triggers that keep it honest in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/db/local_schema.sql"
+            target="_blank" rel="noopener noreferrer">local_schema.sql</a>, and the query parser,
+          ranking and snippets in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/messages/search.rs"
+            target="_blank" rel="noopener noreferrer">search.rs</a>.
         </p>
       </section>
 

@@ -398,6 +398,76 @@ check). Last-writer-wins is safe because the merge is a client-side `max()` over
 per-conversation positions that only move forward. What the server still learns:
 that the blob changed, its size bucket, and when.
 
+### pin_keystate _(migration 000019, #99)_
+- `conversation_id` TEXT PK _(the MLS conversation — group id or DM id, same key as `mls_group_info`)_
+- `wrapped_kpin` BLOB NOT NULL _(AES-256-GCM ciphertext of the 32-byte pin master key under the epoch's exporter-derived KEK)_
+- `nonce` BLOB NOT NULL _(12 bytes, fresh per re-wrap)_
+- `generation` INTEGER NOT NULL DEFAULT 0
+- `epoch` INTEGER NOT NULL
+- `updated_at` TEXT NOT NULL DEFAULT now
+- `updated_by_device_id` TEXT NOT NULL _(diagnostic; authz is the signed request)_
+
+One mutable row per MLS conversation: the CURRENT wrap of `Kpin`, the key every
+pin snapshot in the conversation is sealed under. Re-wrapped (~60 bytes) whenever
+the epoch advances — O(1) per commit regardless of pin count — under the same
+lexicographic `(generation, epoch)` CAS as `mls_group_info`, so a stale wrap can
+never roll the row back to an epoch a removed member could still derive. A MINT
+(`mint: true` on `POST /v1/pins/keystate`) is insert-only — refused whenever any
+row exists, even at a newer epoch — which is what makes a key fork
+unrepresentable when two devices race to create the first key. The DS can open
+neither this wrap nor the pins it protects. Purged with its conversation, and
+deliberately NOT purged when a member leaves (the remaining members' pin access
+lives in this row).
+
+### pinned_message _(migration 000019, #99)_
+- `id` TEXT PK _(pin ULID)_
+- `conversation_id` TEXT NOT NULL _(the channel or DM the message lives in)_
+- `message_id` TEXT NOT NULL _(no FK — a pin snapshot deliberately outlives envelope GC)_
+- `pinned_by` TEXT NOT NULL
+- `encrypted_content` BLOB NOT NULL _(AES-256-GCM under the conversation's `Kpin`: a padded JSON snapshot of the message)_
+- `nonce` BLOB NOT NULL _(12 bytes)_
+- `pinned_at` TEXT NOT NULL DEFAULT now
+- UNIQUE `(conversation_id, message_id)`; index `(conversation_id, pinned_at DESC)`
+
+Written once at pin time, never re-encrypted. The snapshot repeats
+`message_id`/`conversation_id` INSIDE the ciphertext so a spliced row is detected
+client-side instead of rendering as a relocated pin. Membership gates every read
+and write (`writes::is_member` accepts all three id kinds). Rows a departing user
+pinned go with their account; the conversation keeps other members' pins.
+
+### vault_message _(migration 000020, #107)_
+- `id` TEXT PK _(entry ULID, minted client-side, stable across edits)_
+- `user_id` TEXT NOT NULL _(owner; bound to the authenticated user on every touch)_
+- `nonce` BLOB NOT NULL _(12 bytes, fresh per save)_
+- `blob` BLOB NOT NULL _(AES-256-GCM ciphertext + tag over the padded entry JSON)_
+- `created_at` TEXT NOT NULL _(client-supplied; kept on edits)_
+- `updated_at` TEXT NOT NULL DEFAULT now
+- index `(user_id, created_at DESC)`
+
+The Vault: `read_cursor_sync`'s construction per entry — HKDF-SHA256 from the
+ACCOUNT identity key (info `pollis-vault-v1`) → AES-256-GCM — so every enrolled
+device decrypts every entry and the DS decrypts none. This is the stated,
+cryptographic exception to accepted loss (2): a new device starts FULL here. The
+entry body, its pinned flag and its attachment references all live inside the
+ciphertext; the upsert's update arm carries `WHERE vault_message.user_id = ?`
+so a colliding ULID from another account is a refused write, not an overwrite.
+Hard-deleted on entry delete and purged with the account.
+
+### vault_attachment_ref _(migration 000020, #107)_
+- `content_hash` TEXT NOT NULL
+- `vault_message_id` TEXT NOT NULL
+- `created_at` TEXT NOT NULL DEFAULT now
+- PK `(content_hash, vault_message_id)`; index on `vault_message_id`
+
+The vault's leg of the attachment-GC liveness predicate: `live_ref_exists`
+(`pollis-delivery/src/messages.rs`) now ORs "an `attachment_ref` joined to a
+live envelope" with "a `vault_attachment_ref` joined to a live `vault_message`",
+so a file that exists only in someone's vault survives every collect pass.
+Maintained by `/v1/vault/save` (replace-on-save — an edit that drops a file
+releases it) and `/v1/vault/delete`; reaped by `sweep_envelope_gc` if ever
+orphaned. The user→hash pairing it records is already conceded by the signed
+upload presign.
+
 ### message_reaction
 - `id` TEXT PK
 - `message_id` TEXT NOT NULL
@@ -874,11 +944,67 @@ ciphertext — see [`read_cursor_sync`](#read_cursor_sync-migration-000018-844).
 - `last_at` TEXT NOT NULL
 - When this device last rotated its own leaf in this conversation, so the launch-driven sweep can honour `SELF_UPDATE_INTERVAL` (7 days + per-conversation jitter) without a background timer.
 
+### pin_key_cache _(#99)_
+- `conversation_id` TEXT PK _(MLS conversation id)_
+- `kpin` BLOB NOT NULL _(the 32-byte pin master key, plaintext — this DB is the same trust domain as the MLS state itself)_
+- `wrapped_generation` / `wrapped_epoch` INTEGER _(the newest pair this device published a wrap at — the no-network staleness check)_
+- `updated_at` TEXT
+
+Load-bearing, not a convenience: `max_past_epochs = 0` destroys the previous
+exporter at merge, so a device that lost `Kpin` cannot recover it from a stale
+server wrap — only from this row or a peer's fresh re-wrap.
+
+### vault_entry_cache _(local cache, #107)_
+- `id` TEXT PK, `content` TEXT NOT NULL _(decrypted entry body — same shape as `message.content`)_, `pinned` INTEGER, `created_at` / `updated_at` TEXT
+
+The decrypted mirror of the remote `vault_message` rows, replaced wholesale by
+each sync (the remote is the source of truth) — which is also what lets the
+vault render offline. Deliberately NOT named `vault_message`: local and remote
+table names stay disjoint so the `no_client_side_remote_writes` guard can tell
+the two apart by name alone.
+
 ### user_cache
 - `id` TEXT PK
 - `username` TEXT NOT NULL
 - `updated_at` TEXT NOT NULL DEFAULT now
 - Username lookup cache so the UI can render a sender without a remote round trip. Not authoritative — `users` in Turso is.
+
+### conversation_cache _(#850)_
+- `id` TEXT PK — a channel id or a DM conversation id
+- `kind` TEXT NOT NULL CHECK (`channel` | `dm`)
+- `name` TEXT — the channel name, or the peer's username for a DM
+- `group_id` TEXT / `group_name` TEXT — channels only
+- `updated_at` TEXT NOT NULL DEFAULT now
+- What a conversation id MEANS, locally. Channel and group names are remote-only
+  and there is no embedded replica, so without this a search result can only
+  render a UUID, cannot tell a channel from a DM (and so cannot route), and needs
+  an N+1 round trip per page. Written by `list_user_groups_with_channels` and
+  `list_dm_channels` — the two reads that already list them — exactly as
+  `attach_sender_usernames_local` writes `user_cache`. Not authoritative; a miss
+  renders the id.
+
+### message_fts _(FTS5 virtual table, #850)_
+- `body` — the only column; `content=''` makes it **contentless**, so FTS5 keeps
+  the term dictionary and no copy of the message text.
+- `tokenize="unicode61 remove_diacritics 2"` — `cafe` matches `café`. CJK is
+  handled a layer up by `pollis_search_text`, which emits overlapping bigrams.
+- Maintained by three triggers on `message` (`message_fts_ai` / `_ad` / `_au`),
+  never by Rust call sites: there are ten write sites and a DB-level guarantee is
+  what stops an eleventh from silently skipping the index.
+- Both trigger halves call the `pollis_search_text` scalar function
+  (`db/search_text.rs`), registered by `db::local::apply_local_schema`. A
+  contentless index is told what to DELETE by being handed the body it indexed,
+  so that function must stay deterministic forever.
+- The delete halves additionally check `message_fts_docsize` (FTS5's per-row
+  shadow table) before issuing the `'delete'` command: a contentless delete for
+  a rowid the index does not hold is a hard `SQLITE_CORRUPT` error, not a no-op,
+  and until the backfill reaches a pre-existing row that row is exactly such a
+  rowid. The first post-upgrade retention sweep would hit it deterministically.
+  Test: `db::local::tests::pre_backfill_writes_do_not_corrupt_the_index`.
+- Additive `IF NOT EXISTS` DDL — `LOCAL_SCHEMA_VERSION` was not bumped, and must
+  not be for this: a bump deletes the whole DB file including MLS state.
+- Backfill state lives in `kv` under `search_index_backfilled`. Full article:
+  [Message Search](./search.md).
 
 ### mls_kv _(OpenMLS storage provider)_
 - PK: (`scope`, `key`)

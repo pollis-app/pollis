@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
+use rusqlite::OptionalExtension;
+
 use crate::error::Result;
 use crate::state::AppState;
 
 
 use super::ingest::{ingest_channel_envelopes_inner, ingest_dm_envelopes_inner};
 use super::types::{
-    ChannelMessage, Message, MessageCursor, MessagePage,
-    SearchResult, ThreadSummary,
+    ChannelMessage, Message, MessageCursor, MessagePage, ThreadSummary,
 };
 
 pub async fn list_messages(
@@ -428,43 +429,97 @@ pub async fn get_dm_messages(
     Ok(MessagePage { messages, next_cursor })
 }
 
-/// Search the local plaintext message cache using a LIKE query.
-/// Only messages where content IS NOT NULL are searched (i.e. decrypted messages).
-/// Results are ordered newest-first.
-pub async fn search_messages(
-    query: String,
+/// A page of a conversation centred on one message (#850).
+///
+/// The jump-to-message flow — a search hit, a permalink — points at something
+/// that is usually far outside the loaded window, and the renderer's windowing
+/// can only reveal a row the query already holds. Paging backwards until the
+/// target appears would be N round trips for a message from last year; this is
+/// one.
+///
+/// Anchored on `(sent_at, id)` rather than on rowid, because that is the order
+/// the log renders in and the only one the client can reason about. Returns the
+/// `limit` newest messages at or before the anchor plus the `limit` oldest
+/// after it, newest-first like every other page, so the caller can hand it
+/// straight to the same renderer.
+///
+/// A message this device does not hold yields an empty page — the same honest
+/// answer `resolve_message_permalink` gives, and for the same reason.
+pub async fn read_messages_around(
+    conversation_id: String,
+    message_id: String,
     limit: Option<i64>,
     state: &Arc<AppState>,
-) -> Result<Vec<SearchResult>> {
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-    let limit = limit.unwrap_or(50);
-    let pattern = format!("%{}%", query);
+) -> Result<MessagePage> {
+    let limit = limit.unwrap_or(25).clamp(1, 200);
 
-    let mut stmt = db.conn().prepare(
-        "SELECT id, conversation_id, sender_id, content, sent_at
-         FROM message
-         WHERE content IS NOT NULL AND content LIKE ?1
-         ORDER BY sent_at DESC LIMIT ?2"
-    )?;
+    let mut messages: Vec<ChannelMessage> = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-    let rows = stmt.query_map(
-        rusqlite::params![pattern, limit],
-        |row| {
-            let content: String = row.get(3)?;
-            let snippet = content.clone();
-            Ok(SearchResult {
-                message_id: row.get(0)?,
-                conversation_id: row.get(1)?,
-                sender_id: row.get(2)?,
-                content,
-                sent_at: row.get(4)?,
-                snippet,
-            })
-        },
-    )?;
+        let anchor: Option<(String, String)> = db
+            .conn()
+            .query_row(
+                "SELECT sent_at, id FROM message WHERE id = ?1 AND conversation_id = ?2",
+                rusqlite::params![message_id, conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
 
-    Ok(rows.filter_map(|r| r.ok()).collect())
+        let Some((anchor_at, anchor_id)) = anchor else {
+            return Ok(MessagePage { messages: Vec::new(), next_cursor: None });
+        };
+
+        let mut stmt = db.conn().prepare(
+            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+             FROM message
+             WHERE conversation_id = ?1
+               AND (sent_at < ?2 OR (sent_at = ?2 AND id <= ?3))
+             ORDER BY sent_at DESC, id DESC
+             LIMIT ?4",
+        )?;
+        let mut out: Vec<ChannelMessage> = stmt
+            .query_map(
+                rusqlite::params![conversation_id, anchor_at, anchor_id, limit],
+                row_to_channel_message,
+            )?
+            .flatten()
+            .collect();
+
+        let mut stmt_newer = db.conn().prepare(
+            "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+             FROM message
+             WHERE conversation_id = ?1
+               AND (sent_at > ?2 OR (sent_at = ?2 AND id > ?3))
+             ORDER BY sent_at ASC, id ASC
+             LIMIT ?4",
+        )?;
+        let newer: Vec<ChannelMessage> = stmt_newer
+            .query_map(
+                rusqlite::params![conversation_id, anchor_at, anchor_id, limit],
+                row_to_channel_message,
+            )?
+            .flatten()
+            .collect();
+
+        // `newer` came back oldest-first; the page as a whole is newest-first.
+        let mut page: Vec<ChannelMessage> = newer.into_iter().rev().collect();
+        page.append(&mut out);
+        page
+    };
+
+    attach_sender_usernames_local(state, &mut messages).await?;
+
+    // The cursor points at the OLDEST row returned, so scrolling further back
+    // from a jump continues from here exactly as it would from any other page.
+    let next_cursor = messages.last().map(|m| MessageCursor {
+        sent_at: m.sent_at.clone(),
+        id: m.id.clone(),
+    });
+
+    Ok(MessagePage { messages, next_cursor })
 }
 
 /// One thread's replies, oldest-first (#825).

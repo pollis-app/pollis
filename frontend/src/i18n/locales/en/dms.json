@@ -12,7 +12,8 @@
     "fallbackTitle": "Direct Message",
     "viewProfile": "View profile of @{{name}}",
     "call": "Call @{{name}}",
-    "returnToCall": "Return to call with @{{name}}"
+    "returnToCall": "Return to call with @{{name}}",
+    "pinsLabel": "Pinned messages"
   },
   "settings": {
     "pageTitle": "Conversation Settings",

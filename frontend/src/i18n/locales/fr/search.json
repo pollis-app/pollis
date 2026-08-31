@@ -46,7 +46,9 @@
     "savedName": "Enregistrés",
     "savedKeywords": "enregistrés signet signets favoris épinglés plus tard permalien lien",
     "arcadeName": "Arcade",
-    "arcadeKeywords": "arcade jeu astéroïdes vaisseau tirer easter egg jouer"
+    "arcadeKeywords": "arcade jeu astéroïdes vaisseau tirer easter egg jouer",
+    "vaultName": "Coffre",
+    "vaultKeywords": "coffre vault notes personnelles stockage privé chiffré fichiers"
   },
   "page": {
     "title": "Recherche"

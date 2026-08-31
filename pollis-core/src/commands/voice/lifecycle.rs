@@ -826,13 +826,25 @@ pub async fn join_voice_channel(
                                 continue;
                             }
                             let track_key = format!("{}-{}", participant_identity, audio_track.sid());
-                            eprintln!("[voice] track subscribed: {track_key}");
+                            // A screen share's soundtrack arrives as an
+                            // ordinary remote audio track and mixes to the
+                            // speaker like one; the publication's
+                            // TrackSource is the only thing that says it
+                            // is not the person's voice.
+                            let is_shared_audio = matches!(
+                                publication.source(),
+                                livekit::track::TrackSource::ScreenshareAudio
+                            );
+                            eprintln!(
+                                "[voice] track subscribed: {track_key} (shared_audio={is_shared_audio})"
+                            );
                             register_remote_track(
                                 audio_track.rtc_track(),
                                 track_key,
                                 Arc::clone(&voice_arc),
                                 participant_identity,
                                 apm_rate_for_room,
+                                is_shared_audio,
                             )
                             .await;
                         }

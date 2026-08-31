@@ -44,7 +44,8 @@ Render (mixed playback, what's about to hit the speaker):
   mixer_task (10ms tick):
     └─→ drain ≤480 f32 samples from each track_buffers entry
         └─→ sum, soft-clip to [-1, 1]
-            ├─→ apm.analyze_render_frame()          // AEC reference
+            ├─→ apm.analyze_render_frame()          // mic AEC reference
+            ├─→ screenshare::self_echo::analyze_render()  // shared-audio AEC
             └─→ output_ring (interleaved across cpal output channels)
                 └─→ cpal output stream
 ```
@@ -53,6 +54,13 @@ Single shared cpal output stream + single mixer is a deliberate change from
 the previous per-track-stream model. AEC needs *one* point at which the
 about-to-play signal is observed; otherwise the render reference is out of
 sync with what actually comes out of the speaker.
+
+That single point now serves a second consumer. A Linux screen share
+capturing system audio picks up this same mix — the call itself — off the
+sink monitor, so it subtracts it using this mix as the reference
+(`VoiceState::shared_audio_render`; see `capture-split.md` → "Shared
+audio"). The slot is `None` whenever no such share is running, so the
+mixer's cost is one uncontended lock per tick.
 
 ## Listen-only join (no mic)
 
