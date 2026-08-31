@@ -256,7 +256,7 @@ export const VaultPage: React.FC = observer(() => {
 
           <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
             {isLoading ? null : visibleEntries.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted" data-testid="vault-empty">
+              <p className="py-8 text-center font-mono text-sm text-muted" data-testid="vault-empty">
                 {searchQuery ? t("searchEmpty") : t("empty")}
               </p>
             ) : (
