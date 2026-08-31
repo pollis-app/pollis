@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 import { useSearchMessages } from "../../hooks/queries/useSearchMessages";
 import { formatShortDateTime } from "../../utils/format";
 import { Button } from "../ui/Button";
+import { TextInput } from "../ui/TextInput";
+import { EmojiText } from "../Emoji/EmojiText";
+import { ResultThumbnails } from "./ResultThumbnails";
 import { shellOpen } from "../../bridge";
 import type { SearchCorpus, SearchResult, SearchSnippet, SearchSort } from "../../types";
 
@@ -26,6 +29,13 @@ const LEARN_ON_DEVICE_SEARCH_URL = "https://pollis.com/learn#on-device-search";
  * returns `[start, end)` pairs in UTF-16 code units — i.e. plain string indices
  * — and this slices between them. It is also what keeps `<mark>` out of
  * `dangerouslySetInnerHTML`, so a message body can never become markup.
+ *
+ * Each slice is then rendered through `EmojiText`, the same component the
+ * message log uses, so a `<:shortcode:hash>` token shows the image instead of
+ * its raw source text. A highlight range that happens to cut a token in half
+ * simply leaves that fragment literal — `splitEmojiSegments` only accepts
+ * well-formed tokens — which degrades to today's behaviour rather than
+ * breaking.
  */
 export const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snippet }) => {
   const parts = useMemo(() => {
@@ -52,10 +62,12 @@ export const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snipp
       {parts.map((part, i) =>
         part.mark ? (
           <mark key={i} data-testid="search-highlight" className="bg-accent-muted text-accent-bright rounded-sm px-0.5">
-            {part.text}
+            <EmojiText text={part.text} />
           </mark>
         ) : (
-          <span key={i}>{part.text}</span>
+          <span key={i}>
+            <EmojiText text={part.text} />
+          </span>
         ),
       )}
     </span>
@@ -103,12 +115,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
   // conversation. It only becomes a value once the user overrides it.
   const [sort, setSort] = useState<SearchSort | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Auto-focus the input when the view mounts
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   // Debounce the input: wait 300 ms after the user stops typing before searching
   useEffect(() => {
@@ -187,16 +193,13 @@ export const SearchView: React.FC<SearchViewProps> = ({
     <div data-testid="search-view" className="flex flex-col h-full bg-bg">
       {/* Search input */}
       <div className="px-4 py-3 flex-shrink-0 border-b border-line">
-        <input
+        <TextInput
           data-testid="search-input"
-          ref={inputRef}
-          type="text"
-          className="pollis-input font-mono"
+          ariaLabel={t("view.placeholder")}
           placeholder={t("view.placeholder")}
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          autoComplete="off"
-          spellCheck={false}
+          onChange={setInputValue}
+          autoFocus
         />
         {inputValue.trim().length > 0 && inputValue.trim().length < 2 && (
           <p className="text-xs font-mono mt-1 text-muted">{t("view.minLength")}</p>
@@ -242,7 +245,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     data-testid="search-result-item"
                     data-conversation-kind={result.conversation_kind ?? "unknown"}
                     onClick={() => onOpenResult(result)}
-                    className="w-full text-start px-4 py-3 transition-colors bg-transparent hover:bg-hover border-b border-line"
+                    className="w-full text-start px-4 py-3 bg-transparent hover:bg-hover border-b border-line"
                   >
                     {/* Sender and timestamp row */}
                     <div className="flex items-baseline justify-between gap-2 mb-1">
@@ -268,9 +271,11 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     </div>
 
                     {/* Message snippet with highlight */}
-                    <div className="text-xs font-mono text-dim">
+                    <div className="text-xs font-mono text-dim" data-testid="search-result-snippet">
                       <HighlightedSnippet snippet={result.snippet} />
                     </div>
+
+                    <ResultThumbnails result={result} />
                   </button>
                 </li>
               ))}

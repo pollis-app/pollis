@@ -79,6 +79,16 @@ interface MockDmChannel {
   members: Array<{ user_id: string; username?: string; added_by: string; added_at: string }>;
 }
 
+/** One Vault entry (#107). Mirrors `VaultMessage` in `hooks/queries/useVault`. */
+interface MockVaultMessage {
+  id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  pinned: boolean;
+}
+
 interface MockBookmark {
   message_id: string;
   conversation_id: string;
@@ -163,6 +173,7 @@ interface MockStore {
   groupMembers: Record<string, MockGroupMember[]>;
   // Saved messages (#854). Device-local in production; a plain array here.
   bookmarks: MockBookmark[];
+  vaultMessages: MockVaultMessage[];
   // Custom emoji (#848) the signed-in user may SEND — every emoji from every
   // group they belong to, which is exactly what `list_usable_emoji` returns.
   customEmoji: MockCustomEmoji[];
@@ -245,6 +256,7 @@ const store: MockStore = {
   dmChannels: preload.dmChannels ?? [],
   groupMembers: preload.groupMembers ?? {},
   bookmarks: preload.bookmarks ?? [],
+  vaultMessages: preload.vaultMessages ?? [],
   customEmoji: preload.customEmoji ?? [],
   inviteLinks: preload.inviteLinks ?? [],
   voiceGate: {
@@ -987,6 +999,59 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       if (message) {
         message.content = newContent;
         message.edited_at = nowIso();
+      }
+      return null;
+    }
+
+    // ── Vault (#107) ─────────────────────────────────────────────────────
+    // Mirrors `pollis-core/src/commands/vault.rs`. Entries are the caller's
+    // own by construction — there is no sharing surface — so the mock keeps
+    // one flat list and never filters by anything but time.
+
+    case 'get_vault_messages':
+      return [...store.vaultMessages].sort((a, b) =>
+        a.created_at.localeCompare(b.created_at),
+      );
+
+    case 'send_vault_message': {
+      const { content } = args as { userId: string; content: string };
+      const now = new Date().toISOString();
+      const entry: MockVaultMessage = {
+        id: `vault_${store.vaultMessages.length + 1}`,
+        user_id: store.session?.id ?? 'u_me',
+        content,
+        created_at: now,
+        updated_at: now,
+        pinned: false,
+      };
+      store.vaultMessages.push(entry);
+      return entry;
+    }
+
+    case 'edit_vault_message': {
+      const { id, newContent } = args as { id: string; newContent: string };
+      const entry = store.vaultMessages.find((v) => v.id === id);
+      if (entry) {
+        entry.content = newContent;
+        entry.updated_at = new Date().toISOString();
+      }
+      return null;
+    }
+
+    case 'delete_vault_message': {
+      const { id } = args as { id: string };
+      const at = store.vaultMessages.findIndex((v) => v.id === id);
+      if (at >= 0) {
+        store.vaultMessages.splice(at, 1);
+      }
+      return null;
+    }
+
+    case 'set_vault_message_pinned': {
+      const { id, pinned } = args as { id: string; pinned: boolean };
+      const entry = store.vaultMessages.find((v) => v.id === id);
+      if (entry) {
+        entry.pinned = pinned;
       }
       return null;
     }

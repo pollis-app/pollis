@@ -263,7 +263,7 @@ input[type="range"]::-moz-range-thumb {
 
   /* Sidebar nav item ───────────────────────────────────────────── */
   .sidebar-item {
-    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-start text-xs transition-colors duration-100 cursor-pointer select-none;
+    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-start text-xs cursor-pointer select-none;
     border-radius: var(--radius-chip);
     color: var(--c-text-dim);
   }
@@ -282,7 +282,7 @@ input[type="range"]::-moz-range-thumb {
 
   /* Icon buttons ───────────────────────────────────────────────── */
   .icon-btn {
-    @apply flex items-center justify-center w-8 h-8 cursor-pointer transition-colors duration-100;
+    @apply flex items-center justify-center w-8 h-8 cursor-pointer;
     border-radius: var(--radius-control);
     color: var(--c-text-muted);
   }
@@ -293,7 +293,7 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .icon-btn-sm {
-    @apply flex items-center justify-center w-6 h-6 cursor-pointer transition-colors duration-100;
+    @apply flex items-center justify-center w-6 h-6 cursor-pointer;
     border-radius: var(--radius-control);
     color: var(--c-text-muted);
   }
@@ -360,7 +360,7 @@ input[type="range"]::-moz-range-thumb {
 
   /* Buttons ────────────────────────────────────────────────────── */
   .btn-primary {
-    @apply px-4 py-2 text-sm font-mono rounded-panel cursor-pointer transition-colors duration-100 font-medium;
+    @apply px-4 py-2 text-sm font-mono rounded-panel cursor-pointer font-medium;
     background: var(--c-accent);
     color: var(--c-bg);
   }
@@ -375,7 +375,7 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .btn-ghost {
-    @apply px-3 py-2 text-sm rounded-panel cursor-pointer transition-colors duration-100;
+    @apply px-3 py-2 text-sm rounded-panel cursor-pointer;
     color: var(--c-text-dim);
     border: 2px solid var(--c-border);
   }
@@ -397,7 +397,6 @@ input[type="range"]::-moz-range-thumb {
     color: var(--c-accent-dim);
     cursor: pointer;
     border-radius: 2px;
-    transition: background 100ms, color 100ms;
   }
 
   .message-link:hover {

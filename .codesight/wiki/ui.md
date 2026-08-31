@@ -534,7 +534,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**154 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**155 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -634,8 +634,9 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 - **SavedMessageRow** — props: item, conversationLabel, senderLabel — `frontend/src/components/Saved/SavedMessageRow.tsx`
 
-### `components/Search` (1)
+### `components/Search` (2)
 
+- **ResultThumbnails** — `frontend/src/components/Search/ResultThumbnails.tsx`
 - **SearchView** — props: onOpenResult, onOpenRetentionSettings, initialQuery — `frontend/src/components/Search/SearchView.tsx`
 
 ### `components/Security` (3)
@@ -672,7 +673,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **Switch** — props: label, checked, onChange, disabled, className, id, description — `frontend/src/components/ui/Switch.tsx`
 - **TerminalMenu** — props: items, onEsc, className, autoFocus — `frontend/src/components/ui/TerminalMenu.tsx`
 - **TextArea** — props: label, value, onChange, placeholder, description, error, disabled, rows, className, id, onKeyDown — `frontend/src/components/ui/TextArea.tsx`
-- **TextInput** — props: label, value, onChange, placeholder, description, error, disabled, type, className, id, required, autoFocus, autoComplete — `frontend/src/components/ui/TextInput.tsx`
+- **TextInput** — props: label, ariaLabel, value, onChange, placeholder, description, error, disabled, type, className, id, required, autoFocus, autoComplete — `frontend/src/components/ui/TextInput.tsx`
 
 ### `components/Voice` (8)
 
