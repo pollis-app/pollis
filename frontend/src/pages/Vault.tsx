@@ -364,7 +364,7 @@ export const VaultPage: React.FC = observer(() => {
               </div>
             </div>
           ) : (
-            <div className="flex-shrink-0">
+            <div className="flex-shrink-0" data-testid="vault-composer">
               <ChatInput
                 ref={chatInputRef}
                 onSend={handleSend}

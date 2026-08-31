@@ -271,7 +271,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     </div>
 
                     {/* Message snippet with highlight */}
-                    <div className="text-xs font-mono text-dim">
+                    <div className="text-xs font-mono text-dim" data-testid="search-result-snippet">
                       <HighlightedSnippet snippet={result.snippet} />
                     </div>
 
