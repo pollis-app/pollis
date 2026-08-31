@@ -780,6 +780,17 @@ affects `cargo build` or the release path, and runs out of band (OSS-Fuzz-style)
 variant and asserts the fuzzer trips it fast (teeth — a mutant that doesn't crash
 is itself a failure).
 
+**Being detached has a cost the pin-drift check now pays for** (#1042): the fuzz
+workspace does not inherit the root's `[patch.crates-io]` openmls git pin, so it
+carries its own copy in `fuzz/Cargo.toml` — without it, resolution falls back to
+registry openmls, which lacks the PQ-ciphersuites feature and the crate does not
+build. `fuzz-check.sh` refuses to run if the two revs differ; bump both together.
+
+**Scheduled since #1042** (`fuzz.yml`): weekly Monday soak — unlimited runs,
+10 min per target, then the `FUZZ_MUTANT=1` teeth pass — on a pinned nightly, with
+a short smoke on PRs touching `fuzz/**`/`scripts/fuzz-check.sh`/the workflow, and
+crashing inputs uploaded as the `fuzz-crash-artifacts` artifact.
+
 Honest scope + roadmap: `docs/machine-checked-correctness-design.md`.
 
 ## Behaviors the scenarios exercise
