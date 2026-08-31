@@ -1,5 +1,0 @@
-{
-  "record_started_at": "2026-08-28",
-  "note": "The public incident record. It begins on record_started_at and makes NO claim about the period before that date: Pollis kept no incident record before #877, so an empty list here means 'nothing recorded since the record opened', not 'nothing has ever gone wrong'. Format, severity ladder and publication deadlines: docs/incidents/README.md. Validated by scripts/check-incidents.py in scripts-check.yml.",
-  "incidents": []
-}
