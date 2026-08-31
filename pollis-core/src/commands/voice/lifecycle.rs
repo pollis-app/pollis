@@ -18,7 +18,7 @@ use livekit::{
 use crate::{
     commands::{
         livekit::{
-            is_view_identity, lookup_avatar_url, lookup_avatar_url_for_identity,
+            is_view_identity, lookup_avatar_url_for_identity, lookup_avatar_urls_for_identities,
             pin_local_identity, resolve_participant, resolve_participants,
         },
         voice_apm,
@@ -388,6 +388,14 @@ pub async fn join_voice_channel(
     // Both peers compute the same key from the same (group, epoch) so the
     // SFU never sees plaintext audio. Fails closed: if the local MLS group
     // isn't ready, refuse to join rather than fall back to unencrypted.
+    //
+    // ── Phase: e2ee ────────────────────────────────────────────────────────
+    // Strictly before the connect, because `RoomOptions::encryption` has to
+    // carry the key: LiveKit's Rust `Room::connect` is the only entry point and
+    // it commits to the room. So every round trip in here is one the user waits
+    // through before the WebSocket is even dialled — which is exactly why it is
+    // phase-timed rather than lumped into `total_join`.
+    let e2ee_start = Instant::now();
     let (voice_key, voice_key_index, voice_epoch, voice_mls_group_id) = voice_e2ee::derive_voice_key(
         state,
         &channel_id,
@@ -395,6 +403,7 @@ pub async fn join_voice_channel(
         counterparty_user_id.as_deref(),
     )
     .await?;
+    let e2ee_ms = e2ee_start.elapsed().as_millis() as u64;
     let e2ee_options = voice_e2ee::build_e2ee_options(voice_key);
     let key_provider_for_state = e2ee_options.key_provider.clone();
     eprintln!(
@@ -676,7 +685,7 @@ pub async fn join_voice_channel(
     // Do NOT attach tracks here — TrackSubscribed fires for pre-existing
     // subscribed tracks once the event loop drains buffered events, and
     // attaching twice creates competing draining tasks.
-    let local_avatar_url = lookup_avatar_url(state, &user_id).await;
+    let roster_start = Instant::now();
     // #836: everything the SDK reports is an opaque per-room pseudonym. Resolve
     // the whole seed roster in ONE batched DS call — the join path already pays
     // for a Turso avatar lookup here, and doing it per participant instead would
@@ -713,12 +722,26 @@ pub async fn join_voice_channel(
             Some((identity, name, is_muted))
         })
         .collect();
-    let mut existing_with_avatars: Vec<(String, String, bool, Option<String>)> =
-        Vec::with_capacity(existing_remote.len());
-    for (identity, name, is_muted) in existing_remote {
-        let avatar = lookup_avatar_url_for_identity(state, &identity).await;
-        existing_with_avatars.push((identity, name, is_muted, avatar));
-    }
+    // Avatars for OURSELVES and everyone already in the room, in ONE DS round
+    // trip. This used to be a `lookup_avatar_url` for the local user followed by
+    // a `lookup_avatar_url_for_identity` per existing participant, awaited in
+    // sequence — so the last thing between the user and a live call was a chain
+    // of N+1 network round trips that grew with how busy the channel was. The
+    // one case where joining should feel fastest (everyone is already in there)
+    // was the slowest.
+    let mut avatar_identities: Vec<String> = Vec::with_capacity(existing_remote.len() + 1);
+    avatar_identities.push(local_identity.clone());
+    avatar_identities.extend(existing_remote.iter().map(|(identity, _, _)| identity.clone()));
+    let avatars = lookup_avatar_urls_for_identities(state, &avatar_identities).await;
+    let local_avatar_url = avatars.get(&local_identity).cloned();
+    let existing_with_avatars: Vec<(String, String, bool, Option<String>)> = existing_remote
+        .into_iter()
+        .map(|(identity, name, is_muted)| {
+            let avatar = avatars.get(&identity).cloned();
+            (identity, name, is_muted, avatar)
+        })
+        .collect();
+    let roster_ms = roster_start.elapsed().as_millis() as u64;
     {
         let voice = state.voice.lock().await;
         if let Some(ch) = &voice.channel {
@@ -983,19 +1006,23 @@ pub async fn join_voice_channel(
     let timings = JoinTimings {
         channel_id: channel_id.clone(),
         jwt_mint_ms,
+        e2ee_ms,
         room_connect_ms,
         mic_init_ms,
         first_publish_ms,
+        roster_ms,
         total_join_ms,
         join_started_at_ms,
     };
     eprintln!(
-        "[voice/timings] channel={} jwt={}ms connect={}ms mic={}ms publish={}ms total={}ms",
+        "[voice/timings] channel={} jwt={}ms e2ee={}ms connect={}ms mic={}ms publish={}ms roster={}ms total={}ms",
         channel_id,
         jwt_mint_ms,
+        e2ee_ms,
         room_connect_ms,
         mic_init_ms,
         first_publish_ms,
+        roster_ms,
         total_join_ms,
     );
 

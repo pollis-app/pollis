@@ -97,15 +97,23 @@ pub async fn derive_voice_key(
     // `message_envelope` rows on Turso that this client may not have
     // pulled yet. We have to do a real ingest of the conversations
     // backing this MLS group so any unprocessed commits get applied.
-    let epoch_before = derive_voice_key_for_group(state, &mls_group_id)
-        .await
-        .map(|(_, _, e)| e)
-        .unwrap_or(u64::MAX);
-    catch_up_mls_group(state, &mls_group_id, self_user_id).await;
-    let (mut key, mut idx, mut epoch) = derive_voice_key_for_group(state, &mls_group_id).await?;
-    eprintln!(
-        "[voice-e2ee] catch-up: {mls_group_id} epoch {epoch_before} → {epoch}"
+    // The catch-up and the published-GroupInfo read are INDEPENDENT requests —
+    // the second one asks the DS what epoch the group is at, which is not a
+    // function of anything the first one writes locally. Running them
+    // concurrently takes one full DS round trip off the voice-join hot path,
+    // where every serialized request sits between the user and a live call.
+    //
+    // Reading the remote epoch concurrently can only observe it EARLIER, never
+    // later, so the worst case is a remote epoch that is one commit stale. That
+    // biases the comparison below towards *not* firing recovery, which is the
+    // same direction `published_group_epoch` already fails in on purpose: it
+    // gates a destructive rebuild, so "can't tell" must mean "don't".
+    let (_, remote_epoch) = tokio::join!(
+        catch_up_mls_group(state, &mls_group_id, self_user_id),
+        published_group_epoch(state, &mls_group_id),
     );
+    let (mut key, mut idx, mut epoch) = derive_voice_key_for_group(state, &mls_group_id).await?;
+    eprintln!("[voice-e2ee] catch-up: {mls_group_id} now at epoch {epoch}");
 
     // If the catch-up couldn't bring us level with the published GroupInfo,
     // we're stranded behind commits that are no longer in `mls_commit_log`
@@ -113,9 +121,7 @@ pub async fn derive_voice_key(
     // wiped them — see issue #371). External-join rebuilds local state at
     // the current epoch from the published GroupInfo, which is how `process_
     // pending_commits` already recovers when there's no local group at all.
-    if let Some(remote_epoch) =
-        published_group_epoch(state, &mls_group_id).await
-    {
+    if let Some(remote_epoch) = remote_epoch {
         if epoch < remote_epoch {
             eprintln!(
                 "[voice-e2ee] catch-up: local epoch {epoch} < published {remote_epoch} for {mls_group_id} — external-join recovery"
