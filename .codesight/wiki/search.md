@@ -158,7 +158,12 @@ ranked**. `count(*) … MATCH` is **1.4 ms** even for that pathological term, so
 `SearchPage { results, total, next_cursor, sort, corpus }`. `SearchCursor` is an
 **offset**, because relevance ordering is decided after the rows leave SQLite and
 a keyset cursor cannot describe a position in an order the database never
-produced. `corpus` is populated on the first page only.
+produced. `corpus` is populated on the first page only. In relevance mode the
+cursor stops at the 500-candidate rescore ceiling — `total` still reports the
+full match count, but paging past the ceiling would serve rows bm25 never
+ranked, so `next_cursor` goes `None` there; switching to Most recent pages the
+whole corpus. A query whose terms all die in tokenisation (`???`) returns zero
+results rather than falling through to a filter-only scan of everything.
 
 `SearchResult` carries `conversation_kind`, `conversation_name`, `group_id`,
 `group_name`, `sender_username`, `thread_id`, `has_attachment`, `has_link`, and a

@@ -995,6 +995,12 @@ the two apart by name alone.
   (`db/search_text.rs`), registered by `db::local::apply_local_schema`. A
   contentless index is told what to DELETE by being handed the body it indexed,
   so that function must stay deterministic forever.
+- The delete halves additionally check `message_fts_docsize` (FTS5's per-row
+  shadow table) before issuing the `'delete'` command: a contentless delete for
+  a rowid the index does not hold is a hard `SQLITE_CORRUPT` error, not a no-op,
+  and until the backfill reaches a pre-existing row that row is exactly such a
+  rowid. The first post-upgrade retention sweep would hit it deterministically.
+  Test: `db::local::tests::pre_backfill_writes_do_not_corrupt_the_index`.
 - Additive `IF NOT EXISTS` DDL — `LOCAL_SCHEMA_VERSION` was not bumped, and must
   not be for this: a bump deletes the whole DB file including MLS state.
 - Backfill state lives in `kv` under `search_index_backfilled`. Full article:
