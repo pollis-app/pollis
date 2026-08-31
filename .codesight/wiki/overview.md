@@ -83,7 +83,11 @@ mobile/              # Standalone Expo/RN app (NOT a pnpm workspace member) —
                      #   a profile carrying it makes EAS CLI reject the whole file
   modules/pollis-native/  # uniffi-bindgen-react-native turbo module (JSI bridge)
 
-website/             # Static marketing site (Cloudflare Pages, not part of the app)
+website/             # Static marketing site (Cloudflare Pages, not part of the app).
+                     #   Also the public trust record: /retention (derived from
+                     #   docs/metadata-retention-policy.md) and /assurance.
+                     #   Service status is NOT here — status.pollis.com is a
+                     #   separate property built from the `archon` repo
 ```
 
 **Mobile build (#706):** the mobile app has no released output yet, but CI now

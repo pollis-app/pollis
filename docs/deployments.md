@@ -88,17 +88,30 @@ design**.
     roster (first-party AWS only, four US regions, random 24 h placement, opt-in and off by default).
   - `device-security.html` — the lost/stolen-device path: how to revoke, and what a holder of the
     device can still read.
-  - `doc-page.css` — the shared long-form page shell these three use, so the layout lives once.
+  - `retention.html` — the public retention and deletion policy, derived from
+    `docs/metadata-retention-policy.md` (owner sign-off given 2026-08-28), including §6's answer to
+    "what happens to the permanent append-only ledger when I delete my account".
+  - `doc-page.css` — the shared long-form page shell these pages use, so the layout lives once.
 - **`website/rebuild-ledger.json` must be regenerated after every release.** `scripts/rebuild-ledger.sh`
   rebuilds it from the public Actions API; `website-verify.yml` runs `--check` daily and **fails** when
   rebuild-verify has run since the ledger was last published. It is a committed file rather than a
   workflow write because `rebuild-verify.yml` deliberately holds **no** `secrets.*` — that is what lets a
   third party fork and run it — so it must not be given credentials to publish its own verdict.
-- **`docs/retention-public-draft.html` is the finished public retention policy, deliberately NOT in
-  `website/`.** Cloudflare Pages serves everything under `website/`, so a file placed there is public
-  whether or not anything links to it. It ships only when the owner signs off
-  `docs/metadata-retention-policy.md` (§10); the footer links are commented out and tagged
-  `TODO(#877): retention`. Owner sign-off is the only blocker — no code change is outstanding.
+- **`website/retention.html` is PUBLISHED** (owner sign-off 2026-08-28, #877; it was previously held
+  back in `docs/` precisely because Cloudflare Pages serves everything under `website/`, so "unlinked"
+  is not "unpublished"). `docs/metadata-retention-policy.md` stays the engineering source of truth —
+  every claim there cites its enforcing code — and the public page is derived from it. **Changing a
+  retention period means editing the code, then that document, then this page, then deploying the
+  site**; a published page that outlives the behaviour it describes is the exact defect the policy was
+  written to avoid.
+- **Service status is NOT served from this repo.** `status.pollis.com` is a separate property, built
+  and deployed from the `archon` repo, and it already publishes service liveness, the running version
+  and rolling daily uptime. Nothing under `website/` should grow a second status page: the two would
+  disagree the moment one is deployed and the other is not. The two signals `archon` does not cover
+  today — a written incident/postmortem record, and an alarm for the transparency publisher going
+  quiet (an STH timestamp is frozen per tree size, so an abandoned log and an idle one serve
+  byte-identical files, `docs/operational-continuity.md` §4) — belong there too, and are tracked
+  separately rather than duplicated here.
 
 ### 4. pollis-verify (auditor CLI)
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)
@@ -200,6 +213,7 @@ design**.
 
 - **Turso** (libSQL) — two databases: the **main** DB (users, groups, membership, public keys, encrypted envelopes) and the **commit-log** DB (`mls_commit_log` / `mls_group_info` / `mls_welcome`). Schema is applied **migrate-then-ship** by whichever deploy touches prod first: the `apply-migrations` job in `desktop-release.yml` (client releases) **and** the `delivery-deploy-{dev,prod}.yml` deploys (DS releases) both run `db-apply.sh` before shipping. It's idempotent (tracks `schema_migrations`), so overlap is harmless, and additive-only migrations make early application safe for the still-running old code. Nobody applies to prod by hand. Numbered migrations in `pollis-schema/migrations/`; dev also auto-applies on merge via `db-migrate-dev.yml`.
 - **Cloudflare R2** — object storage behind **cdn.pollis.com**: desktop + CLI releases, install scripts, and the transparency-log static tree.
+- **Who holds all of the above, and what breaks in what order if they stop:** `docs/operational-continuity.md` (#877). It carries the singly-held asset register (every account and signing key in this file), the degradation ladder, and §4 on the failure mode specific to this design — a stalled transparency log being indistinguishable from a withheld one. The legal half (ownership, succession, escrow) is deferred to #723 and marked as such rather than answered.
 
 ---
 

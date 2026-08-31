@@ -1,9 +1,15 @@
 # Metadata Retention Policy
 
-**Status:** Engineering draft — **owner sign-off required before publication.** Resolves the engineering
-half of #702; part of #662.
-**Audience:** the owner (who signs it off), whoever fills in the App Store / Play privacy forms (#708),
-and anyone writing the public "what we can and cannot see" page.
+**Status:** **Signed off and PUBLISHED** (owner sign-off, 2026-08-28, under #877). The public rendering
+derived from this document is `website/retention.html`, served at pollis.com/retention. Resolves the
+engineering half of #702; part of #662.
+**Audience:** this document stays the engineering source of truth — every claim cites the enforcing code
+or migration, and the public page is derived from it, never the other way round. It is also what whoever
+fills in the App Store / Play privacy forms (#708) answers from.
+**Changing a retention period is a change to a published promise.** Edit the enforcing code, then this
+document, then `website/retention.html`, in that order, and deploy the site (`website-deploy.yml` is
+manual by design) — a public page that outlives the behaviour it describes is the defect this document
+exists to prevent.
 **Scope:** what the *first-party services* retain — Turso (the Delivery Service database), Cloudflare R2,
 LiveKit, the Expo/APNs/FCM push path, the relay overlay, and the public transparency ledger. Message
 *content* is out of scope: it is end-to-end encrypted under MLS and no first-party service can read it.
@@ -419,15 +425,21 @@ decision to retain, with the reason written down, because reaping it risks delet
 
 ---
 
-## 10. Sign-off
+## 10. Sign-off — GIVEN 2026-08-28 (#877)
 
-This is an engineering draft. It describes what the code does today, with citations, and it deliberately
-does not soften anything. The owner signs off on:
+This document describes what the code does today, with citations, and it deliberately does not soften
+anything. All three items reserved to the owner are now decided:
 
-1. Whether the retention periods described are the intended policy, or whether §9's gaps should be closed
-   before publication.
-2. The public wording derived from this document (the "what we can and cannot see" page).
-3. The answers to the App Store / Play privacy forms, which depend on §2, §3 and §4.
+1. **The retention periods described are the intended policy.** §9's gaps were closed by #762 before
+   publication, so nothing published here is a period we do not actually enforce.
+2. **The public wording derived from this document is signed off** and is now live as
+   `website/retention.html` — including §6's answer to "what happens to the permanent ledger when I
+   delete my account", which is the tension a reader spots first.
+3. **The App Store / Play privacy-form answers** are unblocked and answered from §2, §3 and §4 (#708).
+
+What that sign-off does *not* cover: anything that depends on the legal entity (#723) — a privacy policy
+naming a controller, a data-processing agreement, or a statement about legal process received. Those are
+not retention questions and are not answered here.
 
 Related: #662 (parent), #702 (this ticket), #708 (mobile compliance paperwork, blocked on this),
 #690, #699, #701, #720.
