@@ -1649,6 +1649,80 @@ mod tests {
         assert_eq!(hits, 50);
     }
 
+    /// The window the docsize guard in the delete triggers exists for: between
+    /// the index being created and the backfill reaching a row, that row is
+    /// unindexed — and a contentless 'delete' for an unindexed rowid is a hard
+    /// SQLITE_CORRUPT error, not a no-op. The deterministic real-world hit is
+    /// the retention sweep on the very first post-upgrade open, which runs
+    /// before the backfill task is even spawned; an edit or redaction of an
+    /// old message in the same window is the racy variant. All of them must
+    /// succeed, keep the index consistent, and still converge after backfill.
+    #[test]
+    fn pre_backfill_writes_do_not_corrupt_the_index() {
+        let db = db();
+        let conn = db.conn();
+        conn.execute_batch(
+            "DROP TRIGGER message_fts_ai; DROP TRIGGER message_fts_au; DROP TRIGGER message_fts_ad;",
+        )
+        .expect("drop triggers");
+        for i in 0..10 {
+            insert_indexable(conn, &format!("pre-{i}"), &format!("historic message {i}"));
+        }
+        conn.execute_batch(super::schema_sql())
+            .expect("re-apply schema, restoring the triggers");
+        assert_eq!(fts_row_count(conn), 0, "premise: index empty, rows unindexed");
+
+        // Retention eviction against a fully-unindexed table — the first
+        // post-upgrade open's exact sequence. Must not error.
+        conn.execute(
+            "UPDATE message SET received_at = datetime('now', '-400 days') WHERE id = 'pre-0'",
+            [],
+        )
+        .expect("age one row");
+        set_message_retention_days(conn, 30).expect("eviction sweep over unindexed rows");
+        // The count invariant legitimately doesn't hold until the backfill
+        // finishes — before that, only internal consistency can be asserted.
+        conn.execute_batch("INSERT INTO message_fts(message_fts) VALUES('integrity-check');")
+            .expect("index consistent after pre-backfill eviction");
+
+        // Edit of a not-yet-backfilled row: the delete-half must no-op, and the
+        // insert-half indexes the new content immediately.
+        conn.execute(
+            "UPDATE message SET content = 'edited before backfill', edited_at = '2026-01-03T00:00:00Z'
+             WHERE id = 'pre-1' AND deleted_at IS NULL",
+            [],
+        )
+        .expect("pre-backfill edit");
+
+        // Soft delete (and the replay a redaction can produce) of a
+        // not-yet-backfilled row.
+        for _ in 0..2 {
+            conn.execute(
+                "UPDATE message SET content = NULL, deleted_at = '2026-01-04T00:00:00Z'
+                 WHERE id = 'pre-2' AND deleted_at IS NULL",
+                [],
+            )
+            .expect("pre-backfill soft delete");
+        }
+        conn.execute("DELETE FROM message WHERE id = 'pre-3'", [])
+            .expect("pre-backfill hard delete");
+        conn.execute_batch("INSERT INTO message_fts(message_fts) VALUES('integrity-check');")
+            .expect("index consistent after pre-backfill writes");
+
+        // And the backfill still converges on the invariant around them.
+        while backfill_search_index_chunk(conn).expect("backfill chunk") > 0 {}
+        finish_search_backfill(conn).expect("finish");
+        assert_index_matches(conn, "backfill after pre-backfill writes");
+        let edited: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM message_fts WHERE message_fts MATCH 'edited'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("match");
+        assert_eq!(edited, 1, "the pre-backfill edit must be indexed exactly once");
+    }
+
     /// The Settings escape hatch and the silent auto-repair share one function,
     /// and it has to be safe to run at any time — including on a healthy index.
     #[test]

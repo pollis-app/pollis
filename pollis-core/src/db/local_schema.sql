@@ -261,22 +261,33 @@ BEGIN
     INSERT INTO message_fts (rowid, body) VALUES (new.rowid, pollis_search_text(new.content));
 END;
 
+-- Both delete-halves below additionally check `message_fts_docsize` — FTS5's
+-- own per-row shadow table — so the 'delete' command is only ever issued for a
+-- row the index actually holds. This is not an optimisation: until the
+-- backfill reaches a pre-existing row, that row is unindexed, and a contentless
+-- 'delete' against a rowid the index doesn't know HARD-ERRORS with
+-- SQLITE_CORRUPT ("database disk image is malformed"), aborting whatever write
+-- fired the trigger — the retention sweep on the very first post-upgrade open
+-- being the deterministic case.
 CREATE TRIGGER IF NOT EXISTS message_fts_ad AFTER DELETE ON message
 WHEN old.content IS NOT NULL AND old.deleted_at IS NULL
 BEGIN
     INSERT INTO message_fts (message_fts, rowid, body)
-    VALUES ('delete', old.rowid, pollis_search_text(old.content));
+    SELECT 'delete', old.rowid, pollis_search_text(old.content)
+    WHERE old.rowid IN (SELECT rowid FROM message_fts_docsize);
 END;
 
 -- Edits, soft deletes (content set to NULL) and moderator deletes all arrive
 -- here. Remove whatever the old row contributed, then re-add the new row if it
 -- still has indexable text — the two halves are guarded independently so a
--- delete does not try to un-index a row that was never indexed.
+-- delete does not try to un-index a row that was never indexed (NULL/tombstoned
+-- old content, or a pre-backfill row the index has not reached yet).
 CREATE TRIGGER IF NOT EXISTS message_fts_au AFTER UPDATE OF content, deleted_at ON message
 BEGIN
     INSERT INTO message_fts (message_fts, rowid, body)
     SELECT 'delete', old.rowid, pollis_search_text(old.content)
-    WHERE old.content IS NOT NULL AND old.deleted_at IS NULL;
+    WHERE old.content IS NOT NULL AND old.deleted_at IS NULL
+      AND old.rowid IN (SELECT rowid FROM message_fts_docsize);
 
     INSERT INTO message_fts (rowid, body)
     SELECT new.rowid, pollis_search_text(new.content)
