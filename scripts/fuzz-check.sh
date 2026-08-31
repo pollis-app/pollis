@@ -29,6 +29,19 @@ if ! command -v cargo-fuzz >/dev/null 2>&1; then
   exit 1
 fi
 
+# The fuzz crate is a detached workspace, so it carries its OWN copy of the
+# root's [patch.crates-io] openmls pin. If the two revs drift apart the fuzz
+# build either fails obscurely or — worse — fuzzes a different openmls than the
+# one that ships. Refuse to run until they match again.
+root_revs="$(grep -oE 'openmls/openmls", rev = "[0-9a-f]+"' "$repo_root/Cargo.toml" | sort -u)"
+fuzz_revs="$(grep -oE 'openmls/openmls", rev = "[0-9a-f]+"' Cargo.toml | sort -u)"
+if [[ "$root_revs" != "$fuzz_revs" ]]; then
+  echo "openmls pin drift: fuzz/Cargo.toml's [patch.crates-io] rev does not match the root Cargo.toml's." >&2
+  echo "root: $root_revs" >&2
+  echo "fuzz: $fuzz_revs" >&2
+  exit 1
+fi
+
 # Teeth mode: build each target's deliberate mutant and assert the fuzzer finds a
 # crash quickly. A mutant that does NOT crash is itself a failure (toothless).
 if [[ "${FUZZ_MUTANT:-0}" == "1" ]]; then
