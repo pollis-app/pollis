@@ -1632,7 +1632,7 @@ mod tests {
         assert_eq!(fts_row_count(conn), 0, "premise: nothing indexed yet");
         assert!(search_backfill_pending(conn).expect("pending"));
 
-        conn.execute_batch(&super::schema_sql().to_string())
+        conn.execute_batch(super::schema_sql())
             .expect("re-apply schema, restoring the triggers");
         while backfill_search_index_chunk(conn).expect("backfill chunk") > 0 {}
         finish_search_backfill(conn).expect("finish");

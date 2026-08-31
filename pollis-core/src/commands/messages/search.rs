@@ -541,9 +541,9 @@ fn run_query(
     ];
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-    let from_clause = if match_expr.is_some() {
+    let from_clause = if let Some(expr) = match_expr {
         wheres.insert(0, "message_fts MATCH ?".to_string());
-        params.push(Box::new(match_expr.unwrap().to_string()));
+        params.push(Box::new(expr.to_string()));
         "FROM message_fts JOIN message m ON m.rowid = message_fts.rowid"
     } else {
         // Filters with no text side: an ordinary indexed scan, honestly
