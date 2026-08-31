@@ -58,8 +58,14 @@ export function toggleScreenShare(share: ShareState): void {
         // Linux: the portal dialog is the picker, so there is no in-app
         // step to carry an audio toggle. The stored preference is the
         // only place the choice can come from — set in Voice settings.
+        //
+        // Deliberately does NOT move the share to `starting` first.
+        // Cancelling the portal dialog is a normal flow that the backend
+        // reports as a plain `Ok` with no event, so a pre-set `starting`
+        // would never be cleared and the share pill would sit wedged on
+        // "stop" until clicked again. The state advances when
+        // `local_started` actually arrives.
         const withAudio = await screenShareSession.resolveWithAudio();
-        appStore.shareStartStarting(withAudio);
         await screenShareSession.start(undefined, withAudio);
         return;
       }

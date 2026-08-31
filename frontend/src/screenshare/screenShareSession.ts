@@ -435,12 +435,19 @@ class ScreenShareSession {
    *  needs one unambiguous answer for both platforms. */
   async start(selection?: Selection, withAudio = false): Promise<void> {
     const maxFramerate = await this.resolveMaxFramerate();
+    this.pendingWithAudio = withAudio;
     await invoke("start_screen_share", {
       selection: selection ?? null,
       maxFramerate,
       withAudio,
     });
   }
+
+  /** What the in-flight `start()` asked for, so `local_started` can record
+   *  it. Needed because that event carries only dimensions, and on Linux
+   *  nothing else on the renderer side has seen the choice — there is no
+   *  picker there to have set it. */
+  private pendingWithAudio = false;
 
   /** What sharing sound captures on this platform. Drives the picker's
    *  one-line explanation of the toggle. */
@@ -501,7 +508,11 @@ class ScreenShareSession {
       case "local_started":
         // Backend signals the start after its capture helper has published.
         // Synthesize the renderer-side state transitions (starting → active).
-        store.shareStartStarting();
+        // On the macOS/Windows picker path this is a no-op — the picker
+        // already moved to `starting`, carrying its own audio choice — so
+        // `pendingWithAudio` is what makes the Linux path, which has no
+        // picker, record the choice too.
+        store.shareStartStarting(this.pendingWithAudio);
         store.shareStarted(
           "tauri-local",
           { width: ev.width, height: ev.height },
