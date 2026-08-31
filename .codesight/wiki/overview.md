@@ -85,10 +85,9 @@ mobile/              # Standalone Expo/RN app (NOT a pnpm workspace member) —
 
 website/             # Static marketing site (Cloudflare Pages, not part of the app).
                      #   Also the public trust record: /retention (derived from
-                     #   docs/metadata-retention-policy.md), /status + status.js
-                     #   (renders status-history.json + incidents.json), /assurance.
-                     #   Those JSON files are committed — the DS sends no CORS
-                     #   headers, so the page cannot probe anything client-side
+                     #   docs/metadata-retention-policy.md) and /assurance.
+                     #   Service status is NOT here — status.pollis.com is a
+                     #   separate property built from the `archon` repo
 ```
 
 **Mobile build (#706):** the mobile app has no released output yet, but CI now

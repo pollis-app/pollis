@@ -69,7 +69,7 @@ Assume the operator stops, everything keeps auto-paying, and nobody intervenes.
 |---|---|---|
 | Immediately | Nothing. Messages deliver; the DS keeps serving; the site stays up | No |
 | Within ~2 days | The daily transparency publish stops. New account keys and commits stop being anchored | Only to someone checking the publisher's run history (§4) |
-| Within ~2 days | The status prober stops appending; `/status` freezes. The freshness gate in `website-verify.yml` fails daily — into a run history nobody is reading | Yes, on `/status`, which says so in those words |
+| Within ~2 days | `status.pollis.com` keeps probing and keeps reporting the DS as up, because it is — an abandoned service and a healthy one look identical from the outside until something expires | No; a live status page is not evidence anyone is operating the service |
 | ~60 days | GitHub disables scheduled workflows on an inactive repository. Every cron in this repo stops, including the ones above | Same as above, silently more so |
 | Months | Apple/Azure signing credentials lapse on their own renewal cycles. No new signed builds are possible even with the keys | Only on the next release that never comes |
 | Any time | A dependency CVE, a protocol bug or an outage goes unfixed | Yes, eventually |
@@ -106,29 +106,24 @@ gh run list --workflow=transparency-publish.yml --limit 5 \
   --json conclusion,createdAt,url
 ```
 
-Three things now consume that, deliberately in different places, because a monitor that goes quiet
-cannot be the thing that reports it went quiet:
-
-- **`scripts/status-probe.sh`** records the last run's timestamp and conclusion into
-  `website/status-history.json` on every observation, next to the served head — the two signals kept
-  apart rather than merged into one green tick.
-- **`/status` §4** publishes both, in these words, and marks the publisher `overdue` rather than
-  `healthy` when its last run is more than about two days old.
-- **`website-verify.yml`** fails daily when the publisher has not concluded successfully within 48
-  hours, and separately when the status record itself has stopped being written.
+**Nothing consumes that automatically today.** The check is a manual command, and the gap is known
+rather than hidden: an abandoned publisher and a healthy idle one serve byte-identical files, so the
+only way to tell them apart is the run history above, and no alarm currently reads it. Publishing the
+publisher's own liveness — separately from the head it serves, because a monitor that goes quiet
+cannot be the thing that reports it went quiet — belongs with `status.pollis.com` (the `archon` repo),
+which already serves service status and uptime; it is tracked there rather than rebuilt here.
 
 **Escalation.**
 
 1. **Owner, publisher red or absent > 48h:** re-dispatch `transparency-publish.yml`. If it fails on the
    signing key, follow `docs/signing-key-compromise-runbook.md`; if it fails on database access, that is
-   a DS-side incident. Either way **file it** — `docs/incidents/README.md` §2 makes an unpublished log a
-   `correctness_impact: true` incident, not a cosmetic one, precisely so it cannot be closed as "the site
-   was up the whole time".
-2. **Owner, cannot be fixed within 7 days:** say so on `/status` as an open incident with
-   `status: "identified"`. An acknowledged stall is a completely different object from a silent one, and
-   this is the cheapest thing that turns one into the other.
-3. **A third party, at any time:** the run history above is readable by anyone. So is the git history of
-   `website/status-history.json`, which records what a first party observed and when — including any gap.
+   a DS-side incident. Either way **say so publicly**: an unpublished log is a correctness problem, not a
+   cosmetic one, and must not be closed as "the site was up the whole time".
+2. **Owner, cannot be fixed within 7 days:** acknowledge it on `status.pollis.com`. An acknowledged
+   stall is a completely different object from a silent one, and this is the cheapest thing that turns
+   one into the other.
+3. **A third party, at any time:** the run history above is readable by anyone, and is the record of
+   what was published and when — including any gap.
 
 **What an external monitor should conclude.** Stated as a rule, because getting it wrong in either
 direction is harmful:
@@ -186,14 +181,14 @@ Not written here, because writing it without a legal entity would be writing fic
 
 Each is either already enforced by CI or is a one-line ask. Nothing aspirational.
 
-- [x] **A stalled transparency publisher is detected and fails a build** — `website-verify.yml`, daily.
-- [x] **A stopped status prober is detected by a different workflow than the prober** —
-      `status-probe.sh --check` in `website-verify.yml`, daily.
-- [x] **An unpublished or unverifiable log is a `correctness_impact` incident**, not a cosmetic one —
-      `docs/incidents/README.md` §2, enforced for the postmortem deadline by
-      `scripts/check-incidents.py`.
 - [x] **This register is part of the repository**, so a new credential added without a row here is
       visible in review as an asymmetry between `.github/workflows/` and §2.
+- [ ] **A stalled transparency publisher raises an alarm.** Today §4's check is a command someone has
+      to run. This is the cheapest unbuilt item here and the one this document most depends on:
+      an abandoned log and an idle one are byte-identical from outside.
+- [ ] **A written incident and postmortem record**, in which an unpublished or unverifiable log is a
+      correctness incident rather than a cosmetic one. Belongs with `status.pollis.com` (`archon`),
+      alongside the service status it already publishes.
 - [ ] **A second holder for the two pinned signing keys.** The single highest-value continuity action
       available, and it needs a person to hold them (**→ #723**).
 - [ ] **The anchor split (#754)**, without which a log-key loss is not cleanly recoverable (§5).
@@ -203,6 +198,7 @@ Each is either already enforced by CI or is a one-line ask. Nothing aspirational
 
 `docs/deployments.md` (what ships where, and the post-merge checklist) ·
 `docs/sth-signing-key-custody.md` (§3 is the one to read) ·
-`docs/signing-key-compromise-runbook.md` · `docs/incidents/README.md` ·
-`docs/security-whitepaper.md` (honest limits of the log) · `website/status.html` ·
+`docs/signing-key-compromise-runbook.md` ·
+`docs/security-whitepaper.md` (honest limits of the log) ·
+`status.pollis.com` (service status; built from the `archon` repo) ·
 #723 (legal entity) · #754 (anchor split) · #763 (witness monitoring)

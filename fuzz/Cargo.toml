@@ -20,6 +20,19 @@ cargo-fuzz = true
 # Own workspace root — keeps this crate out of the pinned-stable workspace.
 [workspace]
 
+# MUST mirror the root Cargo.toml's [patch.crates-io] openmls pin. Being a
+# detached workspace, this crate does NOT inherit the root patch — without it,
+# resolution falls back to registry openmls, which lacks the
+# `draft-ietf-mls-pq-ciphersuites` feature pollis-core names, and the build
+# fails. scripts/fuzz-check.sh asserts the revs match before fuzzing so the two
+# pins cannot drift apart silently.
+[patch.crates-io]
+openmls = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+openmls_traits = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+openmls_rust_crypto = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+openmls_basic_credential = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+openmls_memory_storage = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
+
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
