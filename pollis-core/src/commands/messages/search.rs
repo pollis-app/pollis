@@ -484,6 +484,21 @@ pub async fn search_messages(
 
     let match_expr = match_expression(&parsed);
 
+    // Terms were typed but none survived tokenisation (`???`, `!!!`): nothing
+    // the index can answer. Zero results is the honest answer — falling
+    // through would run the filter-only scan and present the entire corpus
+    // as "matches" for a query that matched nothing.
+    if parsed.has_match_terms() && match_expr.is_none() {
+        let corpus = read_corpus(state).await?;
+        return Ok(SearchPage {
+            results: Vec::new(),
+            total: 0,
+            next_cursor: None,
+            sort,
+            corpus,
+        });
+    }
+
     // The rusqlite connection and its statements are not `Send`, so all of them
     // have to be dropped before the awaits below — scoping the whole DB read in
     // a block is what keeps this command `Send`.
@@ -501,8 +516,16 @@ pub async fn search_messages(
         result.snippet.highlights = highlight_ranges(&result.snippet.text, &parsed);
     }
 
+    // Relevance mode rescores the best RESCORE_CANDIDATES bm25 hits and can
+    // page no deeper — `total` stays the honest match count, but the cursor
+    // must stop at the pageable ceiling instead of handing out one empty page.
+    let pageable = if sort == SearchSort::Relevant && match_expr.is_some() {
+        total.min(RESCORE_CANDIDATES)
+    } else {
+        total
+    };
     let returned = offset + results.len() as i64;
-    let next_cursor = if results.len() as i64 == limit && returned < total {
+    let next_cursor = if results.len() as i64 == limit && returned < pageable {
         Some(SearchCursor { offset: returned })
     } else {
         None
