@@ -591,8 +591,8 @@ pub async fn start_screen_share(
                 Ok(Some(CaptureMsg::AudioFrame {
                     sample_rate,
                     channels,
-                    timestamp_us,
                     pcm,
+                    ..
                 })) => {
                     // A backend can renegotiate its rate mid-stream when
                     // the default output device changes under a live
@@ -613,7 +613,6 @@ pub async fn start_screen_share(
                         echo.as_ref(),
                         &pcm,
                         channels,
-                        timestamp_us,
                     )
                     .await;
                 }
@@ -718,13 +717,17 @@ async fn start_shared_audio(
 
 /// Normalise one captured block and hand every whole 10 ms frame it
 /// completed to LiveKit.
+///
+/// The helper's `timestamp_us` is deliberately not carried through:
+/// LiveKit's `AudioFrame` has no timestamp field — an audio track's
+/// timing is its sample count — so there is nowhere to put it. It stays
+/// on the wire for diagnostics.
 async fn push_shared_audio(
     audio_source: Option<&libwebrtc::audio_source::native::NativeAudioSource>,
     resampler: Option<&mut SharedAudioResampler>,
     echo: Option<&SelfEchoCanceller>,
     pcm: &[i16],
     channels: u32,
-    timestamp_us: i64,
 ) {
     let (Some(source), Some(resampler)) = (audio_source, resampler) else {
         return;
@@ -745,7 +748,6 @@ async fn push_shared_audio(
             eprintln!("[screenshare/audio] capture_frame error: {e:?}");
         }
     }
-    let _ = timestamp_us;
 }
 
 // A frame's geometry, timing and two optional sinks — a per-frame hot path where
