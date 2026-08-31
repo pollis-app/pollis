@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 import { useSearchMessages } from "../../hooks/queries/useSearchMessages";
 import { formatShortDateTime } from "../../utils/format";
 import { Button } from "../ui/Button";
+import { EmojiText } from "../Emoji/EmojiText";
+import { MediaTile } from "../Layout/RightPanel/MediaTile";
+import { parseContent } from "../../hooks/queries/useMessages";
 import { shellOpen } from "../../bridge";
 import type { SearchCorpus, SearchResult, SearchSnippet, SearchSort } from "../../types";
 
@@ -26,6 +29,13 @@ const LEARN_ON_DEVICE_SEARCH_URL = "https://pollis.com/learn#on-device-search";
  * returns `[start, end)` pairs in UTF-16 code units — i.e. plain string indices
  * — and this slices between them. It is also what keeps `<mark>` out of
  * `dangerouslySetInnerHTML`, so a message body can never become markup.
+ *
+ * Each slice is then rendered through `EmojiText`, the same component the
+ * message log uses, so a `<:shortcode:hash>` token shows the image instead of
+ * its raw source text. A highlight range that happens to cut a token in half
+ * simply leaves that fragment literal — `splitEmojiSegments` only accepts
+ * well-formed tokens — which degrades to today's behaviour rather than
+ * breaking.
  */
 export const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snippet }) => {
   const parts = useMemo(() => {
@@ -52,13 +62,55 @@ export const HighlightedSnippet: React.FC<{ snippet: SearchSnippet }> = ({ snipp
       {parts.map((part, i) =>
         part.mark ? (
           <mark key={i} data-testid="search-highlight" className="bg-accent-muted text-accent-bright rounded-sm px-0.5">
-            {part.text}
+            <EmojiText text={part.text} />
           </mark>
         ) : (
-          <span key={i}>{part.text}</span>
+          <span key={i}>
+            <EmojiText text={part.text} />
+          </span>
         ),
       )}
     </span>
+  );
+};
+
+/** How many image thumbnails a single hit is willing to show. A result row is
+ *  a preview, not the message — the rest are one click away in the log. */
+const MAX_RESULT_THUMBNAILS = 3;
+
+/**
+ * The image half of a hit's preview.
+ *
+ * The snippet is text, so an attached picture reached the row as its filename
+ * and nothing else. The full content is already on the result (the backend
+ * returns it for the snippet), so the attachment envelope can be unwrapped
+ * here with the same `parseContent` the message log uses, and each image drawn
+ * with `MediaTile` — which resolves bytes through the loopback media server
+ * and falls back to an icon on failure. Non-image attachments keep their
+ * filename in the snippet and add nothing here.
+ */
+const ResultThumbnails: React.FC<{ result: SearchResult }> = ({ result }) => {
+  const images = useMemo(() => {
+    if (!result.has_attachment) {
+      return [];
+    }
+    return (parseContent(result.content).attachments ?? [])
+      .filter((a) => a.content_type.startsWith("image/"))
+      .slice(0, MAX_RESULT_THUMBNAILS);
+  }, [result.has_attachment, result.content]);
+
+  if (images.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-1.5 flex gap-1.5" data-testid="search-result-thumbnails">
+      {images.map((attachment) => (
+        <div key={attachment.id} className="w-12 flex-shrink-0">
+          <MediaTile attachment={attachment} />
+        </div>
+      ))}
+    </div>
   );
 };
 
@@ -271,6 +323,8 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     <div className="text-xs font-mono text-dim">
                       <HighlightedSnippet snippet={result.snippet} />
                     </div>
+
+                    <ResultThumbnails result={result} />
                   </button>
                 </li>
               ))}
