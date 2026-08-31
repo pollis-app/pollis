@@ -56,7 +56,19 @@ use super::audio::{SharedAudioResampler, SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDI
 /// starts after the mixer, or survives a device switch, still gets its
 /// reference. `None` means no share is capturing system audio and the
 /// mixer's per-tick cost is one uncontended lock and a null check.
-pub type SelfEchoSlot = Arc<Mutex<Option<Arc<Processor>>>>;
+pub type SelfEchoSlot = Arc<Mutex<Option<RenderTap>>>;
+
+/// What an armed slot holds: the canceller's processor handle plus the
+/// resampler that carries an off-rate reference's partial frames across
+/// mixer ticks. The resampler must live here and not per call — one 10 ms
+/// block can never complete a whole 48 kHz frame on its own (the
+/// interpolator holds back the last input sample until its successor
+/// arrives), so a per-call resampler emits nothing, ever, and the
+/// canceller silently runs without a reference.
+pub struct RenderTap {
+    processor: Arc<Processor>,
+    resampler: SharedAudioResampler,
+}
 
 /// Feed the mixer's 10 ms mono frame to the shared-audio echo canceller,
 /// if one is armed. Called from the voice mixer's hot loop; resampling to
@@ -68,34 +80,34 @@ pub type SelfEchoSlot = Arc<Mutex<Option<Arc<Processor>>>>;
 /// is dropped, and the worst outcome is that the call leaks back into the
 /// shared audio — the same place we would be without this module.
 pub fn analyze_render(slot: &SelfEchoSlot, mix: &[f32], mix_rate: u32) {
-    let processor = {
-        let guard = match slot.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        match guard.as_ref() {
-            Some(p) => Arc::clone(p),
-            None => return,
-        }
+    let mut guard = match slot.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    let tap = match guard.as_mut() {
+        Some(t) => t,
+        None => return,
     };
     if mix_rate == SHARED_AUDIO_RATE_HZ {
         // The common case, and the one that matters: the reference is
         // already the canceller's rate and frame size, so it goes in
         // untouched and stays sample-aligned with the capture stream.
-        let _ = voice_apm::analyze_render(&processor, mix, mix.len());
+        let _ = voice_apm::analyze_render(&tap.processor, mix, mix.len());
         return;
     }
     // Off-rate voice session (Bluetooth SCO mic). Resample the reference
     // rather than disable cancellation — a slightly imperfect reference
     // still removes most of the call, and no reference removes none of it.
-    let mut resampler = SharedAudioResampler::new(mix_rate);
+    // The slot's resampler carries the partial frame each tick leaves
+    // behind, so roughly every tick from the second onward completes one.
+    tap.resampler.set_src_rate(mix_rate);
     let pcm: Vec<i16> = mix
         .iter()
         .map(|s| (s * 32_767.0).clamp(-32_768.0, 32_767.0) as i16)
         .collect();
-    for frame in resampler.push(&pcm, 1) {
+    for frame in tap.resampler.push(&pcm, 1) {
         let f32s: Vec<f32> = frame.iter().map(|s| f32::from(*s) / 32_768.0).collect();
-        let _ = voice_apm::analyze_render(&processor, &f32s, f32s.len());
+        let _ = voice_apm::analyze_render(&tap.processor, &f32s, f32s.len());
     }
 }
 
@@ -136,7 +148,10 @@ impl SelfEchoCanceller {
             }
         };
         if let Ok(mut guard) = slot.lock() {
-            *guard = Some(stage.handle());
+            *guard = Some(RenderTap {
+                processor: stage.handle(),
+                resampler: SharedAudioResampler::new(SHARED_AUDIO_RATE_HZ),
+            });
         } else {
             eprintln!("[screenshare/audio] render slot poisoned; self-echo cancellation off");
             return None;
@@ -263,6 +278,54 @@ mod tests {
         assert!(
             output_energy < input_energy * 0.5,
             "self-echo cancellation did not attenuate the call: \
+             in={input_energy:.0} out={output_energy:.0}"
+        );
+    }
+
+    /// The off-rate regression: with the voice pipeline at 44.1 kHz (a
+    /// Bluetooth mic pulls the whole APM to the device rate), the render
+    /// reference is resampled before it reaches the canceller. One 10 ms
+    /// block can never complete a whole 48 kHz frame on its own, so this
+    /// only passes if the resampler's partial output survives across
+    /// ticks — a per-call resampler delivers no reference at all and the
+    /// tone comes out untouched.
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn an_off_rate_render_reference_still_cancels() {
+        const MIX_RATE: u32 = 44_100;
+        let s = slot();
+        let aec = SelfEchoCanceller::new(&s).expect("stage");
+
+        // The same 400 Hz call stand-in, generated at each stream's own
+        // rate so reference and capture describe the same signal.
+        let tone_at = |rate: u32, n: usize| -> Vec<f32> {
+            (0..n)
+                .map(|i| {
+                    (i as f32 * 2.0 * std::f32::consts::PI * 400.0 / rate as f32).sin() * 0.5
+                })
+                .collect()
+        };
+        let mix = tone_at(MIX_RATE, MIX_RATE as usize / 100);
+        let capture = tone_at(SHARED_AUDIO_RATE_HZ, SHARED_AUDIO_FRAME_SAMPLES);
+
+        let mut input_energy = 0.0f64;
+        let mut output_energy = 0.0f64;
+        const FRAMES: usize = 300;
+        for n in 0..FRAMES {
+            analyze_render(&s, &mix, MIX_RATE);
+            let mut cap: Vec<i16> = capture.iter().map(|v| (v * 32_767.0) as i16).collect();
+            let before: f64 = cap.iter().map(|v| f64::from(*v) * f64::from(*v)).sum();
+            aec.process(&mut cap);
+            let after: f64 = cap.iter().map(|v| f64::from(*v) * f64::from(*v)).sum();
+            if n >= FRAMES / 2 {
+                input_energy += before;
+                output_energy += after;
+            }
+        }
+
+        assert!(
+            output_energy < input_energy * 0.5,
+            "off-rate render reference did not reach the canceller: \
              in={input_energy:.0} out={output_energy:.0}"
         );
     }
