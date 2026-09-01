@@ -783,21 +783,7 @@ pub async fn get_media_url(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<String> {
-    // Build the URL from the server port + token. Both must be present
-    // — without an active unlock the server returns 403 anyway, so
-    // there's no point handing out a URL the caller can't use.
-    let port = state
-        .media_server_port
-        .lock()
-        .await
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("media server not started")))?;
-    let token = state
-        .media_server_token
-        .lock()
-        .await
-        .clone()
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("media server token not set; not unlocked")))?;
-    let url = format!("http://127.0.0.1:{port}/{token}/{content_hash}");
+    let url = crate::media_server::loopback_url(state, &content_hash).await?;
 
     let target = cache_file_path(&content_hash, &content_type)?;
 
