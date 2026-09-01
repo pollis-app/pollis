@@ -1,5 +1,40 @@
 # The hydra — automated AWS relay-pool orchestrator (#616)
 
+> ## ⛔ THE POOL IS SWITCHED OFF
+>
+> `hydra_enabled` defaults to **`false`** (`variables.tf`). No relay node is
+> running, no ASG exists to launch one, and there is no reconciler Lambda or
+> EventBridge schedule. Everything below describes how the pool works **when it is
+> on** — read it as the manual for a machine that is currently unplugged, not as a
+> description of something serving traffic right now.
+>
+> **What is still standing:** the signed-directory hosting (S3 + CloudFront + the
+> ACM cert for `relays.pollis.com`), the SSM parameters, and the Budgets alert.
+> All of it is ~$0 and deliberately kept so switching back on is one apply rather
+> than a repeat of the ACM/CAA/DNS stand-up. `https://relays.pollis.com/directory.json`
+> still returns the last directory the reconciler signed; it is **expired**, and
+> every client rejects an expired directory.
+>
+> **Switching it back on** — one line, then one apply:
+>
+> ```bash
+> # infra/relay-hydra/variables.tf → variable "hydra_enabled" → default = true
+> AWS_PROFILE=pollis terraform apply
+> ```
+>
+> The pool comes back at the `desired-state` parameter's existing value (`{"total":2}`)
+> — the SSM parameters were never deleted. Then re-verify:
+> `node scripts/verify-directory.mjs "$(terraform output -raw POLLIS_OVERLAY_DIRECTORY_URL)" "<POLLIS_OVERLAY_DIRECTORY_KEY>"`.
+> To flip it off again from a temporarily-on state without editing the file:
+> `terraform apply -var hydra_enabled=false`.
+>
+> **Turning it off does not break messaging.** The overlay is opt-in and off by
+> default in every shipped build (no release workflow sets `POLLIS_OVERLAY`), and
+> with no usable directory an `Off` or `Prefer` client dials the DS directly. Only
+> a client the user explicitly put in **Strict** mode degrades — which is exactly
+> Strict's documented contract ("pauses sending rather than revealing the client
+> IP"). See "Switching off, and what it costs clients" below.
+
 IaC + reconciler + signed directory for the Pollis closed-overlay relay pool.
 This is the **AWS-hosting half**; the relay binary, its image, the client, and the
 client's directory-fetch are the monorepo/#455 workstream. The only coupling is
@@ -72,12 +107,19 @@ client pins the cert, never the address.
    > what used to split-brain the pool across two relay generations. The image
    > workflow records the digest into that param on every roll (pull-based
    > convergence — see "Roll the relay image" below); seed it once for a fresh pool.
-3. **Terraform ≥ 1.6** and Node ≥ 20 (for the scripts/test).
+3. **Terraform ≥ 1.10** (the R2 backend uses `use_lockfile`) and Node ≥ 20 (for the
+   scripts/test).
 
-   > **State is local and gitignored** (`terraform.tfstate` next to this README).
-   > Losing it orphans every resource below — they keep billing and nothing manages
-   > them. Run applies from a durable checkout, not a temp dir, and back the file up
-   > (or move to an S3 backend) before the pool grows.
+   > **State is REMOTE, in Cloudflare R2** — `versions.tf` pins the `s3` backend at
+   > the bucket `pollis-tfstate`, key `relay-hydra/terraform.tfstate`, on the
+   > dedicated `r2-tfstate` AWS profile. It is **not** a local file any more, so any
+   > checkout that can read that profile sees the same state and `terraform destroy`
+   > from a fresh clone works. Two consequences worth holding on to: the AWS provider
+   > and the backend use **different profiles** (`AWS_PROFILE=pollis` for the
+   > provider, `r2-tfstate` for the state — exporting `AWS_ACCESS_KEY_ID` breaks
+   > this by feeding one set of keys to both), and R2 has **no object versioning**,
+   > so a bad state write has no bucket-level rollback — `scripts/snapshot-state.sh`
+   > is the recovery path.
 4. **Allowlist hostnames** — the defaults in `variables.tf` were pulled from
    `.env.production`; re-verify against the current file before apply.
 
@@ -185,6 +227,22 @@ is routine (~1 in 10 at three nodes), and zeroing the losers in the same pass wo
 cold-start the entire pool — several minutes with nothing serving, on a 24-hour
 timer. Deferring is safe because every reconcile is idempotent; if the incoming
 nodes never come up, the old ones simply keep serving.
+
+> **A deferral that can never clear is a money leak, not a wait.** Scale-UP is
+> unconditional and scale-DOWN is guarded, so a guard that never passes makes the
+> pool grow by a region per rotation and never give one back. That is exactly what
+> happened up to 2026-09-01: `mayDrain` treated any region whose desired capacity
+> was being *reduced* as a region that was *leaving*, so a region going 2 → 1 had
+> the node it was about to keep subtracted from the retained count. With a 2-node
+> pool at `node_floor` 2 the check then had no reachable pass state, and the log
+> read `deferring scale-down of us-east-1, us-east-2, us-west-1: 1 healthy node(s)
+> outside them, need 2` every two minutes for days — five running nodes against a
+> drawn placement of two. Fixed: each draining region now contributes
+> `min(healthy there, its post-drain target)`, so a partial reduction counts the
+> nodes that survive it and only a region going to 0 contributes nothing
+> (`test/placement.test.mjs`, "a PARTIAL drain is not a departure"). **If you ever
+> see the same deferral line repeat across more than a few cycles, compare the sum
+> of ASG desired capacities against the drawn placement — they should be equal.**
 
 The placement parameter is validated on read, so a hand-edited draw with negative
 or non-integer counts is re-drawn over rather than trusted — untrusted, it would
@@ -474,16 +532,97 @@ aws ssm delete-parameters --region us-west-2 --names \
   /pollis/relay-hydra-test/identity-cert /pollis/relay-hydra-test/desired-state
 ```
 
+### Switching off, and what it costs clients
+
+`hydra_enabled = false` (the current default) is the switch. It is one variable
+because everything that can launch or bill hangs off it: with `local.active_regions`
+empty there is **no ASG in any region**, and with `module.reconciler` gone there is
+**no Lambda and no EventBridge schedule** to draw a placement, raise a desired
+capacity, or health-check anything. An apply with the switch off is the teardown.
+
+What it deliberately does **not** touch, and why:
+
+| Kept | Why |
+| --- | --- |
+| S3 + CloudFront + the ACM cert (`module.directory`) | ~$0 idle, and destroying it means redoing the ACM/CAA/DNS sequence — the worst part of a stand-up (see the CAA warning above). The last directory just expires. |
+| Every SSM parameter | `desired-state` is what the pool comes back at. **`revocations` must never be deleted** — its SSM `Version` is the published sequence number, and recreating it resets that to 1, which every client that has seen a higher sequence rejects as a rollback. |
+| The Budgets alert | The account keeps its cost guardrail while the pool is off. |
+| `relay-image.yml` | It only builds and publishes an image; it launches nothing. Its `record-intended-image` step is gated on the CI OIDC role, which the switch also removes, so it skips — the same state it is in today with the repo variable unset. |
+
+**Client impact: none, unless a user chose Strict.** The overlay is opt-in and off
+by default at three independent layers — `config.rs` parses an unknown/absent
+`POLLIS_OVERLAY` to `Off`, no release workflow sets it at all, and the synced
+preference normalizes anything unrecognized to `"off"`. With the mode `Off` the
+client never even fetches the directory. In `Prefer`, a missing/expired/empty
+directory collapses the relay pool and every request falls back to a **direct**
+dial — latency only, no failure. In `Strict` it surfaces a degraded error rather
+than silently going direct, which is Strict's whole point; a user in Strict must
+move to Prefer or Off while the pool is down. Nothing else depends on the overlay:
+every DS/R2/transparency call takes an `Option` overlay handle and a `None` yields
+a plain proxy-less client, and the directory fetch itself is always direct.
+
 ### Tear it all down
+
+The `hydra_enabled = false` apply IS the teardown for the compute half. To remove
+the pool entirely — directory hosting and secrets included — destroy the stack:
+
 ```bash
+cd infra/relay-hydra
+export AWS_PROFILE=pollis          # provider creds; the R2 backend uses its own [r2-tfstate] profile
+
+# 1. Switch the pool off. This terminates every node and removes the ASGs,
+#    launch templates, VPCs, the reconciler Lambda, its EventBridge schedule and
+#    its alarms. Takes a few minutes — Terraform waits for the instances to go.
+#    (Already the default; -var is only needed if you flipped it back on.)
+terraform apply -var hydra_enabled=false
+
+# 2. VERIFY nothing is left running, ACROSS EVERY REGION. Terraform only knows
+#    what is in its state, so prove it against EC2 itself. A blank ASG column on
+#    any row = an instance no ASG owns, i.e. an orphan Terraform will never touch.
+for r in $(aws ec2 describe-regions --all-regions --query 'Regions[].RegionName' --output text); do
+  aws ec2 describe-instances --region "$r" \
+    --filters Name=tag:app,Values=pollis-relay \
+              Name=instance-state-name,Values=pending,running,stopping,stopped \
+    --query "Reservations[].Instances[].[\`$r\`,InstanceId,State.Name,Tags[?Key=='aws:autoscaling:groupName']|[0].Value]" \
+    --output text
+done
+#    → no output at all is the pass condition. The Name tag is a second net:
+#      swap the filter for Name=tag:Name,Values='pollis-relay-*' and re-run.
+
+# 3. Same sweep for the ASGs themselves — an empty ASG bills nothing but proves
+#    the apply did not silently skip a region.
+for r in us-east-1 us-east-2 us-west-1 us-west-2; do
+  aws autoscaling describe-auto-scaling-groups --region "$r" \
+    --query 'AutoScalingGroups[].[AutoScalingGroupName,DesiredCapacity,length(Instances)]' --output text
+done
+
+# 4. Only if you are removing the pool FOR GOOD (this also destroys the ACM cert,
+#    CloudFront distribution and S3 bucket — bringing it back then means redoing
+#    the CAA/ACM/DNS dance):
 terraform destroy                 # add -var-file=test.tfvars for a test env
-# The signing/identity SSM SecureStrings are NOT Terraform-managed (their plaintext
-# must never touch TF state) — delete them explicitly (swap the -test prefix for a
-# test env):
+
+# 5. The signing/identity SSM SecureStrings are NOT Terraform-managed (their
+#    plaintext must never touch TF state) — delete them explicitly (swap the -test
+#    prefix for a test env). NOTE the revocations param is NOT in this list: see
+#    the warning above, deleting it resets its Version and every client that has
+#    seen a higher sequence fails closed.
 aws ssm delete-parameters --region us-west-2 --names \
   /pollis/relay-hydra/signing-key /pollis/relay-hydra/identity-key \
   /pollis/relay-hydra/identity-cert /pollis/relay-hydra/desired-state
 ```
+
+> **Why the all-region sweep and not just `terraform state list`.** Every node in
+> this design is launched by an ASG, and every ASG is a Terraform resource — so
+> destroying the stack does terminate them. But the sweep costs one API call per
+> region and is the only check that does not take Terraform's word for it: it
+> catches a shard removed from the config while its instances still ran, a
+> hand-launched node, a `-target`ed partial apply, and a second `env=` pool
+> someone stood up in the same account from a different state file. Run it after
+> the apply, not instead of it.
+>
+> Also worth one look: the CloudWatch **log group** `/aws/lambda/pollis-relay-hydra-reconciler`
+> (14-day retention, pennies) is destroyed with the reconciler module — but only
+> if the module is destroyed, not merely if the Lambda is removed by hand.
 
 ---
 
