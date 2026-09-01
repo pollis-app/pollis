@@ -224,13 +224,11 @@ impl Sth {
     /// domain-separation `context`. An STH signed for one tenant's tree fails
     /// verification under another tenant's context, even with the same key.
     pub fn verify_with_context(&self, verifying_key: &VerifyingKey, context: &[u8]) -> bool {
-        let root = match self.root_bytes() {
-            Ok(r) => r,
-            Err(_) => return false,
+        let Ok(root) = self.root_bytes() else {
+            return false;
         };
-        let signature = match sig_from_hex(&self.signature) {
-            Ok(s) => s,
-            Err(_) => return false,
+        let Ok(signature) = sig_from_hex(&self.signature) else {
+            return false;
         };
         let message = signing_message_with_context(context, self.tree_size, &root, self.timestamp);
         verifying_key.verify(&message, &signature).is_ok()
