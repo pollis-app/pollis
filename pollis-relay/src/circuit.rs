@@ -72,18 +72,25 @@ impl Circuit {
         }
     }
 
-    /// An n-hop circuit along `hops`, in order from the client outward. The last
-    /// entry is the hop that talks to the destination and must therefore be a
-    /// first-party relay — that is the caller's (path selection's) invariant to
-    /// hold; this crate enforces it as the destination allowlist each relay
-    /// applies to a `Connect`.
-    pub fn build(hops: Vec<Hop>, identity: Arc<ClientIdentity>) -> anyhow::Result<Circuit> {
+    /// The two shapes a circuit may never have: none at all, and more than the
+    /// cap. Checked both when a circuit is built and again before it dials.
+    fn validate_hops(hops: &[Hop]) -> anyhow::Result<()> {
         if hops.is_empty() {
             anyhow::bail!("circuit has no hops");
         }
         if hops.len() > MAX_HOPS {
             anyhow::bail!("circuit of {} hops exceeds the {MAX_HOPS}-hop cap", hops.len());
         }
+        Ok(())
+    }
+
+    /// An n-hop circuit along `hops`, in order from the client outward. The last
+    /// entry is the hop that talks to the destination and must therefore be a
+    /// first-party relay — that is the caller's (path selection's) invariant to
+    /// hold; this crate enforces it as the destination allowlist each relay
+    /// applies to a `Connect`.
+    pub fn build(hops: Vec<Hop>, identity: Arc<ClientIdentity>) -> anyhow::Result<Circuit> {
+        Self::validate_hops(&hops)?;
         Ok(Circuit { hops, identity })
     }
 
@@ -104,15 +111,10 @@ impl Circuit {
     /// a fresh onion layer to that successor before speaking to it, so the
     /// returned stream is wrapped in one encryption layer per hop past the first.
     pub async fn connect(&self, target_host: &str, target_port: u16) -> anyhow::Result<BoxedStream> {
-        if self.hops.is_empty() {
-            anyhow::bail!("circuit has no hops");
-        }
-        if self.hops.len() > MAX_HOPS {
-            anyhow::bail!(
-                "circuit of {} hops exceeds the {MAX_HOPS}-hop cap",
-                self.hops.len()
-            );
-        }
+        // Re-checked here, not just at construction: `hops` is public enough to
+        // have been reshaped since, and an over-long circuit must fail before it
+        // dials rather than halfway along.
+        Self::validate_hops(&self.hops)?;
 
         let first = &self.hops[0];
         let link = RelayLink::open(first.addr, &first.relay_cert).await?;
@@ -126,7 +128,7 @@ impl Circuit {
         }
         let mut layer = BoxedStream::new(link.open_stream().await?);
 
-        for (i, _hop) in self.hops.iter().enumerate() {
+        for i in 0..self.hops.len() {
             // Authenticate to this hop. Every hop verifies the device cert
             // offline, so each gets its own freshly-nonced handshake.
             let handshake = self.identity.fresh_handshake()?;

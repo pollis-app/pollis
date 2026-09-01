@@ -98,11 +98,18 @@ impl HostPattern {
     }
 
     pub(crate) fn matches(&self, host: &str) -> bool {
-        let host = host.to_ascii_lowercase();
+        // `parse` already lowercased both stored forms, so an ASCII-insensitive
+        // compare gives the same answer without lowercasing a fresh copy of the
+        // host for every pattern in the list — this runs once per pattern per
+        // `Connect`, and `Any` never looks at the host at all.
         match self {
             HostPattern::Any => true,
-            HostPattern::Exact(h) => *h == host,
-            HostPattern::Suffix(suffix) => host.ends_with(suffix.as_str()),
+            HostPattern::Exact(h) => h.eq_ignore_ascii_case(host),
+            HostPattern::Suffix(suffix) => {
+                let (host, suffix) = (host.as_bytes(), suffix.as_bytes());
+                host.len() >= suffix.len()
+                    && host[host.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+            }
         }
     }
 }
@@ -494,13 +501,10 @@ async fn handle_quic_stream(
 ) -> anyhow::Result<()> {
     let mut stream = RelayStream::new(send, recv, None, None);
 
-    let header = match proto::read_frame_header(&mut stream).await {
-        Ok(h) => h,
-        Err(_) => {
-            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), proto::MIN_PROTOCOL_VERSION).await;
-            return Ok(());
-        }
+    let Ok(header) = proto::read_frame_header(&mut stream).await else {
+        let version = proto::MIN_PROTOCOL_VERSION;
+        reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
+        return Ok(());
     };
 
     match header.msg_type {
@@ -514,6 +518,8 @@ async fn handle_quic_stream(
                 Ok(s) => s,
                 Err(e) => {
                     tracing::debug!("relay: onion layer handshake failed: {e}");
+                    // Counted but not answered: the `Ok` above has already gone
+                    // out on this stream, so there is no second verdict to send.
                     inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
                     return Ok(());
                 }
@@ -523,23 +529,36 @@ async fn handle_quic_stream(
             serve_layered_stream(layered, inner).await
         }
         proto::MSG_HANDSHAKE => {
-            let handshake = match proto::read_handshake_body(&mut stream).await {
-                Ok(h) => h,
-                Err(_) => {
-                    inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-                    let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), header.version).await;
-                    return Ok(());
-                }
-            };
-            serve_authenticated(stream, inner, Some(origin), handshake, header.version).await
+            read_handshake_and_serve(stream, inner, Some(origin), header.version).await
         }
         other => {
-            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), header.version).await;
+            reject(
+                &mut stream,
+                &inner.stats,
+                RejectReason::BadRequest,
+                header.version,
+            )
+            .await;
             tracing::debug!("relay: unexpected opening frame {other}");
             Ok(())
         }
     }
+}
+
+/// Read the handshake body a caller has already committed to, then serve what
+/// follows it. `origin` is `Some` only for a stream straight off this node's
+/// QUIC endpoint; a layered one has no client IP to attribute.
+async fn read_handshake_and_serve<S: DuplexStream>(
+    mut stream: S,
+    inner: Arc<RelayInner>,
+    origin: Option<DirectOrigin>,
+    version: u8,
+) -> anyhow::Result<()> {
+    let Ok(handshake) = proto::read_handshake_body(&mut stream).await else {
+        reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
+        return Ok(());
+    };
+    serve_authenticated(stream, inner, origin, handshake, version).await
 }
 
 /// Serve a stream that arrived inside an onion layer. Identical to the direct
@@ -549,28 +568,37 @@ async fn serve_layered_stream<S: DuplexStream>(
     mut stream: S,
     inner: Arc<RelayInner>,
 ) -> anyhow::Result<()> {
-    let header = match proto::read_frame_header(&mut stream).await {
-        Ok(h) => h,
-        Err(_) => {
-            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), proto::MIN_PROTOCOL_VERSION).await;
-            return Ok(());
-        }
+    let Ok(header) = proto::read_frame_header(&mut stream).await else {
+        let version = proto::MIN_PROTOCOL_VERSION;
+        reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
+        return Ok(());
     };
     if header.msg_type != proto::MSG_HANDSHAKE {
-        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-        let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), header.version).await;
+        reject(
+            &mut stream,
+            &inner.stats,
+            RejectReason::BadRequest,
+            header.version,
+        )
+        .await;
         return Ok(());
     }
-    let handshake = match proto::read_handshake_body(&mut stream).await {
-        Ok(h) => h,
-        Err(_) => {
-            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), header.version).await;
-            return Ok(());
-        }
-    };
-    serve_authenticated(stream, inner, None, handshake, header.version).await
+    read_handshake_and_serve(stream, inner, None, header.version).await
+}
+
+/// Count one refusal and tell the client why. Every rejection path does exactly
+/// this pair, and the counter has to move in lockstep with the response — a
+/// `rejected` that drifts from what clients were actually told is worse than no
+/// counter at all. The write is best-effort: a peer that has already gone away
+/// cannot be told anything, and that is not this node's problem.
+async fn reject<W: tokio::io::AsyncWrite + Unpin>(
+    stream: &mut W,
+    stats: &RelayStats,
+    reason: RejectReason,
+    version: u8,
+) {
+    stats.rejected.fetch_add(1, Ordering::Relaxed);
+    let _ = proto::write_response(stream, Err(reason), version).await;
 }
 
 /// Holds [`RelayStats::live_circuits`] up for as long as one admitted stream is
@@ -606,8 +634,7 @@ async fn serve_authenticated<S: DuplexStream>(
     let verified = match proto::verify_handshake(&handshake, proto::now_unix()) {
         Ok(v) => v,
         Err(reason) => {
-            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            let _ = proto::write_response(&mut stream, Err(reason), version).await;
+            reject(&mut stream, &inner.stats, reason, version).await;
             return Ok(());
         }
     };
@@ -624,14 +651,10 @@ async fn serve_authenticated<S: DuplexStream>(
             .rate_limiter
             .admit_account_only(verified.account_fingerprint),
     };
-    let _circuit_guard = match admitted {
-        Some(g) => g,
-        None => {
-            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-            inner.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
-            let _ = proto::write_response(&mut stream, Err(RejectReason::RateLimited), version).await;
-            return Ok(());
-        }
+    let Some(_circuit_guard) = admitted else {
+        inner.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
+        reject(&mut stream, &inner.stats, RejectReason::RateLimited, version).await;
+        return Ok(());
     };
 
     // Admitted, so this stream is a circuit this node is carrying until it ends.
@@ -643,14 +666,9 @@ async fn serve_authenticated<S: DuplexStream>(
     //    next relay) or a park (offer this connection as a middle hop).
     let mut anchored = false;
     let terminal = loop {
-        let frame = match proto::read_client_frame(&mut stream).await {
-            Ok(f) => f,
-            Err(_) => {
-                inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-                let _ =
-                    proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
-                return Ok(());
-            }
+        let Ok(frame) = proto::read_client_frame(&mut stream).await else {
+            reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
+            return Ok(());
         };
         match frame {
             ClientFrame::Command(command) => {
@@ -663,9 +681,7 @@ async fn serve_authenticated<S: DuplexStream>(
             // only ever be an attempt to have a later one overwrite an earlier
             // verdict — so it is a malformed exchange, not a re-check.
             ClientFrame::Anchor(_) if anchored => {
-                inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-                let _ =
-                    proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+                reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
                 return Ok(());
             }
             ClientFrame::Anchor(anchor) => {
@@ -685,11 +701,11 @@ async fn serve_authenticated<S: DuplexStream>(
                     );
                     if let Err(e) = verdict {
                         tracing::debug!("relay: account anchor refused: {e}");
-                        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
                         inner.stats.anchors_refused.fetch_add(1, Ordering::Relaxed);
-                        let _ = proto::write_response(
+                        reject(
                             &mut stream,
-                            Err(RejectReason::Unauthorized),
+                            &inner.stats,
+                            RejectReason::Unauthorized,
                             version,
                         )
                         .await;
@@ -705,13 +721,12 @@ async fn serve_authenticated<S: DuplexStream>(
     // client cannot present one at all, so it gets the reason code its generation
     // understands rather than one that would decode as `Internal`.
     if inner.anchor.is_required() && !anchored {
-        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
         let reason = if version >= proto::ANCHOR_MIN_VERSION {
             RejectReason::AnchorRequired
         } else {
             RejectReason::Unauthorized
         };
-        let _ = proto::write_response(&mut stream, Err(reason), version).await;
+        reject(&mut stream, &inner.stats, reason, version).await;
         return Ok(());
     }
 
@@ -726,9 +741,7 @@ async fn serve_authenticated<S: DuplexStream>(
             // Parking needs the connection itself, so a stream that arrived
             // inside an onion layer cannot park: there is nothing to park.
             let Some(origin) = origin else {
-                inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-                let _ =
-                    proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+                reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
                 return Ok(());
             };
             // A parked connection is not a circuit — it carries none until an
@@ -762,8 +775,7 @@ async fn serve_park<S: DuplexStream>(
     let Some(_registration) = inner.parked.park(park.relay_leaf_der, origin.connection) else {
         // Already parked here by a live connection — see `ParkedPeers::park` for
         // why the incumbent keeps it.
-        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-        let _ = proto::write_response(&mut stream, Err(RejectReason::BadRequest), version).await;
+        reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
         return Ok(());
     };
 
@@ -790,12 +802,10 @@ async fn serve_connect<S: DuplexStream>(
     // Allowlist — the closed-overlay guarantee (design §1.2). It is enforced
     // wherever the `Connect` lands, which is by construction the last hop.
     if !inner.allowlist.permits(&connect.host) {
-        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-        let _ = proto::write_response(&mut stream, Err(RejectReason::NotAllowed), version).await;
+        reject(&mut stream, &inner.stats, RejectReason::NotAllowed, version).await;
         return Ok(());
     }
 
-    // Dial the target (applying any host→IP override).
     let mut tcp = match dial_target(&connect, &inner.resolve_overrides).await {
         Ok(s) => s,
         Err(e) => {
@@ -846,8 +856,7 @@ async fn serve_extend<S: DuplexStream>(
     version: u8,
 ) -> anyhow::Result<()> {
     if !inner.allow_extend {
-        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-        let _ = proto::write_response(&mut stream, Err(RejectReason::ExtendFailed), version).await;
+        reject(&mut stream, &inner.stats, RejectReason::ExtendFailed, version).await;
         return Ok(());
     }
 
@@ -870,8 +879,7 @@ async fn serve_extend<S: DuplexStream>(
     };
     if !inner.revocations.admit(&identity, proto::now_unix()).admitted() {
         tracing::debug!("relay: refusing to extend to {addr} — not admitted by revocation");
-        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-        let _ = proto::write_response(&mut stream, Err(RejectReason::ExtendFailed), version).await;
+        reject(&mut stream, &inner.stats, RejectReason::ExtendFailed, version).await;
         return Ok(());
     }
 
