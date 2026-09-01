@@ -27,6 +27,8 @@ use axum::{
     extract::State,
     response::Response,
 };
+use std::collections::HashMap;
+
 use libsql::Connection;
 
 use crate::error::AppError;
@@ -232,13 +234,68 @@ async fn channel_ids_of(conn: &Connection, group_id: &str) -> anyhow::Result<Vec
     Ok(out)
 }
 
+/// This device's watermark for each of `conversation_ids`, by conversation.
+///
+/// Read separately from the envelopes rather than as a subquery inside them —
+/// see [`fetch_envelopes`] for why. A conversation with no row is absent from
+/// the map and the caller substitutes `""`, which is the same "everything"
+/// floor the old `COALESCE` produced.
+async fn fetch_watermarks(
+    conn: &Connection,
+    conversation_ids: &[String],
+    user_id: &str,
+    device_id: &str,
+) -> anyhow::Result<HashMap<String, String>> {
+    let sql = format!(
+        "SELECT conversation_id, last_fetched_at FROM conversation_watermark \
+         WHERE user_id = ?1 AND device_id = ?2 AND conversation_id IN ({})",
+        placeholders(conversation_ids.len(), 3)
+    );
+    let mut params: Vec<libsql::Value> = Vec::with_capacity(conversation_ids.len() + 2);
+    params.push(user_id.to_string().into());
+    params.push(device_id.to_string().into());
+    for cid in conversation_ids {
+        params.push(cid.clone().into());
+    }
+    let mut rows = conn.query(&sql, params).await?;
+    let mut out = HashMap::new();
+    while let Some(row) = rows.next().await? {
+        out.insert(row.get(0)?, row.get(1)?);
+    }
+    Ok(out)
+}
+
 /// Envelopes past each conversation's OWN watermark for this device.
 ///
-/// The watermark subquery correlates on `message_envelope.conversation_id`
-/// rather than a bound id, which is what keeps "strictly past THAT
-/// conversation's watermark" true now that one query serves all of them. The
-/// composite ordering is what lets the caller partition one result set into the
-/// same per-conversation lists it used to build from N queries.
+/// The bound has to be per conversation — one query serves all of them, and
+/// each has its own cursor — but it must also be a value the planner can use as
+/// an index RANGE, and those two requirements pull apart.
+///
+/// Expressing it as a correlated subquery (`WHERE sent_at > (SELECT …  WHERE
+/// conversation_id = message_envelope.conversation_id)`) reads correctly and is
+/// what this did until now. It cannot use `idx_envelope_channel_time`'s
+/// `sent_at` column, because the comparison value is not known until the outer
+/// row exists: SQLite plans it `SEARCH … (conversation_id=?)` plus a
+/// `CORRELATED SCALAR SUBQUERY`, i.e. **every retained envelope in the
+/// conversation is read and then discarded**. Measured on the real schema at
+/// 200k envelopes, for a caught-up device returning zero rows: 36 ms and ~200k
+/// rows read. Those are billed rows on Turso, on the path every client takes to
+/// ask "anything new?" — so the idle case, which should be free, was the
+/// expensive one.
+///
+/// Reading the watermarks first and binding each conversation's own value makes
+/// every branch a real range seek (`MULTI-INDEX OR`, each
+/// `conversation_id=? AND sent_at>?`): 0.1 ms, no rows read, same one round
+/// trip. `pollis-delivery/tests/envelope_query_plan.rs` pins the plan, because
+/// this regressed silently once already — #875 batched the per-channel queries
+/// into one and turned a bound `?1` into a correlation without anything noticing.
+///
+/// Splitting the read in two is safe in the only direction that matters. The
+/// watermark for `(conversation, user, device)` is advanced by this device
+/// alone, so a concurrent advance between the two reads can only leave this
+/// query using an OLDER cursor — re-sending an envelope the client already has,
+/// which `ingest.rs`'s `INSERT OR IGNORE INTO message` absorbs. It can never
+/// skip one.
 async fn fetch_envelopes(
     conn: &Connection,
     conversation_ids: &[String],
@@ -246,27 +303,29 @@ async fn fetch_envelopes(
     device_id: &str,
 ) -> anyhow::Result<Vec<EnvelopeWire>> {
     let mut out = Vec::new();
-    for chunk in conversation_ids.chunks(BIND_CHUNK) {
+    // Two binds per conversation now (its id and its own watermark), so half as
+    // many conversations fit under the same variable ceiling.
+    for chunk in conversation_ids.chunks(BIND_CHUNK / 2) {
+        let watermarks = fetch_watermarks(conn, chunk, user_id, device_id).await?;
+        let mut clauses = Vec::with_capacity(chunk.len());
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() * 2);
+        for (i, cid) in chunk.iter().enumerate() {
+            clauses.push(format!(
+                "(conversation_id = ?{} AND sent_at > ?{})",
+                i * 2 + 1,
+                i * 2 + 2
+            ));
+            params.push(cid.clone().into());
+            params.push(watermarks.get(cid).cloned().unwrap_or_default().into());
+        }
         let sql = format!(
             "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
                     target_message_id, sent_at, type \
              FROM message_envelope \
-             WHERE conversation_id IN ({}) \
-               AND sent_at > COALESCE( \
-                   (SELECT last_fetched_at FROM conversation_watermark \
-                    WHERE conversation_id = message_envelope.conversation_id \
-                      AND user_id = ?1 AND device_id = ?2), \
-                   '' \
-               ) \
+             WHERE {} \
              ORDER BY conversation_id ASC, sent_at ASC, id ASC",
-            placeholders(chunk.len(), 3)
+            clauses.join(" OR ")
         );
-        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 2);
-        params.push(user_id.to_string().into());
-        params.push(device_id.to_string().into());
-        for cid in chunk {
-            params.push(cid.clone().into());
-        }
         let mut rows = conn.query(&sql, params).await?;
         while let Some(row) = rows.next().await? {
             out.push(EnvelopeWire {

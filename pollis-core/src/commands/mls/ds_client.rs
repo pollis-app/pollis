@@ -105,11 +105,9 @@ async fn ds_post_bytes(
     path: &str,
     body_bytes: Vec<u8>,
 ) -> Result<reqwest::Response> {
-    let base = state
-        .config
-        .pollis_delivery_url
-        .as_deref()
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("pollis_delivery_url not configured")))?;
+    // Resolved before the identity lookups below so a missing URL still reports
+    // as "not configured" rather than "not signed in".
+    let base = delivery_base(state)?;
 
     let user_id = current_user_id(state).await?;
     let device_id = state
@@ -151,7 +149,7 @@ async fn ds_post_bytes(
         base64::engine::general_purpose::STANDARD.encode(sig)
     };
 
-    let url = format!("{}{}", base.trim_end_matches('/'), path);
+    let url = format!("{base}{path}");
     // First-party DS write — route through the overlay when it is on (§14.2).
     let overlay = state.overlay_handle();
     let resp = crate::net::overlay::http_client(overlay.as_deref())
@@ -423,14 +421,31 @@ pub async fn ds_post_json<B: ClientRequest>(
     state: &Arc<AppState>,
     body: &B,
 ) -> Result<B::Response> {
-    let resp = ds_post(state, body).await?;
-    let status = resp.status();
-    if !status.is_success() {
-        let path = B::PATH;
-        let txt = resp.text().await.unwrap_or_default();
-        return Err(Error::Other(anyhow::anyhow!("ds_post {path} {status}: {txt}")));
-    }
+    let resp = reject_non_2xx(ds_post(state, body).await?, B::PATH, "ds_post").await?;
     decode_response::<B>(resp).await
+}
+
+/// Pass a 2xx response through; turn anything else into an `Err` carrying the
+/// status and the body text.
+///
+/// [`ds_post_json`], [`ds_post_ok`], [`ds_post_signed_or_session_ok`] and
+/// [`ds_post_session_ok`] each carried their own copy of this block. `label` is
+/// the only thing that ever varied between them, and it is a parameter rather
+/// than a hardcoded `"ds_post"` so the messages stay byte-identical to the ones
+/// the copies produced — `ds_post_session_ok` reported under its own name.
+async fn reject_non_2xx(
+    resp: reqwest::Response,
+    path: &str,
+    label: &str,
+) -> Result<reqwest::Response> {
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+    let txt = resp.text().await.unwrap_or_default();
+    Err(Error::Other(anyhow::anyhow!(
+        "{label} {path} {status}: {txt}"
+    )))
 }
 
 /// Decode a 2xx body into the endpoint's declared response type.
@@ -590,14 +605,19 @@ pub async fn ds_report_commit_since(
 /// give up quickly rather than stall real work behind an unreachable DS.
 const REPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Resolve the DS base URL or error if it isn't configured. Shared by the
+/// Resolve the DS base URL, trailing slash trimmed, or error if it isn't
+/// configured. Shared by every sender: the signed [`ds_post_bytes`] above and the
 /// unauthenticated + session-bearer bootstrap clients below.
-fn delivery_base(state: &Arc<AppState>) -> Result<String> {
+///
+/// Borrows rather than allocating — each caller's next move is to `format!` it
+/// into a URL, so the owned `String` this used to return was thrown away
+/// immediately.
+fn delivery_base(state: &Arc<AppState>) -> Result<&str> {
     state
         .config
         .pollis_delivery_url
         .as_deref()
-        .map(|s| s.trim_end_matches('/').to_string())
+        .map(|s| s.trim_end_matches('/'))
         .ok_or_else(|| Error::Other(anyhow::anyhow!("pollis_delivery_url not configured")))
 }
 

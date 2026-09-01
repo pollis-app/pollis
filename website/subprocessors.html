@@ -205,9 +205,19 @@
           preferences, none of your traffic goes through a relay and this section does not apply to you.
         </p>
 
+        <p>
+          <strong>The pool is currently switched off.</strong> No relay nodes are running. The pool was small and
+          barely used, and it was costing money to leave up, so it was taken down rather than left running as
+          decoration. If you have network privacy set to <em>off</em> or <em>prefer</em>, nothing changes for you —
+          <em>prefer</em> simply connects directly, which is what it already did whenever the pool was unreachable.
+          If you set it to <em>strict</em>, sending will pause rather than connect directly, which is exactly what
+          strict is for; switch to <em>prefer</em> if you would rather keep sending. The table below describes the
+          pool as it was configured and as it will be again if it is switched back on.
+        </p>
+
         <div class="doc-table-wrap">
           <table class="doc-table">
-            <thead><tr><th></th><th>What the design allows for</th><th>What actually runs</th></tr></thead>
+            <thead><tr><th></th><th>What the design allows for</th><th>What runs when the pool is on</th></tr></thead>
             <tbody>
               <tr>
                 <td>Operators</td>
@@ -254,8 +264,11 @@
   | jq -r .payload_b64 | base64 -d \
   | jq '{issued_at, expires_at, relays: [.relays[] | {addr, region}]}'</code>
         <span class="doc-cmd-note">
-          Returns the live pool with each node's address and region. Because placement rotates daily, what you see
-          will differ from what anyone else saw yesterday — that is the design working, not drift.
+          Returns the pool with each node's address and region. <strong>While the pool is switched off this
+          returns the last directory that was signed, and its <code>expires_at</code> is in the past</strong> — an
+          expired directory is one every Pollis client refuses, which is the point: there is no way for a stale
+          roster to keep being used. When the pool is on, placement rotates daily, so what you see will differ
+          from what anyone else saw yesterday — that is the design working, not drift.
         </span>
 
         <div class="doc-limit">

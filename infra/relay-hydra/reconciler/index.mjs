@@ -663,8 +663,13 @@ async function drainLosingRegions(pending, perRegionHealthy, placement) {
     return 0;
   }
 
+  // Hand mayDrain each region's POST-DRAIN TARGET, not just its name: a region
+  // going 2 -> 1 is "draining" but still keeps a node, and that node is real
+  // retained capacity. Passing only the names made the guard treat a partial
+  // reduction as a total loss, which a small pool at its floor can never satisfy —
+  // the scale-down then defers forever while scale-ups keep landing elsewhere.
   const { ok, retainedHealthy, required } = mayDrain({
-    draining,
+    draining: Object.fromEntries(Object.entries(pending).map(([region, { target }]) => [region, target])),
     perRegionHealthy,
     poolTotal: placementTotal(placement),
     nodeFloor: NODE_FLOOR,
@@ -672,7 +677,7 @@ async function drainLosingRegions(pending, perRegionHealthy, placement) {
 
   if (!ok) {
     console.log(
-      `deferring scale-down of ${draining.join(", ")}: ${retainedHealthy} healthy node(s) outside them, need ${required}. ` +
+      `deferring scale-down of ${draining.join(", ")}: ${retainedHealthy} healthy node(s) would survive it, need ${required}. ` +
         "A later reconcile will drain them once the incoming nodes answer /version.",
     );
     return 0;
@@ -682,7 +687,7 @@ async function drainLosingRegions(pending, perRegionHealthy, placement) {
   for (const [region, { asgName, target, currentDesired }] of Object.entries(pending)) {
     try {
       await setDesiredCapacity(region, asgName, target);
-      console.log(`${region}: drained ${currentDesired} -> ${target} (${retainedHealthy} healthy elsewhere)`);
+      console.log(`${region}: drained ${currentDesired} -> ${target} (${retainedHealthy} healthy node(s) survive the drain)`);
     } catch (err) {
       failures += 1;
       console.error(`${region}: failed to scale down to ${target}:`, err);

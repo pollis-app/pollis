@@ -33,6 +33,12 @@ use crate::state::AppState;
 
 use super::ds_client::{current_user_id, ds_post_json};
 
+/// The control plane decodes DS base64 with the same helper the data plane uses.
+/// Re-exported rather than redefined so `super::ds_reads::decode_b64` keeps
+/// resolving from inside `mls/` — this module used to carry a byte-identical
+/// second copy of the body.
+pub(crate) use crate::commands::ds_reads::decode_b64;
+
 /// Ask about several conversations at once.
 ///
 /// Batched because the cold-launch sweep runs the catch-up chain per
@@ -115,14 +121,6 @@ pub(crate) async fn resolve_mls_group(
     } else {
         resolved.mls_group_id
     })
-}
-
-/// Decode one base64 blob from a read response.
-pub(crate) fn decode_b64(what: &str, s: &str) -> Result<Vec<u8>> {
-    use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD
-        .decode(s)
-        .map_err(|e| Error::Other(anyhow::anyhow!("{what}: invalid base64 from DS: {e}")))
 }
 
 /// Drain this device's undelivered Welcomes: `(welcome_id, welcome_bytes)`,

@@ -40,7 +40,7 @@ use std::time::Duration;
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
-use base64::Engine as _;
+use crate::util::b64;
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -405,10 +405,6 @@ pub(crate) fn open_cursors(
 async fn account_seed(state: &Arc<AppState>, user_id: &str) -> Result<Zeroizing<Vec<u8>>> {
     let key = crate::commands::account_identity::load_account_id_key(state, user_id).await?;
     Ok(Zeroizing::new(key.to_seed().to_vec()))
-}
-
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 /// Upload every cursor this device holds, encrypted.

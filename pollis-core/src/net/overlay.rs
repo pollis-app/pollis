@@ -136,7 +136,7 @@ pub(crate) fn overlay_policy(config: &Config, mode: OverlayMode) -> RoutingPolic
 /// against `users.identity_version`. So a fixed version is sufficient and correct
 /// for the handshake; the rate limiter keys on `account_id_pub` (the real one),
 /// not the version.
-const OVERLAY_CERT_IDENTITY_VERSION: u32 = 1;
+pub(crate) const OVERLAY_CERT_IDENTITY_VERSION: u32 = 1;
 
 /// How long a relay endpoint stays marked dead after a failed dial before it is
 /// eligible again. Mark-dead-on-failure + cooldown is the *event-driven*
@@ -503,7 +503,7 @@ impl RealRelayFactory {
             .state
             .upgrade()
             .ok_or_else(|| anyhow::anyhow!("overlay: app state gone"))?;
-        let id = Arc::new(build_client_identity(&state).await?);
+        let id = Arc::new(build_client_identity(&state, "overlay").await?);
         *self.identity.lock().await = Some(id.clone());
         Ok(id)
     }
@@ -591,20 +591,28 @@ impl CircuitFactory for RealRelayFactory {
 
 /// Build the logged-in device's relay [`ClientIdentity`] from local state.
 /// See [`RealRelayFactory`] for why the cert is minted locally.
-async fn build_client_identity(state: &Arc<AppState>) -> anyhow::Result<ClientIdentity> {
-    let user_id = overlay_signing_user(state).await?;
+///
+/// Shared with `net::peer::context`, which needs the identical cert for the park
+/// handshake — the relay verifies one offline device-cert chain and does not care
+/// which side of the app minted it. `who` only tags the error messages so a
+/// failure still says which caller was asking; it never reaches the wire.
+pub(crate) async fn build_client_identity(
+    state: &Arc<AppState>,
+    who: &str,
+) -> anyhow::Result<ClientIdentity> {
+    let user_id = overlay_signing_user(state, who).await?;
 
     let device_id = state
         .device_id
         .lock()
         .await
         .clone()
-        .ok_or_else(|| anyhow::anyhow!("overlay: device_id not set (not logged in)"))?;
+        .ok_or_else(|| anyhow::anyhow!("{who}: device_id not set (not logged in)"))?;
 
     // Account identity key (local): absent/locked ⇒ fail-closed (pre-enrollment).
     let account_key = crate::commands::account_identity::load_account_id_key(state, &user_id)
         .await
-        .map_err(|e| anyhow::anyhow!("overlay: account identity unavailable ({e})"))?;
+        .map_err(|e| anyhow::anyhow!("{who}: account identity unavailable ({e})"))?;
     let account_id_pub = account_key.verifying_key().encode().to_vec();
 
     // Device signing keys (local DB / openmls storage) — the keys the cert chain
@@ -615,20 +623,20 @@ async fn build_client_identity(state: &Arc<AppState>) -> anyhow::Result<ClientId
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("overlay: not signed in (local DB closed)"))?;
+            .ok_or_else(|| anyhow::anyhow!("{who}: not signed in (local DB closed)"))?;
         let provider = crate::commands::mls::PollisProvider::new(db.conn());
         let (ed_pub, pq_pub) =
             crate::commands::mls::load_device_cert_pubs(&provider, &user_id, &device_id)
-                .map_err(|e| anyhow::anyhow!("overlay: device signing keys unavailable ({e})"))?;
+                .map_err(|e| anyhow::anyhow!("{who}: device signing keys unavailable ({e})"))?;
         let (device_signing, _) =
             crate::commands::mls::load_device_pq_signing_key(&provider, &user_id, &device_id)
-                .map_err(|e| anyhow::anyhow!("overlay: device PQ signing key unavailable ({e})"))?;
+                .map_err(|e| anyhow::anyhow!("{who}: device PQ signing key unavailable ({e})"))?;
         (device_signing, ed_pub, pq_pub)
     };
     let ed_pub: [u8; 32] = ed_pub
         .as_slice()
         .try_into()
-        .map_err(|_| anyhow::anyhow!("overlay: device Ed25519 signing pub is not 32 bytes"))?;
+        .map_err(|_| anyhow::anyhow!("{who}: device Ed25519 signing pub is not 32 bytes"))?;
 
     let issued_at = crate::util::now_unix();
     let cert = DeviceCertMaterial::mint(
@@ -652,18 +660,18 @@ async fn build_client_identity(state: &Arc<AppState>) -> anyhow::Result<ClientId
 
 /// The user this device signs as, mirroring `ds_client::current_user_id`: prefer
 /// the unlocked session, fall back to the accounts index before unlock.
-async fn overlay_signing_user(state: &Arc<AppState>) -> anyhow::Result<String> {
+async fn overlay_signing_user(state: &Arc<AppState>, who: &str) -> anyhow::Result<String> {
     if let Some(u) = state.unlock.lock().await.as_ref() {
         if !u.user_id.is_empty() {
             return Ok(u.user_id.clone());
         }
     }
     let index = crate::accounts::read_accounts_index()
-        .map_err(|e| anyhow::anyhow!("overlay: read accounts index: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("{who}: read accounts index: {e}"))?;
     index
         .last_active_user
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("overlay: no active user to sign relay handshake"))
+        .ok_or_else(|| anyhow::anyhow!("{who}: no active user to sign relay handshake"))
 }
 
 /// Load the configured relay endpoint(s) + the pinned QUIC leaf. Empty when the
