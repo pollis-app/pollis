@@ -30,9 +30,7 @@
 //! body actor, mirroring the other write modules.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::{IntoResponse, Response},
 };
 use base64::Engine as _;
@@ -40,7 +38,7 @@ use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::reads::authed_user;
-use crate::writes::{bad_request, gate, is_member, ok_response, outcome_response, resolve_actor};
+use crate::writes::{bad_request, gate_and_parse, is_member, ok_response, outcome_response, resolve_actor, RawRequest};
 
 use crate::AppState;
 
@@ -109,18 +107,11 @@ pub enum KeystateOutcome {
 
 pub async fn upsert_keystate(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<UpsertPinKeystateBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: UpsertPinKeystateBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     Ok(
@@ -221,18 +212,11 @@ pub async fn apply_upsert_keystate(
 
 pub async fn pin_message(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<PinMessageBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: PinMessageBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     pin_outcome_response::<PinMessageBody>(apply_pin_message(&conn, authed.as_deref(), &parsed).await?)
@@ -299,18 +283,11 @@ pub async fn apply_pin_message(
 
 pub async fn unpin_message(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<UnpinMessageBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: UnpinMessageBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<UnpinMessageBody>(apply_unpin_message(&conn, authed.as_deref(), &parsed).await?)
@@ -349,25 +326,13 @@ pub async fn apply_unpin_message(
 /// no key yet, and the first pinner mints one.
 pub async fn read_keystate(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: PinKeystateBody = match serde_json::from_slice(&body) {
+    let parsed: PinKeystateBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -404,25 +369,13 @@ pub async fn read_keystate(
 /// byte-exact, for the client to open under `Kpin`.
 pub async fn read_pins(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: ListPinsBody = match serde_json::from_slice(&body) {
+    let parsed: ListPinsBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };

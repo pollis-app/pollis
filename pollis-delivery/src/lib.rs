@@ -57,9 +57,8 @@ pub mod writes;
 use std::sync::Arc;
 
 use axum::{
-    body::Bytes,
     extract::{Path, Query, State},
-    http::{HeaderMap, Method, StatusCode, Uri},
+    http::{HeaderMap, StatusCode},
     middleware::{from_fn, from_fn_with_state},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -71,6 +70,7 @@ use serde::Deserialize;
 use crate::commit::{CommitSinceReport, CommitsResponse, SubmitBody, SubmitResponse};
 use crate::db::Db;
 use crate::error::{AppError, AuthRejection};
+use crate::writes::RawRequest;
 
 /// Shared handler state: the DBs plus whether write auth is enforced.
 #[derive(Clone)]
@@ -632,13 +632,7 @@ fn bearer_token_matches(headers: &HeaderMap, expected: &str) -> bool {
 ///
 /// Takes the raw [`Bytes`] (not `Json<SubmitBody>`) because the signature binds
 /// `sha256(body)` — we must hash the exact wire bytes before deserializing.
-async fn submit(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
+async fn submit(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
     // Verify the signature over the *raw* body before parsing. The path is
     // taken from the matched URI (no query on this route).
     let authed_user = if state.require_auth {
@@ -646,10 +640,10 @@ async fn submit(
         match auth::verify_request_cached(
             &state.device_keys,
             &conn,
-            &headers,
-            method.as_str(),
-            uri.path(),
-            &body,
+            &req.headers,
+            req.method.as_str(),
+            req.uri.path(),
+            &req.body,
             util::now_unix() as i64,
         )
         .await
@@ -662,7 +656,7 @@ async fn submit(
     };
 
     // Parse after the signature check so a forged body can't even reach the DB.
-    let parsed: SubmitBody = match serde_json::from_slice(&body) {
+    let parsed: SubmitBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         // Malformed JSON is a client error, not a server error.
         Err(_) => {
@@ -783,10 +777,7 @@ async fn commits(
 /// have provided.
 async fn report_commit_since(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
     // Authenticate first, over the RAW body, so a forged report can't reach the
     // DB. `(user_id, device_id)` come from the verified signature — never from
@@ -796,10 +787,10 @@ async fn report_commit_since(
         match auth::verify_request_identity_cached(
             &state.device_keys,
             &conn,
-            &headers,
-            method.as_str(),
-            uri.path(),
-            &body,
+            &req.headers,
+            req.method.as_str(),
+            req.uri.path(),
+            &req.body,
             util::now_unix() as i64,
         )
         .await
@@ -811,7 +802,7 @@ async fn report_commit_since(
         None
     };
 
-    let parsed: CommitSinceReport = match serde_json::from_slice(&body) {
+    let parsed: CommitSinceReport = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => {
             return Ok((

@@ -13,9 +13,7 @@
 //! times. Not content, never content.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::{IntoResponse, Response},
 };
 use base64::Engine as _;
@@ -23,7 +21,7 @@ use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::reads::authed_user;
-use crate::writes::{bad_request, gate, ok_response, outcome_response, resolve_actor, WriteOutcome};
+use crate::writes::{bad_request, gate_and_parse, ok_response, outcome_response, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -80,18 +78,11 @@ fn b64(bytes: &[u8]) -> String {
 
 pub async fn save_vault_message(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<SaveVaultMessageBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: SaveVaultMessageBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     vault_outcome_response::<SaveVaultMessageBody>(
@@ -201,18 +192,11 @@ pub async fn apply_save_vault_message(
 
 pub async fn delete_vault_message(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<DeleteVaultMessageBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: DeleteVaultMessageBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<DeleteVaultMessageBody>(
@@ -262,25 +246,13 @@ pub async fn apply_delete_vault_message(
 /// vault is an empty list, not an error.
 pub async fn read_vault(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: VaultMessagesBody = match serde_json::from_slice(&body) {
+    let parsed: VaultMessagesBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        Some(parsed.user_id.as_str()),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, Some(parsed.user_id.as_str())).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };

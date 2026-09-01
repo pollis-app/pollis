@@ -87,16 +87,15 @@
 //! key, so a read-only Turso token no longer breaks logout.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, StatusCode, Uri},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, gate_or_session, outcome_response, resolve_actor, WriteOutcome};
+use crate::writes::{bad_request, gate, gate_and_parse, gate_or_session_and_parse, outcome_response, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -133,18 +132,11 @@ pub enum RotateOutcome {
 /// bump, and the `account_recovery` rewrap are ONE atomic transaction.
 pub async fn rotate_identity(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate_or_session(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_or_session_and_parse::<RotateIdentityBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RotateIdentityBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let outcome = apply_rotate_identity(&conn, authed.as_deref(), &parsed).await?;
@@ -286,18 +278,11 @@ async fn current_key_log_head(conn: &Connection, user_id: &str) -> anyhow::Resul
 /// log (`security_event`). Self-scoped: the row's `user_id` is the signer.
 pub async fn record_security_event(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<SecurityEventBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: SecurityEventBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<SecurityEventBody>(apply_record_security_event(&conn, authed.as_deref(), &parsed).await?)
@@ -339,18 +324,11 @@ pub async fn apply_record_security_event(
 /// equal the signer (a sibling device of the same account).
 pub async fn approve_enrollment(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<ApproveEnrollmentBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: ApproveEnrollmentBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<ApproveEnrollmentBody>(apply_approve_enrollment(&conn, authed.as_deref(), &parsed).await?)
@@ -395,18 +373,11 @@ pub async fn apply_approve_enrollment(
 /// to `rejected`. Self-scoped like [`approve_enrollment`].
 pub async fn reject_enrollment(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RejectEnrollmentBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RejectEnrollmentBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<RejectEnrollmentBody>(apply_reject_enrollment(&conn, authed.as_deref(), &parsed).await?)
@@ -446,18 +417,11 @@ pub async fn apply_reject_enrollment(
 /// client-side (it commits through `/v1/commits`).
 pub async fn revoke_device(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RevokeDeviceBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RevokeDeviceBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     // The device's name BEFORE the write (#987). Tombstoning does not clear the
@@ -575,18 +539,11 @@ pub async fn apply_revoke_device(
 /// pollis-core `auth::logout`'s direct `DELETE FROM user_device`.
 pub async fn logout_device(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<LogoutDeviceBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: LogoutDeviceBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let outcome = apply_logout_device(&conn, authed.as_deref(), &parsed).await?;
@@ -656,18 +613,11 @@ pub async fn apply_logout_device(
 /// `/v1/account/rotate-identity`.
 pub async fn reset_recover(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate_or_session(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_or_session_and_parse::<ResetRecoverBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: ResetRecoverBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let (outcome, dead_conversations) =
@@ -820,20 +770,17 @@ pub async fn apply_reset_recover(
 /// purged after the commit.
 pub async fn delete_account(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+    let authed = match gate(&state, &req).await? {
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
     // An empty body is valid when signed (actor from auth).
-    let parsed: DeleteAccountBody = if body.is_empty() {
+    let parsed: DeleteAccountBody = if req.body.is_empty() {
         DeleteAccountBody { user_id: None }
     } else {
-        match serde_json::from_slice(&body) {
+        match serde_json::from_slice(&req.body) {
             Ok(b) => b,
             Err(_) => return Ok(bad_request("invalid body")),
         }

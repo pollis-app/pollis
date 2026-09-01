@@ -54,9 +54,8 @@
 
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, StatusCode, Uri},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
@@ -65,7 +64,7 @@ use libsql::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, is_member, ok_response, Authed};
+use crate::writes::{bad_request, gate_and_parse, is_member, ok_response, Authed, RawRequest};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -217,20 +216,13 @@ struct VideoGrants {
 /// becomes meaningless to the SFU.
 pub async fn livekit_token(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<LivekitTokenBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
 
-    let parsed: LivekitTokenBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
-    };
     if parsed.room.trim().is_empty() {
         return Ok(bad_request("room required"));
     }
@@ -263,7 +255,7 @@ pub async fn livekit_token(
     // against (gate proved the key registered for THIS device signed the request),
     // so it's trustworthy without re-checking; on the no-auth path take the body.
     let device_id = if authed.is_some() {
-        headers
+        req.headers
             .get("x-pollis-device")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
@@ -518,20 +510,13 @@ fn upstream_error(upstream: crate::util::Upstream, what: &str, e: &reqwest::Erro
 /// participants) is success, mirroring the client's fire-and-forget semantics.
 pub async fn livekit_send_data(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<LivekitSendDataBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
 
-    let parsed: LivekitSendDataBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
-    };
     if parsed.room.trim().is_empty() {
         return Ok(bad_request("room required"));
     }
@@ -622,20 +607,13 @@ pub async fn room_send_data(
 /// doesn't exist yet) returns an empty roster.
 pub async fn livekit_participants(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<LivekitParticipantsBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
 
-    let parsed: LivekitParticipantsBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
-    };
     if parsed.room.trim().is_empty() {
         return Ok(bad_request("room required"));
     }
@@ -761,20 +739,13 @@ pub async fn livekit_participants(
 /// unattributed tile is a better outcome than a failed batch.
 pub async fn livekit_identities(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<LivekitIdentitiesBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
 
-    let parsed: LivekitIdentitiesBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
-    };
     if parsed.room.trim().is_empty() {
         return Ok(bad_request("room required"));
     }
@@ -876,20 +847,13 @@ fn content_hash_from_key(key: &str) -> Option<&str> {
 /// access, not to enforce read authz.
 pub async fn r2_presign(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<R2PresignBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
 
-    let parsed: R2PresignBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
-    };
 
     let http_method = match parsed.operation.as_str() {
         "get" => "GET",

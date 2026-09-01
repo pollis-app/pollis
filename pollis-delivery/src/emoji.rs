@@ -54,16 +54,15 @@
 //! public-ish and unencrypted precisely so a non-member can fetch it.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, StatusCode, Uri},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, resolve_actor, WriteOutcome};
+use crate::writes::{bad_request, gate, gate_and_parse, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -298,18 +297,11 @@ use crate::groups::{is_admin as is_group_admin, is_member as is_group_member};
 
 pub async fn create_emoji(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<CreateEmojiBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: CreateEmojiBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     emoji_outcome_response::<CreateEmojiBody>(apply_create_emoji(&conn, authed.as_deref(), &parsed).await?)
@@ -416,18 +408,11 @@ pub async fn apply_create_emoji(
 
 pub async fn remove_emoji(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RemoveEmojiBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RemoveEmojiBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     emoji_outcome_response::<RemoveEmojiBody>(apply_remove_emoji(&conn, authed.as_deref(), &parsed).await?)
@@ -509,12 +494,9 @@ pub async fn apply_remove_emoji(
 /// an operator would mean the sweep runs only when someone remembers.
 pub async fn emoji_gc(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    if let Err(resp) = gate(&state, &headers, &method, &uri, &body).await? {
+    if let Err(resp) = gate(&state, &req).await? {
         return Ok(resp);
     }
     let conn = state.db.conn().await?;

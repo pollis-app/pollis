@@ -37,19 +37,14 @@
 //! and membership/block checks are skipped — mirroring `messages` / `writes`.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::{IntoResponse, Response},
 };
 use base64::Engine as _;
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{
-    bad_request, claim_conversation_id, conversation_id_taken, gate, outcome_response,
-    resolve_actor, ConversationKind, WriteOutcome,
-};
+use crate::writes::{bad_request, claim_conversation_id, conversation_id_taken, gate_and_parse, outcome_response, resolve_actor, ConversationKind, RawRequest, WriteOutcome};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -85,18 +80,11 @@ pub(crate) async fn is_blocked_either_way(
 
 pub async fn update_profile(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<UpdateProfileBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: UpdateProfileBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<UpdateProfileBody>(apply_update_profile(&conn, authed.as_deref(), &parsed).await?)
@@ -136,18 +124,11 @@ pub async fn apply_update_profile(
 
 pub async fn save_preferences(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<SavePreferencesBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: SavePreferencesBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<SavePreferencesBody>(apply_save_preferences(&conn, authed.as_deref(), &parsed).await?)
@@ -218,18 +199,11 @@ where
 
 pub async fn save_read_cursors(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<SaveReadCursorsBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: SaveReadCursorsBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     read_cursor_outcome_response::<SaveReadCursorsBody>(
@@ -296,18 +270,11 @@ fn b64_decode(s: &str) -> Option<Vec<u8>> {
 
 pub async fn block_user(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<AddBlock>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: AddBlock = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<AddBlock>(apply_block_user(&conn, authed.as_deref(), &parsed.0).await?)
@@ -353,18 +320,11 @@ pub async fn apply_block_user(
 
 pub async fn unblock_user(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RemoveBlock>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RemoveBlock = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<RemoveBlock>(apply_unblock_user(&conn, authed.as_deref(), &parsed.0).await?)
@@ -393,18 +353,11 @@ pub async fn apply_unblock_user(
 
 pub async fn create_dm(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<CreateDmBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: CreateDmBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     match apply_create_dm(&conn, authed.as_deref(), &parsed).await? {
@@ -585,18 +538,11 @@ pub async fn apply_create_dm(
 
 pub async fn accept_dm(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<AcceptDmBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: AcceptDmBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<AcceptDmBody>(apply_accept_dm(&conn, authed.as_deref(), &parsed).await?)
@@ -652,18 +598,11 @@ async fn is_dm_member(
 
 pub async fn add_dm_member(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<AddDmMemberBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: AddDmMemberBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<AddDmMemberBody>(apply_add_dm_member(&conn, authed.as_deref(), &parsed).await?)
@@ -727,18 +666,11 @@ pub async fn apply_add_dm_member(
 
 pub async fn remove_dm_member(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RemoveDmMemberBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RemoveDmMemberBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<RemoveDmMemberBody>(apply_remove_dm_member(&conn, authed.as_deref(), &parsed).await?)
@@ -799,18 +731,11 @@ pub async fn apply_remove_dm_member(
 
 pub async fn leave_dm(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<LeaveDmBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: LeaveDmBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let (outcome, torn_down) = apply_leave_dm(&conn, authed.as_deref(), &parsed).await?;

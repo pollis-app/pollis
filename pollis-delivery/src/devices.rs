@@ -57,15 +57,13 @@
 //! because the client needs the bytes BEFORE it can build the commit it submits.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::Response,
 };
 use libsql::Connection;
 
 use crate::error::AppError;
-use crate::writes::{bad_request, gate, outcome_response, resolve_actor, WriteOutcome};
+use crate::writes::{bad_request, gate, gate_and_parse, outcome_response, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -91,18 +89,11 @@ fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
 /// replenish-top-up client paths (neither deletes).
 pub async fn publish_key_packages(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<PublishKeyPackagesBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: PublishKeyPackagesBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<PublishKeyPackagesBody>(apply_publish_key_packages(&conn, authed.as_deref(), &parsed).await?)
@@ -151,18 +142,11 @@ pub async fn apply_publish_key_packages(
 /// is never observed empty mid-refill.
 pub async fn replenish_key_packages(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<ReplenishKeyPackagesBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: ReplenishKeyPackagesBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<ReplenishKeyPackagesBody>(apply_replenish_key_packages(&conn, authed.as_deref(), &parsed).await?)
@@ -264,17 +248,14 @@ pub enum ClaimOutcome {
 /// rate-limited here.)
 pub async fn claim_key_package(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
     // The gate authenticates the claimer; its returned user_id is intentionally
     // unused — any authenticated caller may claim.
-    if let Err(resp) = gate(&state, &headers, &method, &uri, &body).await? {
+    if let Err(resp) = gate(&state, &req).await? {
         return Ok(resp);
     }
-    let parsed: ClaimKeyPackageBody = match serde_json::from_slice(&body) {
+    let parsed: ClaimKeyPackageBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
@@ -379,18 +360,11 @@ pub async fn apply_claim_key_package(
 /// columns — so it cannot change any device's auth credential.
 pub async fn resign_device_certs(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<ResignDeviceCertsBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: ResignDeviceCertsBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let outcome = apply_resign_device_certs(&conn, authed.as_deref(), &parsed).await?;
@@ -447,18 +421,11 @@ pub async fn apply_resign_device_certs(
 /// reassigns ownership rather than duplicating.
 pub async fn register_push_token(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<PushTokenBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: PushTokenBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<PushTokenBody>(apply_register_push_token(&conn, authed.as_deref(), &parsed).await?)

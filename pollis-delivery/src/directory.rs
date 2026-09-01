@@ -24,9 +24,7 @@
 //! `group_member` / `dm_channel_member`.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::Response,
 };
 use libsql::Connection;
@@ -34,7 +32,7 @@ use libsql::Connection;
 use crate::error::AppError;
 use crate::groups::group_role;
 use crate::reads::authed_user;
-use crate::writes::{bad_request, ok_response};
+use crate::writes::{bad_request, ok_response, RawRequest};
 use crate::AppState;
 
 pub use pollis_api::directory::*;
@@ -67,25 +65,13 @@ fn placeholders(n: usize, first: usize) -> String {
 /// serial round trips become one.
 pub async fn catch_up(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: CatchUpBody = match serde_json::from_slice(&body) {
+    let parsed: CatchUpBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -343,25 +329,13 @@ async fn dm_channel(
 /// oracle for message ids, and the caller cannot act on either answer.
 pub async fn message_lookup(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: MessageLookupBody = match serde_json::from_slice(&body) {
+    let parsed: MessageLookupBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -458,25 +432,13 @@ async fn message_reactions(
 /// request.
 pub async fn bootstrap(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: DirectoryBootstrapBody = match serde_json::from_slice(&body) {
+    let parsed: DirectoryBootstrapBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -739,27 +701,12 @@ async fn preferences(conn: &Connection, user_id: &str) -> anyhow::Result<Option<
 /// links and join requests are admin-only, and an unauthorized section comes back
 /// EMPTY rather than as a refusal for the whole request — the member half is
 /// still legitimately theirs.
-pub async fn group(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    let parsed: DirectoryGroupBody = match serde_json::from_slice(&body) {
+pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let parsed: DirectoryGroupBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -1015,27 +962,12 @@ pub async fn collect_emoji(rows: &mut libsql::Rows) -> anyhow::Result<Vec<Custom
 /// Each group is authorized independently, so one group the caller has left does
 /// not fail the batch. That matters because the caller is the command palette,
 /// whose group list can be a moment stale.
-pub async fn members(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    let parsed: DirectoryMembersBody = match serde_json::from_slice(&body) {
+pub async fn members(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let parsed: DirectoryMembersBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -1069,21 +1001,15 @@ pub async fn members(
 /// The projection deliberately omits `phone`: nothing renders it, and it is the
 /// most re-identifying column on the row, so it does not cross this boundary at
 /// all rather than crossing it and being ignored.
-pub async fn users(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    let parsed: DirectoryUsersBody = match serde_json::from_slice(&body) {
+pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let parsed: DirectoryUsersBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
     // The block check is answered for the AUTHENTICATED caller, never for a
     // body-named one: "is A blocked by B" for arbitrary A and B would publish
     // the block graph.
-    let who = match authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    let who = match authed_user(&state, &req, None).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -1170,16 +1096,13 @@ pub async fn users(
 /// applies, because guessing slugs is the only way to use it.
 pub async fn group_by_slug(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: GroupBySlugBody = match serde_json::from_slice(&body) {
+    let parsed: GroupBySlugBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    if let Err(resp) = authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    if let Err(resp) = authed_user(&state, &req, None).await? {
         return Ok(resp);
     }
 
@@ -1214,25 +1137,13 @@ pub async fn group_by_slug(
 /// caller participates in.
 pub async fn conversations(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: DirectoryConversationsBody = match serde_json::from_slice(&body) {
+    let parsed: DirectoryConversationsBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };

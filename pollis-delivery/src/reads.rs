@@ -26,9 +26,7 @@
 //! route-coverage test that exists to catch exactly this omission.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::{IntoResponse, Response},
 };
 use base64::Engine as _;
@@ -36,7 +34,7 @@ use libsql::Connection;
 
 use crate::auth;
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, is_member, ok_response};
+use crate::writes::{bad_request, is_member, ok_response, RawRequest};
 use crate::AppState;
 
 pub use pollis_api::reads::*;
@@ -76,12 +74,9 @@ pub struct Reader {
 #[allow(clippy::result_large_err)]
 pub(crate) async fn reader_identity(
     state: &AppState,
-    headers: &HeaderMap,
-    method: &Method,
-    uri: &Uri,
-    body: &Bytes,
+    req: &RawRequest,
 ) -> Result<Result<Reader, Response>, AppError> {
-    reader(state, headers, method, uri, body, None, None).await
+    reader(state, req, None, None).await
 }
 
 /// Authenticate a read and resolve the reader identity.
@@ -92,10 +87,7 @@ pub(crate) async fn reader_identity(
 #[allow(clippy::result_large_err)]
 async fn reader(
     state: &AppState,
-    headers: &HeaderMap,
-    method: &Method,
-    uri: &Uri,
-    body: &Bytes,
+    req: &RawRequest,
     body_user_id: Option<&str>,
     body_device_id: Option<&str>,
 ) -> Result<Result<Reader, Response>, AppError> {
@@ -114,10 +106,10 @@ async fn reader(
     match auth::verify_request_identity_cached(
         &state.device_keys,
         &conn,
-        headers,
-        method.as_str(),
-        uri.path(),
-        body,
+        &req.headers,
+        req.method.as_str(),
+        req.uri.path(),
+        &req.body,
         crate::util::now_unix() as i64,
     )
     .await
@@ -138,10 +130,7 @@ async fn reader(
 #[allow(clippy::result_large_err)]
 pub(crate) async fn authed_user(
     state: &AppState,
-    headers: &HeaderMap,
-    method: &Method,
-    uri: &Uri,
-    body: &Bytes,
+    req: &RawRequest,
     body_user_id: Option<&str>,
 ) -> Result<Result<String, Response>, AppError> {
     if !state.require_auth {
@@ -154,10 +143,10 @@ pub(crate) async fn authed_user(
     match auth::verify_request_cached(
         &state.device_keys,
         &conn,
-        headers,
-        method.as_str(),
-        uri.path(),
-        body,
+        &req.headers,
+        req.method.as_str(),
+        req.uri.path(),
+        &req.body,
         crate::util::now_unix() as i64,
     )
     .await
@@ -187,29 +176,17 @@ pub(crate) async fn authed_user(
 /// learning a group's head epoch.
 pub async fn conversation_state(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: ConversationStateBody = match serde_json::from_slice(&body) {
+    let parsed: ConversationStateBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match reader(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-        parsed.device_id.as_deref(),
-    )
-    .await?
-    {
-        Ok(r) => r,
-        Err(resp) => return Ok(resp),
-    };
+    let who =
+        match reader(&state, &req, parsed.user_id.as_deref(), parsed.device_id.as_deref()).await? {
+            Ok(r) => r,
+            Err(resp) => return Ok(resp),
+        };
     if parsed.queries.len() > MAX_QUERIES {
         return Ok(bad_request("too many queries"));
     }
@@ -627,29 +604,17 @@ pub async fn device_registered(
 /// non-recipient learn that a Welcome exists at all.
 pub async fn fetch_welcomes(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: FetchWelcomesBody = match serde_json::from_slice(&body) {
+    let parsed: FetchWelcomesBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match reader(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-        parsed.device_id.as_deref(),
-    )
-    .await?
-    {
-        Ok(r) => r,
-        Err(resp) => return Ok(resp),
-    };
+    let who =
+        match reader(&state, &req, parsed.user_id.as_deref(), parsed.device_id.as_deref()).await? {
+            Ok(r) => r,
+            Err(resp) => return Ok(resp),
+        };
     // A body that names a DIFFERENT recipient than the signature is a 403, not a
     // silently-ignored field: the client sends `user_id` for the no-auth path,
     // and "ignored when auth is on" must not shade into "accepted".
