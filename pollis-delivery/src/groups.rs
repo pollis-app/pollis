@@ -1630,15 +1630,7 @@ pub async fn apply_redeem_invite_link(
 
     // Already a member → idempotent success. Re-opening the same link must not
     // burn a use or fail; it just says "you're in".
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-            libsql::params![group_id.clone(), user.clone()],
-        )
-        .await?;
-    let already_member = rows.next().await?.is_some();
-    drop(rows);
-    if already_member {
+    if is_member(conn, &group_id, &user).await? {
         let group_name = group_name(conn, &group_id).await?;
         return Ok(RedeemOutcome::Joined {
             group_id,
