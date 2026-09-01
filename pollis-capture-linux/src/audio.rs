@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use pollis_capture_proto::CaptureMsg;
+use pollis_capture_proto::{now_us, CaptureMsg};
 use tokio::sync::mpsc;
 
 /// What we ask PipeWire for. 48 kHz stereo s16 is what the parent's
@@ -290,14 +290,6 @@ fn to_s16(bytes: &[u8], format: pipewire::spa::param::audio::AudioFormat) -> Opt
         );
     }
     None
-}
-
-fn now_us() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_micros() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

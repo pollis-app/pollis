@@ -20,16 +20,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, StatusCode, Uri},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 
 use crate::error::{AppError, AuthRejection};
 use crate::otp::{normalize_email, process_request_otp, OtpConfig, OtpStore, VerifyOutcome};
-use crate::writes::{bad_request, gate};
+use crate::writes::{bad_request, gate, RawRequest};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
@@ -117,12 +116,9 @@ fn internal(e: anyhow::Error) -> Response {
 /// signature, NEVER the body.
 pub async fn request_email_change_otp(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+    let authed = match gate(&state, &req).await? {
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
@@ -133,7 +129,7 @@ pub async fn request_email_change_otp(
         None => return Ok(AuthRejection::Unauthorized.into_response()),
     };
 
-    let parsed: RequestEmailChangeBody = match serde_json::from_slice(&body) {
+    let parsed: RequestEmailChangeBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
@@ -170,12 +166,9 @@ pub enum EmailChangeOutcome {
 /// `new_email` and atomically swap `users.email` for the authenticated caller.
 pub async fn verify_email_change(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+    let authed = match gate(&state, &req).await? {
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
@@ -184,7 +177,7 @@ pub async fn verify_email_change(
         None => return Ok(AuthRejection::Unauthorized.into_response()),
     };
 
-    let parsed: VerifyEmailChangeBody = match serde_json::from_slice(&body) {
+    let parsed: VerifyEmailChangeBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };

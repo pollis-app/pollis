@@ -536,6 +536,28 @@ One row = "group `group_id` calls this object `:shortcode:`". The PK makes a sho
 
 **The two columns are in different text formats, deliberately (#908).** A text timestamp's format is decided by one thing: what it is compared against. `last_fetched_at` is compared lexically against `message_envelope.sent_at`, so it is **RFC 3339** — clients write it through `pollis_core::commands::messages::envelope_sent_at`, and the DS's own server-side seeds write it through `pollis_delivery::messages::seeded_watermark_cursor`. `reported_at` is compared against `datetime('now', ?)` in the `CLEANUP_*` predicate, so it stays in **SQLite's `YYYY-MM-DD HH:MM:SS`**. Until #908 the three seed paths (device registration, DM create / DM member-add, group join) wrote `datetime('now')` into *both*; because a space (0x20) sorts below a `T` (0x54), a seeded cursor compared as older than every RFC 3339 stamp sharing its calendar day — the opposite of the "this device has already consumed the backlog" the seed exists to assert. Fail-safe (over-pin, under-collect — envelopes were kept, never lost), but the seed did not do what its comment claimed. `seeded_watermark_cursor` is the DS-side counterpart to `envelope_sent_at`: one function owns the format so five call sites cannot each get it wrong.
 
+**Read as a BOUND value, never correlated (#1049).** `fetch_envelopes` in
+`pollis-delivery/src/directory.rs` serves every conversation in one query, so
+each needs its own cursor — but the cursor must also be something the planner
+can use as an index range on `idx_envelope_channel_time(conversation_id,
+sent_at DESC, id)`. Expressing it as a subquery correlated on
+`message_envelope.conversation_id` reads correctly and **silently loses the
+range**: the comparison value is not known until the outer row exists, so SQLite
+plans `SEARCH (conversation_id=?)` plus a `CORRELATED SCALAR SUBQUERY` and reads
+every retained envelope in the conversation before discarding it. Measured at
+200k envelopes for a caught-up device returning zero rows: **36 ms / ~200k billed
+rows, versus 0.1 ms / none** for the bound form. The watermarks are therefore
+fetched first (`fetch_watermarks`, one indexed read) and bound per conversation
+as `(conversation_id = ? AND sent_at > ?) OR …`, which plans `MULTI-INDEX OR`
+with a real range seek per branch. Splitting the read is safe in the only
+direction that matters: a `(conversation, user, device)` watermark is advanced by
+that device alone, so a concurrent advance between the two reads can only leave
+an OLDER cursor in play — re-sending an envelope the client already has, which
+ingest's `INSERT OR IGNORE INTO message` absorbs. It can never skip one.
+`pollis-delivery/tests/envelope_query_plan.rs` asserts the plan, because this
+regressed once already: #875 batched the per-channel fetches into one and turned
+a bound `?1` into a correlation, which no correctness test could see.
+
 Used by the envelope cleanup sweep — the `CLEANUP_CHANNEL_ENVELOPES` / `CLEANUP_DM_ENVELOPES` DELETEs in `pollis-delivery/src/messages.rs` — to decide when it is safe to drop a row from `message_envelope`. The **trigger** is server-side (#689): the DS runs `sweep_envelope_gc` on a fixed cadence (`POLLIS_DS_GC_SWEEP_SECS`, default 3600s) over every conversation with envelopes, so GC no longer rides a member's ingest path and a conversation whose members all go quiet is still collected. The per-conversation `apply_envelope_gc` (the `/v1/envelopes/gc` endpoint) runs the same watermark-gated cleanup on demand; both share the one cleanup chokepoint. That endpoint has **no client caller and is not meant to have one** — it is operator tooling, classified `Audience::Operator` in `pollis-api`'s endpoint table (so `ds_post` will not accept it) and documented in `docs/ds-operator-endpoints.md` (#925). A row is deleted **only** when every **non-revoked, live** device of every current member has watermarked past `sent_at`. Retention is bounded by the slowest member device **and by device liveness** — invariant **I3** in `docs/backend-core-invariants.md`.
 
 **Device-liveness bound (#720).** A member device that has not **reported** a watermark within `POLLIS_DS_WATERMARK_STALE_MONTHS` (**configured 12 months**; code default 6 when unset) stops pinning: the `CLEANUP_*` `?2` arm excludes it from the roster (`cw.reported_at IS NULL OR cw.reported_at >= datetime('now', ?2)`), mirroring the revoked-device exclusion. The bound is keyed on `reported_at` (the device's last report), **never** on `last_fetched_at` or the envelope's `sent_at`, so a device that reported recently pins every envelope below its cursor however old — this is **not** a TTL. The predicate lives OUTSIDE the shared roster macro (which stays byte-for-byte identical to `commit::current_member_devices` for the I5 parity test); it is an envelope-only bound. Both GC paths pass the same window through the one chokepoint, so they cannot diverge. A NULL `reported_at` (pre-migration row, or a device with no watermark row) is treated as live and keeps pinning (fail-closed). Reporting refreshes `reported_at` to now, so the bound is reversible: a returning device pins again immediately, without being revoked or removed from any roster. The trade is the **third accepted message loss** (a device dormant past the window may return to gaps). N was set to **12 months** on 2026-08-04 — rationale in `docs/metadata-retention-policy.md` §1, disclosed publicly on the Learn page and in `CLAUDE.md`.

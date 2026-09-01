@@ -1,11 +1,7 @@
 pub use pollis_core::accounts;
 pub use pollis_core::config;
-pub use pollis_core::db;
 pub use pollis_core::error;
 pub use pollis_core::keystore;
-pub use pollis_core::realtime;
-pub use pollis_core::signal;
-pub use pollis_core::sink as core_sink;
 pub use pollis_core::state;
 pub mod sink;
 pub mod commands;
@@ -30,6 +26,17 @@ use config::Config;
 #[cfg(feature = "native-shell")]
 use state::AppState;
 
+/// Tear down every live capture: screen share, camera, and camera preview. All
+/// three are idempotent no-ops when nothing is running, so this is safe on any
+/// shutdown path — and keeping the set in one place stops a new capture kind
+/// from being torn down on two paths out of three.
+#[cfg(feature = "native-shell")]
+async fn stop_all_capture(state: &Arc<AppState>) {
+    let _ = pollis_core::commands::screenshare::stop_screen_share(state).await;
+    let _ = pollis_core::commands::camera::stop_camera(state).await;
+    let _ = pollis_core::commands::camera::stop_camera_preview(state).await;
+}
+
 /// On macOS, intercept the window close request (Cmd+W / red traffic light)
 /// and hide the window instead of destroying it. The app keeps running in
 /// the dock and can be re-opened without a cold start.
@@ -44,14 +51,10 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
         if let Some(state) = window.app_handle().try_state::<Arc<AppState>>() {
             let state = state.inner().clone();
             tauri::async_runtime::spawn(async move {
-                let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
-                let _ = pollis_core::commands::camera::stop_camera(&state).await;
-                let _ = pollis_core::commands::camera::stop_camera_preview(&state).await;
+                stop_all_capture(&state).await;
             });
         }
-        // Prevent the window from actually being destroyed.
         api.prevent_close();
-        // Hide the window — it can be shown again from the dock.
         let _ = window.hide();
     }
 }
@@ -191,9 +194,8 @@ fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
     #[cfg(not(target_os = "macos"))]
     {
         use tauri_plugin_clipboard_manager::ClipboardExt;
-        let text = match app.clipboard().read_text() {
-            Ok(t) => t,
-            Err(_) => return vec![],
+        let Ok(text) = app.clipboard().read_text() else {
+            return vec![];
         };
         text.lines()
             .map(|l| l.trim())
@@ -229,18 +231,16 @@ async fn read_clipboard_image(app: tauri::AppHandle) -> tauri::ipc::Response {
 
     let empty = || tauri::ipc::Response::new(Vec::<u8>::new());
 
-    let image = match app.clipboard().read_image() {
-        Ok(img) => img,
-        Err(_) => return empty(),
+    let Ok(image) = app.clipboard().read_image() else {
+        return empty();
     };
 
     let width = image.width();
     let height = image.height();
     let rgba = image.rgba().to_vec();
 
-    let buffer = match image::RgbaImage::from_raw(width, height, rgba) {
-        Some(buf) => buf,
-        None => return empty(),
+    let Some(buffer) = image::RgbaImage::from_raw(width, height, rgba) else {
+        return empty();
     };
 
     let mut png = std::io::Cursor::new(Vec::new());
@@ -613,7 +613,7 @@ pub fn run() {
             commands::mls::poll_mls_welcomes,
             commands::mls::process_pending_commits,
             commands::mls::catch_up_all_mls_groups,
-commands::livekit::get_livekit_token,
+            commands::livekit::get_livekit_token,
             commands::livekit::get_livekit_view_token,
             commands::livekit::get_livekit_url,
             commands::livekit::subscribe_realtime,
@@ -731,9 +731,7 @@ commands::livekit::get_livekit_token,
                 {
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
-                        let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
-                        let _ = pollis_core::commands::camera::stop_camera(&state).await;
-                        let _ = pollis_core::commands::camera::stop_camera_preview(&state).await;
+                        stop_all_capture(&state).await;
                     });
                 }
             }
@@ -769,9 +767,7 @@ commands::livekit::get_livekit_token,
                 if let Some(state) = _app.try_state::<Arc<AppState>>() {
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
-                        let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
-                        let _ = pollis_core::commands::camera::stop_camera(&state).await;
-                        let _ = pollis_core::commands::camera::stop_camera_preview(&state).await;
+                        stop_all_capture(&state).await;
                         // Close the LiveKit rooms (realtime + voice) so the
                         // server evicts us immediately instead of waiting out its
                         // RTC timeout — otherwise our voice card lingers as a

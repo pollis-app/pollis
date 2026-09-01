@@ -61,7 +61,7 @@ use std::sync::Arc;
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
-use base64::Engine as _;
+use crate::util::b64;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use openmls_traits::OpenMlsProvider;
@@ -138,10 +138,6 @@ fn open(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
     cipher
         .decrypt(GenericArray::from_slice(nonce), ciphertext)
         .map_err(|e| Error::Crypto(format!("pin open: {e}")))
-}
-
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 // ── The exporter-derived KEK ─────────────────────────────────────────────────

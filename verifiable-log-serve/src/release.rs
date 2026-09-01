@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 use verifiable_log::{proof, Entry, InclusionProof, Sth, VerifiableLog};
 use verifiable_log_builder::binaries::{self, BinaryInvariant, BinaryRecord};
 
-use crate::bundle::{now_ms, Bundle, InclusionCheck, PublicKeyDoc};
+use crate::bundle::{now_ms, short, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json};
 
@@ -384,14 +384,5 @@ fn layer_str(layer: Layer) -> &'static str {
         Layer::Payload => "payload",
         Layer::Signed => "signed",
         Layer::Exe => "exe",
-    }
-}
-
-/// Abbreviate a long opaque id/hash for human-readable output.
-fn short(s: &str) -> String {
-    if s.len() <= 12 {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}{}", &s[..6], &s[s.len() - 4..])
     }
 }

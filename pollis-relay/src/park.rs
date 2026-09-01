@@ -188,11 +188,11 @@ impl ParkedPeers {
     /// clients a peer is serving, not a byte count, not an address.
     pub fn peer_leaves(&self) -> Vec<Vec<u8>> {
         let map = self.lock();
-        let mut fingerprints: Vec<&PeerFingerprint> = map.keys().collect();
-        fingerprints.sort_unstable();
-        fingerprints
+        let mut entries: Vec<(&PeerFingerprint, &ParkedEntry)> = map.iter().collect();
+        entries.sort_unstable_by_key(|(fingerprint, _)| *fingerprint);
+        entries
             .into_iter()
-            .filter_map(|fp| map.get(fp).map(|entry| entry.leaf_der.as_ref().clone()))
+            .map(|(_, entry)| entry.leaf_der.as_ref().clone())
             .collect()
     }
 
@@ -202,7 +202,7 @@ impl ParkedPeers {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.lock().is_empty()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<PeerFingerprint, ParkedEntry>> {

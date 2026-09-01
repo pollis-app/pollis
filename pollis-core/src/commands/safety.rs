@@ -9,6 +9,7 @@
 //! pins the first-seen key locally (TOFU) and lets two humans compare a
 //! 60-digit safety number derived from both parties' keys.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -50,12 +51,16 @@ fn fingerprint(pubkey: &[u8], stable_id: &[u8]) -> String {
     hasher.update(FP_VERSION.to_be_bytes());
     hasher.update(pubkey);
     hasher.update(stable_id);
-    let mut hash = hasher.finalize().to_vec();
+    // A fixed buffer, not a fresh `Vec` per round: the loop runs
+    // `FP_ITERATIONS` times, so a re-allocating digest costs ~5200 heap
+    // allocations for every safety number rendered.
+    let mut hash = [0u8; 64];
+    hash.copy_from_slice(&hasher.finalize());
     for _ in 1..FP_ITERATIONS {
         let mut h = Sha512::new();
-        h.update(&hash);
+        h.update(hash);
         h.update(pubkey);
-        hash = h.finalize().to_vec();
+        hash.copy_from_slice(&h.finalize());
     }
 
     let mut out = String::with_capacity(30);
@@ -65,7 +70,7 @@ fn fingerprint(pubkey: &[u8], stable_id: &[u8]) -> String {
         for j in 0..5 {
             v = (v << 8) | hash[off + j] as u64;
         }
-        out.push_str(&format!("{:05}", v % 100_000));
+        let _ = write!(out, "{:05}", v % 100_000);
     }
     out
 }
@@ -468,6 +473,26 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(a.len(), 30);
         assert!(a.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    /// The exact digits a given (key, id) pair must produce.
+    ///
+    /// The other tests here pin only shape and determinism, which a change to
+    /// the hash chain would satisfy while silently renumbering every user's
+    /// safety number — two people comparing across app versions would then read
+    /// a mismatch as a MITM. These vectors were taken from the implementation
+    /// before the buffer rewrite in this sweep and must not change without
+    /// bumping `FP_VERSION`.
+    #[test]
+    fn fingerprint_matches_its_pinned_vectors() {
+        assert_eq!(
+            fingerprint(&[7u8; 32], b"user-a"),
+            "594809296990642088583120794182"
+        );
+        assert_eq!(
+            fingerprint(&[3u8; 32], b"pollis"),
+            "182206983802156935973920110564"
+        );
     }
 
     #[test]

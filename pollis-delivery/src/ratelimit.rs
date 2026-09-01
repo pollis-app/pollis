@@ -108,56 +108,52 @@ impl Default for RateLimitConfig {
 }
 
 impl RateLimitConfig {
-    /// Build from DS environment, falling back to [`Default`] per field. Env:
-    /// `RL_REQUEST_OTP_MAX`, `RL_REQUEST_OTP_WINDOW_SECS`, `RL_VERIFY_OTP_MAX`,
-    /// `RL_VERIFY_OTP_WINDOW_SECS`.
+    /// Build from DS environment, falling back to [`Default`] per field. Every
+    /// tier is tunable: `RL_{REQUEST_OTP,VERIFY_OTP,WRITE,READ,PROBE,
+    /// INVITE_REDEEM}_{MAX,WINDOW_SECS}`.
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
-        if let Some(v) = env_u32("RL_REQUEST_OTP_MAX") {
+        if let Some(v) = env_parse::<u32>("RL_REQUEST_OTP_MAX") {
             cfg.request_otp_max = v;
         }
-        if let Some(v) = env_u64("RL_REQUEST_OTP_WINDOW_SECS") {
+        if let Some(v) = env_parse::<u64>("RL_REQUEST_OTP_WINDOW_SECS") {
             cfg.request_otp_window_secs = v;
         }
-        if let Some(v) = env_u32("RL_VERIFY_OTP_MAX") {
+        if let Some(v) = env_parse::<u32>("RL_VERIFY_OTP_MAX") {
             cfg.verify_otp_max = v;
         }
-        if let Some(v) = env_u64("RL_VERIFY_OTP_WINDOW_SECS") {
+        if let Some(v) = env_parse::<u64>("RL_VERIFY_OTP_WINDOW_SECS") {
             cfg.verify_otp_window_secs = v;
         }
-        if let Some(v) = env_u32("RL_WRITE_MAX") {
+        if let Some(v) = env_parse::<u32>("RL_WRITE_MAX") {
             cfg.write_max = v;
         }
-        if let Some(v) = env_u64("RL_WRITE_WINDOW_SECS") {
+        if let Some(v) = env_parse::<u64>("RL_WRITE_WINDOW_SECS") {
             cfg.write_window_secs = v;
         }
-        if let Some(v) = env_u32("RL_READ_MAX") {
+        if let Some(v) = env_parse::<u32>("RL_READ_MAX") {
             cfg.read_max = v;
         }
-        if let Some(v) = env_u64("RL_READ_WINDOW_SECS") {
+        if let Some(v) = env_parse::<u64>("RL_READ_WINDOW_SECS") {
             cfg.read_window_secs = v;
         }
-        if let Some(v) = env_u32("RL_PROBE_MAX") {
+        if let Some(v) = env_parse::<u32>("RL_PROBE_MAX") {
             cfg.probe_max = v;
         }
-        if let Some(v) = env_u64("RL_PROBE_WINDOW_SECS") {
+        if let Some(v) = env_parse::<u64>("RL_PROBE_WINDOW_SECS") {
             cfg.probe_window_secs = v;
         }
-        if let Some(v) = env_u32("RL_INVITE_REDEEM_MAX") {
+        if let Some(v) = env_parse::<u32>("RL_INVITE_REDEEM_MAX") {
             cfg.invite_redeem_max = v;
         }
-        if let Some(v) = env_u64("RL_INVITE_REDEEM_WINDOW_SECS") {
+        if let Some(v) = env_parse::<u64>("RL_INVITE_REDEEM_WINDOW_SECS") {
             cfg.invite_redeem_window_secs = v;
         }
         cfg
     }
 }
 
-fn env_u32(key: &str) -> Option<u32> {
-    std::env::var(key).ok().and_then(|s| s.parse().ok())
-}
-
-fn env_u64(key: &str) -> Option<u64> {
+fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
     std::env::var(key).ok().and_then(|s| s.parse().ok())
 }
 
@@ -217,11 +213,22 @@ impl RateLimiter {
             guard.retain(|_, w| now.saturating_sub(w.window_start) < w.window_secs);
         }
 
-        let win = guard.entry(key.to_string()).or_insert(Window {
-            count: 0,
-            window_start: now,
-            window_secs,
-        });
+        // Probed before `entry`, deliberately: `entry` takes an OWNED key, so
+        // every request would allocate a `String` for a key the map almost
+        // always already holds, and then drop it. Two hash lookups on the hit
+        // path are cheaper than one heap allocation on every request the DS
+        // serves.
+        if !guard.contains_key(key) {
+            guard.insert(
+                key.to_string(),
+                Window {
+                    count: 0,
+                    window_start: now,
+                    window_secs,
+                },
+            );
+        }
+        let win = guard.get_mut(key).expect("inserted above when absent");
         // A key's tier is fixed by its call site, but keep the stored span in
         // step with the caller so a re-tuned limit takes effect on the next hit
         // rather than at the next eviction.
@@ -243,20 +250,19 @@ impl RateLimiter {
 /// sets it and a client cannot forge it through Cloudflare), then the first
 /// `X-Forwarded-For` hop. Absent both (local/dev/test), returns a shared
 /// sentinel so the limiter is still exercised rather than bypassed.
-pub fn client_ip(headers: &HeaderMap) -> String {
+pub fn client_ip(headers: &HeaderMap) -> &str {
     if let Some(ip) = header_str(headers, "cf-connecting-ip") {
-        return ip.to_string();
+        return ip;
     }
-    if let Some(xff) = header_str(headers, "x-forwarded-for") {
-        // `X-Forwarded-For: client, proxy1, proxy2` — the first hop is the client.
-        if let Some(first) = xff.split(',').next() {
-            let first = first.trim();
-            if !first.is_empty() {
-                return first.to_string();
-            }
-        }
+    // `X-Forwarded-For: client, proxy1, proxy2` — the first hop is the client.
+    if let Some(first) = header_str(headers, "x-forwarded-for")
+        .and_then(|xff| xff.split(',').next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return first;
     }
-    "unknown".to_string()
+    "unknown"
 }
 
 fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {

@@ -481,12 +481,8 @@ fn parse_credentials(headers: &HeaderMap, now: i64) -> Result<Credentials, AuthR
         return Err(AuthRejection::Unauthorized);
     }
 
-    let sig_bytes = {
-        use base64::Engine as _;
-        base64::engine::general_purpose::STANDARD
-            .decode(signature_b64)
-            .map_err(|_| AuthRejection::Unauthorized)?
-    };
+    let sig_bytes =
+        crate::util::b64_decode(signature_b64).map_err(|_| AuthRejection::Unauthorized)?;
     if sig_bytes.len() != MLDSA44_SIG_LEN {
         return Err(AuthRejection::Unauthorized);
     }

@@ -162,6 +162,16 @@ pub struct PublicKeyDoc {
 /// deterministic). A clock wrong in the past can only keep a retired key trusted
 /// slightly too long; one wrong in the future retires it early and degrades to
 /// "unverified", never to a false alarm about tampering.
+/// Abbreviate a long opaque id/hash for human-readable output. Shared by the
+/// group, account and release reports, which all print ids beside a verdict.
+pub(crate) fn short(s: &str) -> String {
+    if s.len() <= 12 {
+        s.to_string()
+    } else {
+        format!("{}\u{2026}{}", &s[..6], &s[s.len() - 4..])
+    }
+}
+
 pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

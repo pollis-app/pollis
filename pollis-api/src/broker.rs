@@ -1,5 +1,7 @@
-//! Authorized-secrets broker (#393): LiveKit tokens/fan-out/roster, the Turso
-//! read-only token, and R2 presigns. The DS holds the secrets; the client asks.
+//! Authorized-secrets broker (#393): LiveKit tokens/fan-out/roster and R2
+//! presigns. The DS holds the secrets; the client asks. (The Turso read-only
+//! token used to be brokered here; #987 deleted it — the client holds no
+//! database credential at all now.)
 //!
 //! Wire types only — no handler logic, no DB access. See the matching module in
 //! `pollis-delivery` for what the server does with each one.
@@ -109,7 +111,7 @@ pub struct R2PresignBody {
     pub content_length: Option<u64>,
     /// No-auth path only — see `pollis_delivery::broker::resolve_user`. Unused beyond the auth gate
     /// (presign has no per-object authz), kept for shape-symmetry with the other
-    /// broker endpoint.
+    /// broker endpoints.
     #[serde(default)]
     pub user_id: Option<String>,
 }

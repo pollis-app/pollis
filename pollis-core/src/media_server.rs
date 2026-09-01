@@ -96,6 +96,49 @@ pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
     Ok(port)
 }
 
+/// The loopback URL the renderer fetches `content_hash` from.
+///
+/// Lives beside the route it addresses so the two cannot disagree about the path
+/// shape; `emoji::get_emoji_url` and `r2::get_media_url` each built it from their
+/// own copy of this block.
+///
+/// Both the port and the token must be present. Without an active unlock the
+/// server answers 403 anyway, so there is no point handing out a URL the caller
+/// cannot use.
+pub(crate) async fn loopback_url(
+    state: &Arc<AppState>,
+    content_hash: &str,
+) -> crate::error::Result<String> {
+    use crate::error::Error;
+    let port = state
+        .media_server_port
+        .lock()
+        .await
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("media server not started")))?;
+    let token = state
+        .media_server_token
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("media server token not set; not unlocked")))?;
+    Ok(format!("http://127.0.0.1:{port}/{token}/{content_hash}"))
+}
+
+/// The loopback server's only gate: the caller's path token must equal the
+/// secret minted at unlock, compared in constant time.
+///
+/// Every route runs it and there is one copy of it, so a route added later
+/// cannot pick up a subtly different rule. A missing token (locked, or never
+/// minted) is as much a `false` as a wrong one — callers collapse both to 403
+/// rather than distinguishing them, so the server never reveals which check
+/// failed.
+async fn token_ok(state: &Arc<AppState>, token: &str) -> bool {
+    let Some(expected) = state.media_server_token.lock().await.clone() else {
+        return false;
+    };
+    constant_time_eq(token.as_bytes(), expected.as_bytes())
+}
+
 /// `GET /<token>/<hash>` — serves the decrypted bytes for a cached
 /// content-addressed media file. Honours single-range `Range` requests.
 async fn serve_media(
@@ -103,14 +146,7 @@ async fn serve_media(
     Path((token, hash)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Response {
-    // Token gate. Mismatch / missing / locked all collapse to 403 so the
-    // server gives no information about which check failed.
-    let expected = state.media_server_token.lock().await.clone();
-    let expected = match expected {
-        Some(t) => t,
-        None => return StatusCode::FORBIDDEN.into_response(),
-    };
-    if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
+    if !token_ok(&state, &token).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -329,13 +365,7 @@ async fn ws_screenshare(
     Path(token): Path<String>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    // Token gate — same secret as the media route, same 403-on-anything.
-    let expected = state.media_server_token.lock().await.clone();
-    let expected = match expected {
-        Some(t) => t,
-        None => return StatusCode::FORBIDDEN.into_response(),
-    };
-    if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
+    if !token_ok(&state, &token).await {
         return StatusCode::FORBIDDEN.into_response();
     }
 

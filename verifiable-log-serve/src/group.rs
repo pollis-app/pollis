@@ -35,7 +35,7 @@ use verifiable_log_builder::{
     derive_conversation_pseudonym, window_for_seq, CommitLeaf, CommitLogInvariant, TENANT,
 };
 
-use crate::bundle::{now_ms, Bundle, InclusionCheck, PublicKeyDoc};
+use crate::bundle::{now_ms, short, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json, fetch_text, gate_leaf_format_version};
 
@@ -400,14 +400,5 @@ impl GroupReport {
                 "FAIL: group chain is NOT valid"
             }
         );
-    }
-}
-
-/// Abbreviate a long opaque id/hash for human-readable output.
-fn short(s: &str) -> String {
-    if s.len() <= 12 {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}{}", &s[..6], &s[s.len() - 4..])
     }
 }

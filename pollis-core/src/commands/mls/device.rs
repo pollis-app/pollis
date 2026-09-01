@@ -280,10 +280,7 @@ pub async fn ensure_device_cert(
 
     // 3. Sign the cert with the account identity key loaded from the OS
     //    keystore, using the current unix time as `issued_at`.
-    let issued_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let issued_at = crate::util::now_unix();
 
     let cert = crate::commands::account_identity::sign_device_cert(
         state.as_ref(),
@@ -500,10 +497,7 @@ pub async fn resign_stale_device_certs(
         mls_signature_pub_pq: pq_sig_pub_bytes,
     } in devices
     {
-        let issued_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let issued_at = crate::util::now_unix();
 
         let cert = crate::commands::account_identity::sign_device_cert(
             state.as_ref(),
