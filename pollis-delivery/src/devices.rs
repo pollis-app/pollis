@@ -63,7 +63,15 @@ use axum::{
 use libsql::Connection;
 
 use crate::error::AppError;
-use crate::writes::{bad_request, gate, gate_and_parse, outcome_response, resolve_actor, RawRequest, WriteOutcome};
+use crate::writes::{
+    bad_request,
+    gate,
+    gate_and_parse,
+    outcome_response,
+    resolve_actor,
+    RawRequest,
+    WriteOutcome,
+};
 use crate::AppState;
 use crate::util::b64_decode;
 
@@ -74,9 +82,7 @@ use crate::util::b64_decode;
 // keeps resolving for handlers, tests and the flows harness.
 pub use pollis_api::devices::*;
 
-
 // ── Key-package entries ──────────────────────────────────────────────────────
-
 
 // ── POST /v1/key-packages ────────────────────────────────────────────────────
 

@@ -52,7 +52,6 @@
 //! removed (that client cutover is the follow-up to #393). See
 //! `docs/secrets-broker.md`.
 
-
 use axum::{
     extract::State,
     http::StatusCode,
@@ -853,7 +852,6 @@ pub async fn r2_presign(
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
-
 
     let http_method = match parsed.operation.as_str() {
         "get" => "GET",

@@ -67,8 +67,6 @@ pub use pollis_api::commit::*;
 
 // ── Core logic ──────────────────────────────────────────────────────────────
 
-
-
 /// The group's head epoch as a **pure** function of the log's current
 /// `MAX(epoch)`: `None` (empty log) → `0`, `Some(m)` → `m + 1`. This is the
 /// `COALESCE(MAX(epoch), -1) + 1` SQL lifted out of [`head_epoch`] so Kani can

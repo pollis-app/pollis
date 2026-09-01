@@ -73,7 +73,14 @@ use libsql::Connection;
 use ulid::Ulid;
 
 use crate::error::AppError;
-use crate::writes::{gate_and_parse, is_member, outcome_response, resolve_actor, RawRequest, WriteOutcome};
+use crate::writes::{
+    gate_and_parse,
+    is_member,
+    outcome_response,
+    resolve_actor,
+    RawRequest,
+    WriteOutcome,
+};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the

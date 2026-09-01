@@ -39,7 +39,6 @@ const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 /// Expo accepts up to 100 messages per request.
 const EXPO_BATCH: usize = 100;
 
-
 /// The Expo access token the fan-out authenticates with (`EXPO_TOKEN`).
 ///
 /// Optional while the Expo account leaves push sends unauthenticated, and

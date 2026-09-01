@@ -35,7 +35,6 @@ use crate::util::b64_decode;
 // keeps resolving for handlers, tests and the flows harness.
 pub use pollis_api::bootstrap::*;
 
-
 /// The shared `{"status":"ok"}`, generic over the endpoint (#922) so each of
 /// this module's four handlers names the row it is answering for.
 fn ok_status<B>() -> Response

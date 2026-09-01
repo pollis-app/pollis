@@ -37,7 +37,15 @@ use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::reads::authed_user;
-use crate::writes::{bad_request, gate_and_parse, is_member, ok_response, outcome_response, resolve_actor, RawRequest};
+use crate::writes::{
+    bad_request,
+    gate_and_parse,
+    is_member,
+    ok_response,
+    outcome_response,
+    resolve_actor,
+    RawRequest,
+};
 
 use crate::AppState;
 use crate::util::{b64, b64_decode};
@@ -84,8 +92,6 @@ where
         PinOutcome::Invalid(why) => bad_request(why),
     })
 }
-
-
 
 // ── POST /v1/pins/keystate ───────────────────────────────────────────────────
 

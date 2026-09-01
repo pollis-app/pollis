@@ -20,7 +20,15 @@ use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::reads::authed_user;
-use crate::writes::{bad_request, gate_and_parse, ok_response, outcome_response, resolve_actor, RawRequest, WriteOutcome};
+use crate::writes::{
+    bad_request,
+    gate_and_parse,
+    ok_response,
+    outcome_response,
+    resolve_actor,
+    RawRequest,
+    WriteOutcome,
+};
 use crate::AppState;
 use crate::util::{b64, b64_decode};
 
@@ -65,8 +73,6 @@ where
         VaultOutcome::Invalid(why) => bad_request(why),
     })
 }
-
-
 
 // ── POST /v1/vault/save ──────────────────────────────────────────────────────
 

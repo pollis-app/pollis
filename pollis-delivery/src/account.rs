@@ -95,7 +95,16 @@ use axum::{
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, gate_and_parse, gate_or_session_and_parse, outcome_response, resolve_actor, RawRequest, WriteOutcome};
+use crate::writes::{
+    bad_request,
+    gate,
+    gate_and_parse,
+    gate_or_session_and_parse,
+    outcome_response,
+    resolve_actor,
+    RawRequest,
+    WriteOutcome,
+};
 use crate::AppState;
 use crate::util::b64_decode;
 
@@ -105,7 +114,6 @@ use crate::util::b64_decode;
 // silently-absent JSON key. Re-exported so `pollis_delivery::account::*Body`
 // keeps resolving for handlers, tests and the flows harness.
 pub use pollis_api::account::*;
-
 
 // ── POST /v1/account/rotate-identity ─────────────────────────────────────────
 

@@ -487,7 +487,6 @@ pub async fn group_info(
         Err(resp) => return Ok(resp),
     };
 
-
     // Authz: a signed request may only republish for a conversation it belongs
     // to. Skipped on the no-auth path (mirrors submit).
     if let Some(user_id) = &authed {
@@ -588,7 +587,6 @@ pub async fn welcomes_ack(
         Err(resp) => return Ok(resp),
     };
 
-
     let recipient = match resolve_recipient(authed, parsed.user_id) {
         Ok(r) => r,
         Err(resp) => return Ok(resp),
@@ -650,7 +648,6 @@ pub async fn welcomes_reset(
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
-
 
     let recipient = match resolve_recipient(authed, parsed.user_id) {
         Ok(r) => r,
@@ -744,7 +741,6 @@ pub async fn welcomes_resubmit(
         Err(resp) => return Ok(resp),
     };
 
-
     // Authz: a signed request may only resubmit for a conversation it belongs to.
     // Skipped on the no-auth path (mirrors submit / group_info).
     if let Some(user_id) = &authed {
@@ -810,7 +806,6 @@ pub async fn upsert_welcome(
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-
 #[cfg(test)]
 mod conversation_namespace_tests {
     //! One id must never name two kinds of conversation.
@@ -825,7 +820,6 @@ mod conversation_namespace_tests {
 
     use super::*;
     use libsql::Connection;
-
 
     /// 000017's guard triggers (#948) make an unregistered row in the three
     /// tables unrepresentable going FORWARD — but the three-table legs of

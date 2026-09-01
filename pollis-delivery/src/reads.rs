@@ -48,7 +48,6 @@ pub use pollis_api::reads::*;
 /// conversation's snapshot, which is the thing this endpoint exists to prevent).
 pub const MAX_QUERIES: usize = 64;
 
-
 /// The authenticated `(user_id, device_id)` a read is answered for.
 ///
 /// Both halves come from the VERIFIED signature when auth is on — never from the
@@ -559,7 +558,6 @@ pub async fn device_cert_rows(
     }
     Ok(out)
 }
-
 
 /// Is this device still registered (not revoked)? The main-DB half of the
 /// client's external-join gate.

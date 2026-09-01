@@ -38,12 +38,10 @@ use crate::util::{BIND_CHUNK, placeholders};
 
 pub use pollis_api::directory::*;
 
-
 /// Cap on how many groups one [`members`] call may name. The batch exists so the
 /// command palette opens in one round trip instead of `1 + 2N`; it is not an
 /// invitation to enumerate.
 const MAX_GROUPS: usize = 128;
-
 
 // ── POST /v1/conversations/catch-up ──────────────────────────────────────────
 

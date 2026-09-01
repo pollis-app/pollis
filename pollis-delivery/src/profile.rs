@@ -43,7 +43,17 @@ use axum::{
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, claim_conversation_id, conversation_id_taken, gate_and_parse, outcome_response, resolve_actor, ConversationKind, RawRequest, WriteOutcome};
+use crate::writes::{
+    bad_request,
+    claim_conversation_id,
+    conversation_id_taken,
+    gate_and_parse,
+    outcome_response,
+    resolve_actor,
+    ConversationKind,
+    RawRequest,
+    WriteOutcome,
+};
 use crate::AppState;
 use crate::util::b64_decode;
 
@@ -259,7 +269,6 @@ pub async fn apply_save_read_cursors(
     .await?;
     Ok(ReadCursorOutcome::Ok)
 }
-
 
 // ── POST /v1/blocks/add ──────────────────────────────────────────────────────
 

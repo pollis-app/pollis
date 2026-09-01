@@ -34,9 +34,6 @@ use crate::util::{BIND_CHUNK, b64, placeholders};
 
 pub use pollis_api::account_reads::*;
 
-
-
-
 // ── POST /v1/read/account-keys ───────────────────────────────────────────────
 
 /// POST `/v1/read/account-keys` — cross-signing roots for a batch of users.

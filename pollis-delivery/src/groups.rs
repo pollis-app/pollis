@@ -44,7 +44,16 @@ use axum::{
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{claim_conversation_id, conversation_id_taken, gate_and_parse, outcome_response, resolve_actor, ConversationKind, RawRequest, WriteOutcome};
+use crate::writes::{
+    claim_conversation_id,
+    conversation_id_taken,
+    gate_and_parse,
+    outcome_response,
+    resolve_actor,
+    ConversationKind,
+    RawRequest,
+    WriteOutcome,
+};
 use crate::AppState;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
