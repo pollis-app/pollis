@@ -33,7 +33,6 @@ use axum::{
     extract::State,
     response::{IntoResponse, Response},
 };
-use base64::Engine as _;
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
@@ -41,6 +40,7 @@ use crate::reads::authed_user;
 use crate::writes::{bad_request, gate_and_parse, is_member, ok_response, outcome_response, resolve_actor, RawRequest};
 
 use crate::AppState;
+use crate::util::{b64, b64_decode};
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -85,13 +85,7 @@ where
     })
 }
 
-fn b64_decode(s: &str) -> Option<Vec<u8>> {
-    base64::engine::general_purpose::STANDARD.decode(s).ok()
-}
 
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
 
 // ── POST /v1/pins/keystate ───────────────────────────────────────────────────
 
@@ -147,16 +141,14 @@ pub async fn apply_upsert_keystate(
     if !is_member(conn, &body.conversation_id, &actor).await? {
         return Ok(KeystateOutcome::Forbidden);
     }
-    let wrapped = match b64_decode(&body.wrapped_kpin) {
-        Some(w) => w,
-        None => return Ok(KeystateOutcome::Invalid("wrapped_kpin is not valid base64")),
+    let Ok(wrapped) = b64_decode(&body.wrapped_kpin) else {
+        return Ok(KeystateOutcome::Invalid("wrapped_kpin is not valid base64"));
     };
     if wrapped.is_empty() || wrapped.len() > KEYSTATE_BLOB_MAX_BYTES {
         return Ok(KeystateOutcome::Invalid("wrapped_kpin size out of range"));
     }
-    let nonce = match b64_decode(&body.nonce) {
-        Some(n) => n,
-        None => return Ok(KeystateOutcome::Invalid("nonce is not valid base64")),
+    let Ok(nonce) = b64_decode(&body.nonce) else {
+        return Ok(KeystateOutcome::Invalid("nonce is not valid base64"));
     };
     if nonce.len() != PIN_NONCE_LEN {
         return Ok(KeystateOutcome::Invalid("nonce must be 12 bytes"));
@@ -242,20 +234,14 @@ pub async fn apply_pin_message(
     if !is_member(conn, &body.conversation_id, &actor).await? {
         return Ok(PinOutcome::Forbidden);
     }
-    let content = match b64_decode(&body.encrypted_content) {
-        Some(c) => c,
-        None => {
-            return Ok(PinOutcome::Invalid(
-                "encrypted_content is not valid base64",
-            ))
-        }
+    let Ok(content) = b64_decode(&body.encrypted_content) else {
+        return Ok(PinOutcome::Invalid("encrypted_content is not valid base64"));
     };
     if content.is_empty() || content.len() > PIN_BLOB_MAX_BYTES {
         return Ok(PinOutcome::Invalid("encrypted_content size out of range"));
     }
-    let nonce = match b64_decode(&body.nonce) {
-        Some(n) => n,
-        None => return Ok(PinOutcome::Invalid("nonce is not valid base64")),
+    let Ok(nonce) = b64_decode(&body.nonce) else {
+        return Ok(PinOutcome::Invalid("nonce is not valid base64"));
     };
     if nonce.len() != PIN_NONCE_LEN {
         return Ok(PinOutcome::Invalid("nonce must be 12 bytes"));

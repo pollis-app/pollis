@@ -31,6 +31,7 @@
 //! already landed.
 
 use libsql::Connection;
+use crate::util::{BIND_CHUNK, placeholders};
 
 /// Expo's push service endpoint. Accepts a JSON array of up to 100 messages.
 const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
@@ -38,7 +39,6 @@ const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 /// Expo accepts up to 100 messages per request.
 const EXPO_BATCH: usize = 100;
 
-const BIND_CHUNK: usize = 100;
 
 /// The Expo access token the fan-out authenticates with (`EXPO_TOKEN`).
 ///
@@ -185,10 +185,7 @@ async fn push_tokens(
 ) -> anyhow::Result<Vec<(String, Option<String>)>> {
     let mut out = Vec::new();
     for chunk in user_ids.chunks(BIND_CHUNK) {
-        let placeholders = (0..chunk.len())
-            .map(|i| format!("?{}", i + 1))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let placeholders = placeholders(chunk.len(), 1);
         let sql =
             format!("SELECT token, platform FROM push_token WHERE user_id IN ({placeholders})");
         let params: Vec<libsql::Value> = chunk.iter().map(|u| u.clone().into()).collect();

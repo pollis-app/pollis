@@ -29,13 +29,13 @@ use axum::{
     extract::State,
     response::{IntoResponse, Response},
 };
-use base64::Engine as _;
 use libsql::Connection;
 
 use crate::auth;
 use crate::error::{AppError, AuthRejection};
 use crate::writes::{bad_request, is_member, ok_response, RawRequest};
 use crate::AppState;
+use crate::util::{BIND_CHUNK, b64, placeholders};
 
 pub use pollis_api::reads::*;
 
@@ -48,9 +48,6 @@ pub use pollis_api::reads::*;
 /// conversation's snapshot, which is the thing this endpoint exists to prevent).
 pub const MAX_QUERIES: usize = 64;
 
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
 
 /// The authenticated `(user_id, device_id)` a read is answered for.
 ///
@@ -530,18 +527,14 @@ pub async fn device_cert_rows(
     device_ids: &[String],
 ) -> anyhow::Result<Vec<DeviceCertRow>> {
     let mut out = Vec::with_capacity(device_ids.len());
-    // One slot reserved for the user id, so the two halves of that arithmetic
-    // stay adjacent.
+    // `?1` is the user id, so the device ids start at `?2`.
     for chunk in device_ids.chunks(BIND_CHUNK) {
         let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 1);
-        params.push(user_id.to_string().into());
+        params.push(user_id.into());
         for did in chunk {
-            params.push(did.clone().into());
+            params.push(did.as_str().into());
         }
-        let placeholders = (0..chunk.len())
-            .map(|i| format!("?{}", i + 2))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let placeholders = placeholders(chunk.len(), 2);
         let mut rows = main
             .query(
                 &format!(
@@ -567,10 +560,6 @@ pub async fn device_cert_rows(
     Ok(out)
 }
 
-/// Bound-parameter chunk size for the `IN (…)` lookups above. Well under
-/// SQLite's default `SQLITE_MAX_VARIABLE_NUMBER`, with room for the fixed
-/// leading parameter.
-const BIND_CHUNK: usize = 100;
 
 /// Is this device still registered (not revoked)? The main-DB half of the
 /// client's external-join gate.

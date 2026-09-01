@@ -27,6 +27,7 @@ use libsql::Connection;
 use crate::auth;
 use crate::error::{AppError, AuthRejection};
 use crate::AppState;
+use crate::util::b64_decode;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -809,10 +810,6 @@ pub async fn upsert_welcome(
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
-    use base64::Engine as _;
-    Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
-}
 
 #[cfg(test)]
 mod conversation_namespace_tests {

@@ -34,24 +34,16 @@ use crate::groups::group_role;
 use crate::reads::authed_user;
 use crate::writes::{bad_request, ok_response, RawRequest};
 use crate::AppState;
+use crate::util::{BIND_CHUNK, placeholders};
 
 pub use pollis_api::directory::*;
 
-/// Bound-parameter chunk size for `IN (…)` lookups — well under SQLite's default
-/// `SQLITE_MAX_VARIABLE_NUMBER`, with room for the fixed leading parameters.
-const BIND_CHUNK: usize = 100;
 
 /// Cap on how many groups one [`members`] call may name. The batch exists so the
 /// command palette opens in one round trip instead of `1 + 2N`; it is not an
 /// invitation to enumerate.
 const MAX_GROUPS: usize = 128;
 
-fn placeholders(n: usize, first: usize) -> String {
-    (0..n)
-        .map(|i| format!("?{}", i + first))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
 
 // ── POST /v1/conversations/catch-up ──────────────────────────────────────────
 

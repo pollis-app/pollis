@@ -48,6 +48,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use libsql::Connection;
+use crate::util::{b64, b64_decode};
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -66,15 +67,7 @@ pub use pollis_api::commit::*;
 
 // ── Core logic ──────────────────────────────────────────────────────────────
 
-fn b64_decode(s: &str) -> Result<Vec<u8>> {
-    use base64::Engine as _;
-    Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
-}
 
-fn b64_encode(b: &[u8]) -> String {
-    use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.encode(b)
-}
 
 /// The group's head epoch as a **pure** function of the log's current
 /// `MAX(epoch)`: `None` (empty log) → `0`, `Some(m)` → `m + 1`. This is the
@@ -200,7 +193,7 @@ pub async fn fetch_commits(
             epoch: r.get(0)?,
             seq: r.get(1)?,
             sender_id: r.get(2)?,
-            commit: b64_encode(&commit),
+            commit: b64(&commit),
             added_user_id: r.get::<Option<String>>(4).ok().flatten(),
             added_device_ids: r.get::<Option<String>>(5).ok().flatten(),
             created_at: r.get(6)?,

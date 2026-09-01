@@ -441,10 +441,7 @@ pub async fn apply_verify_otp(
             // Returned to the caller (#987): its orphan check compares these
             // bytes against the account key it holds locally, and this row read
             // is the one that already has them.
-            let encoded = pub_bytes.map(|b| {
-                use base64::Engine as _;
-                base64::engine::general_purpose::STANDARD.encode(b)
-            });
+            let encoded = pub_bytes.as_deref().map(crate::util::b64);
             (id, uname, encoded, false)
         }
         None => {

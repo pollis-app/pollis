@@ -16,13 +16,13 @@ use axum::{
     extract::State,
     response::{IntoResponse, Response},
 };
-use base64::Engine as _;
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::reads::authed_user;
 use crate::writes::{bad_request, gate_and_parse, ok_response, outcome_response, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
+use crate::util::{b64, b64_decode};
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -66,13 +66,7 @@ where
     })
 }
 
-fn b64_decode(s: &str) -> Option<Vec<u8>> {
-    base64::engine::general_purpose::STANDARD.decode(s).ok()
-}
 
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
 
 // ── POST /v1/vault/save ──────────────────────────────────────────────────────
 
@@ -119,16 +113,14 @@ pub async fn apply_save_vault_message(
     if body.created_at.is_empty() || body.created_at.len() > 64 {
         return Ok(VaultOutcome::Invalid("created_at length out of range"));
     }
-    let nonce = match b64_decode(&body.nonce) {
-        Some(n) => n,
-        None => return Ok(VaultOutcome::Invalid("nonce is not valid base64")),
+    let Ok(nonce) = b64_decode(&body.nonce) else {
+        return Ok(VaultOutcome::Invalid("nonce is not valid base64"));
     };
     if nonce.len() != VAULT_NONCE_LEN {
         return Ok(VaultOutcome::Invalid("nonce must be 12 bytes"));
     }
-    let blob = match b64_decode(&body.blob) {
-        Some(b) => b,
-        None => return Ok(VaultOutcome::Invalid("blob is not valid base64")),
+    let Ok(blob) = b64_decode(&body.blob) else {
+        return Ok(VaultOutcome::Invalid("blob is not valid base64"));
     };
     if blob.is_empty() || blob.len() > VAULT_BLOB_MAX_BYTES {
         return Ok(VaultOutcome::Invalid("blob size out of range"));

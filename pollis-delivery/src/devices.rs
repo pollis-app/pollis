@@ -65,6 +65,7 @@ use libsql::Connection;
 use crate::error::AppError;
 use crate::writes::{bad_request, gate, gate_and_parse, outcome_response, resolve_actor, RawRequest, WriteOutcome};
 use crate::AppState;
+use crate::util::b64_decode;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -73,10 +74,6 @@ use crate::AppState;
 // keeps resolving for handlers, tests and the flows harness.
 pub use pollis_api::devices::*;
 
-fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
-    use base64::Engine as _;
-    Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
-}
 
 // ── Key-package entries ──────────────────────────────────────────────────────
 

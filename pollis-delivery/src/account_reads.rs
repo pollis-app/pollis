@@ -24,28 +24,18 @@ use axum::{
     http::HeaderMap,
     response::{IntoResponse, Response},
 };
-use base64::Engine as _;
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::reads::authed_user;
 use crate::writes::{bad_request, ok_response, RawRequest};
 use crate::AppState;
+use crate::util::{BIND_CHUNK, b64, placeholders};
 
 pub use pollis_api::account_reads::*;
 
-const BIND_CHUNK: usize = 100;
 
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
 
-fn placeholders(n: usize, first: usize) -> String {
-    (0..n)
-        .map(|i| format!("?{}", i + first))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
 
 // ── POST /v1/read/account-keys ───────────────────────────────────────────────
 

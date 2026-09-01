@@ -40,12 +40,12 @@ use axum::{
     extract::State,
     response::{IntoResponse, Response},
 };
-use base64::Engine as _;
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::writes::{bad_request, claim_conversation_id, conversation_id_taken, gate_and_parse, outcome_response, resolve_actor, ConversationKind, RawRequest, WriteOutcome};
 use crate::AppState;
+use crate::util::b64_decode;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -236,16 +236,14 @@ pub async fn apply_save_read_cursors(
         Ok(u) => u,
         Err(_) => return Ok(ReadCursorOutcome::Forbidden),
     };
-    let nonce = match b64_decode(&body.nonce) {
-        Some(n) => n,
-        None => return Ok(ReadCursorOutcome::Invalid("nonce is not valid base64")),
+    let Ok(nonce) = b64_decode(&body.nonce) else {
+        return Ok(ReadCursorOutcome::Invalid("nonce is not valid base64"));
     };
     if nonce.len() != READ_CURSOR_NONCE_LEN {
         return Ok(ReadCursorOutcome::Invalid("nonce must be 12 bytes"));
     }
-    let blob = match b64_decode(&body.blob) {
-        Some(b) => b,
-        None => return Ok(ReadCursorOutcome::Invalid("blob is not valid base64")),
+    let Ok(blob) = b64_decode(&body.blob) else {
+        return Ok(ReadCursorOutcome::Invalid("blob is not valid base64"));
     };
     if blob.is_empty() || blob.len() > READ_CURSOR_BLOB_MAX_BYTES {
         return Ok(ReadCursorOutcome::Invalid("blob size out of range"));
@@ -262,9 +260,6 @@ pub async fn apply_save_read_cursors(
     Ok(ReadCursorOutcome::Ok)
 }
 
-fn b64_decode(s: &str) -> Option<Vec<u8>> {
-    base64::engine::general_purpose::STANDARD.decode(s).ok()
-}
 
 // ── POST /v1/blocks/add ──────────────────────────────────────────────────────
 
