@@ -27,6 +27,7 @@ use libsql::Connection;
 use crate::auth;
 use crate::error::{AppError, AuthRejection};
 use crate::AppState;
+use crate::util::b64_decode;
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -34,6 +35,50 @@ use crate::AppState;
 // silently-absent JSON key. Re-exported so `pollis_delivery::writes::*Body`
 // keeps resolving for handlers, tests and the flows harness.
 pub use pollis_api::writes::*;
+
+// ── The request the signature covers ─────────────────────────────────────────
+
+/// Method, path, headers and the **raw** body bytes — exactly the material a
+/// device signature is computed over, in one extractor.
+///
+/// Every `POST /v1/...` handler in this crate needs all four and nothing else,
+/// because the signature binds `sha256(body)` and the canonical signing message
+/// covers the method and path: the body cannot be deserialized before it is
+/// verified, so `Json<T>` is not available to these routes and the parts have to
+/// arrive raw. Ninety-odd handlers therefore declared the same four extractors
+/// positionally, which is four chances each to reorder them into a different
+/// meaning and no place to say what they are *for*.
+///
+/// `Bytes` is extracted last, as it must be (it consumes the body), so this
+/// rejects exactly what the four separate extractors rejected — the same
+/// `DefaultBodyLimit` and the same 400 on a body that cannot be read.
+pub struct RawRequest {
+    pub method: Method,
+    pub uri: Uri,
+    pub headers: HeaderMap,
+    pub body: Bytes,
+}
+
+#[axum::async_trait]
+impl<S: Send + Sync> axum::extract::FromRequest<S> for RawRequest {
+    type Rejection = axum::extract::rejection::BytesRejection;
+
+    async fn from_request(req: axum::extract::Request, state: &S) -> Result<Self, Self::Rejection> {
+        let (parts, body) = req.into_parts();
+        // Cloned, not moved out of `parts`: `Bytes::from_request` is handed the
+        // request back intact, exactly as it was when the four separate
+        // extractors ran in this order.
+        let (method, uri, headers) = (parts.method.clone(), parts.uri.clone(), parts.headers.clone());
+        let body =
+            Bytes::from_request(axum::extract::Request::from_parts(parts, body), state).await?;
+        Ok(Self {
+            method,
+            uri,
+            headers,
+            body,
+        })
+    }
+}
 
 // ── Shared auth gate ─────────────────────────────────────────────────────────
 
@@ -56,10 +101,7 @@ pub(crate) type Authed = Option<String>;
 /// `auth::verify_request` plumbing — it calls this.
 pub(crate) async fn gate(
     state: &AppState,
-    headers: &HeaderMap,
-    method: &Method,
-    uri: &Uri,
-    body: &Bytes,
+    req: &RawRequest,
 ) -> Result<Result<Authed, Response>, AppError> {
     if !state.require_auth {
         return Ok(Ok(None));
@@ -72,10 +114,10 @@ pub(crate) async fn gate(
     match auth::verify_request_cached(
         &state.device_keys,
         &conn,
-        headers,
-        method.as_str(),
-        uri.path(),
-        body,
+        &req.headers,
+        req.method.as_str(),
+        req.uri.path(),
+        &req.body,
         crate::util::now_unix() as i64,
     )
     .await
@@ -100,25 +142,67 @@ pub(crate) async fn gate(
 /// bad signature is never "rescued" by a session token.
 pub(crate) async fn gate_or_session(
     state: &AppState,
-    headers: &HeaderMap,
-    method: &Method,
-    uri: &Uri,
-    body: &Bytes,
+    req: &RawRequest,
 ) -> Result<Result<Authed, Response>, AppError> {
     if !state.require_auth {
         return Ok(Ok(None));
     }
-    if headers.contains_key(auth::H_SIGNATURE) {
-        return gate(state, headers, method, uri, body).await;
+    if req.headers.contains_key(auth::H_SIGNATURE) {
+        return gate(state, req).await;
     }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    match crate::session::verify_session(headers, &state.sessions, now) {
+    match crate::session::verify_session(&req.headers, &state.sessions, crate::util::now_unix()) {
         Ok(claims) => Ok(Ok(Some(claims.user_id))),
         Err(rej) => Ok(Err(rej.into_response())),
     }
+}
+
+/// [`gate`] followed by parsing the body — the preamble every device-signed
+/// endpoint in this crate runs, in one call.
+///
+/// The ORDER is the point, not the line count: the signature is verified over
+/// the RAW bytes and the body is deserialized only afterwards, so a forged body
+/// can never reach a `serde` impl, let alone the DB. Sixty-odd handlers used to
+/// spell that ordering out by hand, which meant sixty-odd chances to write it
+/// the other way round; there is now one place where it is written, and a
+/// handler that wants the wrong order has to visibly stop using this.
+///
+/// Returns `Ok(Err(response))` when the request is rejected (401/403 from the
+/// gate, or 400 for a body that will not parse) — the caller forwards it
+/// unchanged.
+pub(crate) async fn gate_and_parse<B>(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(Authed, B), Response>, AppError>
+where
+    B: serde::de::DeserializeOwned,
+{
+    let authed = match gate(state, req).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(Err(resp)),
+    };
+    Ok(match serde_json::from_slice(&req.body) {
+        Ok(parsed) => Ok((authed, parsed)),
+        Err(_) => Err(bad_request("invalid body")),
+    })
+}
+
+/// [`gate_and_parse`] over [`gate_or_session`] — same ordering guarantee, for the
+/// endpoints an OTP session may also authenticate.
+pub(crate) async fn gate_or_session_and_parse<B>(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(Authed, B), Response>, AppError>
+where
+    B: serde::de::DeserializeOwned,
+{
+    let authed = match gate_or_session(state, req).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(Err(resp)),
+    };
+    Ok(match serde_json::from_slice(&req.body) {
+        Ok(parsed) => Ok((authed, parsed)),
+        Err(_) => Err(bad_request("invalid body")),
+    })
 }
 
 /// Resolve the recipient/owner a welcome op targets.
@@ -396,19 +480,11 @@ pub async fn conversation_id_taken(conn: &Connection, id: &str) -> anyhow::Resul
 /// authenticated user must be a current member of `conversation_id`.
 pub async fn group_info(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<GroupInfoBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-
-    let parsed: GroupInfoBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
 
     // Authz: a signed request may only republish for a conversation it belongs
@@ -504,19 +580,11 @@ pub async fn upsert_group_info(
 /// authenticated recipient so a user can only ack their own Welcomes.
 pub async fn welcomes_ack(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<AckBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-
-    let parsed: AckBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
 
     let recipient = match resolve_recipient(authed, parsed.user_id) {
@@ -574,19 +642,11 @@ pub async fn ack_welcomes(
 /// scoped to the authenticated recipient.
 pub async fn welcomes_reset(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<ResetBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-
-    let parsed: ResetBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
 
     let recipient = match resolve_recipient(authed, parsed.user_id) {
@@ -625,21 +685,18 @@ pub async fn reset_welcomes(
 /// explicit `user_id` only on the no-auth path.
 pub async fn welcomes_purge(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate_or_session(&state, &headers, &method, &uri, &body).await? {
+    let authed = match gate_or_session(&state, &req).await? {
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
 
     // An empty body is valid; tolerate it when auth is on (recipient from auth).
-    let parsed: PurgeBody = if body.is_empty() {
+    let parsed: PurgeBody = if req.body.is_empty() {
         PurgeBody { user_id: None }
     } else {
-        match serde_json::from_slice(&body) {
+        match serde_json::from_slice(&req.body) {
             Ok(b) => b,
             Err(_) => return Ok(bad_request("invalid body")),
         }
@@ -677,19 +734,11 @@ pub async fn purge_welcomes(log_conn: &Connection, recipient: &str) -> anyhow::R
 /// member can re-drive a Welcome for the group they belong to).
 pub async fn welcomes_resubmit(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<ResubmitBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-
-    let parsed: ResubmitBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
 
     // Authz: a signed request may only resubmit for a conversation it belongs to.
@@ -757,11 +806,6 @@ pub async fn upsert_welcome(
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
-    use base64::Engine as _;
-    Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
-}
-
 #[cfg(test)]
 mod conversation_namespace_tests {
     //! One id must never name two kinds of conversation.
@@ -776,7 +820,6 @@ mod conversation_namespace_tests {
 
     use super::*;
     use libsql::Connection;
-
 
     /// 000017's guard triggers (#948) make an unregistered row in the three
     /// tables unrepresentable going FORWARD — but the three-table legs of

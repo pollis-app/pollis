@@ -29,8 +29,8 @@
 //! Drop the numbered `.sql` file in `migrations/` (or `migrations-log/`) and add
 //! it to [`POST_BASELINE_MIGRATIONS`] (or [`POST_BASELINE_LOG_MIGRATIONS`]).
 //! `migrations/000000_baseline.sql` is frozen and must never be edited.
-//! `schema_is_complete` in this crate's tests fails if a file on disk is missing
-//! from the list, so the two cannot silently diverge.
+//! `every_migration_file_is_listed` in this crate's tests fails if a file on
+//! disk is missing from the list, so the two cannot silently diverge.
 
 /// The two membership predicates that BOTH sides of a group-scoped write
 /// evaluate (#942).

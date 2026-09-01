@@ -248,12 +248,12 @@ pub async fn request_otp(State(state): State<AppState>, body: axum::body::Bytes)
         Ok(b) => b,
         Err(_) => return bad_request("invalid body"),
     };
-    let email = parsed.email.trim().to_string();
+    let email = parsed.email.trim();
     // Empty email: nothing to do, but still 200 (don't reveal validation state).
     if email.is_empty() {
         return ok_200();
     }
-    process_request_otp(&state.otp, &state.otp_config, &email).await;
+    process_request_otp(&state.otp, &state.otp_config, email).await;
     ok_200()
 }
 
@@ -313,7 +313,7 @@ async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Resul
         .await?;
     if !resp.status().is_success() {
         let txt = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Resend {}: {txt}", "non-success");
+        anyhow::bail!("Resend non-success: {txt}");
     }
     Ok(())
 }
@@ -330,8 +330,8 @@ pub async fn verify_otp(State(state): State<AppState>, body: axum::body::Bytes) 
         Ok(b) => b,
         Err(_) => return bad_request("invalid body"),
     };
-    let email = parsed.email.trim().to_string();
-    let device_id = parsed.device_id.trim().to_string();
+    let email = parsed.email.trim();
+    let device_id = parsed.device_id.trim();
     if email.is_empty() || device_id.is_empty() {
         return bad_request("email and device_id required");
     }
@@ -346,9 +346,9 @@ pub async fn verify_otp(State(state): State<AppState>, body: axum::body::Bytes) 
         &state.otp,
         &state.sessions,
         &state.otp_config,
-        &email,
+        email,
         &parsed.code,
-        &device_id,
+        device_id,
     )
     .await
     {
@@ -410,10 +410,7 @@ pub async fn apply_verify_otp(
     // `pollis-core` used to carry a client twin of this
     // (`auth::resolve_or_create_user_by_email`); #910 deleted it along with the
     // dev-only login that was its sole caller, so this is now the ONE
-    // implementation of resolve-or-create in the workspace
-    // of this block (its dev-only, no-DS login shortcut). The two crates cannot
-    // depend on each other, so they are kept deliberately identical instead —
-    // diff them if you change either.
+    // implementation of resolve-or-create in the workspace.
     //
     // Canonicalize here rather than relying on the handler having done it:
     // `users.email` is `NOT NULL UNIQUE`, so the string IS the account identity,
@@ -441,10 +438,7 @@ pub async fn apply_verify_otp(
             // Returned to the caller (#987): its orphan check compares these
             // bytes against the account key it holds locally, and this row read
             // is the one that already has them.
-            let encoded = pub_bytes.map(|b| {
-                use base64::Engine as _;
-                base64::engine::general_purpose::STANDARD.encode(b)
-            });
+            let encoded = pub_bytes.as_deref().map(crate::util::b64);
             (id, uname, encoded, false)
         }
         None => {

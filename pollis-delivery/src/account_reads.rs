@@ -21,31 +21,18 @@
 use axum::{
     body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
-use base64::Engine as _;
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::reads::authed_user;
-use crate::writes::{bad_request, ok_response};
+use crate::writes::{bad_request, ok_response, RawRequest};
 use crate::AppState;
+use crate::util::{BIND_CHUNK, b64, placeholders};
 
 pub use pollis_api::account_reads::*;
-
-const BIND_CHUNK: usize = 100;
-
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-fn placeholders(n: usize, first: usize) -> String {
-    (0..n)
-        .map(|i| format!("?{}", i + first))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
 
 // ── POST /v1/read/account-keys ───────────────────────────────────────────────
 
@@ -59,16 +46,13 @@ fn placeholders(n: usize, first: usize) -> String {
 /// cannot influence.
 pub async fn account_keys(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: AccountKeysBody = match serde_json::from_slice(&body) {
+    let parsed: AccountKeysBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    if let Err(resp) = authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    if let Err(resp) = authed_user(&state, &req, None).await? {
         return Ok(resp);
     }
 
@@ -109,18 +93,12 @@ pub async fn account_keys(
 /// material, which any group member can already observe through a commit's add
 /// metadata — a device name is a human-chosen string ("Dan's work laptop") and
 /// has no business crossing that line.
-pub async fn devices(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    let parsed: DevicesBody = match serde_json::from_slice(&body) {
+pub async fn devices(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let parsed: DevicesBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    let who = match authed_user(&state, &req, None).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -230,16 +208,13 @@ pub async fn device_rows(
 /// rather than being trimmed into a plausible-looking list.
 pub async fn key_packages(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: KeyPackagesBody = match serde_json::from_slice(&body) {
+    let parsed: KeyPackagesBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match crate::reads::reader_identity(&state, &headers, &method, &uri, &body).await? {
+    let who = match crate::reads::reader_identity(&state, &req).await? {
         Ok(r) => r,
         Err(resp) => return Ok(resp),
     };
@@ -312,16 +287,13 @@ pub async fn key_packages(
 /// devices, so a failure is an error, never a trim.
 pub async fn registered_devices(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: RegisteredDevicesBody = match serde_json::from_slice(&body) {
+    let parsed: RegisteredDevicesBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    if let Err(resp) = authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    if let Err(resp) = authed_user(&state, &req, None).await? {
         return Ok(resp);
     }
 
@@ -400,12 +372,9 @@ pub async fn registered_device_pairs(
 /// request's account.
 pub async fn enrollment(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: EnrollmentRequestBody = match serde_json::from_slice(&body) {
+    let parsed: EnrollmentRequestBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
@@ -448,7 +417,7 @@ pub async fn enrollment(
         // capability holder — which is anyone who can guess or intercept a
         // request id — must never read the verification code, because reading
         // it out is what a human does to authorize the enrollment.
-        let who = match authed_user(&state, &headers, &method, &uri, &body, None).await? {
+        let who = match authed_user(&state, &req, None).await? {
             Ok(u) => u,
             Err(resp) => return Ok(resp),
         };
@@ -470,25 +439,13 @@ pub async fn enrollment(
 /// requests. Device-signed, because unlike [`enrollment`] this ENUMERATES.
 pub async fn pending_enrollments(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: PendingEnrollmentsBody = match serde_json::from_slice(&body) {
+    let parsed: PendingEnrollmentsBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -610,25 +567,13 @@ pub async fn recovery_blob(
 /// input and a mismatch is a 403, because `email` is on this row.
 pub async fn account_status(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: AccountStatusBody = match serde_json::from_slice(&body) {
+    let parsed: AccountStatusBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -729,25 +674,13 @@ pub async fn account_probe(
 /// POST `/v1/read/security-events` — the caller's own audit log.
 pub async fn security_events(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: SecurityEventsBody = match serde_json::from_slice(&body) {
+    let parsed: SecurityEventsBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -789,18 +722,12 @@ pub async fn security_events(
 /// resolving a hash you were already handed is part of reading a message you can
 /// already read and is ungated. Keeping both here does not merge the rules — it
 /// puts them next to each other where the difference is visible.
-pub async fn emoji(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    let parsed: EmojiReadBody = match serde_json::from_slice(&body) {
+pub async fn emoji(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let parsed: EmojiReadBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    let who = match authed_user(&state, &req, None).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -844,16 +771,13 @@ pub async fn emoji(
 /// already holds, so it discloses nothing the caller did not bring.
 pub async fn object_exists(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: ObjectExistsBody = match serde_json::from_slice(&body) {
+    let parsed: ObjectExistsBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    if let Err(resp) = authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    if let Err(resp) = authed_user(&state, &req, None).await? {
         return Ok(resp);
     }
 
@@ -885,25 +809,13 @@ pub async fn object_exists(
 /// to merge, and that is an ordinary state rather than an error.
 pub async fn read_cursors(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: ReadCursorsBody = match serde_json::from_slice(&body) {
+    let parsed: ReadCursorsBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        Some(parsed.user_id.as_str()),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, Some(parsed.user_id.as_str())).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };

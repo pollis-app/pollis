@@ -30,19 +30,25 @@
 //! body actor, mirroring the other write modules.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::{IntoResponse, Response},
 };
-use base64::Engine as _;
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::reads::authed_user;
-use crate::writes::{bad_request, gate, is_member, ok_response, outcome_response, resolve_actor};
+use crate::writes::{
+    bad_request,
+    gate_and_parse,
+    is_member,
+    ok_response,
+    outcome_response,
+    resolve_actor,
+    RawRequest,
+};
 
 use crate::AppState;
+use crate::util::{b64, b64_decode};
 
 // The request bodies for this module's endpoints live in `pollis-api`, the
 // crate pollis-core builds its requests from — one declaration, both ends, so
@@ -87,14 +93,6 @@ where
     })
 }
 
-fn b64_decode(s: &str) -> Option<Vec<u8>> {
-    base64::engine::general_purpose::STANDARD.decode(s).ok()
-}
-
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
 // ── POST /v1/pins/keystate ───────────────────────────────────────────────────
 
 /// The keystate CAS answer: did the wrap land? Separate from [`PinOutcome`]
@@ -109,18 +107,11 @@ pub enum KeystateOutcome {
 
 pub async fn upsert_keystate(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<UpsertPinKeystateBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: UpsertPinKeystateBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     Ok(
@@ -156,16 +147,14 @@ pub async fn apply_upsert_keystate(
     if !is_member(conn, &body.conversation_id, &actor).await? {
         return Ok(KeystateOutcome::Forbidden);
     }
-    let wrapped = match b64_decode(&body.wrapped_kpin) {
-        Some(w) => w,
-        None => return Ok(KeystateOutcome::Invalid("wrapped_kpin is not valid base64")),
+    let Ok(wrapped) = b64_decode(&body.wrapped_kpin) else {
+        return Ok(KeystateOutcome::Invalid("wrapped_kpin is not valid base64"));
     };
     if wrapped.is_empty() || wrapped.len() > KEYSTATE_BLOB_MAX_BYTES {
         return Ok(KeystateOutcome::Invalid("wrapped_kpin size out of range"));
     }
-    let nonce = match b64_decode(&body.nonce) {
-        Some(n) => n,
-        None => return Ok(KeystateOutcome::Invalid("nonce is not valid base64")),
+    let Ok(nonce) = b64_decode(&body.nonce) else {
+        return Ok(KeystateOutcome::Invalid("nonce is not valid base64"));
     };
     if nonce.len() != PIN_NONCE_LEN {
         return Ok(KeystateOutcome::Invalid("nonce must be 12 bytes"));
@@ -221,18 +210,11 @@ pub async fn apply_upsert_keystate(
 
 pub async fn pin_message(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<PinMessageBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: PinMessageBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     pin_outcome_response::<PinMessageBody>(apply_pin_message(&conn, authed.as_deref(), &parsed).await?)
@@ -258,20 +240,14 @@ pub async fn apply_pin_message(
     if !is_member(conn, &body.conversation_id, &actor).await? {
         return Ok(PinOutcome::Forbidden);
     }
-    let content = match b64_decode(&body.encrypted_content) {
-        Some(c) => c,
-        None => {
-            return Ok(PinOutcome::Invalid(
-                "encrypted_content is not valid base64",
-            ))
-        }
+    let Ok(content) = b64_decode(&body.encrypted_content) else {
+        return Ok(PinOutcome::Invalid("encrypted_content is not valid base64"));
     };
     if content.is_empty() || content.len() > PIN_BLOB_MAX_BYTES {
         return Ok(PinOutcome::Invalid("encrypted_content size out of range"));
     }
-    let nonce = match b64_decode(&body.nonce) {
-        Some(n) => n,
-        None => return Ok(PinOutcome::Invalid("nonce is not valid base64")),
+    let Ok(nonce) = b64_decode(&body.nonce) else {
+        return Ok(PinOutcome::Invalid("nonce is not valid base64"));
     };
     if nonce.len() != PIN_NONCE_LEN {
         return Ok(PinOutcome::Invalid("nonce must be 12 bytes"));
@@ -299,18 +275,11 @@ pub async fn apply_pin_message(
 
 pub async fn unpin_message(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<UnpinMessageBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: UnpinMessageBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<UnpinMessageBody>(apply_unpin_message(&conn, authed.as_deref(), &parsed).await?)
@@ -349,25 +318,13 @@ pub async fn apply_unpin_message(
 /// no key yet, and the first pinner mints one.
 pub async fn read_keystate(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: PinKeystateBody = match serde_json::from_slice(&body) {
+    let parsed: PinKeystateBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -404,25 +361,13 @@ pub async fn read_keystate(
 /// byte-exact, for the client to open under `Kpin`.
 pub async fn read_pins(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: ListPinsBody = match serde_json::from_slice(&body) {
+    let parsed: ListPinsBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
