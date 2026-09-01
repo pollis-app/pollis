@@ -9,8 +9,8 @@
 //!     path), and a parsed `*Body`. They embed BOTH the authorization decision
 //!     AND the write, returning [`WriteOutcome`], so the in-process harness and
 //!     the production axum handler exercise the *exact* same authz.
-//!   - **axum handlers** — `(State, Method, Uri, HeaderMap, Bytes) -> Response`,
-//!     all identical: `gate` → parse → `apply_*` → map outcome.
+//!   - **axum handlers** — `(State, RawRequest) -> Response`, all identical:
+//!     `gate_and_parse` → `apply_*` → map outcome.
 //!
 //! ## Where the writes land
 //!
@@ -782,18 +782,15 @@ pub async fn apply_leave_dm(
     )
     .await?;
     // If no members remain, clean up the channel and all associated data.
-    let mut rows = tx
+    // Existence, not a tally — see `groups::apply_leave_group`.
+    let mut survivors = tx
         .query(
-            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
+            "SELECT 1 FROM dm_channel_member WHERE dm_channel_id = ?1 LIMIT 1",
             libsql::params![body.dm_channel_id.clone()],
         )
         .await?;
-    let remaining: i64 = match rows.next().await? {
-        Some(row) => row.get(0)?,
-        None => 0,
-    };
-    drop(rows);
-    let torn_down = remaining == 0;
+    let torn_down = survivors.next().await?.is_none();
+    drop(survivors);
     if torn_down {
         crate::teardown::purge_dm_channel(&tx, &body.dm_channel_id).await?;
     }

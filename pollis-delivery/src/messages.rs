@@ -16,10 +16,10 @@
 //!     does) is deliberate: it makes the in-process test harness exercise the
 //!     *exact* same authz the production handler runs, with zero duplication —
 //!     both call sites are reduced to `gate → parse → apply → map outcome`.
-//!   - **axum handlers** — `(State, Method, Uri, HeaderMap, Bytes) -> Response`,
-//!     all identical in shape. They `gate` (shared auth, see
-//!     [`crate::writes::gate`]), parse, call the matching `apply_*`, and map the
-//!     outcome to 200 / 403 / 400 / 500.
+//!   - **axum handlers** — `(State, RawRequest) -> Response`, all identical in
+//!     shape. They [`crate::writes::gate_and_parse`] (shared auth over the raw
+//!     body, then deserialize), call the matching `apply_*`, and map the outcome
+//!     to 200 / 403 / 400 / 500.
 //!
 //! ## Where the writes land
 //!

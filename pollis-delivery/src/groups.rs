@@ -8,8 +8,8 @@
 //!     authorization decision AND the write, returning [`WriteOutcome`]. The real
 //!     axum handler and the in-process test harness both call the *same*
 //!     `apply_*`, so server-side authz is exercised with zero duplication.
-//!   - **axum handlers** — `(State, Method, Uri, HeaderMap, Bytes) -> Response`:
-//!     `gate` → parse → `apply_*` → map outcome to 200 / 403 / 400 / 500.
+//!   - **axum handlers** — `(State, RawRequest) -> Response`:
+//!     `gate_and_parse` → `apply_*` → map outcome to 200 / 403 / 400 / 500.
 //!
 //! ## Where the writes land
 //!
@@ -445,19 +445,19 @@ pub async fn apply_leave_group(
         libsql::params![body.group_id.clone(), user.clone()],
     )
     .await?;
-    let mut count_rows = tx
+    // Existence, not a tally: the only question is whether the group is now
+    // empty, and `LIMIT 1` stops at the first surviving member instead of
+    // counting every one of them inside the transaction.
+    let mut survivors = tx
         .query(
-            "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+            "SELECT 1 FROM group_member WHERE group_id = ?1 LIMIT 1",
             libsql::params![body.group_id.clone()],
         )
         .await?;
-    let remaining: i64 = match count_rows.next().await? {
-        Some(row) => row.get(0)?,
-        None => 0,
-    };
-    drop(count_rows);
+    let group_is_empty = survivors.next().await?.is_none();
+    drop(survivors);
     let mut dead: Vec<String> = Vec::new();
-    if remaining == 0 {
+    if group_is_empty {
         dead = crate::teardown::purge_group(&tx, &body.group_id).await?;
         dead.push(body.group_id.clone());
     }
