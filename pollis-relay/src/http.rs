@@ -97,6 +97,55 @@ mod seam_tests {
             .to_path_buf()
     }
 
+    /// Source with every `#[cfg(test)]` module removed, by brace matching.
+    ///
+    /// Mirrors `pollis-core/tests/no_client_side_remote_writes.rs`, which faced
+    /// the same question and answered it the same way. Kept as a copy rather
+    /// than shared: the two crates do not depend on each other, and a guard that
+    /// needs a dependency to run is a guard that gets deleted.
+    fn without_test_modules(src: &str) -> String {
+        let mut out = String::with_capacity(src.len());
+        let mut rest = src;
+        while let Some(i) = rest.find("#[cfg(test)]") {
+            out.push_str(&rest[..i]);
+            let after = &rest[i..];
+            match after.find('{') {
+                Some(open) => {
+                    let mut depth = 0usize;
+                    let mut end = None;
+                    for (off, ch) in after[open..].char_indices() {
+                        match ch {
+                            '{' => depth += 1,
+                            '}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    end = Some(open + off + 1);
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    match end {
+                        Some(e) => rest = &after[e..],
+                        // Unbalanced braces: keep the tail rather than silently
+                        // dropping source the guard is supposed to read.
+                        None => {
+                            out.push_str(after);
+                            return out;
+                        }
+                    }
+                }
+                None => {
+                    out.push_str(after);
+                    return out;
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
     fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -107,7 +156,11 @@ mod seam_tests {
             let name = name.to_string_lossy();
             if path.is_dir() {
                 // Build output, VCS metadata and node deps are not our source.
-                if matches!(name.as_ref(), "target" | ".git" | "node_modules") {
+                // `.claude` holds agent git worktrees — full checkouts of this
+                // same repo, so walking it reports every offender once per
+                // worktree and, worse, reports offenders from OTHER BRANCHES as
+                // if they were on this one.
+                if matches!(name.as_ref(), "target" | ".git" | "node_modules" | ".claude") {
                     continue;
                 }
                 rust_sources(&path, out);
@@ -122,6 +175,12 @@ mod seam_tests {
     /// request — the cost this module's docs put at 3-4.5s per DS POST on a
     /// mobile dev build. #875 found four such sites still live in the DS and
     /// three in `pollis-core`, all on request paths.
+    ///
+    /// **Scope note.** This guard walks the WHOLE workspace, but the workflow
+    /// that runs it (`relay-image.yml`) is path-filtered to `pollis-relay/**`
+    /// and `pollis-device-cert/**`. A rogue client added in `pollis-core` or
+    /// `pollis-delivery` therefore does not trip it until something in the relay
+    /// crate changes — which is how it came to be red on `main` unnoticed.
     ///
     /// This is a GUARD, not a proof that any particular call got faster: it
     /// cannot tell a warm pool from a cold one. What it makes impossible is the
@@ -154,6 +213,14 @@ mod seam_tests {
             let Ok(src) = std::fs::read_to_string(file) else {
                 continue;
             };
+            // `#[cfg(test)]` modules are excluded, for the same reason
+            // `pollis-core/tests/no_client_side_remote_writes.rs` excludes them:
+            // a test that drives an HTTP surface legitimately builds its own
+            // client — `media_server.rs`'s `decrypted_bytes_are_never_storable_
+            // by_the_webview` fetches from the loopback server it just started,
+            // and routing that through the shared seam would test the seam
+            // instead of the server. The rule is about what SHIPPED code does.
+            let src = without_test_modules(&src);
             for (n, line) in src.lines().enumerate() {
                 let t = line.trim_start();
                 // Comments and doc comments name the anti-pattern constantly;
