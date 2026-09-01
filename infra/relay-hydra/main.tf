@@ -19,11 +19,23 @@ locals {
     "us-west-1" = true
     "us-west-2" = true
   }
+
+  # THE OFF SWITCH (var.hydra_enabled). `allowed_regions` stays the JURISDICTION
+  # answer — jurisdiction.tf's preconditions still evaluate it, so turning the pool
+  # off can never be mistaken for a policy change and turning it back on re-checks
+  # the denylist. `active_regions` is the DEPLOYMENT answer: which of those regions
+  # actually gets a shard right now. Off ⇒ none, so there is no ASG anywhere that
+  # could launch an instance, and no reconciler to ask one to.
+  active_regions = var.hydra_enabled ? local.allowed_regions : []
 }
 
-# ── Relay nodes: one shard per allowed region ───────────────────────────────
+# ── Relay nodes: one shard per ACTIVE region ────────────────────────────────
 #
-# Every allowed region gets a full shard (VPC + SG + IAM + ASG) standing by at
+# WHEN var.hydra_enabled IS FALSE, local.active_regions IS EMPTY AND NONE OF THESE
+# FOUR MODULES EXISTS. That is the off switch: destroying the ASG terminates its
+# instances, and with no ASG left there is nothing that can launch another.
+#
+# Every active region gets a full shard (VPC + SG + IAM + ASG) standing by at
 # desired_capacity 0. Idle shards are free — VPCs, security groups, launch
 # templates and empty ASGs cost nothing; only running instances bill. The
 # reconciler then draws each node's region at random on rotation and moves ASG
@@ -44,7 +56,7 @@ locals {
 
 module "relay_region_us_east_1" {
   source = "./modules/relay-region"
-  count  = contains(local.allowed_regions, "us-east-1") ? 1 : 0
+  count  = contains(local.active_regions, "us-east-1") ? 1 : 0
 
   providers = { aws = aws.us_east_1 }
 
@@ -68,7 +80,7 @@ module "relay_region_us_east_1" {
 
 module "relay_region_us_east_2" {
   source = "./modules/relay-region"
-  count  = contains(local.allowed_regions, "us-east-2") ? 1 : 0
+  count  = contains(local.active_regions, "us-east-2") ? 1 : 0
 
   providers = { aws = aws.us_east_2 }
 
@@ -92,7 +104,7 @@ module "relay_region_us_east_2" {
 
 module "relay_region_us_west_1" {
   source = "./modules/relay-region"
-  count  = contains(local.allowed_regions, "us-west-1") ? 1 : 0
+  count  = contains(local.active_regions, "us-west-1") ? 1 : 0
 
   providers = { aws = aws.us_west_1 }
 
@@ -119,7 +131,7 @@ module "relay_region_us_west_1" {
 
 module "relay_region_us_west_2" {
   source = "./modules/relay-region"
-  count  = contains(local.allowed_regions, "us-west-2") ? 1 : 0
+  count  = contains(local.active_regions, "us-west-2") ? 1 : 0
 
   providers = { aws = aws.us_west_2 }
 
@@ -176,8 +188,15 @@ module "directory" {
 }
 
 # ── Reconciler: Lambda + schedule + IAM + alarms ────────────────────────────
+#
+# Gated by the off switch as well, and it has to be: the Lambda is the only thing
+# that ever RAISES an ASG's desired capacity, so leaving it alive against no ASGs
+# would just log a reconcile failure every two minutes and hold the alarm
+# (healthy-nodes-total, treat_missing_data = "breaching") permanently in ALARM.
+# Removing it takes the EventBridge schedule and those alarms with it.
 module "reconciler" {
   source = "./modules/reconciler"
+  count  = var.hydra_enabled ? 1 : 0
 
   primary_region     = var.primary_region
   managed_regions    = local.managed_regions

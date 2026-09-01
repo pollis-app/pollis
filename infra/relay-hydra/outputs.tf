@@ -34,9 +34,14 @@ output "directory_bucket" {
   value       = module.directory.bucket_name
 }
 
+output "hydra_enabled" {
+  description = "THE OFF SWITCH (var.hydra_enabled). false = the pool is switched off: no per-region ASG, no reconciler, no schedule, nothing running or billing beyond the (near-free) directory hosting and the SSM parameters. Flip the variable's default in variables.tf and re-apply to bring it back."
+  value       = var.hydra_enabled
+}
+
 output "reconciler_function_name" {
-  description = "Invoke on-demand with: aws lambda invoke --function-name <this> /dev/stdout"
-  value       = module.reconciler.function_name
+  description = "Invoke on-demand with: aws lambda invoke --function-name <this> /dev/stdout. Empty while the pool is switched off — there is no reconciler then."
+  value       = one(module.reconciler[*].function_name)
 }
 
 output "desired_state_param" {
@@ -65,11 +70,16 @@ output "relay_image_oidc_role_arn" {
 }
 
 output "allowed_regions" {
-  description = "Regions that passed the §4 jurisdiction filter. The reconciler draws node placement from exactly this set."
+  description = "Regions that passed the §4 jurisdiction filter. The reconciler draws node placement from exactly this set — WHEN the pool is switched on. This is the jurisdiction answer, not the deployment one: see active_regions."
   value       = local.allowed_regions
 }
 
+output "active_regions" {
+  description = "Allowed regions that actually hold a shard right now. Empty while hydra_enabled is false."
+  value       = local.active_regions
+}
+
 output "asg_names" {
-  description = "Per-region Auto Scaling Group names. Every allowed region has one, standing by at desired capacity 0 until a draw sends nodes there."
+  description = "Per-region Auto Scaling Group names. Every active region has one, standing by at desired capacity 0 until a draw sends nodes there. Empty while the pool is switched off."
   value       = local.managed_regions
 }

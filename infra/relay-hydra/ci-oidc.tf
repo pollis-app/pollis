@@ -15,7 +15,12 @@
 # caller identity.
 
 locals {
-  ci_oidc_enabled  = var.github_repository != ""
+  # Also gated on the off switch: with no pool there is no fleet to converge, so
+  # the standing grant that lets CI write the intended-image parameter should not
+  # outlive the thing it exists to roll. relay-image.yml keeps BUILDING and
+  # PUBLISHING the image either way (it launches nothing); its record step simply
+  # skips, exactly as it does today with the repo variable unset.
+  ci_oidc_enabled  = var.hydra_enabled && var.github_repository != ""
   github_oidc_host = "token.actions.githubusercontent.com"
   github_oidc_arn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.github_oidc_host}"
 }
