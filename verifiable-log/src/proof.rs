@@ -45,13 +45,11 @@ pub fn verify_inclusion_proof(entry: &Entry, proof: &InclusionProof, sth: &Sth) 
     if proof.tree_size != sth.tree_size {
         return false;
     }
-    let root = match sth.root_bytes() {
-        Ok(r) => r,
-        Err(_) => return false,
+    let Ok(root) = sth.root_bytes() else {
+        return false;
     };
-    let path = match decode_path(&proof.audit_path) {
-        Ok(p) => p,
-        Err(_) => return false,
+    let Ok(path) = decode_path(&proof.audit_path) else {
+        return false;
     };
     merkle::verify_inclusion(
         &entry.leaf_hash(),
@@ -69,17 +67,14 @@ pub fn verify_consistency_proof(old: &Sth, new: &Sth, proof: &ConsistencyProof) 
     if proof.first_size != old.tree_size || proof.second_size != new.tree_size {
         return false;
     }
-    let old_root = match old.root_bytes() {
-        Ok(r) => r,
-        Err(_) => return false,
+    let Ok(old_root) = old.root_bytes() else {
+        return false;
     };
-    let new_root = match new.root_bytes() {
-        Ok(r) => r,
-        Err(_) => return false,
+    let Ok(new_root) = new.root_bytes() else {
+        return false;
     };
-    let path = match decode_path(&proof.path) {
-        Ok(p) => p,
-        Err(_) => return false,
+    let Ok(path) = decode_path(&proof.path) else {
+        return false;
     };
     merkle::verify_consistency(
         proof.first_size as usize,

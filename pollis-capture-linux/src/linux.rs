@@ -192,6 +192,24 @@ async fn run_async(socket_path: &str, mode: Mode, audio: bool) -> Result<()> {
     }
 }
 
+/// Drain the capture channel → parent socket until the capture side ends
+/// or the parent goes away (any write error — EPIPE and friends). Shared
+/// by the portal, X11 and camera paths, which all bridge a synchronous
+/// capture thread to this one socket the same way. `tag` is the caller's
+/// log prefix.
+pub(crate) async fn drain_to_socket(
+    sock: &mut UnixStream,
+    rx: &mut mpsc::Receiver<CaptureMsg>,
+    tag: &str,
+) {
+    while let Some(msg) = rx.recv().await {
+        if let Err(e) = write_msg(sock, &msg).await {
+            eprintln!("{tag} socket write error: {e} — exiting");
+            break;
+        }
+    }
+}
+
 /// The original Wayland + xdg-desktop-portal + PipeWire path. Logic
 /// unchanged from before the split — only the wire encode now goes
 /// through the shared `pollis-capture-proto` crate instead of the
@@ -269,21 +287,12 @@ async fn run_portal(sock: &mut UnixStream, audio: bool) -> Result<()> {
     let audio_thread = audio.then(|| crate::audio::spawn(tx.clone(), Arc::clone(&stop)));
     drop(tx);
 
-    let result: Result<()> = async {
-        while let Some(msg) = rx.recv().await {
-            if let Err(e) = write_msg(sock, &msg).await {
-                eprintln!("[capture] socket write error: {e} — exiting");
-                break;
-            }
-        }
-        Ok(())
-    }
-    .await;
+    drain_to_socket(sock, &mut rx, "[capture]").await;
 
     stop.store(true, Ordering::Relaxed);
     drop(pw_thread);
     drop(audio_thread);
-    result
+    Ok(())
 }
 
 /// The X11 backend (issue #281). Spawns the synchronous xcb/SHM capture
@@ -321,21 +330,12 @@ async fn run_x11(sock: &mut UnixStream, audio: bool) -> Result<()> {
     let audio_thread = audio.then(|| crate::audio::spawn(tx.clone(), Arc::clone(&stop)));
     drop(tx);
 
-    let result: Result<()> = async {
-        while let Some(msg) = rx.recv().await {
-            if let Err(e) = write_msg(sock, &msg).await {
-                eprintln!("[capture] socket write error: {e} — exiting");
-                break;
-            }
-        }
-        Ok(())
-    }
-    .await;
+    drain_to_socket(sock, &mut rx, "[capture]").await;
 
     stop.store(true, Ordering::Relaxed);
     drop(x11_thread);
     drop(audio_thread);
-    result
+    Ok(())
 }
 
 /// Distinguishes "user cancelled the picker" from "everything else"
@@ -426,7 +426,7 @@ unsafe fn libc_pdeathsig(sig: i32) {
 
 mod pw {
     use anyhow::Result;
-    use pollis_capture_proto::CaptureMsg;
+    use pollis_capture_proto::{now_us, CaptureMsg};
     use std::os::fd::OwnedFd;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -692,14 +692,6 @@ mod pw {
         mainloop.run();
         eprintln!("[capture/pw] mainloop exited");
         Ok(())
-    }
-
-    fn now_us() -> i64 {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_micros() as i64)
-            .unwrap_or(0)
     }
 
     // Audio lives in `crate::audio`, not here. It was pulled from this

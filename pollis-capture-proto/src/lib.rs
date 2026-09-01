@@ -89,6 +89,7 @@
 //! The parent stops capture by closing the socket; the helper observes
 //! EPIPE on next write or EOF on read and exits.
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -264,6 +265,16 @@ pub struct CameraSelection {
 
 // ── Encoding (helper side) ────────────────────────────────────────────────
 
+/// Wall-clock microseconds since the Unix epoch — the `timestamp_us` every
+/// Frame and AudioFrame carries. Lives here so all capture backends stamp
+/// from one clock; a pre-epoch clock yields 0 rather than panicking.
+pub fn now_us() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as i64)
+        .unwrap_or(0)
+}
+
 /// Serialize a Format message to its exact wire bytes.
 pub fn encode_format(width: u32, height: u32) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + 4 + 8);
@@ -295,44 +306,37 @@ pub fn encode_frame_header(
     header
 }
 
-/// Serialize a Sources message (helper → parent).
-pub fn encode_sources(list: &SourceList) -> Vec<u8> {
-    let json = serde_json::to_vec(list).expect("SourceList serializes");
+/// Frame a JSON-payload message. Every JSON message on this protocol has
+/// the same shape — opcode, u32 length, utf-8 JSON — so the four of them
+/// share one encoder. Serialization of these types cannot fail (plain
+/// structs of owned primitives), hence the `expect`.
+fn encode_json<T: Serialize>(msg_type: u8, value: &T) -> Vec<u8> {
+    let json = serde_json::to_vec(value).expect("capture proto message serializes");
     let mut buf = Vec::with_capacity(1 + 4 + json.len());
-    buf.push(MSG_SOURCES);
+    buf.push(msg_type);
     buf.extend_from_slice(&(json.len() as u32).to_le_bytes());
     buf.extend_from_slice(&json);
     buf
+}
+
+/// Serialize a Sources message (helper → parent).
+pub fn encode_sources(list: &SourceList) -> Vec<u8> {
+    encode_json(MSG_SOURCES, list)
 }
 
 /// Serialize a Select message (parent → helper).
 pub fn encode_select(sel: &Selection) -> Vec<u8> {
-    let json = serde_json::to_vec(sel).expect("Selection serializes");
-    let mut buf = Vec::with_capacity(1 + 4 + json.len());
-    buf.push(MSG_SELECT);
-    buf.extend_from_slice(&(json.len() as u32).to_le_bytes());
-    buf.extend_from_slice(&json);
-    buf
+    encode_json(MSG_SELECT, sel)
 }
 
 /// Serialize a Cameras message (helper → parent).
 pub fn encode_cameras(list: &CameraList) -> Vec<u8> {
-    let json = serde_json::to_vec(list).expect("CameraList serializes");
-    let mut buf = Vec::with_capacity(1 + 4 + json.len());
-    buf.push(MSG_CAMERAS);
-    buf.extend_from_slice(&(json.len() as u32).to_le_bytes());
-    buf.extend_from_slice(&json);
-    buf
+    encode_json(MSG_CAMERAS, list)
 }
 
 /// Serialize a SelectCamera message (parent → helper).
 pub fn encode_select_camera(sel: &CameraSelection) -> Vec<u8> {
-    let json = serde_json::to_vec(sel).expect("CameraSelection serializes");
-    let mut buf = Vec::with_capacity(1 + 4 + json.len());
-    buf.push(MSG_SELECT_CAMERA);
-    buf.extend_from_slice(&(json.len() as u32).to_le_bytes());
-    buf.extend_from_slice(&json);
-    buf
+    encode_json(MSG_SELECT_CAMERA, sel)
 }
 
 /// Serialize an AudioFormat message (helper → parent).
@@ -422,6 +426,49 @@ where
 
 // ── Decoding (parent side) ────────────────────────────────────────────────
 
+/// Every decode failure on this protocol is a desync or a corrupt payload,
+/// which is `InvalidData` in every case.
+fn invalid_data(msg: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, msg)
+}
+
+/// Read exactly `len` payload bytes into a fresh buffer.
+async fn read_payload<R>(r: &mut R, len: usize) -> std::io::Result<Vec<u8>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let mut bytes = vec![0u8; len];
+    r.read_exact(&mut bytes).await?;
+    Ok(bytes)
+}
+
+/// Read a JSON payload and deserialize it. `what` names the message so a
+/// parse failure says which one desynced.
+async fn read_json<T, R>(r: &mut R, len: usize, what: &str) -> std::io::Result<T>
+where
+    T: DeserializeOwned,
+    R: AsyncReadExt + Unpin,
+{
+    let bytes = read_payload(r, len).await?;
+    serde_json::from_slice(&bytes).map_err(|e| invalid_data(format!("{what} json: {e}")))
+}
+
+/// Read the two-u32 payload that Format and AudioFormat share.
+async fn read_pair_u32<R>(r: &mut R, len: usize, what: &str) -> std::io::Result<(u32, u32)>
+where
+    R: AsyncReadExt + Unpin,
+{
+    if len != 8 {
+        return Err(invalid_data(format!("{what} payload != 8")));
+    }
+    let mut buf = [0u8; 8];
+    r.read_exact(&mut buf).await?;
+    Ok((
+        u32::from_le_bytes(buf[0..4].try_into().unwrap()),
+        u32::from_le_bytes(buf[4..8].try_into().unwrap()),
+    ))
+}
+
 /// Read one framed message from an async reader. Returns `Ok(None)` on a
 /// clean EOF (parent closed the socket / helper exited). This is the
 /// exact decode logic that used to live in `screenshare.rs`'s
@@ -439,32 +486,18 @@ where
     let msg_type = header[0];
     let payload_len = u32::from_le_bytes([header[1], header[2], header[3], header[4]]) as usize;
     if payload_len > MAX_PAYLOAD_LEN {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("oversized helper message: {payload_len}"),
-        ));
+        return Err(invalid_data(format!(
+            "oversized helper message: {payload_len}"
+        )));
     }
     match msg_type {
         MSG_FORMAT => {
-            if payload_len != 8 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "format payload != 8",
-                ));
-            }
-            let mut buf = [0u8; 8];
-            r.read_exact(&mut buf).await?;
-            Ok(Some(CaptureMsg::Format {
-                width: u32::from_le_bytes(buf[0..4].try_into().unwrap()),
-                height: u32::from_le_bytes(buf[4..8].try_into().unwrap()),
-            }))
+            let (width, height) = read_pair_u32(r, payload_len, "format").await?;
+            Ok(Some(CaptureMsg::Format { width, height }))
         }
         MSG_FRAME => {
             if payload_len < 4 + 4 + 4 + 8 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "frame payload too short",
-                ));
+                return Err(invalid_data("frame payload too short"));
             }
             let mut head = [0u8; 4 + 4 + 4 + 8];
             r.read_exact(&mut head).await?;
@@ -483,71 +516,29 @@ where
                 bgrx,
             }))
         }
-        MSG_SOURCES => {
-            let mut bytes = vec![0u8; payload_len];
-            r.read_exact(&mut bytes).await?;
-            let list: SourceList = serde_json::from_slice(&bytes).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("sources json: {e}"),
-                )
-            })?;
-            Ok(Some(CaptureMsg::Sources(list)))
-        }
-        MSG_SELECT => {
-            let mut bytes = vec![0u8; payload_len];
-            r.read_exact(&mut bytes).await?;
-            let sel: Selection = serde_json::from_slice(&bytes).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("select json: {e}"),
-                )
-            })?;
-            Ok(Some(CaptureMsg::Select(sel)))
-        }
-        MSG_CAMERAS => {
-            let mut bytes = vec![0u8; payload_len];
-            r.read_exact(&mut bytes).await?;
-            let list: CameraList = serde_json::from_slice(&bytes).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("cameras json: {e}"),
-                )
-            })?;
-            Ok(Some(CaptureMsg::Cameras(list)))
-        }
-        MSG_SELECT_CAMERA => {
-            let mut bytes = vec![0u8; payload_len];
-            r.read_exact(&mut bytes).await?;
-            let sel: CameraSelection = serde_json::from_slice(&bytes).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("select_camera json: {e}"),
-                )
-            })?;
-            Ok(Some(CaptureMsg::SelectCamera(sel)))
-        }
+        MSG_SOURCES => Ok(Some(CaptureMsg::Sources(
+            read_json(r, payload_len, "sources").await?,
+        ))),
+        MSG_SELECT => Ok(Some(CaptureMsg::Select(
+            read_json(r, payload_len, "select").await?,
+        ))),
+        MSG_CAMERAS => Ok(Some(CaptureMsg::Cameras(
+            read_json(r, payload_len, "cameras").await?,
+        ))),
+        MSG_SELECT_CAMERA => Ok(Some(CaptureMsg::SelectCamera(
+            read_json(r, payload_len, "select_camera").await?,
+        ))),
         MSG_AUDIO_FORMAT => {
-            if payload_len != 8 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "audio format payload != 8",
-                ));
-            }
-            let mut buf = [0u8; 8];
-            r.read_exact(&mut buf).await?;
+            let (sample_rate, channels) = read_pair_u32(r, payload_len, "audio format").await?;
             Ok(Some(CaptureMsg::AudioFormat {
-                sample_rate: u32::from_le_bytes(buf[0..4].try_into().unwrap()),
-                channels: u32::from_le_bytes(buf[4..8].try_into().unwrap()),
+                sample_rate,
+                channels,
             }))
         }
         MSG_AUDIO_FRAME => {
             const HEAD: usize = 4 + 4 + 8;
             if payload_len < HEAD {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "audio frame payload too short",
-                ));
+                return Err(invalid_data("audio frame payload too short"));
             }
             let mut head = [0u8; HEAD];
             r.read_exact(&mut head).await?;
@@ -557,13 +548,11 @@ where
             let body_len = payload_len - HEAD;
             // A half sample on the wire is a desync, not a short frame.
             if body_len % 2 != 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
+                return Err(invalid_data(
                     "audio frame payload is not a whole number of s16 samples",
                 ));
             }
-            let mut bytes = vec![0u8; body_len];
-            r.read_exact(&mut bytes).await?;
+            let bytes = read_payload(r, body_len).await?;
             let pcm: Vec<i16> = bytes
                 .chunks_exact(2)
                 .map(|c| i16::from_le_bytes([c[0], c[1]]))
@@ -576,15 +565,13 @@ where
             }))
         }
         MSG_ERROR => {
-            let mut bytes = vec![0u8; payload_len];
-            r.read_exact(&mut bytes).await?;
+            let bytes = read_payload(r, payload_len).await?;
             let message = String::from_utf8_lossy(&bytes).into_owned();
             Ok(Some(CaptureMsg::Error { message }))
         }
-        other => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("unknown helper msg type: 0x{other:02x}"),
-        )),
+        other => Err(invalid_data(format!(
+            "unknown helper msg type: 0x{other:02x}"
+        ))),
     }
 }
 

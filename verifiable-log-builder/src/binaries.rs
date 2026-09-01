@@ -8,7 +8,7 @@
 //! Merkle tree and its **own** STH — binary entries are never interleaved into
 //! the commit-log or account-key trees — and that tree's STHs are signed under a
 //! domain-separated context ([`STH_CONTEXT`]) so a binaries head can never be
-//! presented as a commit-log or account-key head even though the same Ed25519
+//! presented as a commit-log or account-key head even though the same ML-DSA-44
 //! key signs all three.
 //!
 //! Like [`crate::commit_log`] / [`crate::account_key`] this module is pure — no
@@ -233,8 +233,10 @@ impl TenantInvariant for BinaryInvariant {
                 payload_seen = true;
             }
             // `existing` is in insertion (publish) order, so the last iteration
-            // leaves `last_tag` holding the current tag of the tree.
-            last_tag = Some(prev.release_tag.clone());
+            // leaves `last_tag` holding the current tag of the tree. Moved, not
+            // cloned: `prev` is finished with here, and cloning made the whole
+            // invariant O(n) allocations per appended leaf.
+            last_tag = Some(prev.release_tag);
         }
 
         // (b) Monotonic releases: if the candidate's tag was published earlier

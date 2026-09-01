@@ -664,6 +664,18 @@ pub async fn read_frame_header<R: AsyncRead + Unpin>(r: &mut R) -> Result<FrameH
     Ok(FrameHeader { version, msg_type })
 }
 
+/// The gate every frame writer applies before emitting a byte: a generation
+/// this build does not speak, or one below the frame's own floor, is refused
+/// outright. Check-only on purpose — `write_anchor` and `write_park` validate
+/// their body lengths between this and the version byte, and a caller that
+/// asked for an impossible frame must leave the stream untouched.
+fn check_version(version: u8, min: u8) -> Result<(), ProtoError> {
+    if version < min || !version_supported(version) {
+        return Err(ProtoError::BadVersion(version));
+    }
+    Ok(())
+}
+
 /// Write a handshake frame at wire generation `version`. The frame body is
 /// identical in every supported generation; only the version byte differs.
 pub async fn write_handshake<W: AsyncWrite + Unpin>(
@@ -671,9 +683,7 @@ pub async fn write_handshake<W: AsyncWrite + Unpin>(
     hs: &Handshake,
     version: u8,
 ) -> Result<(), ProtoError> {
-    if !version_supported(version) {
-        return Err(ProtoError::BadVersion(version));
-    }
+    check_version(version, MIN_PROTOCOL_VERSION)?;
     w.write_u8(version).await?;
     w.write_u8(MSG_HANDSHAKE).await?;
     write_string(w, &hs.user_id).await?;
@@ -757,24 +767,13 @@ pub async fn write_connect<W: AsyncWrite + Unpin>(
     c: &Connect,
     version: u8,
 ) -> Result<(), ProtoError> {
-    if !version_supported(version) {
-        return Err(ProtoError::BadVersion(version));
-    }
+    check_version(version, MIN_PROTOCOL_VERSION)?;
     w.write_u8(version).await?;
     w.write_u8(MSG_CONNECT).await?;
     write_string(w, &c.host).await?;
     w.write_u16(c.port).await?;
     w.flush().await?;
     Ok(())
-}
-
-/// Read a whole connect frame (header + body).
-pub async fn read_connect<R: AsyncRead + Unpin>(r: &mut R) -> Result<Connect, ProtoError> {
-    let header = read_frame_header(r).await?;
-    if header.msg_type != MSG_CONNECT {
-        return Err(ProtoError::BadMessageType(header.msg_type));
-    }
-    read_connect_body(r).await
 }
 
 /// Read a connect frame's body, the header having already been consumed.
@@ -792,9 +791,7 @@ pub async fn write_extend<W: AsyncWrite + Unpin>(
     e: &Extend,
     version: u8,
 ) -> Result<(), ProtoError> {
-    if version < ONION_MIN_VERSION || !version_supported(version) {
-        return Err(ProtoError::BadVersion(version));
-    }
+    check_version(version, ONION_MIN_VERSION)?;
     w.write_u8(version).await?;
     w.write_u8(MSG_EXTEND).await?;
     match e.addr.ip() {
@@ -845,9 +842,7 @@ pub async fn read_extend_body<R: AsyncRead + Unpin>(r: &mut R) -> Result<Extend,
 /// payload — everything about the circuit past this point is inside the layer,
 /// which is precisely what keeps it invisible to the sender.
 pub async fn write_layer<W: AsyncWrite + Unpin>(w: &mut W, version: u8) -> Result<(), ProtoError> {
-    if version < ONION_MIN_VERSION || !version_supported(version) {
-        return Err(ProtoError::BadVersion(version));
-    }
+    check_version(version, ONION_MIN_VERSION)?;
     w.write_u8(version).await?;
     w.write_u8(MSG_LAYER).await?;
     w.flush().await?;
@@ -862,9 +857,7 @@ pub async fn write_anchor<W: AsyncWrite + Unpin>(
     a: &AccountAnchor,
     version: u8,
 ) -> Result<(), ProtoError> {
-    if version < ANCHOR_MIN_VERSION || !version_supported(version) {
-        return Err(ProtoError::BadVersion(version));
-    }
+    check_version(version, ANCHOR_MIN_VERSION)?;
     if a.leaf_bytes.len() > MAX_ANCHOR_LEAF {
         return Err(ProtoError::Malformed("anchor leaf too long"));
     }
@@ -935,9 +928,7 @@ pub async fn write_park<W: AsyncWrite + Unpin>(
     p: &Park,
     version: u8,
 ) -> Result<(), ProtoError> {
-    if version < PARK_MIN_VERSION || !version_supported(version) {
-        return Err(ProtoError::BadVersion(version));
-    }
+    check_version(version, PARK_MIN_VERSION)?;
     if p.relay_leaf_der.is_empty() || p.relay_leaf_der.len() > MAX_RELAY_LEAF_DER {
         return Err(ProtoError::Malformed("bad relay leaf length"));
     }

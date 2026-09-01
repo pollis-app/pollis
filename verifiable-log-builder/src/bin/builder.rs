@@ -4,7 +4,7 @@
 //! * `build` — read the DB, append every commit, sign STHs, write the bundle.
 //! * `build-binaries` — read a JSON file of `BinaryRecord`s and write a signed
 //!   binaries-tree bundle (binary transparency, Phase 1). No DB.
-//! * `keygen` — mint a throwaway Ed25519 keypair (hex) for dev.
+//! * `keygen` — mint a throwaway ML-DSA-44 keypair (hex) for dev.
 //!
 //! The emitted bundle is verified with `monitor verify <bundle.json>` from the
 //! `verifiable-log` crate, unchanged.

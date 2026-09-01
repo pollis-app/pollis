@@ -196,7 +196,7 @@ fn peers_body(parked: &ParkedPeers) -> String {
 /// and `protocol_version` come straight from [`crate::proto`], so `/version`
 /// cannot drift from what the QUIC transport actually negotiates.
 fn version_body() -> String {
-    // ALPN is an ASCII token (`b"pollis-relay/3"`), so this never lossily replaces.
+    // ALPN is an ASCII token, so this never lossily replaces.
     let protocol = std::str::from_utf8(crate::proto::ALPN).unwrap_or("");
     let protocol_version = crate::proto::PROTOCOL_VERSION;
     format!(

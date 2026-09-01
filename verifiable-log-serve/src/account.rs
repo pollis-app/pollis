@@ -39,7 +39,7 @@ use verifiable_log_builder::account_key::{
     self, AccountKeyInvariant, AccountKeyLeaf,
 };
 
-use crate::bundle::{now_ms, Bundle, InclusionCheck, PublicKeyDoc};
+use crate::bundle::{now_ms, short, Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json};
 
@@ -339,14 +339,5 @@ impl AccountReport {
                 "FAIL: account key chain is NOT valid"
             }
         );
-    }
-}
-
-/// Abbreviate a long opaque id/hash for human-readable output.
-fn short(s: &str) -> String {
-    if s.len() <= 12 {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}{}", &s[..6], &s[s.len() - 4..])
     }
 }

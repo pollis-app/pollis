@@ -113,16 +113,6 @@ pub const API_VERSION: &str = "v1";
 /// `/v1` surface one level down, in its own subtree.
 pub const ACCOUNT_API_PREFIX: &str = "v1/account-keys";
 
-/// The complete read API for a bundle as an in-memory map of
-/// **relative path → JSON bytes** (e.g. `"v1/sth/latest.json"`), exactly the
-/// content the static tree would write to disk.
-///
-/// This is the single source of truth for the `/v1` surface: the disk
-/// [`generate`] writes this map out file-for-file, and the live server
-/// ([`crate::live`]) holds it in memory and serves the bytes directly. Keying by
-/// the request-relative path (no leading `/`) means a server looks an artifact
-/// up with the same `path.trim_start_matches('/')` it uses for the static host,
-/// so on-disk and in-memory serving cannot diverge.
 /// Emit the root-signed key-set statement at `/v1/key-set.json` (#754).
 ///
 /// The statement is produced OFFLINE by the root ceremony (`builder key-set`), so it
@@ -144,6 +134,30 @@ pub fn insert_key_set(
     insert_json(map, format!("{API_VERSION}/key-set.json"), statement)
 }
 
+/// Write an artifact map out file-for-file under `root`, creating parent
+/// directories as it goes. The three `generate*` entry points differ only in
+/// which map they build, never in how it lands on disk.
+fn write_artifacts(root: &Path, artifacts: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+    for (rel, bytes) in artifacts {
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, bytes)?;
+    }
+    Ok(())
+}
+
+/// The complete read API for a bundle as an in-memory map of
+/// **relative path → JSON bytes** (e.g. `"v1/sth/latest.json"`), exactly the
+/// content the static tree would write to disk.
+///
+/// This is the single source of truth for the `/v1` surface: the disk
+/// [`generate`] writes this map out file-for-file, and the live server
+/// ([`crate::live`]) holds it in memory and serves the bytes directly. Keying by
+/// the request-relative path (no leading `/`) means a server looks an artifact
+/// up with the same `path.trim_start_matches('/')` it uses for the static host,
+/// so on-disk and in-memory serving cannot diverge.
 pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String, Vec<u8>>)> {
     let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
@@ -253,13 +267,7 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
 /// host and the live server serve byte-identical artifacts.
 pub fn generate(bundle: &Bundle, root: &Path) -> Result<Manifest> {
     let (manifest, artifacts) = generate_artifacts(bundle)?;
-    for (rel, bytes) in &artifacts {
-        let path = root.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, bytes)?;
-    }
+    write_artifacts(root, &artifacts)?;
     Ok(manifest)
 }
 
@@ -394,13 +402,7 @@ pub fn generate_account_artifacts(
 /// files.
 pub fn generate_account(account_bundle: &Bundle, root: &Path) -> Result<AccountManifest> {
     let (manifest, artifacts) = generate_account_artifacts(account_bundle)?;
-    for (rel, bytes) in &artifacts {
-        let path = root.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, bytes)?;
-    }
+    write_artifacts(root, &artifacts)?;
     Ok(manifest)
 }
 
@@ -540,13 +542,7 @@ pub fn generate_binaries_artifacts(
 /// files.
 pub fn generate_binaries(binaries_bundle: &Bundle, root: &Path) -> Result<BinaryManifest> {
     let (manifest, artifacts) = generate_binaries_artifacts(binaries_bundle)?;
-    for (rel, bytes) in &artifacts {
-        let path = root.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, bytes)?;
-    }
+    write_artifacts(root, &artifacts)?;
     Ok(manifest)
 }
 
