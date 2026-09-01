@@ -149,17 +149,40 @@ export function clamp(n, lo, hi) {
 // pool. Nodes take minutes to boot and pull an image, so that is an outage on a
 // timer. Hold the old nodes until enough new ones are actually answering.
 //
+// `draining` is a region -> POST-DRAIN TARGET map, not a bare list of names, and
+// that distinction is the whole bug this signature exists to prevent. A region is
+// "draining" whenever its target is BELOW its current desired capacity — which
+// includes a partial reduction like 2 -> 1, where the region keeps serving a node.
+// Counting such a region as a total loss understates the pool the drain would
+// leave behind, and with a 2-node pool at nodeFloor 2 the check can then NEVER be
+// satisfied: the retained node is exactly the one being subtracted. The observed
+// consequence (2026-09-01) was a pool at 5 running nodes against a desired 2, with
+// the reconciler logging "deferring scale-down of us-east-1, us-east-2, us-west-1:
+// 1 healthy node(s) outside them, need 2" every two minutes for days. Scale-UP is
+// unconditional and immediate, so a scale-down that can never fire is a ratchet:
+// every rotation adds a region and none is ever given back.
+//
+// So each draining region contributes min(healthy there, its target) — the nodes
+// that survive the drain — while a region leaving entirely (target 0) contributes
+// nothing, which is the original, correct guard.
+//
 // Kept here, pure, because it is the part that decides whether the pool briefly
 // costs double or briefly serves nothing — index.mjs can't be imported under test
 // (its AWS SDK deps only exist in the Lambda runtime).
 export function mayDrain({ draining, perRegionHealthy, poolTotal, nodeFloor }) {
-  if (draining.length === 0) {
+  const targets = draining ?? {};
+  const regions = Object.keys(targets);
+  if (regions.length === 0) {
     return { ok: true, retainedHealthy: 0, required: 0 };
   }
-  const leaving = new Set(draining);
-  const retainedHealthy = Object.entries(perRegionHealthy)
-    .filter(([region]) => !leaving.has(region))
-    .reduce((sum, [, count]) => sum + count, 0);
+  const retainedHealthy = Object.entries(perRegionHealthy).reduce((sum, [region, healthy]) => {
+    if (!(region in targets)) {
+      return sum + healthy;
+    }
+    // A drain never removes more than it has to: the region ends at its target, so
+    // that many of its healthy nodes (at most) are still serving afterwards.
+    return sum + Math.min(healthy, targets[region]);
+  }, 0);
   // Never demand more than the pool is even meant to hold, or a pool smaller than
   // the floor could never drain at all.
   const required = Math.min(poolTotal, nodeFloor);

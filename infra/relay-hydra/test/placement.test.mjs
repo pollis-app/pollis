@@ -179,7 +179,7 @@ test("does not drain the old regions until the new ones are actually serving", (
   // are still booting. Draining here takes the pool to zero for the several
   // minutes a node needs to pull its image.
   const decision = mayDrain({
-    draining: ["us-west-2"],
+    draining: { "us-west-2": 0 },
     perRegionHealthy: { "us-west-2": 3, "us-east-1": 0 },
     poolTotal: 3,
     nodeFloor: 2,
@@ -190,7 +190,7 @@ test("does not drain the old regions until the new ones are actually serving", (
 
 test("drains once enough replacement capacity is healthy elsewhere", () => {
   const decision = mayDrain({
-    draining: ["us-west-2"],
+    draining: { "us-west-2": 0 },
     perRegionHealthy: { "us-west-2": 3, "us-east-1": 2 },
     poolTotal: 3,
     nodeFloor: 2,
@@ -202,7 +202,7 @@ test("a pool smaller than the floor can still drain", () => {
   // Otherwise `required` would exceed anything the pool could ever have and the
   // losing regions would never scale down — the pool would only ever grow.
   const decision = mayDrain({
-    draining: ["us-west-2"],
+    draining: { "us-west-2": 0 },
     perRegionHealthy: { "us-west-2": 1, "us-east-1": 1 },
     poolTotal: 1,
     nodeFloor: 2,
@@ -212,20 +212,68 @@ test("a pool smaller than the floor can still drain", () => {
 });
 
 test("nothing to drain is never blocked", () => {
-  assert.equal(mayDrain({ draining: [], perRegionHealthy: {}, poolTotal: 3, nodeFloor: 2 }).ok, true);
+  assert.equal(mayDrain({ draining: {}, perRegionHealthy: {}, poolTotal: 3, nodeFloor: 2 }).ok, true);
 });
 
-test("health inside a region that is leaving does not count as retained", () => {
-  // The bug this pins: counting the departing region's own healthy nodes would
-  // always satisfy the check and make the guard a no-op.
+test("health inside a region that is leaving ENTIRELY does not count as retained", () => {
+  // The bug this pins: counting a departing region's own healthy nodes would
+  // always satisfy the check and make the guard a no-op. Target 0 = it really is
+  // leaving, so none of its nodes survive the drain.
   const decision = mayDrain({
-    draining: ["us-west-2", "us-west-1"],
+    draining: { "us-west-2": 0, "us-west-1": 0 },
     perRegionHealthy: { "us-west-2": 2, "us-west-1": 1, "us-east-1": 0 },
     poolTotal: 3,
     nodeFloor: 2,
   });
   assert.equal(decision.ok, false);
   assert.equal(decision.retainedHealthy, 0);
+});
+
+// --- mayDrain: a PARTIAL drain is not a departure ----------------------------
+//
+// The ratchet these pin, observed live on 2026-09-01: desired capacities
+// us-east-1 1, us-east-2 2, us-west-1 1, us-west-2 1 = FIVE running nodes against
+// a drawn placement of {"us-east-2":1,"us-west-2":1} = two. Scale-up is
+// unconditional, scale-down is guarded — so a guard that can never pass makes the
+// pool grow by a region per rotation and never shrink. It could never pass here
+// because us-east-2 was going 2 -> 1: counting it as a total loss left only
+// us-west-2's single node as "retained", forever one short of the floor of 2.
+
+test("a region reduced but not emptied still counts the nodes it keeps", () => {
+  const decision = mayDrain({
+    draining: { "us-east-2": 1 },
+    perRegionHealthy: { "us-east-2": 2, "us-west-2": 1 },
+    poolTotal: 2,
+    nodeFloor: 2,
+  });
+  assert.equal(decision.retainedHealthy, 2, "us-west-2's node plus the one us-east-2 keeps");
+  assert.equal(decision.ok, true);
+});
+
+test("the live 5-against-2 deadlock drains instead of ratcheting", () => {
+  const decision = mayDrain({
+    draining: { "us-east-1": 0, "us-east-2": 1, "us-west-1": 0 },
+    perRegionHealthy: { "us-east-1": 1, "us-east-2": 2, "us-west-1": 1, "us-west-2": 1 },
+    poolTotal: 2,
+    nodeFloor: 2,
+  });
+  assert.equal(decision.required, 2);
+  assert.equal(decision.retainedHealthy, 2, "us-west-2's node plus the one us-east-2 keeps");
+  assert.equal(decision.ok, true, "this deferred every 2 minutes for days, leaking 3 extra nodes");
+});
+
+test("a partial drain counts only what is actually healthy, never the target", () => {
+  // Target 2 but only 1 node answering: the drain leaves 1, not 2. Crediting the
+  // target would let the guard pass on capacity that does not exist yet — the
+  // cold-start this whole predicate is here to prevent.
+  const decision = mayDrain({
+    draining: { "us-east-2": 2 },
+    perRegionHealthy: { "us-east-2": 1, "us-west-2": 0 },
+    poolTotal: 3,
+    nodeFloor: 2,
+  });
+  assert.equal(decision.retainedHealthy, 1);
+  assert.equal(decision.ok, false);
 });
 
 // --- clamp -------------------------------------------------------------------
