@@ -22,6 +22,19 @@ pub fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+/// Base64-encode `bytes` with the standard, padded alphabet — the encoding every
+/// `pollis-api` wire field uses.
+///
+/// The decoding half is `commands::ds_reads::decode_b64`, which stays there
+/// because it takes a field name for its error message and every caller is
+/// already reading a DS response. This half had four identical copies (`vault`,
+/// `pinned_messages`, `messages::read_state`, and a closure in `mls::delivery`)
+/// for the same reason `now_unix` had three.
+pub fn b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
 /// Mask an email's local part, keeping the domain: `alice@example.com` →
 /// `***@example.com`. Anything without a domain → `***`.
 ///
