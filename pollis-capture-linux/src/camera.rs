@@ -32,12 +32,10 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use pollis_capture_proto::{
-    read_msg, CameraList, CameraSource, CaptureMsg,
-};
+use pollis_capture_proto::{now_us, read_msg, CameraList, CameraSource, CaptureMsg};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -123,22 +121,11 @@ pub async fn run_camera(sock: &mut UnixStream) -> Result<()> {
         })
         .context("spawn camera thread")?;
 
-    // Drain channel → socket until the parent goes away (write error) or
-    // the capture thread ends.
-    let result: Result<()> = async {
-        while let Some(msg) = rx.recv().await {
-            if let Err(e) = write_msg(sock, &msg).await {
-                eprintln!("[capture/cam] socket write error: {e} — exiting");
-                break;
-            }
-        }
-        Ok(())
-    }
-    .await;
+    crate::linux::drain_to_socket(sock, &mut rx, "[capture/cam]").await;
 
     stop.store(true, Ordering::Relaxed);
     drop(cap_thread);
-    result
+    Ok(())
 }
 
 /// Enumerate V4L2 capture devices. Lists every `/dev/videoN` node that
@@ -390,13 +377,6 @@ fn write_bgrx(dst: &mut [u8], y: i32, u: i32, v: i32) {
     dst[1] = g as u8;
     dst[2] = r as u8;
     dst[3] = 0xFF;
-}
-
-fn now_us() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_micros() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]
