@@ -55,7 +55,7 @@ pollis-core/src/
   realtime.rs        # LiveKit room manager + event dispatch
   sink.rs            # EventSink trait (frontend-channel abstraction)
   signal/            # MLS storage backend
-  util.rs            # Crate-wide primitives with no better home (now_unix)
+  util.rs            # Crate-wide primitives with no better home (now_unix, b64, mask_email)
   lib.rs             # uniffi exports for mobile bindings
 
 src-tauri/src/       # Tauri desktop host — the shipping shell
@@ -101,11 +101,15 @@ keystore; distribution signing is blocked (Play console / Apple account #723).
 See `docs/deployments.md` and `mobile/CLAUDE.md`.
 
 **Shared Rust primitives.** `pollis-core/src/util.rs` and
-`pollis-delivery/src/util.rs` hold the crate-wide odds and ends — currently just
-`now_unix()` (whole seconds since the epoch, `u64`; callers whose downstream
-arithmetic is signed cast at the boundary). Put a helper there rather than
+`pollis-delivery/src/util.rs` hold the crate-wide odds and ends: `now_unix()`
+(whole seconds since the epoch, `u64`; callers whose downstream arithmetic is
+signed cast at the boundary), `b64()` (standard padded base64, the encoding every
+`pollis-api` wire field uses — its decoding half is
+`commands::ds_reads::decode_b64`, which stays there because it takes a field name
+for its error message), and `mask_email()`. Put a helper there rather than
 re-deriving it in a module: before #875 the DS carried six copies of that clock
-in two return types and pollis-core three under two names. Lowercase hex is
+in two return types and pollis-core three under two names, and `b64` had four
+identical copies before the pollis-core sweep. Lowercase hex is
 `hex::encode` — every crate that needs it already depends on `hex`, and the four
 hand-rolled `hex_lower` loops are gone. The two `util` modules are separate
 because `pollis-core` and `pollis-delivery` deliberately do not depend on each

@@ -835,18 +835,7 @@ pub async fn get_emoji_url(content_hash: String, state: &Arc<AppState>) -> Resul
     if !content_hash_is_valid(&content_hash) {
         return Err(Error::Other(anyhow::anyhow!("malformed emoji content hash")));
     }
-    let port = state
-        .media_server_port
-        .lock()
-        .await
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("media server not started")))?;
-    let token = state
-        .media_server_token
-        .lock()
-        .await
-        .clone()
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("media server token not set; not unlocked")))?;
-    let url = format!("http://127.0.0.1:{port}/{token}/{content_hash}");
+    let url = crate::media_server::loopback_url(state, &content_hash).await?;
 
     // Cache hit needs no content type at all — the cached file's own extension
     // is what the media server serves it with.

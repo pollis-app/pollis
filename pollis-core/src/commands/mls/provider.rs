@@ -313,6 +313,6 @@ pub fn parse_credential_user_id(cred: &Credential) -> String {
 ///
 /// Returns `None` for legacy credentials that contain only `user_id`.
 pub fn parse_credential_device_id(cred: &Credential) -> Option<String> {
-    let s = String::from_utf8_lossy(cred.serialized_content()).into_owned();
+    let s = String::from_utf8_lossy(cred.serialized_content());
     s.split_once(':').map(|(_, d)| d.to_string())
 }

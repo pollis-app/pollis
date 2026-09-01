@@ -777,41 +777,38 @@ pub async fn reconcile_group_mls_impl(
         }
     }
 
+    // The roster as a bindable slice, built once and shared by both reads below
+    // — it used to be cloned separately for each.
+    //
+    // The ids are BOUND as `?n` placeholders rather than interpolated behind a
+    // character filter, matching `registered_devices`. libsql has no array
+    // binding, so the placeholder list is generated but the values are not.
+    let ids: Vec<String> = roster_user_ids.iter().cloned().collect();
+
     // 2. Find devices with unclaimed KPs for all roster users.
-    let mut device_pairs: Vec<(String, String)> = Vec::new();
-    {
-        // A revoked device keeps its unclaimed KeyPackages, so this query needs
-        // the same `revoked_at IS NULL` predicate as `registered_devices` — it is
-        // the source of `available_kps`, and therefore of the KP half of
-        // `desired`. Without it a revoked device is handed back a claimed KP and
-        // re-admitted to the tree. `compute_diff` now filters this set against
-        // `valid_devices` as a second line of defence; filtering here as well
-        // means we never claim (and so never burn) a revoked device's KeyPackage.
-        //
-        // The ids are BOUND as `?n` placeholders rather than interpolated behind
-        // a character filter, matching `registered_devices`. libsql has no array
-        // binding, so the placeholder list is generated but the values are not.
-        let ids: Vec<String> = roster_user_ids.iter().cloned().collect();
-        // ONE request for the whole roster, and an ERROR rather than a short
-        // list on failure. That distinction is the important half: this read
-        // decides WHICH devices get added to the tree, and a truncated answer
-        // does not fail loudly — it commits a reconcile without those devices,
-        // and they stay out of the group until something else triggers another
-        // one. The DS answers all-or-nothing for exactly that reason.
-        device_pairs.extend(
-            crate::commands::ds_reads::claimable_devices(state, &ids, None).await?,
-        );
-    }
+    //
+    // A revoked device keeps its unclaimed KeyPackages, so this query needs the
+    // same `revoked_at IS NULL` predicate as `registered_devices` — it is the
+    // source of `available_kps`, and therefore of the KP half of `desired`.
+    // Without it a revoked device is handed back a claimed KP and re-admitted to
+    // the tree. `compute_diff` now filters this set against `valid_devices` as a
+    // second line of defence; filtering here as well means we never claim (and
+    // so never burn) a revoked device's KeyPackage.
+    //
+    // ONE request for the whole roster, and an ERROR rather than a short list on
+    // failure. That distinction is the important half: this read decides WHICH
+    // devices get added to the tree, and a truncated answer does not fail loudly
+    // — it commits a reconcile without those devices, and they stay out of the
+    // group until something else triggers another one. The DS answers
+    // all-or-nothing for exactly that reason.
+    let device_pairs: Vec<(String, String)> =
+        crate::commands::ds_reads::claimable_devices(state, &ids, None).await?;
 
     // 2b. Snapshot of every (user_id, device_id) pair still registered in
     //     `user_device` for the current roster. Used by reconcile to drop
     //     leaves whose device row was revoked even though the user is still
     //     a roster member (single-device revoke flow).
-    let valid_devices = crate::commands::ds_reads::registered_devices(
-        state,
-        &roster_user_ids.iter().cloned().collect::<Vec<_>>(),
-    )
-    .await?;
+    let valid_devices = crate::commands::ds_reads::registered_devices(state, &ids).await?;
 
     let actor_device_id = state
         .device_id
