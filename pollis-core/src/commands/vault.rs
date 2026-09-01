@@ -49,7 +49,7 @@ use std::sync::Arc;
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
-use base64::Engine as _;
+use crate::util::b64;
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -149,10 +149,6 @@ pub(crate) fn open_entry(
     let json = super::messages::framing::strip(&padded);
     serde_json::from_slice(&json)
         .map_err(|e| Error::Other(anyhow::anyhow!("parse vault entry: {e}")))
-}
-
-fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 // ── Local cache ──────────────────────────────────────────────────────────────

@@ -1,6 +1,13 @@
 # Copy to terraform.tfvars and adjust. All values have sensible defaults in
 # variables.tf; this file only shows the ones you're most likely to touch.
 
+# THE OFF SWITCH. Currently false in variables.tf — the pool is switched OFF: no
+# ASGs, no nodes, no reconciler, no schedule. Prefer flipping the DEFAULT in
+# variables.tf over setting it here, so the repo itself says whether the pool is
+# meant to be running; terraform.tfvars is gitignored and nobody else can see it.
+# Everything below only takes effect while this is true.
+hydra_enabled = false
+
 # Desired-state SEED: a POOL-WIDE count. Regions are not set here — the reconciler
 # draws them at random from the allowed set and re-draws every rotation interval.
 # (It owns runtime scaling after apply — edit the SSM desired-state param to scale;

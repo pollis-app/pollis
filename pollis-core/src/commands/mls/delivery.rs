@@ -87,8 +87,7 @@ async fn http_submit(
     group_info: Option<&[u8]>,
     welcomes: &[WelcomeOut],
 ) -> Result<SubmitResult> {
-    use base64::Engine as _;
-    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    use crate::util::b64;
     let welcomes_json: Vec<pollis_api::commit::WelcomeBody> = welcomes
         .iter()
         .map(|w| pollis_api::commit::WelcomeBody {
