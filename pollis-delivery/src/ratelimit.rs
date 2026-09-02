@@ -165,10 +165,17 @@ pub enum RateLimitOutcome {
     Limited,
 }
 
-/// One IP's counter within the current fixed window.
+/// One key's counter within the current fixed window.
 struct Window {
     count: u32,
     window_start: u64,
+    /// The window length this key is counted over, carried on the entry.
+    ///
+    /// One map serves all six tiers and their windows differ by an order of
+    /// magnitude (60s for `write`/`read`, 600s for the OTP, invite-redeem and
+    /// probe tiers), so the pruner cannot use the calling tier's window to judge
+    /// somebody else's entry — see [`RateLimiter::check`].
+    window_secs: u64,
 }
 
 /// In-memory per-key fixed-window rate limiter. `Clone` is shallow (shared
@@ -194,7 +201,16 @@ impl RateLimiter {
         let mut guard = self.inner.lock().expect("rate limiter mutex poisoned");
 
         if guard.len() > PRUNE_THRESHOLD {
-            guard.retain(|_, w| now.saturating_sub(w.window_start) < window_secs);
+            // Judge every entry by ITS OWN window, not the caller's.
+            //
+            // This used to prune with `window_secs` — the window of whichever
+            // tier happened to trip the threshold. One map holds all six tiers,
+            // so a `write` call (60s) would evict live 600s entries: an OTP
+            // attempt counter that was 90 seconds into its ten-minute window
+            // simply vanished, and the next attempt started from zero. That is a
+            // rate-limit reset on the brute-force-sensitive tier, triggered by
+            // unrelated traffic on a busy server.
+            guard.retain(|_, w| now.saturating_sub(w.window_start) < w.window_secs);
         }
 
         // Probed before `entry`, deliberately: `entry` takes an OWNED key, so
@@ -208,10 +224,15 @@ impl RateLimiter {
                 Window {
                     count: 0,
                     window_start: now,
+                    window_secs,
                 },
             );
         }
         let win = guard.get_mut(key).expect("inserted above when absent");
+        // A key's tier is fixed by its call site, but keep the stored span in
+        // step with the caller so a re-tuned limit takes effect on the next hit
+        // rather than at the next eviction.
+        win.window_secs = window_secs;
         if now.saturating_sub(win.window_start) >= window_secs {
             win.count = 0;
             win.window_start = now;
@@ -343,6 +364,53 @@ pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pruner must judge each entry by its OWN window.
+    ///
+    /// One map serves all six tiers, and their windows differ by an order of
+    /// magnitude. The prune used the CALLING tier's window, so a `write` call
+    /// (60s) crossing the threshold evicted live 600s entries — an OTP attempt
+    /// counter part-way through its ten-minute window vanished, and the next
+    /// attempt started from zero. A rate-limit reset on the brute-force tier,
+    /// caused by unrelated traffic.
+    ///
+    /// Reproduced here at the smallest scale that trips it: an OTP key counted
+    /// to its limit, the map pushed past `PRUNE_THRESHOLD` with filler, then a
+    /// short-window call to force the prune.
+    #[test]
+    fn a_short_window_prune_does_not_evict_a_live_long_window() {
+        const OTP_WINDOW: u64 = 600;
+        const WRITE_WINDOW: u64 = 60;
+        let limiter = RateLimiter::default();
+        let t0 = 1_000_000;
+
+        // An OTP client burns its budget and is now Limited.
+        for _ in 0..5 {
+            limiter.check("otp:victim", 5, OTP_WINDOW, t0);
+        }
+        assert_eq!(
+            limiter.check("otp:victim", 5, OTP_WINDOW, t0),
+            RateLimitOutcome::Limited,
+            "premise: the OTP key is over its limit before anything is pruned"
+        );
+
+        // Unrelated write traffic fills the shared map past the prune threshold.
+        for i in 0..=PRUNE_THRESHOLD {
+            limiter.check(&format!("write:{i}"), 10_000, WRITE_WINDOW, t0);
+        }
+
+        // 90s later the write windows have elapsed but the OTP window has NOT.
+        // This write call is what triggers the prune.
+        let t1 = t0 + 90;
+        limiter.check("write:trigger", 10_000, WRITE_WINDOW, t1);
+
+        assert_eq!(
+            limiter.check("otp:victim", 5, OTP_WINDOW, t1),
+            RateLimitOutcome::Limited,
+            "a throttled OTP client got its counter reset by unrelated write \
+             traffic — the prune judged a 600s window by a 60s cutoff"
+        );
+    }
 
     /// Reads must not spend the write budget, and the two guessable-input ones
     /// must not spend the read budget (#987).
