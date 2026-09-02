@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 
+use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
@@ -366,10 +367,10 @@ pub fn verify_revocations(
     let envelope: RevocationEnvelope = serde_json::from_slice(envelope_bytes)
         .map_err(|_| RevocationError::MalformedEnvelope)?;
 
-    let payload = base64::engine::general_purpose::STANDARD
+    let payload = B64
         .decode(envelope.payload_b64.as_bytes())
         .map_err(|_| RevocationError::BadBase64("payload_b64"))?;
-    let signature_bytes = base64::engine::general_purpose::STANDARD
+    let signature_bytes = B64
         .decode(envelope.signature_b64.as_bytes())
         .map_err(|_| RevocationError::BadBase64("signature_b64"))?;
 
@@ -427,7 +428,7 @@ pub fn verify_revocations(
         if let Some(digest) = digest {
             // A digest that is not 32 bytes can never match a real SHA-256, so
             // it is an unenforceable revocation, not a harmless one.
-            let raw = base64::engine::general_purpose::STANDARD
+            let raw = B64
                 .decode(digest.as_bytes())
                 .map_err(|_| RevocationError::Unenforceable("cert_sha256_b64 is not base64"))?;
             if raw.len() != 32 {
@@ -435,7 +436,7 @@ pub fn verify_revocations(
                     "cert_sha256_b64 is not a 32-byte SHA-256",
                 ));
             }
-            cert_digests.insert(base64::engine::general_purpose::STANDARD.encode(raw));
+            cert_digests.insert(B64.encode(raw));
         }
     }
 
@@ -451,7 +452,7 @@ pub fn verify_revocations(
 /// Rebuild an Ed25519 [`VerifyingKey`] from the base64 of its raw 32 bytes (the
 /// `POLLIS_OVERLAY_DIRECTORY_KEY` shape).
 fn verifying_key_from_b64(pinned_pubkey_b64: &str) -> Result<VerifyingKey, RevocationError> {
-    let raw = base64::engine::general_purpose::STANDARD
+    let raw = B64
         .decode(pinned_pubkey_b64.trim().as_bytes())
         .map_err(|_| RevocationError::BadBase64("pinned key"))?;
     let raw: [u8; 32] = raw.try_into().map_err(|_| RevocationError::BadPinnedKey)?;
@@ -463,7 +464,7 @@ fn normalize_addr(addr: &str) -> String {
 }
 
 fn cert_digest_b64(cert_der: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(Sha256::digest(cert_der))
+    B64.encode(Sha256::digest(cert_der))
 }
 
 /// The live revocation state a relay (or a client's path selector) consults.
@@ -494,16 +495,22 @@ struct StoreInner {
 }
 
 impl RevocationStore {
-    /// A store that verifies against `pinned_pubkey_b64` (the same
-    /// `POLLIS_OVERLAY_DIRECTORY_KEY` that pins the directory).
-    pub fn enforcing(pinned_pubkey_b64: impl Into<String>) -> RevocationStore {
+    /// An empty store. Whether it can evaluate anything is decided entirely by
+    /// whether a directory key came with it.
+    fn with_key(pinned_key_b64: Option<Arc<String>>) -> RevocationStore {
         RevocationStore {
             inner: Arc::new(RwLock::new(StoreInner {
                 list: None,
                 high_water: 0,
             })),
-            pinned_key_b64: Some(Arc::new(pinned_pubkey_b64.into())),
+            pinned_key_b64,
         }
+    }
+
+    /// A store that verifies against `pinned_pubkey_b64` (the same
+    /// `POLLIS_OVERLAY_DIRECTORY_KEY` that pins the directory).
+    pub fn enforcing(pinned_pubkey_b64: impl Into<String>) -> RevocationStore {
+        RevocationStore::with_key(Some(Arc::new(pinned_pubkey_b64.into())))
     }
 
     /// A store for a node that was never given a directory key.
@@ -514,13 +521,7 @@ impl RevocationStore {
     /// unconfigured case permissive is the classic way revocation turns into
     /// decoration, so it is deliberately the strictest state, not the loosest.
     pub fn unconfigured() -> RevocationStore {
-        RevocationStore {
-            inner: Arc::new(RwLock::new(StoreInner {
-                list: None,
-                high_water: 0,
-            })),
-            pinned_key_b64: None,
-        }
+        RevocationStore::with_key(None)
     }
 
     /// Is this store able to evaluate revocation at all?
@@ -668,7 +669,7 @@ mod tests {
         }
 
         fn pinned(sk: &SigningKey) -> String {
-            base64::engine::general_purpose::STANDARD.encode(sk.verifying_key().to_bytes())
+            B64.encode(sk.verifying_key().to_bytes())
         }
 
         /// Sign the EXACT payload bytes, exactly as the reconciler does.
@@ -676,8 +677,8 @@ mod tests {
             let payload = payload_json.as_bytes();
             let sig = sk.sign(payload);
             let env = serde_json::json!({
-                "payload_b64": base64::engine::general_purpose::STANDARD.encode(payload),
-                "signature_b64": base64::engine::general_purpose::STANDARD.encode(sig.to_bytes()),
+                "payload_b64": B64.encode(payload),
+                "signature_b64": B64.encode(sig.to_bytes()),
             });
             serde_json::to_vec(&env).unwrap()
         }
@@ -789,7 +790,7 @@ mod tests {
             // i.e. an attacker trying to STRIP a revocation.
             let stripped = payload(3, NOW + 300, "");
             env["payload_b64"] = serde_json::Value::String(
-                base64::engine::general_purpose::STANDARD.encode(stripped.as_bytes()),
+                B64.encode(stripped.as_bytes()),
             );
             let bytes = serde_json::to_vec(&env).unwrap();
             let store = RevocationStore::enforcing(pinned(&sk));

@@ -73,7 +73,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         if let Some(open) = &app.home.open {
             spans.push(Span::styled("· ", Style::default().fg(Color::DarkGray)));
             spans.push(Span::styled(
-                open.name.clone(),
+                open.name.as_str(),
                 Style::default().add_modifier(Modifier::BOLD),
             ));
         }
@@ -144,8 +144,7 @@ fn render_input_bar(frame: &mut Frame, area: Rect, app: &App) {
                 .home
                 .open
                 .as_ref()
-                .map(|o| o.name.clone())
-                .unwrap_or_else(|| "Message".to_string());
+                .map_or("Message", |o| o.name.as_str());
             format!(" Message {name} ")
         }
         HomeMode::Prompt(kind) => format!(" {} ", kind.label()),
@@ -160,7 +159,7 @@ fn render_input_bar(frame: &mut Frame, area: Rect, app: &App) {
 
     let line = Line::from(vec![
         Span::styled("› ", Style::default().fg(Color::Cyan)),
-        Span::raw(app.input.clone()),
+        Span::raw(app.input.as_str()),
         Span::styled("▏", Style::default().add_modifier(Modifier::SLOW_BLINK)),
     ]);
     frame.render_widget(Paragraph::new(line), inner);
@@ -191,7 +190,9 @@ fn render_sidebar(frame: &mut Frame, area: Rect, home: &HomeState) {
         .iter()
         .enumerate()
         .map(|(i, row)| {
-            let indent = "  ".repeat(row.depth as usize);
+            // Rows are only ever depth 0 (group/section) or 1 (child) — see
+            // `home::build_sidebar_rows` — so the indent needs no allocation.
+            let indent = if row.depth == 0 { "" } else { "  " };
             let selected = i == home.selected && row.selectable();
             let mut style = Style::default();
             if selected {
@@ -204,7 +205,10 @@ fn render_sidebar(frame: &mut Frame, area: Rect, home: &HomeState) {
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD);
             }
-            Line::from(Span::styled(format!("{indent}{}", row.label), style))
+            Line::from(vec![
+                Span::styled(indent, style),
+                Span::styled(row.label.as_str(), style),
+            ])
         })
         .collect();
 
@@ -276,36 +280,37 @@ fn render_messages(frame: &mut Frame, area: Rect, home: &HomeState) {
 
 /// Render a single message as `sender  content`, handling the deleted / not-yet-
 /// decrypted / edited states honestly.
-fn message_line(m: &pollis_core::commands::messages::ChannelMessage) -> Line<'static> {
-    let sender = m
-        .sender_username
-        .clone()
-        .unwrap_or_else(|| m.sender_id.clone());
-    let (body, body_style) = if m.deleted_at.is_some() {
-        (
-            "(deleted)".to_string(),
+///
+/// Borrows from `m` rather than owning: this runs for every visible message on
+/// every frame, and the owned form copied the whole body text each time.
+fn message_line(m: &pollis_core::commands::messages::ChannelMessage) -> Line<'_> {
+    let sender = m.sender_username.as_deref().unwrap_or(&m.sender_id);
+    let sender_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let mut spans = vec![
+        Span::styled(sender, sender_style),
+        Span::styled("  ", sender_style),
+    ];
+    if m.deleted_at.is_some() {
+        spans.push(Span::styled(
+            "(deleted)",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),
-        )
+        ));
     } else if let Some(content) = &m.content {
-        let edited = if m.edited_at.is_some() { " (edited)" } else { "" };
-        (format!("{content}{edited}"), Style::default())
+        spans.push(Span::raw(content.as_str()));
+        if m.edited_at.is_some() {
+            spans.push(Span::raw(" (edited)"));
+        }
     } else {
-        (
-            "(unable to decrypt)".to_string(),
+        spans.push(Span::styled(
+            "(unable to decrypt)",
             Style::default().fg(Color::Red),
-        )
-    };
-    Line::from(vec![
-        Span::styled(
-            format!("{sender}  "),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(body, body_style),
-    ])
+        ));
+    }
+    Line::from(spans)
 }
 
 /// A focused pane gets a solid accent border; an unfocused one a muted border.
@@ -402,8 +407,7 @@ fn render_enroll_waiting(frame: &mut Frame, area: Rect, app: &App) {
     let code = app
         .enroll_handle
         .as_ref()
-        .map(|h| h.verification_code.clone())
-        .unwrap_or_default();
+        .map_or("", |h| h.verification_code.as_str());
 
     let lines = vec![
         Line::from(""),
@@ -485,7 +489,7 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(" working… ", Style::default().fg(Color::Yellow)));
     }
     if let Some(status) = &app.status {
-        spans.push(Span::styled(status.clone(), Style::default().fg(Color::Gray)));
+        spans.push(Span::styled(status.as_str(), Style::default().fg(Color::Gray)));
     }
     if spans.is_empty() {
         let help = match app.screen {

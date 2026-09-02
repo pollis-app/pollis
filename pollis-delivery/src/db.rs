@@ -210,10 +210,8 @@ impl Db {
         Ok(me)
     }
 
-    /// Wrap an ALREADY-OPEN libsql `Database` instead of opening one.
-    ///
-    /// For the `flows` integration harness (#918), which runs this crate's real
-    /// router in-process against the same file its clients read: two independent
+    /// The common tail of [`Self::connect_remote`] and [`Self::connect_local`]:
+    /// an empty pool plus the per-connection pragmas that backend needs.
     fn wrap(db: Arc<Database>, pragmas: PerConnPragmas) -> Self {
         Self {
             db,

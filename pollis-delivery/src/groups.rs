@@ -8,8 +8,8 @@
 //!     authorization decision AND the write, returning [`WriteOutcome`]. The real
 //!     axum handler and the in-process test harness both call the *same*
 //!     `apply_*`, so server-side authz is exercised with zero duplication.
-//!   - **axum handlers** — `(State, Method, Uri, HeaderMap, Bytes) -> Response`:
-//!     `gate` → parse → `apply_*` → map outcome to 200 / 403 / 400 / 500.
+//!   - **axum handlers** — `(State, RawRequest) -> Response`:
+//!     `gate_and_parse` → `apply_*` → map outcome to 200 / 403 / 400 / 500.
 //!
 //! ## Where the writes land
 //!
@@ -38,17 +38,21 @@
 //! mirroring `commit::submit`, `writes.rs`, and `messages.rs`.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::{IntoResponse as _, Response},
 };
 use libsql::Connection;
 
 use crate::error::{AppError, AuthRejection};
 use crate::writes::{
-    bad_request, claim_conversation_id, conversation_id_taken, gate, outcome_response,
-    resolve_actor, ConversationKind, WriteOutcome,
+    claim_conversation_id,
+    conversation_id_taken,
+    gate_and_parse,
+    outcome_response,
+    resolve_actor,
+    ConversationKind,
+    RawRequest,
+    WriteOutcome,
 };
 use crate::AppState;
 
@@ -181,18 +185,11 @@ async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> an
 
 pub async fn create_group(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<CreateGroupBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: CreateGroupBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<CreateGroupBody>(apply_create_group(&conn, authed.as_deref(), &parsed).await?)
@@ -289,18 +286,11 @@ pub async fn apply_create_group(
 
 pub async fn update_group(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<UpdateGroupBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: UpdateGroupBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     // The updated ROW, not `{"status":"ok"}` (#987): the client used to SELECT
@@ -368,18 +358,11 @@ pub async fn apply_update_group(
 
 pub async fn delete_group(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<DeleteGroupBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: DeleteGroupBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let (outcome, dead_conversations) =
@@ -425,18 +408,11 @@ pub async fn apply_delete_group(
 
 pub async fn leave_group(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<LeaveGroupBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: LeaveGroupBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let (outcome, dead_conversations) =
@@ -478,19 +454,19 @@ pub async fn apply_leave_group(
         libsql::params![body.group_id.clone(), user.clone()],
     )
     .await?;
-    let mut count_rows = tx
+    // Existence, not a tally: the only question is whether the group is now
+    // empty, and `LIMIT 1` stops at the first surviving member instead of
+    // counting every one of them inside the transaction.
+    let mut survivors = tx
         .query(
-            "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+            "SELECT 1 FROM group_member WHERE group_id = ?1 LIMIT 1",
             libsql::params![body.group_id.clone()],
         )
         .await?;
-    let remaining: i64 = match count_rows.next().await? {
-        Some(row) => row.get(0)?,
-        None => 0,
-    };
-    drop(count_rows);
+    let group_is_empty = survivors.next().await?.is_none();
+    drop(survivors);
     let mut dead: Vec<String> = Vec::new();
-    if remaining == 0 {
+    if group_is_empty {
         dead = crate::teardown::purge_group(&tx, &body.group_id).await?;
         dead.push(body.group_id.clone());
     }
@@ -502,18 +478,11 @@ pub async fn apply_leave_group(
 
 pub async fn create_channel(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<CreateChannelBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: CreateChannelBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<CreateChannelBody>(apply_create_channel(&conn, authed.as_deref(), &parsed).await?)
@@ -561,18 +530,11 @@ pub async fn apply_create_channel(
 
 pub async fn update_channel(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<UpdateChannelBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: UpdateChannelBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     match apply_update_channel(&conn, authed.as_deref(), &parsed).await? {
@@ -650,18 +612,11 @@ pub async fn apply_update_channel(
 
 pub async fn delete_channel(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<DeleteChannelBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: DeleteChannelBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let outcome = apply_delete_channel(&conn, authed.as_deref(), &parsed).await?;
@@ -714,18 +669,11 @@ pub async fn apply_delete_channel(
 
 pub async fn remove_member(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RemoveMemberBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RemoveMemberBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<RemoveMemberBody>(apply_remove_member(&conn, authed.as_deref(), &parsed).await?)
@@ -770,18 +718,11 @@ pub async fn apply_remove_member(
 
 pub async fn set_member_role(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<SetMemberRoleBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: SetMemberRoleBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<SetMemberRoleBody>(apply_set_member_role(&conn, authed.as_deref(), &parsed).await?)
@@ -823,18 +764,11 @@ pub async fn apply_set_member_role(
 
 pub async fn create_invite(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<CreateInviteBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: CreateInviteBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let answer = match apply_create_invite(&conn, authed.as_deref(), &parsed).await? {
@@ -982,18 +916,11 @@ async fn invite_alert_names(
 
 pub async fn accept_invite(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<AcceptInviteBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: AcceptInviteBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     // Name the group the accept admitted the caller to (#987). The client used
@@ -1082,18 +1009,11 @@ pub async fn apply_accept_invite(
 
 pub async fn decline_invite(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<DeclineInviteBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: DeclineInviteBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<DeclineInviteBody>(apply_decline_invite(&conn, authed.as_deref(), &parsed).await?)
@@ -1122,18 +1042,11 @@ pub async fn apply_decline_invite(
 
 pub async fn create_join_request(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<CreateJoinRequestBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: CreateJoinRequestBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     let answer = match apply_create_join_request(&conn, authed.as_deref(), &parsed).await? {
@@ -1236,18 +1149,11 @@ pub enum JoinRequestOutcome {
 
 pub async fn approve_join_request(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<ApproveJoinRequestBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: ApproveJoinRequestBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     review_response::<ApproveJoinRequestBody>(
@@ -1318,18 +1224,11 @@ pub enum ReviewOutcome {
 
 pub async fn reject_join_request(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RejectJoinRequestBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RejectJoinRequestBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     review_response::<RejectJoinRequestBody>(
@@ -1449,18 +1348,11 @@ const REDEEM_FAILURE_MAX: i64 = 10;
 
 pub async fn create_invite_link(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<CreateInviteLinkBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: CreateInviteLinkBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<CreateInviteLinkBody>(apply_create_invite_link(&conn, authed.as_deref(), &parsed).await?)
@@ -1516,18 +1408,11 @@ pub async fn apply_create_invite_link(
 
 pub async fn revoke_invite_link(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RevokeInviteLinkBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RevokeInviteLinkBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     outcome_response::<RevokeInviteLinkBody>(apply_revoke_invite_link(&conn, authed.as_deref(), &parsed).await?)
@@ -1601,18 +1486,11 @@ pub enum RedeemOutcome {
 
 pub async fn redeem_invite_link(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
-        Ok(a) => a,
+    let (authed, parsed) = match gate_and_parse::<RedeemInviteLinkBody>(&state, &req).await? {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
-    };
-    let parsed: RedeemInviteLinkBody = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
     Ok(
@@ -1761,15 +1639,7 @@ pub async fn apply_redeem_invite_link(
 
     // Already a member → idempotent success. Re-opening the same link must not
     // burn a use or fail; it just says "you're in".
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-            libsql::params![group_id.clone(), user.clone()],
-        )
-        .await?;
-    let already_member = rows.next().await?.is_some();
-    drop(rows);
-    if already_member {
+    if is_member(conn, &group_id, &user).await? {
         let group_name = group_name(conn, &group_id).await?;
         return Ok(RedeemOutcome::Joined {
             group_id,

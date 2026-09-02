@@ -1,3 +1,40 @@
+# ── THE OFF SWITCH ──────────────────────────────────────────────────────────
+
+variable "hydra_enabled" {
+  description = <<-EOT
+    THE ONE SWITCH. false (the current default) means the relay pool is OFF: no
+    per-region shard is created at all, so there is no ASG to launch an instance
+    from, and no reconciler Lambda + EventBridge schedule to draw a placement or
+    scale anything. `terraform apply` with this false is the teardown — it
+    terminates every running node and removes the compute half of the pool.
+
+    Set it back to true and `terraform apply` to bring the pool back. Nothing else
+    has to be remembered:
+
+      - The signed-directory hosting (S3 + CloudFront + the ACM cert for
+        relays.pollis.com) is DELIBERATELY NOT gated. It costs ~$0 idle, and
+        destroying it would mean redoing the ACM/CAA/DNS dance documented above —
+        a multi-step manual sequence that is the worst part of a fresh stand-up.
+        While the pool is off the last-published directory simply expires
+        (directory_ttl_seconds, 1h) and every client fails closed on it, which is
+        the correct degraded state.
+      - Every SSM parameter is likewise NOT gated: desired-state, placement,
+        intended-image and — critically — `revocations`, whose SSM Version IS the
+        published sequence number. Deleting and recreating that parameter resets
+        Version to 1, which every client that has seen a higher sequence rejects
+        as a rollback. So the switch never touches it.
+      - The Budgets alert stays too, so the account keeps its cost guardrail while
+        the pool is off.
+
+    Turning it off does NOT break messaging. The overlay is opt-in and off by
+    default in every shipped build; with no usable directory, `Off` and `Prefer`
+    clients dial the DS directly and only a client the user explicitly put in
+    `Strict` mode degrades — which is precisely Strict's documented contract.
+  EOT
+  type        = bool
+  default     = false
+}
+
 # ── Environment ─────────────────────────────────────────────────────────────
 
 variable "env" {

@@ -123,13 +123,10 @@ fn decode_public_key(hex: &str) -> Result<Vec<u8>> {
             hex.len()
         )));
     }
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(&hex[i..i + 2], 16)
-                .map_err(|_| Error::KeySet("public key is not lowercase hex".into()))
-        })
-        .collect()
+    // `hex::decode` rather than a hand-rolled `&hex[i..i + 2]` walk: this string
+    // arrives from a fetched key-set document, and byte-slicing it panics on a
+    // multi-byte char even when the length check above passed.
+    hex::decode(hex).map_err(|_| Error::KeySet("public key is not lowercase hex".into()))
 }
 
 /// Sorted by `key_id`, no duplicates, non-empty, and every key well-formed.
@@ -179,7 +176,7 @@ impl KeySetStatement {
             issued_at_ms,
             not_after_ms,
             signers,
-            signature: hex_of(signature.encode().as_slice()),
+            signature: hex::encode(signature.encode().as_slice()),
             root_key_id: Some(key_id_for(&root.verifying_key())),
         })
     }
@@ -199,13 +196,10 @@ impl KeySetStatement {
             self.not_after_ms,
             &self.signers,
         )?;
-        let raw = (0..self.signature.len())
-            .step_by(2)
-            .map(|i| {
-                u8::from_str_radix(&self.signature[i..i + 2], 16)
-                    .map_err(|_| Error::KeySet("signature is not hex".into()))
-            })
-            .collect::<Result<Vec<u8>>>()?;
+        // Same reason as `decode_public_key`: an odd-length or non-ASCII
+        // signature is attacker-reachable, and index-slicing it panics.
+        let raw = hex::decode(&self.signature)
+            .map_err(|_| Error::KeySet("signature is not hex".into()))?;
         let encoded = EncodedSignature::<MlDsa44>::try_from(raw.as_slice())
             .map_err(|_| Error::KeySet("signature is not 2420 bytes".into()))?;
         let sig = ml_dsa::Signature::<MlDsa44>::decode(&encoded)
@@ -251,10 +245,6 @@ impl KeySetStatement {
     }
 }
 
-fn hex_of(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 /// Decode a hex public key into a verifying key.
 pub fn root_key_from_hex(hex: &str) -> Result<VerifyingKey> {
     let raw = decode_public_key(hex)?;
@@ -281,7 +271,7 @@ mod tests {
         let vk = sk.verifying_key();
         SignerEntry {
             key_id: key_id_for(&vk),
-            public_key: hex_of(vk.encode().as_slice()),
+            public_key: hex::encode(vk.encode().as_slice()),
             trees: trees.iter().map(|t| t.to_string()).collect(),
             not_after_ms,
         }
@@ -314,7 +304,7 @@ mod tests {
         // else, and the client accepts your forged tree.
         let r = root(1);
         let mut st = statement(&r, vec![signer(2, &[COMMIT], None)]);
-        st.signers[0].public_key = hex_of(root(3).verifying_key().encode().as_slice());
+        st.signers[0].public_key = hex::encode(root(3).verifying_key().encode().as_slice());
         assert!(st.verify(&r.verifying_key()).is_err());
     }
 

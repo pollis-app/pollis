@@ -68,15 +68,13 @@ pub async fn sync_once(state: &Arc<AppState>, user_id: &str) -> Result<data::Con
     Ok(tree)
 }
 
-/// Run [`sync_once`] up to `rounds` times, stopping early once a round makes no
-/// difference is *not* attempted here (that needs change-detection the core
-/// doesn't expose cheaply); instead we just run a fixed number of rounds, which
-/// is how §6 settles an interleaved catch-up (~4 rounds). Returns the number of
-/// rounds actually run (all of them, unless one errors).
+/// Run [`sync_once`] exactly `rounds` times. Stopping early once a round makes
+/// no difference would need change-detection the core doesn't expose cheaply, so
+/// a fixed count is used instead — which is how §6 settles an interleaved
+/// catch-up (~4 rounds). Returns `rounds`, unless one of them errors.
 pub async fn sync_rounds(state: &Arc<AppState>, user_id: &str, rounds: usize) -> Result<usize> {
-    for round in 0..rounds {
+    for _ in 0..rounds {
         sync_once(state, user_id).await?;
-        let _ = round;
     }
     Ok(rounds)
 }
@@ -91,8 +89,8 @@ pub struct SyncSnapshot {
 }
 
 /// A running background sync loop and its shutdown switch. Dropping it does
-/// **not** stop the task — call [`SyncLoop::cancel`] (graceful, lets the current
-/// round finish) or [`SyncLoop::abort`] (immediate) on shutdown.
+/// **not** stop the task — call [`SyncLoop::cancel`] on shutdown, which lets the
+/// current round finish.
 pub struct SyncLoop {
     handle: JoinHandle<()>,
     shutdown: watch::Sender<bool>,
@@ -107,11 +105,6 @@ impl SyncLoop {
         // Ignore send errors: a closed receiver means the task already exited.
         let _ = self.shutdown.send(true);
         self.handle
-    }
-
-    /// Abort the loop immediately, without waiting for the current round.
-    pub fn abort(&self) {
-        self.handle.abort();
     }
 }
 

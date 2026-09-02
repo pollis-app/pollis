@@ -24,36 +24,26 @@
 //! `group_member` / `dm_channel_member`.
 
 use axum::{
-    body::Bytes,
     extract::State,
-    http::{HeaderMap, Method, Uri},
     response::Response,
 };
+use std::collections::HashMap;
+
 use libsql::Connection;
 
 use crate::error::AppError;
 use crate::groups::group_role;
 use crate::reads::authed_user;
-use crate::writes::{bad_request, ok_response};
+use crate::writes::{bad_request, ok_response, RawRequest};
 use crate::AppState;
+use crate::util::{BIND_CHUNK, placeholders};
 
 pub use pollis_api::directory::*;
-
-/// Bound-parameter chunk size for `IN (…)` lookups — well under SQLite's default
-/// `SQLITE_MAX_VARIABLE_NUMBER`, with room for the fixed leading parameters.
-const BIND_CHUNK: usize = 100;
 
 /// Cap on how many groups one [`members`] call may name. The batch exists so the
 /// command palette opens in one round trip instead of `1 + 2N`; it is not an
 /// invitation to enumerate.
 const MAX_GROUPS: usize = 128;
-
-fn placeholders(n: usize, first: usize) -> String {
-    (0..n)
-        .map(|i| format!("?{}", i + first))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
 
 // ── POST /v1/conversations/catch-up ──────────────────────────────────────────
 
@@ -67,25 +57,13 @@ fn placeholders(n: usize, first: usize) -> String {
 /// serial round trips become one.
 pub async fn catch_up(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: CatchUpBody = match serde_json::from_slice(&body) {
+    let parsed: CatchUpBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -256,13 +234,68 @@ async fn channel_ids_of(conn: &Connection, group_id: &str) -> anyhow::Result<Vec
     Ok(out)
 }
 
+/// This device's watermark for each of `conversation_ids`, by conversation.
+///
+/// Read separately from the envelopes rather than as a subquery inside them —
+/// see [`fetch_envelopes`] for why. A conversation with no row is absent from
+/// the map and the caller substitutes `""`, which is the same "everything"
+/// floor the old `COALESCE` produced.
+async fn fetch_watermarks(
+    conn: &Connection,
+    conversation_ids: &[String],
+    user_id: &str,
+    device_id: &str,
+) -> anyhow::Result<HashMap<String, String>> {
+    let sql = format!(
+        "SELECT conversation_id, last_fetched_at FROM conversation_watermark \
+         WHERE user_id = ?1 AND device_id = ?2 AND conversation_id IN ({})",
+        placeholders(conversation_ids.len(), 3)
+    );
+    let mut params: Vec<libsql::Value> = Vec::with_capacity(conversation_ids.len() + 2);
+    params.push(user_id.to_string().into());
+    params.push(device_id.to_string().into());
+    for cid in conversation_ids {
+        params.push(cid.clone().into());
+    }
+    let mut rows = conn.query(&sql, params).await?;
+    let mut out = HashMap::new();
+    while let Some(row) = rows.next().await? {
+        out.insert(row.get(0)?, row.get(1)?);
+    }
+    Ok(out)
+}
+
 /// Envelopes past each conversation's OWN watermark for this device.
 ///
-/// The watermark subquery correlates on `message_envelope.conversation_id`
-/// rather than a bound id, which is what keeps "strictly past THAT
-/// conversation's watermark" true now that one query serves all of them. The
-/// composite ordering is what lets the caller partition one result set into the
-/// same per-conversation lists it used to build from N queries.
+/// The bound has to be per conversation — one query serves all of them, and
+/// each has its own cursor — but it must also be a value the planner can use as
+/// an index RANGE, and those two requirements pull apart.
+///
+/// Expressing it as a correlated subquery (`WHERE sent_at > (SELECT …  WHERE
+/// conversation_id = message_envelope.conversation_id)`) reads correctly and is
+/// what this did until now. It cannot use `idx_envelope_channel_time`'s
+/// `sent_at` column, because the comparison value is not known until the outer
+/// row exists: SQLite plans it `SEARCH … (conversation_id=?)` plus a
+/// `CORRELATED SCALAR SUBQUERY`, i.e. **every retained envelope in the
+/// conversation is read and then discarded**. Measured on the real schema at
+/// 200k envelopes, for a caught-up device returning zero rows: 36 ms and ~200k
+/// rows read. Those are billed rows on Turso, on the path every client takes to
+/// ask "anything new?" — so the idle case, which should be free, was the
+/// expensive one.
+///
+/// Reading the watermarks first and binding each conversation's own value makes
+/// every branch a real range seek (`MULTI-INDEX OR`, each
+/// `conversation_id=? AND sent_at>?`): 0.1 ms, no rows read, same one round
+/// trip. `pollis-delivery/tests/envelope_query_plan.rs` pins the plan, because
+/// this regressed silently once already — #875 batched the per-channel queries
+/// into one and turned a bound `?1` into a correlation without anything noticing.
+///
+/// Splitting the read in two is safe in the only direction that matters. The
+/// watermark for `(conversation, user, device)` is advanced by this device
+/// alone, so a concurrent advance between the two reads can only leave this
+/// query using an OLDER cursor — re-sending an envelope the client already has,
+/// which `ingest.rs`'s `INSERT OR IGNORE INTO message` absorbs. It can never
+/// skip one.
 async fn fetch_envelopes(
     conn: &Connection,
     conversation_ids: &[String],
@@ -270,27 +303,29 @@ async fn fetch_envelopes(
     device_id: &str,
 ) -> anyhow::Result<Vec<EnvelopeWire>> {
     let mut out = Vec::new();
-    for chunk in conversation_ids.chunks(BIND_CHUNK) {
+    // Two binds per conversation now (its id and its own watermark), so half as
+    // many conversations fit under the same variable ceiling.
+    for chunk in conversation_ids.chunks(BIND_CHUNK / 2) {
+        let watermarks = fetch_watermarks(conn, chunk, user_id, device_id).await?;
+        let mut clauses = Vec::with_capacity(chunk.len());
+        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() * 2);
+        for (i, cid) in chunk.iter().enumerate() {
+            clauses.push(format!(
+                "(conversation_id = ?{} AND sent_at > ?{})",
+                i * 2 + 1,
+                i * 2 + 2
+            ));
+            params.push(cid.clone().into());
+            params.push(watermarks.get(cid).cloned().unwrap_or_default().into());
+        }
         let sql = format!(
             "SELECT conversation_id, id, sender_id, ciphertext, reply_to_id, \
                     target_message_id, sent_at, type \
              FROM message_envelope \
-             WHERE conversation_id IN ({}) \
-               AND sent_at > COALESCE( \
-                   (SELECT last_fetched_at FROM conversation_watermark \
-                    WHERE conversation_id = message_envelope.conversation_id \
-                      AND user_id = ?1 AND device_id = ?2), \
-                   '' \
-               ) \
+             WHERE {} \
              ORDER BY conversation_id ASC, sent_at ASC, id ASC",
-            placeholders(chunk.len(), 3)
+            clauses.join(" OR ")
         );
-        let mut params: Vec<libsql::Value> = Vec::with_capacity(chunk.len() + 2);
-        params.push(user_id.to_string().into());
-        params.push(device_id.to_string().into());
-        for cid in chunk {
-            params.push(cid.clone().into());
-        }
         let mut rows = conn.query(&sql, params).await?;
         while let Some(row) = rows.next().await? {
             out.push(EnvelopeWire {
@@ -343,25 +378,13 @@ async fn dm_channel(
 /// oracle for message ids, and the caller cannot act on either answer.
 pub async fn message_lookup(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: MessageLookupBody = match serde_json::from_slice(&body) {
+    let parsed: MessageLookupBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -458,25 +481,13 @@ async fn message_reactions(
 /// request.
 pub async fn bootstrap(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: DirectoryBootstrapBody = match serde_json::from_slice(&body) {
+    let parsed: DirectoryBootstrapBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -739,27 +750,12 @@ async fn preferences(conn: &Connection, user_id: &str) -> anyhow::Result<Option<
 /// links and join requests are admin-only, and an unauthorized section comes back
 /// EMPTY rather than as a refusal for the whole request — the member half is
 /// still legitimately theirs.
-pub async fn group(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    let parsed: DirectoryGroupBody = match serde_json::from_slice(&body) {
+pub async fn group(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let parsed: DirectoryGroupBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -1015,27 +1011,12 @@ pub async fn collect_emoji(rows: &mut libsql::Rows) -> anyhow::Result<Vec<Custom
 /// Each group is authorized independently, so one group the caller has left does
 /// not fail the batch. That matters because the caller is the command palette,
 /// whose group list can be a moment stale.
-pub async fn members(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    let parsed: DirectoryMembersBody = match serde_json::from_slice(&body) {
+pub async fn members(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let parsed: DirectoryMembersBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -1069,21 +1050,15 @@ pub async fn members(
 /// The projection deliberately omits `phone`: nothing renders it, and it is the
 /// most re-identifying column on the row, so it does not cross this boundary at
 /// all rather than crossing it and being ignored.
-pub async fn users(
-    State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, AppError> {
-    let parsed: DirectoryUsersBody = match serde_json::from_slice(&body) {
+pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Response, AppError> {
+    let parsed: DirectoryUsersBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
     // The block check is answered for the AUTHENTICATED caller, never for a
     // body-named one: "is A blocked by B" for arbitrary A and B would publish
     // the block graph.
-    let who = match authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    let who = match authed_user(&state, &req, None).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };
@@ -1170,16 +1145,13 @@ pub async fn users(
 /// applies, because guessing slugs is the only way to use it.
 pub async fn group_by_slug(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: GroupBySlugBody = match serde_json::from_slice(&body) {
+    let parsed: GroupBySlugBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    if let Err(resp) = authed_user(&state, &headers, &method, &uri, &body, None).await? {
+    if let Err(resp) = authed_user(&state, &req, None).await? {
         return Ok(resp);
     }
 
@@ -1214,25 +1186,13 @@ pub async fn group_by_slug(
 /// caller participates in.
 pub async fn conversations(
     State(state): State<AppState>,
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
+    req: RawRequest,
 ) -> Result<Response, AppError> {
-    let parsed: DirectoryConversationsBody = match serde_json::from_slice(&body) {
+    let parsed: DirectoryConversationsBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
-    let who = match authed_user(
-        &state,
-        &headers,
-        &method,
-        &uri,
-        &body,
-        parsed.user_id.as_deref(),
-    )
-    .await?
-    {
+    let who = match authed_user(&state, &req, parsed.user_id.as_deref()).await? {
         Ok(u) => u,
         Err(resp) => return Ok(resp),
     };

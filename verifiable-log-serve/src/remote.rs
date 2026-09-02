@@ -76,9 +76,16 @@ pub(crate) fn gate_format_version(body: &str) -> Result<()> {
 /// [`ServeError::LogTooOld`] turns that silent wrong answer into an actionable
 /// one, which is the whole point of having a version gate.
 pub(crate) fn gate_leaf_format_version(body: &str) -> Result<()> {
-    gate_format_version(body)?;
+    // One parse, then both bounds — the ceiling still reports first, exactly as
+    // it did when this delegated to `gate_format_version` and re-parsed.
     let probe: FormatProbe = serde_json::from_str(body)
         .map_err(|e| ServeError::Http(format!("read manifest format_version: {e}")))?;
+    if probe.format_version > FORMAT_VERSION {
+        return Err(ServeError::VersionSkew {
+            served: probe.format_version,
+            supported: FORMAT_VERSION,
+        });
+    }
     if probe.format_version < MIN_LEAF_FORMAT_VERSION {
         return Err(ServeError::LogTooOld {
             served: probe.format_version,

@@ -31,13 +31,13 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use verifiable_log::SigningKey;
 use tiny_http::{Method, Request, Response, Server};
 use verifiable_log_builder::{build_bundle, source};
 
-use crate::bundle::Bundle;
+use crate::bundle::{now_ms, Bundle};
 use crate::error::{Result, ServeError};
 use crate::group::verify_group_in_bundle;
 use crate::layout;
@@ -145,7 +145,7 @@ impl Shared {
 
         // The serve runtime is allowed the clock; the builder stays deterministic
         // by taking the timestamp as an argument.
-        let bundle = build_bundle(&rows, &self.signing_key, current_unix_ms())?;
+        let bundle = build_bundle(&rows, &self.signing_key, now_ms())?;
 
         // The builder and serve crates carry byte-identical bundle shapes; round
         // -trip through JSON rather than depend on the builder's concrete type.
@@ -381,11 +381,3 @@ fn handle_verify_group(request: Request, shared: &Shared, encoded_id: &str) {
     }
 }
 
-/// Current time in milliseconds since the Unix epoch (for the STH timestamp).
-/// A pre-epoch clock — never expected — clamps to 0 rather than panicking.
-fn current_unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}

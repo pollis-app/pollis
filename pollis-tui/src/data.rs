@@ -63,9 +63,13 @@ impl ConversationTree {
     }
 
     /// Total conversation count (channels + DM channels + DM requests) — handy
-    /// for a "3 conversations" status line and for tests.
+    /// for a "3 conversations" status line and for tests. Counted rather than
+    /// measured off `conversation_ids`, which would clone every id: the status
+    /// line calls this on every rendered frame.
     pub fn len(&self) -> usize {
-        self.conversation_ids().len()
+        self.groups.iter().map(|g| g.channels.len()).sum::<usize>()
+            + self.dm_channels.len()
+            + self.dm_requests.len()
     }
 
     pub fn is_empty(&self) -> bool {

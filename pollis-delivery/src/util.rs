@@ -146,6 +146,16 @@ pub fn bind_chunks<T>(items: &[T], reserved: usize) -> std::slice::Chunks<'_, T>
     items.chunks(per_chunk)
 }
 
+/// The read paths' `IN (…)` chunk size — deliberately far below
+/// [`MAX_BIND_PARAMS`], with room for the fixed leading parameters.
+///
+/// Four modules (`directory`, `account_reads`, `reads`, `push`) each declared
+/// their own `const BIND_CHUNK: usize = 100;`. They agreed, which is exactly why
+/// nobody would have noticed when one of them stopped agreeing — and the number
+/// is a bound on a statement SQLite will refuse to prepare, so a divergence
+/// surfaces as a 500 on whichever read happened to get a long list.
+pub const BIND_CHUNK: usize = 100;
+
 /// `?first,?first+1,…` for `count` values — the `IN (…)` body.
 pub fn placeholders(count: usize, first: usize) -> String {
     let mut out = String::with_capacity(count * 5);
@@ -157,4 +167,25 @@ pub fn placeholders(count: usize, first: usize) -> String {
         out.push_str(&(first + i).to_string());
     }
     out
+}
+
+// ── base64 (#… this sweep) ───────────────────────────────────────────────────
+//
+// Every binary field on the wire is STANDARD base64. Thirteen copies of these
+// two functions had accumulated across ten modules in three flavours — `Result`,
+// `Option`, and a differently-named encoder — plus two open-coded blocks. They
+// were identical, so nothing was broken; they were also thirteen places to
+// change if the alphabet or padding ever had to move, which is the shape of
+// every silent divergence this crate keeps writing tests against.
+
+/// Encode bytes as STANDARD base64 — the encoding every binary wire field uses.
+pub fn b64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Decode STANDARD base64. Callers that only care whether it parsed use `.ok()`.
+pub fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
+    use base64::Engine as _;
+    Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
 }

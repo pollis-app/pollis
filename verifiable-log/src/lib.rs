@@ -1,7 +1,7 @@
 //! # verifiable-log
 //!
 //! A generic, tenant-agnostic **verifiable append-only log** built on an
-//! RFC 6962-style Merkle tree, with Ed25519 Signed Tree Heads and the two
+//! RFC 6962-style Merkle tree, with ML-DSA-44 Signed Tree Heads and the two
 //! standard proofs (inclusion + consistency). It is the reusable
 //! Key-Transparency core that later tenants (an MLS commit log, an
 //! account-key directory) and a serve layer are built on.

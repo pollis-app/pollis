@@ -2,7 +2,7 @@
 //!
 //! M0 gives us the skeleton (boot → event loop → quit). M1 adds the auth
 //! screens: first-device signup (email → OTP → PIN) and returning-user unlock.
-//! M2 will graft the group/channel/DM panes onto the [`Screen::Home`] state.
+//! M2 grafts the group/channel/DM panes onto the [`Screen::Home`] state.
 
 use std::sync::Arc;
 use std::time::Duration;

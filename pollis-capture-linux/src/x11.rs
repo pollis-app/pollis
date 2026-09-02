@@ -41,10 +41,10 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use pollis_capture_proto::CaptureMsg;
+use pollis_capture_proto::{now_us, CaptureMsg};
 use tokio::sync::mpsc;
 use xcb::{shm, x, Xid};
 
@@ -56,79 +56,82 @@ struct CaptureRegion {
     height: u16,
 }
 
+/// Fetch a CRTC's geometry, or `None` if the request fails.
+fn crtc_info(
+    conn: &xcb::Connection,
+    crtc: xcb::randr::Crtc,
+) -> Option<xcb::randr::GetCrtcInfoReply> {
+    let cookie = conn.send_request(&xcb::randr::GetCrtcInfo {
+        crtc,
+        config_timestamp: x::CURRENT_TIME,
+    });
+    conn.wait_for_reply(cookie).ok()
+}
+
+impl CaptureRegion {
+    /// A CRTC becomes a capture region only if it has a non-zero size.
+    fn from_crtc(c: &xcb::randr::GetCrtcInfoReply, what: &str) -> Option<Self> {
+        if c.width() == 0 || c.height() == 0 {
+            return None;
+        }
+        eprintln!(
+            "[capture/x11] capturing {what} {}x{} at +{}+{}",
+            c.width(),
+            c.height(),
+            c.x(),
+            c.y()
+        );
+        Some(CaptureRegion {
+            x: c.x(),
+            y: c.y(),
+            width: c.width(),
+            height: c.height(),
+        })
+    }
+}
+
+/// The RandR primary output's CRTC, if there is one and it is usable.
+fn primary_region(conn: &xcb::Connection, root: x::Window) -> Option<CaptureRegion> {
+    let cookie = conn.send_request(&xcb::randr::GetOutputPrimary { window: root });
+    let output = conn.wait_for_reply(cookie).ok()?.output();
+    // `Xid::is_none()` lives on every XID newtype the xcb 1.x bindings
+    // expose (Output / Crtc / Mode / …). It's the typed equivalent of
+    // X11's `None` sentinel — `0` for the resource id — without
+    // assuming the generated bindings expose a free `x::NONE` const
+    // (they don't — only the atom-shaped one, `x::ATOM_NONE`).
+    if output.is_none() {
+        return None;
+    }
+    let cookie = conn.send_request(&xcb::randr::GetOutputInfo {
+        output,
+        config_timestamp: x::CURRENT_TIME,
+    });
+    let crtc = conn.wait_for_reply(cookie).ok()?.crtc();
+    if crtc.is_none() {
+        return None;
+    }
+    CaptureRegion::from_crtc(&crtc_info(conn, crtc)?, "primary output")
+}
+
+/// The first active CRTC RandR reports, if any.
+fn first_active_region(conn: &xcb::Connection, root: x::Window) -> Option<CaptureRegion> {
+    let cookie = conn.send_request(&xcb::randr::GetScreenResourcesCurrent { window: root });
+    let res = conn.wait_for_reply(cookie).ok()?;
+    res.crtcs().iter().find_map(|&crtc| {
+        let c = crtc_info(conn, crtc)?;
+        if c.mode().is_none() {
+            return None;
+        }
+        CaptureRegion::from_crtc(&c, "CRTC")
+    })
+}
+
 /// Pick the monitor to capture. Prefer the RandR primary output; fall
 /// back to the first connected/active CRTC; finally fall back to the
 /// whole root window if RandR is unavailable (very old server).
 fn pick_region(conn: &xcb::Connection, root: x::Window) -> Result<CaptureRegion> {
-    // Try RandR primary first.
-    let primary = conn.send_request(&xcb::randr::GetOutputPrimary { window: root });
-    if let Ok(primary) = conn.wait_for_reply(primary) {
-        let output = primary.output();
-        // `Xid::is_none()` lives on every XID newtype the xcb 1.x bindings
-        // expose (Output / Crtc / Mode / …). It's the typed equivalent of
-        // X11's `None` sentinel — `0` for the resource id — without
-        // assuming the generated bindings expose a free `x::NONE` const
-        // (they don't — only the atom-shaped one, `x::ATOM_NONE`).
-        if !output.is_none() {
-            let info = conn.send_request(&xcb::randr::GetOutputInfo {
-                output,
-                config_timestamp: x::CURRENT_TIME,
-            });
-            if let Ok(info) = conn.wait_for_reply(info) {
-                let crtc = info.crtc();
-                if !crtc.is_none() {
-                    let crtc_info = conn.send_request(&xcb::randr::GetCrtcInfo {
-                        crtc,
-                        config_timestamp: x::CURRENT_TIME,
-                    });
-                    if let Ok(c) = conn.wait_for_reply(crtc_info) {
-                        if c.width() > 0 && c.height() > 0 {
-                            eprintln!(
-                                "[capture/x11] capturing primary output {}x{} at +{}+{}",
-                                c.width(),
-                                c.height(),
-                                c.x(),
-                                c.y()
-                            );
-                            return Ok(CaptureRegion {
-                                x: c.x(),
-                                y: c.y(),
-                                width: c.width(),
-                                height: c.height(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // No primary — first active CRTC.
-    let res = conn.send_request(&xcb::randr::GetScreenResourcesCurrent { window: root });
-    if let Ok(res) = conn.wait_for_reply(res) {
-        for &crtc in res.crtcs() {
-            let crtc_info = conn.send_request(&xcb::randr::GetCrtcInfo {
-                crtc,
-                config_timestamp: x::CURRENT_TIME,
-            });
-            if let Ok(c) = conn.wait_for_reply(crtc_info) {
-                if c.width() > 0 && c.height() > 0 && !c.mode().is_none() {
-                    eprintln!(
-                        "[capture/x11] capturing CRTC {}x{} at +{}+{}",
-                        c.width(),
-                        c.height(),
-                        c.x(),
-                        c.y()
-                    );
-                    return Ok(CaptureRegion {
-                        x: c.x(),
-                        y: c.y(),
-                        width: c.width(),
-                        height: c.height(),
-                    });
-                }
-            }
-        }
+    if let Some(region) = primary_region(conn, root).or_else(|| first_active_region(conn, root)) {
+        return Ok(region);
     }
 
     // RandR absent or no usable output: whole root window.
@@ -290,10 +293,7 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         // 32bpp at these widths on the common servers; X pads to the
         // scanline pad which is 32 bits == one pixel, so width*4 holds).
         let stride = width as u32 * bytes_per_pixel as u32;
-        let timestamp_us = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_micros() as i64)
-            .unwrap_or(0);
+        let timestamp_us = now_us();
 
         // Copy out of SHM — the next GetImage overwrites it. Last-frame-
         // wins: try_send fails fast when the socket can't keep up.
