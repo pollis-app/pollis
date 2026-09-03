@@ -15,7 +15,7 @@ export const ChannelPage: React.FC = observer(() => {
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/channels/$channelId" });
   const setSelectedChannelId = appStore.setSelectedChannelId;
   const setSelectedGroupId = appStore.setSelectedGroupId;
-  const markConversationRead = useMarkConversationRead(appStore.currentUser?.id ?? null);
+  const { mutate: markConversationRead } = useMarkConversationRead(appStore.currentUser?.id ?? null);
   const pendingDeleteChannelId = appStore.pendingDeleteChannelId;
   const setPendingDeleteChannelId = appStore.setPendingDeleteChannelId;
   const { togglePins } = useRightPanel();
@@ -34,7 +34,7 @@ export const ChannelPage: React.FC = observer(() => {
     // visit left the bottom-bar count stuck.
     // Clears the badge optimistically AND advances the persisted cursor, so
     // the channel is still read after a restart (#844).
-    markConversationRead.mutate(channelId);
+    markConversationRead(channelId);
     return () => { setSelectedChannelId(null); };
   }, [groupId, channelId, setSelectedGroupId, setSelectedChannelId, markConversationRead]);
 

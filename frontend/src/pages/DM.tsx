@@ -26,7 +26,7 @@ export const DMPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
   const setSelectedConversationId = appStore.setSelectedConversationId;
-  const markConversationRead = useMarkConversationRead(appStore.currentUser?.id ?? null);
+  const { mutate: markConversationRead } = useMarkConversationRead(appStore.currentUser?.id ?? null);
   const currentUser = appStore.currentUser;
   const setOutgoingCall = appStore.setOutgoingCall;
   const outgoingCall = appStore.outgoingCall;
@@ -43,7 +43,7 @@ export const DMPage: React.FC = observer(() => {
     // not just the DMs list click handler.
     // Optimistic badge clear AND a durable cursor, so this DM stays read
     // across a restart (#844).
-    markConversationRead.mutate(conversationId);
+    markConversationRead(conversationId);
     return () => { setSelectedConversationId(null); };
   }, [conversationId, setSelectedConversationId, markConversationRead]);
 

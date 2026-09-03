@@ -120,6 +120,11 @@ touching a list:
   inline arrow, a `useMutation` result (new object every render), or an array/Map
   rebuilt per render. Before adding memoisation, check whether the existing memo is
   simply being defeated.
+- Never list a `useMutation` result in a `useEffect` dependency array: every
+  mutation state change re-renders the caller, the effect re-runs, and if it calls
+  `mutate` the cycle never ends (the Channel and DM pages did this with
+  `markConversationRead` and grew the renderer past 5 GB). Destructure the stable
+  `mutate` instead; `tests/mutation-effect-deps.test.ts` enforces it.
 
 Concretely, in the message log:
 
