@@ -302,6 +302,35 @@ const invokeCounts: Record<string, number> = {};
   }
 };
 
+/**
+ * Reply gating (#1040).
+ *
+ * Real IPC has latency; this mock answers on the microtask queue. A race the
+ * app can only lose while a reply is in flight — the picker's stored
+ * "share sound" default landing after the user has already flipped the
+ * switch — is therefore unreachable here unless a spec can hold a command's
+ * reply open. `window.__tauriHold(cmd)` parks every reply for `cmd` (the
+ * command still runs, only its answer waits); `window.__tauriRelease(cmd)`
+ * lets the parked replies through in order. The last args each command was
+ * called with are kept in `window.__tauriLastArgs` so a spec can check what
+ * the app eventually asked for.
+ */
+const heldReplies = new Map<string, Array<() => void>>();
+const lastInvokeArgs: Record<string, unknown> = {};
+(window as any).__tauriLastArgs = lastInvokeArgs;
+(window as any).__tauriHold = (command: string) => {
+  if (!heldReplies.has(command)) {
+    heldReplies.set(command, []);
+  }
+};
+(window as any).__tauriRelease = (command: string) => {
+  const waiting = heldReplies.get(command) ?? [];
+  heldReplies.delete(command);
+  for (const settle of waiting) {
+    settle();
+  }
+};
+
 function generateId(): string {
   return Math.random().toString(36).slice(2, 11);
 }
@@ -1501,11 +1530,20 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   // hop instead parks the effect behind every timer the app has queued, which
   // is long enough for a test to look at the result and find nothing there.
   invokeCounts[command] = (invokeCounts[command] ?? 0) + 1;
+  lastInvokeArgs[command] = args ?? {};
   return new Promise((resolve, reject) => {
+    let settle: () => void;
     try {
-      resolve(handleCommand(command, args ?? {}) as T);
+      const result = handleCommand(command, args ?? {}) as T;
+      settle = () => resolve(result);
     } catch (err) {
-      reject(err);
+      settle = () => reject(err);
+    }
+    const held = heldReplies.get(command);
+    if (held) {
+      held.push(settle);
+    } else {
+      settle();
     }
   });
 }

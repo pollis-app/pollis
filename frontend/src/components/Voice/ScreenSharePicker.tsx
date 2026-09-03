@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Monitor, Square, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useTranslation } from "react-i18next";
@@ -45,11 +45,15 @@ export const ScreenSharePicker: React.FC = observer(() => {
   // — the same preference the Linux path reads, since it has no picker.
   const [withAudio, setWithAudio] = useState(false);
   const audioScope = screenShareSession.audioScope();
+  // The stored preference arrives asynchronously. If the user flips the
+  // switch before it lands, their explicit choice wins over the remembered
+  // default (#1040) — the preference only seeds an untouched switch.
+  const audioTouched = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     void screenShareSession.resolveWithAudio().then((v) => {
-      if (!cancelled) {
+      if (!cancelled && !audioTouched.current) {
         setWithAudio(v);
       }
     });
@@ -57,6 +61,11 @@ export const ScreenSharePicker: React.FC = observer(() => {
       cancelled = true;
     };
   }, []);
+
+  function handleAudioToggle(next: boolean) {
+    audioTouched.current = true;
+    setWithAudio(next);
+  }
 
   // Esc cancels (matches the rest of the app's modal-replacement flows).
   useEffect(() => {
@@ -136,7 +145,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
           <Switch
             label={t("share.audioToggle")}
             checked={withAudio}
-            onChange={setWithAudio}
+            onChange={handleAudioToggle}
             disabled={busy}
             data-testid="screen-share-audio-toggle"
           />
@@ -211,6 +220,7 @@ export const ScreenSharePicker: React.FC = observer(() => {
 interface SourceCardProps {
   disabled: boolean;
   onPick: () => void;
+  testId: string;
   title: string;
   subtitle?: string;
   /** PNG data URL — when present, renders as the tile preview. When
@@ -223,6 +233,7 @@ interface SourceCardProps {
 const SourceCardShell: React.FC<SourceCardProps> = ({
   disabled,
   onPick,
+  testId,
   title,
   subtitle,
   thumbnail,
@@ -232,6 +243,7 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
     type="button"
     onClick={onPick}
     disabled={disabled}
+    data-testid={testId}
     className="text-start font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent rounded-[6px]"
     style={{ minHeight: 100 }}
   >
@@ -285,6 +297,7 @@ const DisplayCard: React.FC<{
   <SourceCardShell
     disabled={disabled}
     onPick={onPick}
+    testId={`screen-share-source-display-${display.id}`}
     title={display.name}
     // Suppress the dim subtitle when the backend didn't supply real
     // dimensions (0×0 looked broken; "—" would be noise) — i.e. under
@@ -316,6 +329,7 @@ const WindowCard: React.FC<{
     <SourceCardShell
       disabled={disabled}
       onPick={onPick}
+      testId={`screen-share-source-window-${window.id}`}
       title={primary}
       // Never show "0 × 0" for window sources; the thumbnail is the
       // primary visual identifier, and per-window size is only knowable

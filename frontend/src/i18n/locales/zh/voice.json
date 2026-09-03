@@ -61,12 +61,12 @@
     "noDisplays": "没有可用的显示器。",
     "noWindows": "没有可用的窗口。",
     "untitledWindow": "无标题窗口",
-    "audioToggle": "Share sound",
-    "audioScopeSource": "Shares the audio of whatever you pick.",
-    "audioScopeSystem": "Shares everything your computer is playing.",
-    "audioExcludesCall": "The call itself is never included.",
-    "audioLive": "Sound on",
-    "audioPending": "Starting sound…",
+    "audioToggle": "共享声音",
+    "audioScopeSource": "共享你所选内容的声音。",
+    "audioScopeSystem": "共享电脑正在播放的所有声音。",
+    "audioExcludesCall": "通话本身绝不会被包含在内。",
+    "audioLive": "声音已开启",
+    "audioPending": "正在开启声音…",
     "audioOffLabel": "Sharing without sound"
   },
   "camera": {
@@ -162,8 +162,8 @@
     "behaviorHeading": "行为",
     "autoJoinVoice": "自动加入语音",
     "autoJoinVoiceDescription": "打开语音频道时自动加入语音。关闭后可以先查看频道中有谁，再决定是否加入。",
-    "screenShareAudio": "Share sound by default",
-    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
+    "screenShareAudio": "默认共享声音",
+    "screenShareAudioDescription": "共享屏幕时一并共享电脑的声音。通话本身绝不会被包含在内。在 Linux 上，这里是唯一的开启位置，因为来源由系统对话框选择。"
   },
   "joinError": {
     "unreachable": "无法连接到语音服务器 — 请检查网络后重试。",

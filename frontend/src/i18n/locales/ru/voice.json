@@ -64,12 +64,12 @@
     "noDisplays": "Доступных экранов нет.",
     "noWindows": "Доступных окон нет.",
     "untitledWindow": "Окно без названия",
-    "audioToggle": "Share sound",
-    "audioScopeSource": "Shares the audio of whatever you pick.",
-    "audioScopeSystem": "Shares everything your computer is playing.",
-    "audioExcludesCall": "The call itself is never included.",
-    "audioLive": "Sound on",
-    "audioPending": "Starting sound…",
+    "audioToggle": "Передавать звук",
+    "audioScopeSource": "Передаёт звук того, что вы выберете.",
+    "audioScopeSystem": "Передаёт всё, что воспроизводит компьютер.",
+    "audioExcludesCall": "Сам звонок никогда не включается.",
+    "audioLive": "Звук включён",
+    "audioPending": "Запуск звука…",
     "audioOffLabel": "Sharing without sound"
   },
   "camera": {
@@ -165,8 +165,8 @@
     "behaviorHeading": "Поведение",
     "autoJoinVoice": "Автовход в голосовой канал",
     "autoJoinVoiceDescription": "Автоматически подключаться к голосу при открытии голосового канала. Отключите, чтобы сначала посмотреть, кто в канале.",
-    "screenShareAudio": "Share sound by default",
-    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
+    "screenShareAudio": "Передавать звук по умолчанию",
+    "screenShareAudioDescription": "Включать звук компьютера при показе экрана. Сам звонок никогда не включается. В Linux это единственное место, где его можно включить, потому что источник выбирается в системном диалоге."
   },
   "joinError": {
     "unreachable": "Не удалось связаться с голосовым сервером — проверьте подключение и попробуйте снова.",

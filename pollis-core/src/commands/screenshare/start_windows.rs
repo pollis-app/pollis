@@ -386,6 +386,8 @@ async fn start_windows_audio(
         return;
     };
     let mut resampler = SharedAudioResampler::new(SHARED_AUDIO_RATE_HZ);
+    let state_for_task = Arc::clone(state);
+    let room_for_task = std::sync::Arc::clone(room);
     tokio::spawn(async move {
         while let Some(block) = rx.recv().await {
             if resampler.src_rate() != block.sample_rate {
@@ -406,6 +408,22 @@ async fn start_windows_audio(
             }
         }
         eprintln!("[screenshare/audio] windows publish loop ended");
+        // The capture thread hung up while the share is still running:
+        // a mid-share audio failure (device removed, WASAPI error), not a
+        // stop. Retire the track rather than leave it published with
+        // nothing behind it (#1040); on a real stop `active` is already
+        // false and `stop_screen_share` owns the teardown.
+        if active.load(std::sync::atomic::Ordering::Acquire) {
+            super::audio::unpublish_shared_audio(&state_for_task, &room_for_task).await;
+            drop(source);
+            emit(
+                &state_for_task,
+                ScreenShareEvent::LocalAudioUnavailable {
+                    message: "Audio capture stopped. Sharing without sound.".into(),
+                },
+            )
+            .await;
+        }
     });
 }
 

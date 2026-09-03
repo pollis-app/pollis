@@ -62,12 +62,12 @@
     "noDisplays": "No hay pantallas disponibles.",
     "noWindows": "No hay ventanas disponibles.",
     "untitledWindow": "Ventana sin título",
-    "audioToggle": "Share sound",
-    "audioScopeSource": "Shares the audio of whatever you pick.",
-    "audioScopeSystem": "Shares everything your computer is playing.",
-    "audioExcludesCall": "The call itself is never included.",
-    "audioLive": "Sound on",
-    "audioPending": "Starting sound…",
+    "audioToggle": "Compartir sonido",
+    "audioScopeSource": "Comparte el audio de lo que elijas.",
+    "audioScopeSystem": "Comparte todo lo que esté sonando en tu equipo.",
+    "audioExcludesCall": "La propia llamada nunca se incluye.",
+    "audioLive": "Sonido activado",
+    "audioPending": "Iniciando el sonido…",
     "audioOffLabel": "Sharing without sound"
   },
   "camera": {
@@ -163,8 +163,8 @@
     "behaviorHeading": "Comportamiento",
     "autoJoinVoice": "Unirse a voz automáticamente",
     "autoJoinVoiceDescription": "Entra automáticamente en la voz al abrir un canal de voz. Desactívalo para ver quién hay en el canal antes de entrar.",
-    "screenShareAudio": "Share sound by default",
-    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
+    "screenShareAudio": "Compartir sonido por defecto",
+    "screenShareAudioDescription": "Incluye el audio de tu equipo al compartir pantalla. La propia llamada nunca se incluye. En Linux este es el único sitio donde activarlo, porque la selección de la fuente la hace el diálogo del sistema."
   },
   "joinError": {
     "unreachable": "No se ha podido contactar con el servidor de voz: comprueba tu conexión e inténtalo de nuevo.",

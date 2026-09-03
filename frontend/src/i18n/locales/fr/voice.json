@@ -62,12 +62,12 @@
     "noDisplays": "Aucun écran disponible.",
     "noWindows": "Aucune fenêtre disponible.",
     "untitledWindow": "Fenêtre sans titre",
-    "audioToggle": "Share sound",
-    "audioScopeSource": "Shares the audio of whatever you pick.",
-    "audioScopeSystem": "Shares everything your computer is playing.",
-    "audioExcludesCall": "The call itself is never included.",
-    "audioLive": "Sound on",
-    "audioPending": "Starting sound…",
+    "audioToggle": "Partager le son",
+    "audioScopeSource": "Partage le son de ce que vous choisissez.",
+    "audioScopeSystem": "Partage tout ce que votre ordinateur diffuse.",
+    "audioExcludesCall": "L'appel lui-même n'est jamais inclus.",
+    "audioLive": "Son activé",
+    "audioPending": "Démarrage du son…",
     "audioOffLabel": "Sharing without sound"
   },
   "camera": {
@@ -163,8 +163,8 @@
     "behaviorHeading": "Comportement",
     "autoJoinVoice": "Rejoindre le vocal automatiquement",
     "autoJoinVoiceDescription": "Rejoint automatiquement le vocal à l'ouverture d'un canal vocal. Désactivez cette option pour voir qui est dans le canal avant de le rejoindre.",
-    "screenShareAudio": "Share sound by default",
-    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
+    "screenShareAudio": "Partager le son par défaut",
+    "screenShareAudioDescription": "Inclut le son de votre ordinateur lors d'un partage d'écran. L'appel lui-même n'est jamais inclus. Sous Linux, c'est le seul endroit où l'activer, car la sélection de la source passe par la boîte de dialogue du système."
   },
   "joinError": {
     "unreachable": "Impossible de joindre le serveur vocal — vérifiez votre connexion et réessayez.",

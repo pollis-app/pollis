@@ -954,6 +954,14 @@ Five things to know before writing one:
   number rather than an impression — `ipc-efficiency.spec.ts` pins how many calls
   a screen or a focus round is allowed. Counting lives in the shared mock, not in
   a per-spec wrapper, because every spec imports the same module.
+- **Replies can be held open (#1040).** `window.__tauriHold(cmd)` parks every
+  reply for `cmd` (the command still runs; only its answer waits) and
+  `window.__tauriRelease(cmd)` lets them through in order. The mock answers on
+  the microtask queue, so any race the app can only lose while a reply is in
+  flight is unreachable without this — `screenshare-picker.spec.ts` uses it to
+  flip the share-sound switch before the stored default lands. The last
+  arguments each command was called with are in `window.__tauriLastArgs`, for
+  asserting what the app eventually asked the backend for.
 - **Realtime events are drivable too (#874).** Every `Channel` the app opens is
   registered, and `window.__emitRealtimeEvent(event)` pushes one through the live
   subscription (the most recently created channel — StrictMode double-invokes

@@ -27,8 +27,8 @@ use crate::{error::Result, state::AppState};
 
 use super::{
     audio::{
-        audio_error_message, emit, publish_shared_audio_track, SharedAudioResampler,
-        SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDIO_RATE_HZ,
+        audio_error_message, emit, publish_shared_audio_track, unpublish_shared_audio,
+        SharedAudioResampler, SHARED_AUDIO_FRAME_SAMPLES, SHARED_AUDIO_RATE_HZ,
     },
     codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec, resolve_screenshare_encoding},
     fail_capture,
@@ -626,12 +626,20 @@ pub async fn start_screen_share(
                 Ok(Some(CaptureMsg::Error { message })) => {
                     // Losing audio mid-share must not end the share: the
                     // user is still presenting, and the video half is
-                    // unaffected. Drop the pump and carry on silently.
+                    // unaffected. Drop the pump, then unpublish the track
+                    // and disarm the self-echo tap (#1040) — a published
+                    // track with no samples behind it keeps every viewer's
+                    // speaker indicator lit until the share ends, and an
+                    // armed tap keeps the mixer feeding a dead canceller.
+                    // The local source clone goes last, after unpublish,
+                    // matching `stop`'s ordering. A later `AudioFormat`
+                    // (device came back) republishes from scratch.
                     if let Some(reason) = audio_error_message(&message) {
                         eprintln!("[screenshare/audio] stopped mid-share: {reason}");
-                        audio_source = None;
                         resampler = None;
                         echo = None;
+                        unpublish_shared_audio(&state_for_task, &room_for_task).await;
+                        audio_source = None;
                         emit(
                             &state_for_task,
                             ScreenShareEvent::LocalAudioUnavailable {

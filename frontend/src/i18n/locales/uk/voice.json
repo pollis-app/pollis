@@ -64,12 +64,12 @@
     "noDisplays": "Немає доступних екранів.",
     "noWindows": "Немає доступних вікон.",
     "untitledWindow": "Вікно без назви",
-    "audioToggle": "Share sound",
-    "audioScopeSource": "Shares the audio of whatever you pick.",
-    "audioScopeSystem": "Shares everything your computer is playing.",
-    "audioExcludesCall": "The call itself is never included.",
-    "audioLive": "Sound on",
-    "audioPending": "Starting sound…",
+    "audioToggle": "Передавати звук",
+    "audioScopeSource": "Передає звук того, що ви оберете.",
+    "audioScopeSystem": "Передає все, що відтворює комп'ютер.",
+    "audioExcludesCall": "Сам дзвінок ніколи не включається.",
+    "audioLive": "Звук увімкнено",
+    "audioPending": "Запуск звуку…",
     "audioOffLabel": "Sharing without sound"
   },
   "camera": {
@@ -165,8 +165,8 @@
     "behaviorHeading": "Поведінка",
     "autoJoinVoice": "Автоприєднання до голосу",
     "autoJoinVoiceDescription": "Автоматично приєднуватися до голосу під час відкриття голосового каналу. Вимкніть, щоб спершу побачити, хто в каналі.",
-    "screenShareAudio": "Share sound by default",
-    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
+    "screenShareAudio": "Передавати звук за замовчуванням",
+    "screenShareAudioDescription": "Додавати звук комп'ютера під час демонстрації екрана. Сам дзвінок ніколи не включається. У Linux це єдине місце, де його можна ввімкнути, бо джерело обирається в системному діалозі."
   },
   "joinError": {
     "unreachable": "Не вдалося зв'язатися з голосовим сервером — перевірте з'єднання та спробуйте ще раз.",

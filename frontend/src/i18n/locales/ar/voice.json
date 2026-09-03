@@ -66,12 +66,12 @@
     "noDisplays": "لا توجد شاشات متاحة.",
     "noWindows": "لا توجد نوافذ متاحة.",
     "untitledWindow": "نافذة بلا عنوان",
-    "audioToggle": "Share sound",
-    "audioScopeSource": "Shares the audio of whatever you pick.",
-    "audioScopeSystem": "Shares everything your computer is playing.",
-    "audioExcludesCall": "The call itself is never included.",
-    "audioLive": "Sound on",
-    "audioPending": "Starting sound…",
+    "audioToggle": "مشاركة الصوت",
+    "audioScopeSource": "يشارك صوت ما تختاره.",
+    "audioScopeSystem": "يشارك كل ما يشغّله جهازك.",
+    "audioExcludesCall": "المكالمة نفسها لا تُضمَّن أبدًا.",
+    "audioLive": "الصوت مفعّل",
+    "audioPending": "جارٍ تشغيل الصوت…",
     "audioOffLabel": "Sharing without sound"
   },
   "camera": {
@@ -167,8 +167,8 @@
     "behaviorHeading": "السلوك",
     "autoJoinVoice": "الانضمام التلقائي إلى الصوت",
     "autoJoinVoiceDescription": "الانضمام تلقائيًا إلى الصوت عند فتح قناة صوتية. عطّله لمعاينة من في القناة قبل الانضمام.",
-    "screenShareAudio": "Share sound by default",
-    "screenShareAudioDescription": "Include your computer's audio when you share a screen. The call itself is never included. On Linux this is the only place to turn it on, because the system dialog handles source selection."
+    "screenShareAudio": "مشاركة الصوت افتراضيًا",
+    "screenShareAudioDescription": "تضمين صوت جهازك عند مشاركة الشاشة. المكالمة نفسها لا تُضمَّن أبدًا. على Linux هذا هو المكان الوحيد لتفعيله، لأن مربع حوار النظام هو من يتولى اختيار المصدر."
   },
   "joinError": {
     "unreachable": "تعذّر الوصول إلى خادم الصوت — تحقق من اتصالك وحاول مرة أخرى.",

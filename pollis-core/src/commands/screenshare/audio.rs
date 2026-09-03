@@ -34,7 +34,11 @@ use livekit::{
 
 use crate::state::AppState;
 
-use super::ScreenShareEvent;
+use super::{
+    self_echo::{self, SelfEchoSlot},
+    state::ScreenShareState,
+    ScreenShareEvent,
+};
 
 /// The rate every shared-audio track publishes at. Matches
 /// `voice_apm::DEFAULT_APM_RATE_HZ` and LiveKit's Opus encoding rate, so
@@ -249,6 +253,54 @@ pub(super) async fn publish_shared_audio_track(
     Some(source)
 }
 
+/// Take the shared-audio track + source out of state and disarm the
+/// self-echo tap — the state transition behind an audio-only failure
+/// mid-share. Returns the pair for the caller to unpublish: that needs
+/// the room, and keeping the room out of here is what lets a unit test
+/// prove the transition leaves nothing behind.
+///
+/// Both halves come out together on purpose. Leaving the track parked
+/// would keep every viewer's speaker indicator lit on a track that no
+/// longer carries a sample; leaving the tap armed would keep the voice
+/// mixer feeding a canceller nothing is reading any more.
+pub(super) fn retire_shared_audio(
+    ss: &mut ScreenShareState,
+    slot: &SelfEchoSlot,
+) -> Option<(LocalAudioTrack, NativeAudioSource)> {
+    self_echo::disarm(slot);
+    let track = ss.local_audio_track.take();
+    let source = ss.local_audio_source.take();
+    match (track, source) {
+        (Some(track), Some(source)) => Some((track, source)),
+        // A track without its source (or the reverse) is not a state
+        // `publish_shared_audio_track` can produce; if one half is
+        // somehow missing there is nothing coherent to unpublish.
+        _ => None,
+    }
+}
+
+/// Tear down the shared-audio track mid-share, leaving the video share
+/// untouched. Unpublishes before dropping the source, in the same order
+/// `stop` uses, so an in-flight `capture_frame` cannot outlive its
+/// backing. Idempotent: a second call finds nothing parked and returns.
+pub(super) async fn unpublish_shared_audio(state: &Arc<AppState>, room: &Arc<Room>) {
+    // Same lock order as `stop_screen_share`: screenshare, then voice.
+    let retired = {
+        let mut ss = state.screenshare.lock().await;
+        let voice = state.voice.lock().await;
+        retire_shared_audio(&mut ss, &voice.shared_audio_render)
+    };
+    let Some((track, source)) = retired else {
+        return;
+    };
+    let sid = track.sid();
+    if let Err(e) = room.local_participant().unpublish_track(&sid).await {
+        eprintln!("[screenshare/audio] unpublish error: {e}");
+    }
+    drop(source);
+    eprintln!("[screenshare/audio] shared-audio track unpublished");
+}
+
 /// Send one screen-share event without holding the state lock across the
 /// send. Shared by the audio paths, which emit from several places.
 pub(super) async fn emit(state: &Arc<AppState>, event: ScreenShareEvent) {
@@ -401,6 +453,68 @@ mod tests {
         // A bare prefix carries no reason, so it is not a usable message.
         assert_eq!(audio_error_message("audio:"), None);
         assert_eq!(audio_error_message("audio:   "), None);
+    }
+
+    /// A parked track + source, the shape `publish_shared_audio_track`
+    /// leaves in state once the track is live.
+    fn parked_state() -> ScreenShareState {
+        let source = NativeAudioSource::new(
+            AudioSourceOptions {
+                echo_cancellation: false,
+                noise_suppression: false,
+                auto_gain_control: false,
+            },
+            SHARED_AUDIO_RATE_HZ,
+            1,
+            100,
+        );
+        let track = LocalAudioTrack::create_audio_track(
+            "screenshare-audio",
+            RtcAudioSource::Native(source.clone()),
+        );
+        let mut ss = ScreenShareState::new();
+        ss.local_audio_source = Some(source);
+        ss.local_audio_track = Some(track);
+        ss
+    }
+
+    /// The #1040 regression: an `audio:` error mid-share must leave neither
+    /// the track parked (viewers' speaker indicator stays lit) nor the
+    /// self-echo tap armed (the mixer keeps feeding a dead canceller).
+    #[test]
+    fn retiring_shared_audio_clears_the_track_and_disarms_the_tap() {
+        let mut ss = parked_state();
+        let slot: SelfEchoSlot = Arc::new(std::sync::Mutex::new(None));
+        let armed = super::super::self_echo::SelfEchoCanceller::new(&slot);
+        assert!(armed.is_some());
+        assert!(slot.lock().unwrap().is_some());
+
+        let retired = retire_shared_audio(&mut ss, &slot);
+
+        assert!(retired.is_some(), "the live pair comes back for unpublishing");
+        assert!(ss.local_audio_track.is_none());
+        assert!(ss.local_audio_source.is_none());
+        assert!(slot.lock().unwrap().is_none(), "tap must be disarmed");
+        // The video half is untouched by an audio-only failure.
+        assert!(ss.local_track.is_none() && ss.local_source.is_none());
+    }
+
+    #[test]
+    fn retiring_shared_audio_twice_is_a_no_op() {
+        let mut ss = parked_state();
+        let slot: SelfEchoSlot = Arc::new(std::sync::Mutex::new(None));
+        assert!(retire_shared_audio(&mut ss, &slot).is_some());
+        assert!(retire_shared_audio(&mut ss, &slot).is_none());
+        assert!(slot.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn retiring_with_no_audio_live_still_disarms_the_tap() {
+        let mut ss = ScreenShareState::new();
+        let slot: SelfEchoSlot = Arc::new(std::sync::Mutex::new(None));
+        let _armed = super::super::self_echo::SelfEchoCanceller::new(&slot);
+        assert!(retire_shared_audio(&mut ss, &slot).is_none());
+        assert!(slot.lock().unwrap().is_none());
     }
 
     #[test]
