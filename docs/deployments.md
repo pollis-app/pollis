@@ -7,10 +7,10 @@ the codebase actually *ships*. Keep it updated when a build/deploy pipeline
 changes.
 
 There are **4 shipped executables/sites**, **4 running backend services**, and
-**2 managed data layers**. The repo's **37 workflows** split into: **10**
-build/deploy pipelines (the outputs above), **10** always-on CI gates, **12**
+**2 managed data layers**. The repo's **38 workflows** split into: **10**
+build/deploy pipelines (the outputs above), **11** always-on CI gates, **12**
 dispatch-only E2E runs, and **5** dispatch-only verification / ops tools. Every
-one of the 37 is accounted for below — if you are about to delete a workflow
+one of the 38 is accounted for below — if you are about to delete a workflow
 because it "looks unused", check its row first; most of them are idle **by
 design**.
 
@@ -231,6 +231,7 @@ design**.
 | `tla.yml` | TLC exhaustively model-checks both TLA+ specs — Spec A CommitLog (invariants I1+I2) + Spec B Delivery (I3+I4) — plus a "teeth" check that each broken variant still produces a counterexample. JVM-only, no Rust build. Path-filtered to `specs/tla/**`. |
 | `mobile-core-check.yml` | Two cross-compile gates (`android-check` / `ios-check`) build `pollis-core` for Android + iOS (aarch64, `--no-default-features`, matching the ubrn build) so mobile `#[cfg]` gate rot becomes red CI instead of a latent defect on the next mobile build. `ios-check` runs `cargo build`, not `cargo check`, because mobile links a vendored OpenSSL + SQLCipher and link-stage breakage is invisible to `check`; it then asserts the built artifact's minimum iOS version matches `IPHONEOS_DEPLOYMENT_TARGET` in `.cargo/config.toml`. That assertion is the one with teeth: a rustc/cc-rs deployment-target mismatch shipped once and blew up the release link on `___chkstk_darwin`, but the *debug* link survives it, so only reading the min-version back off the binary catches it without paying for a release build. Android gets link coverage from `android-build`; iOS has no artifact job, so it has to come from the gate. Plus (#706) an `android-build` job that assembles a real installable **APK** end to end (uniffi gen → 3-ABI `cargo-ndk` cross-compile → `expo prebuild` → Gradle release), uploaded as the `pollis-android-apk` artifact, and an `expo-doctor` config-health job. Path-filtered to `pollis-core/**` + `mobile/**` — never always-on. The APK is debug-keystore-signed only (Play upload signing is blocked, PL-18). |
 | `frontend-check.yml` | Renderer typecheck on every PR to `main`: filtered pnpm install of `frontend/` only, then plain `tsc` (noEmit — no vite build, no artifacts), plus the renderer's pure-helper unit tests (`frontend/tests/`, Node's built-in runner). A frontend change can no longer merge without a typecheck. |
+| `e2e-browser.yml` | The **Playwright UI tier** (#1059): every `e2e/*.spec.{js,ts}` against the browser build with the Tauri IPC mocked (`VITE_PLAYWRIGHT=true`), one headless Chromium, `workers: 1`, on every PR and every push to `main`. No backend, no secrets, ~6 min. Exists because this tier ran nowhere in CI from #843 until #1059, so the bookmarks copy-link paint assertion sat red on `main` from #990 without anyone noticing. Not to be confused with the dispatch-only `e2e-*.yml` WebDriver runs below, which drive the real Tauri binary. Failure screenshots + traces upload as `playwright-artifacts`. Spec inventory: `.codesight/wiki/testing.md` → "Playwright UI specs". |
 | `scripts-check.yml` | Shell/config consistency gate over `scripts/**`, the DS worker + wrangler configs, and the workflows themselves. Notably it pins `scripts/test-rebuild-verdict.sh` (both directions of the #944 rebuild verdict) and the `ds-config-manifest.json` ↔ `sync-ds-secrets.sh` ↔ wrangler-vars agreement that #760 exists to catch. Path-filtered, and one of the paths is `.github/workflows/**` — so editing any workflow runs it. |
 
 ### On-demand E2E (all `workflow_dispatch`-only — idle is the design, not decay)

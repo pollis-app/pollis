@@ -194,6 +194,38 @@ async function gotoChannel(page: Page) {
   await expect(page.getByTestId(`message-${CHANNEL_MESSAGE_ID}`)).toBeVisible();
 }
 
+/**
+ * Resolve a `--c-*` design token to the same serialisation `getComputedStyle`
+ * gives a painted element, so a token can be compared against an element's
+ * computed `color` / `backgroundColor` verbatim. Goes through a probe element
+ * because the tokens are `hsl(... / 14%)` and `color-mix(...)` expressions,
+ * which only become `rgb()` / `rgba()` / `color()` once painted.
+ */
+async function resolveToken(
+  page: Page,
+  token: string,
+  property: "color" | "backgroundColor",
+): Promise<string> {
+  const raw = await page.evaluate(
+    (t) => getComputedStyle(document.documentElement).getPropertyValue(t).trim(),
+    token,
+  );
+  // A token that resolves to nothing would make every comparison against it
+  // vacuous, which is precisely how #935 slipped through.
+  expect(raw, `${token} must be defined`).not.toBe("");
+  return page.evaluate(
+    ([value, prop]) => {
+      const probe = document.createElement("span");
+      probe.style[prop as "color" | "backgroundColor"] = value;
+      document.body.appendChild(probe);
+      const resolved = getComputedStyle(probe)[prop as "color" | "backgroundColor"];
+      probe.remove();
+      return resolved;
+    },
+    [raw, property] as const,
+  );
+}
+
 for (const skin of SKINS) {
   test.describe(`bookmarks + permalinks — ${skin} skin`, () => {
     test("saved list shows a saved message and can unsave it", async ({ page }) => {
@@ -369,17 +401,25 @@ for (const skin of SKINS) {
     test("the copied state is actually painted, not just labelled", async ({
       page,
     }) => {
-      // `--c-text-accent` was referenced by every hover, focus-visible and
-      // "copied" state on the message actions and defined NOWHERE, so the
-      // colour half of the affordance silently painted nothing. The glyph and
-      // the accessible name still changed, which is exactly why the existing
-      // tests passed throughout. This asserts the RESOLVED colour moves.
+      // Twice now the colour half of this affordance has silently painted
+      // nothing while the glyph and the accessible name still changed, which
+      // is exactly why the attribute/name tests passed throughout. First
+      // `--c-text-accent` was referenced everywhere and defined nowhere
+      // (#935); then #990's focus inversion (`focus:bg-accent focus:text-bg`)
+      // painted over the copied tone, because the row keeps focus after the
+      // click — the menu stays open so the feedback lands where the pointer
+      // is (#897). This asserts the RESOLVED paint of the row in the state it
+      // is actually in after a click: still focused, and copied.
       //
-      // Only the refined skin fails on the unfixed code: terminal defines
-      // `--c-text` as the same HSL as `--c-accent`, so an element falling back
-      // to inherited text colour lands on the accent by coincidence. That is
-      // why this went unnoticed — in terminal it looked correct. Keep both
-      // skins: in terminal this is a guard, in refined it proves the fix.
+      // The design (#1059): the copied row steps its focus fill down from the
+      // solid accent to the selected-row tint (`--c-active`) so the accent
+      // text can show — like a pressed button releasing. Focus never moves.
+      //
+      // Terminal defines `--c-text` as the same HSL as `--c-accent`, so a row
+      // falling back to inherited text colour lands on the accent by
+      // coincidence there; the idle row is `text-dim`, so the colour still
+      // has to move. Keep both skins: in terminal this is a guard, in refined
+      // it proves the fix.
       await boot(page, skin);
       await gotoChannel(page);
 
@@ -393,25 +433,26 @@ for (const skin of SKINS) {
 
       await copyButton.click();
       await expect(copyButton).toHaveAttribute("data-copy-state", "copied");
+      // The contract the bug hid behind: the row is still the active element
+      // after the click. If a future change moves focus off the row, this
+      // test stops proving anything about the focused paint — fail loudly.
+      await expect(copyButton).toBeFocused();
       const copied = await colourOf();
+      const copiedFill = await copyButton.evaluate(
+        (el) => getComputedStyle(el).backgroundColor,
+      );
 
       expect(copied).not.toBe(idle);
       // And it is the accent, not some arbitrary third colour.
-      const accent = await page.evaluate(() =>
-        getComputedStyle(document.documentElement)
-          .getPropertyValue("--c-accent")
-          .trim(),
-      );
-      expect(accent).not.toBe("");
-      const asRgb = await page.evaluate((c) => {
-        const probe = document.createElement("span");
-        probe.style.color = c;
-        document.body.appendChild(probe);
-        const resolved = getComputedStyle(probe).color;
-        probe.remove();
-        return resolved;
-      }, accent);
-      expect(copied).toBe(asRgb);
+      const accent = await resolveToken(page, "--c-accent", "color");
+      expect(copied).toBe(accent);
+      // The focused copied row is tinted, not inverted: the solid accent fill
+      // would swallow the accent text (this is the #1059 regression), so the
+      // fill must be the selected-row tint instead.
+      const activeTint = await resolveToken(page, "--c-active", "backgroundColor");
+      expect(copiedFill).toBe(activeTint);
+      const accentFill = await resolveToken(page, "--c-accent", "backgroundColor");
+      expect(copiedFill).not.toBe(accentFill);
     });
 
     test("a successful copy confirms itself on the button", async ({ page }) => {
@@ -455,6 +496,16 @@ for (const skin of SKINS) {
       // The whole point of #889: the failure must not look like the success.
       await expect(copyButton).toHaveAttribute("data-copy-state", "failed");
       await expect(copyButton).toHaveAccessibleName("Couldn't copy link");
+      // Painted, not just labelled (#1059): the row is still focused after
+      // the click, and a failed copy inverts to danger exactly like Delete —
+      // never the affirmative accent fill the idle row focuses with.
+      await expect(copyButton).toBeFocused();
+      const failedFill = await copyButton.evaluate(
+        (el) => getComputedStyle(el).backgroundColor,
+      );
+      expect(failedFill).toBe(
+        await resolveToken(page, "--c-danger", "backgroundColor"),
+      );
 
       // Nothing was put on the clipboard, so the user has nothing to paste —
       // which is exactly why they need to be told.

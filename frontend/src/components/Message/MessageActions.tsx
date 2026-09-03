@@ -181,6 +181,20 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   // fight by accident.
   const menuRowFocusClass = "focus:bg-accent focus:text-bg";
   const menuRowFocusDangerClass = "focus:bg-danger focus:text-bg";
+  // The Copy link row keeps focus after the click (the menu stays open so the
+  // feedback lands where the pointer is), so the plain inversion would paint
+  // over its copied/failed tone and the colour half of the confirmation was
+  // never seen (#1059). Like a pressed button releasing, the copied row steps
+  // the focus fill down from the solid accent to the app's selected-row tint
+  // (`bg-active`, the sidebar selection) so the accent text can show; a failed
+  // copy inverts to danger exactly like Delete does. Focus never moves — a
+  // keyboard user would lose their place in the menu.
+  const copyLinkFocusClass =
+    copyLinkState === "copied"
+      ? "focus:bg-active focus:text-accent"
+      : copyLinkState === "failed"
+        ? menuRowFocusDangerClass
+        : menuRowFocusClass;
 
   const closeAnd = (action: () => void) => () => {
     setMenuOpen(false);
@@ -292,7 +306,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
                   // Stays open so the copied/failed feedback is visible where
                   // the click happened.
                   onClick={() => onCopyLink(messageId)}
-                  className={`${menuRowClass} ${menuRowFocusClass} ${copyLinkTone}`}
+                  className={`${menuRowClass} ${copyLinkFocusClass} ${copyLinkTone}`}
                 >
                   {React.createElement(copyLinkIcon, { size: 16, className: "shrink-0" })}
                   {copyLinkLabel}

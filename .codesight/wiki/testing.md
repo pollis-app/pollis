@@ -894,12 +894,21 @@ branching; no MLS, no delivery service, no Turso.
 ```bash
 pnpm --filter @pollis/e2e exec playwright install chromium   # once
 pnpm --filter @pollis/e2e e2e:ui                             # all specs
+pnpm --filter @pollis/e2e e2e:ui bookmarks                   # one file (substring match)
 ```
+
+**CI:** `.github/workflows/e2e-browser.yml` runs the whole tier on every PR and
+every push to `main` (#1059). It ran nowhere from #843 until then, which is how
+the bookmarks copy-link paint assertion sat red on `main` from #990 onward
+without anyone noticing — the WebDriver tier's `e2e-*.yml` are dispatch-only
+by design, but this tier is seconds-per-spec and needs no backend, so there is
+no reason for it not to gate. Failure screenshots + traces upload as the
+`playwright-artifacts` workflow artifact.
 
 | spec | what it proves |
 |---|---|
 | `mentions.spec.js` | `@username` autocomplete + rendering in BOTH skins (#843) |
-| `bookmarks.spec.ts` | Saved messages + permalinks, and what an unresolvable permalink refuses to say, in BOTH skins (#854) |
+| `bookmarks.spec.ts` | Saved messages + permalinks, and what an unresolvable permalink refuses to say, in BOTH skins (#854). Also pins the copy-link row's three states on **resolved paint**, not class strings — the row keeps focus after the click, so a copied row must show the accent text over the selected-row tint and a failed one the danger inversion (#1059) |
 | `emoji.spec.ts` | The custom-emoji picker (full standard set, search, caret-accurate insertion) and `<:name:hash>` rendering, in BOTH skins (#848) |
 | `invite-links.spec.ts` | Invite-link create / one-time copy / revoke, in BOTH skins (#847) |
 | `voice-controls.spec.ts` | Push-to-talk, deafen and the input-mode toggle — the four mic states drawn distinctly — in BOTH skins (#849) |
@@ -907,12 +916,16 @@ pnpm --filter @pollis/e2e e2e:ui                             # all specs
 | `i18n.spec.ts` | The language selector, switching, per-device persistence, OS-locale default and the English fallback — driven through a synthetic locale so it survives the real language list changing, in BOTH skins (#855). Also pins that the sidebar's settings rows are reached by `sidebar-row-*` testid and not by their translated label, under a locale that renames every one of them (#932) |
 | `ipc-efficiency.spec.ts` | IPC/query-layer COUNTS (#874): one batched preview call per list instead of one per row, zero refetches on window focus, a closed Cmd+K panel costing zero member queries, `membership_changed` touching only the named group's roster, join requests keyed per group id, own-profile vs public-profile not colliding. Skin-agnostic except the two tests that also assert something renders |
 | `rtl.spec.ts` | Right-to-left layout, asserted as **measured geometry** (`getBoundingClientRect`, a `Range` over the text, the painted physical border edge) rather than a `dir` attribute — which passes on unmirrored code. Drives the real `ar` locale and pins the LTR case in the same body, in BOTH skins (#855) |
-
 | `receipts.spec.ts` | DM delivery/read indicators in BOTH skins — delivered vs read visually distinct, none in group channels, per-reader fractions in group DMs (#857) |
 | `render-cost.spec.ts` | Regression guards on message-log render cost in BOTH skins — typing in the edit bar, opening the reply bar and arrow-key navigation must re-render **zero** rows; a shell re-render must not re-render the sidebar; paired with the other half (skin flip restructures rows, an edit updates its row, day dividers survive) so a memo cannot pass by freezing the UI (#874) |
 | `message-window.spec.ts` | The virtualised log: only the visible slice is in the DOM, and every DOM-locating path still reaches a row outside the window, in BOTH skins (#874). Plus the load-more seam (#934) — a `MutationObserver` proves some DOM batch carries the prepended rows while the log still reports fetching, which a poll could never catch |
 | `linkify.spec.ts` | URL detection in message bodies in BOTH skins — every body keeps the link it *starts* with, the media unfurl agrees with the linkifier about which URLs exist, and a bare `www.` link gets a protocol. Guards the pattern shared by `LinkifiedText` and `MediaLinkUnfurl` (#874) |
 | `thread-panel.spec.ts` | The thread panel's timestamps in BOTH skins — a seconds-precision `created_at` must render the real date rather than 1970, a millisecond one must be left alone, and the thread must agree with the channel about when a message was sent (#874) |
+| `message-nav.spec.ts` | The DOM half of arrow-key log navigation in BOTH skins: the composer hands ArrowUp off at the right caret positions, logical focus projects onto real element focus (rows, then action-bar buttons), and the exits (down past newest, Escape, Tab) land back in the composer. The pure state machine is `frontend/tests/message-nav.test.ts` |
+| `search.spec.ts` | On-device message search (#850), the user-visible flow in BOTH skins: type a query, ranked results with real names, structured snippet highlights, pagination, click through to the message |
+| `right-panel-persistence.spec.ts` | The right-hand panel's open/closed state is per user, per device, and survives navigation and a skin flip (#904), in BOTH skins |
+| `vault-search-style.spec.ts` | Vault + search + chrome style regressions in BOTH skins, every one asserted on a computed style or rendered node rather than a class string |
+| `voice-sidebar-parity.spec.ts` | The persistent voice strip (terminal `VoiceBar`, refined `SidebarProfilePanel` row 2) draws the same four mic states and offers a way out of deafen in BOTH skins (#849, #891) |
 
 `.spec.ts` is as welcome as `.spec.js`; one config matches both.
 

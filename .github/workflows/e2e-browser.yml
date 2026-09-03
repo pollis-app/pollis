@@ -1,0 +1,73 @@
+name: Browser UI specs
+
+# The Playwright UI tier (`e2e/*.spec.{js,ts}`, `e2e/playwright.config.js`)
+# drives the BROWSER build of the renderer with the Tauri IPC mocked, so it
+# needs no backend, no secrets and no native shell — and for a year nothing
+# ran it in CI. #990 turned the bookmarks copy-link paint assertion red on
+# main and it stayed red, unnoticed, until #1059. This job is the always-on
+# gate that closes that hole: the whole suite, one Chromium, every PR.
+#
+# It is NOT the WebDriver tier: `e2e-*.yml` drive the real Tauri binary and
+# stay dispatch-only by design (docs/deployments.md → "On-demand E2E").
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    # The suite takes ~6 min locally with one worker (the config is
+    # deliberately `workers: 1` — the composer specs are keystroke-driven).
+    # Twice that plus a cold browser download is the ceiling; a hung dev
+    # server must not hold a runner for the default six hours.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      # Filtered to the two packages the suite touches: `frontend` (vite
+      # serves it) and `e2e` (the Playwright runner). Skips pollis-delivery's
+      # worker toolchain.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter ./frontend... --filter ./e2e...
+
+      # One browser only; the config's single project is Desktop Chrome.
+      # `--with-deps` pulls the runner's shared-library set (fonts, GTK bits)
+      # that headless Chromium still needs on a stock ubuntu image.
+      - name: Install Chromium
+        run: pnpm --filter @pollis/e2e exec playwright install --with-deps chromium
+
+      # `CI=1` flips the config's `reuseExistingServer` off, so the run can
+      # only ever talk to the vite server it started itself (the config
+      # derives the port from the checkout path for the same reason).
+      - name: Run the browser suite
+        run: pnpm --filter @pollis/e2e e2e:ui
+        env:
+          CI: "1"
+
+      # Screenshots + traces are only written for failures (`only-on-failure`
+      # / `retain-on-failure`), so a green run uploads nothing.
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: e2e/artifacts/playwright
+          if-no-files-found: ignore
+          retention-days: 7
