@@ -12,6 +12,7 @@ import { MessageQueue } from "../Message/MessageQueue";
 import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInput";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
+import { EditMessageBar } from "../ui/EditMessageBar";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
 import { transformChannelMessage, type RawChannelMessage, useThreadSummaries } from "../../hooks/queries/useMessages";
 import { useRightPanel } from "./RightPanel/useRightPanel";
@@ -23,6 +24,7 @@ import { messageNavStore } from "../../stores/messageNavStore";
 import { messageJumpStore } from "../../stores/messageJumpStore";
 import { TypingIndicator } from "../TypingIndicator";
 import { EmptyState } from "../ui/EmptyState";
+import { probeRender } from "../../utils/renderProbe";
 
 // Passed from DM page when the current user has not yet accepted the DM.
 // Replaces the chat input with an accept/block bar.
@@ -74,6 +76,7 @@ interface MainContentProps {
 }
 
 export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequest = null }) => {
+  probeRender("MainContent");
   const { t } = useTranslation("nav");
   const {
     selectedChannelId,
@@ -147,8 +150,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   // Message currently being edited (null = not editing).
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [editDraftValue, setEditDraftValue] = useState('');
-  const [editBarFocused, setEditBarFocused] = useState(false);
-  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Which conversation the log on screen belongs to. Channels and DMs share
   // this component, so both ids go into the key.
@@ -175,19 +176,6 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   useEffect(() => {
     setEditingMessage(null);
   }, [selectedChannelId, selectedConversationId]);
-
-  // Focus the edit textarea and place cursor at end when entering edit mode.
-  useEffect(() => {
-    if (!editingMessage) {
-      return;
-    }
-    const el = editTextareaRef.current;
-    if (!el) {
-      return;
-    }
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-  }, [editingMessage]);
 
   // Escape cancels edit/delete/reply bar — capture phase so AppShell's navigation handler doesn't fire first.
   useEffect(() => {
@@ -719,54 +707,20 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           </div>
         </div>
       ) : editingMessage ? (
-        <div data-testid="edit-message-bar">
-          <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 border-t border-line bg-surface"
-          >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest text-muted">
-              {t("editBar.heading")}
-            </span>
-            <button
-              data-testid="cancel-edit-button"
-              onClick={handleCancelEdit}
-              aria-label={t("editBar.cancel")}
-              className="icon-btn-sm flex-shrink-0"
-            >
-              <X size={20} aria-hidden="true" />
-            </button>
-          </div>
-          <div className="px-4 pb-3 pt-1 bg-surface">
-            <textarea
-              ref={editTextareaRef}
-              data-testid="edit-message-bar-input"
-              value={editDraftValue}
-              onChange={(e) => setEditDraftValue(e.target.value)}
-              onFocus={() => setEditBarFocused(true)}
-              onBlur={() => setEditBarFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSaveEdit();
-                }
-              }}
-              disabled={editMessageMutation.isPending}
-              rows={2}
-              className={`chat-input-textarea w-full font-mono text-sm resize-none transition-colors${editBarFocused ? " is-focused" : ""}`}
-              style={{
-                borderRadius: '4px',
-                border: 'none',
-                outline: 'none',
-                padding: '4px 8px',
-                background: editBarFocused ? 'var(--c-accent)' : 'var(--c-hover)',
-                color: editBarFocused ? 'var(--c-bg)' : 'var(--c-text)',
-                opacity: editMessageMutation.isPending ? 0.5 : 1,
-              }}
-            />
-            <p className="text-2xs font-mono mt-1 text-muted">
-              {t("editBar.hint")}
-            </p>
-          </div>
-        </div>
+        <EditMessageBar
+          key={editingMessage.id}
+          testId="edit-message-bar"
+          inputTestId="edit-message-bar-input"
+          cancelTestId="cancel-edit-button"
+          heading={t("editBar.heading")}
+          cancelLabel={t("editBar.cancel")}
+          hint={t("editBar.hint")}
+          value={editDraftValue}
+          onChange={setEditDraftValue}
+          onSave={handleSaveEdit}
+          onCancel={handleCancelEdit}
+          isSaving={editMessageMutation.isPending}
+        />
       ) : isDeletingThisChannel ? (
         <div data-testid="delete-channel-bar">
           <div

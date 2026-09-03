@@ -20,7 +20,7 @@ const CHANNEL_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1XCB";
 
 const OLD_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1OLD";
 const MID_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1MID";
-// The newest message is the viewer's own, so its bar carries reply+edit+more.
+// The newest message is the viewer's own, so its bar carries reply+react+edit+more.
 const OWN_ID = "01HQ7Z3K9M2P5R8T1V4W6Y1OWN";
 
 const SKINS = ["terminal", "refined"] as const;
@@ -143,9 +143,11 @@ for (const skin of SKINS) {
       const ownRow = page.getByTestId(`message-${OWN_ID}`);
       await expect(ownRow).toBeFocused();
 
-      // Own message: reply → edit → more, clamping at the end.
+      // Own message: reply → react → edit → more, clamping at the end.
       await page.keyboard.press("ArrowRight");
       await expect(ownRow.getByTestId("reply-button")).toBeFocused();
+      await page.keyboard.press("ArrowRight");
+      await expect(ownRow.getByTestId("reaction-add-btn")).toBeFocused();
       await page.keyboard.press("ArrowRight");
       await expect(ownRow.getByTestId("edit-button")).toBeFocused();
       await page.keyboard.press("ArrowRight");
@@ -156,11 +158,13 @@ for (const skin of SKINS) {
       // Back past the first action returns to the bare row.
       await page.keyboard.press("ArrowLeft");
       await page.keyboard.press("ArrowLeft");
+      await page.keyboard.press("ArrowLeft");
       await expect(ownRow.getByTestId("reply-button")).toBeFocused();
       await page.keyboard.press("ArrowLeft");
       await expect(ownRow).toBeFocused();
 
       // Enter on "more" opens the row's action menu.
+      await page.keyboard.press("ArrowRight");
       await page.keyboard.press("ArrowRight");
       await page.keyboard.press("ArrowRight");
       await page.keyboard.press("ArrowRight");

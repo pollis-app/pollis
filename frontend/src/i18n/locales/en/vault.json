@@ -19,8 +19,7 @@
   "edit": {
     "heading": "Edit entry",
     "cancel": "Cancel edit",
-    "save": "Save",
-    "saving": "Saving…"
+    "hint": "Enter to save · Shift+Enter for newline · Esc to cancel"
   },
   "delete": {
     "heading": "Delete entry",

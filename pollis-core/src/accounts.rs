@@ -227,6 +227,36 @@ pub fn upsert_account(user_id: &str, username: &str, avatar_url: Option<&str>) -
     write_accounts_index(&index)
 }
 
+impl AccountsIndex {
+    /// Set the display username of one account. Returns whether it changed.
+    ///
+    /// Touches nothing else: not `avatar_url`, not `last_seen`, not
+    /// `last_active_user` — this is a rename, not a sign-in.
+    pub fn rename(&mut self, user_id: &str, username: &str) -> bool {
+        match self.accounts.iter_mut().find(|a| a.user_id == user_id) {
+            Some(account) if account.username != username => {
+                account.username = username.to_string();
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Record a username change for an account that is already in the index.
+///
+/// `get_session` reads the username from this file, so a rename that only
+/// reached the Delivery Service came back as the OLD name on the next launch
+/// — and as the sender name on every optimistic row until the send resolved
+/// against the remote row. An account the index has never seen is ignored.
+pub fn rename_account(user_id: &str, username: &str) -> Result<()> {
+    let mut index = read_accounts_index()?;
+    if !index.rename(user_id, username) {
+        return Ok(());
+    }
+    write_accounts_index(&index)
+}
+
 /// Remove an account from the index (on delete_data logout).
 pub fn remove_account(user_id: &str) -> Result<()> {
     let mut index = read_accounts_index().unwrap_or_default();
@@ -423,6 +453,44 @@ mod tests {
 
         let json = serde_json::to_string(&index).expect("serialize");
         assert!(!json.contains("email"), "accounts.json must carry no email: {json}");
+    }
+
+    /// A rename changes the username and nothing else — in particular not the
+    /// avatar and not which account is active, which `upsert_account` would
+    /// both clobber.
+    #[test]
+    fn rename_changes_only_the_username() {
+        let mut index = AccountsIndex {
+            accounts: vec![
+                AccountInfo {
+                    user_id: "01JBQ0000000000000000000AA".to_string(),
+                    username: "alice_x7q2".to_string(),
+                    avatar_url: Some("avatars/aa".to_string()),
+                    last_seen: "2026-08-01T10:00:00+00:00".to_string(),
+                    legacy_email: None,
+                },
+                AccountInfo {
+                    user_id: "01JBQ0000000000000000000BB".to_string(),
+                    username: "bob".to_string(),
+                    avatar_url: None,
+                    last_seen: "2026-08-02T10:00:00+00:00".to_string(),
+                    legacy_email: None,
+                },
+            ],
+            last_active_user: Some("01JBQ0000000000000000000BB".to_string()),
+        };
+
+        assert!(index.rename("01JBQ0000000000000000000AA", "alice"));
+        assert_eq!(index.accounts[0].username, "alice");
+        assert_eq!(index.accounts[0].avatar_url.as_deref(), Some("avatars/aa"));
+        assert_eq!(index.accounts[0].last_seen, "2026-08-01T10:00:00+00:00");
+        assert_eq!(index.accounts[1].username, "bob");
+        assert_eq!(index.last_active_user.as_deref(), Some("01JBQ0000000000000000000BB"));
+
+        // Same name again, and an unknown account: nothing to write.
+        assert!(!index.rename("01JBQ0000000000000000000AA", "alice"));
+        assert!(!index.rename("01JBQ0000000000000000000ZZ", "zed"));
+        assert_eq!(index.accounts.len(), 2);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { resolveEmojiUrl } from "../Emoji/useEmojiImage";
+import { probeRender } from "../../utils/renderProbe";
 import {
   EMOJI_TOKEN_ATTR,
   GHOST_ATTR,
@@ -282,6 +283,7 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
   },
   ref,
 ) => {
+  probeRender("RichTextInput");
   const hostRef = useRef<HTMLDivElement>(null);
   // What the DOM currently holds, as wire text. `null` before the first
   // projection, so the mount always projects.
@@ -352,10 +354,11 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
     }
     // A `Range` is always start-before-end, so no ordering fix is needed here —
     // the backwards-drag case is normalized by the DOM before we see it.
-    return {
-      start: offsetOf(host, range.startContainer, range.startOffset),
-      end: offsetOf(host, range.endContainer, range.endOffset),
-    };
+    // Each `offsetOf` clones and serializes the prefix, so the collapsed case
+    // (every keystroke) measures once and reuses it.
+    const start = offsetOf(host, range.startContainer, range.startOffset);
+    const end = range.collapsed ? start : offsetOf(host, range.endContainer, range.endOffset);
+    return { start, end };
   }, []);
 
   /**
@@ -515,13 +518,16 @@ const RichTextInputInner: React.ForwardRefRenderFunction<
         return;
       }
       const live = liveOffsets();
-      if (live) {
-        lastSelectionRef.current = live;
+      if (!live) {
+        return;
       }
-      onSelectionChangeRef.current?.(
-        offsetOf(host, selection.focusNode, selection.focusOffset),
-        selection.isCollapsed,
-      );
+      lastSelectionRef.current = live;
+      // The focus end of a collapsed selection is its only end; a drag
+      // selection is the one case that needs its own measurement.
+      const caret = selection.isCollapsed
+        ? live.start
+        : offsetOf(host, selection.focusNode, selection.focusOffset);
+      onSelectionChangeRef.current?.(caret, selection.isCollapsed);
     };
     document.addEventListener("selectionchange", handler);
     return () => document.removeEventListener("selectionchange", handler);

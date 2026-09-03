@@ -501,4 +501,52 @@ for (const skin of SKINS) {
       await expect(page.getByTestId("emoji-ghost")).toHaveCount(0);
     });
   });
+
+  test.describe(`reactions — ${skin} skin`, () => {
+    test("a message without reactions reserves no reactions row", async ({ page }) => {
+      await openChannel(page, skin);
+      // The old design rendered a row under EVERY message holding a
+      // hover-revealed "+" — a blank line that read as a layout bug. The row
+      // must not exist at all until there is a reaction to show.
+      await expect(page.getByTestId("message-m1")).toBeVisible();
+      await expect(page.getByTestId("message-reactions")).toHaveCount(0);
+    });
+
+    test("the hover bar reads reply, react, then more", async ({ page }) => {
+      await openChannel(page, skin);
+      const row = page.getByTestId("message-m1");
+      await row.hover();
+      const buttons = row.getByTestId("message-actions").locator("button[data-nav-action]");
+      await expect(buttons).toHaveText(["", "", ""]);
+      const order = await buttons.evaluateAll((els) =>
+        els.map((el) => (el as HTMLElement).dataset.navAction),
+      );
+      expect(order).toEqual(["reply", "react", "more"]);
+    });
+
+    test("reacting from the hover bar shows a pill; clicking it takes it back", async ({
+      page,
+    }) => {
+      await openChannel(page, skin);
+      const row = page.getByTestId("message-m1");
+      await row.hover();
+      await row.getByTestId("reaction-add-btn").click();
+      await expect(row.getByTestId("reaction-picker")).toBeVisible();
+      await expect(page.getByTestId("emoji-cell").first()).toBeVisible();
+      await page.locator(`[data-emoji-id="c:${PARROT_HASH}"]`).click();
+
+      // Picked → picker gone, one pill by the viewer, and now there is a row.
+      await expect(row.getByTestId("reaction-picker")).toHaveCount(0);
+      const pill = row.getByTestId("reaction-pill");
+      await expect(pill).toHaveCount(1);
+      await expect(pill).toHaveAttribute("aria-pressed", "true");
+      await expect(pill.getByTestId("custom-emoji")).toBeVisible();
+
+      // The pill toggles the viewer's own reaction off, and with nothing left
+      // the row goes with it.
+      await pill.click();
+      await expect(row.getByTestId("reaction-pill")).toHaveCount(0);
+      await expect(row.getByTestId("message-reactions")).toHaveCount(0);
+    });
+  });
 }

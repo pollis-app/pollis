@@ -133,15 +133,19 @@ async function assertProbeLive(page: Page) {
  */
 async function settleRenders(page: Page) {
   let previous = -1;
+  let stableFor = 0;
   await expect
     .poll(
       async () => {
         const current = await renders(page, "MessageList");
-        const stable = current === previous;
+        stableFor = current === previous ? stableFor + 1 : 0;
         previous = current;
-        return stable;
+        // Three quiet polls in a row (~300ms): the list's post-mount scroll
+        // settle lands a couple of hundred milliseconds after first paint, and
+        // a single matching pair can fall on either side of it.
+        return stableFor >= 3;
       },
-      { intervals: [50, 100, 100, 200, 200, 400] },
+      { intervals: [100, 100, 100, 100, 200, 200, 400] },
     )
     .toBe(true);
 }
@@ -206,6 +210,58 @@ for (const skin of SKINS) {
       await page.keyboard.press("ArrowUp");
       await page.keyboard.press("ArrowUp");
 
+      expect(await renders(page, "MessageItem")).toBe(rowsBefore);
+    });
+
+    test("an open channel that nobody touches renders nothing", async ({ page }) => {
+      await boot(page, skin);
+      await gotoChannel(page);
+      await assertProbeLive(page);
+      await settleRenders(page);
+
+      // Not a settle: a fixed window with the app left alone. The ChannelPage
+      // used to depend on a `useMutation` result object — new every render —
+      // from an effect whose cleanup nulled the selected channel, so an open
+      // channel re-rendered the whole tree and fired an IPC hundreds of times a
+      // second for as long as it stayed open. Every keystroke in the composer
+      // competed with that, which is what "typing feels slow" was. Nothing in
+      // this window is allowed to render, at any level of the tree.
+      const before = await Promise.all(
+        ["AppShell", "MainContent", "MessageList", "MessageItem", "ChatInput"].map((p) =>
+          renders(page, p),
+        ),
+      );
+      await page.waitForTimeout(1000);
+      const after = await Promise.all(
+        ["AppShell", "MainContent", "MessageList", "MessageItem", "ChatInput"].map((p) =>
+          renders(page, p),
+        ),
+      );
+      expect(after).toEqual(before);
+    });
+
+    test("typing in the composer re-renders only the composer", async ({ page }) => {
+      await boot(page, skin);
+      await gotoChannel(page);
+      await assertProbeLive(page);
+
+      const input = page.getByTestId("message-input");
+      await input.click();
+      await settleRenders(page);
+      const shellBefore = await renders(page, "AppShell");
+      const contentBefore = await renders(page, "MainContent");
+      const listBefore = await renders(page, "MessageList");
+      const rowsBefore = await renders(page, "MessageItem");
+      const composerBefore = await renders(page, "ChatInput");
+
+      await page.keyboard.type("typing must stay local", { delay: 5 });
+      await expect(input).toHaveText(/typing must stay local$/);
+
+      // The composer rendered — otherwise the zeros below prove nothing.
+      expect(await renders(page, "ChatInput")).toBeGreaterThan(composerBefore);
+      expect(await renders(page, "AppShell")).toBe(shellBefore);
+      expect(await renders(page, "MainContent")).toBe(contentBefore);
+      expect(await renders(page, "MessageList")).toBe(listBefore);
       expect(await renders(page, "MessageItem")).toBe(rowsBefore);
     });
 

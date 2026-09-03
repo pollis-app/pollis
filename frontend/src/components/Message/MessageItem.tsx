@@ -262,7 +262,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
                 {t("message.edited")}
               </span>
             )}
-            {message.status && message.status !== "sent" && (
+            {/* Only a FAILED send is labelled. An optimistic row already looks sent
+                — the `[sending]` tag made a fast send feel slow. Kept for reference:
+                {message.status && message.status !== "sent" && (…)} */}
+            {message.status === "failed" && (
               <span className="ms-1 text-xs font-machine text-muted">
                 [{t(`status.${message.status}`)}]
               </span>
@@ -403,7 +406,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
               {t("message.edited")}
             </span>
           )}
-          {message.status && message.status !== "sent" && (
+          {/* Only a FAILED send is labelled. An optimistic row already looks sent
+              — the `[sending]` tag made a fast send feel slow. Kept for reference:
+              {message.status && message.status !== "sent" && (…)} */}
+          {message.status === "failed" && (
             <span className="ms-1 text-xs text-muted">
               [{t(`status.${message.status}`)}]
             </span>

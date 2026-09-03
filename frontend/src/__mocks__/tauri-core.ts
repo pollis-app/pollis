@@ -186,6 +186,9 @@ interface MockStore {
   // production — a preload that puts receipts under a channel id is modelling
   // something the Rust side cannot produce, so the UI must still show nothing.
   receipts: Record<string, MockReceipt[]>;
+  // Reactions, keyed by message id. `add_reaction` / `remove_reaction` are
+  // real writes here so a spec can watch a pill appear and disappear.
+  reactions: Record<string, { emoji: string; user_ids: string[]; count: number }[]>;
   // Held decoded. `get_preferences` is the only thing that serializes it, and
   // preloads may write either shape (see `readPreferences`).
   preferences: Record<string, unknown>;
@@ -267,6 +270,7 @@ const store: MockStore = {
     muted_before_deafen: false,
   },
   receipts: preload.receipts ?? {},
+  reactions: preload.reactions ?? {},
   // Lets a test drive the skin: `{ skin: 'refined' }` or its JSON string.
   preferences: readPreferences(preload.preferences),
   clipboard: '',
@@ -748,13 +752,42 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'list_group_invites':
     case 'list_security_events':
     case 'get_pinned_messages':
+      return [];
+
     // `MessageReactions` destructures with `= []`, which only covers
     // `undefined` — the `null` an unhandled command returns reaches
     // `reactions.length` and takes the whole message log down with it. It went
     // unnoticed because the crash needs the query to have RESOLVED, so a spec
     // that finished asserting first never saw it (#850).
-    case 'get_reactions':
-      return [];
+    case 'get_reactions': {
+      const { messageId } = args as { messageId: string };
+      return store.reactions[messageId] ?? [];
+    }
+    case 'add_reaction': {
+      const { messageId, userId, emoji } = args as { messageId: string; userId: string; emoji: string };
+      const list = (store.reactions[messageId] ??= []);
+      const existing = list.find((r) => r.emoji === emoji);
+      if (existing) {
+        if (!existing.user_ids.includes(userId)) {
+          existing.user_ids.push(userId);
+          existing.count = existing.user_ids.length;
+        }
+      } else {
+        list.push({ emoji, user_ids: [userId], count: 1 });
+      }
+      return null;
+    }
+    case 'remove_reaction': {
+      const { messageId, userId, emoji } = args as { messageId: string; userId: string; emoji: string };
+      const list = store.reactions[messageId] ?? [];
+      const existing = list.find((r) => r.emoji === emoji);
+      if (existing) {
+        existing.user_ids = existing.user_ids.filter((id) => id !== userId);
+        existing.count = existing.user_ids.length;
+      }
+      store.reactions[messageId] = list.filter((r) => r.count > 0);
+      return null;
+    }
 
     // Threads (#825). Keyed by the root message id and by conversation id
     // respectively, matching the two Rust commands. Empty unless a preload

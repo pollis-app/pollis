@@ -19,8 +19,7 @@
   "edit": {
     "heading": "تعديل المدخل",
     "cancel": "إلغاء التعديل",
-    "save": "حفظ",
-    "saving": "جارٍ الحفظ…"
+    "hint": "Enter للحفظ · Shift+Enter لسطر جديد · Esc للإلغاء"
   },
   "delete": {
     "heading": "حذف المدخل",

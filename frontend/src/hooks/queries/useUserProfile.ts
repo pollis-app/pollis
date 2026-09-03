@@ -225,6 +225,19 @@ export function useUserProfile() {
     appStore.setUserAvatarUrl(avatarUrl);
   }, [avatarUrl, hasProfile]);
 
+  // Same for the username. `currentUser.username` is seeded by `get_session`
+  // from the on-disk accounts index, which is a cache: an install renamed
+  // before the index was kept in step still carries the enrollment-time name,
+  // and that name is what an optimistic row shows as its sender until the send
+  // resolves. The profile query is the remote truth, so the store follows it.
+  const username = query.data?.username || null;
+  useEffect(() => {
+    if (!hasProfile || !username || appStore.currentUser?.username === username) {
+      return;
+    }
+    appStore.setUsername(username);
+  }, [username, hasProfile]);
+
   return query;
 }
 

@@ -19,8 +19,7 @@
   "edit": {
     "heading": "Modifier l’entrée",
     "cancel": "Annuler la modification",
-    "save": "Enregistrer",
-    "saving": "Enregistrement…"
+    "hint": "Entrée pour enregistrer · Maj+Entrée pour un saut de ligne · Échap pour annuler"
   },
   "delete": {
     "heading": "Supprimer l’entrée",

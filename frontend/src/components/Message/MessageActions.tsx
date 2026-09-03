@@ -13,6 +13,7 @@ import {
   AlertCircle,
   Trash2,
 } from "lucide-react";
+import { ReactionAddButton } from "./ReactionAddButton";
 
 export type CopyLinkState = "idle" | "copied" | "failed";
 
@@ -42,8 +43,8 @@ interface MessageActionsProps {
 const MENU_CLEARANCE_PX = 220;
 
 /**
- * Per-message hover actions, Discord-shaped: Reply, Edit (own messages), and a
- * "more" trigger; every other action lives in an anchored menu with icon +
+ * Per-message hover actions, Discord-shaped: Reply, React, Edit (own
+ * messages), and a "more" trigger; every other action lives in an anchored menu with icon +
  * explicit label per row, Delete last.
  *
  * The menu is `absolute` inside the toolbar's own `relative` wrapper — anchored
@@ -69,6 +70,9 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
 }) => {
   const { t } = useTranslation("chat");
   const [menuOpen, setMenuOpen] = useState(false);
+  // The reaction picker is anchored in the bar too, so it holds the bar open
+  // the same way the menu does.
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Whether the menu opens above the trigger — chosen at open time from the
   // trigger's viewport position, so the menu near the composer never renders
   // below the fold of the scrolling message list.
@@ -156,7 +160,7 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
   // open menu would turn invisible yet keep intercepting clicks.
   // group-focus-within: the row root carries `group`, so keyboard focus on
   // the ROW (arrow-key log navigation) reveals the bar exactly like hover.
-  const visibilityClass = menuOpen
+  const visibilityClass = menuOpen || pickerOpen
     ? "opacity-100"
     : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
   const containerClass =
@@ -194,6 +198,13 @@ export const MessageActions: React.FC<MessageActionsProps> = ({
       >
         <Reply size={iconSize} className="rtl-mirror" />
       </button>
+
+      <ReactionAddButton
+        messageId={messageId}
+        iconSize={iconSize}
+        className={barBtnClass}
+        onOpenChange={setPickerOpen}
+      />
 
       {isOwn && onEdit && (
         <button

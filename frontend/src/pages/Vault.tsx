@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { ChatInput, type ChatInputHandle, type Attachment } from "../components/ui/ChatInput";
 import { Button } from "../components/ui/Button";
+import { EditMessageBar } from "../components/ui/EditMessageBar";
 import { LinkifiedText } from "../components/ui/LinkifiedText";
 import { AttachmentDisplay } from "../components/Message/AttachmentDisplay";
 import { MediaGalleryView } from "../components/Media/MediaGalleryView";
@@ -285,55 +286,20 @@ export const VaultPage: React.FC = observer(() => {
           </div>
 
           {editingEntry ? (
-            <div data-testid="vault-edit-bar">
-              <div className="flex flex-shrink-0 items-center gap-2 border-t border-line bg-surface px-4 py-1.5">
-                <span className="flex-1 font-mono text-2xs uppercase tracking-widest text-muted">
-                  {t("edit.heading")}
-                </span>
-                <button
-                  data-testid="vault-edit-cancel"
-                  onClick={() => setEditingEntry(null)}
-                  aria-label={t("edit.cancel")}
-                  className="icon-btn-sm flex-shrink-0"
-                >
-                  <X size={20} aria-hidden="true" />
-                </button>
-              </div>
-              <div className="flex items-end gap-3 bg-surface px-4 pb-3 pt-1">
-                <textarea
-                  data-testid="vault-edit-input"
-                  value={editDraft}
-                  onChange={(event) => setEditDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      confirmEdit();
-                    }
-                  }}
-                  disabled={editMutation.isPending}
-                  rows={2}
-                  autoFocus
-                  className="chat-input-textarea w-full flex-1 resize-none font-mono text-sm"
-                  style={{
-                    borderRadius: "4px",
-                    border: "none",
-                    outline: "none",
-                    padding: "4px 8px",
-                    background: "var(--c-hover)",
-                    color: "var(--c-text)",
-                    opacity: editMutation.isPending ? 0.5 : 1,
-                  }}
-                />
-                <Button
-                  data-testid="vault-edit-save"
-                  onClick={confirmEdit}
-                  isLoading={editMutation.isPending}
-                  loadingText={t("edit.saving")}
-                >
-                  {t("edit.save")}
-                </Button>
-              </div>
-            </div>
+            <EditMessageBar
+              key={editingEntry.id}
+              testId="vault-edit-bar"
+              inputTestId="vault-edit-input"
+              cancelTestId="vault-edit-cancel"
+              heading={t("edit.heading")}
+              cancelLabel={t("edit.cancel")}
+              hint={t("edit.hint")}
+              value={editDraft}
+              onChange={setEditDraft}
+              onSave={confirmEdit}
+              onCancel={() => setEditingEntry(null)}
+              isSaving={editMutation.isPending}
+            />
           ) : pendingDeleteId ? (
             <div data-testid="vault-delete-bar">
               <div className="flex flex-shrink-0 items-center gap-2 border-t border-line bg-surface px-4 py-1.5">

@@ -38,6 +38,7 @@ import { useShortcodeEntries } from "../Emoji/useShortcodeEntries";
 import { RichTextInput, type RichTextInputHandle } from "./RichTextInput";
 import { MentionSuggestList } from "./MentionSuggestList";
 import { EmojiSuggestList } from "./EmojiSuggestList";
+import { probeRender } from "../../utils/renderProbe";
 
 /**
  * Where the bytes of a queued attachment are, and the only two answers there
@@ -199,6 +200,7 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
   canNotifyAll = false,
   onHistoryUp,
 }, ref) => {
+  probeRender("ChatInput");
   const { t } = useTranslation("common");
   // Resolved at render, not as a default parameter, so the fallback follows
   // a language change.

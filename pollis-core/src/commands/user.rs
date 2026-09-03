@@ -53,13 +53,35 @@ pub async fn update_user_profile(
     // Route the profile write through the Delivery Service (the write API).
     // Server-side authz binds the edit to the authenticated user's own row.
     let body = pollis_api::profile::UpdateProfileBody {
-        user_id,
-        username,
+        user_id: user_id.clone(),
+        username: username.clone(),
         preferred_name,
         phone,
         avatar_url,
     };
     crate::commands::mls::ds_post_ok(state, &body).await?;
+
+    // The two local copies of our own username follow the remote one. Neither
+    // is authoritative and both are only caches, but each is read on a path
+    // that never consults the DS: `get_session` (the name the composer stamps
+    // on an optimistic row) reads the accounts index, and the message log
+    // reads `user_cache` for sender names. Left alone, both showed the
+    // enrollment-time name until something happened to refill them.
+    if let Some(username) = username {
+        if let Err(e) = crate::accounts::rename_account(&user_id, &username) {
+            eprintln!("[profile] accounts index not updated after rename: {e}");
+        }
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            if let Err(e) = db.conn().execute(
+                "INSERT INTO user_cache (id, username, updated_at) VALUES (?1, ?2, datetime('now'))
+                 ON CONFLICT(id) DO UPDATE SET username = ?2, updated_at = datetime('now')",
+                rusqlite::params![user_id, username],
+            ) {
+                eprintln!("[profile] user_cache not updated after rename: {e}");
+            }
+        }
+    }
 
     Ok(())
 }

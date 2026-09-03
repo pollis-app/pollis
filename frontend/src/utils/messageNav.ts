@@ -21,7 +21,7 @@
  */
 
 /** The composer-bar actions a focused message can expose, in visual order. */
-export type MessageNavAction = "reply" | "edit" | "more";
+export type MessageNavAction = "reply" | "react" | "edit" | "more";
 
 export type MessageNavState =
   /** The chat input owns focus; the log is not being navigated. */

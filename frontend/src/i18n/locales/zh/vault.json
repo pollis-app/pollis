@@ -19,8 +19,7 @@
   "edit": {
     "heading": "编辑条目",
     "cancel": "取消编辑",
-    "save": "保存",
-    "saving": "保存中…"
+    "hint": "Enter 保存 · Shift+Enter 换行 · Esc 取消"
   },
   "delete": {
     "heading": "删除条目",

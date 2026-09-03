@@ -1,9 +1,8 @@
-import React, { useState, useRef, useEffect } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
-import { useReactions, useAddReaction, useRemoveReaction } from "../../hooks/queries/useReactions";
+import { useReactions, useToggleReaction } from "../../hooks/queries/useReactions";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
-import { EmojiPicker } from "../Emoji/EmojiPicker";
 import { CustomEmojiImage } from "../Emoji/CustomEmojiImage";
 import { splitEmojiSegments } from "../Emoji/emojiTokens";
 
@@ -39,60 +38,25 @@ const ReactionEmoji: React.FC<{ emoji: string }> = ({ emoji }) => {
   );
 };
 
+/**
+ * The reaction pills under a message. Renders NOTHING — no wrapper, no
+ * reserved height — until the message has a reaction: a permanent row with a
+ * hover-revealed "+" put a blank line under every message and read as a
+ * layout bug. Adding a reaction lives in the hover bar (`ReactionAddButton`).
+ */
 export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ messageId }) => {
   const { t } = useTranslation("chat");
   const { currentUser } = appStore;
   const { data: reactions = [] } = useReactions(messageId);
-  const addReaction = useAddReaction();
-  const removeReaction = useRemoveReaction();
+  const toggleReaction = useToggleReaction(messageId);
 
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
-
-  // Close picker when clicking outside
-  useEffect(() => {
-    if (!pickerOpen) {
-      return;
-    }
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setPickerOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [pickerOpen]);
-
-  const toggleReaction = (emoji: string) => {
-    if (!currentUser) {
-      return;
-    }
-
-    const existing = reactions.find((r) => r.emoji === emoji);
-    const alreadyReacted = existing?.user_ids.includes(currentUser.id) ?? false;
-
-    if (alreadyReacted) {
-      removeReaction.mutate({ messageId, userId: currentUser.id, emoji });
-    } else {
-      addReaction.mutate({ messageId, userId: currentUser.id, emoji });
-    }
-  };
-
-  const handlePickerEmoji = (emoji: string) => {
-    toggleReaction(emoji);
-    setPickerOpen(false);
-  };
-
-  const hasReactions = reactions.length > 0;
+  if (reactions.length === 0) {
+    return null;
+  }
 
   return (
-    <div className="flex items-center flex-wrap gap-1 ms-[3.25rem] mt-0.5">
-      {/* Existing reaction pills */}
-      {hasReactions && reactions.map((reaction) => {
+    <div data-testid="message-reactions" className="flex items-center flex-wrap gap-1 ms-[3.25rem] mt-0.5">
+      {reactions.map((reaction) => {
         const reacted = currentUser
           ? reaction.user_ids.includes(currentUser.id)
           : false;
@@ -118,31 +82,6 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
           </button>
         );
       })}
-
-      {/* Add-reaction trigger — shown on group hover (controlled by parent) */}
-      <div className="relative" ref={pickerRef}>
-        <button
-          data-testid="reaction-add-btn"
-          onClick={() => setPickerOpen((prev) => !prev)}
-          className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity panel-raised px-1.5 py-0.5 text-xs font-mono"
-          style={{ color: "var(--c-text-muted)" }}
-          aria-label={t("reactions.add")}
-          aria-expanded={pickerOpen}
-        >
-          +
-        </button>
-
-        {/*
-          The real picker (#848), replacing the eight hard-coded emoji this
-          affordance used to be. Anchored `absolute` inside this `relative`
-          wrapper — no portal, no fixed overlay, no backdrop.
-        */}
-        {pickerOpen && (
-          <div data-testid="reaction-picker" className="absolute bottom-full mb-1 start-0 z-40">
-            <EmojiPicker onSelect={handlePickerEmoji} onClose={() => setPickerOpen(false)} closeOnSelect />
-          </div>
-        )}
-      </div>
     </div>
   );
 });

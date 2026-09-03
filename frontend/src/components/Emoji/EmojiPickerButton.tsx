@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Smile } from "lucide-react";
+import { Smile, type LucideIcon } from "lucide-react";
 import { type Placement, panelHeightPx, resolvePlacement } from "./pickerPlacement";
 
 // The picker carries the full standard emoji table (`emojiData.ts`), which is
@@ -39,6 +39,21 @@ interface EmojiPickerButtonProps {
   className?: string;
   "data-testid"?: string;
   ariaLabel?: string;
+  /** Trigger chrome. Defaults to the composer's `icon-btn-sm`; a message
+   * hover bar passes its own button class so every action there matches. */
+  buttonClassName?: string;
+  /** Trigger glyph. Defaults to the plain smile. */
+  icon?: LucideIcon;
+  iconSize?: number;
+  /** Defaults to `size-4`, which scales the glyph with the font setting. */
+  iconClassName?: string;
+  /** Marks the trigger for arrow-key message navigation (`data-nav-action`). */
+  navAction?: string;
+  /** Test id on the panel wrapper, for callers whose panel is not "the" picker. */
+  panelTestId?: string;
+  /** Reported on every open/close, so a host that hides on hover-out can hold
+   * itself visible while the panel is up. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -60,9 +75,23 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
   className = "",
   "data-testid": testId = "emoji-picker-button",
   ariaLabel,
+  buttonClassName = "icon-btn-sm",
+  icon: Icon = Smile,
+  iconSize = 16,
+  iconClassName = "size-4 shrink-0",
+  navAction,
+  panelTestId,
+  onOpenChange,
 }) => {
   const { t } = useTranslation("emoji");
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setOpenState(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
   // Resolved when the panel opens, and again whenever the geometry it was
   // derived from moves. Seeded with the caller's preference so the very first
   // paint is never the wrong way round.
@@ -98,7 +127,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   // The decision is only as good as the geometry it was made from, and both
   // inputs move while the panel is open: resizing changes the space, and any
@@ -137,15 +166,20 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
         aria-expanded={open}
         aria-haspopup="dialog"
         title={label}
-        onClick={() => setOpen((prev) => !prev)}
-        className="icon-btn-sm"
+        data-nav-action={navAction}
+        onClick={() => setOpen(!open)}
+        className={buttonClassName}
         style={{ color: open ? "var(--c-accent)" : undefined }}
       >
-        <Smile size={16} className="size-4 shrink-0" />
+        <Icon size={iconSize} className={iconClassName} />
       </button>
 
       {open && (
-        <div data-placement={resolved.placement} className={`absolute z-40 ${positionClass}`}>
+        <div
+          data-testid={panelTestId}
+          data-placement={resolved.placement}
+          className={`absolute z-40 ${positionClass}`}
+        >
           {/* `null` fallback rather than a spinner: the chunk is local and
               resolves within a frame or two, and a flashing placeholder where
               the grid is about to appear reads worse than the grid simply

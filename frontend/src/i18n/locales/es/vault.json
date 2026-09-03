@@ -19,8 +19,7 @@
   "edit": {
     "heading": "Editar entrada",
     "cancel": "Cancelar edición",
-    "save": "Guardar",
-    "saving": "Guardando…"
+    "hint": "Intro para guardar · Mayús+Intro para salto de línea · Esc para cancelar"
   },
   "delete": {
     "heading": "Eliminar entrada",
