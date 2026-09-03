@@ -203,6 +203,7 @@ before this table existed.
 | `search_messages(query, conversationId?, sort?, limit?, cursor?)` | Returns `SearchPage` |
 | `rebuild_search_index()` | The Preferences escape hatch |
 | `read_messages_around(conversationId, messageId, limit?)` | A page centred on one message, anchored on `(sent_at, id)` — the jump-to-message read path |
+| `read_messages_after(conversationId, cursor, limit?)` | The oldest `limit` messages newer than `cursor` — how a jump's window pages forward to the live tail (#1039) |
 
 Registered in `pollis-core/src/bridge.rs`, `src-tauri/src/commands/messages.rs`,
 `src-tauri/src/lib.rs`'s `invoke_handler!` and `src-tauri/src/test_harness.rs`.
@@ -228,7 +229,9 @@ Registered in `pollis-core/src/bridge.rs`, `src-tauri/src/commands/messages.rs`,
   **silently drops every key it does not return**, so a param that is not
   declared there does not exist. `MainContent` consumes it once, calls
   `read_messages_around` when the target is outside the loaded window, and
-  strips the param so a back-navigation does not re-flash.
+  strips the param so a back-navigation does not re-flash. The page that comes
+  back opens an **anchored window** rather than being merged into the live one
+  (#1039) — see [UI → The windowed log](./ui.md#the-windowed-log-874).
 
 ## Honesty (§6 of the ticket)
 

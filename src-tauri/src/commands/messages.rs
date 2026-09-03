@@ -79,6 +79,11 @@ pub async fn read_messages_around(conversation_id: String, message_id: String, l
 }
 
 #[tauri::command]
+pub async fn read_messages_after(conversation_id: String, cursor: MessageCursor, limit: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<MessagePage> {
+    pollis_core::commands::messages::read_messages_after(conversation_id, cursor, limit, &state).await
+}
+
+#[tauri::command]
 pub async fn add_reaction(message_id: String, user_id: String, emoji: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::messages::add_reaction(message_id, user_id, emoji, &state).await
 }

@@ -389,6 +389,69 @@ function readMessagePage(
   };
 }
 
+/** The conversation in log order — `sent_at`, then `id`, the page reads' tie-break. */
+function chronologicalMessages(conversationId: string): MockMessage[] {
+  const at = (m: MockMessage) => String(m.sent_at);
+  return [...(store.messages[conversationId] ?? [])].sort((a, b) =>
+    at(a) === at(b) ? a.id.localeCompare(b.id) : at(a).localeCompare(at(b)),
+  );
+}
+
+/**
+ * `read_messages_around` (#850, #1039): `limit` before the anchor, the anchor,
+ * and `limit` after it, newest-first; `next_cursor` is the oldest row returned
+ * when older rows remain. Without `paginate` the whole conversation is the page.
+ */
+function readMessagesAround(
+  conversationId: string,
+  messageId: string,
+  limit?: number,
+): { messages: MockMessage[]; next_cursor: MessageCursor | null } {
+  const chronological = chronologicalMessages(conversationId);
+  if (!store.paginate) {
+    return { messages: chronological, next_cursor: null };
+  }
+  const anchorIndex = chronological.findIndex((m) => m.id === messageId);
+  if (anchorIndex === -1) {
+    return { messages: [], next_cursor: null };
+  }
+  const size = limit && limit > 0 ? limit : chronological.length;
+  const from = Math.max(anchorIndex - size, 0);
+  const page = chronological.slice(from, anchorIndex + size + 1).reverse();
+  const oldest = page[page.length - 1];
+  return {
+    messages: page,
+    next_cursor: from > 0 ? { sent_at: String(oldest.sent_at), id: oldest.id } : null,
+  };
+}
+
+/**
+ * `read_messages_after` (#1039): the oldest `limit` rows strictly newer than
+ * `cursor`, newest-first; `next_cursor` is the newest row returned iff the
+ * page came back full. Without `paginate` everything newer comes back at once.
+ */
+function readMessagesAfter(
+  conversationId: string,
+  cursor: MessageCursor,
+  limit?: number,
+): { messages: MockMessage[]; next_cursor: MessageCursor | null } {
+  const at = (m: MockMessage) => String(m.sent_at);
+  const newer = chronologicalMessages(conversationId).filter(
+    (m) =>
+      at(m) > cursor.sent_at || (at(m) === cursor.sent_at && m.id > cursor.id),
+  );
+  if (!store.paginate || !limit || limit <= 0) {
+    return { messages: newer.reverse(), next_cursor: null };
+  }
+  const page = newer.slice(0, limit).reverse();
+  const newest = page[0];
+  return {
+    messages: page,
+    next_cursor:
+      page.length === limit ? { sent_at: at(newest), id: newest.id } : null,
+  };
+}
+
 /** Look a message up across every conversation, as the local DB's primary key
  *  lookup does. */
 function findMessage(messageId: string): MockMessage | undefined {
@@ -1220,13 +1283,31 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'rebuild_search_index':
       return null;
 
-    // The jump-to-message read path. The mock holds every conversation in one
-    // array, so "the page around this message" is that array — which is the
-    // right answer for a spec, since the point of the command is that the
-    // target ends up loaded.
+    // The jump-to-message read path. With `paginate` off the mock hands back
+    // the whole conversation as "the page around this message" — the right
+    // answer for most specs, since the point of the command is that the
+    // target ends up loaded. With it on, the page is `limit` before and
+    // `limit` after the anchor, as Rust reads it, so the gap between that
+    // page and the live tail (#1039) is real.
     case 'read_messages_around': {
-      const { conversationId } = args as { conversationId: string; messageId: string };
-      return { messages: store.messages[conversationId] ?? [], next_cursor: null };
+      const { conversationId, messageId, limit } = args as {
+        conversationId: string;
+        messageId: string;
+        limit?: number;
+      };
+      return readMessagesAround(conversationId, messageId, limit);
+    }
+
+    // The forward page read that fills that gap (#1039): the oldest `limit`
+    // messages strictly newer than `cursor`, newest-first like Rust, with a
+    // continuation only when the page came back full.
+    case 'read_messages_after': {
+      const { conversationId, cursor, limit } = args as {
+        conversationId: string;
+        cursor: MessageCursor;
+        limit?: number;
+      };
+      return readMessagesAfter(conversationId, cursor, limit);
     }
 
     // ── Custom emoji (#848) ──────────────────────────────────────────────

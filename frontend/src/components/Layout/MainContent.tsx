@@ -48,28 +48,75 @@ type MessagesQueryData = {
 };
 
 /**
- * Older pages fetched for one conversation, and the cursor the next page
- * continues from.
+ * The pages this component has fetched for one conversation beyond the live
+ * newest page, and which of the two window modes the log is in (#1039).
+ *
+ * **Live** is the ordinary state: the React Query page is the tail of the
+ * log, `messages` are the older pages fetched behind it, and the two are
+ * contiguous — so their union, deduped and sorted, IS the log.
+ *
+ * **Anchored** is the state a jump to a message outside the loaded window
+ * puts the log in. `messages` is a self-contained window around the anchor
+ * that pages in both directions — older from `olderCursor` as usual, and
+ * NEWER from `newerCursor` as the reader scrolls toward the present — and the
+ * live page is NOT shown, because nothing says it is adjacent. Merging the
+ * two anyway was the #1039 bug: the log rendered the anchor's page and the
+ * live page as neighbours and the history between them silently vanished.
+ * The window hands back to live mode the moment a forward page touches the
+ * live page or runs out of history, at which point the two are contiguous
+ * and the ordinary merge is correct again. This is what Slack and Discord do.
  *
  * Stamped with the log they belong to so the pages and the conversation on
  * screen can never disagree, not even for the one render an effect-based
  * reset leaves between them (#927).
  */
-type OlderPages = {
-  logKey: string;
-  messages: Message[];
-  cursor: PageCursor | null;
-  /** Whether a page has been fetched for this log yet — before the first
-   *  one, the cursor to continue from is the initial page's own. */
-  fetched: boolean;
-};
+type MessageWindow =
+  | {
+      mode: "live";
+      logKey: string;
+      messages: Message[];
+      cursor: PageCursor | null;
+      /** Whether a page has been fetched for this log yet — before the first
+       *  one, the cursor to continue from is the initial page's own. */
+      fetched: boolean;
+    }
+  | {
+      mode: "anchored";
+      logKey: string;
+      messages: Message[];
+      /** Continue backwards from here; null once the oldest message is held. */
+      olderCursor: PageCursor | null;
+      /** Continue forwards from here — the newest row held. */
+      newerCursor: PageCursor;
+    };
 
-const NO_OLDER_PAGES: OlderPages = {
+const NO_WINDOW: MessageWindow = {
+  mode: "live",
   logKey: "",
   messages: [],
   cursor: null,
   fetched: false,
 };
+
+const PAGE_SIZE = 50;
+
+/** Whether two pages share a message, i.e. are known to be contiguous. */
+function overlaps(a: Message[], ids: Set<string>): boolean {
+  return a.some((m) => ids.has(m.id));
+}
+
+/** The log's order: `sent_at`, then `id` — the same tie-break the page reads use. */
+function isOlder(a: PageCursor, b: PageCursor): boolean {
+  return a.sent_at < b.sent_at || (a.sent_at === b.sent_at && a.id < b.id);
+}
+
+function olderOf(a: PageCursor, b: PageCursor): PageCursor {
+  return isOlder(a, b) ? a : b;
+}
+
+function newerOf(a: PageCursor, b: PageCursor): PageCursor {
+  return isOlder(a, b) ? b : a;
+}
 
 interface MainContentProps {
   pendingDmRequest?: PendingDmRequest | null;
@@ -155,22 +202,39 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   // this component, so both ids go into the key.
   const logKey = `${selectedChannelId ?? ""}|${selectedConversationId ?? ""}`;
 
-  const [olderPages, setOlderPages] = useState<OlderPages>(NO_OLDER_PAGES);
+  const [messageWindow, setMessageWindow] = useState<MessageWindow>(NO_WINDOW);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
+  // Bumped when an anchored window is dropped for the live tail wholesale (a
+  // send from inside it), so `MessageList` re-runs its open-at-newest anchor
+  // rather than keeping a scroll offset into a log that no longer exists. NOT
+  // bumped on the scroll-driven anchored→live hand-back, which must leave the
+  // reader exactly where they are, and not on a jump, whose pending target
+  // positions the log itself.
+  const [windowEpoch, setWindowEpoch] = useState(0);
 
   // Pages belonging to another conversation are simply not this log's — no
   // reset effect, so there is no window in which they could be read as if
   // they were, and nothing to re-run.
-  const older = olderPages.logKey === logKey ? olderPages : NO_OLDER_PAGES;
-  const olderMessages = older.messages;
-  // Where the next page continues from: the initial page's cursor until a
-  // page has been fetched, then whatever that fetch handed back. Derived
-  // during render, because the effect that used to seed it read the PREVIOUS
-  // conversation's page list — so opening a conversation whose first page was
-  // already cached left it with no cursor at all, and no dependency would
-  // ever change to give it one. That conversation stayed capped at its newest
-  // 50 messages for as long as the cache held it (#927).
-  const pageCursor = older.fetched ? older.cursor : nextCursor;
+  const window_ = messageWindow.logKey === logKey ? messageWindow : NO_WINDOW;
+  const isAnchored = window_.mode === "anchored";
+  const windowMessages = window_.messages;
+  // Where the next OLDER page continues from. Live: the initial page's cursor
+  // until a page has been fetched, then whatever that fetch handed back.
+  // Derived during render, because the effect that used to seed it read the
+  // PREVIOUS conversation's page list — so opening a conversation whose first
+  // page was already cached left it with no cursor at all, and no dependency
+  // would ever change to give it one. That conversation stayed capped at its
+  // newest 50 messages for as long as the cache held it (#927).
+  const pageCursor =
+    window_.mode === "anchored"
+      ? window_.olderCursor
+      : window_.fetched
+        ? window_.cursor
+        : nextCursor;
+  // Where the next NEWER page continues from — anchored mode only; in live
+  // mode the newest page IS the tail and new arrivals land on it directly.
+  const newerCursor = window_.mode === "anchored" ? window_.newerCursor : null;
 
   // Reset edit state when the selected channel/conversation changes.
   useEffect(() => {
@@ -208,10 +272,12 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     return () => window.removeEventListener("pollis:focus-chat-input", handler);
   }, []);
 
-  // Merge older fetched pages with the live initial page, deduplicated and
-  // sorted oldest-first. Dedup keeps the first occurrence by message ID.
+  // The log: in live mode the older pages merged with the live page,
+  // deduplicated and sorted oldest-first (dedup keeps the first occurrence by
+  // message ID); in anchored mode the window alone, because the live page is
+  // not known to be adjacent to it (#1039).
   const allMessages = useMemo(() => {
-    const combined = [...olderMessages, ...messages];
+    const combined = isAnchored ? windowMessages : [...windowMessages, ...messages];
     const seen = new Set<string>();
     const deduped: Message[] = [];
     for (const m of combined) {
@@ -221,7 +287,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       }
     }
     return deduped.sort((a, b) => a.created_at - b.created_at);
-  }, [olderMessages, messages]);
+  }, [isAnchored, windowMessages, messages]);
 
   // What the CHANNEL shows: everything except thread replies (#825). A reply
   // lives in its thread, and the root already advertises it with "N replies" —
@@ -283,13 +349,18 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       // Written against the log this fetch was issued for. A conversation
       // switch mid-flight therefore lands on a key nothing reads, rather than
       // prepending one conversation's history onto another's.
-      setOlderPages((prev) => {
-        const base = prev.logKey === logKey ? prev : NO_OLDER_PAGES;
+      setMessageWindow((prev) => {
+        const base = prev.logKey === logKey ? prev : NO_WINDOW;
         const existingIds = new Set(base.messages.map((m) => m.id));
         const newOnes = fetched.filter((m) => !existingIds.has(m.id));
+        const merged = [...newOnes, ...base.messages];
+        if (base.mode === "anchored") {
+          return { ...base, logKey, messages: merged, olderCursor: continuation };
+        }
         return {
+          mode: "live",
           logKey,
-          messages: [...newOnes, ...base.messages],
+          messages: merged,
           cursor: continuation,
           fetched: true,
         };
@@ -320,9 +391,84 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   // the whole of that commit and drops in the next one.
   useEffect(() => {
     setLoadingMore(false);
-  }, [olderPages]);
+    setLoadingNewer(false);
+  }, [messageWindow]);
 
-  // ── Jump to a message that is not loaded (#850) ─────────────────────────
+  // The live page's ids and the current window, read from callbacks rather
+  // than closed over, for the "has the window reached the tail yet" checks.
+  const liveMessagesRef = useRef(messages);
+  liveMessagesRef.current = messages;
+  const windowRef = useRef(window_);
+  windowRef.current = window_;
+
+  // ── Anchored window: page forward toward the present (#1039) ────────────
+  //
+  // The other half of what makes a jump honest. Each call appends the next
+  // page after `newerCursor`; the window hands back to live mode as soon as a
+  // page shares a message with the live page (they are contiguous from here
+  // on) or comes back short (this device holds nothing newer, so the live
+  // page — the newest N on disk — is by definition what comes next). Until
+  // then the live page stays off screen, which is the whole point.
+  //
+  // A read failure also hands back, degrading to the pre-#1039 merge rather
+  // than leaving the reader in a window that can never reach the present.
+  const loadNewer = useCallback(async () => {
+    if (!newerCursor || loadingNewer) {
+      return;
+    }
+    const conversationId = selectedChannelId ?? selectedConversationId;
+    if (!conversationId) {
+      return;
+    }
+    setLoadingNewer(true);
+    let page: RawMessagePage | null = null;
+    try {
+      page = await invoke<RawMessagePage>("read_messages_after", {
+        conversationId,
+        cursor: newerCursor,
+        limit: PAGE_SIZE,
+      });
+    } catch (error) {
+      console.error("Failed to load newer messages:", error);
+    }
+    const base = windowRef.current;
+    if (base.logKey !== logKey || base.mode !== "anchored") {
+      // Already handed back (a send, a conversation switch) — nothing to
+      // append to, and no window change coming to clear the flag.
+      setLoadingNewer(false);
+      return;
+    }
+    const fetched = page ? page.messages.map(transformChannelMessage) : [];
+    const continuation = page?.next_cursor ?? null;
+    const liveIds = new Set(liveMessagesRef.current.map((m) => m.id));
+    const rejoin = !continuation || overlaps(fetched, liveIds);
+    const existingIds = new Set(base.messages.map((m) => m.id));
+    const merged = [...base.messages, ...fetched.filter((m) => !existingIds.has(m.id))];
+    // The append below is what ends this load; the effect keyed on the window
+    // clears the flag one commit later, exactly as for `loadMore` (#934).
+    setMessageWindow(
+      rejoin
+        ? { mode: "live", logKey, messages: merged, cursor: base.olderCursor, fetched: true }
+        : { ...base, messages: merged, newerCursor: continuation },
+    );
+  }, [newerCursor, loadingNewer, logKey, selectedChannelId, selectedConversationId]);
+
+  // Sending from inside an anchored window returns the log to the present —
+  // the new message lands on the live page, which the window does not show,
+  // and Slack does exactly this. The window's pages are dropped rather than
+  // kept as "older" ones: they are not contiguous with the tail, and keeping
+  // them would re-create the gap this mode exists to prevent.
+  const leaveAnchoredWindow = useCallback(() => {
+    setMessageWindow((prev) => {
+      if (prev.logKey !== logKey || prev.mode !== "anchored") {
+        return prev;
+      }
+      return NO_WINDOW;
+    });
+    setWindowEpoch((n) => n + 1);
+  }, [logKey]);
+
+  // ── Jump to a message that is not loaded (#850, #1039) ──────────────────
   //
   // A search hit or a reply quote almost by definition points at something
   // older than the newest page. `MessageList.revealRow` can only reveal a row
@@ -331,9 +477,11 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   // scroll back a page at a time.
   //
   // `read_messages_around` fetches N before and N after the anchor in one call
-  // (anchored on `sent_at`, the order the log renders in), and the page is
-  // merged into the same `olderPages` list `loadMore` writes, so nothing
-  // downstream has to know a jump happened.
+  // (anchored on `sent_at`, the order the log renders in). If that page
+  // touches what is already loaded it is simply merged in, as contiguous
+  // history. If it does not, the log switches to an ANCHORED window around
+  // it (see `MessageWindow`), and `loadNewer` pages it forward until it
+  // rejoins the tail.
   const ensureMessageLoaded = useCallback(
     async (messageId: string) => {
       if (allMessagesRef.current.some((m) => m.id === messageId)) {
@@ -346,25 +494,78 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
       const page = await invoke<RawMessagePage>("read_messages_around", {
         conversationId,
         messageId,
-        limit: 50,
+        limit: PAGE_SIZE,
       });
       if (page.messages.length === 0) {
         return;
       }
       const fetched = page.messages.map(transformChannelMessage);
-      setOlderPages((prev) => {
-        const base = prev.logKey === logKey ? prev : NO_OLDER_PAGES;
-        const existingIds = new Set(base.messages.map((m) => m.id));
-        const newOnes = fetched.filter((m) => !existingIds.has(m.id));
-        return {
+      // Newest-first, so the head of the page is where a forward read continues.
+      const newest = page.messages[0];
+      const pageNewer: PageCursor = { sent_at: newest.sent_at, id: newest.id };
+      const pageOlder = page.next_cursor ?? null;
+      const liveIds = new Set(liveMessagesRef.current.map((m) => m.id));
+      const contiguousWithLive = overlaps(fetched, liveIds);
+      const base = windowRef.current;
+      const baseIds = new Set(base.messages.map((m) => m.id));
+      const touchesBase = base.messages.length > 0 && overlaps(fetched, baseIds);
+      const newOnes = fetched.filter((m) => !baseIds.has(m.id));
+
+      if (base.mode === "live") {
+        if (contiguousWithLive || touchesBase) {
+          // Everything loaded in live mode is contiguous with the tail, so a
+          // page touching any of it sits older than all of it: its
+          // continuation is where "load more" resumes from.
+          setMessageWindow({
+            mode: "live",
+            logKey,
+            messages: [...newOnes, ...base.messages],
+            cursor: pageOlder,
+            fetched: true,
+          });
+          return;
+        }
+        setMessageWindow({
+          mode: "anchored",
           logKey,
-          messages: [...newOnes, ...base.messages],
-          // The around-page always sits older than the live newest page, so its
-          // continuation is the correct place for "load more" to resume from.
-          cursor: page.next_cursor ?? base.cursor,
-          fetched: true,
-        };
-      });
+          messages: fetched,
+          olderCursor: pageOlder,
+          newerCursor: pageNewer,
+        });
+        return;
+      }
+
+      if (touchesBase) {
+        // A second jump landing inside or beside the current window: one
+        // window, bounded by the older and the newer of the two edges. A null
+        // older edge means the start of the log has been reached and stays.
+        const merged = [...newOnes, ...base.messages];
+        const olderCursor =
+          pageOlder && base.olderCursor
+            ? olderOf(pageOlder, base.olderCursor)
+            : null;
+        setMessageWindow(
+          contiguousWithLive
+            ? { mode: "live", logKey, messages: merged, cursor: olderCursor, fetched: true }
+            : {
+                mode: "anchored",
+                logKey,
+                messages: merged,
+                olderCursor,
+                newerCursor: newerOf(pageNewer, base.newerCursor),
+              },
+        );
+        return;
+      }
+
+      // A jump clean out of the current window: that window is dropped, not
+      // kept — its pages are not contiguous with the new one, and keeping
+      // them would re-create exactly the gap this mode exists to prevent.
+      setMessageWindow(
+        contiguousWithLive
+          ? { mode: "live", logKey, messages: fetched, cursor: pageOlder, fetched: true }
+          : { mode: "anchored", logKey, messages: fetched, olderCursor: pageOlder, newerCursor: pageNewer },
+      );
     },
     [logKey, selectedChannelId, selectedConversationId],
   );
@@ -372,14 +573,57 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
   // Fired by `MessageList` whenever something asks to scroll to a message —
   // a reply quote, or a queued jump. Best-effort: a message this device does
   // not hold simply never arrives, and the log stays where it is.
+  //
+  // The jump is queued on the store as well, so a target that has to be
+  // fetched — and, in anchored mode, re-seats the whole window — is scrolled
+  // to and flashed once its row exists, rather than merely loaded.
   const handleScrollToMessage = useCallback(
     (messageId: string) => {
+      const conversationId = selectedChannelId ?? selectedConversationId ?? "";
+      messageJumpStore.request(conversationId, messageId);
       void ensureMessageLoaded(messageId).catch((error) => {
         console.error("Failed to load the page around a message:", error);
       });
     },
-    [ensureMessageLoaded],
+    [ensureMessageLoaded, selectedChannelId, selectedConversationId],
   );
+
+  // A jump queued on the store — a permalink, a saved message — whose target
+  // this log does not hold. `MessageList` can only claim a jump once the row
+  // exists, so until now such a jump simply stayed pending for as long as the
+  // target sat one or more pages back (#1039). Fetch the page around it, the
+  // way the `?message=` door below always has. Once per request: the store
+  // keeps the same id pending until the row renders, and re-fetching on every
+  // window change would race the reveal.
+  const pendingJumpMessageId = messageJumpStore.messageId;
+  const pendingJumpConversationId = messageJumpStore.conversationId;
+  const fetchedJumpRef = useRef<string | null>(null);
+  useEffect(() => {
+    const conversationId = selectedChannelId ?? selectedConversationId;
+    // Not before the live page is in hand: the around-page is compared with
+    // it to decide whether the jump needs a window at all.
+    if (
+      !pendingJumpMessageId ||
+      !conversationId ||
+      messagesLoading ||
+      pendingJumpConversationId !== conversationId ||
+      fetchedJumpRef.current === pendingJumpMessageId ||
+      allMessagesRef.current.some((m) => m.id === pendingJumpMessageId)
+    ) {
+      return;
+    }
+    fetchedJumpRef.current = pendingJumpMessageId;
+    void ensureMessageLoaded(pendingJumpMessageId).catch((error) => {
+      console.error("Failed to load the page around a message:", error);
+    });
+  }, [
+    pendingJumpMessageId,
+    pendingJumpConversationId,
+    messagesLoading,
+    selectedChannelId,
+    selectedConversationId,
+    ensureMessageLoaded,
+  ]);
 
   // `?message=` on the URL is the other door into the same jump: it survives a
   // real navigation and a reload, where the MobX store cannot. Consumed once
@@ -530,6 +774,11 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
     if (!currentUser) {
       return;
     }
+    // The optimistic insert below lands on the live page; make sure the log
+    // is showing it (#1039).
+    if (isAnchored) {
+      leaveAnchoredWindow();
+    }
 
     const contentText = text.trim();
     const queryKey = selectedChannelId
@@ -645,6 +894,10 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             hasMore={!!pageCursor}
             isFetchingMore={loadingMore}
             onLoadMore={loadMore}
+            hasNewer={!!newerCursor}
+            isFetchingNewer={loadingNewer}
+            onLoadNewer={loadNewer}
+            windowEpoch={windowEpoch}
             focusComposer={focusComposer}
           />
         )}

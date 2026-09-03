@@ -151,6 +151,17 @@ interface MessageListProps {
   hasMore?: boolean;
   isFetchingMore?: boolean;
   onLoadMore?: () => void;
+  /** The log is an anchored window (#1039): there are messages newer than
+   * its last row that are not the live tail. Scrolling near the bottom asks
+   * for them via `onLoadNewer`, and arriving messages do not pull the
+   * viewport down until the window has rejoined the tail. */
+  hasNewer?: boolean;
+  isFetchingNewer?: boolean;
+  onLoadNewer?: () => void;
+  /** Bumped by the parent whenever it replaces the log wholesale with the
+   * live tail (leaving an anchored window), so the log re-opens at its newest
+   * row exactly as it does on a conversation switch. */
+  windowEpoch?: number;
   /** Opting into arrow-key log navigation: return focus to this surface's
    * composer. Only the surface that owns the app's main composer passes it —
    * exactly one mounted list may lend the nav store its context. */
@@ -178,6 +189,10 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   hasMore,
   isFetchingMore,
   onLoadMore,
+  hasNewer = false,
+  isFetchingNewer = false,
+  onLoadNewer,
+  windowEpoch = 0,
   focusComposer,
 }) => {
   probeRender("MessageList");
@@ -366,7 +381,13 @@ export const MessageList: React.FC<MessageListProps> = observer(({
     // Follow new messages down — but only from the bottom. Scrolled back
     // through history, an arriving message no longer yanks the viewport away,
     // which is how Slack and Discord both behave.
-    followOnAppend: "smooth",
+    //
+    // Off entirely while the log is an anchored window (#1039): the "bottom"
+    // of such a window is not the present, and a forward page appending
+    // below it is history the reader has not seen yet, not a new arrival to
+    // follow. Held off one commit past the last append too (`isFetchingNewer`
+    // clears then), so the rejoining page is not followed either.
+    followOnAppend: hasNewer || isFetchingNewer ? false : "smooth",
     // "At the bottom" with one row of slack, rather than the 1px default.
     scrollEndThreshold: rowEstimatePx,
   });
@@ -421,7 +442,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
       return;
     }
     virtualizer.scrollToIndex(timelineRef.current.length - 1, { align: "end" });
-  }, [logKey, hasRows, virtualizer]);
+  }, [logKey, windowEpoch, hasRows, virtualizer]);
 
   // Ask for another page while the reader is at the top of the log — or while
   // there is no top to reach, because the log does not fill its own viewport.
@@ -468,6 +489,46 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   useEffect(() => {
     maybeLoadMore();
   }, [maybeLoadMore, timeline.length]);
+
+  // The mirror image, for an anchored window (#1039): ask for the next page
+  // toward the present while the reader is at the BOTTOM of the window — or
+  // while the window does not fill its viewport, for the same reason as above.
+  // `hasNewer` is false in live mode, so this is inert on the ordinary log.
+  //
+  // Runaway is bounded the same way: the append re-pins the reader onto the
+  // row they were reading (`followOnAppend` is off while `hasNewer`), which
+  // is no longer near the bottom once a page sits below it.
+  //
+  // Not while a jump is still pending: the window has just been re-seated
+  // and the viewport is wherever the previous log left it (typically its
+  // bottom, i.e. this window's bottom) until the jump effect below centres
+  // the target. Asking then would fetch a page nobody has scrolled toward.
+  const pendingJumpMessageId = messageJumpStore.messageId;
+  const maybeLoadNewer = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || !hasNewer || isFetchingNewer || pendingJumpMessageId) {
+      return;
+    }
+    const threshold = loadMoreThresholdPx();
+    const scrollable = container.scrollHeight - container.clientHeight > threshold;
+    const fromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (!scrollable || fromBottom < threshold) {
+      onLoadNewer?.();
+    }
+  }, [hasNewer, isFetchingNewer, onLoadNewer, pendingJumpMessageId]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    container.addEventListener("scroll", maybeLoadNewer, { passive: true });
+    return () => container.removeEventListener("scroll", maybeLoadNewer);
+  }, [maybeLoadNewer]);
+
+  useEffect(() => {
+    maybeLoadNewer();
+  }, [maybeLoadNewer, timeline.length]);
 
   // `useCallback` is load-bearing, not tidiness: this is handed to every row as
   // `onScrollToReply`, so a fresh identity per render re-rendered the entire log
@@ -938,6 +999,14 @@ export const MessageList: React.FC<MessageListProps> = observer(({
           </div>
         ))}
       </div>
+      {isFetchingNewer && (
+        <p
+          data-testid="message-loading-newer"
+          className="text-xs font-mono text-center py-2 text-muted"
+        >
+          {t("common:states.loading")}
+        </p>
+      )}
     </div>
   );
 });

@@ -875,6 +875,12 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             let limit: Option<i64> = arg_opt(&args, "limit")?;
             ok(messages::read_messages_around(conversation_id, message_id, limit, &state()?).await?)
         }
+        "read_messages_after" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let cursor: messages::MessageCursor = arg(&args, "cursor")?;
+            let limit: Option<i64> = arg_opt(&args, "limit")?;
+            ok(messages::read_messages_after(conversation_id, cursor, limit, &state()?).await?)
+        }
 
         // ----- blocks -----
         "block_user" => {

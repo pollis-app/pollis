@@ -597,6 +597,7 @@ pub fn run() {
             commands::messages::search_messages,
             commands::messages::rebuild_search_index,
             commands::messages::read_messages_around,
+            commands::messages::read_messages_after,
             commands::messages::add_reaction,
             commands::messages::remove_reaction,
             commands::messages::get_reactions,

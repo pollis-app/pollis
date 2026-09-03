@@ -522,6 +522,88 @@ pub async fn read_messages_around(
     Ok(MessagePage { messages, next_cursor })
 }
 
+/// The `limit` OLDEST messages strictly newer than `cursor`, newest-first, as
+/// a `(rows, next_cursor)` pair (#1039). See [`read_messages_after`].
+///
+/// Split out from the command so the paging contract is testable against a
+/// bare connection: the whole point of the forward read is that repeatedly
+/// feeding `next_cursor` back in visits every row exactly once and then stops.
+pub(crate) fn read_after_on(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    cursor: &MessageCursor,
+    limit: i64,
+) -> rusqlite::Result<(Vec<ChannelMessage>, Option<MessageCursor>)> {
+    let mut stmt = conn.prepare(
+        "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at, thread_id
+         FROM message
+         WHERE conversation_id = ?1
+           AND (sent_at > ?2 OR (sent_at = ?2 AND id > ?3))
+         ORDER BY sent_at ASC, id ASC
+         LIMIT ?4",
+    )?;
+    let oldest_first: Vec<ChannelMessage> = stmt
+        .query_map(
+            rusqlite::params![conversation_id, cursor.sent_at, cursor.id, limit],
+            row_to_channel_message,
+        )?
+        .flatten()
+        .collect();
+
+    // A full page may have more behind it; a short one is the tail of what
+    // this device holds. The cursor points at the NEWEST row returned, because
+    // that is the edge the next forward page continues from — the mirror image
+    // of every backward read, where it points at the oldest.
+    let next_cursor = if oldest_first.len() == limit as usize {
+        oldest_first.last().map(|m| MessageCursor {
+            sent_at: m.sent_at.clone(),
+            id: m.id.clone(),
+        })
+    } else {
+        None
+    };
+
+    // Newest-first, like every other page, so one renderer path handles it.
+    let messages: Vec<ChannelMessage> = oldest_first.into_iter().rev().collect();
+    Ok((messages, next_cursor))
+}
+
+/// A page of a conversation NEWER than a cursor — the forward read (#1039).
+///
+/// Every other page read walks backwards from the newest message, which is
+/// the only direction a log opened at its tail ever needs. A jump to an old
+/// message (#850) is different: the window is re-centred far back in history
+/// and the reader then scrolls FORWARD, toward the present. Without this read
+/// the renderer had nothing to fill the gap between the anchor's page and the
+/// live newest page, so it rendered the two as if they were adjacent and the
+/// history in between silently vanished from the scroll — the #1039 bug.
+///
+/// `cursor` is exclusive: the page starts at the first message after it in
+/// `(sent_at, id)` order, the order the log renders in. `next_cursor` is `None`
+/// once the page comes back short — i.e. the device has nothing newer on
+/// disk, which is the client's cue that the anchored window has caught up
+/// with the live tail and can hand back to it.
+pub async fn read_messages_after(
+    conversation_id: String,
+    cursor: MessageCursor,
+    limit: Option<i64>,
+    state: &Arc<AppState>,
+) -> Result<MessagePage> {
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+
+    let (mut messages, next_cursor) = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        read_after_on(db.conn(), &conversation_id, &cursor, limit)?
+    };
+
+    attach_sender_usernames_local(state, &mut messages).await?;
+
+    Ok(MessagePage { messages, next_cursor })
+}
+
 /// One thread's replies, oldest-first (#825).
 ///
 /// Purely local: `thread_id` lives inside the MLS ciphertext and is recovered

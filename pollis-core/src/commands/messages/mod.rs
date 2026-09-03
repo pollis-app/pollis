@@ -158,8 +158,8 @@ pub use send::send_message;
 // ── Read / list / search ─────────────────────────────────────────────────────
 pub use read::{
     get_channel_messages, get_dm_messages, list_messages, list_thread_summaries,
-    read_channel_messages, read_dm_messages, read_last_messages, read_messages_around,
-    read_thread_messages,
+    read_channel_messages, read_dm_messages, read_last_messages, read_messages_after,
+    read_messages_around, read_thread_messages,
 };
 
 // ── Search (on-device FTS5 — #850) ───────────────────────────────────────────

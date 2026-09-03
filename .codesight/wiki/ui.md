@@ -244,6 +244,46 @@ rules follow from what went wrong:
   pins the seam with a `MutationObserver`, since a state that lasts one commit
   cannot be polled for.
 
+**Jumping to a message opens an anchored window, not a merge (#1039).** A
+search hit or permalink almost by definition points outside the loaded pages,
+so `MainContent` fetches `read_messages_around` — `limit` before the target and
+`limit` after. That page used to be merged straight into the live one, and the
+log rendered the two as neighbours: from message 150 the reader scrolled into
+message 350 with nothing to say two hundred messages were missing. The paging
+state (`MessageWindow`) now has two modes:
+
+- **`live`** — the ordinary state. The React Query page is the tail, the fetched
+  pages are the contiguous history behind it, and their union is the log.
+- **`anchored`** — a self-contained window around the jump target that pages in
+  *both* directions: older from `olderCursor` as usual, newer from
+  `newerCursor` via `read_messages_after` as the reader scrolls toward the
+  bottom (`MessageList.maybeLoadNewer`, the mirror image of `maybeLoadMore`,
+  same rem threshold, same re-check on timeline change, same
+  loading line — `message-loading-newer` — below the window). **The live page
+  is not shown** in this mode, because nothing says it is adjacent. The window
+  hands back to `live` the moment a forward page shares a message with the
+  live page, comes back short (this device holds nothing newer, so the live page
+  is by definition what comes next), or fails to read (degrading to the old
+  merge rather than stranding the reader). Sending from inside the window drops
+  it and returns to the present, which is what Slack does: your message is where
+  the conversation is now. A second jump that lands inside or beside the window
+  widens it; one that lands clear of it replaces it — the old pages are not
+  contiguous with the new one, and keeping them would re-create the gap.
+
+Two things `MessageList` does for this mode: `followOnAppend` is **off** while
+`hasNewer || isFetchingNewer` (a forward page appending below the window is
+unread history, not an arrival to follow — and the flag clears one commit after
+the last append, exactly as `loadingMore` does, so the rejoining page is not
+followed either), and the `windowEpoch` prop re-runs the open-at-newest effect
+when the parent hands the log back to the tail wholesale.
+
+A jump queued on `messageJumpStore` (a permalink, a saved message) with a
+target this log does not hold is also what triggers the around-read — before
+#1039 only the `?message=` door did, so a permalink into an unloaded page stayed
+pending forever under pagination. `e2e/message-jump-gap.spec.ts` pins all of it:
+it jumps three pages back, wheels forward to the newest message, and demands
+every id in between was rendered on the way — through both doors, in both skins.
+
 **`content-visibility: auto` on the row does not work** — tried and reverted in
 #874, and not worth retrying. It implies *paint containment*, which clips the
 row's `absolute` hover action bar (`end-4 top-0 -translate-y-1/2`) and its
@@ -253,9 +293,10 @@ of the row into a single shared overlay tracking the hovered row (the way Slack
 does it).
 
 Guards live in `e2e/render-cost.spec.ts` (render cost, backed by
-`utils/renderProbe.ts`) and `e2e/message-window.spec.ts` (the window itself, and
-every DOM-locating path aimed at a target far outside it). Both run in both
-skins. Seeding a paginated conversation in the specs needs `paginate: true` in
+`utils/renderProbe.ts`), `e2e/message-window.spec.ts` (the window itself, and
+every DOM-locating path aimed at a target far outside it) and
+`e2e/message-jump-gap.spec.ts` (the anchored window a jump opens, and its walk
+back to the tail). All run in both skins. Seeding a paginated conversation in the specs needs `paginate: true` in
 the preload — `frontend/src/__mocks__/tauri-core.ts` otherwise hands back the
 whole seeded conversation in one page, which is what every other spec wants.
 ### Query layer (#874)
@@ -623,7 +664,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MessageAvatar** — props: userId, username, size — `frontend/src/components/Message/MessageAvatar.tsx`
 - **MessageBody** — props: text, ctx — `frontend/src/components/Message/MessageBody.tsx`. Renders resolving `@mentions` as tokens and delegates the rest to `LinkifiedText`. Plain `React.memo`, not `observer()` — it reads no observables, taking skin and the mention roster from `ctx`.
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, onTogglePin, copyLinkState, isSaved, isPinned, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed.
-- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, focusComposer, pinsConversationId — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).
+- **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, hasNewer, isFetchingNewer, onLoadNewer, windowEpoch, focusComposer, pinsConversationId — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
 - **MessageReactions** — props: messageId — `frontend/src/components/Message/MessageReactions.tsx`. The reaction pills, rendered by **both** skins from `MessageItem` and gated on `!isDeleted`. Returns `null` — no wrapper, no reserved height — until the message has a reaction: the previous permanent row with a hover-revealed `+` put a blank line under every message. Adding a reaction is `ReactionAddButton` in the hover bar. Restored in #931 after #874 deleted it as a dead path: the Rust commands survived and mobile still called them, so the feature was live with no desktop UI. A pill toggles — clicking one you are already in removes your reaction, keyed on `(message, user, emoji)` so it never touches anyone else's (`useToggleReaction`, shared with the bar). The emoji is run through `splitEmojiSegments` and a custom one renders via `CustomEmojiImage`, which is what lets a `<:name:hash>` reaction display as an image for a viewer who is not in the group that owns it (#848); reactions are stored as opaque strings, so a custom reaction simply *is* its wire token.
 - **ReactionAddButton** — props: messageId, iconSize, className, onOpenChange — `frontend/src/components/Message/ReactionAddButton.tsx`. The add-reaction trigger in the message hover bar, second from the left (reply, **react**, edit, more — the Discord order). A thin skin over `EmojiPickerButton`, so the panel is lazy-loaded, anchored, non-modal, and flipped to whichever side of the row has room (a row at the top of the log opens downward). `onOpenChange` lets `MessageActions` hold the bar visible while the panel is up, exactly as it does for its own menu; `data-nav-action="react"` puts it on the arrow-key path.
