@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { MediaTile } from "../Layout/RightPanel/MediaTile";
+import { AttachmentDisplay } from "../Message/AttachmentDisplay";
 import { parseContent } from "../../hooks/queries/useMessages";
 import type { SearchResult } from "../../types";
 
@@ -13,9 +13,10 @@ const MAX_RESULT_THUMBNAILS = 3;
  * A snippet is text, so an attached picture reached the row as its filename and
  * nothing else. The full content is already on the result (the backend returns
  * it for the snippet), so the attachment envelope is unwrapped here with the
- * same `parseContent` the message log uses, and each image drawn with
- * `MediaTile` — which resolves bytes through the loopback media server and
- * falls back to an icon on failure. No URL or decrypt logic is duplicated.
+ * same `parseContent` the message log uses, and each image drawn with the
+ * log's own `AttachmentDisplay` in `tile` mode — same blurhash placeholder,
+ * same loopback resolution, same lightbox. No URL or decrypt logic is
+ * duplicated.
  *
  * Non-image attachments keep their filename in the snippet and add nothing
  * here.
@@ -38,7 +39,11 @@ export const ResultThumbnails: React.FC<{ result: SearchResult }> = ({ result })
     <div className="mt-1.5 flex gap-1.5" data-testid="search-result-thumbnails">
       {images.map((attachment) => (
         <div key={attachment.id} className="w-12 flex-shrink-0">
-          <MediaTile attachment={attachment} />
+          <AttachmentDisplay
+            attachment={attachment}
+            tile
+            testId="search-result-thumbnail"
+          />
         </div>
       ))}
     </div>

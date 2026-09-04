@@ -13,12 +13,10 @@ import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
 import type { MessageAttachment } from "../../types";
 
-// Co-located: only used by AttachmentDisplay.
-const BlurhashCanvas: React.FC<{ hash: string; width: number; height: number }> = ({
-  hash,
-  width,
-  height,
-}) => {
+// Co-located: only used by AttachmentDisplay. Fills whatever box it is put
+// in — every caller is a square thumb that crops the real image with
+// `object-fit: cover`, so the placeholder crops the same way.
+const BlurhashCanvas: React.FC<{ hash: string }> = ({ hash }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -36,12 +34,8 @@ const BlurhashCanvas: React.FC<{ hash: string; width: number; height: number }> 
     }
   }, [hash]);
 
-  // Aspect-ratio-correct container height (capped at 200px).
-  const aspect = width > 0 && height > 0 ? height / width : 1;
-  const containerH = Math.min(Math.round(280 * aspect), 200);
-
   return (
-    <div style={{ position: "relative", width: "100%", height: containerH, overflow: "hidden" }}>
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
       <canvas
         ref={canvasRef}
         width={32}
@@ -67,11 +61,34 @@ const lightboxBtnStyle: React.CSSProperties = {
   padding: "2px 8px",
 };
 
-export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
+interface AttachmentDisplayProps {
+  attachment: MessageAttachment;
+  /** Grid mode: the image/video card fills its cell as a square instead of
+   * the fixed 96×96 chat thumb. Everything else — blurhash placeholder, the
+   * rounded corners, the lightbox on click — is identical, which is the
+   * point: the right panel's media grid and the search-result thumbnails
+   * render the very same component as the message log. */
+  tile?: boolean;
+  /** Overrides the default `attachment-<id>` test id — a surface that shows
+   * an attachment the log is also showing needs its own handle. */
+  testId?: string;
+}
+
+export const AttachmentDisplay: React.FC<AttachmentDisplayProps> = ({
+  attachment,
+  tile = false,
+  testId,
+}) => {
   const { t } = useTranslation("chat");
   const isImage = attachment.content_type.startsWith("image/");
   const isVideo = attachment.content_type.startsWith("video/");
   const isAudio = attachment.content_type.startsWith("audio/");
+  const cardTestId = testId ?? `attachment-${attachment.id}`;
+  // The thumb's box: a fixed 96×96 in the log, a square filling the cell in
+  // a grid.
+  const thumbBox: React.CSSProperties = tile
+    ? { width: "100%", aspectRatio: "1 / 1" }
+    : { width: 96, height: 96 };
   // object_key is empty while the upload is still in progress (optimistic stub).
   const isPending = !attachment.object_key;
 
@@ -364,15 +381,14 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
     return (
       <>
         <button
-          data-testid={`attachment-${attachment.id}`}
+          data-testid={cardTestId}
           onClick={() => { if (downloadUrl) { setViewerOpen(true); } }}
           disabled={!downloadUrl}
           aria-label={t("attachment.viewLabel", { filename: attachment.filename })}
           title={attachment.filename}
           className="border-0"
           style={{
-            width: 96,
-            height: 96,
+            ...thumbBox,
             padding: 0,
             background: "transparent",
             borderRadius: "0.5rem",
@@ -399,13 +415,9 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
                 display: "block",
               }}
             />
-          ) : attachment.blurhash && attachment.width && attachment.height ? (
+          ) : attachment.blurhash ? (
             <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
-              <BlurhashCanvas
-                hash={attachment.blurhash}
-                width={attachment.width}
-                height={attachment.height}
-              />
+              <BlurhashCanvas hash={attachment.blurhash} />
             </div>
           ) : (
             <span className="text-xs font-mono text-muted">
@@ -456,7 +468,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
     return (
       <>
         <div
-          data-testid={`attachment-${attachment.id}`}
+          data-testid={cardTestId}
           style={{
             borderRadius: 8,
             overflow: "hidden",
@@ -525,7 +537,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
     return (
       <>
         <button
-          data-testid={`attachment-${attachment.id}`}
+          data-testid={cardTestId}
           onClick={!isPending && !isLoading ? handleVideoOpen : undefined}
           disabled={isPending || isLoading}
           aria-label={t("attachment.openLabel", { filename: attachment.filename })}
@@ -535,8 +547,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            width: 96,
-            height: 96,
+            ...thumbBox,
             padding: 0,
             background: "transparent",
             cursor: isPending || isLoading ? "default" : "pointer",
@@ -546,7 +557,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
             flexShrink: 0,
           }}
         >
-          {(poster || (attachment.blurhash && attachment.width && attachment.height)) && (
+          {(poster || attachment.blurhash) && (
             <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
               {poster ? (
                 <img
@@ -556,11 +567,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : (
-                <BlurhashCanvas
-                  hash={attachment.blurhash!}
-                  width={attachment.width!}
-                  height={attachment.height!}
-                />
+                <BlurhashCanvas hash={attachment.blurhash!} />
               )}
             </div>
           )}
@@ -644,7 +651,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
   const FileTypeIcon = getFileIcon(attachment.filename);
   return (
     <div
-      data-testid={`attachment-${attachment.id}`}
+      data-testid={cardTestId}
       className="flex items-center gap-2 px-2.5 py-1.5 min-w-0 border-2 border-line bg-surface-high"
       style={{
         maxWidth: 360,

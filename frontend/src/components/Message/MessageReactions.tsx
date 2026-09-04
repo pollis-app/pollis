@@ -8,6 +8,10 @@ import { splitEmojiSegments } from "../Emoji/emojiTokens";
 
 interface MessageReactionsProps {
   messageId: string;
+  /** Placement, owned by the row: the terminal row indents the pills to the
+   * author column, the refined row renders them inside its body column and
+   * needs no indent. */
+  className?: string;
 }
 
 /**
@@ -44,7 +48,7 @@ const ReactionEmoji: React.FC<{ emoji: string }> = ({ emoji }) => {
  * hover-revealed "+" put a blank line under every message and read as a
  * layout bug. Adding a reaction lives in the hover bar (`ReactionAddButton`).
  */
-export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ messageId }) => {
+export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ messageId, className = "" }) => {
   const { t } = useTranslation("chat");
   const { currentUser } = appStore;
   const { data: reactions = [] } = useReactions(messageId);
@@ -55,7 +59,7 @@ export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ mes
   }
 
   return (
-    <div data-testid="message-reactions" className="flex items-center flex-wrap gap-1 ms-[3.25rem] mt-0.5">
+    <div data-testid="message-reactions" className={`flex items-center flex-wrap gap-1 ${className}`}>
       {reactions.map((reaction) => {
         const reacted = currentUser
           ? reaction.user_ids.includes(currentUser.id)

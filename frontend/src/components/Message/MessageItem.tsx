@@ -286,13 +286,14 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
             count={threadReplyCount}
             onOpen={onOpenThread ? () => onOpenThread(message.id) : undefined}
           />
-        </div>
 
-        {/* Reaction pills, plus the hover-revealed add trigger (#931). Sits
-            outside the body column so the pills align to the message text
-            rather than the avatar gutter. A deleted message keeps no
-            reactions: there is nothing left to react to. */}
-        {!isDeleted && <MessageReactions messageId={message.id} />}
+          {/* Reaction pills. Inside the body column so they line up with the
+              text: as a third child of the two-column grid they landed in
+              the avatar gutter of the next row and stacked one per line. A
+              deleted message keeps no reactions: there is nothing left to
+              react to. */}
+          {!isDeleted && <MessageReactions messageId={message.id} className="mt-1" />}
+        </div>
 
         {/* Floating hover action toolbar */}
         {!isDeleted && (
@@ -463,10 +464,10 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
         </div>
       )}
 
-      {/* Reaction pills + hover-revealed add trigger (#931), same as the
-          refined skin. Both rows already carry `group`, which is what reveals
-          the trigger on hover. */}
-      {!isDeleted && <MessageReactions messageId={message.id} />}
+      {/* Reaction pills, indented to the author column (`w-20` timestamp)
+          so the first pill sits under the name. Adding one lives in the
+          hover bar (`ReactionAddButton`). */}
+      {!isDeleted && <MessageReactions messageId={message.id} className="ms-20 mt-0.5" />}
     </div>
   );
 });

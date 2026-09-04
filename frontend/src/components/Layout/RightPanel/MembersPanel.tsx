@@ -18,6 +18,11 @@ import type { MessageAttachment } from "../../../types";
  */
 const MEDIA_LIMIT = 30;
 
+/** What the media grid shows — the same split the message log's thumb strip
+ * makes (`MessageItem`). */
+const isVisualMedia = (contentType: string): boolean =>
+  contentType.startsWith("image/") || contentType.startsWith("video/");
+
 interface MembersPanelProps {
   groupId: string | null;
   channelId: string | null;
@@ -163,6 +168,11 @@ export const MembersPanel: React.FC<MembersPanelProps> = observer(
           continue;
         }
         for (const attachment of message.attachments ?? []) {
+          // "Media" means pictures and videos; audio and files stay in the
+          // log, where their cards make sense at full width.
+          if (!isVisualMedia(attachment.content_type)) {
+            continue;
+          }
           if (out.length >= MEDIA_LIMIT || seen.has(attachment.id)) {
             continue;
           }
