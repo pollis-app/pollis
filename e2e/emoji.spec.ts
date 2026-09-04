@@ -101,7 +101,9 @@ const MESSAGES = [
 const SKINS = ["terminal", "refined"] as const;
 type Skin = (typeof SKINS)[number];
 
-function preloadFor(skin: Skin) {
+type SeededReaction = { emoji: string; user_ids: string[]; count: number };
+
+function preloadFor(skin: Skin, reactions: Record<string, SeededReaction[]> = {}) {
   return {
     session: ME,
     profile: { id: ME.id, username: ME.username },
@@ -125,6 +127,7 @@ function preloadFor(skin: Skin) {
     dmChannels: [],
     customEmoji: CUSTOM_EMOJI,
     preferences: { skin },
+    reactions,
   };
 }
 
@@ -136,10 +139,14 @@ function preloadFor(skin: Skin) {
  * and still render Root. Navigation goes through the UI, as in
  * `mentions.spec.js`.
  */
-async function openChannel(page: Page, skin: Skin) {
+async function openChannel(
+  page: Page,
+  skin: Skin,
+  reactions: Record<string, SeededReaction[]> = {},
+) {
   await page.addInitScript((data) => {
     (window as unknown as Record<string, unknown>).__POLLIS_PRELOAD__ = data;
-  }, preloadFor(skin));
+  }, preloadFor(skin, reactions));
   await page.goto("/");
   await expect(page.getByTestId("app-ready")).toBeAttached();
 
@@ -547,6 +554,68 @@ for (const skin of SKINS) {
       await pill.click();
       await expect(row.getByTestId("reaction-pill")).toHaveCount(0);
       await expect(row.getByTestId("message-reactions")).toHaveCount(0);
+    });
+
+    test("a reaction shows before the write comes back, and is taken back the same way", async ({
+      page,
+    }) => {
+      await openChannel(page, skin);
+      const row = page.getByTestId("message-m1");
+
+      // Park the write. The pill has to appear anyway: a reaction that waits
+      // for the round trip reads as a click that did nothing.
+      await page.evaluate(() => (window as any).__tauriHold("add_reaction"));
+      await row.hover();
+      await row.getByTestId("reaction-add-btn").click();
+      await expect(page.getByTestId("emoji-cell").first()).toBeVisible();
+      await page.locator(`[data-emoji-id="c:${PARROT_HASH}"]`).click();
+
+      const pill = row.getByTestId("reaction-pill");
+      await expect(pill).toHaveCount(1);
+      await expect(pill).toHaveAttribute("aria-pressed", "true");
+      await expect(pill).toContainText("1");
+
+      // The write lands; the refetch agrees with what was already shown.
+      await page.evaluate(() => (window as any).__tauriRelease("add_reaction"));
+      await expect(pill).toHaveCount(1);
+      await expect(pill).toHaveAttribute("aria-pressed", "true");
+
+      // Removal is optimistic too: the row goes while the write is parked.
+      await page.evaluate(() => (window as any).__tauriHold("remove_reaction"));
+      await pill.click();
+      await expect(row.getByTestId("message-reactions")).toHaveCount(0);
+      await page.evaluate(() => (window as any).__tauriRelease("remove_reaction"));
+      await expect(row.getByTestId("message-reactions")).toHaveCount(0);
+    });
+
+    test("pills sit on one line, starting under the author", async ({ page }) => {
+      await openChannel(page, skin, {
+        m1: [
+          { emoji: "👍", user_ids: ["u_dana"], count: 1 },
+          { emoji: "🎉", user_ids: ["u_dana", ME.id], count: 2 },
+          { emoji: PARROT_TOKEN, user_ids: [ME.id], count: 1 },
+        ],
+      });
+      const row = page.getByTestId("message-m1");
+      const pills = row.getByTestId("reaction-pill");
+      await expect(pills).toHaveCount(3);
+
+      // Refined once rendered the row as a third child of the avatar/body
+      // grid, so the pills fell into the 3.5rem gutter and stacked one per
+      // line. Every pill shares a top edge now.
+      const boxes = await pills.evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return { top: Math.round(r.top), left: Math.round(r.left) };
+        }),
+      );
+      expect(new Set(boxes.map((b) => b.top)).size).toBe(1);
+
+      // The first pill starts where the text column starts: under the
+      // author in both skins (refined's name and body share a column).
+      const anchor = row.getByTestId(skin === "terminal" ? "message-author" : "message-content");
+      const anchorLeft = Math.round((await anchor.boundingBox())!.x);
+      expect(Math.abs(boxes[0].left - anchorLeft)).toBeLessThanOrEqual(1);
     });
   });
 }

@@ -383,6 +383,8 @@ Coverage: `e2e/right-panel-persistence.spec.ts`, both skins.
 
 **Content is contextual, the column is not.** The panel no longer collapses on routes with no conversation (Preferences, Search, root). `MembersPanel` degrades there to the plain online roster — self plus everyone visible in `presenceStore.byUser`, named from the DM list — and drops the media grid, since "who is online" still answers a question off-conversation and "media shared in this conversation" does not. A stale `?thread=` on such a route falls back to the roster rather than rendering an empty thread.
 
+**The media grid is the message log's thumbnails.** `MediaGrid` renders `AttachmentDisplay` in its `tile` mode (a square that fills the cell instead of the fixed 96×96 thumb) — the same blurhash placeholder while bytes resolve, the same `0.5rem` corners, no border, click-to-lightbox — so a picture looks identical in the panel and in the chat. It used to be a separate `MediaTile` with none of that; the search page's `ResultThumbnails` used the same tile and now renders the same component. The grid is pictures and videos only (`isVisualMedia` in `MembersPanel`, the split `MessageItem` makes); audio and files stay in the log. Coverage: `e2e/right-panel-media.spec.ts`.
+
 ### Resizable side panels (#985)
 
 Both side columns — the left `Sidebar` and the right `RightPanel` — are dragged by a
@@ -580,7 +582,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**157 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**156 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -639,10 +641,9 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
 - **WindowResizeEdges** — `frontend/src/components/Layout/WindowResizeEdges.tsx`
 
-### `components/Layout/RightPanel` (8)
+### `components/Layout/RightPanel` (7)
 
 - **MediaGrid** — props: attachments — `frontend/src/components/Layout/RightPanel/MediaGrid.tsx`
-- **MediaTile** — props: attachment — `frontend/src/components/Layout/RightPanel/MediaTile.tsx`
 - **MemberRow** — props: userId, label, avatarKey, isAdmin — `frontend/src/components/Layout/RightPanel/MemberRow.tsx`
 - **MembersPanel** — props: groupId, channelId, conversationId — `frontend/src/components/Layout/RightPanel/MembersPanel.tsx`
 - **PinnedPanel** — props: channelId, conversationId — `frontend/src/components/Layout/RightPanel/PinnedPanel.tsx`
@@ -656,7 +657,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 ### `components/Message` (15)
 
-- **AttachmentDisplay** — `frontend/src/components/Message/AttachmentDisplay.tsx`
+- **AttachmentDisplay** — props: attachment, tile, testId — `frontend/src/components/Message/AttachmentDisplay.tsx`
 - **LastMessagePreview** — props: message, isLoading — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **MediaLinkUnfurl** — props: text — `frontend/src/components/Message/MediaLinkUnfurl.tsx`
 - **MentionToken** — props: name, isSelf, skin — `frontend/src/components/Message/MentionToken.tsx`
@@ -666,7 +667,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **MessageItem** — props: message, ctx, replyToMessage, authorUsername, isAuthorAdmin, canModerate, isGroupStart, onReply, onOpenThread, threadReplyCount, onEdit, onDelete, onToggleSave, onCopyLink, onTogglePin, copyLinkState, isSaved, isPinned, onScrollToReply, receipt, peerCount, isDm — `frontend/src/components/Message/MessageItem.tsx`. Memoised via `observer()`. `ctx` is the list-wide `MessageRenderContext`; `replyToMessage` and `receipt` are resolved per row BY THE LIST, replacing an `allMessages.find()` (O(N^2)) and a whole-`Map` receipts prop that re-rendered every row whenever any one receipt landed.
 - **MessageList** — props: messages, conversationId, groupIdForNames, adminUserIds, viewerIsAdmin, onReply, onOpenThread, threadReplyCounts, onEdit, onDelete, onScrollToMessage, getAuthorUsername, hasMore, isFetchingMore, onLoadMore, hasNewer, isFetchingNewer, onLoadNewer, windowEpoch, focusComposer, pinsConversationId — `frontend/src/components/Message/MessageList.tsx`. Passing `focusComposer` opts the list into arrow-key log navigation (bash-history style): ArrowUp from an empty/first-line composer walks the log, Left/Right walk the focused row's action bar, ArrowDown past the newest (or Tab/Escape) returns to the composer. The pure state machine lives in `utils/messageNav.ts` (unit-pinned by `frontend/tests/message-nav.test.ts`), the live state in `stores/messageNavStore.ts`, and rows style keyboard focus purely via CSS `focus-within` so keystrokes re-render nothing; browser-level coverage is `e2e/message-nav.spec.ts`. Windowed via `@tanstack/react-virtual` — see "The windowed log" above; `components/Message/messageWindow.ts` (not a `.tsx`, so not listed here) is the only door from a message id to a live row, and owns the rem-based row estimates and load-more threshold (#934).
 - **MessageQueue** — `frontend/src/components/Message/MessageQueue.tsx`
-- **MessageReactions** — props: messageId — `frontend/src/components/Message/MessageReactions.tsx`. The reaction pills, rendered by **both** skins from `MessageItem` and gated on `!isDeleted`. Returns `null` — no wrapper, no reserved height — until the message has a reaction: the previous permanent row with a hover-revealed `+` put a blank line under every message. Adding a reaction is `ReactionAddButton` in the hover bar. Restored in #931 after #874 deleted it as a dead path: the Rust commands survived and mobile still called them, so the feature was live with no desktop UI. A pill toggles — clicking one you are already in removes your reaction, keyed on `(message, user, emoji)` so it never touches anyone else's (`useToggleReaction`, shared with the bar). The emoji is run through `splitEmojiSegments` and a custom one renders via `CustomEmojiImage`, which is what lets a `<:name:hash>` reaction display as an image for a viewer who is not in the group that owns it (#848); reactions are stored as opaque strings, so a custom reaction simply *is* its wire token.
+- **MessageReactions** — props: messageId, className — `frontend/src/components/Message/MessageReactions.tsx`. The reaction pills, rendered by **both** skins from `MessageItem` and gated on `!isDeleted`. Placement is the row's (`className`): terminal indents them `ms-20` so the first pill sits under the author (the timestamp column is `w-20`); refined renders them **inside** its body column — as a third child of the `[3.5rem_minmax(0,1fr)]` grid they fell into the avatar gutter of the next row and stacked one per line. Writes are optimistic (`useReactions.ts`): `add_reaction` / `remove_reaction` patch the `["reactions", id]` cache in `onMutate`, roll back on error, and refetch on settle, so a pill appears the instant the emoji is picked; `useToggleReaction` decides add-vs-remove from the cache at click time, so a second quick click takes the reaction back rather than adding it twice. Returns `null` — no wrapper, no reserved height — until the message has a reaction: the previous permanent row with a hover-revealed `+` put a blank line under every message. Adding a reaction is `ReactionAddButton` in the hover bar. Restored in #931 after #874 deleted it as a dead path: the Rust commands survived and mobile still called them, so the feature was live with no desktop UI. A pill toggles — clicking one you are already in removes your reaction, keyed on `(message, user, emoji)` so it never touches anyone else's (`useToggleReaction`, shared with the bar). The emoji is run through `splitEmojiSegments` and a custom one renders via `CustomEmojiImage`, which is what lets a `<:name:hash>` reaction display as an image for a viewer who is not in the group that owns it (#848); reactions are stored as opaque strings, so a custom reaction simply *is* its wire token.
 - **ReactionAddButton** — props: messageId, iconSize, className, onOpenChange — `frontend/src/components/Message/ReactionAddButton.tsx`. The add-reaction trigger in the message hover bar, second from the left (reply, **react**, edit, more — the Discord order). A thin skin over `EmojiPickerButton`, so the panel is lazy-loaded, anchored, non-modal, and flipped to whichever side of the row has room (a row at the top of the log opens downward). `onOpenChange` lets `MessageActions` hold the bar visible while the panel is up, exactly as it does for its own menu; `data-nav-action="react"` puts it on the arrow-key path.
 - **ReceiptIndicator** — props: receipts, peerCount, visible — `frontend/src/components/Message/ReceiptIndicator.tsx`
 - **ReplyPreview** — props: messageId, allMessages, onDismiss, onScrollToMessage — `frontend/src/components/Message/ReplyPreview.tsx`
