@@ -375,7 +375,6 @@ pub async fn edit_message_as(
     new_content: &str,
 ) -> Result<()> {
     let envelope_id = Ulid::new().to_string();
-    let now = super::envelope_sent_at();
     let (mls_group_id, _is_channel) = resolve_mls_group(state, conversation_id).await?;
 
     // Catch up (welcomes + interleaved) so the edit is sealed at the current
@@ -411,29 +410,38 @@ pub async fn edit_message_as(
         crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
     }
 
-    let ciphertext_remote = {
+    let plaintext = super::framing::pad(new_content.as_bytes());
+    let sealed = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        let plaintext = super::framing::pad(new_content.as_bytes());
-        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, &plaintext)
-            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
-                "MLS group not initialized for conversation {conversation_id}"
-            )))?;
-        format!("mls:{}", hex::encode(&mls_bytes))
+        super::seal::seal(db.conn(), &mls_group_id, conversation_id, &plaintext)?
     };
 
     // Edit envelopes are NOT sealed (the DS membership-gates the write on the
     // authenticated writer, so `sender_id` binds to the caller); the recipient's
     // author check reads the MLS credential, not this column.
-    let body = pollis_api::messages::EditMessageBody {
-        envelope_id,
-        conversation_id: conversation_id.to_string(),
-        target_message_id: target_message_id.to_string(),
-        sender_id: Some(user_id.to_string()),
-        ciphertext: ciphertext_remote,
-        sent_at: now,
-    };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    super::seal::post_resealing(
+        state,
+        super::seal::Target {
+            mls_group_id: &mls_group_id,
+            conversation_id,
+            user_id,
+            plaintext: &plaintext,
+        },
+        sealed,
+        |sealed| pollis_api::messages::EditMessageBody {
+            envelope_id: envelope_id.clone(),
+            conversation_id: conversation_id.to_string(),
+            target_message_id: target_message_id.to_string(),
+            sender_id: Some(user_id.to_string()),
+            ciphertext: sealed.wire(),
+            sent_at: sealed.sent_at.clone(),
+            generation: Some(sealed.generation),
+            epoch: Some(sealed.epoch),
+        },
+        |_, _| Ok(()),
+    )
+    .await?;
 
     Ok(())
 }
@@ -454,7 +462,6 @@ async fn send_redaction_message(
     user_id: &str,
 ) -> Result<()> {
     let envelope_id = Ulid::new().to_string();
-    let now = super::envelope_sent_at();
     let (mls_group_id, _is_channel) = resolve_mls_group(state, conversation_id).await?;
 
     // Catch up MLS before encrypting so the redaction is sealed at the current
@@ -493,36 +500,45 @@ async fn send_redaction_message(
         crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
     }
 
-    let ciphertext_remote = {
+    let plaintext = super::framing::pad_redaction(target_message_id);
+    let sealed = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-        let plaintext = super::framing::pad_redaction(target_message_id);
-        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, &plaintext)
-            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
-                "MLS group not initialized for conversation {conversation_id}"
-            )))?;
-        format!("mls:{}", hex::encode(&mls_bytes))
+        super::seal::seal(db.conn(), &mls_group_id, conversation_id, &plaintext)?
     };
 
     // Blind the envelope sender exactly like a normal send — sealing is
     // UNCONDITIONAL (#607). The true author is the MLS credential inside the
     // ciphertext, which is what the recipient's redaction-authorization check
     // reads; the stored `sender_id` is always the non-identifying sentinel.
-    let body = pollis_api::messages::SendMessageBody {
-        id: envelope_id,
-        conversation_id: conversation_id.to_string(),
-        sender_id: Some(super::send::SEALED_SENDER_SENTINEL.to_string()),
-        ciphertext: ciphertext_remote,
-        // A redaction is not a reply.
-        reply_to_id: None,
-        sent_at: now,
-        sealed: 1,
-        // A redaction wakes nobody: the tombstone is applied on the next
-        // ingest, and pushing "you have a new message" for a deletion would be
-        // both wrong and a notification the user cannot act on (#987).
-        push_to: None,
-    };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    super::seal::post_resealing(
+        state,
+        super::seal::Target {
+            mls_group_id: &mls_group_id,
+            conversation_id,
+            user_id,
+            plaintext: &plaintext,
+        },
+        sealed,
+        |sealed| pollis_api::messages::SendMessageBody {
+            id: envelope_id.clone(),
+            conversation_id: conversation_id.to_string(),
+            sender_id: Some(super::send::SEALED_SENDER_SENTINEL.to_string()),
+            ciphertext: sealed.wire(),
+            // A redaction is not a reply.
+            reply_to_id: None,
+            sent_at: sealed.sent_at.clone(),
+            sealed: 1,
+            generation: Some(sealed.generation),
+            epoch: Some(sealed.epoch),
+            // A redaction wakes nobody: the tombstone is applied on the next
+            // ingest, and pushing "you have a new message" for a deletion would be
+            // both wrong and a notification the user cannot act on (#987).
+            push_to: None,
+        },
+        |_, _| Ok(()),
+    )
+    .await?;
 
     Ok(())
 }
@@ -753,7 +769,6 @@ pub async fn edit_message(
     state: &Arc<AppState>,
 ) -> Result<()> {
     let envelope_id = Ulid::new().to_string();
-    let now = super::envelope_sent_at();
 
     // Resolve the MLS group for this conversation (channel → group_id, DM → conversation_id).
     let (mls_group_id, _) = resolve_mls_group(state, &conversation_id).await?;
@@ -804,27 +819,24 @@ pub async fn edit_message(
         crate::commands::mls::external_join_group(state, &mls_group_id, &user_id).await?;
     }
 
-    let ciphertext_remote = {
+    // Size padding (issue #331 v2, §4.1) — same scheme as the send path:
+    // pad TEXT edits to a size bucket; leave attachment edits unpadded.
+    let plaintext: Vec<u8> = if is_attachment_content(&new_content) {
+        new_content.as_bytes().to_vec()
+    } else {
+        super::framing::pad(new_content.as_bytes())
+    };
+
+    let sealed = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        // Size padding (issue #331 v2, §4.1) — same scheme as the send path:
-        // pad TEXT edits to a size bucket; leave attachment edits unpadded.
-        let plaintext: Vec<u8> = if is_attachment_content(&new_content) {
-            new_content.as_bytes().to_vec()
-        } else {
-            super::framing::pad(new_content.as_bytes())
-        };
-
-        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, &plaintext)
-            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
-                "MLS group not initialized for conversation {conversation_id}"
-            )))?;
+        let sealed = super::seal::seal(db.conn(), &mls_group_id, &conversation_id, &plaintext)?;
 
         let rows_affected = db.conn().execute(
             "UPDATE message SET content = ?1, edited_at = ?2
              WHERE id = ?3 AND sender_id = ?4 AND deleted_at IS NULL",
-            rusqlite::params![new_content, now, message_id, user_id],
+            rusqlite::params![new_content, sealed.sent_at, message_id, user_id],
         )?;
 
         if rows_affected == 0 {
@@ -833,21 +845,41 @@ pub async fn edit_message(
             )));
         }
 
-        format!("mls:{}", hex::encode(&mls_bytes))
+        sealed
     };
 
     // Replace any existing edit envelope for this message with the new one
     // (DELETE + INSERT, single transaction on the DS side). DS seam: route the
-    // replace through the Delivery Service.
-    let body = pollis_api::messages::EditMessageBody {
-        envelope_id,
-        conversation_id: conversation_id.clone(),
-        target_message_id: message_id.clone(),
-        sender_id: Some(user_id),
-        ciphertext: ciphertext_remote,
-        sent_at: now,
-    };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    // replace through the Delivery Service. Re-sealed at the new epoch if a
+    // commit landed since our catch-up (#1041).
+    super::seal::post_resealing(
+        state,
+        super::seal::Target {
+            mls_group_id: &mls_group_id,
+            conversation_id: &conversation_id,
+            user_id: &user_id,
+            plaintext: &plaintext,
+        },
+        sealed,
+        |sealed| pollis_api::messages::EditMessageBody {
+            envelope_id: envelope_id.clone(),
+            conversation_id: conversation_id.clone(),
+            target_message_id: message_id.clone(),
+            sender_id: Some(user_id.clone()),
+            ciphertext: sealed.wire(),
+            sent_at: sealed.sent_at.clone(),
+            generation: Some(sealed.generation),
+            epoch: Some(sealed.epoch),
+        },
+        |conn, sealed| {
+            conn.execute(
+                "UPDATE message SET edited_at = ?1 WHERE id = ?2",
+                rusqlite::params![sealed.sent_at, message_id],
+            )?;
+            Ok(())
+        },
+    )
+    .await?;
 
     // Notify recipients via LiveKit so they invalidate their cache immediately.
     // Non-fatal — errors are logged, not returned.

@@ -197,6 +197,14 @@ impl Driver {
         }
     }
 
+    /// One tick of the real data-plane surfacing path: consume the background
+    /// sync loop's latest snapshot (via [`Action::Refresh`]) and redraw. What
+    /// [`Driver::wait_for`] does per iteration, for callers that wait on
+    /// something other than rendered text.
+    pub async fn refresh(&mut self) {
+        self.pump(Action::Refresh).await;
+    }
+
     /// Poll-until-visible: repeatedly consume the background sync loop's latest
     /// snapshot (via the real [`Action::Refresh`] path) and redraw, yielding
     /// briefly between tries so the fast sync loop advances, until `needle`

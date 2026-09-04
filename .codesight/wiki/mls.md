@@ -212,6 +212,56 @@ catch-up running). This extends the ingest-before-advance invariant to every
 advance path — fetch/sweep/realtime (group-level catch-up), send/edit/invite/
 remove (pre-op hoist), and now the recovery converge.
 
+### The epoch gate — no envelope behind the log head (#1041)
+
+The pre-op catch-up above is not atomic with the op that follows it, and that
+window was the flake behind `pollis-tui/tests/ui_e2e.rs`. Two arms of one race:
+
+- **Committer window.** A committer catches up at epoch *e*, then builds and
+  CASes its commit. Any envelope sealed at *e* that lands between those two
+  steps is decryptable only at *e*; the committer merges to *e+1*, discards the
+  keys (`max_past_epochs = 0`), later fetches the envelope, fails to decrypt it,
+  and marks it handled — silently lost.
+- **Sender window.** A sender catches up at *e* and seals; a commit to *e+1*
+  lands before its post. Every member is at *e+1* — nobody can ever read it.
+
+Three enforcement points, lowest layer first:
+
+1. **Protocol chokepoint (DS).** `SendMessageBody` / `EditMessageBody` carry
+   the sealer's `(generation, epoch)` (read off the ciphertext's own MLS
+   header — `envelope_lineage`). `/v1/messages/send|edit` keep an envelope only
+   if that pair equals the commit log's head (`head_epoch_in`); otherwise 409
+   `epoch_behind { head_generation, head_epoch }`. The main and log DBs are
+   separate handles, so the gate is pre-check → insert → re-check → delete on
+   mismatch (`apply_at_head`, `pollis-delivery/src/messages.rs`). A commit that
+   lands *after* an envelope is admitted is the committer's problem (point 2);
+   one that lands *before* makes the envelope unstorable. Unasserted bodies
+   (older clients) are still admitted. Tests: `messages::epoch_gate_tests`.
+2. **Committer pre-merge sweep.** On `Resolution::Won`, `publish_staged_commit`
+   runs `sweep_before_merge` → `messages::sweep_current_epoch` BEFORE
+   `finalize_won_commit`: it decrypts every envelope of the closing epoch at the
+   still-live keys (without moving watermarks) and only then merges. Once the
+   commit is in the log the DS admits nothing more at that epoch, so this sweep
+   is complete. If the sweep fails twice the won commit stays STAGED (the next
+   ingesting catch-up drains the epoch and adopts it from the log); a migration
+   merges anyway with a loud log, because abandoning an opened successor
+   lineage strands every member. Receipts for swept envelopes are emitted after
+   the merge.
+3. **Sender re-seal.** Every post site — send, edit, redaction — goes through
+   `messages::seal::post_resealing`: on `epoch_behind` it runs the interleaved
+   catch-up, re-seals at the new epoch with a fresh `sent_at`, updates its own
+   local row, and re-posts (up to `MAX_RESEALS` = 4, then a visible failure).
+   Receipts (`receipts::emit_receipt`) are best-effort and skip instead — some
+   callers hold the group lock. Bounded replay on the receiver side:
+   `CatchUpResponse.head` becomes a `ReplayBound`, so a receiver never applies a
+   commit its fetched envelope set does not yet cover.
+
+Proofs (flows suite, `dms.rs`), both fail with the gate and sweep disabled:
+`message_sealed_at_the_epoch_a_committer_leaves_is_still_delivered` (committer
+arm, parks the committer at `SelfUpdateBeforeSubmit`) and
+`message_sealed_behind_a_landed_commit_is_resealed_and_delivered` (sender arm,
+parks the sender at the `EnvelopeBeforePost` rendezvous point).
+
 ### Recovery-path guards (revocation + membership lockout)
 
 The external-join **recovery** paths in `process_pending_commits_locked_impl`

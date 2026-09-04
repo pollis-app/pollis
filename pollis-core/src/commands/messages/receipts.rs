@@ -203,7 +203,7 @@ pub(crate) async fn emit_receipt(
     let dm = is_dm(state, conversation_id).await?;
 
     let now = super::envelope_sent_at();
-    let ciphertext_remote = {
+    let sealed = {
         let guard = state.local_db.lock().await;
         let db = guard
             .as_ref()
@@ -215,15 +215,15 @@ pub(crate) async fn emit_receipt(
         }
         let plaintext = super::framing::pad_receipt(kind, &now, message_ids);
         // A DM's MLS group is keyed by the conversation id directly.
-        let Some(mls_bytes) =
-            crate::commands::mls::try_mls_encrypt(db.conn(), conversation_id, &plaintext)
+        let Some(sealed) =
+            super::seal::try_seal(db.conn(), conversation_id, conversation_id, &plaintext)?
         else {
             // No local MLS group for this DM yet. A receipt is best-effort
             // telemetry about messages we already hold; failing the caller over
             // it would be worse than silently skipping.
             return Ok(());
         };
-        format!("mls:{}", hex::encode(&mls_bytes))
+        sealed
     };
 
     // Blind the envelope sender exactly like every other send — sealing is
@@ -233,16 +233,36 @@ pub(crate) async fn emit_receipt(
         id: ulid::Ulid::new().to_string(),
         conversation_id: conversation_id.to_string(),
         sender_id: Some(super::send::SEALED_SENDER_SENTINEL.to_string()),
-        ciphertext: ciphertext_remote,
+        ciphertext: sealed.wire(),
         // A receipt is not a reply.
         reply_to_id: None,
-        sent_at: now,
+        sent_at: sealed.sent_at.clone(),
         sealed: 1,
+        generation: Some(sealed.generation),
+        epoch: Some(sealed.epoch),
         // A receipt frame wakes nobody: it is an acknowledgement of
         // something the recipient already has (#987).
         push_to: None,
     };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    // No re-seal loop here, deliberately: a receipt's callers may hold the
+    // group lock (the committer's post-merge sweep) and the catch-up a re-seal
+    // needs would deadlock on it. A receipt the DS turns away as epoch-behind
+    // (#1041) is best-effort telemetry that the next read/ingest re-emits at
+    // the new epoch — dropping it loses no message.
+    match crate::commands::mls::ds_post_envelope(state, &body).await? {
+        crate::commands::mls::EnvelopePost::Landed => {}
+        crate::commands::mls::EnvelopePost::EpochBehind {
+            head_generation,
+            head_epoch,
+        } => {
+            eprintln!(
+                "[receipts] {kind:?} receipt for {conversation_id} sealed at ({}, {}) but the \
+                 log head is ({head_generation}, {head_epoch}) — skipped",
+                sealed.generation, sealed.epoch
+            );
+            return Ok(());
+        }
+    }
 
     // Wake the peers so the sender sees the tick without polling. This is the
     // same routing-only hint an ordinary message publishes, which is also why it

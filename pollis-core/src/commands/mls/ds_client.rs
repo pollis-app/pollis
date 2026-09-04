@@ -479,6 +479,51 @@ pub async fn ds_post_ok<B: ClientRequest>(state: &Arc<AppState>, body: &B) -> Re
     Ok(())
 }
 
+/// How an envelope post ended (#1041).
+#[derive(Debug)]
+pub enum EnvelopePost {
+    /// Stored.
+    Landed,
+    /// Refused: the envelope's asserted `(generation, epoch)` was not the commit
+    /// log's head when it landed, so it was deleted. Nothing is stored. The
+    /// sender must catch up, re-seal at the current epoch and post again.
+    EpochBehind {
+        head_generation: i64,
+        head_epoch: i64,
+    },
+}
+
+/// [`ds_post_ok`] for `/v1/messages/send` and `/v1/messages/edit`, which have
+/// one expected refusal beyond auth: the 409 [`pollis_api::messages::EpochBehind`]
+/// the DS answers when the envelope's epoch is stale. That one is returned as
+/// [`EnvelopePost::EpochBehind`] so the sender can converge; any other non-2xx
+/// is the `Err` it always was. A 409 whose body is not an `EpochBehind` is also
+/// an `Err`: the commit-race 409 lives on `/v1/commits`, not here, and a body we
+/// cannot read is not a head we can re-seal at.
+pub async fn ds_post_envelope<B: ClientRequest>(
+    state: &Arc<AppState>,
+    body: &B,
+) -> Result<EnvelopePost> {
+    let resp = ds_post(state, body).await?;
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(EnvelopePost::Landed);
+    }
+    let path = B::PATH;
+    let txt = resp.text().await.unwrap_or_default();
+    if status == reqwest::StatusCode::CONFLICT {
+        if let Ok(behind) = serde_json::from_str::<pollis_api::messages::EpochBehind>(&txt) {
+            if behind.error == pollis_api::messages::EpochBehind::ERROR {
+                return Ok(EnvelopePost::EpochBehind {
+                    head_generation: behind.head_generation,
+                    head_epoch: behind.head_epoch,
+                });
+            }
+        }
+    }
+    Err(Error::Other(anyhow::anyhow!("ds_post {path} {status}: {txt}")))
+}
+
 /// [`ds_post`] when this device can sign (local DB open, device key enrolled);
 /// otherwise fall back to whichever verified-OTP session this sign-in minted.
 /// For the account-lifecycle calls reachable from a PRE-ENROLLMENT device — the

@@ -12,6 +12,7 @@ mod read;
 mod read_state;
 mod receipts;
 mod retention;
+mod seal;
 mod search;
 mod send;
 mod types;
@@ -173,6 +174,8 @@ pub use ingest::{
     catch_up_mls_group_interleaved, ingest_channel_envelopes, ingest_channel_envelopes_inner,
     ingest_dm_envelopes, ingest_dm_envelopes_inner,
 };
+// The committer's pre-merge sweep (#1041), for the MLS publish path only.
+pub(crate) use ingest::{sweep_current_epoch, SweptEnvelopes};
 
 // ── Edit / delete ────────────────────────────────────────────────────────────
 pub use edit_delete::{delete_message, edit_message};

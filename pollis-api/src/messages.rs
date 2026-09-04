@@ -45,6 +45,20 @@ pub struct SendMessageBody {
     /// The push itself carries `{ conversationId, kind }` and nothing else.
     #[serde(default)]
     pub push_to: Option<Vec<String>>,
+    /// The MLS lineage the ciphertext was sealed at, as the client read it off
+    /// its own envelope (#1041). Together with `epoch` this is the envelope's
+    /// position in the commit log; the DS refuses to keep an envelope whose
+    /// position is not the log's head at the moment it lands, because with
+    /// `max_past_epochs = 0` every member that has already applied the next
+    /// commit could never decrypt it. See `EpochBehind`.
+    ///
+    /// Absent (an older client) → ungated, exactly the pre-#1041 write. A client
+    /// that lies here only hurts its own message.
+    #[serde(default)]
+    pub generation: Option<i64>,
+    /// The MLS epoch the ciphertext was sealed at. See `generation`.
+    #[serde(default)]
+    pub epoch: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -56,6 +70,33 @@ pub struct EditMessageBody {
     pub sender_id: Option<String>,
     pub ciphertext: String,
     pub sent_at: String,
+    /// See [`SendMessageBody::generation`] — an edit is sealed exactly like a
+    /// message and is gated exactly like one.
+    #[serde(default)]
+    pub generation: Option<i64>,
+    /// See [`SendMessageBody::epoch`].
+    #[serde(default)]
+    pub epoch: Option<i64>,
+}
+
+/// The `409 Conflict` body `/v1/messages/send` and `/v1/messages/edit` answer
+/// when the envelope's asserted `(generation, epoch)` is not the commit log's
+/// head (#1041). Nothing was stored. The client's only correct move is to catch
+/// up (apply the commit(s) it is missing), re-seal at the new epoch, and post
+/// again — the same convergence a lost commit race demands.
+///
+/// `error` is the constant [`EpochBehind::ERROR`], so a 409 from a different
+/// cause (a lost commit race on `/v1/commits` is also a 409) can never be
+/// mistaken for this one.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EpochBehind {
+    pub error: String,
+    pub head_generation: i64,
+    pub head_epoch: i64,
+}
+
+impl EpochBehind {
+    pub const ERROR: &'static str = "epoch_behind";
 }
 
 #[derive(Serialize, Deserialize)]

@@ -64,6 +64,7 @@ the invariant that makes it unrepresentable.
 | F5 | **Welcome dropped before delivery** | `mls_welcome.delivered` flag + delete paths; no retention floor | a new device can miss its only Welcome |
 | F6 | ~~**Retention ignores absent members**~~ — **FIXED for envelopes** | the envelope floor is the MIN `last_fetched_at` over every current member device (revoked devices excluded #685, devices silent past N months excluded #720), no longer gated by a TTL | F3's TTL was the leak; it is gone. The #720 liveness bound adds a *third* accepted loss (a device dormant past the window) — see I3. Commit/Welcome floors (I4) tracked separately |
 | F8 | **One id naming two conversations** — **unrepresentable (#880 + #948)** | `dm_channel`, `groups` and `channels` are three tables with three separate primary keys, so the same id fits in all three, and `is_member` ORs across all three on one id. #879 added the `conversation_id_taken` chokepoint; #880 added the `conversation` registry, claimed in the same transaction as the row it names, so a second claim cannot commit *through the DS*; #948 (migration 000017) added guard triggers so the database itself refuses a row the registry did not grant — a writer that skips the registry is now refused too | a DM named after a victim's group made `is_member(victim_group, attacker)` true — commit injection, GroupInfo/Welcome overwrite, a LiveKit token for their room. Pinned in `pollis-delivery/tests/conversation_namespace.rs`, including raw-SQL refusal with the DS bypassed |
+| F9 | ~~**Envelope stored at an epoch the log has closed**~~ — **unrepresentable (#1041)** | the pre-op catch-up and the op are two steps; an envelope sealed at epoch *e* after a committer's catch-up but before its commit merged was undecryptable once it merged (`max_past_epochs = 0`) and marked handled — silent loss; one sealed after the commit landed was readable by nobody. The DS now keeps an envelope only if its asserted `(generation, epoch)` is the log head (409 `epoch_behind`), the committer sweeps the closing epoch before it merges, and refused senders re-seal — see I8 | the `ui_e2e.rs` flake on CI. Pinned in `pollis-delivery` `epoch_gate_tests` and `flows::dms::message_sealed_*` (both fail with the gate and sweep disabled) |
 | F7 | **Schema divergence: test vs prod** | two apply paths — test harness uses `POST_BASELINE_MIGRATIONS` on a *fresh* DB; prod uses `db-apply.sh` (version-tracked) on the *long-lived* DB. Version numbers collide with the old lineage | prod missing `000005_account_key_log`, `000006_push_token` while all tests pass |
 
 ## Target invariants & where they're enforced
@@ -203,6 +204,28 @@ the invariant that makes it unrepresentable.
   The triggers validate rather than claim, so `claim_conversation_id` stays
   the sole writer and the migration deployed against the running DS unchanged.
 
+### I8 — No stored envelope is sealed behind the commit log's head
+- An application envelope is decryptable only by members still AT the epoch it
+  was sealed at (`max_past_epochs = 0`). Once the log holds a commit closing
+  that epoch, every member either has moved past it or will the moment it
+  catches up — an envelope stored behind the head is one that *some* member is
+  guaranteed to drop. That was #1041: the pre-op catch-up and the op it
+  precedes are two steps, and an envelope sealed in between was lost silently
+  by the committer (merged past it before fetching it) or by everyone (sealed
+  at an epoch already closed).
+- Unrepresentable at the DS (#1041): `/v1/messages/send|edit` store an
+  envelope only if its asserted `(generation, epoch)` equals `head_epoch_in`
+  of the owning group's log, else 409 `epoch_behind`. The main and log DBs
+  are separate handles, so the write is pre-check → insert → re-check → delete
+  (`apply_at_head`), which closes the "commit landed while inserting" gap from
+  the server's side. The residual window — a commit landing *after* admission —
+  is the committer's: it sweeps the closing epoch's envelopes
+  (`sweep_before_merge`) before it merges, and nothing more can be admitted
+  there once its commit is in the log. Senders that are refused catch up,
+  re-seal, and re-post (`post_resealing`).
+- *Result:* "an envelope no current member can decrypt" is unrepresentable on
+  the wire; the accepted losses stay exactly the three in `CLAUDE.md`.
+
 ## Enforcement layers, summarized
 
 | Invariant | DB constraint/trigger | Rust type | Protocol | Test |
@@ -214,6 +237,7 @@ the invariant that makes it unrepresentable.
 | I5 historical membership | — | — | derive from tree | churn + catch-up |
 | I6 one schema | `schema_migrations` integrity | — | single apply path | test==prod schema check |
 | I7 one id, one conversation | `conversation` PK + `kind` CHECK, claimed in the creating txn (#880); guard triggers on all three tables (#948, migration 000017) | `ConversationKind` | `conversation_id_taken` → 403 | guard vs registry vs DB-trigger layers (`conversation_namespace.rs`) |
+| I8 no envelope behind the head | — (two DB handles; insert-then-verify) | `Sealed { generation, epoch }` asserted from the ciphertext | `epoch_behind` → 409 + committer pre-merge sweep | `epoch_gate_tests` (DS) + `dms::message_sealed_*` (flows, fail with the gate/sweep off) |
 
 ## Roadmap (phased)
 

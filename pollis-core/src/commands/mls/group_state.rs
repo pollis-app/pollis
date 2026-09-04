@@ -19,6 +19,73 @@ use super::provider::{
     parse_credential_user_id, signature_scheme, store_only, MlsProvider, PollisProvider,
 };
 
+/// Test-harness rendezvous points inside the join and commit paths.
+///
+/// A test arms one, drives a client into the path (which then parks at the
+/// point and hands the test a release handle), interleaves whatever it wants
+/// against the parked client, and releases it. Deterministic interleavings of
+/// the join paths are otherwise unreachable from a test — they depend on which
+/// of two clients' HTTP round trips lands first.
+#[cfg(feature = "test-harness")]
+pub mod rendezvous {
+    use std::sync::Mutex;
+    use tokio::sync::{mpsc, oneshot};
+
+    /// Handle a parked client hands the test: dropping or sending on it
+    /// releases the client.
+    pub type Release = oneshot::Sender<()>;
+
+    /// The points a test can park a client at.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Point {
+        /// External commit built and stored locally, CAS not yet submitted —
+        /// the window in which another member's commit turns it into a lost
+        /// race.
+        ExternalJoinBeforeSubmit,
+        /// `reconcile_group_mls_impl` entered, per-conversation lock not yet
+        /// taken.
+        ReconcileEntry,
+        /// Self-update commit staged under the per-conversation lock, CAS not
+        /// yet submitted — the window between the pre-op catch-up and the
+        /// epoch advance.
+        SelfUpdateBeforeSubmit,
+        /// An application envelope sealed and about to be posted — the window
+        /// between the sender's catch-up and its post, in which a commit that
+        /// lands makes the envelope epoch-behind (#1041).
+        EnvelopeBeforePost,
+    }
+
+    const POINTS: usize = 4;
+
+    static ARMED: Mutex<[Option<mpsc::UnboundedSender<Release>>; POINTS]> =
+        Mutex::new([None, None, None, None]);
+
+    /// Arm `point`. Every client reaching it in this process then parks there
+    /// and sends a [`Release`] on the returned receiver. Disarm with
+    /// [`disarm`] (dropping the receiver also stops clients from parking: a
+    /// send on a closed channel falls through).
+    pub fn arm(point: Point) -> mpsc::UnboundedReceiver<Release> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        ARMED.lock().expect("rendezvous poisoned")[point as usize] = Some(tx);
+        rx
+    }
+
+    /// Disarm `point` so later arrivals run straight through.
+    pub fn disarm(point: Point) {
+        ARMED.lock().expect("rendezvous poisoned")[point as usize] = None;
+    }
+
+    pub(crate) async fn park(point: Point) {
+        let tx = ARMED.lock().expect("rendezvous poisoned")[point as usize].clone();
+        if let Some(tx) = tx {
+            let (release, parked) = oneshot::channel();
+            if tx.send(release).is_ok() {
+                let _ = parked.await;
+            }
+        }
+    }
+}
+
 // ── GroupInfo publishing ─────────────────────────────────────────────────────
 
 /// Export a fresh `GroupInfo` for the given conversation and upsert it
@@ -510,6 +577,12 @@ async fn external_join_attempt(
             verifiable_group_info,
         )?
     };
+
+    // Test-harness only: let a test park this attempt with the doomed-or-not
+    // branch already stored locally and the CAS not yet submitted — the exact
+    // window in which another member's commit turns it into a lost race.
+    #[cfg(feature = "test-harness")]
+    rendezvous::park(rendezvous::Point::ExternalJoinBeforeSubmit).await;
 
     // 3. Claim this epoch in mls_commit_log via compare-and-swap. If another
     //    member already committed `stored_epoch`, the conflict makes this a
@@ -1085,7 +1158,7 @@ pub(crate) async fn process_pending_commits_locked(
     mls_group_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
-    process_pending_commits_locked_impl(state, mls_group_id, user_id, None).await
+    process_pending_commits_locked_impl(state, mls_group_id, user_id, None, None).await
 }
 
 /// Like [`process_pending_commits_inner`], but after the local group reaches
@@ -1113,14 +1186,63 @@ pub(crate) async fn process_pending_commits_locked(
 /// After a suite migration a conversation has two lineages and the successor
 /// restarts at epoch 0, so "epoch 1" is ambiguous across a migration; only the
 /// pair is monotone, and it is the pair the ingest watermark advances on.
+///
+/// `bound` is the commit-log head the caller read BEFORE it fetched the
+/// envelopes it will decrypt from `on_epoch` (#1041). The replay applies only
+/// commits strictly below it — see [`ReplayBound`] — so the group never advances
+/// past an epoch whose envelopes this pass could not have fetched. `None` (an
+/// older DS, or a caller with no envelopes in hand) replays to head as before.
 pub async fn process_pending_commits_inner_with_hook(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
     on_epoch: &mut (dyn FnMut(&rusqlite::Connection, i64, u64) + Send),
+    bound: Option<ReplayBound>,
 ) -> crate::error::Result<()> {
     let _guard = state.mls_group_lock(mls_group_id).await;
-    process_pending_commits_locked_impl(state, mls_group_id, user_id, Some(on_epoch)).await
+    process_pending_commits_locked_impl(state, mls_group_id, user_id, Some(on_epoch), bound).await
+}
+
+/// How far one ingesting replay may advance the local group (#1041).
+///
+/// An ingest pass reads the commit-log head, then fetches envelopes, then
+/// fetches commits — three requests, and the log keeps moving between them.
+/// With `max_past_epochs = 0` a commit, once merged, destroys the keys of the
+/// epoch it leaves; so a commit the pass applies that was accepted AFTER its
+/// envelope fetch can destroy the keys for an envelope that fetch did not carry
+/// — sealed at the epoch the commit closed, posted after the fetch — and that
+/// envelope is lost to this device forever, even though it was a member at the
+/// epoch it was sealed. Bounding the replay at the head the pass read FIRST
+/// closes the window: every commit it applies was in the log before the
+/// envelope fetch, so every envelope sealed at an epoch this pass leaves was
+/// either in the fetch or refused by the DS's epoch gate (#1041) and re-sealed
+/// by its sender at a later epoch. Whatever the bound holds back is applied on
+/// the next pass, whose fetch carries the envelopes that arrived meanwhile.
+///
+/// Lexicographic on `(generation, epoch)`: a successor lineage restarts at
+/// epoch 0, and a bound in a later generation releases every commit of the
+/// current one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplayBound {
+    pub generation: i64,
+    /// The head epoch in `generation` — the epoch the next accepted commit
+    /// will be based on. A commit row at this epoch or beyond is not applied.
+    pub epoch: u64,
+}
+
+impl ReplayBound {
+    /// Whether a commit row at `(generation, epoch)` lies below the bound and
+    /// may be applied on this pass.
+    pub fn admits(self, generation: i64, epoch: u64) -> bool {
+        (generation, epoch) < (self.generation, self.epoch)
+    }
+
+    /// Whether the bound lies in a generation beyond `generation`, i.e. the log
+    /// had already opened a successor lineage when the bound was read, so
+    /// adopting one on this pass cannot skip envelopes the pass did not fetch.
+    pub fn allows_generation_beyond(self, generation: i64) -> bool {
+        self.generation > generation
+    }
 }
 
 /// Most suite generations a single pass will hop across (#454 P4).
@@ -1144,10 +1266,12 @@ async fn process_pending_commits_locked_impl(
     mls_group_id: &str,
     user_id: &str,
     mut on_epoch: Option<&mut EpochHook<'_>>,
+    bound: Option<ReplayBound>,
 ) -> crate::error::Result<()> {
     for _hop in 0..MAX_GENERATION_HOPS {
         let advanced =
-            process_one_generation(state, mls_group_id, user_id, on_epoch.as_deref_mut()).await?;
+            process_one_generation(state, mls_group_id, user_id, on_epoch.as_deref_mut(), bound)
+                .await?;
         if !advanced {
             break;
         }
@@ -1167,6 +1291,7 @@ async fn process_one_generation<'h>(
     mls_group_id: &str,
     user_id: &str,
     mut on_epoch: Option<&mut EpochHook<'h>>,
+    bound: Option<ReplayBound>,
 ) -> crate::error::Result<bool> {
     // 1. Get the current lineage + epoch from the local group.
     let (generation, has_group) = {
@@ -1419,6 +1544,22 @@ async fn process_one_generation<'h>(
     // cannot advance must still recover, not wedge.
     let mut recover: Option<RecoverReason> = None;
     for commit in pending {
+        // #1041: a commit at or beyond the head this pass read before fetching
+        // its envelopes was accepted after that fetch, and merging it would
+        // discard the keys for envelopes the fetch could not have carried. Leave
+        // it — and everything after it — to the next pass. See `ReplayBound`.
+        if let Some(b) = bound {
+            if !b.admits(generation, commit.epoch as u64) {
+                eprintln!(
+                    "[mls] process_pending_commits: {mls_group_id} holding at epoch {current_epoch} — \
+                     commit at epoch {} landed after this pass fetched its envelopes (bound {b:?}); \
+                     the next pass applies it",
+                    commit.epoch
+                );
+                break;
+            }
+        }
+
         // Gap classification (I1), proved by Kani (`invariants::classify`) never
         // to `Apply` across a gap: `Apply` iff this row's epoch is exactly
         // `current_epoch`, else `GapRecover`. Abstracted by the `Apply` /
@@ -1608,7 +1749,13 @@ async fn process_one_generation<'h>(
     // function runs through `catch_up_mls_group_interleaved`, which always passes
     // a hook, so this costs no liveness — it only refuses to advance on a pass
     // that could not have drained first.
-    if on_epoch.is_some() {
+    //
+    // And only when the bound (#1041) does not forbid it: adopting a successor
+    // also discards the predecessor's keys, so a successor the log opened AFTER
+    // this pass fetched its envelopes waits for the next pass, exactly like a
+    // commit beyond the bound.
+    let bound_allows_hop = bound.is_none_or(|b| b.allows_generation_beyond(generation));
+    if on_epoch.is_some() && bound_allows_hop {
         if let Some(new_generation) =
             maybe_advance_generation(state, mls_group_id, user_id, generation).await
         {
@@ -2233,6 +2380,15 @@ impl<'a> MlsDecryptor<'a> {
             provider: PollisProvider::new(conn),
             group,
         })
+    }
+
+    /// The `(generation, epoch)` the loaded group sits at — the position of
+    /// every envelope this decryptor can open. A staged-but-unmerged own commit
+    /// does not move it: the group is still AT its epoch until the merge.
+    pub fn lineage(&self) -> (i64, u64) {
+        let raw = String::from_utf8_lossy(self.group.group_id().as_slice()).into_owned();
+        let (_, generation) = super::generation::split_mls_group_id(&raw);
+        (generation, self.group.epoch().as_u64())
     }
 
     /// Decrypt one envelope. See [`try_mls_decrypt`] for the contract — this is

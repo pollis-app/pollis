@@ -298,9 +298,31 @@ pub fn ok_empty<B: pollis_api::DsRequest<Response = pollis_api::Empty>>() -> Res
 pub enum WriteOutcome {
     Ok,
     Forbidden,
+    /// An envelope write asserted a `(generation, epoch)` that is not the commit
+    /// log's head (#1041). Nothing is stored; the client must catch up, re-seal
+    /// and post again (→ 409 [`pollis_api::messages::EpochBehind`]). Only the
+    /// two envelope endpoints produce this.
+    EpochBehind {
+        head_generation: i64,
+        head_epoch: i64,
+    },
 }
 
-/// Map a [`WriteOutcome`] to the HTTP response (200 ok / 403 forbidden).
+/// The 409 body for [`WriteOutcome::EpochBehind`].
+pub(crate) fn epoch_behind_response(head_generation: i64, head_epoch: i64) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(pollis_api::messages::EpochBehind {
+            error: pollis_api::messages::EpochBehind::ERROR.to_string(),
+            head_generation,
+            head_epoch,
+        }),
+    )
+        .into_response()
+}
+
+/// Map a [`WriteOutcome`] to the HTTP response (200 ok / 403 forbidden / 409
+/// epoch-behind).
 ///
 /// Generic over the endpoint's request type since #922, which is what ties this
 /// shared success body to a specific route: `B::Response` must be
@@ -316,6 +338,10 @@ where
     Ok(match outcome {
         WriteOutcome::Ok => ok_response::<B>(pollis_api::StatusOk::Ok),
         WriteOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
+        WriteOutcome::EpochBehind {
+            head_generation,
+            head_epoch,
+        } => epoch_behind_response(head_generation, head_epoch),
     })
 }
 

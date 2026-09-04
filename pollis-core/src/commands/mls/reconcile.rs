@@ -245,7 +245,22 @@ pub(super) async fn publish_staged_commit(
 
     match resolution {
         Resolution::Won => {
+            // #1041: the log now holds our commit, so no further envelope can be
+            // sealed at the epoch it closes — the DS refuses them. Whatever WAS
+            // sealed there before the CAS is still decryptable right now and
+            // will never be again once we merge: read it first.
+            let swept = sweep_before_merge(
+                state,
+                conversation_id,
+                actor_user_id,
+                closes_epoch.is_some(),
+                what,
+            )
+            .await?;
             finalize_won_commit(state, conversation_id, generation).await?;
+            if let Some(swept) = swept {
+                swept.emit_receipts(state).await;
+            }
             Ok(PublishOutcome::Won)
         }
         Resolution::LostRace => {
@@ -263,6 +278,60 @@ pub(super) async fn publish_staged_commit(
             Err(e)
         }
     }
+}
+
+/// The committer's sweep of the epoch a won commit is about to leave (#1041),
+/// with the failure policy that keeps it from losing what it exists to save.
+///
+/// Returns the envelopes it persisted (their receipts are owed after the
+/// merge) or, when the sweep could not be completed:
+///
+/// * an ordinary commit → `Err`, and the commit stays STAGED. It has landed,
+///   so it must not be cleared; the next ingesting catch-up starts at the epoch
+///   it closes, decrypts that epoch's envelopes, then adopts it from the log
+///   (`OwnPendingCommit` → merge). Merging blind here would be the exact loss
+///   this sweep prevents.
+/// * a migration (`is_migration`) → `Ok(None)` with a loud log, so the caller
+///   merges anyway. A migration's `Err` path abandons the successor lineage the
+///   log has already opened, which strands every member on a closed one — far
+///   worse than the bounded window this sweep covers.
+///
+/// One retry: the sweep is one read, and a transient failure straight after a
+/// successful CAS is the common shape of a flaky link.
+async fn sweep_before_merge(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    is_migration: bool,
+    what: &str,
+) -> crate::error::Result<Option<crate::commands::messages::SweptEnvelopes>> {
+    let mut last_err = None;
+    for _attempt in 0..2 {
+        match crate::commands::messages::sweep_current_epoch(state, conversation_id, user_id).await
+        {
+            Ok(swept) => return Ok(Some(swept)),
+            Err(e) => {
+                eprintln!(
+                    "[mls] {what}: pre-merge envelope sweep for {conversation_id} failed: {e}"
+                );
+                last_err = Some(e);
+            }
+        }
+    }
+    let e = last_err.expect("two attempts, both failed");
+    if is_migration {
+        eprintln!(
+            "[mls] {what}: merging the migration of {conversation_id} without its pre-merge \
+             sweep — envelopes sealed at the closed epoch since the last catch-up may be lost \
+             to this device"
+        );
+        return Ok(None);
+    }
+    eprintln!(
+        "[mls] {what}: leaving the won commit for {conversation_id} staged — the next catch-up \
+         drains its epoch and adopts it from the log"
+    );
+    Err(e)
 }
 
 /// Roll back a staged-but-unconfirmed pending commit (best effort; logs on
@@ -731,6 +800,12 @@ pub async fn reconcile_group_mls_impl(
 ) -> crate::error::Result<ReconcileOutcome> {
     let conversation_id = conversation_id.to_owned();
     let actor_user_id = actor_user_id.to_owned();
+
+    // Test-harness only: a test can park a reconcile here to line it up against
+    // another device's join (#1041).
+    #[cfg(feature = "test-harness")]
+    super::group_state::rendezvous::park(super::group_state::rendezvous::Point::ReconcileEntry)
+        .await;
 
     // Serialize all MLS mutations for this conversation on this device so two
     // concurrent reconciles (or a reconcile racing the external-join path)

@@ -71,13 +71,16 @@ async fn message_typed_on_one_ui_surfaces_on_the_others_rendered_screen() {
     bob.press(KeyCode::Char('a'), KeyModifiers::NONE).await;
     // The DM graduates from a pending "Requests" row to a compose-able "Direct
     // Messages" row once B has joined the MLS group and the accept has synced.
-    // NOTE: this is the reproducer for the DM-accept convergence race — with the
-    // background sync loop running, B's inbound Welcome (`apply_welcome`, which
-    // holds only the local_db lock) races B's external-join recovery
-    // (`process_pending_commits` → `external_join_group`, which holds the
-    // per-conversation `mls_group_lock`); the unsynchronised "delete stale group
-    // → rejoin" in both can strand B. Once that core race is fixed this is a
-    // reliable UI e2e; until then it is expected to be flaky.
+    //
+    // This accept is where #1041 used to lose A's first message: B's post-join
+    // self-update catches up and THEN commits, and a message A seals at the
+    // epoch in between is decryptable by nobody once the commit merges
+    // (`max_past_epochs = 0`). The DS now refuses an envelope sealed behind the
+    // log head, a committer sweeps the epoch it closes before merging, and a
+    // receiver's replay is bounded to the head its envelope fetch saw — the
+    // deterministic proofs are `dms::message_sealed_*` in the flows suite. This
+    // e2e is the UI-level check that the accept converges with the real sync
+    // loop running.
     bob.wait_for("Direct Messages", SIDEBAR_TIMEOUT).await;
 
     // ── Direction 1: A opens the DM, composes, and sends — all through the UI ──
@@ -93,11 +96,14 @@ async fn message_typed_on_one_ui_surfaces_on_the_others_rendered_screen() {
     alice.press(KeyCode::Char('i'), KeyModifiers::NONE).await;
     alice.send_keys("PING_ACROSS_THE_UI").await;
     alice.enter().await;
-    // A's own rendered message pane shows the just-sent message.
+    // A's own rendered message pane shows the just-sent message. The text alone
+    // proves nothing (a failed send leaves it sitting in the composer); a
+    // failed send is what puts "Send failed" on the status line.
+    let alice_after_send = alice.buffer_text();
     assert!(
-        alice.buffer_text().contains("PING_ACROSS_THE_UI"),
-        "A's own rendered pane should show the message it just sent, buffer:\n{}",
-        alice.buffer_text()
+        alice_after_send.contains("PING_ACROSS_THE_UI")
+            && !alice_after_send.contains("Send failed"),
+        "A's own rendered pane should show the message it just sent, buffer:\n{alice_after_send}"
     );
 
     // B opens the now-accepted DM and the message surfaces on B's RENDERED screen

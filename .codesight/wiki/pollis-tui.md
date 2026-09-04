@@ -219,6 +219,15 @@ the mobile bridge use. The rig also wires the enrollment DS
 routes (`/v1/auth/enrollment-request` session-gated, `/v1/enrollment/{approve,
 reject}` device-signed, `/v1/security-events`).
 
+Because the data dir is process-global, **every test file here holds exactly
+one `#[tokio::test]`**. Cargo runs a binary's tests on parallel threads, and a
+second test in the same binary repoints the dir mid-signup of the first
+("Couldn't set PIN: no active user; call verify_otp first" — exactly how
+#1041's PR first went red). A new scenario gets a new file, e.g.
+`tests/ui_e2e.rs` (the rendered-screen two-client gate) and
+`tests/ui_race_e2e.rs` (the same scenario with the rendezvous points forcing
+the recipient to lose the epoch-0 external-join race).
+
 ## Sync model (M2, spec §6)
 
 Media is off, so there is no LiveKit realtime inbox — the TUI **polls**.

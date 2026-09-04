@@ -299,6 +299,10 @@ pub async fn update_group(
     // this one.
     match apply_update_group(&conn, authed.as_deref(), &parsed).await? {
         WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        WriteOutcome::EpochBehind {
+            head_generation,
+            head_epoch,
+        } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
         WriteOutcome::Ok => match crate::directory::group_row(&conn, &parsed.group_id).await? {
             Some(g) => Ok(crate::writes::ok_response::<UpdateGroupBody>(
                 UpdatedGroup::Ok {
@@ -539,6 +543,10 @@ pub async fn update_channel(
     let conn = state.db.conn().await?;
     match apply_update_channel(&conn, authed.as_deref(), &parsed).await? {
         WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        WriteOutcome::EpochBehind {
+            head_generation,
+            head_epoch,
+        } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
         WriteOutcome::Ok => match channel_row(&conn, &parsed.channel_id).await? {
             Some(c) => Ok(crate::writes::ok_response::<UpdateChannelBody>(c)),
             None => Err(AppError(anyhow::anyhow!(
@@ -930,6 +938,10 @@ pub async fn accept_invite(
     let group_id = accepted_invite_group(&conn, authed.as_deref(), &parsed).await?;
     match apply_accept_invite(&conn, authed.as_deref(), &parsed).await? {
         WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        WriteOutcome::EpochBehind {
+            head_generation,
+            head_epoch,
+        } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
         WriteOutcome::Ok => match group_id {
             Some(group_id) => Ok(crate::writes::ok_response::<AcceptInviteBody>(
                 AcceptedInvite::Ok { group_id },

@@ -123,49 +123,44 @@ pub async fn send_message(
         eprintln!("[messages] send_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
-    let ciphertext_remote = {
+    // Size padding (issue #331 v2, `docs/metadata-minimization-design.md`
+    // §4.1). Pad TEXT plaintext to a size bucket before encryption so the
+    // ciphertext length in `message_envelope` no longer reveals the message
+    // length. The framing (version byte + length prefix) lives inside the
+    // MLS ciphertext, so only members see it and there's no schema/server
+    // change. Attachment envelopes are left unpadded — their R2 blob size is
+    // inherent and dedup depends on it.
+    //
+    // A THREADED send (#825) always takes the padded frame, attachment
+    // envelope or not, because the thread id rides in that frame's trailer
+    // and there is nowhere else inside the ciphertext to put it. Padding an
+    // attachment envelope is harmless — the exemption above exists because
+    // the R2 blob size already leaks, not because padding would hurt — and
+    // an old client still strips a `0xF5` frame correctly, so a threaded
+    // attachment stays readable on clients that predate threads.
+    //
+    // An UNTHREADED send is byte-for-byte what it was before threads.
+    let plaintext: Vec<u8> = match thread_id.as_deref() {
+        Some(thread) => super::framing::pad_threaded(content.as_bytes(), thread),
+        None if super::edit_delete::is_attachment_content(&content) => {
+            content.as_bytes().to_vec()
+        }
+        None => super::framing::pad(content.as_bytes()),
+    };
+
+    let sealed = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        // Size padding (issue #331 v2, `docs/metadata-minimization-design.md`
-        // §4.1). Pad TEXT plaintext to a size bucket before encryption so the
-        // ciphertext length in `message_envelope` no longer reveals the message
-        // length. The framing (version byte + length prefix) lives inside the
-        // MLS ciphertext, so only members see it and there's no schema/server
-        // change. Attachment envelopes are left unpadded — their R2 blob size is
-        // inherent and dedup depends on it.
-        //
-        // A THREADED send (#825) always takes the padded frame, attachment
-        // envelope or not, because the thread id rides in that frame's trailer
-        // and there is nowhere else inside the ciphertext to put it. Padding an
-        // attachment envelope is harmless — the exemption above exists because
-        // the R2 blob size already leaks, not because padding would hurt — and
-        // an old client still strips a `0xF5` frame correctly, so a threaded
-        // attachment stays readable on clients that predate threads.
-        //
-        // An UNTHREADED send is byte-for-byte what it was before threads.
-        let plaintext: Vec<u8> = match thread_id.as_deref() {
-            Some(thread) => super::framing::pad_threaded(content.as_bytes(), thread),
-            None if super::edit_delete::is_attachment_content(&content) => {
-                content.as_bytes().to_vec()
-            }
-            None => super::framing::pad(content.as_bytes()),
-        };
-
-        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, &plaintext)
-            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
-                "MLS group not initialized for conversation {conversation_id}"
-            )))?;
-
-        let mls_ct_str = format!("mls:{}", hex::encode(&mls_bytes));
+        let sealed = super::seal::seal(db.conn(), &mls_group_id, &conversation_id, &plaintext)?;
 
         db.conn().execute(
             "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, reply_to_id, thread_id, sent_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![id, conversation_id, sender_id, mls_bytes, content, reply_to_id, thread_id, now],
+            rusqlite::params![id, conversation_id, sender_id, sealed.bytes, content, reply_to_id, thread_id, sealed.sent_at],
         )?;
 
-        mls_ct_str
+        sealed
     };
 
     // Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2) —
@@ -239,18 +234,41 @@ pub async fn send_message(
     };
 
     // Post to Turso for offline delivery. DS seam: route the envelope write
-    // through the Delivery Service (the write API).
-    let body = pollis_api::messages::SendMessageBody {
-        id: id.clone(),
-        conversation_id: conversation_id.clone(),
-        sender_id: Some(SEALED_SENDER_SENTINEL.to_string()),
-        ciphertext: ciphertext_remote,
-        reply_to_id: reply_to_id.clone(),
-        sent_at: now.clone(),
-        sealed: 1,
-        push_to,
-    };
-    crate::commands::mls::ds_post_ok(state, &body).await?;
+    // through the Delivery Service (the write API). The body asserts the epoch
+    // the envelope was sealed at; if a commit landed since our catch-up the DS
+    // refuses it (#1041) and `post_resealing` catches up, re-seals at the new
+    // epoch, rewrites our own local copy to match, and posts again.
+    let sealed = super::seal::post_resealing(
+        state,
+        super::seal::Target {
+            mls_group_id: &mls_group_id,
+            conversation_id: &conversation_id,
+            user_id: &sender_id,
+            plaintext: &plaintext,
+        },
+        sealed,
+        |sealed| pollis_api::messages::SendMessageBody {
+            id: id.clone(),
+            conversation_id: conversation_id.clone(),
+            sender_id: Some(SEALED_SENDER_SENTINEL.to_string()),
+            ciphertext: sealed.wire(),
+            reply_to_id: reply_to_id.clone(),
+            sent_at: sealed.sent_at.clone(),
+            sealed: 1,
+            generation: Some(sealed.generation),
+            epoch: Some(sealed.epoch),
+            push_to: push_to.clone(),
+        },
+        |conn, sealed| {
+            conn.execute(
+                "UPDATE message SET ciphertext = ?1, sent_at = ?2 WHERE id = ?3",
+                rusqlite::params![sealed.bytes, sealed.sent_at, id],
+            )?;
+            Ok(())
+        },
+    )
+    .await?;
+    let now = sealed.sent_at;
 
     // Register a server-side reference for each attachment this message carries
     // (#690), keyed by the message id. The DS reference-counts the shared,

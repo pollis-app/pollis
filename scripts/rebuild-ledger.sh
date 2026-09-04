@@ -18,8 +18,9 @@
 # the one property that makes its verdict worth reading. So the verdict is
 # collected out-of-band, from the public Actions API, by this script.
 #
-# The ledger cannot silently rot: `website-verify.yml` runs `--check` daily and
-# fails when new runs are unpublished.
+# The ledger cannot silently rot: `rebuild-ledger.yml` runs this script after
+# every rebuild-verify run and opens the PR (#1041), and `website-verify.yml`
+# runs `--check` daily and fails while new runs are unpublished.
 #
 # TAG RESOLUTION, and why it is layered. A `workflow_run`-triggered run reports
 # `headBranch: main` and a `headSha` that is main's tip, NOT the tag's commit —
@@ -240,8 +241,10 @@ if [ "${1:-}" = "--check" ]; then
   rm -f "${OUT}.tmp"
   if [ "$a" != "$b" ]; then
     echo "::error::website/rebuild-ledger.json is out of date — rebuild-verify has run" >&2
-    echo "::error::  since it was last published. Run scripts/rebuild-ledger.sh and commit" >&2
-    echo "::error::  the result, so /assurance stops under-reporting the record." >&2
+    echo "::error::  since it was last published. Merge the open bot/rebuild-ledger PR" >&2
+    echo "::error::  (rebuild-ledger.yml opens one after every run), or run" >&2
+    echo "::error::  scripts/rebuild-ledger.sh and commit the result, so /assurance" >&2
+    echo "::error::  stops under-reporting the record." >&2
     exit 1
   fi
   echo "rebuild ledger is up to date."

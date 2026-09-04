@@ -120,6 +120,26 @@ pub struct CatchUpResponse {
     /// The desired MLS roster. Empty unless `want_roster`.
     #[serde(default)]
     pub roster: Vec<String>,
+    /// The commit log's head, read BEFORE `envelopes` was (#1041). `None` unless
+    /// `want_envelopes` (or from a DS that predates the field).
+    ///
+    /// This is the receiver's half of the epoch gate. An envelope may only be
+    /// stored while its epoch is the head, so every envelope that will ever exist
+    /// at an epoch below this head was already stored when the head was read,
+    /// and therefore is in `envelopes`. A replay that applies only the commits
+    /// accepted before this head — `(generation, epoch) < head` — can never
+    /// advance past an epoch whose envelopes it has not fetched. Commits accepted
+    /// later wait for the next pass, which fetches again first.
+    #[serde(default)]
+    pub head: Option<LogHead>,
+}
+
+/// A position in the commit log: the next epoch a commit in `generation` would
+/// be accepted from (`MAX(epoch) + 1`, or `0` for an empty lineage).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogHead {
+    pub generation: i64,
+    pub epoch: i64,
 }
 
 /// One `message_envelope` row as it crosses the wire.

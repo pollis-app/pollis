@@ -453,6 +453,10 @@ pub async fn revoke_device(
     }
     match outcome {
         WriteOutcome::Forbidden => Ok(AuthRejection::Forbidden.into_response()),
+        WriteOutcome::EpochBehind {
+            head_generation,
+            head_epoch,
+        } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
         WriteOutcome::Ok => Ok(crate::writes::ok_response::<RevokeDeviceBody>(
             match device_name {
                 Some(name) => DeviceRevoked::Ok {

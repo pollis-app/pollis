@@ -83,6 +83,7 @@ pub async fn catch_up(
             envelopes: Vec::new(),
             dm: None,
             roster: Vec::new(),
+            head: None,
         }));
     };
 
@@ -95,6 +96,7 @@ pub async fn catch_up(
             envelopes: Vec::new(),
             dm: None,
             roster: Vec::new(),
+            head: None,
         }));
     }
 
@@ -103,10 +105,20 @@ pub async fn catch_up(
         _ => channel_ids_of(&conn, &mls_group_id).await?,
     };
 
-    let envelopes = if parsed.want_envelopes {
-        fetch_envelopes(&conn, &conversation_ids, &who, &device_id).await?
+    // The log head is read BEFORE the envelopes (#1041). An envelope sealed at
+    // epoch `e` can be decrypted only by a member still at `e`, so a replay that
+    // applied a commit this response does not yet know about could strand an
+    // envelope this response carries. Ordering the two reads lets the client
+    // bound its replay to `head` and leave the rest to its next pass.
+    let (head, envelopes) = if parsed.want_envelopes {
+        let log = state.log_db.conn().await?;
+        let generation = crate::commit::head_generation(&log, &mls_group_id).await?;
+        let epoch = crate::commit::head_epoch_in(&log, &mls_group_id, generation).await?;
+        let head = LogHead { generation, epoch };
+        let envelopes = fetch_envelopes(&conn, &conversation_ids, &who, &device_id).await?;
+        (Some(head), envelopes)
     } else {
-        Vec::new()
+        (None, Vec::new())
     };
 
     let dm = if parsed.want_dm && kind == ConversationKind::Dm {
@@ -129,6 +141,7 @@ pub async fn catch_up(
         envelopes,
         dm,
         roster,
+        head,
     }))
 }
 

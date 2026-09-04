@@ -643,3 +643,348 @@ async fn user_block_lifecycle() {
     drop(bob);
     drop(carol);
 }
+
+/// The DM-accept convergence race (#1041), in the ordering CI produced.
+///
+/// `create_dm_channel` publishes GroupInfo at epoch 0 (`init_mls_group`) BEFORE
+/// reconcile adds the recipient, and the recipient's membership row is visible
+/// from the first write. A recipient whose sync loop ticks in that window has no
+/// Welcome to defer to, so it external-joins: it builds a local branch at epoch
+/// 1 and submits a compare-and-swap on epoch 0. If the creator's Add lands
+/// first, the join loses, discards its branch and — on the retry — defers to
+/// the Welcome the Add produced.
+///
+/// The recipient is driven the way the TUI drives it: a background sync loop
+/// (welcomes → commits → ingest) AND a UI refresh loop (ingest of the open
+/// conversation) running concurrently, so the Welcome path (`apply_welcome`)
+/// and the external-join path overlap exactly as they do in `pollis-tui`.
+///
+/// Locally the recipient nearly always WINS epoch 0 (the creator's reconcile
+/// does more work), which is why the TUI e2e only ever failed on CI. The
+/// rendezvous parks the recipient with its branch built and the CAS unsent, so
+/// the losing ordering is reproduced on demand rather than by luck.
+///
+/// This ordering was the one the e2e's comment blamed, and it is handled: the
+/// lost CAS falls back to the Welcome. It was NOT the loss CI saw — that is the
+/// committer window `message_sealed_at_the_epoch_a_committer_leaves_is_still_delivered`
+/// pins below. Kept because a lost epoch-0 join is a real interleaving that
+/// must keep converging.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn recipient_that_loses_the_epoch_zero_race_still_reads_the_creators_message() {
+    use pollis_api::DsRequest;
+    use pollis_lib::commands::mls::{init_mls_group, reconcile_group_mls_impl, rendezvous};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // The DM rows only — the two halves of the MLS bootstrap are driven by hand
+    // below so the recipient can be interleaved between them.
+    let dm_id = ulid::Ulid::new().to_string();
+    let body = pollis_api::profile::CreateDmBody {
+        id: dm_id.clone(),
+        creator_id: alice_profile.id.clone(),
+        member_ids: vec![alice_profile.id.clone(), bob_profile.id.clone()],
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let status = crate::harness::signed_post_status(
+        &alice,
+        <pollis_api::profile::CreateDmBody as DsRequest>::PATH,
+        &serde_json::to_vec(&body).expect("serialize CreateDmBody"),
+    )
+    .await;
+    assert_eq!(status, 200, "create_dm rows");
+
+    // Half one: the creator's single-member group + GroupInfo at epoch 0.
+    init_mls_group(&alice.state, &dm_id, &alice_profile.id)
+        .await
+        .expect("init_mls_group");
+
+    // Bob, shaped like the TUI: a sync loop and a UI refresh loop, both free
+    // running until the test is done with them.
+    let mut parked = rendezvous::arm(rendezvous::Point::ExternalJoinBeforeSubmit);
+    let stop = Arc::new(AtomicBool::new(false));
+    let sync_loop = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        let dm = dm_id.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                let _ = pollis_core::commands::mls::poll_mls_welcomes(&state, user.clone()).await;
+                let _ = pollis_core::commands::mls::process_pending_commits(
+                    &state,
+                    dm.clone(),
+                    user.clone(),
+                )
+                .await;
+                let _ = pollis_core::commands::messages::get_dm_messages(
+                    user.clone(),
+                    dm.clone(),
+                    Some(50),
+                    None,
+                    &state,
+                )
+                .await;
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        })
+    };
+    let refresh_loop = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        let dm = dm_id.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                let _ = pollis_core::commands::messages::get_dm_messages(
+                    user.clone(),
+                    dm.clone(),
+                    Some(50),
+                    None,
+                    &state,
+                )
+                .await;
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+    };
+
+    // Bob's sync tick lands in the window: no Welcome, GroupInfo at epoch 0, a
+    // membership row — the gate picks ExternalJoin. He parks with the branch
+    // built and the CAS unsent.
+    let release = tokio::time::timeout(Duration::from_secs(30), parked.recv())
+        .await
+        .expect("bob never reached the external-join submit point")
+        .expect("rendezvous closed");
+
+    // Half two: the creator's reconcile adds Bob at epoch 0 → 1 and writes his
+    // Welcome — it wins epoch 0 because Bob's CAS has not been sent.
+    reconcile_group_mls_impl(&alice.state, &dm_id, &alice_profile.id)
+        .await
+        .expect("reconcile");
+    // Bob's UI refresh loop (ingest → unlocked welcome poll) gets to see the
+    // Welcome while his external join is still parked under the group lock —
+    // the overlap `pollis-tui` produces on every accept.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Bob's CAS now loses; his retry finds the Welcome and defers to it.
+    rendezvous::disarm(rendezvous::Point::ExternalJoinBeforeSubmit);
+    let _ = release.send(());
+
+    // Bob accepts through the same core call the TUI's `a` key makes.
+    bob.accept_dm_request(&dm_id).await;
+
+    // The creator sends. This is the message CI never surfaced.
+    alice.send_channel_message(&dm_id, "PING_ACROSS_THE_UI").await;
+
+    // Bob's loops must surface it on their own, exactly as the TUI's do.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let mut bob_view: Vec<String> = Vec::new();
+    while tokio::time::Instant::now() < deadline {
+        bob_view = bob
+            .fetch_dm_messages(&dm_id)
+            .await
+            .iter()
+            .filter_map(|m| m["content"].as_str().map(str::to_string))
+            .collect();
+        if bob_view.contains(&"PING_ACROSS_THE_UI".to_string()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    stop.store(true, Ordering::Relaxed);
+    let _ = sync_loop.await;
+    let _ = refresh_loop.await;
+    assert!(
+        bob_view.contains(&"PING_ACROSS_THE_UI".to_string()),
+        "bob lost the creator's message after losing the epoch-0 race: {bob_view:?}"
+    );
+
+    // And back: the DM is usable in both directions.
+    bob.send_channel_message(&dm_id, "PONG_BACK_ACROSS_UI").await;
+    let alice_view: Vec<String> = alice
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        alice_view.contains(&"PONG_BACK_ACROSS_UI".to_string()),
+        "alice did not get bob's reply: {alice_view:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+}
+
+/// The loss CI actually produced (#1041): a message sealed at the epoch a
+/// committer is about to leave.
+///
+/// A new member's post-join self-update runs an ingesting catch-up and THEN
+/// commits. The two are not one step: an envelope the creator seals at the
+/// current epoch and posts after the catch-up's fetch but before the commit
+/// merges is decryptable by nobody who has merged that commit
+/// (`max_past_epochs = 0`). On the DM-accept path the committer is the
+/// recipient, the commit is guaranteed, and the creator is typing — so the
+/// first message of the DM is the one that lands in the window.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn message_sealed_at_the_epoch_a_committer_leaves_is_still_delivered() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // Alice's Add lands Bob's Welcome at epoch 1.
+    let dm_id = alice.create_dm(&[&bob_profile.id]).await;
+
+    // Bob applies the Welcome, catches up (nothing to ingest) and stages his
+    // post-join self-update — parking under the group lock with the commit
+    // built and unsent.
+    let mut parked = rendezvous::arm(Point::SelfUpdateBeforeSubmit);
+    let poll = {
+        let state = bob.state.clone();
+        let user = bob_profile.id.clone();
+        tokio::spawn(async move {
+            pollis_core::commands::mls::poll_mls_welcomes(&state, user).await
+        })
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), parked.recv())
+        .await
+        .expect("bob never staged his post-join self-update")
+        .expect("rendezvous closed");
+
+    // Alice, at epoch 1 with no commit to catch up on, seals at epoch 1.
+    alice.send_channel_message(&dm_id, "PING_ACROSS_THE_UI").await;
+
+    // Bob's commit lands (head is still 1) and merges: epoch 2.
+    rendezvous::disarm(Point::SelfUpdateBeforeSubmit);
+    let _ = release.send(());
+    poll.await.expect("poll task").expect("poll_mls_welcomes");
+    bob.accept_dm_request(&dm_id).await;
+
+    let bob_view: Vec<String> = bob
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        bob_view.contains(&"PING_ACROSS_THE_UI".to_string()),
+        "bob lost the message sealed at the epoch his self-update left: {bob_view:?}"
+    );
+
+    // Alice reads Bob's commit and the DM keeps working both ways.
+    bob.send_channel_message(&dm_id, "PONG_BACK_ACROSS_UI").await;
+    let alice_view: Vec<String> = alice
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        alice_view.contains(&"PONG_BACK_ACROSS_UI".to_string()),
+        "alice did not get bob's reply: {alice_view:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+}
+
+/// #1041, the SENDER-side arm of the same race. Alice catches up, seals at the
+/// head epoch, and then — before her post reaches the DS — Bob's commit lands
+/// and moves the head. Her envelope is now sealed at an epoch every member has
+/// left. The DS refuses it (`epoch_behind`) and she catches up, re-seals at the
+/// new epoch, and posts again; Bob reads it. Deterministic: Alice parks at
+/// `EnvelopeBeforePost` while Bob's self-update runs to completion.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn message_sealed_behind_a_landed_commit_is_resealed_and_delivered() {
+    use pollis_lib::commands::mls::rendezvous::{self, Point};
+    use std::time::Duration;
+
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let dm_id = alice.create_dm(&[&bob_profile.id]).await;
+    // Bob joins fully (Welcome + post-join self-update) and both sides settle.
+    bob.accept_dm_request(&dm_id).await;
+    alice.send_channel_message(&dm_id, "settle").await;
+    assert!(bob
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .any(|m| m["content"] == "settle"));
+
+    // Alice's send catches up and seals, then parks with the envelope unposted.
+    let mut parked = rendezvous::arm(Point::EnvelopeBeforePost);
+    let send = {
+        let state = alice.state.clone();
+        let user = alice.user_id().to_string();
+        let dm = dm_id.clone();
+        tokio::spawn(async move {
+            pollis_core::commands::messages::send_message(
+                dm,
+                user,
+                "PING_BEHIND_THE_HEAD".to_string(),
+                None,
+                None,
+                Some("alice".to_string()),
+                &state,
+            )
+            .await
+        })
+    };
+    let release = tokio::time::timeout(Duration::from_secs(30), parked.recv())
+        .await
+        .expect("alice never reached the post")
+        .expect("rendezvous closed");
+
+    // Bob's commit lands and merges while Alice's envelope is sealed at the
+    // epoch it closes.
+    assert!(bob.self_update(&dm_id).await, "bob's self-update must land");
+
+    rendezvous::disarm(Point::EnvelopeBeforePost);
+    let _ = release.send(());
+    let sent = send.await.expect("send task").expect("send_message");
+    assert_eq!(sent.content.as_deref(), Some("PING_BEHIND_THE_HEAD"));
+
+    // The envelope Bob fetches must be the RE-SEALED one — at his epoch.
+    let bob_view: Vec<String> = bob
+        .fetch_dm_messages(&dm_id)
+        .await
+        .iter()
+        .filter_map(|m| m["content"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        bob_view.contains(&"PING_BEHIND_THE_HEAD".to_string()),
+        "bob lost the message alice sealed behind his commit: {bob_view:?}"
+    );
+
+    // Alice's own copy carries the stamp that actually landed, so her local
+    // history and the envelope agree.
+    let alice_view = alice.fetch_dm_messages(&dm_id).await;
+    let own = alice_view
+        .iter()
+        .find(|m| m["content"] == "PING_BEHIND_THE_HEAD")
+        .expect("alice keeps her own message");
+    assert_eq!(own["sent_at"].as_str(), Some(sent.sent_at.as_str()));
+
+    drop(alice);
+    drop(bob);
+}

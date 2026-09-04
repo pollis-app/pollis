@@ -549,7 +549,8 @@ pub async fn send_message(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    let outcome = apply_send_message(&conn, authed.as_deref(), &parsed).await?;
+    let log = state.log_db.conn().await?;
+    let outcome = send_envelope(&conn, &log, authed.as_deref(), &parsed).await?;
 
     // Wake the recipients, AFTER the envelope has landed and only if it did
     // (#987). Best-effort and detached: a push that fails must never fail a send
@@ -663,7 +664,146 @@ pub async fn edit_message(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<EditMessageBody>(apply_edit_message(&conn, authed.as_deref(), &parsed).await?)
+    let log = state.log_db.conn().await?;
+    outcome_response::<EditMessageBody>(
+        edit_envelope(&conn, &log, authed.as_deref(), &parsed).await?,
+    )
+}
+
+// ── The epoch gate (#1041) ───────────────────────────────────────────────────
+//
+// An application envelope is decryptable only by members AT the epoch it was
+// sealed at (`max_past_epochs = 0` on the client). If a commit lands between a
+// sender's catch-up and its post, the envelope arrives sealed at an epoch every
+// member has left or is about to leave: recipients that already merged the
+// commit have thrown the keys away, and the committer's own merge advanced
+// past it before it could fetch. The message is silently lost — not one of the
+// three accepted losses.
+//
+// So the DS refuses to KEEP an envelope whose asserted `(generation, epoch)` is
+// no longer the commit log's head, answering 409 `epoch_behind` with the head
+// so the sender can catch up, re-seal, and post again. The assertion is
+// optional on the wire (an older client sends none and is admitted ungated);
+// every client this repo ships asserts.
+//
+// Insert-then-verify, not lock-then-insert. The envelope and the commit log
+// live on two handles (`state.db` / `state.log_db`) that may be two databases
+// in a deployed environment, so there is no transaction spanning both. Instead
+// the envelope is inserted first and the head read second; if the head has
+// moved the row is deleted again and the post refused. Race against a
+// concurrent commit CAS (`commit::submit`), which appends the commit BEFORE its
+// winner sweeps the envelopes of the epoch it closes:
+//   - CAS before our head read → we see the new head → delete + 409 → the
+//     sender re-seals at the new epoch. Nothing at the old epoch remains.
+//   - CAS after our head read → the row was already visible when the CAS
+//     landed, so the committer's pre-merge sweep fetches it and decrypts it at
+//     the epoch it closes. Every other member replays that epoch on their
+//     next catch-up, bounded to it by the `head` the response carries.
+// Either way no envelope sits at an epoch nobody can still open.
+
+/// The commit-log identity the epoch gate reads the head for: a channel's
+/// owning group, a DM's own id. An id the directory does not know resolves to
+/// itself, which is the DM shape and what the in-process tests use.
+async fn mls_group_of(conn: &Connection, conversation_id: &str) -> anyhow::Result<String> {
+    Ok(crate::directory::resolve_conversation(conn, conversation_id)
+        .await?
+        .map(|(g, _)| g)
+        .unwrap_or_else(|| conversation_id.to_string()))
+}
+
+/// An envelope's asserted lineage, or `None` when the client asserted nothing
+/// (admitted ungated).
+type Lineage = Option<(i64, i64)>;
+
+/// `Some(EpochBehind)` when `asserted` is not the log head for `mls_group_id`.
+async fn behind_head(
+    log: &Connection,
+    mls_group_id: &str,
+    asserted: Lineage,
+) -> anyhow::Result<Option<WriteOutcome>> {
+    let Some(asserted) = asserted else {
+        return Ok(None);
+    };
+    let head_generation = crate::commit::head_generation(log, mls_group_id).await?;
+    let head_epoch = crate::commit::head_epoch_in(log, mls_group_id, head_generation).await?;
+    if asserted == (head_generation, head_epoch) {
+        return Ok(None);
+    }
+    Ok(Some(WriteOutcome::EpochBehind {
+        head_generation,
+        head_epoch,
+    }))
+}
+
+/// Run `apply` under the epoch gate. The head is checked BEFORE the write (so a
+/// sender that is plainly behind touches nothing — an edit's DELETE of the
+/// prior pending edit included) and AGAIN after it, deleting the row `id` the
+/// write inserted when the head moved in between.
+async fn apply_at_head<F, Fut>(
+    main: &Connection,
+    log: &Connection,
+    conversation_id: &str,
+    id: &str,
+    asserted: Lineage,
+    apply: F,
+) -> anyhow::Result<WriteOutcome>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<WriteOutcome>>,
+{
+    let mls_group_id = mls_group_of(main, conversation_id).await?;
+    if let Some(behind) = behind_head(log, &mls_group_id, asserted).await? {
+        return Ok(behind);
+    }
+    let outcome = apply().await?;
+    if !matches!(outcome, WriteOutcome::Ok) {
+        return Ok(outcome);
+    }
+    let Some(behind) = behind_head(log, &mls_group_id, asserted).await? else {
+        return Ok(WriteOutcome::Ok);
+    };
+    main.execute(
+        "DELETE FROM message_envelope WHERE id = ?1",
+        libsql::params![id.to_string()],
+    )
+    .await?;
+    Ok(behind)
+}
+
+/// [`apply_send_message`] under the epoch gate — what `/v1/messages/send` runs.
+pub async fn send_envelope(
+    main: &Connection,
+    log: &Connection,
+    authed: Option<&str>,
+    body: &SendMessageBody,
+) -> anyhow::Result<WriteOutcome> {
+    apply_at_head(
+        main,
+        log,
+        &body.conversation_id,
+        &body.id,
+        body.generation.zip(body.epoch),
+        || apply_send_message(main, authed, body),
+    )
+    .await
+}
+
+/// [`apply_edit_message`] under the epoch gate — what `/v1/messages/edit` runs.
+pub async fn edit_envelope(
+    main: &Connection,
+    log: &Connection,
+    authed: Option<&str>,
+    body: &EditMessageBody,
+) -> anyhow::Result<WriteOutcome> {
+    apply_at_head(
+        main,
+        log,
+        &body.conversation_id,
+        &body.envelope_id,
+        body.generation.zip(body.epoch),
+        || apply_edit_message(main, authed, body),
+    )
+    .await
 }
 
 /// Replace the single pending edit envelope (DELETE prior + INSERT new) in one
@@ -3127,6 +3267,10 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: msg_sent_at.to_string(),
                 sealed: 1,
+                // Unasserted lineage: these tests are about envelope columns,
+                // not the epoch gate (which has its own tests below).
+                generation: None,
+                epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
             },
@@ -3277,6 +3421,10 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: client_stamp(base, 999_999_999),
                 sealed: 1,
+                // Unasserted lineage: these tests are about envelope columns,
+                // not the epoch gate (which has its own tests below).
+                generation: None,
+                epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
             },
@@ -3366,6 +3514,10 @@ mod admin_delete_visibility_tests {
                 reply_to_id: None,
                 sent_at: boundary.clone(),
                 sealed: 1,
+                // Unasserted lineage: these tests are about envelope columns,
+                // not the epoch gate (which has its own tests below).
+                generation: None,
+                epoch: None,
                 // No push from a unit test — these assert envelope columns.
                 push_to: None,
             },
@@ -3617,5 +3769,229 @@ mod delete_scope_tests {
             !exists(&c, "my-envelope").await,
             "the legitimate self-delete must still remove the envelope"
         );
+    }
+}
+
+#[cfg(test)]
+mod epoch_gate_tests {
+    //! The epoch gate (#1041): `/v1/messages/send` and `/v1/messages/edit`
+    //! keep an envelope only when the `(generation, epoch)` it asserts is the
+    //! commit log's head. The invalid state — an envelope stored at an epoch
+    //! the group has already left — is what these prove cannot be created.
+
+    use super::*;
+
+    /// One DB standing in for both handles (the flows harness's shape).
+    async fn conn() -> Connection {
+        let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
+        pollis_schema::apply::single_db(&conn).await.expect("schema");
+        conn
+    }
+
+    /// Append the head commit of `generation` — the log's head epoch becomes
+    /// `epoch + 1`, exactly as a real CAS win does.
+    async fn append_commit(conn: &Connection, conv: &str, generation: i64, epoch: i64) {
+        conn.execute(
+            "INSERT INTO mls_commit_log (conversation_id, generation, epoch, sender_id, commit_data) \
+             VALUES (?1, ?2, ?3, 'alice', x'00')",
+            libsql::params![conv.to_string(), generation, epoch],
+        )
+        .await
+        .expect("append commit");
+    }
+
+    async fn stored(conn: &Connection, id: &str) -> bool {
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM message_envelope WHERE id = ?1",
+                libsql::params![id.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().is_some()
+    }
+
+    fn send(id: &str, conv: &str, generation: Option<i64>, epoch: Option<i64>) -> SendMessageBody {
+        SendMessageBody {
+            id: id.to_string(),
+            conversation_id: conv.to_string(),
+            sender_id: Some("sealed".to_string()),
+            ciphertext: "mls:00".to_string(),
+            reply_to_id: None,
+            sent_at: "2026-09-01T00:00:00+00:00".to_string(),
+            sealed: 1,
+            generation,
+            epoch,
+            push_to: None,
+        }
+    }
+
+    fn edit(
+        id: &str,
+        conv: &str,
+        target: &str,
+        generation: Option<i64>,
+        epoch: Option<i64>,
+    ) -> EditMessageBody {
+        EditMessageBody {
+            envelope_id: id.to_string(),
+            conversation_id: conv.to_string(),
+            target_message_id: target.to_string(),
+            sender_id: Some("alice".to_string()),
+            ciphertext: "mls:00".to_string(),
+            sent_at: "2026-09-01T00:00:00+00:00".to_string(),
+            generation,
+            epoch,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_envelope_sealed_at_the_head_epoch_lands() {
+        let c = conn().await;
+        append_commit(&c, "dm", 0, 0).await;
+        append_commit(&c, "dm", 0, 1).await;
+        // Head is (0, 2).
+        let out = send_envelope(&c, &c, None, &send("m1", "dm", Some(0), Some(2)))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(stored(&c, "m1").await);
+    }
+
+    #[tokio::test]
+    async fn an_envelope_sealed_at_a_left_epoch_is_refused_and_nothing_remains() {
+        let c = conn().await;
+        append_commit(&c, "dm", 0, 0).await;
+        append_commit(&c, "dm", 0, 1).await;
+        // Sealed at epoch 1, but the group is at 2.
+        let out = send_envelope(&c, &c, None, &send("m1", "dm", Some(0), Some(1)))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                out,
+                WriteOutcome::EpochBehind {
+                    head_generation: 0,
+                    head_epoch: 2
+                }
+            ),
+            "{out:?}"
+        );
+        assert!(!stored(&c, "m1").await, "a behind envelope must leave no row");
+    }
+
+    #[tokio::test]
+    async fn an_envelope_from_a_closed_generation_is_refused() {
+        let c = conn().await;
+        append_commit(&c, "dm", 0, 0).await;
+        append_commit(&c, "dm", 1, 0).await;
+        // Head is (1, 1); an envelope at (0, 1) is from the migrated-away lineage.
+        let out = send_envelope(&c, &c, None, &send("m1", "dm", Some(0), Some(1)))
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                out,
+                WriteOutcome::EpochBehind {
+                    head_generation: 1,
+                    head_epoch: 1
+                }
+            ),
+            "{out:?}"
+        );
+        assert!(!stored(&c, "m1").await);
+    }
+
+    #[tokio::test]
+    async fn an_empty_log_is_head_zero() {
+        let c = conn().await;
+        let ok = send_envelope(&c, &c, None, &send("m0", "dm", Some(0), Some(0)))
+            .await
+            .unwrap();
+        assert!(matches!(ok, WriteOutcome::Ok), "{ok:?}");
+        let behind = send_envelope(&c, &c, None, &send("m1", "dm", Some(0), Some(1)))
+            .await
+            .unwrap();
+        assert!(matches!(behind, WriteOutcome::EpochBehind { .. }), "{behind:?}");
+        assert!(stored(&c, "m0").await);
+        assert!(!stored(&c, "m1").await);
+    }
+
+    #[tokio::test]
+    async fn an_envelope_asserting_nothing_is_admitted_ungated() {
+        let c = conn().await;
+        append_commit(&c, "dm", 0, 0).await;
+        let out = send_envelope(&c, &c, None, &send("m1", "dm", None, None))
+            .await
+            .unwrap();
+        assert!(matches!(out, WriteOutcome::Ok), "{out:?}");
+        assert!(stored(&c, "m1").await);
+    }
+
+    #[tokio::test]
+    async fn an_edit_behind_the_head_is_refused_and_the_prior_edit_survives() {
+        let c = conn().await;
+        append_commit(&c, "dm", 0, 0).await;
+        // Head is (0, 1). A first edit lands at head.
+        let first = edit_envelope(&c, &c, None, &edit("e1", "dm", "m", Some(0), Some(1)))
+            .await
+            .unwrap();
+        assert!(matches!(first, WriteOutcome::Ok), "{first:?}");
+        // The group moves on; a second edit still sealed at epoch 1 is refused
+        // BEFORE it replaces the pending one.
+        append_commit(&c, "dm", 0, 1).await;
+        let second = edit_envelope(&c, &c, None, &edit("e2", "dm", "m", Some(0), Some(1)))
+            .await
+            .unwrap();
+        assert!(
+            matches!(second, WriteOutcome::EpochBehind { head_epoch: 2, .. }),
+            "{second:?}"
+        );
+        assert!(
+            stored(&c, "e1").await,
+            "the pending edit at the old head must survive a refused replacement"
+        );
+        assert!(!stored(&c, "e2").await);
+        // Re-sealed at the new head it replaces e1.
+        let third = edit_envelope(&c, &c, None, &edit("e3", "dm", "m", Some(0), Some(2)))
+            .await
+            .unwrap();
+        assert!(matches!(third, WriteOutcome::Ok), "{third:?}");
+        assert!(!stored(&c, "e1").await);
+        assert!(stored(&c, "e3").await);
+    }
+
+    #[tokio::test]
+    async fn a_channel_envelope_is_gated_on_its_owning_groups_log() {
+        let c = conn().await;
+        c.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('g', 'group'), ('ch', 'channel');
+             INSERT INTO groups (id, name, owner_id) VALUES ('g', 'g', 'alice');",
+        )
+        .await
+        .unwrap();
+        c.execute(
+            "INSERT INTO channels (id, group_id, name) VALUES ('ch', 'g', 'general')",
+            (),
+        )
+        .await
+        .unwrap();
+        append_commit(&c, "g", 0, 0).await;
+        // The channel id itself has no log; the gate must read the group's.
+        let behind = send_envelope(&c, &c, None, &send("m1", "ch", Some(0), Some(0)))
+            .await
+            .unwrap();
+        assert!(
+            matches!(behind, WriteOutcome::EpochBehind { head_epoch: 1, .. }),
+            "{behind:?}"
+        );
+        let ok = send_envelope(&c, &c, None, &send("m2", "ch", Some(0), Some(1)))
+            .await
+            .unwrap();
+        assert!(matches!(ok, WriteOutcome::Ok), "{ok:?}");
+        assert!(!stored(&c, "m1").await);
+        assert!(stored(&c, "m2").await);
     }
 }

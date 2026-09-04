@@ -201,6 +201,13 @@ pub async fn self_update_group(
         None => return Ok(false),
     };
 
+    // Test-harness only: a test can park a committer here to land another
+    // member's message at `epoch_before` while this commit is in flight
+    // (#1041).
+    #[cfg(feature = "test-harness")]
+    super::group_state::rendezvous::park(super::group_state::rendezvous::Point::SelfUpdateBeforeSubmit)
+        .await;
+
     let published = publish_staged_commit(
         state,
         conversation_id,

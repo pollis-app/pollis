@@ -197,7 +197,14 @@ pub async fn catch_up_mls_group_interleaved(
         return Ok(());
     }
     let is_dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
-    let conversation_ids: Vec<String> = resolved.conversation_ids;
+    // The log head the DS read BEFORE it scanned the envelopes (#1041): the
+    // replay below must not apply a commit at or beyond it. See `ReplayBound`.
+    let bound = resolved
+        .head
+        .map(|h| crate::commands::mls::ReplayBound {
+            generation: h.generation,
+            epoch: h.epoch.max(0) as u64,
+        });
 
     let device_id = state.device_id.lock().await.clone();
 
@@ -213,44 +220,21 @@ pub async fn catch_up_mls_group_interleaved(
     // trips before anything else could happen. The correlated watermark subquery
     // is unchanged: it keys off the row's own `conversation_id`, so it still
     // resolves per conversation rather than group-wide.
-    //
-    // The composite `ORDER BY conversation_id, sent_at ASC, id ASC` is what lets
-    // one result set be partitioned into the same per-conversation lists the old
-    // loop built: within a conversation the order is byte-for-byte what it was.
-    let mut per_conv: Vec<(String, Vec<EnvelopeRow>)> = conversation_ids
-        .iter()
-        .map(|cid| (cid.clone(), Vec::new()))
-        .collect();
-    {
-        // Index by conversation id so a row lands in the right bucket regardless
-        // of the order the ids were listed in.
-        let slot: HashMap<&str, usize> = conversation_ids
-            .iter()
-            .enumerate()
-            .map(|(i, cid)| (cid.as_str(), i))
-            .collect();
-        for env in resolved.envelopes {
-            let Some(&i) = slot.get(env.conversation_id.as_str()) else {
-                continue;
-            };
-            per_conv[i].1.push((
-                env.id,
-                env.sender_id,
-                env.ciphertext,
-                env.reply_to_id,
-                env.target_message_id,
-                env.sent_at,
-                env.kind,
-            ));
-        }
-    }
+    let per_conv = partition_envelopes(resolved.conversation_ids, resolved.envelopes);
 
     // Drive the shared group's replay once, decrypting each conversation's
     // envelopes as the group reaches their epoch. Returns the per-conversation
     // watermark each device may advance to, plus the messages newly decrypted on
     // this pass (the delivery-receipt batch).
-    let results: Vec<ConvIngest> =
-        ingest_group_envelopes_interleaved(state, user_id, mls_group_id, &per_conv, is_dm).await?;
+    let results: Vec<ConvIngest> = ingest_group_envelopes_interleaved(
+        state,
+        user_id,
+        mls_group_id,
+        &per_conv,
+        is_dm,
+        bound,
+    )
+    .await?;
 
     // Advance each conversation's watermark through the Delivery Service (best
     // effort — DS failures are logged and ignored). Envelope GC is NOT fired from
@@ -286,26 +270,179 @@ pub async fn catch_up_mls_group_interleaved(
     // group-channel case. Best-effort — a receipt that fails to send must never
     // fail an ingest pass, because the message itself already landed.
     if is_dm {
-        for res in &results {
-            if res.newly_delivered.is_empty() {
-                continue;
-            }
-            if let Err(e) = super::receipts::emit_delivered(
-                state,
-                &res.conversation_id,
-                &res.newly_delivered,
-            )
-            .await
-            {
-                eprintln!(
-                    "[receipts] delivered emit failed for {}: {e}",
-                    res.conversation_id
-                );
-            }
-        }
+        emit_delivered_batches(
+            state,
+            results
+                .iter()
+                .map(|r| (r.conversation_id.as_str(), r.newly_delivered.as_slice())),
+        )
+        .await;
     }
 
     Ok(())
+}
+
+/// Bucket one catch-up's envelopes per bound conversation, in the order the
+/// conversations were listed.
+///
+/// The composite `ORDER BY conversation_id, sent_at ASC, id ASC` the DS applies
+/// is what lets one result set be partitioned into the same per-conversation
+/// lists a per-channel loop would build: within a conversation the order is
+/// byte-for-byte what it was.
+fn partition_envelopes(
+    conversation_ids: Vec<String>,
+    envelopes: Vec<pollis_api::directory::EnvelopeWire>,
+) -> Vec<(String, Vec<EnvelopeRow>)> {
+    let mut per_conv: Vec<(String, Vec<EnvelopeRow>)> = conversation_ids
+        .iter()
+        .map(|cid| (cid.clone(), Vec::new()))
+        .collect();
+    // Index by conversation id so a row lands in the right bucket regardless
+    // of the order the ids were listed in.
+    let slot: HashMap<&str, usize> = conversation_ids
+        .iter()
+        .enumerate()
+        .map(|(i, cid)| (cid.as_str(), i))
+        .collect();
+    for env in envelopes {
+        let Some(&i) = slot.get(env.conversation_id.as_str()) else {
+            continue;
+        };
+        per_conv[i].1.push((
+            env.id,
+            env.sender_id,
+            env.ciphertext,
+            env.reply_to_id,
+            env.target_message_id,
+            env.sent_at,
+            env.kind,
+        ));
+    }
+    per_conv
+}
+
+/// Emit one delivery receipt per conversation for the messages a pass newly
+/// persisted (#857). Best-effort — a receipt that fails to send must never fail
+/// the ingest that already landed the message.
+async fn emit_delivered_batches<'a>(
+    state: &Arc<AppState>,
+    batches: impl Iterator<Item = (&'a str, &'a [String])>,
+) {
+    for (conversation_id, ids) in batches {
+        if ids.is_empty() {
+            continue;
+        }
+        if let Err(e) = super::receipts::emit_delivered(state, conversation_id, ids).await {
+            eprintln!("[receipts] delivered emit failed for {conversation_id}: {e}");
+        }
+    }
+}
+
+/// What the committer's sweep ([`sweep_current_epoch`]) persisted, handed back
+/// so the receipts it owes are sent only once the won commit is merged.
+pub(crate) struct SweptEnvelopes {
+    is_dm: bool,
+    newly_delivered: Vec<(String, Vec<String>)>,
+}
+
+impl SweptEnvelopes {
+    /// Send the delivery receipts for what the sweep persisted. Deferred to
+    /// after the merge because a receipt is itself an MLS send, and encrypting
+    /// merges any staged commit first — before the committer has finalized it.
+    pub(crate) async fn emit_receipts(self, state: &Arc<AppState>) {
+        if !self.is_dm {
+            return;
+        }
+        emit_delivered_batches(
+            state,
+            self.newly_delivered
+                .iter()
+                .map(|(cid, ids)| (cid.as_str(), ids.as_slice())),
+        )
+        .await;
+    }
+}
+
+/// The committer's sweep (#1041): after a staged commit has WON its epoch on
+/// the log and BEFORE it is merged locally, decrypt every envelope sealed at the
+/// epoch the commit is about to leave.
+///
+/// A commit merges by discarding the keys of the epoch it leaves
+/// (`max_past_epochs = 0`). Envelopes sealed at that epoch by other members are
+/// still decryptable by everyone else — they were sealed at the head — but the
+/// committer's own catch-up ran BEFORE its commit was accepted, so any envelope
+/// posted in between is one the committer never fetched and, once merged, never
+/// can. This sweep is the second read that closes that window, and the DS's
+/// epoch gate is the other half: an envelope that lands at this epoch either
+/// landed before the commit was accepted — and is in this fetch — or after,
+/// in which case the DS refuses it and its sender re-seals at the next epoch.
+///
+/// Must run under the conversation's MLS lock (the caller holds it) and with
+/// the won commit still STAGED: the group is at the sealed epoch until the
+/// merge, and openmls decrypts application messages against a group that holds
+/// its own pending commit. No watermark is advanced here — the next ingest pass
+/// finds these envelopes already persisted (`decrypt_and_persist_one` dedupes)
+/// and moves the cursor past them by epoch.
+pub(crate) async fn sweep_current_epoch(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+) -> Result<SweptEnvelopes> {
+    let resolved =
+        crate::commands::ds_reads::catch_up(state, mls_group_id, true, false).await?;
+    let is_dm = resolved.kind == pollis_api::directory::ConversationKind::Dm;
+    let mut swept = SweptEnvelopes {
+        is_dm,
+        newly_delivered: Vec::new(),
+    };
+    if !resolved.authorized {
+        return Ok(swept);
+    }
+    let per_conv = partition_envelopes(resolved.conversation_ids, resolved.envelopes);
+
+    let guard = state.local_db.lock().await;
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+    let conn = db.conn();
+    let Some(mut decryptor) = crate::commands::mls::MlsDecryptor::open(conn, mls_group_id) else {
+        return Ok(swept);
+    };
+    let at = decryptor.lineage();
+    for (cid, envs) in &per_conv {
+        let mut delivered: Vec<String> = Vec::new();
+        for env in envs {
+            let (_, _, ciphertext, _, _, _, env_type) = env;
+            if env_type != "message" && env_type != "edit" {
+                continue;
+            }
+            let Some(bytes) = ciphertext
+                .strip_prefix("mls:")
+                .and_then(|h| hex::decode(h).ok())
+            else {
+                continue;
+            };
+            if crate::commands::mls::envelope_lineage(&bytes) != Some(at) {
+                continue;
+            }
+            if let Some(id) =
+                decrypt_and_persist_one(conn, &mut decryptor, cid, env, &bytes, user_id, is_dm)
+            {
+                delivered.push(id);
+            }
+        }
+        if !delivered.is_empty() {
+            eprintln!(
+                "[mls] pre-merge sweep of {cid} decrypted {} envelope(s) sealed at ({}, {}) — \
+                 the epoch this commit closes (#1041)",
+                delivered.len(),
+                at.0,
+                at.1
+            );
+            swept.newly_delivered.push((cid.clone(), delivered));
+        }
+    }
+    Ok(swept)
 }
 
 /// Core of [`catch_up_mls_group_interleaved`]: drive the shared MLS group's
@@ -338,6 +475,9 @@ async fn ingest_group_envelopes_interleaved(
     // gates both recording an inbound receipt frame and collecting the
     // delivered batch.
     is_dm: bool,
+    // The log head read before the envelope fetch (#1041); the replay stops
+    // short of it. `None` replays to head.
+    bound: Option<crate::commands::mls::ReplayBound>,
 ) -> Result<Vec<ConvIngest>> {
     // Pre-parse each message/edit envelope's MLS position across ALL bound
     // conversations (delete/unknown carry none) and index `(conv_idx, env_idx)`
@@ -443,6 +583,7 @@ async fn ingest_group_envelopes_interleaved(
             mls_group_id,
             user_id,
             &mut on_epoch,
+            bound,
         )
         .await
         {
