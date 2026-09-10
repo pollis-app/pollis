@@ -205,6 +205,10 @@ CLASSIFIED='{
     "class": "false_red",
     "evidence": "The tag was not yet in the binaries tree (found: false) and 0 bytes differed. v1.9.5 reproduced byte-identically; the red was the wait-loop bug."
   },
+  "33783789041": {
+    "class": "environment_drift",
+    "evidence": "v1.11.1, and the narrowest drift on record — the workflow classified it itself while it ran and printed \"verdict: environment_drift\". Logged payload b0c238ce…, rebuilt 66293998…; the release (desktop-release build-linux) ran on ubuntu22@20260824.273.3, this rebuild twenty-two hours later on ubuntu22@20260831.284.1 — a re-imaged ubuntu-22.04 label, rolled out gradually as always — with the identical helper image ubuntu24@20260831.293.1 on both. The run’s own split by origin settles it: \"vendored host libraries (usr/lib/, copied off the runner by linuxdeploy): 4\" and \"everything else (built from Pollis source): 0\", printing \"ONLY vendored host libraries differ. Nothing built from Pollis source\". The four are libblkid.so.1, libbz2.so.1.0, libmount.so.1 and libp11-kit.so.0 — util-linux, bzip2 and p11-kit as shipped by the two images, none of them produced by this repository. Not one byte built from Pollis source differed: unlike v1.9.3 (§6a) the CSP hash order inside usr/bin/pollis is identical too, so the frontend bundle and the Rust binary both reproduced exactly. The 83,943,733 differing bytes are compression smear across a squashfs, not the size of the change. Still red, because an inconclusive rebuild is not a passing one, and a rerun can only converge once the pool hands out the release’s 20260824 image again. Full write-up: docs/reproducible-builds-residuals.md §6."
+  },
   "32276578948": {
     "class": "environment_drift",
     "evidence": "v1.9.9, and the cleanest example of §6 yet — unlike v1.9.3 this one needed no diagnosis, because the post-#944 workflow classified it itself while it ran. It recorded: logged payload 6e76b988…, rebuilt c4f06c33…, release on ubuntu22@20260810.260.1+helper:ubuntu24@20260810.271.1, rebuild on ubuntu22@20260817.266.1+helper:ubuntu24@20260810.271.1 — a re-imaged ubuntu-22.04 label a week later — and printed \"verdict: environment_drift\". The run'"'"'s own vendored/Pollis-built split is the part that settles it: \"vendored host libraries (usr/lib/, copied off the runner by linuxdeploy): 1\" and \"ONLY vendored host libraries differ. Nothing built from Pollis source\". The single differing library is libpng16, and the ELF diff shows shifted symbol addresses (png_set_cHRM 0x1ef20 → 0x1eec0, png_write_rows 0x27560 → 0x27500) — a genuinely different upstream build of libpng vendored off a different image, not a rebuilt Pollis artifact. Nothing built from Pollis source differed at all, so this is a strictly narrower drift than v1.9.3, which also permuted the CSP hash order inside usr/bin/pollis (§6a). Still red, because an inconclusive rebuild is not a passing one. Full write-up: docs/reproducible-builds-residuals.md §6."
@@ -241,10 +245,25 @@ if [ "${1:-}" = "--check" ]; then
   rm -f "${OUT}.tmp"
   if [ "$a" != "$b" ]; then
     echo "::error::website/rebuild-ledger.json is out of date — rebuild-verify has run" >&2
-    echo "::error::  since it was last published. Merge the open bot/rebuild-ledger PR" >&2
-    echo "::error::  (rebuild-ledger.yml opens one after every run), or run" >&2
-    echo "::error::  scripts/rebuild-ledger.sh and commit the result, so /assurance" >&2
-    echo "::error::  stops under-reporting the record." >&2
+    echo "::error::  since it was last published, so /assurance is under-reporting" >&2
+    echo "::error::  the record." >&2
+    # Which of the two reasons it is decides who has to do what, and getting it
+    # wrong costs days: this check told us for a week to "merge the open PR"
+    # while `gh pr create` had been failing and no PR existed at all (#1041).
+    # So look, rather than assume the happy path.
+    pr="$(gh pr list --head bot/rebuild-ledger --base main --state open \
+      --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+    if [ -n "$pr" ]; then
+      echo "::error::  The bot PR is open: merge #${pr}." >&2
+    else
+      echo "::error::  NO bot/rebuild-ledger PR is open. Either rebuild-ledger.yml has" >&2
+      echo "::error::  not run since, or it ran and could not open one — check its last" >&2
+      echo "::error::  run. 'GitHub Actions is not permitted to create or approve pull" >&2
+      echo "::error::  requests' means Settings -> Actions -> General -> Workflow" >&2
+      echo "::error::  permissions -> 'Allow GitHub Actions to create and approve pull" >&2
+      echo "::error::  requests' is off and must be on." >&2
+      echo "::error::  Or run scripts/rebuild-ledger.sh yourself and commit the result." >&2
+    fi
     exit 1
   fi
   echo "rebuild ledger is up to date."

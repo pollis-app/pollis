@@ -114,6 +114,31 @@ jobs:
           if [ -n "$existing" ]; then
             gh pr edit "$existing" --title "$subject" --body "$body"
             echo "updated PR #${existing}"
-          else
-            gh pr create --base main --head "$branch" --title "$subject" --body "$body"
+            exit 0
           fi
+
+          # `gh pr create` fails with a bare GraphQL error when the repository
+          # has "Allow GitHub Actions to create and approve pull requests"
+          # switched off. That is a REPOSITORY SETTING, invisible from the
+          # workflow file, and the failure is one red run in a workflow nobody
+          # watches — while website-verify.yml goes red every single day
+          # afterwards pointing at a PR that was never opened. It burned a week
+          # exactly that way. So name the setting in the error.
+          if ! err="$(gh pr create --base main --head "$branch" \
+            --title "$subject" --body "$body" 2>&1)"; then
+            echo "$err" >&2
+            case "$err" in
+              *"not permitted to create or approve pull requests"*)
+                echo "::error::GitHub Actions cannot open pull requests in this repository."
+                echo "::error::  The ledger commit is pushed to \`${branch}\` and is not lost —"
+                echo "::error::  only the PR is missing, and website-verify.yml will go red"
+                echo "::error::  daily until it is merged."
+                echo "::error::  Fix: Settings -> Actions -> General -> Workflow permissions"
+                echo "::error::  -> tick 'Allow GitHub Actions to create and approve pull"
+                echo "::error::  requests'. Then re-run this workflow."
+                echo "::error::  Meanwhile, open the PR by hand from \`${branch}\`."
+                ;;
+            esac
+            exit 1
+          fi
+          echo "$err"
