@@ -14,6 +14,7 @@ import type { RouterContext } from "../types/router";
 import * as api from "../services/api";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
 import { BuildVerifyLine } from "../components/Security/BuildVerifyLine";
+import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
 import { useSelfAuditAccountKey, useVerifyOwnBuild } from "../hooks/queries";
 import { getVersion, shellOpen } from "../bridge";
 import { usePreferences } from "../hooks/queries/usePreferences";
@@ -795,6 +796,26 @@ export const SecurityPage: React.FC = observer(() => {
               {isWindows && t("security.mediaNoteWindows")}
               {!isMac && !isLinux && !isWindows && t("security.mediaNoteOther")}
             </p>
+          </section>
+
+          {/* Your data (#856) — the exit that is not delete_account. Strictly
+              on-device: Rust reads the local DB and writes the file the user
+              picked; nothing touches the network. Sits directly above the
+              danger zone so "get my data out" is visibly next to "delete it". */}
+          <section className="flex flex-col gap-4 mb-12" data-testid="export-section">
+            <h2 className={sectionHeaderClass}>
+              {t("security.exportHeading")}
+            </h2>
+            <p className="text-xs text-muted" style={{ lineHeight: 1.5 }}>
+              {t("security.exportDescription")}
+            </p>
+            <p className="text-xs font-mono text-dim" style={{ lineHeight: 1.5 }}>
+              {t("security.exportNote")}
+            </p>
+            <ExportArchiveButton
+              fileStem={`pollis-archive-${new Date().toISOString().slice(0, 10)}`}
+              testId="export-archive-button"
+            />
           </section>
 
           {/* Danger zone — account deletion lives at the very bottom of the

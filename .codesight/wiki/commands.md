@@ -297,6 +297,46 @@ any of them.
   is therefore *cryptographic*, not a permission check — accepted loss (1) in
   `CLAUDE.md`.
 
+## export (`commands/export.rs`)
+
+On-device plaintext export (#856): one conversation, or the whole account, written as
+a JSON file to a path the user picked in the OS save dialog. **Strictly device-local**
+— pure rusqlite against the encrypted local DB; no DS, no Turso, no R2. The module's
+own test scans its source for the network helpers (`ds_client`, `ds_post`, `ds_reads`,
+`reqwest`, `presign`, `r2::`) so that stays true.
+
+- `export_archive(path, conversation_id?)` → `ExportSummary` — `conversation_id`
+  narrows to one conversation; `null` is the full account archive (which also carries
+  the Vault). `path` must be absolute (a dialog result); the file is written to a
+  sibling `.part` and renamed into place, so a failed write never leaves a truncated
+  archive. Returns `{ path, conversations, messages, attachments, vault_entries, bytes }`.
+
+**Shape** (`format: "pollis-archive"`, `version: 1`): `account { user_id, username }`,
+`conversations[] { id, kind, name, group_id, group_name, peer_user_id, messages[] }`,
+`vault[]`. Each message carries `text`, `attachments[] { name, content_type, size_bytes,
+content_hash, storage_key }`, reply/thread ids, timestamps, `saved` (bookmark) and
+`receipts[]`. Names come from `conversation_cache` / `user_cache` — a conversation the
+cache never learned still exports, with `name: null`. A deleted message exports as a
+tombstone (`text: null`, `deleted_at` set), never its last body. The `{"_att","_txt"}`
+envelope is unpacked; a body that merely starts with `{` is kept as text.
+
+**What it is not.** Not key backup, and not history sync: it reads plaintext this
+device *already* decrypted, so accepted losses (1) and (2) in `CLAUDE.md` apply to the
+archive exactly as they apply to the message list. Ciphertext, `mls_kv`, `identity_key`,
+`pin_key_cache`, `contact_verification` and the keystore are never read
+(`archive_never_carries_key_material` seeds each with a marker and asserts none reach
+the file). **No import command exists and none may be added** — a reader for this
+format would be the backup channel #856 forbids; `there_is_no_import_command` and
+`frontend/tests/export-archive.test.ts` guard both halves.
+
+**Attachments** are recorded by metadata only. Their bytes live encrypted in R2 and
+fetching them would make this a network operation; the `content_hash` is the
+convergent-encryption key, so an archive is sufficient to fetch and decrypt every
+attachment later without any other secret.
+
+UI: Security page → "Your data" (account), `DMSettings` and the channel header
+(conversation) — all through `components/Security/ExportArchiveButton`.
+
 ## pinned_messages (`commands/pinned_messages.rs`)
 
 Pinned messages (#99). Not `pin` — that module is the device-unlock PIN. Pins are

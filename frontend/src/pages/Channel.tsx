@@ -8,6 +8,7 @@ import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useMarkConversationRead } from "../hooks/queries/useUnread";
+import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
 
 export const ChannelPage: React.FC = observer(() => {
   const { t } = useTranslation("channels");
@@ -55,6 +56,15 @@ export const ChannelPage: React.FC = observer(() => {
         className="flex items-center px-4 flex-shrink-0 text-xs font-mono h-bar border-b border-line text-muted"
       >
         <span className="flex-1">{title}</span>
+        <div className="me-2">
+          <ExportArchiveButton
+            key={channelId}
+            conversationId={channelId}
+            fileStem={`pollis-${channel?.name ?? channelId}`}
+            variant="icon"
+            testId="channel-export-trigger"
+          />
+        </div>
         <button
           data-testid="channel-pins-trigger"
           onClick={togglePins}

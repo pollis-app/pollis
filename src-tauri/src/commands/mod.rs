@@ -5,6 +5,7 @@ pub mod auth;
 pub mod autolock;
 pub mod blocks;
 pub mod bookmarks;
+pub mod export;
 pub mod device_enrollment;
 pub mod dm;
 // Custom per-group emoji (#848).

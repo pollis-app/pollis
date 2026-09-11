@@ -209,6 +209,25 @@ export async function deleteAccount(userId: string): Promise<void> {
   await invoke('delete_account', { userId });
 }
 
+/// Mirrors `pollis_core::commands::export::ExportSummary`.
+export interface ExportSummary {
+  path: string;
+  conversations: number;
+  messages: number;
+  attachments: number;
+  vault_entries: number;
+  bytes: number;
+}
+
+/// On-device plaintext export (#856). `path` is a save-dialog result; the
+/// archive is written by Rust straight from the local DB — no network.
+export async function exportArchive(
+  path: string,
+  conversationId?: string,
+): Promise<ExportSummary> {
+  return invoke<ExportSummary>('export_archive', { path, conversationId: conversationId ?? null });
+}
+
 export async function listKnownAccounts(): Promise<AccountsIndex> {
   return invoke('list_known_accounts');
 }

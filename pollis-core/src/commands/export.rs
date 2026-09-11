@@ -1,0 +1,663 @@
+//! On-device data export (#856): one conversation, or the whole account, as a
+//! plaintext JSON archive written to a file the user picked.
+//!
+//! # What this is, and is not
+//!
+//! "Your data is yours" needs an exit that is not `delete_account`. This is
+//! that exit, and it is also the honest answer to a data-access request. It is
+//! **not** key backup and does not touch the no-history-sync rule: it is a
+//! user-initiated read of plaintext this device has *already* decrypted, written
+//! to local disk, and nothing else. Concretely:
+//!
+//! - **Strictly local.** Every read is a rusqlite query against the encrypted
+//!   local DB. No DS call, no Turso, no R2. `tests::export_never_talks_to_the_network`
+//!   scans this file for the network helpers so that stays true.
+//! - **Per device.** A device only holds what it decrypted, so the archive is
+//!   exactly that device's view — accepted losses (1) and (2) in CLAUDE.md apply
+//!   to the export the same way they apply to the message list.
+//! - **No key material, ever.** Ciphertext, MLS state, identity keys, pin keys
+//!   and the device keystore are never read. `tests::archive_never_carries_key_material`
+//!   seeds every secret-bearing table with a marker and asserts none of it reaches
+//!   the file.
+//! - **No re-import.** There is deliberately no command that reads one of these
+//!   files back. An import path is exactly the backup channel the constraint on
+//!   #856 forbids.
+//!
+//! # Attachments
+//!
+//! The archive records each attachment's metadata (name, type, size, content
+//! hash, storage key) but not its bytes — those live encrypted in R2 and pulling
+//! them would make this a network operation. The content hash is the
+//! convergent-encryption key for the object, so an archive is sufficient to
+//! fetch and decrypt every attachment later without any other secret.
+
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::io::Write;
+use std::path::Path;
+use std::sync::Arc;
+
+use crate::error::{Error, Result};
+use crate::state::AppState;
+
+/// Bumped when the JSON shape changes incompatibly. Readers key off this.
+pub const ARCHIVE_FORMAT_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Archive {
+    /// Always `"pollis-archive"`, so a reader can refuse an unrelated file.
+    pub format: String,
+    pub version: u32,
+    pub exported_at: String,
+    pub scope: ArchiveScope,
+    pub account: ArchiveAccount,
+    pub conversations: Vec<ArchiveConversation>,
+    /// The Vault (#107). Account scope only — a conversation export omits it.
+    pub vault: Vec<ArchiveVaultEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ArchiveScope {
+    Account,
+    Conversation { conversation_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchiveAccount {
+    pub user_id: String,
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchiveConversation {
+    pub id: String,
+    /// `"channel"` / `"dm"`, or `null` when the local name cache has no row.
+    pub kind: Option<String>,
+    pub name: Option<String>,
+    pub group_id: Option<String>,
+    pub group_name: Option<String>,
+    /// The other party of a 1:1 DM, when this device recorded one.
+    pub peer_user_id: Option<String>,
+    pub messages: Vec<ArchiveMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchiveMessage {
+    pub id: String,
+    pub sender_id: String,
+    pub sender_username: Option<String>,
+    /// `null` for a deleted message — the tombstone is kept so the reader can
+    /// see that something was here.
+    pub text: Option<String>,
+    pub attachments: Vec<ArchiveAttachment>,
+    pub reply_to_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub sent_at: String,
+    pub received_at: String,
+    pub edited_at: Option<String>,
+    pub deleted_at: Option<String>,
+    pub saved: bool,
+    pub receipts: Vec<ArchiveReceipt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchiveAttachment {
+    pub name: Option<String>,
+    pub content_type: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub content_hash: String,
+    pub storage_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchiveReceipt {
+    pub reader_id: String,
+    pub kind: String,
+    pub at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArchiveVaultEntry {
+    pub id: String,
+    pub text: Option<String>,
+    pub attachments: Vec<ArchiveAttachment>,
+    pub pinned: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// What the UI reports after a successful export.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExportSummary {
+    pub path: String,
+    pub conversations: usize,
+    pub messages: usize,
+    pub attachments: usize,
+    pub vault_entries: usize,
+    pub bytes: u64,
+}
+
+// ── Content envelope ──────────────────────────────────────────────────────
+
+/// Split a stored `content` string into its text and attachment refs.
+///
+/// Plain text is returned as-is. The `{"_att":[...],"_txt":"..."}` envelope
+/// (see `frontend/src/utils/attachmentEnvelope.ts`) is unpacked; anything that
+/// starts with `{` but does not parse as that envelope is treated as text, so
+/// a message that literally begins with a brace is not lost.
+fn split_content(raw: &str) -> (Option<String>, Vec<ArchiveAttachment>) {
+    if !raw.starts_with('{') {
+        return (Some(raw.to_string()), Vec::new());
+    }
+    let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return (Some(raw.to_string()), Vec::new());
+    };
+    if !obj.contains_key("_att") && !obj.contains_key("_txt") {
+        return (Some(raw.to_string()), Vec::new());
+    }
+    let text = obj
+        .get("_txt")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let attachments = obj
+        .get("_att")
+        .and_then(|v| v.as_array())
+        .map(|atts| {
+            atts.iter()
+                .filter_map(|a| {
+                    let content_hash = a.get("hash")?.as_str()?.to_string();
+                    let storage_key = a.get("key")?.as_str()?.to_string();
+                    if content_hash.is_empty() || storage_key.is_empty() {
+                        return None;
+                    }
+                    Some(ArchiveAttachment {
+                        name: a.get("name").and_then(|v| v.as_str()).map(str::to_string),
+                        content_type: a.get("ct").and_then(|v| v.as_str()).map(str::to_string),
+                        size_bytes: a.get("size").and_then(|v| v.as_u64()),
+                        content_hash,
+                        storage_key,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (text, attachments)
+}
+
+// ── Building ──────────────────────────────────────────────────────────────
+
+fn conversation_filter(scope: &ArchiveScope) -> Option<&str> {
+    match scope {
+        ArchiveScope::Account => None,
+        ArchiveScope::Conversation { conversation_id } => Some(conversation_id.as_str()),
+    }
+}
+
+fn load_receipts(
+    conn: &Connection,
+    only: Option<&str>,
+) -> Result<HashMap<String, Vec<ArchiveReceipt>>> {
+    let mut stmt = conn.prepare(
+        "SELECT r.message_id, r.reader_id, r.kind, r.at
+           FROM message_receipt r
+           JOIN message m ON m.id = r.message_id
+          WHERE ?1 IS NULL OR m.conversation_id = ?1
+          ORDER BY r.at ASC, r.kind ASC",
+    )?;
+    let mut out: HashMap<String, Vec<ArchiveReceipt>> = HashMap::new();
+    let rows = stmt.query_map(rusqlite::params![only], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            ArchiveReceipt { reader_id: r.get(1)?, kind: r.get(2)?, at: r.get(3)? },
+        ))
+    })?;
+    for row in rows {
+        let (message_id, receipt) = row?;
+        out.entry(message_id).or_default().push(receipt);
+    }
+    Ok(out)
+}
+
+fn load_bookmarks(conn: &Connection, only: Option<&str>) -> Result<HashSet<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT message_id FROM bookmark WHERE ?1 IS NULL OR conversation_id = ?1",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![only], |r| r.get::<_, String>(0))?;
+    rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
+}
+
+fn load_usernames(conn: &Connection) -> Result<HashMap<String, String>> {
+    let mut stmt = conn.prepare("SELECT id, username FROM user_cache")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
+}
+
+fn load_conversations(conn: &Connection, only: Option<&str>) -> Result<Vec<ArchiveConversation>> {
+    // Every conversation this device holds a message for, whether or not the
+    // name cache knows it: an unnamed conversation still exports its messages.
+    let mut stmt = conn.prepare(
+        "SELECT m.conversation_id, c.kind, c.name, c.group_id, c.group_name, d.peer_user_id
+           FROM (SELECT DISTINCT conversation_id FROM message
+                  WHERE ?1 IS NULL OR conversation_id = ?1) m
+           LEFT JOIN conversation_cache c ON c.id = m.conversation_id
+           LEFT JOIN dm_conversation d ON d.id = m.conversation_id
+          ORDER BY c.group_name, c.name, m.conversation_id",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![only], |r| {
+        Ok(ArchiveConversation {
+            id: r.get(0)?,
+            kind: r.get(1)?,
+            name: r.get(2)?,
+            group_id: r.get(3)?,
+            group_name: r.get(4)?,
+            peer_user_id: r.get(5)?,
+            messages: Vec::new(),
+        })
+    })?;
+    rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
+}
+
+fn load_messages(
+    conn: &Connection,
+    conversation_id: &str,
+    usernames: &HashMap<String, String>,
+    bookmarks: &HashSet<String>,
+    receipts: &mut HashMap<String, Vec<ArchiveReceipt>>,
+) -> Result<Vec<ArchiveMessage>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, sender_id, content, reply_to_id, thread_id, sent_at, received_at,
+                edited_at, deleted_at
+           FROM message
+          WHERE conversation_id = ?1
+          ORDER BY sent_at ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![conversation_id], |r| {
+        let id: String = r.get(0)?;
+        let sender_id: String = r.get(1)?;
+        let content: Option<String> = r.get(2)?;
+        let deleted_at: Option<String> = r.get(8)?;
+        let (text, attachments) = match (&content, &deleted_at) {
+            (Some(raw), None) => split_content(raw),
+            _ => (None, Vec::new()),
+        };
+        Ok(ArchiveMessage {
+            sender_username: usernames.get(&sender_id).cloned(),
+            saved: bookmarks.contains(&id),
+            receipts: receipts.remove(&id).unwrap_or_default(),
+            id,
+            sender_id,
+            text,
+            attachments,
+            reply_to_id: r.get(3)?,
+            thread_id: r.get(4)?,
+            sent_at: r.get(5)?,
+            received_at: r.get(6)?,
+            edited_at: r.get(7)?,
+            deleted_at,
+        })
+    })?;
+    rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
+}
+
+fn load_vault(conn: &Connection) -> Result<Vec<ArchiveVaultEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, content, pinned, created_at, updated_at
+           FROM vault_entry_cache ORDER BY created_at ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        let content: String = r.get(1)?;
+        let (text, attachments) = split_content(&content);
+        Ok(ArchiveVaultEntry {
+            id: r.get(0)?,
+            text,
+            attachments,
+            pinned: r.get::<_, i64>(2)? != 0,
+            created_at: r.get(3)?,
+            updated_at: r.get(4)?,
+        })
+    })?;
+    rows.collect::<std::result::Result<_, _>>().map_err(Into::into)
+}
+
+/// Assemble the archive from the local database. Pure rusqlite, no I/O beyond
+/// the connection — the unit tests drive this directly.
+pub fn build_archive(conn: &Connection, user_id: &str, scope: ArchiveScope) -> Result<Archive> {
+    let only = conversation_filter(&scope);
+    let usernames = load_usernames(conn)?;
+    let bookmarks = load_bookmarks(conn, only)?;
+    let mut receipts = load_receipts(conn, only)?;
+    let mut conversations = load_conversations(conn, only)?;
+    for conversation in &mut conversations {
+        conversation.messages =
+            load_messages(conn, &conversation.id, &usernames, &bookmarks, &mut receipts)?;
+    }
+    let vault = match scope {
+        ArchiveScope::Account => load_vault(conn)?,
+        ArchiveScope::Conversation { .. } => Vec::new(),
+    };
+    Ok(Archive {
+        format: "pollis-archive".to_string(),
+        version: ARCHIVE_FORMAT_VERSION,
+        exported_at: chrono::Utc::now().to_rfc3339(),
+        scope,
+        account: ArchiveAccount {
+            user_id: user_id.to_string(),
+            username: usernames.get(user_id).cloned(),
+        },
+        conversations,
+        vault,
+    })
+}
+
+// ── Writing ───────────────────────────────────────────────────────────────
+
+/// Write the archive to `path`. The path must be absolute (a save-dialog
+/// result); a relative one would resolve against the process's working
+/// directory, which is never where the user pointed.
+///
+/// Written to a sibling `.part` file and renamed into place, so a failure
+/// mid-write never leaves a truncated archive that parses as an empty account.
+pub fn write_archive(path: &Path, archive: &Archive) -> Result<ExportSummary> {
+    if !path.is_absolute() {
+        return Err(Error::Other(anyhow::anyhow!("export path must be absolute")));
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("export path has no file name")))?;
+    let part = path.with_file_name(format!("{file_name}.part"));
+    let result = (|| -> std::io::Result<()> {
+        let file = std::fs::File::create(&part)?;
+        let mut writer = std::io::BufWriter::new(file);
+        serde_json::to_writer_pretty(&mut writer, archive)?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+        writer.get_ref().sync_all()?;
+        std::fs::rename(&part, path)
+    })();
+    if let Err(e) = result {
+        let _ = std::fs::remove_file(&part);
+        return Err(Error::Other(anyhow::anyhow!("could not write archive: {e}")));
+    }
+    let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    Ok(ExportSummary {
+        path: path.to_string_lossy().into_owned(),
+        conversations: archive.conversations.len(),
+        messages: archive.conversations.iter().map(|c| c.messages.len()).sum(),
+        attachments: archive
+            .conversations
+            .iter()
+            .flat_map(|c| c.messages.iter())
+            .map(|m| m.attachments.len())
+            .sum::<usize>()
+            + archive.vault.iter().map(|v| v.attachments.len()).sum::<usize>(),
+        vault_entries: archive.vault.len(),
+        bytes,
+    })
+}
+
+// ── Command ───────────────────────────────────────────────────────────────
+
+/// Export this device's decrypted history to `path` as JSON. `conversation_id`
+/// narrows it to one conversation; `None` is the full account archive.
+pub async fn export_archive(
+    path: String,
+    conversation_id: Option<String>,
+    state: &Arc<AppState>,
+) -> Result<ExportSummary> {
+    let user_id = {
+        let guard = state.unlock.lock().await;
+        guard
+            .as_ref()
+            .map(|u| u.user_id.clone())
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?
+    };
+    let scope = match conversation_id {
+        Some(conversation_id) => ArchiveScope::Conversation { conversation_id },
+        None => ArchiveScope::Account,
+    };
+    // The whole build runs under the DB lock with no `.await` inside, so the
+    // non-`Send` connection never crosses a suspension point.
+    let archive = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+        build_archive(db.conn(), &user_id, scope)?
+    };
+    write_archive(Path::new(&path), &archive)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::local::LocalDb;
+
+    fn db() -> LocalDb {
+        LocalDb::open_in_memory().expect("in-memory db")
+    }
+
+    fn seed_message(conn: &Connection, id: &str, conversation_id: &str, sender: &str, content: &str) {
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+             VALUES (?1, ?2, ?3, X'01', ?4, ?5)",
+            rusqlite::params![id, conversation_id, sender, content, "2024-01-01T00:00:00Z"],
+        )
+        .expect("seed message");
+    }
+
+    fn seed_fixture(conn: &Connection) {
+        conn.execute_batch(
+            "INSERT INTO user_cache (id, username) VALUES ('me', 'dan'), ('alice', 'alice');
+             INSERT INTO conversation_cache (id, kind, name, group_id, group_name)
+                  VALUES ('chan-1', 'channel', 'general', 'grp-1', 'Pollis');
+             INSERT INTO conversation_cache (id, kind, name) VALUES ('dm-1', 'dm', 'alice');
+             INSERT INTO dm_conversation (id, peer_user_id) VALUES ('dm-1', 'alice');
+             INSERT INTO vault_entry_cache (id, content, pinned, created_at, updated_at)
+                  VALUES ('v1', 'a note', 1, '2024-02-01T00:00:00Z', '2024-02-01T00:00:00Z');",
+        )
+        .expect("fixture");
+        seed_message(conn, "m1", "chan-1", "alice", "hello");
+        seed_message(
+            conn,
+            "m2",
+            "chan-1",
+            "me",
+            r#"{"_att":[{"key":"r2/abc","name":"cat.png","ct":"image/png","size":123,"hash":"deadbeef"}],"_txt":"look"}"#,
+        );
+        seed_message(conn, "m3", "dm-1", "alice", "secret dm");
+        conn.execute(
+            "INSERT INTO message_receipt (message_id, reader_id, kind, at)
+             VALUES ('m3', 'me', 'read', '2024-01-02T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO bookmark (message_id, conversation_id) VALUES ('m1', 'chan-1')", [])
+            .unwrap();
+    }
+
+    #[test]
+    fn account_archive_carries_every_conversation_the_device_holds() {
+        let db = db();
+        seed_fixture(db.conn());
+        let archive = build_archive(db.conn(), "me", ArchiveScope::Account).unwrap();
+
+        assert_eq!(archive.format, "pollis-archive");
+        assert_eq!(archive.version, ARCHIVE_FORMAT_VERSION);
+        assert_eq!(archive.account.username.as_deref(), Some("dan"));
+        assert_eq!(archive.conversations.len(), 2);
+
+        let chan = archive.conversations.iter().find(|c| c.id == "chan-1").unwrap();
+        assert_eq!(chan.group_name.as_deref(), Some("Pollis"));
+        assert_eq!(chan.name.as_deref(), Some("general"));
+        assert_eq!(chan.messages.len(), 2);
+        let m1 = &chan.messages[0];
+        assert_eq!(m1.text.as_deref(), Some("hello"));
+        assert_eq!(m1.sender_username.as_deref(), Some("alice"));
+        assert!(m1.saved);
+        let m2 = &chan.messages[1];
+        assert_eq!(m2.text.as_deref(), Some("look"));
+        assert_eq!(m2.attachments.len(), 1);
+        assert_eq!(m2.attachments[0].name.as_deref(), Some("cat.png"));
+        assert_eq!(m2.attachments[0].size_bytes, Some(123));
+        assert_eq!(m2.attachments[0].storage_key, "r2/abc");
+
+        let dm = archive.conversations.iter().find(|c| c.id == "dm-1").unwrap();
+        assert_eq!(dm.peer_user_id.as_deref(), Some("alice"));
+        // The read-implies-delivered trigger materialises the second row.
+        let kinds: Vec<&str> = dm.messages[0].receipts.iter().map(|r| r.kind.as_str()).collect();
+        assert_eq!(kinds, ["delivered", "read"]);
+
+        assert_eq!(archive.vault.len(), 1);
+        assert_eq!(archive.vault[0].text.as_deref(), Some("a note"));
+        assert!(archive.vault[0].pinned);
+    }
+
+    #[test]
+    fn conversation_scope_exports_that_conversation_and_nothing_else() {
+        let db = db();
+        seed_fixture(db.conn());
+        let archive = build_archive(
+            db.conn(),
+            "me",
+            ArchiveScope::Conversation { conversation_id: "dm-1".into() },
+        )
+        .unwrap();
+        assert_eq!(archive.conversations.len(), 1);
+        assert_eq!(archive.conversations[0].id, "dm-1");
+        assert!(archive.vault.is_empty(), "vault is account-level, never part of one conversation");
+        let json = serde_json::to_string(&archive).unwrap();
+        assert!(!json.contains("hello"), "channel text leaked into a DM export");
+    }
+
+    #[test]
+    fn an_unnamed_conversation_still_exports_its_messages() {
+        let db = db();
+        seed_message(db.conn(), "m9", "conv-unknown", "alice", "orphan");
+        let archive = build_archive(db.conn(), "me", ArchiveScope::Account).unwrap();
+        assert_eq!(archive.conversations.len(), 1);
+        assert_eq!(archive.conversations[0].name, None);
+        assert_eq!(archive.conversations[0].messages[0].text.as_deref(), Some("orphan"));
+    }
+
+    #[test]
+    fn a_deleted_message_is_a_tombstone_not_its_last_text() {
+        let db = db();
+        seed_message(db.conn(), "m1", "c", "alice", "was here");
+        db.conn()
+            .execute("UPDATE message SET deleted_at = '2024-01-03T00:00:00Z' WHERE id = 'm1'", [])
+            .unwrap();
+        let archive = build_archive(db.conn(), "me", ArchiveScope::Account).unwrap();
+        let m = &archive.conversations[0].messages[0];
+        assert_eq!(m.text, None);
+        assert!(m.deleted_at.is_some());
+    }
+
+    #[test]
+    fn split_content_keeps_a_literal_brace_message() {
+        assert_eq!(split_content("{not json").0.as_deref(), Some("{not json"));
+        assert_eq!(split_content(r#"{"a":1}"#).0.as_deref(), Some(r#"{"a":1}"#));
+        let (text, atts) = split_content(r#"{"_att":[],"_txt":"just text"}"#);
+        assert_eq!(text.as_deref(), Some("just text"));
+        assert!(atts.is_empty());
+        let (text, atts) = split_content(r#"{"_att":[{"key":"k","hash":"h"}]}"#);
+        assert_eq!(text, None);
+        assert_eq!(atts.len(), 1);
+    }
+
+    #[test]
+    fn archive_never_carries_key_material() {
+        let db = db();
+        let conn = db.conn();
+        conn.execute_batch(
+            "INSERT INTO identity_key (id, public_key) VALUES (1, X'49444B4D41524B4552');
+             INSERT INTO mls_kv (scope, key, value) VALUES ('group', X'01', X'4D4C534D41524B4552');
+             INSERT INTO pin_key_cache (conversation_id, kpin) VALUES ('c', X'4B50494E4D41524B4552');
+             INSERT INTO kv (key, value) VALUES ('session_token', 'KVMARKER');
+             INSERT INTO contact_verification (peer_user_id, account_id_pub, identity_version)
+                  VALUES ('alice', X'434F4E544143544D41524B4552', 1);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, sent_at)
+             VALUES ('m1', 'c', 'alice', X'43495048455254455854', 'plain', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let archive = build_archive(conn, "me", ArchiveScope::Account).unwrap();
+        let json = serde_json::to_string(&archive).unwrap();
+        for marker in ["IDKMARKER", "MLSMARKER", "KPINMARKER", "KVMARKER", "CONTACTMARKER", "CIPHERTEXT"] {
+            assert!(!json.contains(marker), "{marker} reached the archive");
+        }
+        for base64ish in ["SURLTUFSS0VS", "TUxTTUFSS0VS", "Q0lQSEVSVEVYVA"] {
+            assert!(!json.contains(base64ish), "an encoded secret reached the archive");
+        }
+        assert!(!json.contains("ciphertext"), "the ciphertext column must not be exported at all");
+        assert!(json.contains("plain"));
+    }
+
+    #[test]
+    fn write_is_atomic_and_round_trips() {
+        let db = db();
+        seed_fixture(db.conn());
+        let archive = build_archive(db.conn(), "me", ArchiveScope::Account).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pollis-export.json");
+        let summary = write_archive(&path, &archive).unwrap();
+
+        assert_eq!(summary.conversations, 2);
+        assert_eq!(summary.messages, 3);
+        assert_eq!(summary.attachments, 1);
+        assert_eq!(summary.vault_entries, 1);
+        assert!(summary.bytes > 0);
+        assert!(!dir.path().join("pollis-export.json.part").exists(), ".part left behind");
+
+        let read_back: Archive =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(read_back, archive);
+    }
+
+    #[test]
+    fn a_relative_path_is_refused() {
+        let db = db();
+        let archive = build_archive(db.conn(), "me", ArchiveScope::Account).unwrap();
+        let err = write_archive(Path::new("relative.json"), &archive).unwrap_err();
+        assert!(err.to_string().contains("absolute"));
+        assert!(!Path::new("relative.json").exists());
+    }
+
+    #[test]
+    fn a_failed_write_leaves_no_partial_file() {
+        let db = db();
+        let archive = build_archive(db.conn(), "me", ArchiveScope::Account).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing-dir").join("export.json");
+        assert!(write_archive(&path, &archive).is_err());
+        assert!(!path.exists());
+        assert!(!dir.path().join("missing-dir").exists());
+    }
+
+    /// The constraint on #856: strictly local. Nothing in this module may reach
+    /// for the DS client, the directory reads, R2, or an HTTP client.
+    #[test]
+    fn export_never_talks_to_the_network() {
+        let src = include_str!("export.rs");
+        let body = src.split("#[cfg(test)]").next().unwrap();
+        for banned in ["ds_client", "ds_post", "ds_reads", "reqwest", "presign", "r2::", "download_media", "libsql"] {
+            assert!(!body.contains(banned), "export.rs must stay device-local; found `{banned}`");
+        }
+    }
+
+    /// The other half of the constraint: no re-import path. A reader for this
+    /// format would be the backup channel #856 forbids.
+    #[test]
+    fn there_is_no_import_command() {
+        let src = include_str!("export.rs");
+        let body = src.split("#[cfg(test)]").next().unwrap();
+        assert!(!body.contains("pub async fn import"), "no import command may exist");
+        assert!(!body.contains("fn restore"), "no restore path may exist");
+    }
+}

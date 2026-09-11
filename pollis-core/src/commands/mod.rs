@@ -9,6 +9,9 @@ pub mod blocks;
 // device-local DB — no DS, no Turso, compiles on every target.
 pub mod bookmarks;
 pub mod device_enrollment;
+// On-device plaintext export (#856). Pure rusqlite against the local DB — no
+// DS, no Turso, no R2 — and deliberately no import path.
+pub mod export;
 /// The client half of the DS directory + account READ endpoints (#987).
 pub(crate) mod ds_reads;
 // Custom per-group emoji (#848): the untrusted-image re-encoder, the

@@ -7,6 +7,7 @@ import { observer } from "mobx-react-lite";
 import { useLeaveDM } from "../hooks/queries/useMessages";
 import { Button } from "../components/ui/Button";
 import { PageShell } from "../components/Layout/PageShell";
+import { ExportArchiveButton } from "../components/Security/ExportArchiveButton";
 
 export const DMSettingsPage: React.FC = observer(() => {
   const { t } = useTranslation("dms");
@@ -23,6 +24,13 @@ export const DMSettingsPage: React.FC = observer(() => {
             {errorMessage(leaveDMMutation.error, t("settings.leaveFailed"))}
           </p>
         )}
+        <div className="w-full max-w-[280px]">
+          <ExportArchiveButton
+            conversationId={conversationId}
+            fileStem={`pollis-dm-${conversationId}`}
+            testId="dm-settings-export-button"
+          />
+        </div>
         <Button
           data-testid="dm-settings-leave-button"
           onClick={async () => {

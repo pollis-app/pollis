@@ -582,7 +582,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 > there or in a section above.
 
 <!-- BEGIN GENERATED: component inventory (scripts/ui-inventory.mjs) -->
-**156 `.tsx` files** under `frontend/src`, by directory. Regenerate with
+**157 `.tsx` files** under `frontend/src`, by directory. Regenerate with
 `node scripts/ui-inventory.mjs`; `--check` fails if this is stale.
 
 ### `(root)` (3)
@@ -687,10 +687,11 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **ResultThumbnails** — `frontend/src/components/Search/ResultThumbnails.tsx`
 - **SearchView** — props: onOpenResult, onOpenRetentionSettings, initialQuery — `frontend/src/components/Search/SearchView.tsx`
 
-### `components/Security` (3)
+### `components/Security` (4)
 
 - **AccountKeyAuditLine** — props: status, detail, testId — `frontend/src/components/Security/AccountKeyAuditLine.tsx`
 - **BuildVerifyLine** — props: status, detail, testId — `frontend/src/components/Security/BuildVerifyLine.tsx`
+- **ExportArchiveButton** — `frontend/src/components/Security/ExportArchiveButton.tsx`
 - **KeyChangeBanner** — props: peerUserId, peerLabel — `frontend/src/components/Security/KeyChangeBanner.tsx`
 
 ### `components/ui` (28)
