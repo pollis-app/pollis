@@ -574,6 +574,7 @@ pub fn run() {
             commands::bookmarks::resolve_message_permalink,
             // On-device plaintext export (#856). Device-local; no network.
             commands::export::export_archive,
+            commands::export::fetch_export_attachments,
             // Pinned messages (#99)
             commands::pinned_messages::pin_message,
             commands::pinned_messages::unpin_message,

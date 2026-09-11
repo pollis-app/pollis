@@ -138,6 +138,11 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 keyring = { version = "3", features = ["apple-native", "sync-secret-service", "windows-native", "crypto-rust"], optional = true }
 base64 = "0.22"
 hex = "0.4"
+# The mobile export bundle (#856): one zip for the share sheet. Deflate via the
+# flate2/miniz_oxide pair already in the tree — zip's own `deflate` feature
+# would add zopfli and zlib-rs, two crates nothing else here vets.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 ulid = "1"
 chrono = { version = "0.4", features = ["serde"] }
 # `socks` enables `Proxy::all("socks5h://…")` so `pollis_relay::http::http_client`

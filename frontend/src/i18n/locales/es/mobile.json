@@ -277,6 +277,14 @@
       "submit": "Eliminar la cuenta permanentemente",
       "title": "Eliminar cuenta"
     },
+    "export": {
+      "conversationHeading": "Exportar",
+      "rowSub": "Escrito en este teléfono y compartido como zip",
+      "share": "Compartir archivo",
+      "bundling": "Empaquetando…",
+      "sharingUnavailable": "Compartir no está disponible en este dispositivo.",
+      "shareTitle": "Compartir tu archivo de Pollis"
+    },
     "hub": {
       "preferencesSub": "Tema, densidad, comportamiento",
       "savedSub": "Mensajes guardados",

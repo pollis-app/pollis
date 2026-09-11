@@ -277,6 +277,14 @@
       "submit": "Supprimer définitivement le compte",
       "title": "Supprimer le compte"
     },
+    "export": {
+      "conversationHeading": "Exporter",
+      "rowSub": "Écrit sur ce téléphone, puis partagé en zip",
+      "share": "Partager l'archive",
+      "bundling": "Compression…",
+      "sharingUnavailable": "Le partage n'est pas disponible sur cet appareil.",
+      "shareTitle": "Partager votre archive Pollis"
+    },
     "hub": {
       "preferencesSub": "Thème, densité, comportement",
       "savedSub": "Messages enregistrés",

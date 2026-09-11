@@ -205,6 +205,9 @@ interface MockStore {
   // hand back a real `next_cursor`, which is what the load-more path — and
   // the windowed log's scroll anchoring across a prepend — needs to exercise.
   paginate: boolean;
+  // On-device export (#856). What the OS save dialog "returns"; `null` is the
+  // user cancelling. A preload sets it; the default is a plausible path.
+  exportSavePath: string | null;
 }
 
 // Only `@tauri-apps/api/core` and `/event` are vite-aliased to these mocks.
@@ -277,6 +280,10 @@ const store: MockStore = {
   autoLockMinutes: null,
   activityReports: 0,
   paginate: preload.paginate === true,
+  exportSavePath:
+    preload.exportSavePath === undefined
+      ? '/Users/alice/Downloads/pollis-archive.json'
+      : preload.exportSavePath,
 };
 
 // Expose for test inspection via page.evaluate(() => window.__tauriMock)
@@ -454,6 +461,25 @@ function readMessagesAfter(
 
 /** Look a message up across every conversation, as the local DB's primary key
  *  lookup does. */
+/** The `_att` refs in a message body, or none for plain text / bad JSON. */
+function parseAttachmentRefs(
+  content: string,
+): { hash: string; key: string; name?: string; ct?: string }[] {
+  if (!content.startsWith('{')) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(content) as { _att?: unknown };
+    return Array.isArray(parsed._att)
+      ? (parsed._att as { hash?: string; key?: string; name?: string; ct?: string }[])
+          .filter((a) => a.hash && a.key)
+          .map((a) => ({ hash: a.hash as string, key: a.key as string, name: a.name, ct: a.ct }))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function findMessage(messageId: string): MockMessage | undefined {
   for (const conversationId of Object.keys(store.messages)) {
     const hit = store.messages[conversationId].find((m) => m.id === messageId);
@@ -911,6 +937,54 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
 
     case 'plugin:notification|is_permission_granted':
       return false;
+
+    // The OS save picker (`@tauri-apps/plugin-dialog` → `save()`), which the
+    // export's button opens before anything is written.
+    case 'plugin:dialog|save':
+      return store.exportSavePath;
+
+    // On-device export (#856): the same summary shape
+    // `pollis-core/src/commands/export.rs` returns. The browser holds no media
+    // cache, so every attachment is "missing" — which is what lets a spec see
+    // the opt-in fetch offer.
+    case 'export_archive': {
+      const { path, conversationId } = args as { path: string; conversationId: string | null };
+      const ids = conversationId ? [conversationId] : Object.keys(store.messages);
+      const missing = new Map<string, { content_hash: string; storage_key: string; content_type: string | null; file: string }>();
+      let messages = 0;
+      let attachments = 0;
+      for (const id of ids) {
+        for (const m of store.messages[id] ?? []) {
+          messages += 1;
+          for (const att of parseAttachmentRefs(m.content ?? '')) {
+            attachments += 1;
+            missing.set(att.hash, {
+              content_hash: att.hash,
+              storage_key: att.key,
+              content_type: att.ct ?? null,
+              file: `${att.hash.slice(0, 16)}-${att.name ?? att.hash}`,
+            });
+          }
+        }
+      }
+      const stem = path.replace(/\.json$/, '');
+      return {
+        path,
+        conversations: ids.filter((id) => (store.messages[id] ?? []).length > 0).length,
+        messages,
+        attachments,
+        vault_entries: conversationId ? 0 : store.vaultMessages.length,
+        bytes: 1024 * (messages + 1),
+        files_dir: `${stem}-files`,
+        attachments_written: 0,
+        attachments_missing: [...missing.values()],
+      };
+    }
+
+    case 'fetch_export_attachments': {
+      const { attachments } = args as { filesDir: string; attachments: unknown[] };
+      return { fetched: attachments.length, failed: [] };
+    }
 
     // Loopback media server URL — nothing serves it in the browser.
     case 'screenshare_ws_url':

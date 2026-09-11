@@ -32,6 +32,7 @@ import {
   useAutoLockMinutes,
   useLockNow,
 } from "../../lib/autolock";
+import { ExportArchive } from "../../components/ExportArchive";
 
 function formatRelative(iso: string): string {
   const d = new Date(iso);
@@ -570,6 +571,8 @@ export default function Security() {
             {t("mobile:self.security.recoveryDescription")}
           </Text>
         </View>
+
+        <ExportArchive />
 
         <SectionTitle>{upper(t("user.accountHeading"))}</SectionTitle>
         <ListRow

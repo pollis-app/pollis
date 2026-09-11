@@ -13,6 +13,7 @@ import {
   BottomAction,
   Ctx,
 } from "../../components/ui";
+import { ExportArchive } from "../../components/ExportArchive";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useDMChannel, useLeaveDM } from "../../hooks/queries";
@@ -109,6 +110,8 @@ function DMInfo() {
             />
           );
         })}
+
+        <ExportArchive conversationId={channelId ?? null} />
 
         <SectionTitle>{upper(t("dm.danger"))}</SectionTitle>
         <View style={{ paddingHorizontal: 18 }}>

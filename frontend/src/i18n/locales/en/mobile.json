@@ -277,6 +277,14 @@
       "submit": "Delete account permanently",
       "title": "Delete account"
     },
+    "export": {
+      "conversationHeading": "Export",
+      "rowSub": "Written on this phone, then shared as a zip",
+      "share": "Share archive",
+      "bundling": "Bundling…",
+      "sharingUnavailable": "Sharing isn't available on this device.",
+      "shareTitle": "Share your Pollis archive"
+    },
     "hub": {
       "preferencesSub": "Theme, density, behavior",
       "savedSub": "Bookmarked messages",

@@ -1,0 +1,32 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# EXPORT (#856) — "Your data" on Security: write the on-device archive, see the
+# summary, reach the share button. The share sheet itself is OS chrome and is
+# not asserted; the flow stops at the button that opens it. Self-contained.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- assertVisible:
+    id: "screen-self-security"
+- scrollUntilVisible:
+    element:
+      id: "row-export-archive"
+    direction: DOWN
+- tapOn:
+    id: "row-export-archive"
+- extendedWaitUntil:
+    visible:
+      id: "text-export-summary"
+    timeout: 15000
+- assertVisible:
+    id: "btn-export-share"
+- takeScreenshot: export-01-summary
+# A fresh account has no attachments, so the opt-in download offer must NOT
+# appear — the export stayed offline.
+- assertNotVisible:
+    id: "btn-export-fetch"

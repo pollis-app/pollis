@@ -1,6 +1,13 @@
 /**
  * File-dialog bridge — `dialogOpen` / `dialogSave` route to the OS picker.
  *
+ * Both are the one-line `invoke` the plugin's own `open()` / `save()` make,
+ * issued through OUR `invoke` rather than by importing
+ * `@tauri-apps/plugin-dialog`. Under Playwright that matters: vite
+ * pre-bundles the plugin, and the alias inside that bundle resolves to a
+ * SECOND copy of the IPC mock with its own store and counters, so a picker
+ * result and the export it drives would be recorded in different worlds.
+ *
  * Opts shape matches Tauri's plugin-dialog so call sites don't need to be
  * rewritten:
  *   open: { multiple?, directory?, title?, defaultPath?, filters? }
@@ -9,6 +16,8 @@
  *
  * Both return the picked absolute path(s), or null on cancel.
  */
+
+import { invoke } from "./invoke";
 
 export interface DialogFilter {
   name: string;
@@ -32,14 +41,12 @@ export interface SaveDialogOptions {
 export async function dialogOpen(
   opts?: OpenDialogOptions,
 ): Promise<string | string[] | null> {
-  const mod = await import("@tauri-apps/plugin-dialog");
-  // Cast: Tauri returns `string | string[] | null` depending on multiple.
-  return mod.open(opts as never) as Promise<string | string[] | null>;
+  // Tauri returns `string | string[] | null` depending on `multiple`.
+  return invoke<string | string[] | null>("plugin:dialog|open", { options: opts ?? {} });
 }
 
 export async function dialogSave(
   opts?: SaveDialogOptions,
 ): Promise<string | null> {
-  const mod = await import("@tauri-apps/plugin-dialog");
-  return mod.save(opts as never) as Promise<string | null>;
+  return invoke<string | null>("plugin:dialog|save", { options: opts ?? {} });
 }

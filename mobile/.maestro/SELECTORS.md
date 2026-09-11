@@ -76,7 +76,7 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | --- | --- | --- |
 | `self/preferences` | `screen-self-preferences` | accent: `chip-accent-amber`, `chip-accent-citron`, `chip-accent-mint`, `chip-accent-glass`, `chip-accent-lilac`, `chip-accent-rust`; theme: `chip-theme-coal`, `chip-theme-paper`, `chip-theme-system`; density: `chip-density-compact`, `chip-density-comfortable`; behavior toggles: `toggle-show-inline-timestamps`, `toggle-show-member-avatars`, `toggle-mark-verified-peers`, `toggle-read-receipts`, `toggle-reduce-motion`; `toggle-notifications`; language (#1074): `pref-language` (section), `pref-language-heading`, `chip-language-<code>` (`en`, `es`, `uk`, `fr`, `ru`, `zh`, `ar`), `pref-language-restart` (shown until a relaunch applies an LTR↔RTL switch) |
 | `self/user-settings` | `screen-self-user-settings` | `input-display-name`, `input-handle`, `input-email` (read-only), `btn-change-email`, `btn-save`, `btn-cancel` |
-| `self/security` | `screen-self-security` | enrollment: `btn-approve-<requestId>`, `btn-reject-<requestId>`; devices: `row-device-<deviceId>`, `btn-revoke-device-<deviceId>`; `row-blocked-users` (nav to blocked list); `btn-sign-out` |
+| `self/security` | `screen-self-security` | enrollment: `btn-approve-<requestId>`, `btn-reject-<requestId>`; devices: `row-device-<deviceId>`, `btn-revoke-device-<deviceId>`; `row-blocked-users` (nav to blocked list); export (#856): `row-export-archive`, `text-export-summary`, `text-export-files`, `btn-export-fetch` (only when attachments are missing), `text-export-fetched`, `btn-export-share`, `text-export-error`; `btn-sign-out` |
 | `self/blocked` | `screen-self-blocked` | `row-blocked-<id>`, `btn-unblock-<id>` |
 | `self/change-email` | `screen-self-change-email` | `input-email` (enter-email stage), `input-otp` (enter-code stage), `btn-request-otp` (enter-email stage) / `btn-submit` (enter-code stage), `btn-use-different-email` |
 
@@ -85,7 +85,8 @@ delete/remove/revoke), the record id is appended to keep the selector unique
 | Route | `screen-*` | Key testIDs |
 | --- | --- | --- |
 | `dm/new` | `screen-dm-new` | `input-user-search`, `row-user-<id>` (single exact-match result; tapping starts the DM) |
-| `dm/info` | `screen-dm-info` | `row-member-<userId>` (tap → user profile), `btn-leave` (leave conversation), `btn-back-to-conversation` |
+| `dm/info` | `screen-dm-info` | `row-member-<userId>` (tap → user profile), export (#856, same ids as `self/security`): `row-export-archive` … `btn-export-share`, `btn-leave` (leave conversation), `btn-back-to-conversation` |
+| `conversation/info` | `screen-conversation-info` | `row-member-<userId>`, export (#856): `row-export-archive` … `btn-export-share`, `btn-back-to-conversation` |
 
 ### Groups
 

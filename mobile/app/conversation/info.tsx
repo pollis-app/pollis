@@ -18,6 +18,7 @@ import {
   BottomAction,
   Button,
 } from "../../components/ui";
+import { ExportArchive } from "../../components/ExportArchive";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import {
@@ -220,6 +221,8 @@ function ConversationInfo() {
             ))}
           </View>
         )}
+
+        <ExportArchive conversationId={conversationId} />
       </Body>
       <Ctx cr={ctxLabel} name={t("conversationInfo.ctxName", { title })} />
       <BottomAction>

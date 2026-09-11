@@ -94,7 +94,7 @@ fn media_cache_dir() -> Result<PathBuf> {
 
 /// Map a MIME type to a file extension. Falls back to `bin`. Kept small —
 /// we only need extensions for the media types Pollis actually renders.
-fn ext_for_content_type(ct: &str) -> &'static str {
+pub(crate) fn ext_for_content_type(ct: &str) -> &'static str {
     match ct {
         "image/png" => "png",
         "image/jpeg" => "jpg",
@@ -158,7 +158,20 @@ pub fn content_type_for_ext(ext: &str) -> &'static str {
 /// exists in the cache.
 pub fn find_cached_file(content_hash: &str) -> Option<(PathBuf, String)> {
     let dir = media_cache_dir().ok()?;
-    let entries = std::fs::read_dir(&dir).ok()?;
+    find_cached_file_in(&dir, content_hash)
+}
+
+/// [`find_cached_file`] for a NAMED user rather than the ambient one — the same
+/// decoupling [`CacheScope::User`] gives the wipe (#1000). The export (#856)
+/// runs under the unlock's `user_id` and must never read another user's
+/// directory, nor `_anon` because the ambient user happened to be unset.
+pub(crate) fn find_cached_file_for_user(user_id: &str, content_hash: &str) -> Option<(PathBuf, String)> {
+    let root = MEDIA_CACHE_DIR.get()?;
+    find_cached_file_in(&root.join(user_id), content_hash)
+}
+
+fn find_cached_file_in(dir: &Path, content_hash: &str) -> Option<(PathBuf, String)> {
+    let entries = std::fs::read_dir(dir).ok()?;
     let prefix = format!("{content_hash}.");
     for entry in entries.flatten() {
         let path = entry.path();

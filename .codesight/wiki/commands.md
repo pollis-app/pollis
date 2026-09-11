@@ -329,13 +329,52 @@ the file). **No import command exists and none may be added** — a reader for t
 format would be the backup channel #856 forbids; `there_is_no_import_command` and
 `frontend/tests/export-archive.test.ts` guard both halves.
 
-**Attachments** are recorded by metadata only. Their bytes live encrypted in R2 and
-fetching them would make this a network operation; the `content_hash` is the
-convergent-encryption key, so an archive is sufficient to fetch and decrypt every
-attachment later without any other secret.
+**Attachments.** Every reference carries its metadata plus a deterministic `file`
+name (`<hash[..16]>-<sanitised name>`, one safe path component). Bytes are written to
+the sibling `<archive>-files/` directory for every distinct attachment whose decrypted
+copy is **already in this device's media cache** — looked up for the unlocked user *by
+name* (`r2::find_cached_file_for_user`, the #1000 lesson), decrypted under `db_key` and
+re-verified against its hash before being vouched for; anything that fails is reported
+missing rather than aborting. Still zero network. The summary returns `files_dir`,
+`attachments_written` and `attachments_missing[]` (the exact list the opt-in fetch
+takes). The JSON never claims a file exists — the filesystem is the source of truth.
+The `content_hash` is the convergent-encryption key, so an archive is also sufficient
+to fetch and decrypt every attachment later without any other secret.
+
+## export_fetch (`commands/export_fetch.rs`)
+
+The **opt-in second step** of the export, and the one place the feature touches the
+network. A separate module and command on purpose: `export.rs` stays scannable as
+strictly local, and the default path never comes here.
+
+- `fetch_export_attachments(files_dir, attachments: MissingAttachment[])` →
+  `FetchSummary { fetched, failed[] { content_hash, file, error } }` — downloads the
+  attachments an export reported missing into its files directory, via
+  `r2::download_media` (DS-minted presigned GET, decrypt, content-hash check). Only
+  ever reachable from the separately-worded "Download the missing attachments" button
+  that appears *after* an archive is written; `frontend/tests/export-archive.test.ts`
+  pins that to `ExportArchiveButton` alone. Sequential — one presigned GET at a time,
+  so a large archive cannot fan out into a burst against the DS.
+- The list comes from the renderer and is treated as untrusted: `files_dir` must be
+  absolute and every `file` a single path component (no separators, no `..`), or the
+  whole call is refused before any byte moves. A file already present with the right
+  hash is counted and skipped (idempotent, no re-download); bytes that fail their hash
+  are a per-file failure and never reach the disk.
 
 UI: Security page → "Your data" (account), `DMSettings` and the channel header
-(conversation) — all through `components/Security/ExportArchiveButton`.
+(conversation) — all through `components/Security/ExportArchiveButton`, which also
+carries the opt-in fetch offer when the summary reports missing attachments.
+Playwright: `e2e/export-archive.spec.ts` (both skins; the picker is the mock's
+`plugin:dialog|save`, driven by the `exportSavePath` preload — `null` = cancel).
+
+**Mobile** (`bridge.rs` arms `export_archive`, `fetch_export_attachments`,
+`bundle_export`; `mobile/components/ExportArchive.tsx` on Security, `dm/info` and
+`conversation/info`). A sandboxed app has no "save as", so the archive is written
+under the app's cache dir (`pollis-export/`), optionally completed with the fetch,
+then `bundle_export(path)` → `bundle_archive` zips `archive.json` + `files/` into one
+`<archive>.zip` for the OS share sheet (`expo-sharing`). Desktop keeps the loose
+JSON-plus-folder layout because the user chose the destination there. Maestro:
+`mobile/.maestro/flows/export.yaml`.
 
 ## pinned_messages (`commands/pinned_messages.rs`)
 

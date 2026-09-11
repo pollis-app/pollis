@@ -269,6 +269,14 @@
       "submit": "永久删除账户",
       "title": "删除账户"
     },
+    "export": {
+      "conversationHeading": "导出",
+      "rowSub": "在此手机上写入，然后以 zip 形式分享",
+      "share": "分享归档",
+      "bundling": "正在打包…",
+      "sharingUnavailable": "此设备不支持分享。",
+      "shareTitle": "分享你的 Pollis 归档"
+    },
     "hub": {
       "preferencesSub": "主题、密度、行为",
       "savedSub": "收藏的消息",

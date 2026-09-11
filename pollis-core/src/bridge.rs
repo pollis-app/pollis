@@ -795,6 +795,36 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
                 .await?)
         }
 
+        // ----- on-device export (#856) -----
+        // Same three steps as desktop's Security page, plus the bundle: a
+        // sandboxed app has no "save as" — the archive is written under the
+        // app's cache dir, optionally completed with the fetch, then zipped so
+        // the OS share sheet (one file) can hand it wherever the user wants.
+        "export_archive" => {
+            let path: String = arg(&args, "path")?;
+            let conversation_id: Option<String> = arg_opt(&args, "conversationId")?;
+            let path = path.strip_prefix("file://").unwrap_or(&path).to_string();
+            ok(crate::commands::export::export_archive(path, conversation_id, &state()?).await?)
+        }
+        "fetch_export_attachments" => {
+            let files_dir: String = arg(&args, "filesDir")?;
+            let attachments: Vec<crate::commands::export::MissingAttachment> =
+                arg(&args, "attachments")?;
+            let files_dir = files_dir.strip_prefix("file://").unwrap_or(&files_dir).to_string();
+            ok(crate::commands::export_fetch::fetch_export_attachments(
+                files_dir,
+                attachments,
+                &state()?,
+            )
+            .await?)
+        }
+        "bundle_export" => {
+            let path: String = arg(&args, "path")?;
+            let path = path.strip_prefix("file://").unwrap_or(&path);
+            let zip = crate::commands::export::bundle_archive(std::path::Path::new(path))?;
+            ok(format!("file://{}", zip.display()))
+        }
+
         // ----- pinned messages (#99) -----
         "pin_message" => {
             let conversation_id: String = arg(&args, "conversationId")?;
@@ -1144,6 +1174,9 @@ mod tests {
             "set_vault_message_pinned",
             "delete_vault_message",
             "search_vault_messages",
+            "export_archive",
+            "fetch_export_attachments",
+            "bundle_export",
         ] {
             assert!(is_registered(cmd).await, "no bridge arm for {cmd}");
         }

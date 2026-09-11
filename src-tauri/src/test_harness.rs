@@ -118,6 +118,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::bookmarks::list_saved_messages,
             crate::commands::bookmarks::resolve_message_permalink,
             crate::commands::export::export_archive,
+            crate::commands::export::fetch_export_attachments,
             // Pinned messages (#99)
             crate::commands::pinned_messages::pin_message,
             crate::commands::pinned_messages::unpin_message,

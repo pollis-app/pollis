@@ -309,6 +309,14 @@
       "submit": "حذف الحساب نهائيًا",
       "title": "حذف الحساب"
     },
+    "export": {
+      "conversationHeading": "تصدير",
+      "rowSub": "يُكتب على هذا الهاتف ثم يُشارك كملف zip",
+      "share": "مشاركة الأرشيف",
+      "bundling": "جارٍ التجميع…",
+      "sharingUnavailable": "المشاركة غير متاحة على هذا الجهاز.",
+      "shareTitle": "شارك أرشيف Pollis الخاص بك"
+    },
     "hub": {
       "preferencesSub": "السمة، الكثافة، السلوك",
       "savedSub": "الرسائل المحفوظة",

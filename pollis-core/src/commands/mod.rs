@@ -12,6 +12,9 @@ pub mod device_enrollment;
 // On-device plaintext export (#856). Pure rusqlite against the local DB — no
 // DS, no Turso, no R2 — and deliberately no import path.
 pub mod export;
+// The opt-in, network-touching second step of the export: fetch what the
+// cache did not have. Separate module so `export.rs` can be scanned as local.
+pub mod export_fetch;
 /// The client half of the DS directory + account READ endpoints (#987).
 pub(crate) mod ds_reads;
 // Custom per-group emoji (#848): the untrusted-image re-encoder, the
