@@ -1,4 +1,5 @@
 import { View, TextInput, Pressable } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
 
@@ -18,6 +19,7 @@ export function EditBar({
   onSave: () => void;
   savePending: boolean;
 }) {
+  const { t } = useTranslation("chat");
   return (
     <View
       style={{
@@ -35,7 +37,7 @@ export function EditBar({
         onPress={onCancel}
         testID="btn-edit-cancel"
         accessibilityRole="button"
-        accessibilityLabel="Cancel edit"
+        accessibilityLabel={t("nav:editBar.cancel")}
         style={{
           width: 38,
           height: 38,
@@ -50,11 +52,11 @@ export function EditBar({
       </Pressable>
       <TextInput
         testID="input-edit-composer"
-        accessibilityLabel="Edit message"
+        accessibilityLabel={t("actions.edit")}
         value={draft}
         onChangeText={onChangeDraft}
         autoFocus
-        placeholder="Edit message…"
+        placeholder={t("mobile:chat.editPlaceholder")}
         placeholderTextColor={semantic.mute}
         onSubmitEditing={onSave}
         returnKeyType="send"
@@ -76,7 +78,7 @@ export function EditBar({
         disabled={!draft.trim() || savePending}
         testID="btn-edit-save"
         accessibilityRole="button"
-        accessibilityLabel="Save edit"
+        accessibilityLabel={t("common:actions.save")}
         style={{
           width: 38,
           height: 38,

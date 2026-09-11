@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import Svg, { Rect } from "react-native-svg";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Screen, Crumb, Card } from "../../components/ui";
 import { palette, semantic, type as ty } from "../../theme/tokens";
 import { useQuery } from "@tanstack/react-query";
@@ -9,6 +10,7 @@ import { useInitializeIdentity } from "../../hooks/queries/useAuth";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { upper } from "../../i18n";
 
 interface Step {
   n: string;
@@ -40,6 +42,7 @@ function Corner({ pos }: { pos: "tl" | "tr" | "bl" | "br" }) {
 }
 
 function Initializing() {
+  const { t } = useTranslation("mobile");
   const router = useRouter();
   const currentUser = appStore.currentUser;
   const initIdentity = useInitializeIdentity();
@@ -77,7 +80,8 @@ function Initializing() {
           wait,
         );
       },
-      onError: (e) => setError((e as Error).message || "Setup failed."),
+      onError: (e) =>
+        setError((e as Error).message || t("auth.initializing.setupFailed")),
     });
     return () => {
       if (navTimer.current) {
@@ -89,26 +93,34 @@ function Initializing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
-  const progress = initIdentity.isPending
-    ? "WORKING…"
-    : initIdentity.isSuccess
-      ? "DONE"
-      : "READY";
+  const progress = upper(
+    initIdentity.isPending
+      ? t("auth.initializing.working")
+      : initIdentity.isSuccess
+        ? t("settings:changePin.doneButton")
+        : t("auth.initializing.ready"),
+  );
+  const ok = upper(t("auth.initializing.statusOk"));
   const steps: Step[] = [
-    { n: "KEYS LOADED", s: "OK", done: true },
-    { n: "DEVICE PAIRED", s: "OK", done: true },
+    { n: upper(t("auth.initializing.stepKeysLoaded")), s: ok, done: true },
+    { n: upper(t("auth.initializing.stepDevicePaired")), s: ok, done: true },
     {
-      n: "INITIALIZE IDENTITY",
+      n: upper(t("auth.initializing.stepInitializeIdentity")),
       s: initIdentity.isPending
         ? "…"
         : initIdentity.isSuccess
-          ? "OK"
+          ? ok
           : initIdentity.isError
-            ? "ERR"
+            ? upper(t("auth.initializing.statusError"))
             : "—",
       done: initIdentity.isSuccess,
     },
-    { n: "RESOLVE PEERS", s: "—", done: false, muted: true },
+    {
+      n: upper(t("auth.initializing.stepResolvePeers")),
+      s: "—",
+      done: false,
+      muted: true,
+    },
   ];
 
   return (
@@ -117,7 +129,10 @@ function Initializing() {
       <Corner pos="tr" />
       <Corner pos="bl" />
       <Corner pos="br" />
-      <Crumb segs={[{ label: "INITIALIZING", leaf: true }]} end={progress} />
+      <Crumb
+        segs={[{ label: upper(t("auth.crumb.initializing")), leaf: true }]}
+        end={progress}
+      />
 
       <View
         style={{
@@ -174,7 +189,7 @@ function Initializing() {
               marginBottom: 6,
             }}
           >
-            Setting up
+            {t("auth.initializing.title")}
           </Text>
           <Text
             style={{
@@ -184,7 +199,7 @@ function Initializing() {
               marginBottom: 20,
             }}
           >
-            One moment — pairing your device and syncing keys.
+            {t("auth.initializing.intro")}
           </Text>
           <View
             style={{
@@ -265,9 +280,11 @@ function Initializing() {
           onPress={() => router.replace("/(tabs)/groups")}
           testID="btn-continue"
           accessibilityRole="button"
-          accessibilityLabel="Skip"
+          accessibilityLabel={t("auth.initializing.skip")}
         >
-          <Text style={[ty.label, { color: semantic.accent }]}>SKIP →</Text>
+          <Text style={[ty.label, { color: semantic.accent }]}>
+            {upper(t("auth.initializing.skip"))} →
+          </Text>
         </Pressable>
       </View>
     </Screen>

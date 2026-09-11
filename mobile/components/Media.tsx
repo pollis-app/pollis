@@ -12,6 +12,7 @@
 import { useMemo } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { Image } from "expo-image";
+import { useTranslation } from "react-i18next";
 import type { ImageStyle, StyleProp } from "react-native";
 import { useMediaUri } from "../hooks/useMediaUri";
 import { semantic, r, type as ty } from "../theme/tokens";
@@ -26,6 +27,7 @@ export function MediaImage({
   style?: StyleProp<ImageStyle>;
   contentFit?: "cover" | "contain";
 }) {
+  const { t } = useTranslation("mobile");
   // While an optimistic send is still uploading there's no object key to
   // fetch — render the local preview directly and skip the transport.
   const isPending = !attachment.object_key && !!attachment.localPreviewUri;
@@ -43,7 +45,7 @@ export function MediaImage({
   if (error) {
     return (
       <View style={[styles.fallback, style]}>
-        <Text style={styles.fallbackText}>Image unavailable</Text>
+        <Text style={styles.fallbackText}>{t("ui.imageUnavailable")}</Text>
       </View>
     );
   }

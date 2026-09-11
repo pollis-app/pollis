@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -14,8 +15,10 @@ import {
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useGroupBySlug, useRequestGroupAccess, useMyJoinRequest } from "../../hooks/queries";
+import { upper } from "../../i18n";
 
 export default function Discover() {
+  const { t } = useTranslation("search");
   const router = useRouter();
   const [slug, setSlug] = useState("");
   const search = useGroupBySlug(slug.trim().replace(/^#/, ""));
@@ -33,17 +36,22 @@ export default function Discover() {
 
   return (
     <Screen testID="screen-group-discover">
-      <Crumb segs={[{ label: "GROUPS" }, { label: "Discover", leaf: true }]} />
+      <Crumb
+        segs={[
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: t("mobile:group.discover.title"), leaf: true },
+        ]}
+      />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 8 }}>
-          <Text style={ty.label}>GROUP SLUG</Text>
+          <Text style={ty.label}>{upper(t("group.slugLabel"))}</Text>
           <Field
             amber
             value={slug}
             onChangeText={setSlug}
-            placeholder="#general-room"
+            placeholder={t("group.slugPlaceholder")}
             testID="input-group-search"
-            accessibilityLabel="Group slug"
+            accessibilityLabel={t("group.slugLabel")}
             icon={<Icon.diamond size={14} color={semantic.mute} />}
           />
           <Text
@@ -54,8 +62,7 @@ export default function Discover() {
               lineHeight: 16,
             }}
           >
-            Slugs are short, unique identifiers chosen by group owners.
-            Ask for one to join — there's no public directory.
+            {t("mobile:group.discover.blurb")}
           </Text>
         </View>
 
@@ -68,7 +75,7 @@ export default function Discover() {
                 color: semantic.mute,
               }}
             >
-              Looking up…
+              {t("group.searching")}
             </Text>
           ) : null}
           {search.isError ? (
@@ -79,7 +86,7 @@ export default function Discover() {
                 color: semantic.danger,
               }}
             >
-              {(search.error as Error).message || "No group with that slug."}
+              {(search.error as Error).message || t("group.notFound")}
             </Text>
           ) : null}
           {search.data ? (
@@ -110,15 +117,15 @@ export default function Discover() {
                   <Text
                     style={[ty.label, { color: semantic.accent }]}
                   >
-                    REQUEST PENDING
+                    {upper(t("mobile:group.discover.requestPending"))}
                   </Text>
                 ) : status === "approved" ? (
                   <Text style={[ty.label, { color: semantic.accent }]}>
-                    APPROVED — OPEN GROUPS TAB
+                    {upper(t("mobile:group.discover.approved"))}
                   </Text>
                 ) : status === "rejected" ? (
                   <Text style={[ty.label, { color: semantic.danger }]}>
-                    REQUEST DECLINED
+                    {upper(t("mobile:group.discover.requestDeclined"))}
                   </Text>
                 ) : (
                   <Button
@@ -129,7 +136,9 @@ export default function Discover() {
                     disabled={requestAccess.isPending}
                     iconRight={<Icon.arrowRight color="#0a0907" />}
                   >
-                    {requestAccess.isPending ? "REQUESTING…" : "REQUEST TO JOIN"}
+                    {requestAccess.isPending
+                      ? upper(t("group.sendingRequest"))
+                      : upper(t("group.requestAccess"))}
                   </Button>
                 )}
               </View>
@@ -137,7 +146,10 @@ export default function Discover() {
           ) : null}
         </View>
       </Body>
-      <Ctx cr="GROUPS" name="Discover" />
+      <Ctx
+        cr={upper(t("nav:breadcrumb.groups"))}
+        name={t("mobile:group.discover.title")}
+      />
       <BottomAction>
         <Button
           full
@@ -146,7 +158,7 @@ export default function Discover() {
           onPress={() => router.back()}
           icon={<Icon.back color={semantic.ink} />}
         >
-          Back
+          {t("common:actions.back")}
         </Button>
       </BottomAction>
     </Screen>

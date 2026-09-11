@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -17,9 +18,11 @@ import { semantic, type as ty } from "../../theme/tokens";
 import { useDMChannel, useLeaveDM } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { upper } from "../../i18n";
 
 function DMInfo() {
   const router = useRouter();
+  const { t } = useTranslation("mobile");
   const { id } = useLocalSearchParams<{ id?: string }>();
   const channelId = id ?? null;
   const currentUser = appStore.currentUser;
@@ -46,15 +49,25 @@ function DMInfo() {
   };
 
   const members = channel.data?.members ?? [];
+  const directLabel = upper(t("tabs.direct"));
 
   return (
     <Screen testID="screen-dm-info">
       <Crumb
-        segs={[{ label: "DIRECT" }, { label: "Info", leaf: true }]}
+        segs={[
+          { label: directLabel },
+          { label: t("conversationInfo.info"), leaf: true },
+        ]}
         end={members.length > 0 ? String(members.length) : undefined}
       />
       <Body>
-        <SectionTitle>{`PARTICIPANTS${members.length > 0 ? ` · ${members.length}` : ""}`}</SectionTitle>
+        <SectionTitle>
+          {upper(
+            members.length > 0
+              ? t("dm.participantsCount", { count: members.length })
+              : t("dm.participants"),
+          )}
+        </SectionTitle>
         {channel.isLoading ? (
           <Text
             style={{
@@ -65,7 +78,7 @@ function DMInfo() {
               paddingVertical: 8,
             }}
           >
-            Loading…
+            {t("common:states.loading")}
           </Text>
         ) : null}
         {members.map((m) => {
@@ -77,7 +90,11 @@ function DMInfo() {
               testID={`row-member-${m.user_id}`}
               minHeight={54}
               glyph={<Avatar label={handle.slice(0, 2)} />}
-              name={`@${handle}${isMe ? " · you" : ""}`}
+              name={
+                isMe
+                  ? t("conversationInfo.memberSelf", { handle })
+                  : `@${handle}`
+              }
               nameStyle={{ fontSize: 14 }}
               onPress={
                 isMe
@@ -93,7 +110,7 @@ function DMInfo() {
           );
         })}
 
-        <SectionTitle>DANGER</SectionTitle>
+        <SectionTitle>{upper(t("dm.danger"))}</SectionTitle>
         <View style={{ paddingHorizontal: 18 }}>
           <Button
             full
@@ -103,11 +120,13 @@ function DMInfo() {
             onPress={onLeave}
             disabled={leave.isPending || !channelId}
           >
-            {leave.isPending
-              ? "LEAVING…"
-              : confirmLeave
-                ? "TAP AGAIN TO CONFIRM"
-                : "LEAVE CONVERSATION"}
+            {upper(
+              leave.isPending
+                ? t("dms:settings.submitting")
+                : confirmLeave
+                  ? t("dm.tapAgainToConfirm")
+                  : t("dms:settings.leave"),
+            )}
           </Button>
           {leave.isError ? (
             <Text
@@ -118,12 +137,12 @@ function DMInfo() {
                 paddingTop: 6,
               }}
             >
-              {(leave.error as Error).message || "Couldn't leave."}
+              {(leave.error as Error).message || t("dms:settings.leaveFailed")}
             </Text>
           ) : null}
         </View>
       </Body>
-      <Ctx cr="DIRECT" name="Info" />
+      <Ctx cr={directLabel} name={t("conversationInfo.info")} />
       <BottomAction>
         <Button
           full
@@ -132,7 +151,7 @@ function DMInfo() {
           onPress={() => router.back()}
           icon={<Icon.back color={semantic.ink} />}
         >
-          Back to conversation
+          {t("conversationInfo.backToConversation")}
         </Button>
       </BottomAction>
     </Screen>

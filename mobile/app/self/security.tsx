@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -13,6 +14,7 @@ import {
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts } from "../../theme/tokens";
+import i18n, { activeLocale, upper } from "../../i18n";
 import {
   useUserDevices,
   useRevokeDevice,
@@ -39,21 +41,24 @@ function formatRelative(iso: string): string {
   const diffMs = Date.now() - d.getTime();
   const sec = Math.floor(diffMs / 1000);
   if (sec < 60) {
-    return "just now";
+    return i18n.t("mobile:self.security.justNow");
   }
   const min = Math.floor(sec / 60);
   if (min < 60) {
-    return `${min}m ago`;
+    return i18n.t("mobile:self.security.minutesAgo", { count: min });
   }
   const hr = Math.floor(min / 60);
   if (hr < 48) {
-    return `${hr}h ago`;
+    return i18n.t("mobile:self.security.hoursAgo", { count: hr });
   }
   const day = Math.floor(hr / 24);
   if (day < 30) {
-    return `${day}d ago`;
+    return i18n.t("mobile:self.security.daysAgo", { count: day });
   }
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(activeLocale(), {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function shortId(id: string): string {
@@ -73,23 +78,27 @@ function describeEvent(event: SecurityEvent): {
   switch (event.kind) {
     case "device_enrolled":
       return {
-        heading: "Device enrolled",
+        heading: i18n.t("settings:security.eventDeviceEnrolledHeading"),
         detail: event.device_id
-          ? `A new device (${shortId(event.device_id)}) was approved for your account.`
-          : "A new device was approved for your account.",
+          ? i18n.t("settings:security.eventDeviceEnrolledDetail", {
+              device: shortId(event.device_id),
+            })
+          : i18n.t("settings:security.eventDeviceEnrolledDetailUnknown"),
       };
     case "device_rejected":
       return {
-        heading: "Enrollment rejected",
+        heading: i18n.t("settings:security.eventDeviceRejectedHeading"),
         detail: event.device_id
-          ? `A pairing request from device ${shortId(event.device_id)} was rejected.`
-          : "A device pairing request was rejected.",
+          ? i18n.t("settings:security.eventDeviceRejectedDetail", {
+              device: shortId(event.device_id),
+            })
+          : i18n.t("settings:security.eventDeviceRejectedDetailUnknown"),
       };
     case "device_revoked": {
       if (!event.device_id) {
         return {
-          heading: "Device revoked",
-          detail: "A device was removed from your account.",
+          heading: i18n.t("settings:security.eventDeviceRevokedHeading"),
+          detail: i18n.t("settings:security.eventDeviceRevokedDetailUnknown"),
         };
       }
       // `name=<device name>` when the revoked row carried one (#947). This
@@ -99,22 +108,26 @@ function describeEvent(event: SecurityEvent): {
         ? event.metadata.slice("name=".length)
         : null;
       return {
-        heading: "Device revoked",
+        heading: i18n.t("settings:security.eventDeviceRevokedHeading"),
         detail: name
-          ? `"${name}" (${shortId(event.device_id)}) was removed from your account.`
-          : `Device ${shortId(event.device_id)} was removed from your account.`,
+          ? i18n.t("settings:security.eventDeviceRevokedDetailNamed", {
+              name,
+              device: shortId(event.device_id),
+            })
+          : i18n.t("settings:security.eventDeviceRevokedDetail", {
+              device: shortId(event.device_id),
+            }),
       };
     }
     case "identity_reset":
       return {
-        heading: "Identity reset",
-        detail:
-          "Your account identity was reset with the recovery key. Prior devices were signed out.",
+        heading: i18n.t("settings:security.eventIdentityResetHeading"),
+        detail: i18n.t("settings:security.eventIdentityResetDetail"),
       };
     case "secret_key_rotated":
       return {
-        heading: "Recovery key rotated",
-        detail: "A new recovery key was generated. Older keys no longer work.",
+        heading: i18n.t("settings:security.eventSecretKeyRotatedHeading"),
+        detail: i18n.t("settings:security.eventSecretKeyRotatedDetail"),
       };
     default:
       return {
@@ -135,6 +148,7 @@ function groupKey(key: string): string {
 }
 
 export default function Security() {
+  const { t } = useTranslation("settings");
   const router = useRouter();
   const { data: devices = [], isLoading, isError } = useUserDevices();
   const revoke = useRevokeDevice();
@@ -170,11 +184,18 @@ export default function Security() {
 
   return (
     <Screen testID="screen-self-security" centered>
-      <Crumb segs={[{ label: "SELF" }, { label: "Security", leaf: true }]} />
+      <Crumb
+        segs={[
+          { label: upper(t("mobile:self.title")) },
+          { label: t("security.title"), leaf: true },
+        ]}
+      />
       <Body>
         {pendingEnrollments.length > 0 ? (
           <View>
-            <SectionTitle>PAIR NEW DEVICE</SectionTitle>
+            <SectionTitle>
+              {upper(t("mobile:self.security.pairHeading"))}
+            </SectionTitle>
             {pendingEnrollments.map((req) => (
               <View
                 key={req.request_id}
@@ -193,7 +214,7 @@ export default function Security() {
                     color: semantic.ink,
                   }}
                 >
-                  A new device wants to pair with your account.
+                  {t("mobile:self.security.pairIntro")}
                 </Text>
                 <Text
                   style={{
@@ -212,21 +233,20 @@ export default function Security() {
                     color: semantic.mute,
                   }}
                 >
-                  Confirm this code matches what's shown on the other device,
-                  then approve.
+                  {t("mobile:self.security.pairHint")}
                 </Text>
                 <View style={{ flexDirection: "row", gap: 8, paddingTop: 6 }}>
                   <Chip
                     testID={`btn-reject-${req.request_id}`}
-                    accessibilityLabel="Reject enrollment"
+                    accessibilityLabel={t("mobile:self.security.rejectA11y")}
                     onPress={() => rejectEnrollment.mutate(req.request_id)}
                   >
-                    Reject
+                    {t("mobile:self.security.reject")}
                   </Chip>
                   <Chip
                     variant="on"
                     testID={`btn-approve-${req.request_id}`}
-                    accessibilityLabel="Approve enrollment"
+                    accessibilityLabel={t("mobile:self.security.approveA11y")}
                     onPress={() =>
                       approveEnrollment.mutate({
                         requestId: req.request_id,
@@ -234,7 +254,9 @@ export default function Security() {
                       })
                     }
                   >
-                    {approveEnrollment.isPending ? "Approving…" : "Approve"}
+                    {approveEnrollment.isPending
+                      ? t("auth:approval.approving")
+                      : t("mobile:self.security.approve")}
                   </Chip>
                 </View>
               </View>
@@ -250,13 +272,13 @@ export default function Security() {
                 }}
               >
                 {((approveEnrollment.error ?? rejectEnrollment.error) as Error)
-                  .message || "Couldn't process the enrollment request."}
+                  .message || t("mobile:self.security.enrollmentFailed")}
               </Text>
             ) : null}
           </View>
         ) : null}
 
-        <SectionTitle>IDENTITY</SectionTitle>
+        <SectionTitle>{upper(t("mobile:self.identityHeading"))}</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 8 }}>
           <Text
             style={{
@@ -266,8 +288,7 @@ export default function Security() {
               lineHeight: 17,
             }}
           >
-            Your public identity key. Peers you talk to can compare this
-            against what their device sees to verify it's really you.
+            {t("mobile:self.security.identityDescription")}
           </Text>
           {identity && identity.public_key ? (
             <Text
@@ -290,12 +311,12 @@ export default function Security() {
                 color: semantic.mute2,
               }}
             >
-              No identity key published from this device yet.
+              {t("mobile:self.security.identityMissing")}
             </Text>
           )}
         </View>
 
-        <SectionTitle>DEVICES</SectionTitle>
+        <SectionTitle>{upper(t("security.devicesHeading"))}</SectionTitle>
         {isLoading ? (
           <Text
             style={{
@@ -306,7 +327,7 @@ export default function Security() {
               paddingVertical: 12,
             }}
           >
-            Loading devices…
+            {t("security.devicesLoading")}
           </Text>
         ) : null}
         {isError ? (
@@ -319,14 +340,17 @@ export default function Security() {
               paddingVertical: 12,
             }}
           >
-            Couldn't load devices.
+            {t("security.devicesLoadFailed")}
           </Text>
         ) : null}
         {devices.map((d) => {
           const name =
             (d.device_name && d.device_name.trim()) ||
             d.device_id.slice(0, 8);
-          const sub = `paired ${formatRelative(d.created_at)} · last seen ${formatRelative(d.last_seen)}`;
+          const sub = t("mobile:self.security.deviceSub", {
+            paired: formatRelative(d.created_at),
+            lastSeen: formatRelative(d.last_seen),
+          });
           const armed = confirmRevoke === d.device_id;
           return (
             <ListRow
@@ -334,24 +358,30 @@ export default function Security() {
               testID={`row-device-${d.device_id}`}
               minHeight={54}
               glyph={<Icon.device color={semantic.mute} />}
-              name={`${name}${d.is_current ? " · this device" : ""}`}
+              name={
+                d.is_current
+                  ? t("mobile:self.security.thisDevice", { name })
+                  : name
+              }
               nameStyle={{ fontSize: 14 }}
               sub={sub}
               end={
                 d.is_current ? (
-                  <Chip variant="on">CURRENT</Chip>
+                  <Chip variant="on">
+                    {upper(t("mobile:self.security.current"))}
+                  </Chip>
                 ) : (
                   <Chip
                     variant={armed ? "on" : "default"}
                     testID={`btn-revoke-device-${d.device_id}`}
-                    accessibilityLabel="Revoke device"
+                    accessibilityLabel={t("security.revokeConfirmSubmit")}
                     onPress={() => onRevoke(d.device_id)}
                   >
                     {revoke.isPending && armed
-                      ? "Revoking…"
+                      ? t("security.revoking")
                       : armed
-                        ? "Confirm"
-                        : "Revoke"}
+                        ? t("security.revokeNowConfirm")
+                        : t("security.revokeButton")}
                   </Chip>
                 )
               }
@@ -368,11 +398,11 @@ export default function Security() {
               paddingTop: 6,
             }}
           >
-            {(revoke.error as Error).message || "Couldn't revoke device."}
+            {(revoke.error as Error).message || t("security.revokeFailed")}
           </Text>
         ) : null}
 
-        <SectionTitle>SECURITY EVENTS</SectionTitle>
+        <SectionTitle>{upper(t("security.eventsHeading"))}</SectionTitle>
         {eventsError ? (
           <Text
             style={{
@@ -383,7 +413,7 @@ export default function Security() {
               paddingVertical: 12,
             }}
           >
-            Couldn't load security events.
+            {t("security.eventsLoadFailed")}
           </Text>
         ) : null}
         {!eventsError && events.length === 0 ? (
@@ -396,8 +426,7 @@ export default function Security() {
               paddingVertical: 12,
             }}
           >
-            No security events yet. Device pairings, revocations, and identity
-            resets will show up here.
+            {t("mobile:self.security.eventsEmpty")}
           </Text>
         ) : null}
         {events.slice(0, visibleEvents).map((ev) => {
@@ -466,28 +495,30 @@ export default function Security() {
           >
             <Chip
               testID="btn-show-older-events"
-              accessibilityLabel="Show older events"
+              accessibilityLabel={t("mobile:self.security.showOlderA11y")}
               onPress={() =>
                 setVisibleEvents((n) => n + SECURITY_EVENTS_PAGE_SIZE)
               }
             >
-              Show older events
+              {t("security.eventsShowOlder", {
+                count: events.length - visibleEvents,
+              })}
             </Chip>
           </View>
         ) : null}
 
-        <SectionTitle>SAFETY</SectionTitle>
+        <SectionTitle>{upper(t("mobile:self.security.safetyHeading"))}</SectionTitle>
         <ListRow
           testID="row-blocked-users"
           minHeight={48}
           glyph={<Icon.exit color={semantic.mute} />}
-          name="Blocked users"
+          name={t("nav:breadcrumb.blockedUsers")}
           nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
           onPress={() => router.push("/self/blocked")}
           end={<Icon.fwd color={semantic.mute} />}
         />
 
-        <SectionTitle>AUTO-LOCK</SectionTitle>
+        <SectionTitle>{upper(t("security.autoLockHeading"))}</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 10 }}>
           <Text
             style={{
@@ -497,15 +528,16 @@ export default function Security() {
               lineHeight: 17,
             }}
           >
-            Lock Pollis behind your device PIN after a period of inactivity.
-            This setting stays on this phone.
+            {t("mobile:self.security.autoLockDescription")}
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {AUTO_LOCK_OPTIONS_MINUTES.map((opt) => (
               <Chip
                 key={opt === null ? "off" : String(opt)}
                 testID={`chip-autolock-${opt === null ? "off" : opt}`}
-                accessibilityLabel={`Auto-lock ${autoLockLabel(opt)}`}
+                accessibilityLabel={t("mobile:self.security.autoLockA11y", {
+                  label: autoLockLabel(opt),
+                })}
                 variant={autoLockMinutes === opt ? "on" : "default"}
                 onPress={() => setAutoLockMinutes(opt)}
               >
@@ -518,14 +550,14 @@ export default function Security() {
           testID="row-lock-now"
           minHeight={48}
           glyph={<Icon.lock color={semantic.mute} />}
-          name="Lock now"
+          name={t("mobile:self.security.lockNow")}
           nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          sub="Require your PIN to reopen Pollis"
+          sub={t("mobile:self.security.lockNowSub")}
           onPress={() => void lockNow()}
           end={<Icon.fwd color={semantic.mute} />}
         />
 
-        <SectionTitle>RECOVERY</SectionTitle>
+        <SectionTitle>{upper(t("mobile:self.security.recoveryHeading"))}</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
           <Text
             style={{
@@ -535,13 +567,11 @@ export default function Security() {
               lineHeight: 17,
             }}
           >
-            Recovery key and device PIN management aren't wired on mobile
-            yet. To set up a new device, sign in with your email — Pollis
-            walks you through enrollment.
+            {t("mobile:self.security.recoveryDescription")}
           </Text>
         </View>
 
-        <SectionTitle>ACCOUNT</SectionTitle>
+        <SectionTitle>{upper(t("user.accountHeading"))}</SectionTitle>
         <ListRow
           testID="row-delete-account"
           minHeight={48}
@@ -554,10 +584,10 @@ export default function Security() {
                 color: semantic.danger,
               }}
             >
-              Delete account
+              {t("mobile:self.deleteAccount.title")}
             </Text>
           }
-          sub="Permanently delete your account and wipe this device"
+          sub={t("mobile:self.security.deleteAccountSub")}
           onPress={() => router.push("/self/delete-account")}
           end={<Icon.fwd color={semantic.mute} />}
         />
@@ -571,11 +601,13 @@ export default function Security() {
             onPress={onSignOut}
             disabled={logout.isPending}
           >
-            {logout.isPending ? "SIGNING OUT…" : "SIGN OUT"}
+            {logout.isPending
+              ? upper(t("mobile:self.hub.signingOut"))
+              : upper(t("auth:shell.signOutTitle"))}
           </Button>
         </View>
       </Body>
-      <Ctx cr="SELF" name="Security" />
+      <Ctx cr={upper(t("mobile:self.title"))} name={t("security.title")} />
     </Screen>
   );
 }

@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { View, Text } from "react-native";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -21,10 +22,12 @@ import {
   useLeaveGroup,
   useGroupJoinRequests,
 } from "../../hooks/queries";
+import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 function GroupDetail() {
+  const { t } = useTranslation("channels");
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const groupId = id ?? null;
@@ -53,10 +56,16 @@ function GroupDetail() {
     }, []),
   );
 
-  const groupName = group?.name ?? "Group";
+  const groupName = group?.name ?? t("mobile:group.common.fallbackName");
   const adminCount = members.filter(
     (m) => m.role === "admin" || m.role === "owner",
   ).length;
+  const membersSub = [
+    String(members.length),
+    adminCount ? t("mobile:group.detail.adminCount", { count: adminCount }) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const onLeave = () => {
     if (!groupId) {
@@ -70,8 +79,13 @@ function GroupDetail() {
   return (
     <Screen testID="screen-group">
       <Crumb
-        segs={[{ label: "GROUPS" }, { label: groupName, leaf: true }]}
-        end={`${members.length || 0} MEMBERS`}
+        segs={[
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: groupName, leaf: true },
+        ]}
+        end={upper(
+          t("mobile:group.detail.memberCount", { count: members.length || 0 }),
+        )}
       />
       <Body>
         <View
@@ -107,11 +121,13 @@ function GroupDetail() {
               .slice(0, 3)
               .map((m) => m.username || m.user_id.slice(0, 6))
               .join(", ")}
-            {members.length > 3 ? ` +${members.length - 3}` : ""}
+            {members.length > 3
+              ? ` ${t("mobile:group.detail.moreMembers", { count: members.length - 3 })}`
+              : ""}
           </Text>
         </View>
 
-        <SectionTitle>TEXT CHANNELS</SectionTitle>
+        <SectionTitle>{upper(t("mobile:group.detail.textChannels"))}</SectionTitle>
         {channelsLoading && channels.length === 0 ? (
           <Text
             style={{
@@ -122,7 +138,7 @@ function GroupDetail() {
               paddingVertical: 8,
             }}
           >
-            Loading channels…
+            {t("mobile:group.detail.loadingChannels")}
           </Text>
         ) : null}
         {channels.map((c) => (
@@ -146,14 +162,14 @@ function GroupDetail() {
           />
         ))}
 
-        <SectionTitle>ADMIN</SectionTitle>
+        <SectionTitle>{upper(t("mobile:group.detail.adminSection"))}</SectionTitle>
         <ListRow
           testID="row-group-members"
           minHeight={48}
           glyph={<Icon.people color={semantic.mute} />}
-          name="Members"
+          name={t("group.members")}
           nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          sub={`${members.length}${adminCount ? ` · ${adminCount} admin` : ""}`}
+          sub={membersSub}
           onPress={() =>
             groupId &&
             router.push({
@@ -167,7 +183,7 @@ function GroupDetail() {
           testID="row-group-invite"
           minHeight={48}
           glyph={<Icon.at color={semantic.mute} />}
-          name="Invite a member"
+          name={t("group.inviteMember")}
           nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
           onPress={() =>
             groupId &&
@@ -182,9 +198,9 @@ function GroupDetail() {
           testID="row-group-settings"
           minHeight={48}
           glyph={<Icon.gear color={semantic.mute} />}
-          name="Settings"
+          name={t("nav:breadcrumb.settings")}
           nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          sub="Rename, channels, danger zone"
+          sub={t("mobile:group.detail.settingsSub")}
           onPress={() =>
             groupId &&
             router.push({
@@ -199,9 +215,9 @@ function GroupDetail() {
             testID="row-group-requests"
             minHeight={48}
             glyph={<Icon.inbox color={semantic.mute} />}
-            name="Join requests"
+            name={t("group.joinRequests")}
             nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-            sub={`${joinRequests.length} pending`}
+            sub={t("nav:home.pending", { count: joinRequests.length })}
             onPress={() =>
               groupId &&
               router.push({
@@ -213,12 +229,14 @@ function GroupDetail() {
           />
         ) : null}
 
-        <SectionTitle>DANGER</SectionTitle>
+        <SectionTitle>{upper(t("mobile:group.common.danger"))}</SectionTitle>
         <ListRow
           testID="btn-leave-group"
           minHeight={48}
           glyph={<Icon.exit color={semantic.danger} />}
-          name={leaveGroup.isPending ? "Leaving…" : "Leave group"}
+          name={
+            leaveGroup.isPending ? t("leaveGroup.submitting") : t("group.leave")
+          }
           nameStyle={{
             fontSize: 14,
             fontFamily: ty.body.fontFamily,
@@ -236,18 +254,18 @@ function GroupDetail() {
               paddingTop: 6,
             }}
           >
-            {(leaveGroup.error as Error).message || "Couldn't leave the group."}
+            {(leaveGroup.error as Error).message || t("leaveGroup.leaveFailed")}
           </Text>
         ) : null}
       </Body>
 
       <Ctx
-        cr="GROUPS"
+        cr={upper(t("nav:breadcrumb.groups"))}
         name={groupName}
         actions={
           <CtxAct
             testID="btn-group-menu"
-            accessibilityLabel="Group menu"
+            accessibilityLabel={t("mobile:group.detail.menuLabel")}
             icon={<Icon.kebab color={semantic.ink2} />}
           />
         }

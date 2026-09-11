@@ -1,4 +1,5 @@
 import { View, Text } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import type { MessageReceipts } from "../../hooks/queries/useReceipts";
@@ -22,6 +23,7 @@ export function ReceiptIndicator({
   peerCount: number;
   visible: boolean;
 }) {
+  const { t } = useTranslation("chat");
   if (!visible || !receipts || peerCount < 1) {
     return null;
   }
@@ -34,10 +36,13 @@ export function ReceiptIndicator({
   const anyRead = readCount > 0;
   const color = allRead ? semantic.accent : semantic.mute;
   const label = allRead
-    ? "Read by everyone"
+    ? t("receipts.readByEveryone")
     : anyRead
-      ? `Read by ${readCount} of ${peerCount}`
-      : `Delivered to ${deliveredCount} of ${peerCount}`;
+      ? t("receipts.readByCount", { count: readCount, total: peerCount })
+      : t("receipts.deliveredCount", {
+          count: deliveredCount,
+          total: peerCount,
+        });
 
   return (
     <View

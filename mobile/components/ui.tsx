@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { palette, semantic, type as ty, r, space, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { useLayoutClass } from "../hooks/useLayoutClass";
@@ -686,6 +687,7 @@ export function Ctx({
   hideBack?: boolean;
 }) {
   const router = useRouter();
+  const { t } = useTranslation("common");
   return (
     <View
       testID={testID}
@@ -706,7 +708,7 @@ export function Ctx({
           onPress={() => router.back()}
           testID="btn-back"
           accessibilityRole="button"
-          accessibilityLabel="Back"
+          accessibilityLabel={t("actions.back")}
           style={{
             width: 38,
             height: 38,

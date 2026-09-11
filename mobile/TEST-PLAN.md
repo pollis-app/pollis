@@ -72,7 +72,8 @@ capturing **iPhone + iPad + Android** screenshots:
 
 `auth` · `auth-restore` (keystore unlock) · `enrollment` (+ recovery) · `groups` ·
 `group-members` · `dms` · `messaging` (edit/delete/reactions/reply) · `search` ·
-`profile-prefs` (+ accent + change-email) · `security` (devices/safety-numbers) ·
+`profile-prefs` (+ accent + change-email) · `i18n` (#1074: language switch,
+persistence across relaunch, Arabic mirroring) · `security` (devices/safety-numbers) ·
 `blocking` · `realtime` (two-client live) · `push-tap` · `invite-links` (#847
 parity: mint on the invite screen with expiry/uses presets, one-time card with
 verified copy + share sheet, list/revoke on `group/invite-links`, and

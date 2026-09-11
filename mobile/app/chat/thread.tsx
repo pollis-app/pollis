@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, FlatList } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Screen, Crumb, Ctx } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
@@ -18,6 +19,7 @@ import {
 import { useMentionCandidates } from "../../hooks/useMentionCandidates";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { upper } from "../../i18n";
 
 /**
  * Slack-style thread screen (#831): the root message pinned at the top,
@@ -27,6 +29,7 @@ import { observer } from "mobx-react-lite";
  */
 function ThreadScreen() {
   const router = useRouter();
+  const { t } = useTranslation("nav");
   const params = useLocalSearchParams<{
     threadId?: string;
     id?: string;
@@ -37,7 +40,8 @@ function ThreadScreen() {
   const conversationId = params.id ?? null;
   const kind: ConversationKind | null =
     params.kind === "channel" || params.kind === "dm" ? params.kind : null;
-  const title = typeof params.name === "string" ? params.name : "Thread";
+  const title =
+    typeof params.name === "string" ? params.name : t("panel.thread");
 
   const [draft, setDraft] = useState("");
   const listRef = useRef<FlatList<Message>>(null);
@@ -98,7 +102,9 @@ function ThreadScreen() {
   const renderRow = useCallback(
     ({ item: m }: { item: Message }) => {
       const mine = currentUser?.id === m.sender_id;
-      const name = m.sender_username || (mine ? "you" : "user");
+      const name =
+        m.sender_username ||
+        (mine ? t("mobile:chat.you") : t("chat:list.unknownAuthor"));
       return (
         <MessageRow
           testID={`row-thread-${m.id}`}
@@ -125,7 +131,7 @@ function ThreadScreen() {
         />
       );
     },
-    [currentUser?.id, router],
+    [currentUser?.id, router, t],
   );
 
   const header = (
@@ -138,7 +144,9 @@ function ThreadScreen() {
           amber={currentUser?.id === root.sender_id}
           name={
             root.sender_username ||
-            (currentUser?.id === root.sender_id ? "you" : "user")
+            (currentUser?.id === root.sender_id
+              ? t("mobile:chat.you")
+              : t("chat:list.unknownAuthor"))
           }
           time={timeLabel(root.created_at)}
           text={root.content}
@@ -158,7 +166,7 @@ function ThreadScreen() {
         }}
       >
         <Text style={[ty.label, { letterSpacing: 2.2 }]}>
-          {replies.length === 1 ? "1 REPLY" : `${replies.length} REPLIES`}
+          {upper(t("chat:thread.replyCount", { count: replies.length }))}
         </Text>
         <View
           style={{ flex: 1, height: 1, backgroundColor: semantic.hairSoft }}
@@ -174,7 +182,7 @@ function ThreadScreen() {
             paddingTop: 4,
           }}
         >
-          Loading replies…
+          {t("thread.loading")}
         </Text>
       ) : null}
       {!isLoading && replies.length === 0 ? (
@@ -187,7 +195,7 @@ function ThreadScreen() {
             paddingTop: 4,
           }}
         >
-          No replies yet. Start the thread.
+          {t("thread.empty")}
         </Text>
       ) : null}
     </View>
@@ -195,7 +203,7 @@ function ThreadScreen() {
 
   return (
     <Screen testID="screen-thread">
-      <Crumb segs={[{ label: "THREAD", leaf: true }]} />
+      <Crumb segs={[{ label: upper(t("panel.thread")), leaf: true }]} />
       <FlatList
         ref={listRef}
         testID="list-thread"
@@ -217,11 +225,11 @@ function ThreadScreen() {
             paddingBottom: 4,
           }}
         >
-          {(sendMessage.error as Error).message || "Couldn't send reply."}
+          {(sendMessage.error as Error).message || t("mobile:thread.sendFailed")}
         </Text>
       ) : null}
       <Ctx
-        cr="THREAD"
+        cr={upper(t("panel.thread"))}
         name={
           <View
             style={{

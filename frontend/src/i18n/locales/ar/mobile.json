@@ -1,0 +1,442 @@
+{
+  "auth": {
+    "crumb": {
+      "auth": "المصادقة",
+      "emergencyKit": "حقيبة الطوارئ",
+      "identify": "التعريف",
+      "initializing": "التهيئة",
+      "pairDevice": "إقران الجهاز",
+      "setDevicePin": "تعيين رمز PIN للجهاز",
+      "unlockDevice": "إلغاء قفل الجهاز",
+      "verifyEmail": "التحقق من البريد"
+    },
+    "email": {
+      "intro": "أدخل بريدك الإلكتروني. سنرسل إليك رمزًا لمرة واحدة — دون كلمة مرور.",
+      "sendFailed": "تعذّر إرسال الرمز. تحقق من اتصالك وحاول مرة أخرى.",
+      "title": "تسجيل الدخول"
+    },
+    "emergencyKit": {
+      "ackLabel": "حفظت المفتاح السري",
+      "ackText": "حفظت المفتاح السري في مكان آمن.",
+      "copyFailed": "تعذّر النسخ",
+      "intro": "هذا المفتاح هو الطريقة الوحيدة لإضافة Pollis إلى جهاز جديد أو استعادة حسابك بعد فقدان هذا الجهاز. لا نخزّنه في أي مكان يمكنك قراءته لاحقًا — فاكتبه الآن أو احفظه في مدير كلمات المرور.",
+      "title": "احفظ المفتاح السري",
+      "warning": "يمكن لأي شخص يملك هذا المفتاح تسجيل الدخول باسمك على جهاز جديد. تعامل معه كما تتعامل مع كلمة مرور رئيسية."
+    },
+    "enrollment": {
+      "chooserIntro": "لا يملك هذا الجهاز مفاتيحك بعد. اختر طريقة نقلها إليه.",
+      "chooserTitle": "إقران هذا الجهاز",
+      "expired": "انتهت صلاحية الطلب. ابدأ من جديد.",
+      "finalizeFailed": "تعذّر إكمال الإعداد.",
+      "pollingIntro": "على جهاز سبق تسجيل الدخول عليه، افتح «أنا» ← «الأمان» ووافق على الطلب بالرمز أدناه.",
+      "pollingTitle": "وافق من جهازك الآخر",
+      "recover": "استعادة",
+      "recoveryIntro": "الصق المفتاح السري الذي حفظته عند التسجيل لأول مرة. يبدو كسلسلة طويلة من الحروف والأرقام.",
+      "recoveryKeyLabel": "المفتاح السري",
+      "recoveryTitle": "أدخل المفتاح السري",
+      "rejected": "رفض الجهاز الآخر هذا الطلب.",
+      "starting": "جارٍ البدء…",
+      "useRecoveryKey": "استخدام المفتاح السري",
+      "verificationCode": "رمز التحقق",
+      "waiting": "بانتظار الموافقة…"
+    },
+    "initializing": {
+      "intro": "لحظة واحدة — جارٍ إقران جهازك ومزامنة المفاتيح.",
+      "ready": "جاهز",
+      "setupFailed": "فشل الإعداد.",
+      "skip": "تخطي",
+      "statusError": "خطأ",
+      "statusOk": "تم",
+      "stepDevicePaired": "تم إقران الجهاز",
+      "stepInitializeIdentity": "تهيئة الهوية",
+      "stepKeysLoaded": "تم تحميل المفاتيح",
+      "stepResolvePeers": "تحديد الأقران",
+      "title": "جارٍ الإعداد",
+      "working": "جارٍ العمل…"
+    },
+    "otp": {
+      "codeLabel": "رمز لمرة واحدة",
+      "invalidCode": "رمز غير صالح. حاول مرة أخرى.",
+      "sentTo": "أرسلنا رمزًا من 6 أرقام إلى <address>{{email}}</address>. أدخله للمتابعة.",
+      "title": "تحقق من بريدك الإلكتروني",
+      "useDifferentEmail": "استخدام بريد إلكتروني آخر",
+      "yourEmail": "بريدك الإلكتروني"
+    },
+    "pin": {
+      "createIntro": "يُستخدم لإلغاء قفل Pollis على هذا الجهاز. يبقى على هاتفك — ولا نراه أبدًا.",
+      "createTitle": "رمز PIN جديد للجهاز",
+      "invalidPin": "رمز PIN غير صالح.",
+      "noActiveUser": "لا يوجد مستخدم نشط. سجّل الدخول مرة أخرى.",
+      "saveFailed": "تعذّر حفظ رمز PIN.",
+      "stepConfirm": "الخطوة 2 من 2 · أكّد رمز PIN",
+      "stepEnter": "الخطوة 1 من 2 · أدخل رمز PIN",
+      "unlockIntro": "أدخل رمز PIN الخاص بجهازك لإلغاء قفل البيانات المحلية المشفَّرة.",
+      "unlockPrompt": "أدخل رمز PIN لإلغاء القفل",
+      "unlockTitle": "إلغاء قفل Pollis"
+    }
+  },
+  "chat": {
+    "copied": "تم النسخ",
+    "copyFailed": "تعذّر النسخ",
+    "copyText": "نسخ النص",
+    "editPlaceholder": "تعديل الرسالة…",
+    "emojiSuggestionLabel": "رمز تعبيري ‎:{{shortcode}}:‎",
+    "groupSettings": "إعدادات المجموعة",
+    "loadFailed": "تعذّر تحميل الرسائل.",
+    "loading": "جارٍ تحميل الرسائل…",
+    "loadingOlder": "جارٍ تحميل الرسائل الأقدم…",
+    "mentionLabel": "الإشارة إلى ‎@{{name}}",
+    "openThread_zero": "فتح السلسلة، {{count}} رد",
+    "openThread_one": "فتح السلسلة، {{count}} رد",
+    "openThread_two": "فتح السلسلة، {{count}} ردان",
+    "openThread_few": "فتح السلسلة، {{count}} ردود",
+    "openThread_many": "فتح السلسلة، {{count}} ردًّا",
+    "openThread_other": "فتح السلسلة، {{count}} رد",
+    "reactWith": "التفاعل بـ {{emoji}}",
+    "reactionPillReacted_zero": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
+    "reactionPillReacted_one": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
+    "reactionPillReacted_two": "{{emoji}} {{count}} تفاعلان، وقد تفاعلت",
+    "reactionPillReacted_few": "{{emoji}} {{count}} تفاعلات، وقد تفاعلت",
+    "reactionPillReacted_many": "{{emoji}} {{count}} تفاعلًا، وقد تفاعلت",
+    "reactionPillReacted_other": "{{emoji}} {{count}} تفاعل، وقد تفاعلت",
+    "sendFailed": "تعذّر إرسال الرسالة.",
+    "you": "أنت"
+  },
+  "common": {
+    "working": "جارٍ العمل…"
+  },
+  "conversationInfo": {
+    "backToConversation": "العودة إلى المحادثة",
+    "ctxName": "{{title}} · معلومات",
+    "fallbackTitle": "محادثة",
+    "info": "معلومات",
+    "memberSelf": "‎@{{handle}}‎ · أنت",
+    "roleAdmin": "مشرف",
+    "roleOwner": "المالك"
+  },
+  "direct": {
+    "acceptRequest": "قبول الطلب",
+    "blockSender": "حظر المرسل",
+    "empty": "لا توجد رسائل مباشرة بعد.",
+    "loadFailed": "تعذّر تحميل المحادثات.",
+    "loading": "جارٍ تحميل المحادثات…",
+    "wantsToMessage": "يريد مراسلتك"
+  },
+  "dm": {
+    "backToInbox": "العودة إلى الوارد",
+    "danger": "الخطر",
+    "exactMatchHint": "اكتب حرفين على الأقل. التطابق التام فقط — فـ Pollis لا يبث التطابقات الجزئية.",
+    "new": "جديد",
+    "participants": "المشاركون",
+    "participantsCount_zero": "المشاركون · {{count}}",
+    "participantsCount_one": "المشاركون · {{count}}",
+    "participantsCount_two": "المشاركون · {{count}}",
+    "participantsCount_few": "المشاركون · {{count}}",
+    "participantsCount_many": "المشاركون · {{count}}",
+    "participantsCount_other": "المشاركون · {{count}}",
+    "searchFailed": "فشل البحث.",
+    "startWith": "بدء رسالة مباشرة مع ‎@{{name}}",
+    "tapAgainToConfirm": "انقر مرة أخرى للتأكيد"
+  },
+  "emoji": {
+    "groupFallback": "مجموعة"
+  },
+  "group": {
+    "common": {
+      "confirm": "تأكيد",
+      "danger": "الخطر",
+      "descriptionLabel": "وصف المجموعة",
+      "emoji": "الرموز التعبيرية",
+      "fallbackName": "مجموعة",
+      "noChannels": "لا توجد قنوات.",
+      "remove": "إزالة"
+    },
+    "detail": {
+      "adminCount_zero": "{{count}} مشرف",
+      "adminCount_one": "{{count}} مشرف",
+      "adminCount_two": "{{count}} مشرفان",
+      "adminCount_few": "{{count}} مشرفين",
+      "adminCount_many": "{{count}} مشرفًا",
+      "adminCount_other": "{{count}} مشرف",
+      "adminSection": "الإدارة",
+      "loadingChannels": "جارٍ تحميل القنوات…",
+      "memberCount_zero": "{{count}} عضو",
+      "memberCount_one": "{{count}} عضو",
+      "memberCount_two": "{{count}} عضوان",
+      "memberCount_few": "{{count}} أعضاء",
+      "memberCount_many": "{{count}} عضوًا",
+      "memberCount_other": "{{count}} عضو",
+      "menuLabel": "قائمة المجموعة",
+      "moreMembers_zero": "‎+{{count}}",
+      "moreMembers_one": "‎+{{count}}",
+      "moreMembers_two": "‎+{{count}}",
+      "moreMembers_few": "‎+{{count}}",
+      "moreMembers_many": "‎+{{count}}",
+      "moreMembers_other": "‎+{{count}}",
+      "settingsSub": "إعادة التسمية، القنوات، منطقة الخطر",
+      "textChannels": "القنوات النصية"
+    },
+    "discover": {
+      "approved": "تمت الموافقة — افتح تبويب المجموعات",
+      "blurb": "المعرّفات رموز قصيرة فريدة يختارها مالكو المجموعات. اطلب أحدها للانضمام — فلا يوجد دليل عام.",
+      "requestDeclined": "رُفض الطلب",
+      "requestPending": "الطلب قيد الانتظار",
+      "title": "استكشاف"
+    },
+    "emoji": {
+      "adminsOnly": "لا يمكن إلا لمشرفي المجموعة إضافة الرموز التعبيرية أو إزالتها.",
+      "ctxTitle": "الرموز التعبيرية لـ {{name}}",
+      "empty": "لا توجد رموز تعبيرية مخصصة بعد.",
+      "pickAndUpload": "اختيار صورة ورفعها",
+      "sizeKb_zero": "{{count}} ك.ب",
+      "sizeKb_one": "{{count}} ك.ب",
+      "sizeKb_two": "{{count}} ك.ب",
+      "sizeKb_few": "{{count}} ك.ب",
+      "sizeKb_many": "{{count}} ك.ب",
+      "sizeKb_other": "{{count}} ك.ب",
+      "uploading": "جارٍ الرفع…"
+    },
+    "invite": {
+      "blurb": "سيرون هذه الدعوة في قسم «قيد الانتظار» عند فتح Pollis في المرة التالية. لا يمكن إلا لمشرفي {{name}} توجيه الدعوات — وإن لم تكن منهم، فسيرفضها الخادم.",
+      "createLinkFailed": "تعذّر إنشاء رابط الدعوة.",
+      "crumb": "دعوة",
+      "linkBlurb": "يمكن لأي شخص لديه الرابط الانضمام مباشرة — دون خطوة موافقة. يُعرض الرابط مرة واحدة فقط، بعد إنشائه مباشرة.",
+      "linkCreated": "أُنشئ الرابط — انسخه الآن",
+      "linkOnce": "هذه هي المرة الوحيدة التي يمكن عرض هذا الرابط فيها. لا يمكن لأحد — بمن فيهم أنت — رؤيته مرة أخرى. لمشاركته لاحقًا، أنشئ رابطًا جديدًا.",
+      "manageLinks": "إدارة روابط الدعوة",
+      "manageLinksSub": "مراجعة الروابط الحالية وإبطالها",
+      "share": "مشاركة",
+      "shareableLink": "رابط قابل للمشاركة",
+      "thisGroup": "هذه المجموعة"
+    },
+    "inviteLinks": {
+      "blurb": "لا يمكن عرض الروابط مرة أخرى بعد إنشائها — فالخادم لا يحتفظ إلا بتجزئتها. ويوقف الإبطال الرابط فورًا لدى كل من يحمله.",
+      "empty": "لا توجد روابط دعوة بعد. أنشئ واحدًا من شاشة الدعوة.",
+      "revokeFailed": "تعذّر إبطال الرابط.",
+      "revokeLabel": "إبطال رابط الدعوة",
+      "title": "روابط الدعوة"
+    },
+    "members": {
+      "joined": "انضم {{date}}",
+      "makeAdmin": "تعيين مشرفًا",
+      "removeAdmin": "إزالة الإشراف",
+      "roleOwner": "المالك"
+    },
+    "new": {
+      "blurb": "تُنشأ قناة نصية باسم ‎#General تلقائيًا. ويمكنك إضافة المزيد لاحقًا. بيانات المجموعة الوصفية مرئية للأعضاء المدعوين فقط.",
+      "crumb": "جديدة",
+      "descriptionLabel": "الوصف (اختياري)",
+      "descriptionPlaceholder": "ما الغرض من هذه المجموعة؟"
+    },
+    "requests": {
+      "approveLabel": "الموافقة على الطلب",
+      "declineLabel": "رفض الطلب",
+      "pendingSection": "الطلبات قيد الانتظار",
+      "processFailed": "تعذّرت معالجة الطلب.",
+      "requested": "طُلب {{date}}"
+    },
+    "settings": {
+      "channelsSection": "القنوات",
+      "customEmojiSub": "مجموعة الرموز التعبيرية الخاصة بهذه المجموعة",
+      "deleteFailed": "تعذّر حذف المجموعة.",
+      "deleteGroup": "حذف المجموعة",
+      "deleting": "جارٍ الحذف…",
+      "identitySection": "الهوية",
+      "notAdmin": "ليست لديك صلاحيات الإشراف على هذه المجموعة.",
+      "tapAgainToConfirm": "انقر مرة أخرى للتأكيد"
+    }
+  },
+  "groups": {
+    "acceptInviteLabel": "قبول الدعوة",
+    "declineInviteLabel": "رفض الدعوة",
+    "empty": "لا توجد مجموعات بعد. أنشئ واحدة للبدء.",
+    "loading": "جارٍ تحميل المجموعات…",
+    "pendingInvites": "الدعوات قيد الانتظار"
+  },
+  "invite": {
+    "backToPollis": "العودة إلى Pollis",
+    "checking": "جارٍ التحقق من دعوتك…",
+    "failed": "لا يمكن استخدام رابط الدعوة هذا. فقد يكون غير صالح أو منتهي الصلاحية أو مُبطَلًا أو مستنفَدًا — اطلب رابطًا جديدًا.",
+    "groupInvite": "دعوة إلى مجموعة",
+    "locked": "ألغِ قفل Pollis أولًا، ثم افتح رابط الدعوة مرة أخرى.",
+    "openPollis": "فتح Pollis",
+    "signedOut": "سجّل الدخول إلى Pollis أولًا، ثم افتح رابط الدعوة مرة أخرى.",
+    "title": "دعوة"
+  },
+  "language": {
+    "restartRequired": "أعد تشغيل Pollis لتبديل اتجاه الواجهة."
+  },
+  "permalink": {
+    "context": "رابط",
+    "opening": "جارٍ فتح الرسالة…",
+    "title": "رابط الرسالة"
+  },
+  "push": {
+    "channelMessages": "الرسائل"
+  },
+  "search": {
+    "channels": "القنوات",
+    "hint": "اكتب حرفين على الأقل للبحث في المجموعات والقنوات والأشخاص والرسائل.",
+    "messages": "الرسائل",
+    "placeholder": "ابحث في كل شيء…",
+    "resultCount_zero": "{{count}} نتيجة",
+    "resultCount_one": "{{count}} نتيجة",
+    "resultCount_two": "{{count}} نتيجتان",
+    "resultCount_few": "{{count}} نتائج",
+    "resultCount_many": "{{count}} نتيجةً",
+    "resultCount_other": "{{count}} نتيجة",
+    "typePrompt": "اكتب…"
+  },
+  "self": {
+    "blocked": {
+      "blockedOn": "حُظر {{date}}",
+      "title": "المحظورون",
+      "unblock": "إلغاء الحظر",
+      "unblockFailed": "تعذّر إلغاء الحظر."
+    },
+    "changeEmail": {
+      "confirm": "تأكيد",
+      "enterCodeIntro": "أدخل الرمز الذي أرسلناه إلى ‎{{email}}‎.",
+      "enterEmailIntro": "أدخل البريد الإلكتروني الجديد. سنرسل رمزًا من 6 أرقام لتأكيد ملكيتك له.",
+      "title": "تغيير البريد الإلكتروني",
+      "useDifferentEmail": "استخدام بريد إلكتروني آخر"
+    },
+    "deleteAccount": {
+      "consequences": "يحذف هذا حساب Pollis الخاص بك نهائيًا. ستُزال من كل مجموعة ومحادثة، وسيُلغى تسجيل أجهزتك، وستُمحى بياناتك المشفَّرة على هذا الهاتف. يحتفظ الأعضاء الآخرون بنسخهم من الرسائل السابقة، لكن لا يمكن أبدًا قراءة أي شيء يُرسل بعد الحذف بمفاتيحك.",
+      "contextPath": "{{parent}} · {{child}}",
+      "failed": "تعذّر حذف الحساب. لم يتغير شيء — حاول مرة أخرى.",
+      "irreversible": "لا يمكن التراجع عن ذلك. لا توجد مهلة سماح ولا استعادة.",
+      "submit": "حذف الحساب نهائيًا",
+      "title": "حذف الحساب"
+    },
+    "hub": {
+      "preferencesSub": "السمة، الكثافة، السلوك",
+      "savedSub": "الرسائل المحفوظة",
+      "securitySub": "المفاتيح، الأجهزة، تسجيل الخروج",
+      "signingOut": "جارٍ تسجيل الخروج…",
+      "userSettingsSub": "اسم العرض، اسم المستخدم، البريد الإلكتروني"
+    },
+    "identityHeading": "الهوية",
+    "preferences": {
+      "accentA11y": "لون التمييز {{name}}",
+      "accentHeading": "لون التمييز",
+      "behavior": {
+        "markVerifiedPeers": "تمييز الأقران الموثَّقين بعلامة ◆",
+        "reduceMotion": "تقليل الحركة",
+        "showInlineTimestamps": "إظهار الطوابع الزمنية داخل السطر",
+        "showMemberAvatars": "إظهار الصور الرمزية للأعضاء"
+      },
+      "density": {
+        "comfortable": "مريح",
+        "compact": "مضغوط"
+      },
+      "densityHeading": "الكثافة",
+      "notificationsOffSettings": "مغلقة — فعّلها من إعدادات النظام",
+      "notificationsOffTap": "مغلقة — انقر للتفعيل",
+      "notificationsOn": "مفعّلة — ستصلك إشعارات بالرسائل الجديدة",
+      "readReceiptsSub": "متبادلة — إغلاقها يخفي عنك إيصالات الآخرين أيضًا",
+      "swatch": {
+        "amber": "كهرماني",
+        "citron": "ليموني",
+        "glass": "زجاجي",
+        "lilac": "ليلكي",
+        "mint": "نعناعي",
+        "rust": "صدئي"
+      },
+      "theme": {
+        "coal": "فحمي",
+        "paper": "ورقي",
+        "system": "النظام"
+      },
+      "themeHeading": "السمة"
+    },
+    "saved": {
+      "empty": "لا توجد رسائل محفوظة. اضغط مطولًا على رسالة لحفظها.",
+      "openA11y": "فتح الرسالة المحفوظة",
+      "savedAgo": "حُفظت قبل {{time}}",
+      "unsave": "إلغاء الحفظ"
+    },
+    "security": {
+      "approve": "موافقة",
+      "approveA11y": "الموافقة على التسجيل",
+      "autoLockA11y": "القفل التلقائي {{label}}",
+      "autoLockDescription": "يقفل Pollis خلف رمز PIN الخاص بجهازك بعد فترة من عدم النشاط. يبقى هذا الإعداد على هذا الهاتف.",
+      "current": "الحالي",
+      "daysAgo_zero": "قبل {{count}} يوم",
+      "daysAgo_one": "قبل يوم",
+      "daysAgo_two": "قبل يومين",
+      "daysAgo_few": "قبل {{count}} أيام",
+      "daysAgo_many": "قبل {{count}} يومًا",
+      "daysAgo_other": "قبل {{count}} يوم",
+      "deleteAccountSub": "حذف حسابك نهائيًا ومسح هذا الجهاز",
+      "deviceSub": "أُقرن {{paired}} · آخر ظهور {{lastSeen}}",
+      "enrollmentFailed": "تعذّرت معالجة طلب التسجيل.",
+      "eventsEmpty": "لا توجد أحداث أمان بعد. ستظهر هنا عمليات إقران الأجهزة وإبطالها وإعادة تعيين الهوية.",
+      "hoursAgo_zero": "قبل {{count}} ساعة",
+      "hoursAgo_one": "قبل ساعة",
+      "hoursAgo_two": "قبل ساعتين",
+      "hoursAgo_few": "قبل {{count}} ساعات",
+      "hoursAgo_many": "قبل {{count}} ساعةً",
+      "hoursAgo_other": "قبل {{count}} ساعة",
+      "identityDescription": "مفتاح هويتك العام. يمكن لمن تحادثهم مقارنته بما يراه جهازهم للتحقق من أنك أنت فعلًا.",
+      "identityMissing": "لم يُنشر مفتاح هوية من هذا الجهاز بعد.",
+      "justNow": "الآن",
+      "lockNow": "القفل الآن",
+      "lockNowSub": "طلب رمز PIN لإعادة فتح Pollis",
+      "minutesAgo_zero": "قبل {{count}} دقيقة",
+      "minutesAgo_one": "قبل دقيقة",
+      "minutesAgo_two": "قبل دقيقتين",
+      "minutesAgo_few": "قبل {{count}} دقائق",
+      "minutesAgo_many": "قبل {{count}} دقيقةً",
+      "minutesAgo_other": "قبل {{count}} دقيقة",
+      "pairHeading": "إقران جهاز جديد",
+      "pairHint": "تأكد من أن هذا الرمز يطابق المعروض على الجهاز الآخر، ثم وافق.",
+      "pairIntro": "جهاز جديد يريد الإقران بحسابك.",
+      "recoveryDescription": "إدارة المفتاح السري ورمز PIN للجهاز غير متاحة على الهاتف بعد. لإعداد جهاز جديد، سجّل الدخول ببريدك الإلكتروني — وسيرشدك Pollis خلال التسجيل.",
+      "recoveryHeading": "الاسترداد",
+      "reject": "رفض",
+      "rejectA11y": "رفض التسجيل",
+      "safetyHeading": "السلامة",
+      "showOlderA11y": "عرض الأحداث الأقدم",
+      "thisDevice": "{{name}} · هذا الجهاز"
+    },
+    "title": "أنا",
+    "userSettings": {
+      "avatarHint": "مشتقة من أول حرفين في اسم المستخدم.",
+      "displayName": "اسم العرض",
+      "handle": "اسم المستخدم",
+      "handleHint": "يمكن للأعضاء الآخرين العثور عليك ومراسلتك عبر ‎@handle‎."
+    }
+  },
+  "tabs": {
+    "direct": "المباشرة",
+    "groups": "المجموعات",
+    "search": "بحث",
+    "self": "أنا"
+  },
+  "thread": {
+    "sendFailed": "تعذّر إرسال الرد."
+  },
+  "timeAgo": {
+    "now": "الآن"
+  },
+  "ui": {
+    "imageUnavailable": "الصورة غير متوفرة",
+    "selectConversation": "اختر محادثة"
+  },
+  "user": {
+    "blockUser": "حظر المستخدم",
+    "compareHint": "قارن هذه الأرقام وجهًا لوجه أو عبر قناة خارجية. تطابق الأرقام يثبت أنك تتحدث إلى المفتاح نفسه الذي نشره الخادم لهذا المستخدم.",
+    "computing": "جارٍ الحساب…",
+    "fallbackHandle": "مستخدم",
+    "keyChanged": "تغيّر المفتاح منذ آخر تحقق — أعد التحقق وجهًا لوجه.",
+    "message": "مراسلة",
+    "opening": "جارٍ الفتح…",
+    "safetyActionsHeading": "إجراءات السلامة",
+    "safetyNumberFailed": "تعذّر جلب رقم الأمان.",
+    "selfNote": "هذا أنت. عدّل اسم المستخدم واسم العرض من <link>أنا ← إعدادات المستخدم</link>.",
+    "title": "المستخدم",
+    "unblockUser": "إلغاء حظر المستخدم",
+    "verified": "◆ موثَّق"
+  }
+}

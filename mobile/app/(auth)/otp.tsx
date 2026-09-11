@@ -1,12 +1,15 @@
 import { useRef, useState } from "react";
 import { View, Text, TextInput, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { Trans, useTranslation } from "react-i18next";
 import { Screen, Crumb, Button, BottomAction } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
+import { upper } from "../../i18n";
 
 export default function AuthOTP() {
+  const { t } = useTranslation("auth");
   const router = useRouter();
   const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
   const email = (emailParam ?? "").trim();
@@ -39,11 +42,16 @@ export default function AuthOTP() {
   return (
     <Screen testID="screen-auth-otp" centered>
       <Crumb
-        segs={[{ label: "AUTH" }, { label: "Verify email", leaf: true }]}
+        segs={[
+          { label: upper(t("mobile:auth.crumb.auth")) },
+          { label: t("mobile:auth.crumb.verifyEmail"), leaf: true },
+        ]}
       />
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 22 }}>
         <View style={{ gap: 8 }}>
-          <Text style={[ty.h1, { color: semantic.ink }]}>Check your email</Text>
+          <Text style={[ty.h1, { color: semantic.ink }]}>
+            {t("mobile:auth.otp.title")}
+          </Text>
           <Text
             style={{
               fontFamily: ty.body.fontFamily,
@@ -52,11 +60,12 @@ export default function AuthOTP() {
               color: semantic.mute,
             }}
           >
-            We sent a 6-digit code to{" "}
-            <Text style={{ color: semantic.ink2 }}>
-              {email || "your email"}
-            </Text>
-            . Enter it to continue.
+            <Trans
+              t={t}
+              i18nKey="mobile:auth.otp.sentTo"
+              values={{ email: email || t("mobile:auth.otp.yourEmail") }}
+              components={{ address: <Text style={{ color: semantic.ink2 }} /> }}
+            />
           </Text>
         </View>
 
@@ -115,7 +124,7 @@ export default function AuthOTP() {
         <TextInput
           ref={input}
           testID="input-otp"
-          accessibilityLabel="One-time code"
+          accessibilityLabel={t("mobile:auth.otp.codeLabel")}
           value={code}
           onChangeText={(v) => setCode(v.replace(/[^0-9]/g, "").slice(0, 6))}
           keyboardType="number-pad"
@@ -133,7 +142,7 @@ export default function AuthOTP() {
             }}
           >
             {(verifyOtp.error as Error).message ||
-              "Invalid code. Please try again."}
+              t("mobile:auth.otp.invalidCode")}
           </Text>
         ) : null}
 
@@ -154,7 +163,7 @@ export default function AuthOTP() {
               color: semantic.ink,
             }}
           >
-            Use a different email
+            {t("mobile:auth.otp.useDifferentEmail")}
           </Text>
         </Pressable>
       </View>
@@ -162,14 +171,14 @@ export default function AuthOTP() {
       <BottomAction>
         <Button
           testID="btn-submit-otp"
-          accessibilityLabel="Verify"
+          accessibilityLabel={t("otp.verify")}
           variant="primary"
           full
           onPress={onSubmit}
           disabled={code.length !== 6 || verifyOtp.isPending}
           iconRight={<Icon.arrowRight color="#0a0907" />}
         >
-          {verifyOtp.isPending ? "VERIFYING…" : "VERIFY"}
+          {upper(verifyOtp.isPending ? t("otp.verifying") : t("otp.verify"))}
         </Button>
       </BottomAction>
     </Screen>

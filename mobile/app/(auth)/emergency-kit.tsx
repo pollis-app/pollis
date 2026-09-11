@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, ScrollView, Share } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -14,6 +15,7 @@ import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import i18n, { upper } from "../../i18n";
 
 /**
  * Emergency Kit — shown once, right after a brand-new account's PIN is set.
@@ -40,35 +42,20 @@ type CopyState = "idle" | "copied" | "failed";
 
 /**
  * The emergency-kit document, byte-for-byte the same text desktop writes to
- * `pollis-emergency-kit-*.txt` (`auth:emergencyKit.document`). Whatever the
- * user saves on a phone should be the same artifact they would have saved on
- * a laptop — a kit that reads differently per platform is a support problem
- * the day someone compares them.
+ * `pollis-emergency-kit-*.txt` — the shared `auth:emergencyKit.document`
+ * catalogue entry. Whatever the user saves on a phone should be the same
+ * artifact they would have saved on a laptop — a kit that reads differently
+ * per platform is a support problem the day someone compares them.
  */
 function emergencyKitDocument(secretKey: string): string {
-  return `POLLIS — EMERGENCY KIT
-======================
-
-Your Secret Key is the only way to recover access to your account
-from a new device when you don't have any other Pollis device with
-you. Treat it like a master password.
-
-If you lose this key AND lose access to all of your devices,
-your account is unrecoverable. Pollis cannot reset it for you.
-
-  SECRET KEY:
-
-    ${secretKey}
-
-Store this file somewhere safe (a password manager, encrypted
-backup, or printed and locked away). Anyone with this key + your
-email address can sign in as you on a new device.
-
-Generated: ${new Date().toISOString()}
-`;
+  return i18n.t("auth:emergencyKit.document", {
+    secretKey,
+    generated: new Date().toISOString(),
+  });
 }
 
 function EmergencyKit() {
+  const { t } = useTranslation("auth");
   const router = useRouter();
   const pendingSecretKey = appStore.pendingSecretKey;
   const setPendingSecretKey = appStore.setPendingSecretKey;
@@ -134,12 +121,17 @@ function EmergencyKit() {
   return (
     <Screen testID="screen-auth-emergency-kit" centered>
       <Crumb
-        segs={[{ label: "AUTH" }, { label: "Emergency kit", leaf: true }]}
+        segs={[
+          { label: upper(t("mobile:auth.crumb.auth")) },
+          { label: t("mobile:auth.crumb.emergencyKit"), leaf: true },
+        ]}
       />
       <Body>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 18, gap: 18, paddingBottom: 24 }}>
           <View style={{ gap: 8 }}>
-            <Text style={[ty.h1, { color: semantic.ink }]}>Save your recovery key</Text>
+            <Text style={[ty.h1, { color: semantic.ink }]}>
+              {t("mobile:auth.emergencyKit.title")}
+            </Text>
             <Text
               style={{
                 fontFamily: ty.body.fontFamily,
@@ -148,10 +140,7 @@ function EmergencyKit() {
                 color: semantic.mute,
               }}
             >
-              This key is the only way to add Pollis to a new device or
-              recover after losing this one. We don't store it anywhere
-              you can read it later — write it down or save it to a
-              password manager now.
+              {t("mobile:auth.emergencyKit.intro")}
             </Text>
           </View>
 
@@ -187,11 +176,13 @@ function EmergencyKit() {
                   )
                 }
               >
-                {copyState === "copied"
-                  ? "COPIED"
-                  : copyState === "failed"
-                    ? "COPY FAILED"
-                    : "COPY"}
+                {upper(
+                  copyState === "copied"
+                    ? t("secretKey.copied")
+                    : copyState === "failed"
+                      ? t("mobile:auth.emergencyKit.copyFailed")
+                      : t("common:actions.copy"),
+                )}
               </Button>
             </View>
             <View style={{ flex: 1 }}>
@@ -201,7 +192,7 @@ function EmergencyKit() {
                 onPress={onShare}
                 icon={<Icon.share color={semantic.ink} />}
               >
-                SAVE
+                {upper(t("common:actions.save"))}
               </Button>
             </View>
           </View>
@@ -223,8 +214,7 @@ function EmergencyKit() {
                 lineHeight: 16,
               }}
             >
-              Anyone with this key can sign in as you on a new device.
-              Treat it like a master password.
+              {t("mobile:auth.emergencyKit.warning")}
             </Text>
           </View>
 
@@ -232,7 +222,7 @@ function EmergencyKit() {
             onPress={() => setAcknowledged((v) => !v)}
             testID="toggle-recovery-ack"
             accessibilityRole="checkbox"
-            accessibilityLabel="I've saved my recovery key"
+            accessibilityLabel={t("mobile:auth.emergencyKit.ackLabel")}
             accessibilityState={{ checked: acknowledged }}
             style={{
               flexDirection: "row",
@@ -263,7 +253,7 @@ function EmergencyKit() {
                 color: semantic.ink,
               }}
             >
-              I've saved my recovery key in a safe place.
+              {t("mobile:auth.emergencyKit.ackText")}
             </Text>
           </Pressable>
         </ScrollView>
@@ -277,7 +267,7 @@ function EmergencyKit() {
           disabled={!acknowledged}
           iconRight={<Icon.arrowRight color="#0a0907" />}
         >
-          CONTINUE
+          {upper(t("pinCreate.continue"))}
         </Button>
       </BottomAction>
     </Screen>

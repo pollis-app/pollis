@@ -1,33 +1,37 @@
 import { View, Pressable, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { observer } from "mobx-react-lite";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { palette, semantic, fonts } from "../theme/tokens";
 import { useTheme } from "./theme";
 import { Icon } from "./icons";
 import { appStore } from "../stores/appStore";
 import { useDMChannels, useUserGroupsWithChannels } from "../hooks/queries";
+import { upper } from "../i18n";
 
 const TABS: {
   name: string;
-  label: string;
+  label: (t: TFunction) => string;
   glyph: (c: string) => React.ReactNode;
 }[] = [
   {
     name: "groups",
-    label: "Groups",
+    label: (t) => t("tabs.groups"),
     glyph: (c) => <Icon.diamond size={16} color={c} />,
   },
-  { name: "direct", label: "Direct", glyph: (c) => <Icon.at size={16} color={c} /> },
+  { name: "direct", label: (t) => t("tabs.direct"), glyph: (c) => <Icon.at size={16} color={c} /> },
   {
     name: "search",
-    label: "Search",
+    label: (t) => t("tabs.search"),
     glyph: (c) => <Icon.search size={16} color={c} />,
   },
-  { name: "self", label: "Self", glyph: (c) => <Icon.user size={16} color={c} /> },
+  { name: "self", label: (t) => t("tabs.self"), glyph: (c) => <Icon.user size={16} color={c} /> },
 ];
 
 export const TabBar = observer(function TabBar({ state, navigation }: any) {
   useTheme();
+  const { t } = useTranslation("mobile");
   const insets = useSafeAreaInsets();
   // Per-tab unread badge: sum the store's unread counts over the ids each tab
   // lists. The same cached queries the tabs render from split the id space
@@ -57,13 +61,14 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
       {TABS.map((tab, i) => {
         const focused = state.index === i;
         const color = focused ? semantic.accent : semantic.mute;
+        const label = tab.label(t);
         return (
           <Pressable
             key={tab.name}
             onPress={() => navigation.navigate(tab.name)}
             testID={`tab-${tab.name}`}
             accessibilityRole="tab"
-            accessibilityLabel={tab.label}
+            accessibilityLabel={label}
             accessibilityState={{ selected: focused }}
             style={{
               flex: 1,
@@ -125,11 +130,10 @@ export const TabBar = observer(function TabBar({ state, navigation }: any) {
                 fontFamily: fonts.sora500,
                 fontSize: 10,
                 letterSpacing: 1.4,
-                textTransform: "uppercase",
                 color,
               }}
             >
-              {tab.label}
+              {upper(label)}
             </Text>
           </Pressable>
         );

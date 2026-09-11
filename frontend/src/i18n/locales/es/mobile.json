@@ -1,0 +1,398 @@
+{
+  "auth": {
+    "crumb": {
+      "auth": "Acceso",
+      "emergencyKit": "Kit de emergencia",
+      "identify": "Identificarse",
+      "initializing": "Inicializando",
+      "pairDevice": "Vincular dispositivo",
+      "setDevicePin": "Crear PIN del dispositivo",
+      "unlockDevice": "Desbloquear dispositivo",
+      "verifyEmail": "Verificar correo"
+    },
+    "email": {
+      "intro": "Escribe tu correo. Te enviaremos un código de un solo uso; sin contraseña.",
+      "sendFailed": "No se pudo enviar el código. Comprueba tu conexión e inténtalo de nuevo.",
+      "title": "Iniciar sesión"
+    },
+    "emergencyKit": {
+      "ackLabel": "He guardado mi clave secreta",
+      "ackText": "He guardado mi clave secreta en un sitio seguro.",
+      "copyFailed": "No se pudo copiar",
+      "intro": "Esta clave es la única forma de añadir Pollis a un dispositivo nuevo o de recuperar el acceso si pierdes este. No la guardamos en ningún sitio donde puedas consultarla más tarde: anótala o guárdala ahora en un gestor de contraseñas.",
+      "title": "Guarda tu clave secreta",
+      "warning": "Cualquiera con esta clave puede iniciar sesión como tú en un dispositivo nuevo. Trátala como una contraseña maestra."
+    },
+    "enrollment": {
+      "chooserIntro": "Este dispositivo todavía no tiene tus claves. Elige cómo traerlas aquí.",
+      "chooserTitle": "Vincular este dispositivo",
+      "expired": "La solicitud ha caducado. Empieza de nuevo.",
+      "finalizeFailed": "No se pudo completar.",
+      "pollingIntro": "En un dispositivo que ya tenga la sesión iniciada, abre Tú → Seguridad y aprueba la solicitud con el código de abajo.",
+      "pollingTitle": "Aprueba desde tu otro dispositivo",
+      "recover": "Recuperar",
+      "recoveryIntro": "Pega la clave secreta que guardaste al registrarte. Es una cadena larga de letras y números.",
+      "recoveryKeyLabel": "Clave secreta",
+      "recoveryTitle": "Introduce la clave secreta",
+      "rejected": "El otro dispositivo rechazó esta solicitud.",
+      "starting": "Iniciando…",
+      "useRecoveryKey": "Usar la clave secreta",
+      "verificationCode": "Código de verificación",
+      "waiting": "Esperando aprobación…"
+    },
+    "initializing": {
+      "intro": "Un momento: vinculando tu dispositivo y sincronizando las claves.",
+      "ready": "Listo",
+      "setupFailed": "La configuración falló.",
+      "skip": "Omitir",
+      "statusError": "Err",
+      "statusOk": "OK",
+      "stepDevicePaired": "Dispositivo vinculado",
+      "stepInitializeIdentity": "Inicializar identidad",
+      "stepKeysLoaded": "Claves cargadas",
+      "stepResolvePeers": "Resolver contactos",
+      "title": "Configurando",
+      "working": "Trabajando…"
+    },
+    "otp": {
+      "codeLabel": "Código de un solo uso",
+      "invalidCode": "Código no válido. Inténtalo de nuevo.",
+      "sentTo": "Hemos enviado un código de 6 dígitos a <address>{{email}}</address>. Introdúcelo para continuar.",
+      "title": "Revisa tu correo",
+      "useDifferentEmail": "Usar otro correo",
+      "yourEmail": "tu correo"
+    },
+    "pin": {
+      "createIntro": "Sirve para desbloquear Pollis en este dispositivo. Se queda en tu teléfono: nosotros nunca lo vemos.",
+      "createTitle": "PIN del dispositivo",
+      "invalidPin": "PIN no válido.",
+      "noActiveUser": "No hay ningún usuario activo. Inicia sesión de nuevo.",
+      "saveFailed": "No se pudo guardar el PIN.",
+      "stepConfirm": "Paso 2 de 2 · Confirma el PIN",
+      "stepEnter": "Paso 1 de 2 · Introduce el PIN",
+      "unlockIntro": "Introduce el PIN del dispositivo para desbloquear los datos locales cifrados.",
+      "unlockPrompt": "Introduce el PIN para desbloquear",
+      "unlockTitle": "Desbloquear Pollis"
+    }
+  },
+  "chat": {
+    "copied": "Copiado",
+    "copyFailed": "No se pudo copiar",
+    "copyText": "Copiar texto",
+    "editPlaceholder": "Editar mensaje…",
+    "emojiSuggestionLabel": "Emoji :{{shortcode}}:",
+    "groupSettings": "Ajustes del grupo",
+    "loadFailed": "No se pudieron cargar los mensajes.",
+    "loading": "Cargando mensajes…",
+    "loadingOlder": "Cargando mensajes anteriores…",
+    "mentionLabel": "Mencionar a @{{name}}",
+    "openThread_one": "Abrir hilo, {{count}} respuesta",
+    "openThread_other": "Abrir hilo, {{count}} respuestas",
+    "reactWith": "Reaccionar con {{emoji}}",
+    "reactionPillReacted_one": "{{emoji}} {{count}} reacción, has reaccionado",
+    "reactionPillReacted_other": "{{emoji}} {{count}} reacciones, has reaccionado",
+    "sendFailed": "No se pudo enviar el mensaje.",
+    "you": "tú"
+  },
+  "common": {
+    "working": "Trabajando…"
+  },
+  "conversationInfo": {
+    "backToConversation": "Volver a la conversación",
+    "ctxName": "{{title}} · Info",
+    "fallbackTitle": "Conversación",
+    "info": "Info",
+    "memberSelf": "@{{handle}} · tú",
+    "roleAdmin": "Admin",
+    "roleOwner": "Propietario"
+  },
+  "direct": {
+    "acceptRequest": "Aceptar solicitud",
+    "blockSender": "Bloquear remitente",
+    "empty": "Todavía no hay mensajes directos.",
+    "loadFailed": "No se pudieron cargar las conversaciones.",
+    "loading": "Cargando conversaciones…",
+    "wantsToMessage": "quiere escribirte"
+  },
+  "dm": {
+    "backToInbox": "Volver a la bandeja",
+    "danger": "Peligro",
+    "exactMatchHint": "Escribe al menos dos caracteres. Solo coincidencias exactas: Pollis no difunde coincidencias parciales.",
+    "new": "Nuevo",
+    "participants": "Participantes",
+    "participantsCount_one": "Participantes · {{count}}",
+    "participantsCount_other": "Participantes · {{count}}",
+    "searchFailed": "La búsqueda falló.",
+    "startWith": "Iniciar mensaje directo con @{{name}}",
+    "tapAgainToConfirm": "Toca de nuevo para confirmar"
+  },
+  "emoji": {
+    "groupFallback": "Grupo"
+  },
+  "group": {
+    "common": {
+      "confirm": "Confirmar",
+      "danger": "Peligro",
+      "descriptionLabel": "Descripción del grupo",
+      "emoji": "Emoji",
+      "fallbackName": "Grupo",
+      "noChannels": "No hay canales.",
+      "remove": "Quitar"
+    },
+    "detail": {
+      "adminCount_one": "{{count}} admin",
+      "adminCount_other": "{{count}} admins",
+      "adminSection": "Administración",
+      "loadingChannels": "Cargando canales…",
+      "memberCount_one": "{{count}} miembro",
+      "memberCount_other": "{{count}} miembros",
+      "menuLabel": "Menú del grupo",
+      "moreMembers_one": "+{{count}}",
+      "moreMembers_other": "+{{count}}",
+      "settingsSub": "Renombrar, canales, zona de peligro",
+      "textChannels": "Canales de texto"
+    },
+    "discover": {
+      "approved": "Aprobada: abre la pestaña Grupos",
+      "blurb": "Los identificadores son nombres cortos y únicos que eligen los propietarios de cada grupo. Pide uno para unirte: no hay directorio público.",
+      "requestDeclined": "Solicitud rechazada",
+      "requestPending": "Solicitud pendiente",
+      "title": "Descubrir"
+    },
+    "emoji": {
+      "adminsOnly": "Solo los admins del grupo pueden añadir o quitar emoji.",
+      "ctxTitle": "Emoji de {{name}}",
+      "empty": "Todavía no hay emoji personalizados.",
+      "pickAndUpload": "Elegir imagen y subir",
+      "sizeKb_one": "{{count}} KB",
+      "sizeKb_other": "{{count}} KB",
+      "uploading": "Subiendo…"
+    },
+    "invite": {
+      "blurb": "Verán esta invitación en su sección Pendientes la próxima vez que abran Pollis. Solo los admins de {{name}} pueden invitar: si no eres uno, el servidor la rechazará.",
+      "createLinkFailed": "No se pudo crear el enlace de invitación.",
+      "crumb": "Invitar",
+      "linkBlurb": "Cualquiera con el enlace puede entrar directamente, sin aprobación. El enlace se muestra una sola vez, justo después de crearlo.",
+      "linkCreated": "Enlace creado: cópialo ahora",
+      "linkOnce": "Esta es la única vez que se puede mostrar este enlace. Nadie, ni siquiera tú, podrá volver a verlo. Para compartirlo más adelante, crea uno nuevo.",
+      "manageLinks": "Gestionar enlaces de invitación",
+      "manageLinksSub": "Revisa y revoca los enlaces existentes",
+      "share": "Compartir",
+      "shareableLink": "Enlace para compartir",
+      "thisGroup": "este grupo"
+    },
+    "inviteLinks": {
+      "blurb": "Los enlaces no se pueden volver a mostrar después de crearlos: el servidor solo guarda un hash. Revocar un enlace lo anula al instante para todo el que lo tenga.",
+      "empty": "Todavía no hay enlaces de invitación. Crea uno desde la pantalla Invitar.",
+      "revokeFailed": "No se pudo revocar el enlace.",
+      "revokeLabel": "Revocar enlace de invitación",
+      "title": "Enlaces de invitación"
+    },
+    "members": {
+      "joined": "se unió el {{date}}",
+      "makeAdmin": "Hacer admin",
+      "removeAdmin": "Quitar admin",
+      "roleOwner": "Propietario"
+    },
+    "new": {
+      "blurb": "Se crea automáticamente un canal de texto #General. Puedes añadir más después. Los metadatos del grupo solo son visibles para los miembros invitados.",
+      "crumb": "Nuevo",
+      "descriptionLabel": "Descripción (opcional)",
+      "descriptionPlaceholder": "¿Para qué es este grupo?"
+    },
+    "requests": {
+      "approveLabel": "Aprobar solicitud",
+      "declineLabel": "Rechazar solicitud",
+      "pendingSection": "Solicitudes pendientes",
+      "processFailed": "No se pudo procesar la solicitud.",
+      "requested": "solicitado el {{date}}"
+    },
+    "settings": {
+      "channelsSection": "Canales",
+      "customEmojiSub": "El conjunto de emoji de este grupo",
+      "deleteFailed": "No se pudo eliminar el grupo.",
+      "deleteGroup": "Eliminar grupo",
+      "deleting": "Eliminando…",
+      "identitySection": "Identidad",
+      "notAdmin": "No tienes permisos de admin en este grupo.",
+      "tapAgainToConfirm": "Toca de nuevo para confirmar"
+    }
+  },
+  "groups": {
+    "acceptInviteLabel": "Aceptar invitación",
+    "declineInviteLabel": "Rechazar invitación",
+    "empty": "Todavía no hay grupos. Crea uno para empezar.",
+    "loading": "Cargando grupos…",
+    "pendingInvites": "Invitaciones pendientes"
+  },
+  "invite": {
+    "backToPollis": "Volver a Pollis",
+    "checking": "Comprobando tu invitación…",
+    "failed": "Este enlace de invitación no se puede usar. Puede que no sea válido, haya caducado, se haya revocado o ya se haya agotado: pide un enlace nuevo.",
+    "groupInvite": "Invitación a un grupo",
+    "locked": "Desbloquea Pollis primero y luego vuelve a abrir el enlace de invitación.",
+    "openPollis": "Abrir Pollis",
+    "signedOut": "Inicia sesión en Pollis primero y luego vuelve a abrir el enlace de invitación.",
+    "title": "Invitación"
+  },
+  "language": {
+    "restartRequired": "Reinicia Pollis para cambiar la dirección de la interfaz."
+  },
+  "permalink": {
+    "context": "Enlace",
+    "opening": "Abriendo mensaje…",
+    "title": "Enlace al mensaje"
+  },
+  "push": {
+    "channelMessages": "Mensajes"
+  },
+  "search": {
+    "channels": "Canales",
+    "hint": "Escribe al menos dos caracteres para buscar grupos, canales, personas y mensajes.",
+    "messages": "Mensajes",
+    "placeholder": "Buscar en todo…",
+    "resultCount_one": "{{count}} resultado",
+    "resultCount_other": "{{count}} resultados",
+    "typePrompt": "Escribe…"
+  },
+  "self": {
+    "blocked": {
+      "blockedOn": "bloqueado el {{date}}",
+      "title": "Bloqueados",
+      "unblock": "Desbloquear",
+      "unblockFailed": "No se pudo desbloquear."
+    },
+    "changeEmail": {
+      "confirm": "Confirmar",
+      "enterCodeIntro": "Introduce el código que hemos enviado a {{email}}.",
+      "enterEmailIntro": "Escribe el correo nuevo. Te enviaremos un código de 6 dígitos para confirmar que es tuyo.",
+      "title": "Cambiar el correo",
+      "useDifferentEmail": "Usar otro correo"
+    },
+    "deleteAccount": {
+      "consequences": "Esto elimina tu cuenta de Pollis de forma permanente. Se te quita de todos los grupos y conversaciones, se anula el registro de tus dispositivos y se borran los datos cifrados de este teléfono. Los demás miembros conservan sus propias copias de los mensajes anteriores, pero nada de lo enviado después de la eliminación podrá leerse jamás con tus claves.",
+      "contextPath": "{{parent}} · {{child}}",
+      "failed": "No se pudo eliminar la cuenta. No se ha cambiado nada: inténtalo de nuevo.",
+      "irreversible": "No se puede deshacer. No hay periodo de gracia ni recuperación.",
+      "submit": "Eliminar la cuenta permanentemente",
+      "title": "Eliminar cuenta"
+    },
+    "hub": {
+      "preferencesSub": "Tema, densidad, comportamiento",
+      "savedSub": "Mensajes guardados",
+      "securitySub": "Claves, dispositivos, cerrar sesión",
+      "signingOut": "Cerrando sesión…",
+      "userSettingsSub": "Nombre preferido, nombre de usuario, correo"
+    },
+    "identityHeading": "Identidad",
+    "preferences": {
+      "accentA11y": "Acento {{name}}",
+      "accentHeading": "Acento",
+      "behavior": {
+        "markVerifiedPeers": "Marcar los contactos verificados con ◆",
+        "reduceMotion": "Reducir el movimiento",
+        "showInlineTimestamps": "Mostrar la hora junto a cada mensaje",
+        "showMemberAvatars": "Mostrar los avatares de los miembros"
+      },
+      "density": {
+        "comfortable": "Cómoda",
+        "compact": "Compacta"
+      },
+      "densityHeading": "Densidad",
+      "notificationsOffSettings": "Desactivadas: actívalas en los Ajustes del sistema",
+      "notificationsOffTap": "Desactivadas: toca para activarlas",
+      "notificationsOn": "Activadas: te avisaremos de los mensajes nuevos",
+      "readReceiptsSub": "Recíproco: desactivarlo también te oculta las confirmaciones de los demás",
+      "swatch": {
+        "amber": "Ámbar",
+        "citron": "Cidra",
+        "glass": "Cristal",
+        "lilac": "Lila",
+        "mint": "Menta",
+        "rust": "Óxido"
+      },
+      "theme": {
+        "coal": "Carbón",
+        "paper": "Papel",
+        "system": "Sistema"
+      },
+      "themeHeading": "Tema"
+    },
+    "saved": {
+      "empty": "No hay mensajes guardados. Mantén pulsado un mensaje para guardarlo.",
+      "openA11y": "Abrir mensaje guardado",
+      "savedAgo": "guardado hace {{time}}",
+      "unsave": "Quitar de guardados"
+    },
+    "security": {
+      "approve": "Aprobar",
+      "approveA11y": "Aprobar el registro",
+      "autoLockA11y": "Bloqueo automático {{label}}",
+      "autoLockDescription": "Bloquea Pollis tras el PIN del dispositivo después de un tiempo sin actividad. Este ajuste se queda en este teléfono.",
+      "current": "Actual",
+      "daysAgo_one": "hace {{count}} d",
+      "daysAgo_other": "hace {{count}} d",
+      "deleteAccountSub": "Elimina tu cuenta de forma permanente y borra este dispositivo",
+      "deviceSub": "vinculado {{paired}} · visto por última vez {{lastSeen}}",
+      "enrollmentFailed": "No se pudo procesar la solicitud de registro.",
+      "eventsEmpty": "Todavía no hay eventos de seguridad. Aquí aparecerán las vinculaciones de dispositivos, las revocaciones y los restablecimientos de identidad.",
+      "hoursAgo_one": "hace {{count}} h",
+      "hoursAgo_other": "hace {{count}} h",
+      "identityDescription": "Tu clave de identidad pública. Las personas con las que hablas pueden compararla con lo que ve su dispositivo para verificar que eres tú de verdad.",
+      "identityMissing": "Este dispositivo todavía no ha publicado ninguna clave de identidad.",
+      "justNow": "ahora mismo",
+      "lockNow": "Bloquear ahora",
+      "lockNowSub": "Pedir el PIN para volver a abrir Pollis",
+      "minutesAgo_one": "hace {{count}} min",
+      "minutesAgo_other": "hace {{count}} min",
+      "pairHeading": "Vincular un dispositivo nuevo",
+      "pairHint": "Confirma que este código coincide con el que se muestra en el otro dispositivo y luego apruébalo.",
+      "pairIntro": "Un dispositivo nuevo quiere vincularse a tu cuenta.",
+      "recoveryDescription": "La gestión de la clave secreta y del PIN del dispositivo todavía no está disponible en el móvil. Para configurar un dispositivo nuevo, inicia sesión con tu correo: Pollis te guiará por el registro.",
+      "recoveryHeading": "Recuperación",
+      "reject": "Rechazar",
+      "rejectA11y": "Rechazar el registro",
+      "safetyHeading": "Seguridad",
+      "showOlderA11y": "Mostrar eventos anteriores",
+      "thisDevice": "{{name}} · este dispositivo"
+    },
+    "title": "Tú",
+    "userSettings": {
+      "avatarHint": "Se genera a partir de los dos primeros caracteres de tu nombre de usuario.",
+      "displayName": "Nombre preferido",
+      "handle": "Nombre de usuario",
+      "handleHint": "Los demás miembros pueden encontrarte y escribirte con @handle."
+    }
+  },
+  "tabs": {
+    "direct": "Directos",
+    "groups": "Grupos",
+    "search": "Buscar",
+    "self": "Tú"
+  },
+  "thread": {
+    "sendFailed": "No se pudo enviar la respuesta."
+  },
+  "timeAgo": {
+    "now": "ahora"
+  },
+  "ui": {
+    "imageUnavailable": "Imagen no disponible",
+    "selectConversation": "Selecciona una conversación"
+  },
+  "user": {
+    "blockUser": "Bloquear usuario",
+    "compareHint": "Compara estos dígitos en persona o por otro canal de confianza. Si coinciden, estás hablando con la misma clave que el servidor publicó para este usuario.",
+    "computing": "Calculando…",
+    "fallbackHandle": "usuario",
+    "keyChanged": "La clave ha cambiado desde la última vez que verificaste: vuelve a verificar en persona.",
+    "message": "Mensaje",
+    "opening": "Abriendo…",
+    "safetyActionsHeading": "Acciones de seguridad",
+    "safetyNumberFailed": "No se pudo obtener el número de seguridad.",
+    "selfNote": "Esta persona eres tú. Edita tu nombre de usuario y tu nombre preferido en <link>Tú → Ajustes de usuario</link>.",
+    "title": "Usuario",
+    "unblockUser": "Desbloquear usuario",
+    "verified": "◆ Verificado"
+  }
+}

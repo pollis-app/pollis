@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -23,10 +24,12 @@ import {
   useDeleteChannel,
   useGroupMembers,
 } from "../../hooks/queries";
+import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 function GroupSettings() {
+  const { t } = useTranslation("channels");
   const router = useRouter();
   const { groupId } = useLocalSearchParams<{ groupId?: string }>();
   const id = groupId ?? null;
@@ -99,9 +102,9 @@ function GroupSettings() {
     <Screen testID="screen-group-settings">
       <Crumb
         segs={[
-          { label: "GROUPS" },
-          { label: group?.name ?? "Group" },
-          { label: "Settings", leaf: true },
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: group?.name ?? t("mobile:group.common.fallbackName") },
+          { label: t("nav:breadcrumb.settings"), leaf: true },
         ]}
       />
       <Body>
@@ -115,33 +118,33 @@ function GroupSettings() {
               paddingTop: 14,
             }}
           >
-            You don't have admin permissions for this group.
+            {t("mobile:group.settings.notAdmin")}
           </Text>
         ) : null}
 
-        <SectionTitle>IDENTITY</SectionTitle>
+        <SectionTitle>{upper(t("mobile:group.settings.identitySection"))}</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
-          <Text style={ty.label}>NAME</Text>
+          <Text style={ty.label}>{upper(t("renameGroup.nameLabel"))}</Text>
           <Field
             value={name}
             onChangeText={setName}
             editable={iAmAdmin}
             testID="input-group-name"
-            accessibilityLabel="Group name"
+            accessibilityLabel={t("renameGroup.nameLabel")}
           />
         </View>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
-          <Text style={ty.label}>DESCRIPTION</Text>
+          <Text style={ty.label}>{upper(t("renameGroup.descriptionLabel"))}</Text>
           <Field
             value={description}
             onChangeText={setDescription}
             editable={iAmAdmin}
             testID="input-group-description"
-            accessibilityLabel="Group description"
+            accessibilityLabel={t("mobile:group.common.descriptionLabel")}
           />
         </View>
 
-        <SectionTitle>CHANNELS</SectionTitle>
+        <SectionTitle>{upper(t("mobile:group.settings.channelsSection"))}</SectionTitle>
         {channels.map((c) => {
           const armed = confirmDeleteChannel === c.id;
           return (
@@ -158,14 +161,14 @@ function GroupSettings() {
                   <Chip
                     variant={armed ? "on" : "default"}
                     testID={`btn-delete-channel-${c.id}`}
-                    accessibilityLabel="Delete channel"
+                    accessibilityLabel={t("channel.deleteLabel")}
                     onPress={() => onDeleteChannel(c.id)}
                   >
                     {deleteChannel.isPending && armed
                       ? "…"
                       : armed
-                        ? "Confirm"
-                        : "Delete"}
+                        ? t("mobile:group.common.confirm")
+                        : t("common:actions.delete")}
                   </Chip>
                 ) : null
               }
@@ -182,18 +185,18 @@ function GroupSettings() {
               paddingTop: 6,
             }}
           >
-            No channels.
+            {t("mobile:group.common.noChannels")}
           </Text>
         ) : null}
 
-        <SectionTitle>EMOJI</SectionTitle>
+        <SectionTitle>{upper(t("mobile:group.common.emoji"))}</SectionTitle>
         <ListRow
           testID="row-group-emoji"
           minHeight={48}
           glyph={<Icon.plus color={semantic.mute} />}
-          name="Custom emoji"
+          name={t("group.customEmoji")}
           nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          sub="This group's emoji set"
+          sub={t("mobile:group.settings.customEmojiSub")}
           onPress={() =>
             id
               ? router.push({
@@ -206,7 +209,7 @@ function GroupSettings() {
 
         {iAmOwner ? (
           <View>
-            <SectionTitle>DANGER</SectionTitle>
+            <SectionTitle>{upper(t("mobile:group.common.danger"))}</SectionTitle>
             <View style={{ paddingHorizontal: 18 }}>
               <Button
                 full
@@ -217,10 +220,10 @@ function GroupSettings() {
                 disabled={deleteGroup.isPending}
               >
                 {deleteGroup.isPending
-                  ? "DELETING…"
+                  ? upper(t("mobile:group.settings.deleting"))
                   : confirmDeleteGroup
-                    ? "TAP AGAIN TO CONFIRM"
-                    : "DELETE GROUP"}
+                    ? upper(t("mobile:group.settings.tapAgainToConfirm"))
+                    : upper(t("mobile:group.settings.deleteGroup"))}
               </Button>
               {deleteGroup.isError ? (
                 <Text
@@ -232,7 +235,7 @@ function GroupSettings() {
                   }}
                 >
                   {(deleteGroup.error as Error).message ||
-                    "Couldn't delete group."}
+                    t("mobile:group.settings.deleteFailed")}
                 </Text>
               ) : null}
             </View>
@@ -249,11 +252,14 @@ function GroupSettings() {
               paddingTop: 6,
             }}
           >
-            {(updateGroup.error as Error).message || "Couldn't save changes."}
+            {(updateGroup.error as Error).message || t("renameGroup.renameFailed")}
           </Text>
         ) : null}
       </Body>
-      <Ctx cr={group?.name ?? "GROUP"} name="Settings" />
+      <Ctx
+        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
+        name={t("nav:breadcrumb.settings")}
+      />
       {iAmAdmin ? (
         <BottomAction>
           <Button
@@ -264,7 +270,9 @@ function GroupSettings() {
             disabled={!dirty || !name.trim() || updateGroup.isPending}
             iconRight={<Icon.check color="#0a0907" />}
           >
-            {updateGroup.isPending ? "SAVING…" : "SAVE CHANGES"}
+            {updateGroup.isPending
+              ? upper(t("renameGroup.submitting"))
+              : upper(t("renameGroup.submit"))}
           </Button>
         </BottomAction>
       ) : null}

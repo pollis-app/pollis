@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -14,11 +15,13 @@ import {
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
+import { upper } from "../../i18n";
 import { useUserProfile, useUpdateProfile } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 function UserSettings() {
+  const { t } = useTranslation("settings");
   const router = useRouter();
   const currentUser = appStore.currentUser;
   const { data: profile, isLoading } = useUserProfile();
@@ -58,7 +61,10 @@ function UserSettings() {
   return (
     <Screen testID="screen-self-user-settings" centered>
       <Crumb
-        segs={[{ label: "SELF" }, { label: "User settings", leaf: true }]}
+        segs={[
+          { label: upper(t("mobile:self.title")) },
+          { label: t("user.title"), leaf: true },
+        ]}
       />
       <Body>
         <View
@@ -90,29 +96,33 @@ function UserSettings() {
               }}
             >
               {isLoading
-                ? "Loading…"
-                : "Derived from your handle's first two characters."}
+                ? t("common:states.loading")
+                : t("mobile:self.userSettings.avatarHint")}
             </Text>
           </View>
         </View>
 
-        <SectionTitle>IDENTITY</SectionTitle>
+        <SectionTitle>{upper(t("mobile:self.identityHeading"))}</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
-          <Text style={ty.label}>DISPLAY NAME</Text>
+          <Text style={ty.label}>
+            {upper(t("mobile:self.userSettings.displayName"))}
+          </Text>
           <Field
             value={displayName}
             onChangeText={setDisplayName}
             testID="input-display-name"
-            accessibilityLabel="Display name"
+            accessibilityLabel={t("mobile:self.userSettings.displayName")}
           />
         </View>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
-          <Text style={ty.label}>HANDLE</Text>
+          <Text style={ty.label}>
+            {upper(t("mobile:self.userSettings.handle"))}
+          </Text>
           <Field
             value={handle}
             onChangeText={setHandle}
             testID="input-handle"
-            accessibilityLabel="Handle"
+            accessibilityLabel={t("mobile:self.userSettings.handle")}
             icon={
               <Text
                 style={{
@@ -131,16 +141,16 @@ function UserSettings() {
               color: semantic.mute,
             }}
           >
-            Other members can find and DM you with @handle.
+            {t("mobile:self.userSettings.handleHint")}
           </Text>
         </View>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
-          <Text style={ty.label}>EMAIL</Text>
+          <Text style={ty.label}>{upper(t("user.emailLabel"))}</Text>
           <Field
             value={profile?.email ?? currentUser?.email ?? ""}
             editable={false}
             testID="input-email"
-            accessibilityLabel="Email"
+            accessibilityLabel={t("user.emailLabel")}
             icon={<Icon.mail color={semantic.mute} />}
           />
           <Button
@@ -150,7 +160,7 @@ function UserSettings() {
             onPress={() => router.push("/self/change-email")}
             icon={<Icon.edit color={semantic.ink} />}
           >
-            Change email address
+            {t("user.changeEmailButton")}
           </Button>
         </View>
 
@@ -164,7 +174,7 @@ function UserSettings() {
               paddingTop: 10,
             }}
           >
-            {(updateProfile.error as Error).message || "Couldn't save changes."}
+            {(updateProfile.error as Error).message || t("user.saveFailed")}
           </Text>
         ) : null}
         {updateProfile.isSuccess && !dirty ? (
@@ -177,11 +187,11 @@ function UserSettings() {
               paddingTop: 10,
             }}
           >
-            Saved.
+            {t("user.saved")}
           </Text>
         ) : null}
       </Body>
-      <Ctx cr="SELF" name="User settings" />
+      <Ctx cr={upper(t("mobile:self.title"))} name={t("user.title")} />
       <BottomAction>
         <Button
           full
@@ -191,7 +201,9 @@ function UserSettings() {
           disabled={!dirty || !handle.trim() || updateProfile.isPending}
           iconRight={<Icon.check color="#0a0907" />}
         >
-          {updateProfile.isPending ? "SAVING…" : "SAVE CHANGES"}
+          {updateProfile.isPending
+            ? upper(t("user.saving"))
+            : upper(t("user.saveButton"))}
         </Button>
         <Button
           variant="subtle"
@@ -199,7 +211,7 @@ function UserSettings() {
           testID="btn-cancel"
           onPress={() => router.back()}
         >
-          Cancel
+          {t("common:actions.cancel")}
         </Button>
       </BottomAction>
     </Screen>

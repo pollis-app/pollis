@@ -54,3 +54,11 @@ jobs:
       # tier that can hold that line.
       - name: Unit tests
         run: pnpm --filter frontend test
+
+      # Catalogue integrity for BOTH apps (#1074): plural families, placeholders,
+      # every t() call site in frontend/src and mobile/ resolving in `en`, the
+      # generated mobile resource table being fresh, and the emoji ranking
+      # modules mobile carries as copies matching the desktop originals. Node
+      # only — no deps beyond the checkout.
+      - name: i18n check
+        run: pnpm i18n:check

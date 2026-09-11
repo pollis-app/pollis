@@ -34,7 +34,7 @@ async function loadLocale(locale: string): Promise<EmojiAnnotations> {
   return buildEmojiAnnotations(module.default);
 }
 
-const [en, uk, es] = await Promise.all(["en", "uk", "es"].map(loadLocale));
+const [en, uk, es, fr] = await Promise.all(["en", "uk", "es", "fr"].map(loadLocale));
 
 function chars(items: PickerEmoji[]): string[] {
   return items.map((item) => (item.kind === "standard" ? item.emoji.char : ""));
@@ -62,6 +62,36 @@ test("English keeps working for a Ukrainian user", () => {
 test("a Spanish query with an accent finds the emoji", () => {
   assert.equal(search("corazón", [es, en])[0], "❤");
   assert.equal(search("cara llorando de risa", [es, en])[0], "😂");
+});
+
+test("an unaccented query matches the accented name — phones rarely have dead keys", () => {
+  assert.equal(search("corazon", [es, en])[0], "❤");
+  assert.equal(search("corazon rojo", [es, en])[0], "❤");
+  assert.ok(search("cafe", [fr, en]).includes("☕"));
+  assert.ok(search("patisserie", [fr, en]).length > 0);
+});
+
+test("a custom substring hit outranks every standard keyword hit", () => {
+  const custom: CustomEmoji = {
+    group_id: "g",
+    group_name: "g",
+    shortcode: "big_heart",
+    content_hash: "h",
+    content_type: "image/webp",
+    animated: false,
+    size_bytes: 1,
+    created_by: "u",
+  };
+  const items = rankEmoji("heart", STANDARD_EMOJI, [custom], [en]);
+  const ids = items.map((item) => (item.kind === "custom" ? "custom" : item.emoji.char));
+  const customAt = ids.indexOf("custom");
+  // 💘 "heart with arrow" is NAMED with the word, so it may still lead; 💋
+  // "kiss mark" and 💌 "love letter" only carry "heart" as a keyword and must
+  // sit below the custom emoji.
+  assert.ok(customAt >= 0);
+  assert.ok(customAt < ids.indexOf("💋"));
+  assert.ok(customAt < ids.indexOf("💌"));
+  assert.ok(ids.includes("❤"));
 });
 
 test("without any table the Unicode name still ranks an exact match first", () => {

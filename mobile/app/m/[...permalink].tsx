@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Text } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Screen, Crumb, Ctx } from "../../components/ui";
 import { semantic, type as ty } from "../../theme/tokens";
+import { upper } from "../../i18n";
 import { useResolvePermalink } from "../../hooks/queries";
 import { useConversationRoute } from "../../hooks/useConversationRoute";
-import { PERMALINK_MISS_COPY } from "../../lib/permalinks";
+import { permalinkMissCopy } from "../../lib/permalinks";
 
 /**
  * Deep-link target for `pollis://m/<conversation_id>/<message_id>` (#887).
@@ -15,6 +17,7 @@ import { PERMALINK_MISS_COPY } from "../../lib/permalinks";
  * and a message this device does not hold are indistinguishable).
  */
 export default function PermalinkScreen() {
+  const { t } = useTranslation("mobile");
   const router = useRouter();
   const params = useLocalSearchParams<{ permalink?: string | string[] }>();
   const resolvePermalink = useResolvePermalink();
@@ -62,7 +65,9 @@ export default function PermalinkScreen() {
 
   return (
     <Screen testID="screen-permalink">
-      <Crumb segs={[{ label: "MESSAGE LINK", leaf: true }]} />
+      <Crumb
+        segs={[{ label: upper(t("mobile:permalink.title")), leaf: true }]}
+      />
       <Text
         testID={state === "missing" ? "permalink-unresolved" : "permalink-checking"}
         style={{
@@ -73,9 +78,14 @@ export default function PermalinkScreen() {
           paddingTop: 14,
         }}
       >
-        {state === "missing" ? PERMALINK_MISS_COPY : "Opening message…"}
+        {state === "missing"
+          ? permalinkMissCopy()
+          : t("mobile:permalink.opening")}
       </Text>
-      <Ctx cr="LINK" name="Message link" />
+      <Ctx
+        cr={upper(t("mobile:permalink.context"))}
+        name={t("mobile:permalink.title")}
+      />
     </Screen>
   );
 }

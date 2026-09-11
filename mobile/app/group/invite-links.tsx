@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Screen, Crumb, Body, Chip, Ctx } from "../../components/ui";
 import { semantic, type as ty } from "../../theme/tokens";
 import {
@@ -9,6 +10,7 @@ import {
   useRevokeGroupInviteLink,
   type InviteLinkSummary,
 } from "../../hooks/queries";
+import { activeLocale, upper } from "../../i18n";
 
 // #847 (mobile) — review and revoke a group's shareable invite links.
 //
@@ -17,6 +19,7 @@ import {
 // `sha256(secret)` and has no token to give back. A link is copyable exactly
 // once, at creation, on the invite screen.
 export default function GroupInviteLinks() {
+  const { t } = useTranslation("channels");
   const { groupId } = useLocalSearchParams<{ groupId?: string }>();
   const id = groupId ?? null;
 
@@ -43,26 +46,26 @@ export default function GroupInviteLinks() {
     // `is_live` is computed server-side so this badge cannot disagree with
     // what redemption will actually do.
     if (link.revoked_at) {
-      return "REVOKED";
+      return upper(t("inviteLinks.statusRevoked"));
     }
     if (link.is_live) {
-      return "ACTIVE";
+      return upper(t("inviteLinks.statusActive"));
     }
-    return "EXPIRED";
+    return upper(t("inviteLinks.statusExpired"));
   };
 
   const detailOf = (link: InviteLinkSummary): string => {
     const uses =
       link.max_uses != null
-        ? `${link.uses}/${link.max_uses} uses`
-        : link.uses === 1
-          ? "1 use"
-          : `${link.uses} uses`;
+        ? t("inviteLinks.rowUsesOfMax", { used: link.uses, count: link.max_uses })
+        : t("inviteLinks.rowUses", { count: link.uses });
     const expiry = link.expires_at
-      ? `expires ${new Date(link.expires_at).toLocaleDateString()}`
-      : "no expiry";
+      ? t("inviteLinks.expiresOn", {
+          date: new Date(link.expires_at).toLocaleDateString(activeLocale()),
+        })
+      : t("inviteLinks.noExpiry");
     const creator = link.creator_username
-      ? `by ${link.creator_username}`
+      ? t("inviteLinks.createdBy", { name: link.creator_username })
       : null;
     return [uses, expiry, creator].filter(Boolean).join(" · ");
   };
@@ -71,9 +74,9 @@ export default function GroupInviteLinks() {
     <Screen testID="screen-group-invite-links" centered>
       <Crumb
         segs={[
-          { label: "GROUPS" },
-          { label: group?.name ?? "Group" },
-          { label: "Invite links", leaf: true },
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: group?.name ?? t("mobile:group.common.fallbackName") },
+          { label: t("mobile:group.inviteLinks.title"), leaf: true },
         ]}
       />
       <Body>
@@ -87,8 +90,7 @@ export default function GroupInviteLinks() {
             paddingTop: 6,
           }}
         >
-          Links can't be shown again after creation — the server keeps only a
-          hash. Revoking stops a link immediately for everyone holding it.
+          {t("mobile:group.inviteLinks.blurb")}
         </Text>
 
         {links.map((link) => {
@@ -135,14 +137,14 @@ export default function GroupInviteLinks() {
                 <Chip
                   variant={armed ? "on" : "default"}
                   testID={`btn-revoke-invite-link-${link.id}`}
-                  accessibilityLabel="Revoke invite link"
+                  accessibilityLabel={t("mobile:group.inviteLinks.revokeLabel")}
                   onPress={() => onRevoke(link.id)}
                 >
                   {revokeLink.isPending && armed
                     ? "…"
                     : armed
-                      ? "Confirm"
-                      : "Revoke"}
+                      ? t("mobile:group.common.confirm")
+                      : t("inviteLinks.revoke")}
                 </Chip>
               ) : null}
             </View>
@@ -159,7 +161,7 @@ export default function GroupInviteLinks() {
               paddingTop: 14,
             }}
           >
-            No invite links yet. Create one from the Invite screen.
+            {t("mobile:group.inviteLinks.empty")}
           </Text>
         ) : null}
 
@@ -173,11 +175,15 @@ export default function GroupInviteLinks() {
               paddingTop: 8,
             }}
           >
-            {(revokeLink.error as Error).message || "Couldn't revoke link."}
+            {(revokeLink.error as Error).message ||
+              t("mobile:group.inviteLinks.revokeFailed")}
           </Text>
         ) : null}
       </Body>
-      <Ctx cr={group?.name ?? "GROUP"} name="Invite links" />
+      <Ctx
+        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
+        name={t("mobile:group.inviteLinks.title")}
+      />
     </Screen>
   );
 }

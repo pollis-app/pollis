@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { View, Text, TextInput, Pressable, ScrollView } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { Avatar } from "../ui";
 import { semantic, type as ty, r } from "../../theme/tokens";
@@ -68,6 +69,7 @@ export function Composer({
   /** True when attachments alone make the message sendable. */
   canSendEmptyText?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const [caret, setCaret] = useState(0);
 
   const mentionQuery =
@@ -165,7 +167,9 @@ export function Composer({
                 key={candidate.userId}
                 testID={`row-mention-${candidate.username}`}
                 accessibilityRole="button"
-                accessibilityLabel={`Mention ${candidate.username}`}
+                accessibilityLabel={t("mobile:chat.mentionLabel", {
+                  name: candidate.username,
+                })}
                 onPress={() => acceptMention(candidate)}
                 style={{
                   flexDirection: "row",
@@ -209,7 +213,9 @@ export function Composer({
                 key={`${entry.custom ? "c" : "s"}:${entry.shortcode}`}
                 testID={`row-emoji-${entry.shortcode}`}
                 accessibilityRole="button"
-                accessibilityLabel={`Emoji :${entry.shortcode}:`}
+                accessibilityLabel={t("mobile:chat.emojiSuggestionLabel", {
+                  shortcode: entry.shortcode,
+                })}
                 onPress={() => acceptEmoji(entry)}
                 style={{
                   flexDirection: "row",
@@ -269,7 +275,9 @@ export function Composer({
               key={att.id}
               testID={`chip-attachment-${att.id}`}
               accessibilityRole="button"
-              accessibilityLabel={`Remove attachment ${att.name}`}
+              accessibilityLabel={t("composer.removeAttachment", {
+                name: att.name,
+              })}
               onPress={() => onRemoveAttachment?.(att.id)}
               style={{
                 flexDirection: "row",
@@ -312,7 +320,7 @@ export function Composer({
         <Pressable
           testID="btn-attach"
           accessibilityRole="button"
-          accessibilityLabel="Add attachment"
+          accessibilityLabel={t("composer.addAttachment")}
           onPress={onAttach}
           style={{
             width: 38,
@@ -328,11 +336,11 @@ export function Composer({
         </Pressable>
         <TextInput
           testID="input-composer"
-          accessibilityLabel="Message"
+          accessibilityLabel={t("composer.inputLabel")}
           value={draft}
           onChangeText={handleChangeText}
           onSelectionChange={(e) => setCaret(e.nativeEvent.selection.end)}
-          placeholder="Type a message…"
+          placeholder={t("composer.placeholder")}
           placeholderTextColor={semantic.mute}
           onSubmitEditing={onSend}
           returnKeyType="send"
@@ -355,7 +363,7 @@ export function Composer({
           disabled={(!draft.trim() && !canSendEmptyText) || sendPending}
           testID="btn-send"
           accessibilityRole="button"
-          accessibilityLabel="Send"
+          accessibilityLabel={t("composer.send")}
           style={{
             width: 38,
             height: 38,

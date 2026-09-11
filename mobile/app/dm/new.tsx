@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -14,9 +15,11 @@ import {
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useUserSearch, useCreateDM } from "../../hooks/queries";
+import { upper } from "../../i18n";
 
 export default function NewDM() {
   const router = useRouter();
+  const { t } = useTranslation("mobile");
   const [query, setQuery] = useState("");
   const search = useUserSearch(query);
   const createDM = useCreateDM();
@@ -38,21 +41,24 @@ export default function NewDM() {
   const found = search.data;
   const showEmpty =
     !search.isLoading && !search.isError && query.trim().length >= 2 && !found;
+  const directLabel = upper(t("tabs.direct"));
 
   return (
     <Screen testID="screen-dm-new" centered>
       <Crumb
-        segs={[{ label: "DIRECT" }, { label: "New", leaf: true }]}
+        segs={[{ label: directLabel }, { label: t("dm.new"), leaf: true }]}
       />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 8 }}>
-          <Text style={ty.label}>USERNAME OR EMAIL</Text>
+          <Text style={ty.label}>
+            {upper(t("dms:start.identifierLabel"))}
+          </Text>
           <Field
             amber
             value={query}
             onChangeText={setQuery}
             testID="input-user-search"
-            accessibilityLabel="Username or email"
+            accessibilityLabel={t("dms:start.identifierLabel")}
             icon={<Icon.search color={semantic.mute} />}
           />
           <Text
@@ -62,8 +68,7 @@ export default function NewDM() {
               color: semantic.mute,
             }}
           >
-            Type at least two characters. Exact match only — Pollis doesn't
-            broadcast partial matches.
+            {t("dm.exactMatchHint")}
           </Text>
         </View>
 
@@ -78,7 +83,7 @@ export default function NewDM() {
                 paddingVertical: 12,
               }}
             >
-              Searching…
+              {t("search:view.searching")}
             </Text>
           ) : null}
           {search.isError ? (
@@ -91,7 +96,7 @@ export default function NewDM() {
                 paddingVertical: 12,
               }}
             >
-              Search failed.
+              {t("dm.searchFailed")}
             </Text>
           ) : null}
           {showEmpty ? (
@@ -104,13 +109,13 @@ export default function NewDM() {
                 paddingVertical: 12,
               }}
             >
-              No user found.
+              {t("dms:start.userNotFound")}
             </Text>
           ) : null}
           {found ? (
             <ListRow
               testID={`row-user-${found.id}`}
-              accessibilityLabel={`Start DM with @${found.username}`}
+              accessibilityLabel={t("dm.startWith", { name: found.username })}
               minHeight={64}
               glyph={
                 <Avatar
@@ -146,13 +151,13 @@ export default function NewDM() {
               }}
             >
               {(createDM.error as Error).message ||
-                "Couldn't open a DM with this user."}
+                t("dms:start.startFailed")}
             </Text>
           ) : null}
         </View>
       </Body>
       <Ctx
-        cr="DIRECT"
+        cr={directLabel}
         name={
           <Pressable onPress={() => router.back()}>
             <Text
@@ -162,7 +167,7 @@ export default function NewDM() {
                 color: semantic.ink,
               }}
             >
-              ← Back to inbox
+              ← {t("dm.backToInbox")}
             </Text>
           </Pressable>
         }

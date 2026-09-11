@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { View, Text, FlatList, Pressable } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Screen, Crumb, Ctx, Chip } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
+import i18n, { upper } from "../../i18n";
 import {
   useSavedMessages,
   useUnsaveMessage,
@@ -12,7 +14,7 @@ import {
 } from "../../hooks/queries";
 import { useConversationRoute } from "../../hooks/useConversationRoute";
 import { EmojiText } from "../../components/emoji/EmojiText";
-import { PERMALINK_MISS_COPY } from "../../lib/permalinks";
+import { permalinkMissCopy } from "../../lib/permalinks";
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime();
@@ -21,15 +23,15 @@ function timeAgo(iso: string): string {
   }
   const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
   if (s < 60) {
-    return "now";
+    return i18n.t("common:timeAgo.seconds", { count: s });
   }
   if (s < 3600) {
-    return `${Math.floor(s / 60)}m`;
+    return i18n.t("common:timeAgo.minutes", { count: Math.floor(s / 60) });
   }
   if (s < 86400) {
-    return `${Math.floor(s / 3600)}h`;
+    return i18n.t("common:timeAgo.hours", { count: Math.floor(s / 3600) });
   }
-  return `${Math.floor(s / 86400)}d`;
+  return i18n.t("common:timeAgo.days", { count: Math.floor(s / 86400) });
 }
 
 /**
@@ -38,6 +40,7 @@ function timeAgo(iso: string): string {
  * and navigates nowhere.
  */
 export default function SavedScreen() {
+  const { t } = useTranslation("saved");
   const router = useRouter();
   const { data: saved = [], isLoading } = useSavedMessages();
   const unsave = useUnsaveMessage();
@@ -70,7 +73,7 @@ export default function SavedScreen() {
     <Pressable
       testID={`row-saved-${item.message_id}`}
       accessibilityRole="button"
-      accessibilityLabel="Open saved message"
+      accessibilityLabel={t("mobile:self.saved.openA11y")}
       onPress={() => void openItem(item)}
       style={{
         flexDirection: "row",
@@ -86,7 +89,7 @@ export default function SavedScreen() {
       <View style={{ flex: 1, minWidth: 0 }}>
         {item.available ? (
           <EmojiText
-            text={item.content || "(no text)"}
+            text={item.content || t("row.noText")}
             numberOfLines={2}
             style={{
               fontFamily: ty.body.fontFamily,
@@ -105,7 +108,7 @@ export default function SavedScreen() {
             }}
             testID={`saved-unavailable-${item.message_id}`}
           >
-            {PERMALINK_MISS_COPY}
+            {t("row.unavailable")}
           </Text>
         )}
         <Text
@@ -116,22 +119,27 @@ export default function SavedScreen() {
             marginTop: 2,
           }}
         >
-          saved {timeAgo(item.saved_at)} ago
+          {t("mobile:self.saved.savedAgo", { time: timeAgo(item.saved_at) })}
         </Text>
       </View>
       <Chip
         testID={`btn-unsave-${item.message_id}`}
-        accessibilityLabel="Unsave"
+        accessibilityLabel={t("mobile:self.saved.unsave")}
         onPress={() => unsave.mutate(item.message_id)}
       >
-        Unsave
+        {t("mobile:self.saved.unsave")}
       </Chip>
     </Pressable>
   );
 
   return (
     <Screen testID="screen-saved">
-      <Crumb segs={[{ label: "SELF" }, { label: "Saved", leaf: true }]} />
+      <Crumb
+        segs={[
+          { label: upper(t("mobile:self.title")) },
+          { label: t("page.title"), leaf: true },
+        ]}
+      />
       {unresolved ? (
         <Text
           testID="saved-unresolved-notice"
@@ -143,7 +151,7 @@ export default function SavedScreen() {
             paddingTop: 10,
           }}
         >
-          {PERMALINK_MISS_COPY}
+          {permalinkMissCopy()}
         </Text>
       ) : null}
       <FlatList
@@ -163,12 +171,12 @@ export default function SavedScreen() {
             }}
           >
             {isLoading
-              ? "Loading…"
-              : "No saved messages. Use the long-press action on a message to save it."}
+              ? t("common:states.loading")
+              : t("mobile:self.saved.empty")}
           </Text>
         }
       />
-      <Ctx cr="SELF" name="Saved" />
+      <Ctx cr={upper(t("mobile:self.title"))} name={t("page.title")} />
     </Screen>
   );
 }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -19,9 +20,11 @@ import {
   useUserSearch,
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
+import { activeLocale, upper } from "../../i18n";
 
 export default function Search() {
   const router = useRouter();
+  const { t } = useTranslation("mobile");
   const [q, setQ] = useState("");
   const trimmed = q.trim();
   const messages = useSearchMessages(trimmed);
@@ -104,8 +107,12 @@ export default function Search() {
   return (
     <Screen testID="screen-search">
       <Crumb
-        segs={[{ label: "SEARCH", leaf: true }]}
-        end={trimmed.length >= 2 ? `${totalResults} RESULTS` : "TYPE…"}
+        segs={[{ label: upper(t("tabs.search")), leaf: true }]}
+        end={upper(
+          trimmed.length >= 2
+            ? t("search.resultCount", { count: totalResults })
+            : t("search.typePrompt"),
+        )}
       />
       <Body>
         {trimmed.length < 2 ? (
@@ -118,8 +125,7 @@ export default function Search() {
               paddingTop: 14,
             }}
           >
-            Type at least two characters to search groups, channels, people,
-            and messages.
+            {t("search.hint")}
           </Text>
         ) : null}
         {showEmpty ? (
@@ -132,13 +138,13 @@ export default function Search() {
               paddingTop: 14,
             }}
           >
-            Nothing matched.
+            {t("search:panel.noMatches")}
           </Text>
         ) : null}
 
         {filtered.groups.length > 0 ? (
           <View>
-            <SectionTitle>GROUPS</SectionTitle>
+            <SectionTitle>{upper(t("tabs.groups"))}</SectionTitle>
             {filtered.groups.map((g) => (
               <ListRow
                 key={g.id}
@@ -160,7 +166,7 @@ export default function Search() {
 
         {filtered.channels.length > 0 ? (
           <View>
-            <SectionTitle>CHANNELS</SectionTitle>
+            <SectionTitle>{upper(t("search.channels"))}</SectionTitle>
             {filtered.channels.map((c) => (
               <ListRow
                 key={c.id}
@@ -186,7 +192,7 @@ export default function Search() {
 
         {user.data ? (
           <View>
-            <SectionTitle>DIRECT</SectionTitle>
+            <SectionTitle>{upper(t("tabs.direct"))}</SectionTitle>
             <ListRow
               testID={`row-user-${user.data.id}`}
               minHeight={48}
@@ -210,7 +216,7 @@ export default function Search() {
 
         {(messages.data?.results.length ?? 0) > 0 ? (
           <View>
-            <SectionTitle>MESSAGES</SectionTitle>
+            <SectionTitle>{upper(t("search.messages"))}</SectionTitle>
             {messages.data!.results.map((m) => (
               <ListRow
                 key={m.message_id}
@@ -222,12 +228,12 @@ export default function Search() {
                 sub={m.snippet.text || m.content}
                 end={
                   <Text style={ty.label}>
-                    {new Date(m.sent_at)
-                      .toLocaleDateString(undefined, {
+                    {upper(
+                      new Date(m.sent_at).toLocaleDateString(activeLocale(), {
                         month: "short",
                         day: "numeric",
-                      })
-                      .toUpperCase()}
+                      }),
+                    )}
                   </Text>
                 }
                 onPress={() => {
@@ -271,11 +277,11 @@ export default function Search() {
       >
         <Field
           testID="input-search"
-          accessibilityLabel="Search"
+          accessibilityLabel={t("search:page.title")}
           amber
           value={q}
           onChangeText={setQ}
-          placeholder="Search everything…"
+          placeholder={t("search.placeholder")}
           icon={<Icon.search color={semantic.mute} />}
         />
       </View>

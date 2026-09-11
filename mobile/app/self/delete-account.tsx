@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -13,6 +14,7 @@ import {
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
+import { upper } from "../../i18n";
 import { useDeleteAccount } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -23,6 +25,7 @@ import { observer } from "mobx-react-lite";
 const DELETE_CONFIRM_WORD = "DELETE";
 
 function DeleteAccount() {
+  const { t } = useTranslation("settings");
   const router = useRouter();
   const queryClient = useQueryClient();
   const currentUser = appStore.currentUser;
@@ -51,15 +54,15 @@ function DeleteAccount() {
     <Screen testID="screen-self-delete-account" centered>
       <Crumb
         segs={[
-          { label: "SELF" },
-          { label: "Security" },
-          { label: "Delete account", leaf: true },
+          { label: upper(t("mobile:self.title")) },
+          { label: t("security.title") },
+          { label: t("mobile:self.deleteAccount.title"), leaf: true },
         ]}
       />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 14 }}>
           <Text style={[ty.h1, { color: semantic.danger }]}>
-            Delete account
+            {t("mobile:self.deleteAccount.title")}
           </Text>
           <Text
             style={{
@@ -69,11 +72,7 @@ function DeleteAccount() {
               color: semantic.mute,
             }}
           >
-            This permanently deletes your Pollis account. You are removed from
-            every group and conversation, your devices are unregistered, and
-            your encrypted data on this phone is wiped. Other members keep
-            their own copies of past messages, but nothing sent after deletion
-            can ever be read with your keys.
+            {t("mobile:self.deleteAccount.consequences")}
           </Text>
           <Text
             style={{
@@ -83,19 +82,23 @@ function DeleteAccount() {
               color: semantic.mute,
             }}
           >
-            This cannot be undone. There is no grace period and no recovery.
+            {t("mobile:self.deleteAccount.irreversible")}
           </Text>
 
           <View style={{ gap: 6, paddingTop: 8 }}>
             <Text style={ty.label}>
-              TYPE {DELETE_CONFIRM_WORD} TO CONFIRM
+              {upper(
+                t("security.deleteConfirmLabel", { word: DELETE_CONFIRM_WORD }),
+              )}
             </Text>
             <Field
               value={confirmText}
               onChangeText={setConfirmText}
               placeholder={DELETE_CONFIRM_WORD}
               testID="input-delete-confirm"
-              accessibilityLabel={`Type ${DELETE_CONFIRM_WORD} to confirm`}
+              accessibilityLabel={t("security.deleteConfirmLabel", {
+                word: DELETE_CONFIRM_WORD,
+              })}
               icon={<Icon.shield color={semantic.danger} />}
             />
           </View>
@@ -111,7 +114,7 @@ function DeleteAccount() {
               }}
             >
               {(deleteAccount.error as Error).message ||
-                "Couldn't delete the account. Nothing was changed — try again."}
+                t("mobile:self.deleteAccount.failed")}
             </Text>
           ) : null}
         </View>
@@ -126,11 +129,19 @@ function DeleteAccount() {
           onPress={onDelete}
         >
           {deleteAccount.isPending
-            ? "DELETING ACCOUNT…"
-            : "DELETE ACCOUNT PERMANENTLY"}
+            ? upper(t("security.deletingAccount"))
+            : upper(t("mobile:self.deleteAccount.submit"))}
         </Button>
       </BottomAction>
-      <Ctx cr="SELF · SECURITY" name="Delete account" />
+      <Ctx
+        cr={upper(
+          t("mobile:self.deleteAccount.contextPath", {
+            parent: t("mobile:self.title"),
+            child: t("security.title"),
+          }),
+        )}
+        name={t("mobile:self.deleteAccount.title")}
+      />
     </Screen>
   );
 }

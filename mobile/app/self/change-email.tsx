@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -12,6 +13,7 @@ import {
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
+import { upper } from "../../i18n";
 import { useMutation } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { appStore } from "../../stores/appStore";
@@ -20,6 +22,7 @@ import { observer } from "mobx-react-lite";
 type Stage = "enter-email" | "enter-code";
 
 function ChangeEmail() {
+  const { t } = useTranslation("settings");
   const router = useRouter();
   const currentUser = appStore.currentUser;
   const setCurrentUser = appStore.setCurrentUser;
@@ -81,14 +84,16 @@ function ChangeEmail() {
     <Screen testID="screen-self-change-email" centered>
       <Crumb
         segs={[
-          { label: "SELF" },
-          { label: "User settings" },
-          { label: "Email", leaf: true },
+          { label: upper(t("mobile:self.title")) },
+          { label: t("user.title") },
+          { label: t("user.emailLabel"), leaf: true },
         ]}
       />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 14 }}>
-          <Text style={[ty.h1, { color: semantic.ink }]}>Change email</Text>
+          <Text style={[ty.h1, { color: semantic.ink }]}>
+            {t("mobile:self.changeEmail.title")}
+          </Text>
           <Text
             style={{
               fontFamily: ty.body.fontFamily,
@@ -98,26 +103,28 @@ function ChangeEmail() {
             }}
           >
             {stage === "enter-email"
-              ? "Enter the new email. We'll send a 6-digit code to confirm you own it."
-              : `Enter the code we sent to ${newEmail}.`}
+              ? t("mobile:self.changeEmail.enterEmailIntro")
+              : t("mobile:self.changeEmail.enterCodeIntro", { email: newEmail })}
           </Text>
 
           {stage === "enter-email" ? (
             <View style={{ gap: 6 }}>
-              <Text style={ty.label}>NEW EMAIL</Text>
+              <Text style={ty.label}>{upper(t("user.newEmailLabel"))}</Text>
               <Field
                 amber
                 value={newEmail}
                 onChangeText={setNewEmail}
                 testID="input-email"
-                accessibilityLabel="New email"
+                accessibilityLabel={t("user.newEmailLabel")}
                 icon={<Icon.mail color={semantic.mute} />}
                 keyboardType="email-address"
               />
             </View>
           ) : (
             <View style={{ gap: 6 }}>
-              <Text style={ty.label}>VERIFICATION CODE</Text>
+              <Text style={ty.label}>
+                {upper(t("user.verificationCodeLabel"))}
+              </Text>
               <Field
                 amber
                 value={code}
@@ -125,7 +132,7 @@ function ChangeEmail() {
                   setCode(v.replace(/[^0-9]/g, "").slice(0, 6))
                 }
                 testID="input-otp"
-                accessibilityLabel="Verification code"
+                accessibilityLabel={t("user.verificationCodeLabel")}
                 keyboardType="number-pad"
                 icon={<Icon.key color={semantic.mute} />}
               />
@@ -140,12 +147,15 @@ function ChangeEmail() {
                 color: semantic.danger,
               }}
             >
-              {(error as Error).message || "Something went wrong."}
+              {(error as Error).message || t("errors:boundary.title")}
             </Text>
           ) : null}
         </View>
       </Body>
-      <Ctx cr="SELF" name="Change email" />
+      <Ctx
+        cr={upper(t("mobile:self.title"))}
+        name={t("mobile:self.changeEmail.title")}
+      />
       <BottomAction>
         <Button
           full
@@ -161,10 +171,10 @@ function ChangeEmail() {
           iconRight={<Icon.arrowRight color="#0a0907" />}
         >
           {pending
-            ? "WORKING…"
+            ? upper(t("mobile:common.working"))
             : stage === "enter-email"
-              ? "SEND CODE"
-              : "CONFIRM"}
+              ? upper(t("user.sendCodeButton"))
+              : upper(t("mobile:self.changeEmail.confirm"))}
         </Button>
         {stage === "enter-code" ? (
           <Button
@@ -176,7 +186,7 @@ function ChangeEmail() {
               setStage("enter-email");
             }}
           >
-            Use a different email
+            {t("mobile:self.changeEmail.useDifferentEmail")}
           </Button>
         ) : null}
       </BottomAction>

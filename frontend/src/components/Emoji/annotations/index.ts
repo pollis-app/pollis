@@ -6,8 +6,10 @@
 //
 //     python3 scripts/generate-emoji-data.py --refresh-annotations
 //
-// Each locale is its own module behind a dynamic import: the picker needs the
-// active locale's table and English's, never all of them.
+// Each locale is its own module behind a dynamic import. In the web bundle that
+// is a separate chunk (the picker needs the active locale's table and English's,
+// never all of them); on native, where Metro does not split, every locale ships
+// in the binary and the import only defers parsing until the picker opens.
 
 /** `[char, localized name, `|`-joined lowercase keywords]`. */
 export type EmojiAnnotationRow = readonly [

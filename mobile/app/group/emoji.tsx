@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import * as ImagePicker from "expo-image-picker";
 import {
   Screen,
@@ -24,6 +25,7 @@ import {
   SHORTCODE_RE,
 } from "../../hooks/queries";
 import { CustomEmojiImage } from "../../components/emoji/CustomEmojiImage";
+import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -36,6 +38,7 @@ function uriToPath(uri: string): string {
 }
 
 function GroupEmoji() {
+  const { t } = useTranslation("emoji");
   const { groupId } = useLocalSearchParams<{ groupId?: string }>();
   const id = groupId ?? null;
   const currentUser = appStore.currentUser;
@@ -88,17 +91,19 @@ function GroupEmoji() {
     });
   };
 
+  const groupName = group?.name ?? t("mobile:group.common.fallbackName");
+
   return (
     <Screen testID="screen-group-emoji">
       <Crumb
         segs={[
-          { label: "GROUPS" },
-          { label: group?.name ?? "Group" },
-          { label: "Emoji", leaf: true },
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: groupName },
+          { label: t("mobile:group.common.emoji"), leaf: true },
         ]}
       />
       <Body>
-        <SectionTitle>CUSTOM EMOJI</SectionTitle>
+        <SectionTitle>{upper(t("manage.title"))}</SectionTitle>
         {isLoading ? (
           <Text
             style={{
@@ -109,7 +114,7 @@ function GroupEmoji() {
               paddingTop: 6,
             }}
           >
-            Loading…
+            {t("common:states.loading")}
           </Text>
         ) : null}
         {!isLoading && emoji.length === 0 ? (
@@ -122,11 +127,14 @@ function GroupEmoji() {
               paddingTop: 6,
             }}
           >
-            No custom emoji yet.
+            {t("mobile:group.emoji.empty")}
           </Text>
         ) : null}
         {emoji.map((e) => {
           const armed = confirmRemove === e.shortcode;
+          const size = t("mobile:group.emoji.sizeKb", {
+            count: Math.max(1, Math.round(e.size_bytes / 1024)),
+          });
           return (
             <ListRow
               key={e.shortcode}
@@ -141,20 +149,20 @@ function GroupEmoji() {
               }
               name={`:${e.shortcode}:`}
               nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-              sub={`${Math.max(1, Math.round(e.size_bytes / 1024))} KB${e.animated ? " · animated" : ""}`}
+              sub={e.animated ? t("manage.sizeAnimated", { size }) : size}
               end={
                 iAmAdmin ? (
                   <Chip
                     variant={armed ? "on" : "default"}
                     testID={`btn-remove-emoji-${e.shortcode}`}
-                    accessibilityLabel={`Remove :${e.shortcode}:`}
+                    accessibilityLabel={t("manage.remove", { shortcode: e.shortcode })}
                     onPress={() => onRemove(e.shortcode)}
                   >
                     {remove.isPending && armed
                       ? "…"
                       : armed
-                        ? "Confirm"
-                        : "Remove"}
+                        ? t("mobile:group.common.confirm")
+                        : t("mobile:group.common.remove")}
                   </Chip>
                 ) : null
               }
@@ -171,21 +179,21 @@ function GroupEmoji() {
               paddingTop: 6,
             }}
           >
-            {(remove.error as Error).message || "Couldn't remove emoji."}
+            {(remove.error as Error).message || t("manage.removeFailed")}
           </Text>
         ) : null}
 
         {iAmAdmin ? (
           <View>
-            <SectionTitle>ADD EMOJI</SectionTitle>
+            <SectionTitle>{upper(t("manage.add"))}</SectionTitle>
             <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
-              <Text style={ty.label}>SHORTCODE</Text>
+              <Text style={ty.label}>{upper(t("manage.shortcodeLabel"))}</Text>
               <Field
                 value={shortcode}
                 onChangeText={(v) => setShortcode(v.toLowerCase())}
-                placeholder="party_parrot"
+                placeholder={t("manage.shortcodePlaceholder")}
                 testID="input-emoji-shortcode"
-                accessibilityLabel="Emoji shortcode"
+                accessibilityLabel={t("manage.shortcodeLabel")}
               />
               {shortcode.length > 0 && !shortcodeValid ? (
                 <Text
@@ -195,7 +203,7 @@ function GroupEmoji() {
                     color: semantic.danger,
                   }}
                 >
-                  2–32 characters: a–z, 0–9, underscore.
+                  {t("manage.shortcodeInvalid")}
                 </Text>
               ) : null}
               {shortcodeTaken ? (
@@ -206,7 +214,7 @@ function GroupEmoji() {
                     color: semantic.danger,
                   }}
                 >
-                  That shortcode is already taken in this group.
+                  {t("manage.shortcodeTaken", { shortcode })}
                 </Text>
               ) : null}
               <View style={{ paddingTop: 8 }}>
@@ -219,7 +227,9 @@ function GroupEmoji() {
                     !shortcodeValid || shortcodeTaken || upload.isPending
                   }
                 >
-                  {upload.isPending ? "UPLOADING…" : "PICK IMAGE & UPLOAD"}
+                  {upload.isPending
+                    ? upper(t("mobile:group.emoji.uploading"))
+                    : upper(t("mobile:group.emoji.pickAndUpload"))}
                 </Button>
               </View>
               {upload.isError ? (
@@ -231,7 +241,7 @@ function GroupEmoji() {
                     paddingTop: 6,
                   }}
                 >
-                  {(upload.error as Error).message || "Couldn't upload emoji."}
+                  {(upload.error as Error).message || t("manage.addFailed")}
                 </Text>
               ) : null}
               {pickError ? (
@@ -258,11 +268,14 @@ function GroupEmoji() {
               paddingTop: 14,
             }}
           >
-            Only group admins can add or remove emoji.
+            {t("mobile:group.emoji.adminsOnly")}
           </Text>
         )}
       </Body>
-      <Ctx cr="GROUP" name={`${group?.name ?? "Group"} emoji`} />
+      <Ctx
+        cr={upper(t("mobile:group.common.fallbackName"))}
+        name={t("mobile:group.emoji.ctxTitle", { name: groupName })}
+      />
     </Screen>
   );
 }

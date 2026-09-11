@@ -15,6 +15,7 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
   ```
 - `mobile/pnpm-lock.yaml` is independent of the root lock.
 - If Expo complains about missing packages, first check that `node_modules` is inside `mobile/` and not at the repo root.
+- Mobile imports **no frontend TypeScript**. Generated data is copied across by its generator (`emojiData.ts`, `emoji/annotations/`). The ONE shared directory is the translation catalogues, `frontend/src/i18n/locales/`, reached through a `watchFolders` entry in `metro.config.js` — see [Localization](#localization-i18n-1074). Do not widen that list.
 
 ## Stack
 
@@ -35,8 +36,10 @@ cd mobile && pnpm test        # node --test over mobile/tests/
 ```
 
 Node's own runner, no Jest and no RN renderer — it covers the **pure modules**
-under `hooks/`/`lib/` (the reaction-toggle reducer today), which is where the
-rules that are worth pinning actually live. Node 22 strips the TS types, so
+under `hooks/`/`lib/`/`i18n/`/`components/emoji/` (the reaction-toggle reducer,
+the language registry and resolution rules, the emoji search ranking against
+the real generated tables), which is where the rules that are worth pinning
+actually live. Node 22 strips the TS types, so
 there is no compile step; imports carry an explicit `.ts` extension, which is
 why `tsconfig.json` sets `allowImportingTsExtensions` (and `noEmit`, which that
 option requires) rather than excluding `tests/` from typechecking the way
@@ -48,6 +51,60 @@ instead of behind a 3-ABI cross-compile.
 
 Anything needing a device or a renderer stays out: Maestro (`.maestro/`) is the
 tier for that.
+
+## Localization (i18n, #1074)
+
+`i18next` + `react-i18next`, the same stack and the **same catalogues** as
+desktop — `mobile/i18n/resources.ts` is a generated static table of every
+`frontend/src/i18n/locales/<lng>/<ns>.json`, which Metro can resolve because
+`metro.config.js` adds that one directory to `watchFolders`. A key is
+addressed exactly as on desktop (`t("settings:language.heading")`, or
+`t("language.heading")` under `useTranslation("settings")`); copy that exists
+only on mobile lives in the `mobile` namespace, in the same directory, so
+translators and `scripts/i18n-check.mjs` see one catalogue. The canonical
+article is `.codesight/wiki/i18n.md`; `frontend/src/i18n/README.md` is the
+working checklist and applies here verbatim (keys, plurals, interpolation,
+what is not translated).
+
+Mobile-specific pieces, all under `mobile/i18n/`:
+
+- `languages.ts` — the registry (a copy of desktop's; `tests/i18n.test.ts`
+  fails if it drifts from the locale directories), tag normalization, and the
+  device locale via `Intl.DateTimeFormat().resolvedOptions().locale` (Hermes
+  answers with the OS locale on both platforms — no `expo-localization`
+  prebuild).
+- `storage.ts` — the device-local choice in `expo-secure-store`, user-scoped
+  like desktop's `localStorage` key. Never the synced preferences blob: the
+  pre-auth screens need it.
+- `index.ts` — init, `hydrateLanguage()` (the root layout holds the splash on
+  it so the first frame is already in the stored language), `setLanguage`,
+  `adoptUserLanguage`, `activeLocale()` and `upper()`.
+
+Rules that are easy to get wrong here:
+
+- **Every `toLocale*` / `Intl.*` call passes `activeLocale()`.** A bare
+  `undefined` formats against the host locale and puts an English date under an
+  Arabic heading (desktop's #902).
+- **Uppercase labels go through `upper(t(...))`**, never `.toUpperCase()` on
+  translated text (locale-invariant casing is wrong in Turkish and a no-op in
+  Arabic). The label style (`SELF`, `PREFERENCES`) makes this the common case.
+- **RTL is `I18nManager`.** `setLanguage` calls `forceRTL` for the language's
+  `dir`, which React Native applies on the **next launch**; `LanguageSection`
+  shows `mobile:language.restartRequired` until then (`layoutRestartPending`).
+  Yoga mirrors flex layout and `left/right` positioning on its own; what it
+  cannot mirror is a glyph, so `components/icons.tsx` flips only the icons
+  that encode direction (`back`, `fwd`, the arrows).
+- **Emoji search is localized** through the CLDR annotations the generator
+  emits under `components/emoji/annotations/` (#901); `useEmojiAnnotations`
+  loads the active locale's table and English's.
+
+Adding a locale: follow the desktop README, then add the same row to
+`mobile/i18n/languages.ts` and run `node scripts/mobile-i18n-resources.mjs`.
+`scripts/i18n-check.mjs` (which also scans mobile call sites) and
+`tests/i18n.test.ts` fail until both are done.
+
+The Maestro flow `.maestro/flows/i18n.yaml` is the device-tier proof: copy
+re-renders on switch, the choice survives a relaunch, Arabic mirrors after one.
 
 ## Rust bridge (`modules/pollis-native`)
 

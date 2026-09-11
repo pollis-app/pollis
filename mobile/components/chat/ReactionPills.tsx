@@ -1,5 +1,6 @@
 import { View, Text, Pressable } from "react-native";
-import { semantic, type as ty, r, t } from "../../theme/tokens";
+import { useTranslation } from "react-i18next";
+import { semantic, type as ty, r, t as tint } from "../../theme/tokens";
 import type { Reaction } from "../../hooks/queries/useReactions";
 import { splitEmojiSegments } from "../emoji/emojiTokens";
 import { CustomEmojiImage } from "../emoji/CustomEmojiImage";
@@ -38,6 +39,7 @@ export function ReactionPills({
   currentUserId?: string;
   onToggle: (emoji: string, reacted: boolean) => void;
 }) {
+  const { t } = useTranslation("chat");
   if (reactions.length === 0) {
     return null;
   }
@@ -60,7 +62,17 @@ export function ReactionPills({
             testID={`pill-reaction-${messageId}-${reaction.emoji}`}
             accessibilityRole="button"
             accessibilityState={{ selected: reacted }}
-            accessibilityLabel={`${reaction.emoji} ${reaction.count}${reacted ? ", you reacted" : ""}`}
+            accessibilityLabel={
+              reacted
+                ? t("mobile:chat.reactionPillReacted", {
+                    emoji: reaction.emoji,
+                    count: reaction.count,
+                  })
+                : t("reactions.pillLabel", {
+                    emoji: reaction.emoji,
+                    count: reaction.count,
+                  })
+            }
             onPress={() => onToggle(reaction.emoji, reacted)}
             style={{
               flexDirection: "row",
@@ -71,7 +83,7 @@ export function ReactionPills({
               borderWidth: 1,
               borderColor: reacted ? semantic.accent : semantic.hair,
               borderRadius: r.lg,
-              backgroundColor: reacted ? t(0.12) : "transparent",
+              backgroundColor: reacted ? tint(0.12) : "transparent",
             }}
           >
             <ReactionFace emoji={reaction.emoji} />

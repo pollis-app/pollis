@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { View, Text, ActivityIndicator } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { Screen, Crumb, Body, Button, BottomAction, Ctx } from "../../components/ui";
 import { semantic, type as ty } from "../../theme/tokens";
+import { upper } from "../../i18n";
 import { invoke } from "../../lib/native";
 import { restoreSession } from "../../hooks/queries/useAuth";
 import { appStore } from "../../stores/appStore";
@@ -31,6 +33,7 @@ type Phase = "working" | "signedOut" | "locked" | "failed";
 // revoked or used up — distinguishing them would confirm to an attacker that
 // a token was real but stale.
 export default function InviteLanding() {
+  const { t } = useTranslation("mobile");
   const router = useRouter();
   const queryClient = useQueryClient();
   const { token } = useLocalSearchParams<{ token?: string }>();
@@ -85,16 +88,21 @@ export default function InviteLanding() {
 
   const message =
     phase === "working"
-      ? "Checking your invite…"
+      ? t("mobile:invite.checking")
       : phase === "signedOut"
-        ? "Sign in to Pollis first, then open the invite link again."
+        ? t("mobile:invite.signedOut")
         : phase === "locked"
-          ? "Unlock Pollis first, then open the invite link again."
-          : "This invite link can't be used. It may be invalid, expired, revoked, or already used up — ask for a new link.";
+          ? t("mobile:invite.locked")
+          : t("mobile:invite.failed");
 
   return (
     <Screen testID="screen-invite-landing" centered>
-      <Crumb segs={[{ label: "POLLIS" }, { label: "Invite", leaf: true }]} />
+      <Crumb
+        segs={[
+          { label: "POLLIS" },
+          { label: t("mobile:invite.title"), leaf: true },
+        ]}
+      />
       <Body>
         <View
           style={{
@@ -121,7 +129,7 @@ export default function InviteLanding() {
           </Text>
         </View>
       </Body>
-      <Ctx cr="POLLIS" name="Group invite" hideBack />
+      <Ctx cr="POLLIS" name={t("mobile:invite.groupInvite")} hideBack />
       {phase !== "working" ? (
         <BottomAction>
           <Button
@@ -130,7 +138,9 @@ export default function InviteLanding() {
             variant="primary"
             onPress={() => router.replace("/")}
           >
-            {phase === "failed" ? "BACK TO POLLIS" : "OPEN POLLIS"}
+            {phase === "failed"
+              ? upper(t("mobile:invite.backToPollis"))
+              : upper(t("mobile:invite.openPollis"))}
           </Button>
         </BottomAction>
       ) : null}

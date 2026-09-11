@@ -132,11 +132,13 @@ locale there and refreshing is the whole procedure::
 
 That mode is the ONLY one that touches the network (stdlib ``urllib``, pinned
 to ``CLDR_RELEASE``); a plain run stays offline and deterministic. Both modes
-then emit one ``frontend/src/components/Emoji/annotations/<lang>.ts`` per locale
-plus an ``index.ts`` whose loader dynamically imports them — each table is
-~50-90 KB and the picker only ever needs the active locale's and English's
-(#874's code-splitting rule). Mobile has no localization yet and gets no
-annotation modules.
+then emit one ``annotations/<lang>.ts`` per locale plus an ``index.ts`` whose
+loader dynamically imports them, under both ``frontend/src/components/Emoji/``
+and ``mobile/components/emoji/``. Each table is ~90-190 KB and the picker only
+ever needs the active locale's and English's, which on the web bundle is a
+separate chunk per locale (#874's code-splitting rule); Metro does not split,
+so on mobile every locale ships in the binary and the dynamic import only
+defers parsing until the picker opens.
 
 Known approximation limits
 --------------------------
@@ -203,9 +205,14 @@ SHORTCODES_PATH = REPO_ROOT / "scripts" / "emoji-shortcodes.json"
 # and keywords come from" above.
 ANNOTATIONS_PATH = REPO_ROOT / "scripts" / "emoji-annotations.json"
 
-# One generated module per locale plus the loader index. The directory is
-# owned by this script: stale locale modules are removed on every run.
-ANNOTATIONS_DIR = REPO_ROOT / "frontend" / "src" / "components" / "Emoji" / "annotations"
+# One generated module per locale plus the loader index, per app. Both
+# directories are owned by this script: stale locale modules are removed on
+# every run. Mobile gets the same modules because its picker is localized
+# through the same shared catalogues (#1074).
+ANNOTATIONS_DIRS = (
+    REPO_ROOT / "frontend" / "src" / "components" / "Emoji" / "annotations",
+    REPO_ROOT / "mobile" / "components" / "emoji" / "annotations",
+)
 
 # The locale registry. `--refresh-annotations` reads its `code: "xx"` entries
 # so the annotation set can never drift from the languages the app ships.
@@ -906,8 +913,10 @@ def render_annotation_module(
 
 def render_annotation_index(langs: list[str], release: str) -> str:
     lines = annotation_header(release)
-    lines.append("// Each locale is its own module behind a dynamic import: the picker needs the")
-    lines.append("// active locale's table and English's, never all of them.")
+    lines.append("// Each locale is its own module behind a dynamic import. In the web bundle that")
+    lines.append("// is a separate chunk (the picker needs the active locale's table and English's,")
+    lines.append("// never all of them); on native, where Metro does not split, every locale ships")
+    lines.append("// in the binary and the import only defers parsing until the picker opens.")
     lines.append("")
     lines.append("/** `[char, localized name, `|`-joined lowercase keywords]`. */")
     lines.append("export type EmojiAnnotationRow = readonly [")
@@ -942,23 +951,21 @@ def write_annotations(entries: list[dict[str, object]]) -> dict[str, int]:
     locales, release = load_annotations()
     known = {codepoint_key(str(entry["char"])) for entry in entries}
     langs = sorted(locales)
-    ANNOTATIONS_DIR.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {}
+    modules: dict[str, str] = {"index.ts": render_annotation_index(langs, release)}
     for lang in langs:
         # A key the table no longer carries (a narrowed range) is dropped here
         # rather than shipped as an orphan row.
         table = {key: values for key, values in locales[lang].items() if key in known}
         counts[lang] = len(table)
-        (ANNOTATIONS_DIR / f"{lang}.ts").write_text(
-            render_annotation_module(lang, table, release), encoding="utf-8"
-        )
-    (ANNOTATIONS_DIR / "index.ts").write_text(
-        render_annotation_index(langs, release), encoding="utf-8"
-    )
-    keep = {f"{lang}.ts" for lang in langs} | {"index.ts"}
-    for stale in ANNOTATIONS_DIR.glob("*.ts"):
-        if stale.name not in keep:
-            stale.unlink()
+        modules[f"{lang}.ts"] = render_annotation_module(lang, table, release)
+    for out_dir in ANNOTATIONS_DIRS:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for name, rendered in modules.items():
+            (out_dir / name).write_text(rendered, encoding="utf-8")
+        for stale in out_dir.glob("*.ts"):
+            if stale.name not in modules:
+                stale.unlink()
     return counts
 
 
@@ -1137,7 +1144,8 @@ def main() -> None:
     for lang, count in annotation_counts.items():
         print(f"  {'annotations ' + lang:<21} {count:>5}")
     print(f"wrote {OUTPUT_PATH}")
-    print(f"wrote {ANNOTATIONS_DIR}/")
+    for out_dir in ANNOTATIONS_DIRS:
+        print(f"wrote {out_dir}/")
 
 
 if __name__ == "__main__":

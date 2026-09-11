@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Screen, Crumb } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
@@ -11,12 +12,14 @@ import {
 } from "../../hooks/queries/useAuth";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { upper } from "../../i18n";
 
 const SUBS = ["", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"];
 
 type Stage = "checking" | "create-first" | "create-confirm" | "unlock";
 
 function AuthPIN() {
+  const { t } = useTranslation("auth");
   const router = useRouter();
   const currentUser = appStore.currentUser;
   const [pin, setPin] = useState("");
@@ -53,27 +56,30 @@ function AuthPIN() {
   const stageLabel = (() => {
     switch (stage) {
       case "checking":
-        return "CHECKING…";
+        return upper(t("settings:security.permissionChecking"));
       case "create-first":
-        return "STEP 1 OF 2 · ENTER PIN";
+        return upper(t("mobile:auth.pin.stepEnter"));
       case "create-confirm":
-        return "STEP 2 OF 2 · CONFIRM PIN";
+        return upper(t("mobile:auth.pin.stepConfirm"));
       case "unlock":
-        return "ENTER PIN TO UNLOCK";
+        return upper(t("mobile:auth.pin.unlockPrompt"));
     }
   })();
 
-  const headline = stage === "unlock" ? "Unlock Pollis" : "New device PIN";
+  const headline =
+    stage === "unlock"
+      ? t("mobile:auth.pin.unlockTitle")
+      : t("mobile:auth.pin.createTitle");
   const subtitle =
     stage === "unlock"
-      ? "Enter your device PIN to unlock encrypted local data."
-      : "Used to unlock Pollis on this device. This stays on your phone — we never see it.";
+      ? t("mobile:auth.pin.unlockIntro")
+      : t("mobile:auth.pin.createIntro");
 
   const onComplete = (entered: string) => {
     setError(null);
     if (stage === "unlock") {
       if (!currentUser) {
-        setError("No active user. Sign in again.");
+        setError(t("mobile:auth.pin.noActiveUser"));
         setStage("checking");
         return;
       }
@@ -85,7 +91,7 @@ function AuthPIN() {
             router.replace("/(auth)/initializing");
           },
           onError: (e) => {
-            setError((e as Error).message || "Invalid PIN.");
+            setError((e as Error).message || t("mobile:auth.pin.invalidPin"));
             setPin("");
           },
         },
@@ -100,7 +106,7 @@ function AuthPIN() {
     }
     if (stage === "create-confirm") {
       if (entered !== firstPin) {
-        setError("PINs didn't match. Start over.");
+        setError(t("pinCreate.mismatch"));
         setFirstPin("");
         setPin("");
         setStage("create-first");
@@ -123,7 +129,7 @@ function AuthPIN() {
             }
           },
           onError: (e) => {
-            setError((e as Error).message || "Couldn't save PIN.");
+            setError((e as Error).message || t("mobile:auth.pin.saveFailed"));
             setFirstPin("");
             setPin("");
             setStage("create-first");
@@ -154,8 +160,14 @@ function AuthPIN() {
     <Screen testID="screen-auth-pin" centered>
       <Crumb
         segs={[
-          { label: "AUTH" },
-          { label: stage === "unlock" ? "Unlock device" : "Set device PIN", leaf: true },
+          { label: upper(t("mobile:auth.crumb.auth")) },
+          {
+            label:
+              stage === "unlock"
+                ? t("mobile:auth.crumb.unlockDevice")
+                : t("mobile:auth.crumb.setDevicePin"),
+            leaf: true,
+          },
         ]}
       />
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
@@ -246,7 +258,7 @@ function AuthPIN() {
             onPress={() => router.replace("/(auth)/email")}
             testID="btn-pin-signout"
             accessibilityRole="button"
-            accessibilityLabel="Sign in again"
+            accessibilityLabel={t("enroll.signInAgain")}
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -263,7 +275,7 @@ function AuthPIN() {
                 color: semantic.ink,
               }}
             >
-              Sign in again
+              {t("enroll.signInAgain")}
             </Text>
           </Pressable>
         </View>
@@ -289,7 +301,7 @@ function AuthPIN() {
             }
             accessibilityRole={k === "" ? undefined : "button"}
             accessibilityLabel={
-              k === "" ? undefined : k === "bk" ? "Delete" : k
+              k === "" ? undefined : k === "bk" ? t("common:keys.delete") : k
             }
             onPress={() => (k === "bk" ? setPin(pin.slice(0, -1)) : push(k))}
             // Subtle press feedback: the key briefly fills with the soft amber

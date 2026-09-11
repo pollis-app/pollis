@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -12,10 +13,12 @@ import {
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useCreateGroup } from "../../hooks/queries";
+import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 function NewGroup() {
+  const { t } = useTranslation("channels");
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -51,29 +54,36 @@ function NewGroup() {
 
   return (
     <Screen testID="screen-group-new" centered>
-      <Crumb segs={[{ label: "GROUPS" }, { label: "New", leaf: true }]} />
+      <Crumb
+        segs={[
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: t("mobile:group.new.crumb"), leaf: true },
+        ]}
+      />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 16 }}>
           <View style={{ gap: 8 }}>
-            <Text style={ty.label}>GROUP NAME</Text>
+            <Text style={ty.label}>{upper(t("createGroup.nameLabel"))}</Text>
             <Field
               testID="input-group-name"
-              accessibilityLabel="Group name"
+              accessibilityLabel={t("createGroup.nameLabel")}
               amber
               value={name}
               onChangeText={setName}
-              placeholder="Quick Group"
+              placeholder={t("createGroup.namePlaceholder")}
               icon={<Icon.people color={semantic.mute} />}
             />
           </View>
           <View style={{ gap: 8 }}>
-            <Text style={ty.label}>DESCRIPTION (OPTIONAL)</Text>
+            <Text style={ty.label}>
+              {upper(t("mobile:group.new.descriptionLabel"))}
+            </Text>
             <Field
               testID="input-group-description"
-              accessibilityLabel="Group description"
+              accessibilityLabel={t("mobile:group.common.descriptionLabel")}
               value={description}
               onChangeText={setDescription}
-              placeholder="What's this group for?"
+              placeholder={t("mobile:group.new.descriptionPlaceholder")}
             />
           </View>
           <Text
@@ -84,8 +94,7 @@ function NewGroup() {
               lineHeight: 16,
             }}
           >
-            A #General text channel is created automatically. You can add more
-            later. Group metadata is visible to invited members only.
+            {t("mobile:group.new.blurb")}
           </Text>
           {createGroup.isError ? (
             <Text
@@ -96,7 +105,7 @@ function NewGroup() {
               }}
             >
               {(createGroup.error as Error).message ||
-                "Couldn't create the group."}
+                t("createGroup.createFailed")}
             </Text>
           ) : null}
         </View>
@@ -109,10 +118,12 @@ function NewGroup() {
           disabled={!name.trim() || createGroup.isPending}
           iconRight={<Icon.arrowRight color="#0a0907" />}
         >
-          {createGroup.isPending ? "CREATING…" : "CREATE GROUP"}
+          {createGroup.isPending
+            ? upper(t("createGroup.submitting"))
+            : upper(t("createGroup.submit"))}
         </Button>
         <Button variant="subtle" full onPress={() => router.back()}>
-          Cancel
+          {t("common:actions.cancel")}
         </Button>
       </BottomAction>
     </Screen>

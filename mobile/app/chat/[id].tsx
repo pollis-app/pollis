@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, FlatList } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { Screen, Crumb, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { palette, semantic, type as ty } from "../../theme/tokens";
@@ -40,6 +41,7 @@ import type { PickedAttachment } from "../../lib/attachments";
 import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { upper } from "../../i18n";
 
 // Props let this screen double as an embedded right-pane conversation on the
 // two-pane (regular/iPad) layout. Route usage passes NO props, so every value
@@ -60,6 +62,7 @@ type ChatListItem =
 
 function TextChat(props: ChatViewProps = {}) {
   const router = useRouter();
+  const { t } = useTranslation("mobile");
   const params = useLocalSearchParams<{
     id?: string;
     kind?: string;
@@ -311,7 +314,9 @@ function TextChat(props: ChatViewProps = {}) {
     [reactionsByMessage, currentUser, toggleReaction],
   );
 
-  const ctxLabel = kind === "dm" ? "DIRECT" : "CHANNEL";
+  const ctxLabel = upper(
+    kind === "dm" ? t("tabs.direct") : t("channels:channel.fallbackTitle"),
+  );
 
   // Header title: prefer the human name passed in by the opener (channel name
   // or DM peer handle). For DMs opened without one, fall back to the other
@@ -328,7 +333,9 @@ function TextChat(props: ChatViewProps = {}) {
   const title =
     (displayName && displayName.trim()) ||
     peerName ||
-    (kind === "dm" ? "Direct message" : "Channel");
+    (kind === "dm"
+      ? t("dms:conversation.fallbackTitle")
+      : t("channels:channel.fallbackTitle"));
 
   const openThread = useCallback(
     (rootId: string) => {
@@ -355,7 +362,9 @@ function TextChat(props: ChatViewProps = {}) {
       }
       const m = item.message;
       const mine = currentUser?.id === m.sender_id;
-      const name = m.sender_username || (mine ? "you" : "user");
+      const name =
+        m.sender_username ||
+        (mine ? t("chat.you") : t("chat:list.unknownAuthor"));
       return (
         <MessageRow
           testID={`row-message-${m.id}`}
@@ -409,6 +418,7 @@ function TextChat(props: ChatViewProps = {}) {
       openThread,
       mentionNames,
       selfName,
+      t,
     ],
   );
 
@@ -425,7 +435,7 @@ function TextChat(props: ChatViewProps = {}) {
             paddingTop: 12,
           }}
         >
-          Loading messages…
+          {t("chat.loading")}
         </Text>
       ) : null}
       {isError ? (
@@ -438,7 +448,7 @@ function TextChat(props: ChatViewProps = {}) {
             paddingTop: 12,
           }}
         >
-          Couldn't load messages.
+          {t("chat.loadFailed")}
         </Text>
       ) : null}
       {!isLoading && !isError && items.length === 0 ? (
@@ -451,7 +461,7 @@ function TextChat(props: ChatViewProps = {}) {
             paddingTop: 12,
           }}
         >
-          No messages yet. Be the first to say something.
+          {t("chat:list.empty")}
         </Text>
       ) : null}
       <FlatList
@@ -493,7 +503,7 @@ function TextChat(props: ChatViewProps = {}) {
                 paddingVertical: 10,
               }}
             >
-              Loading older messages…
+              {t("chat.loadingOlder")}
             </Text>
           ) : null
         }
@@ -509,7 +519,7 @@ function TextChat(props: ChatViewProps = {}) {
             paddingBottom: 4,
           }}
         >
-          {(sendMessage.error as Error).message || "Couldn't send message."}
+          {(sendMessage.error as Error).message || t("chat.sendFailed")}
         </Text>
       ) : null}
 
@@ -545,7 +555,7 @@ function TextChat(props: ChatViewProps = {}) {
           <>
             <CtxAct
               testID="btn-members"
-              accessibilityLabel="Members"
+              accessibilityLabel={t("channels:group.members")}
               icon={<Icon.people color={semantic.ink2} />}
               onPress={
                 kind === "channel" && groupId
@@ -559,7 +569,7 @@ function TextChat(props: ChatViewProps = {}) {
             />
             <CtxAct
               testID="btn-chat-menu"
-              accessibilityLabel="Conversation menu"
+              accessibilityLabel={t("common:actions.moreOptions")}
               icon={<Icon.kebab color={semantic.ink2} />}
               onPress={() => {
                 if (!conversationId) {

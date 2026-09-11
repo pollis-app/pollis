@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   Screen,
   Crumb,
@@ -22,24 +24,46 @@ import {
   useCreateGroupInviteLink,
   type CreatedInviteLink,
 } from "../../hooks/queries";
+import { upper } from "../../i18n";
 
 // Expiry presets, mirroring desktop's InviteLinkManager (#847). A fixed list
 // rather than a date picker on purpose — every preset here is one a person
 // actually asks for.
-const EXPIRY_OPTIONS: { id: string; label: string; hours: number | null }[] = [
-  { id: "24h", label: "24 HOURS", hours: 24 },
-  { id: "7d", label: "7 DAYS", hours: 24 * 7 },
-  { id: "30d", label: "30 DAYS", hours: 24 * 30 },
-  { id: "never", label: "NEVER", hours: null },
+const EXPIRY_OPTIONS: {
+  id: string;
+  label: (t: TFunction) => string;
+  hours: number | null;
+}[] = [
+  {
+    id: "24h",
+    label: (t) => t("channels:inviteLinks.expiryHours", { count: 24 }),
+    hours: 24,
+  },
+  {
+    id: "7d",
+    label: (t) => t("channels:inviteLinks.expiryDays", { count: 7 }),
+    hours: 24 * 7,
+  },
+  {
+    id: "30d",
+    label: (t) => t("channels:inviteLinks.expiryDays", { count: 30 }),
+    hours: 24 * 30,
+  },
+  { id: "never", label: (t) => t("channels:inviteLinks.expiryNever"), hours: null },
 ];
 
-const USES_OPTIONS: { id: string; label: string; uses: number | null }[] = [
-  { id: "1", label: "1 USE", uses: 1 },
-  { id: "10", label: "10 USES", uses: 10 },
-  { id: "unlimited", label: "UNLIMITED", uses: null },
+const USES_OPTIONS: {
+  id: string;
+  label: (t: TFunction) => string;
+  uses: number | null;
+}[] = [
+  { id: "1", label: (t) => t("channels:inviteLinks.usesOption", { count: 1 }), uses: 1 },
+  { id: "10", label: (t) => t("channels:inviteLinks.usesOption", { count: 10 }), uses: 10 },
+  { id: "unlimited", label: (t) => t("channels:inviteLinks.usesUnlimited"), uses: null },
 ];
 
 export default function InviteToGroup() {
+  const { t } = useTranslation("channels");
   const router = useRouter();
   const { groupId } = useLocalSearchParams<{ groupId?: string }>();
   const [identifier, setIdentifier] = useState("");
@@ -79,20 +103,20 @@ export default function InviteToGroup() {
     <Screen testID="screen-group-invite" centered>
       <Crumb
         segs={[
-          { label: "GROUPS" },
-          { label: group?.name ?? "Group" },
-          { label: "Invite", leaf: true },
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: group?.name ?? t("mobile:group.common.fallbackName") },
+          { label: t("mobile:group.invite.crumb"), leaf: true },
         ]}
       />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 8 }}>
-          <Text style={ty.label}>USERNAME OR EMAIL</Text>
+          <Text style={ty.label}>{upper(t("inviteMember.identifierLabel"))}</Text>
           <Field
             amber
             value={identifier}
             onChangeText={setIdentifier}
             testID="input-user-search"
-            accessibilityLabel="Username or email"
+            accessibilityLabel={t("inviteMember.identifierLabel")}
             icon={<Icon.at color={semantic.mute} />}
           />
           <Text
@@ -103,9 +127,9 @@ export default function InviteToGroup() {
               lineHeight: 16,
             }}
           >
-            They'll see this invite in their Pending section the next time
-            they open Pollis. Only admins of {group?.name ?? "this group"}{" "}
-            can invite — if you're not one, the server will reject this.
+            {t("mobile:group.invite.blurb", {
+              name: group?.name ?? t("mobile:group.invite.thisGroup"),
+            })}
           </Text>
           {sendInvite.isError ? (
             <Text
@@ -116,7 +140,7 @@ export default function InviteToGroup() {
                 paddingTop: 8,
               }}
             >
-              {(sendInvite.error as Error).message || "Couldn't send invite."}
+              {(sendInvite.error as Error).message || t("inviteMember.sendFailed")}
             </Text>
           ) : null}
           {sendInvite.isSuccess ? (
@@ -128,12 +152,12 @@ export default function InviteToGroup() {
                 paddingTop: 8,
               }}
             >
-              Invite sent.
+              {t("inviteMember.sent")}
             </Text>
           ) : null}
         </View>
 
-        <SectionTitle>SHAREABLE LINK</SectionTitle>
+        <SectionTitle>{upper(t("mobile:group.invite.shareableLink"))}</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 8 }}>
           <Text
             style={{
@@ -143,11 +167,12 @@ export default function InviteToGroup() {
               lineHeight: 16,
             }}
           >
-            Anyone with the link can join directly — no approval step. The
-            link is shown exactly once, right after you create it.
+            {t("mobile:group.invite.linkBlurb")}
           </Text>
 
-          <Text style={[ty.label, { paddingTop: 6 }]}>EXPIRES AFTER</Text>
+          <Text style={[ty.label, { paddingTop: 6 }]}>
+            {upper(t("inviteLinks.expiresAfter"))}
+          </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
             {EXPIRY_OPTIONS.map((opt) => (
               <Chip
@@ -156,12 +181,14 @@ export default function InviteToGroup() {
                 testID={`chip-expiry-${opt.id}`}
                 onPress={() => setExpiryHours(opt.hours)}
               >
-                {opt.label}
+                {upper(opt.label(t))}
               </Chip>
             ))}
           </View>
 
-          <Text style={[ty.label, { paddingTop: 6 }]}>MAXIMUM USES</Text>
+          <Text style={[ty.label, { paddingTop: 6 }]}>
+            {upper(t("inviteLinks.maximumUses"))}
+          </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
             {USES_OPTIONS.map((opt) => (
               <Chip
@@ -170,7 +197,7 @@ export default function InviteToGroup() {
                 testID={`chip-uses-${opt.id}`}
                 onPress={() => setMaxUses(opt.uses)}
               >
-                {opt.label}
+                {upper(opt.label(t))}
               </Chip>
             ))}
           </View>
@@ -183,7 +210,9 @@ export default function InviteToGroup() {
               disabled={createLink.isPending}
               icon={<Icon.link color={semantic.ink} />}
             >
-              {createLink.isPending ? "CREATING…" : "CREATE INVITE LINK"}
+              {createLink.isPending
+                ? upper(t("inviteLinks.creating"))
+                : upper(t("inviteLinks.create"))}
             </Button>
           </View>
 
@@ -196,7 +225,7 @@ export default function InviteToGroup() {
               }}
             >
               {(createLink.error as Error).message ||
-                "Couldn't create invite link."}
+                t("mobile:group.invite.createLinkFailed")}
             </Text>
           ) : null}
 
@@ -207,9 +236,9 @@ export default function InviteToGroup() {
           testID="row-manage-invite-links"
           minHeight={48}
           glyph={<Icon.link color={semantic.mute} />}
-          name="Manage invite links"
+          name={t("mobile:group.invite.manageLinks")}
           nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          sub="Review and revoke existing links"
+          sub={t("mobile:group.invite.manageLinksSub")}
           onPress={() =>
             groupId &&
             router.push({
@@ -220,7 +249,10 @@ export default function InviteToGroup() {
           end={<Icon.fwd color={semantic.mute} />}
         />
       </Body>
-      <Ctx cr={group?.name ?? "GROUP"} name="Invite a member" />
+      <Ctx
+        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
+        name={t("group.inviteMember")}
+      />
       <BottomAction>
         <Button
           full
@@ -230,7 +262,9 @@ export default function InviteToGroup() {
           disabled={!identifier.trim() || sendInvite.isPending}
           iconRight={<Icon.arrowRight color="#0a0907" />}
         >
-          {sendInvite.isPending ? "SENDING…" : "SEND INVITE"}
+          {sendInvite.isPending
+            ? upper(t("inviteMember.submitting"))
+            : upper(t("inviteMember.submit"))}
         </Button>
         <Button
           variant="subtle"
@@ -238,7 +272,7 @@ export default function InviteToGroup() {
           testID="btn-cancel"
           onPress={() => router.back()}
         >
-          Cancel
+          {t("common:actions.cancel")}
         </Button>
       </BottomAction>
     </Screen>

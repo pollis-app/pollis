@@ -40,6 +40,11 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'mobile/**'
+      # The translation catalogues are shared with mobile (#1074): a new locale
+      # or namespace must regenerate mobile/i18n/resources.ts.
+      - 'frontend/src/i18n/locales/**'
+      - 'scripts/mobile-i18n-resources.mjs'
+      - 'scripts/i18n-check.mjs'
       - '.github/workflows/mobile-core-check.yml'
   workflow_dispatch:
 

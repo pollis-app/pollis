@@ -64,8 +64,21 @@ That one covers the design decisions; this one is the working checklist.
 
    It reads the locale list from `languages.ts`, so nothing else needs
    pointing at the new code; commit `scripts/emoji-annotations.json` and the
-   new `components/Emoji/annotations/<code>.ts`.
-   `frontend/tests/emoji-search-i18n.test.ts` fails until you do.
+   new `components/Emoji/annotations/<code>.ts` (the generator writes the
+   mobile copy too). `frontend/tests/emoji-search-i18n.test.ts` fails until
+   you do.
+
+6. **Register it on mobile.** The catalogues are shared with the Expo app
+   (`mobile/metro.config.js` watches this directory), but its registry is a
+   copy and its resource table is generated:
+
+   ```bash
+   # add the same { code, label, dir } row to mobile/i18n/languages.ts, then
+   node scripts/mobile-i18n-resources.mjs
+   ```
+
+   `scripts/i18n-check.mjs` and `mobile/tests/i18n.test.ts` fail until both
+   are done.
 
 Nothing else needs editing. The selector, `supportedLngs`, the OS-locale probe
 and the resource loader all read from `SUPPORTED_LANGUAGES`.

@@ -8,12 +8,11 @@
 
 import type { CustomEmoji } from "../../hooks/queries/useEmoji";
 import { applySkinTone, STANDARD_EMOJI, type StandardEmoji } from "./emojiData";
+import { NO_ANNOTATIONS, type EmojiAnnotationStack } from "./emojiAnnotations";
+import { rankEmoji, type PickerEmoji } from "./emojiRank";
 import { emojiTokenText } from "./emojiTokens";
 
-/** A picker cell: either a Unicode emoji or a custom per-group one. */
-export type PickerEmoji =
-  | { kind: "standard"; emoji: StandardEmoji }
-  | { kind: "custom"; emoji: CustomEmoji };
+export type { PickerEmoji } from "./emojiRank";
 
 /** Stable identity for a cell — the recents key and the React key. */
 export function pickerEmojiId(item: PickerEmoji): string {
@@ -67,46 +66,18 @@ export function pickerEmojiInsertText(
 }
 
 /**
- * Rank `query` against the emoji set. Three tiers — exact, prefix, substring —
- * shorter haystack wins within a tier, and custom emoji outrank standard ones
- * at equal tier.
+ * Rank `query` against the whole standard table plus `custom`.
+ *
+ * `annotations` is the active locale's table followed by English's (from
+ * `useEmojiAnnotations`); without it only the Unicode names are searched. The
+ * ranking itself lives in `emojiRank.ts`, where it is unit-tested.
  */
 export function searchEmoji(
   query: string,
   custom: readonly CustomEmoji[],
+  annotations: EmojiAnnotationStack = NO_ANNOTATIONS,
 ): PickerEmoji[] {
-  const needle = query.trim().toLowerCase();
-  if (!needle) {
-    return [];
-  }
-
-  const scored: { item: PickerEmoji; tier: number; length: number }[] = [];
-
-  const consider = (item: PickerEmoji, haystack: string, bonus: number) => {
-    const index = haystack.indexOf(needle);
-    if (index < 0) {
-      return;
-    }
-    let tier: number;
-    if (haystack === needle) {
-      tier = 0;
-    } else if (index === 0) {
-      tier = 1;
-    } else {
-      tier = 2;
-    }
-    scored.push({ item, tier: tier * 2 + bonus, length: haystack.length });
-  };
-
-  for (const emoji of custom) {
-    consider({ kind: "custom", emoji }, emoji.shortcode.toLowerCase(), 0);
-  }
-  for (const emoji of STANDARD_EMOJI) {
-    consider({ kind: "standard", emoji }, emoji.name, 1);
-  }
-
-  scored.sort((a, b) => a.tier - b.tier || a.length - b.length);
-  return scored.map((s) => s.item);
+  return rankEmoji(query, STANDARD_EMOJI, custom, annotations);
 }
 
 /**

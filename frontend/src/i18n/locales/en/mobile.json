@@ -1,0 +1,398 @@
+{
+  "auth": {
+    "crumb": {
+      "auth": "Auth",
+      "emergencyKit": "Emergency kit",
+      "identify": "Identify",
+      "initializing": "Initializing",
+      "pairDevice": "Pair device",
+      "setDevicePin": "Set device PIN",
+      "unlockDevice": "Unlock device",
+      "verifyEmail": "Verify email"
+    },
+    "email": {
+      "intro": "Enter your email. We'll send you a one-time code — no password.",
+      "sendFailed": "Couldn't send code. Check your connection and try again.",
+      "title": "Sign in"
+    },
+    "emergencyKit": {
+      "ackLabel": "I've saved my recovery key",
+      "ackText": "I've saved my recovery key in a safe place.",
+      "copyFailed": "Copy failed",
+      "intro": "This key is the only way to add Pollis to a new device or recover after losing this one. We don't store it anywhere you can read it later — write it down or save it to a password manager now.",
+      "title": "Save your recovery key",
+      "warning": "Anyone with this key can sign in as you on a new device. Treat it like a master password."
+    },
+    "enrollment": {
+      "chooserIntro": "This device doesn't have your keys yet. Choose how to get them onto it.",
+      "chooserTitle": "Pair this device",
+      "expired": "Request expired. Start again.",
+      "finalizeFailed": "Couldn't finalize.",
+      "pollingIntro": "On a device that's already signed in, open Self → Security and approve the request with the code below.",
+      "pollingTitle": "Approve on your other device",
+      "recover": "Recover",
+      "recoveryIntro": "Paste the recovery key you saved when you first signed up. It looks like a long string of letters and numbers.",
+      "recoveryKeyLabel": "Recovery key",
+      "recoveryTitle": "Enter recovery key",
+      "rejected": "The other device rejected this request.",
+      "starting": "Starting…",
+      "useRecoveryKey": "Use recovery key",
+      "verificationCode": "Verification code",
+      "waiting": "Waiting for approval…"
+    },
+    "initializing": {
+      "intro": "One moment — pairing your device and syncing keys.",
+      "ready": "Ready",
+      "setupFailed": "Setup failed.",
+      "skip": "Skip",
+      "statusError": "Err",
+      "statusOk": "OK",
+      "stepDevicePaired": "Device paired",
+      "stepInitializeIdentity": "Initialize identity",
+      "stepKeysLoaded": "Keys loaded",
+      "stepResolvePeers": "Resolve peers",
+      "title": "Setting up",
+      "working": "Working…"
+    },
+    "otp": {
+      "codeLabel": "One-time code",
+      "invalidCode": "Invalid code. Please try again.",
+      "sentTo": "We sent a 6-digit code to <address>{{email}}</address>. Enter it to continue.",
+      "title": "Check your email",
+      "useDifferentEmail": "Use a different email",
+      "yourEmail": "your email"
+    },
+    "pin": {
+      "createIntro": "Used to unlock Pollis on this device. This stays on your phone — we never see it.",
+      "createTitle": "New device PIN",
+      "invalidPin": "Invalid PIN.",
+      "noActiveUser": "No active user. Sign in again.",
+      "saveFailed": "Couldn't save PIN.",
+      "stepConfirm": "Step 2 of 2 · Confirm PIN",
+      "stepEnter": "Step 1 of 2 · Enter PIN",
+      "unlockIntro": "Enter your device PIN to unlock encrypted local data.",
+      "unlockPrompt": "Enter PIN to unlock",
+      "unlockTitle": "Unlock Pollis"
+    }
+  },
+  "chat": {
+    "copied": "Copied",
+    "copyFailed": "Couldn't copy",
+    "copyText": "Copy text",
+    "editPlaceholder": "Edit message…",
+    "emojiSuggestionLabel": "Emoji :{{shortcode}}:",
+    "groupSettings": "Group settings",
+    "loadFailed": "Couldn't load messages.",
+    "loading": "Loading messages…",
+    "loadingOlder": "Loading older messages…",
+    "mentionLabel": "Mention @{{name}}",
+    "openThread_one": "Open thread, {{count}} reply",
+    "openThread_other": "Open thread, {{count}} replies",
+    "reactWith": "React with {{emoji}}",
+    "reactionPillReacted_one": "{{emoji}} {{count}} reaction, you reacted",
+    "reactionPillReacted_other": "{{emoji}} {{count}} reactions, you reacted",
+    "sendFailed": "Couldn't send message.",
+    "you": "you"
+  },
+  "common": {
+    "working": "Working…"
+  },
+  "conversationInfo": {
+    "backToConversation": "Back to conversation",
+    "ctxName": "{{title}} · Info",
+    "fallbackTitle": "Conversation",
+    "info": "Info",
+    "memberSelf": "@{{handle}} · you",
+    "roleAdmin": "Admin",
+    "roleOwner": "Owner"
+  },
+  "direct": {
+    "acceptRequest": "Accept request",
+    "blockSender": "Block sender",
+    "empty": "No direct messages yet.",
+    "loadFailed": "Couldn't load conversations.",
+    "loading": "Loading conversations…",
+    "wantsToMessage": "wants to message you"
+  },
+  "dm": {
+    "backToInbox": "Back to inbox",
+    "danger": "Danger",
+    "exactMatchHint": "Type at least two characters. Exact match only — Pollis doesn't broadcast partial matches.",
+    "new": "New",
+    "participants": "Participants",
+    "participantsCount_one": "Participants · {{count}}",
+    "participantsCount_other": "Participants · {{count}}",
+    "searchFailed": "Search failed.",
+    "startWith": "Start DM with @{{name}}",
+    "tapAgainToConfirm": "Tap again to confirm"
+  },
+  "emoji": {
+    "groupFallback": "Group"
+  },
+  "group": {
+    "common": {
+      "confirm": "Confirm",
+      "danger": "Danger",
+      "descriptionLabel": "Group description",
+      "emoji": "Emoji",
+      "fallbackName": "Group",
+      "noChannels": "No channels.",
+      "remove": "Remove"
+    },
+    "detail": {
+      "adminCount_one": "{{count}} admin",
+      "adminCount_other": "{{count}} admins",
+      "adminSection": "Admin",
+      "loadingChannels": "Loading channels…",
+      "memberCount_one": "{{count}} member",
+      "memberCount_other": "{{count}} members",
+      "menuLabel": "Group menu",
+      "moreMembers_one": "+{{count}}",
+      "moreMembers_other": "+{{count}}",
+      "settingsSub": "Rename, channels, danger zone",
+      "textChannels": "Text channels"
+    },
+    "discover": {
+      "approved": "Approved — open Groups tab",
+      "blurb": "Slugs are short, unique identifiers chosen by group owners. Ask for one to join — there's no public directory.",
+      "requestDeclined": "Request declined",
+      "requestPending": "Request pending",
+      "title": "Discover"
+    },
+    "emoji": {
+      "adminsOnly": "Only group admins can add or remove emoji.",
+      "ctxTitle": "{{name}} emoji",
+      "empty": "No custom emoji yet.",
+      "pickAndUpload": "Pick image & upload",
+      "sizeKb_one": "{{count}} KB",
+      "sizeKb_other": "{{count}} KB",
+      "uploading": "Uploading…"
+    },
+    "invite": {
+      "blurb": "They'll see this invite in their Pending section the next time they open Pollis. Only admins of {{name}} can invite — if you're not one, the server will reject this.",
+      "createLinkFailed": "Couldn't create invite link.",
+      "crumb": "Invite",
+      "linkBlurb": "Anyone with the link can join directly — no approval step. The link is shown exactly once, right after you create it.",
+      "linkCreated": "Link created — copy it now",
+      "linkOnce": "This is the only time this link can be shown. Nobody — including you — can view it again. To share it later, create a new one.",
+      "manageLinks": "Manage invite links",
+      "manageLinksSub": "Review and revoke existing links",
+      "share": "Share",
+      "shareableLink": "Shareable link",
+      "thisGroup": "this group"
+    },
+    "inviteLinks": {
+      "blurb": "Links can't be shown again after creation — the server keeps only a hash. Revoking stops a link immediately for everyone holding it.",
+      "empty": "No invite links yet. Create one from the Invite screen.",
+      "revokeFailed": "Couldn't revoke link.",
+      "revokeLabel": "Revoke invite link",
+      "title": "Invite links"
+    },
+    "members": {
+      "joined": "joined {{date}}",
+      "makeAdmin": "Make admin",
+      "removeAdmin": "Remove admin",
+      "roleOwner": "Owner"
+    },
+    "new": {
+      "blurb": "A #General text channel is created automatically. You can add more later. Group metadata is visible to invited members only.",
+      "crumb": "New",
+      "descriptionLabel": "Description (optional)",
+      "descriptionPlaceholder": "What's this group for?"
+    },
+    "requests": {
+      "approveLabel": "Approve request",
+      "declineLabel": "Decline request",
+      "pendingSection": "Pending requests",
+      "processFailed": "Couldn't process the request.",
+      "requested": "requested {{date}}"
+    },
+    "settings": {
+      "channelsSection": "Channels",
+      "customEmojiSub": "This group's emoji set",
+      "deleteFailed": "Couldn't delete group.",
+      "deleteGroup": "Delete group",
+      "deleting": "Deleting…",
+      "identitySection": "Identity",
+      "notAdmin": "You don't have admin permissions for this group.",
+      "tapAgainToConfirm": "Tap again to confirm"
+    }
+  },
+  "groups": {
+    "acceptInviteLabel": "Accept invite",
+    "declineInviteLabel": "Decline invite",
+    "empty": "No groups yet. Create one to get started.",
+    "loading": "Loading groups…",
+    "pendingInvites": "Pending invites"
+  },
+  "invite": {
+    "backToPollis": "Back to Pollis",
+    "checking": "Checking your invite…",
+    "failed": "This invite link can't be used. It may be invalid, expired, revoked, or already used up — ask for a new link.",
+    "groupInvite": "Group invite",
+    "locked": "Unlock Pollis first, then open the invite link again.",
+    "openPollis": "Open Pollis",
+    "signedOut": "Sign in to Pollis first, then open the invite link again.",
+    "title": "Invite"
+  },
+  "language": {
+    "restartRequired": "Restart Pollis to switch the layout direction."
+  },
+  "permalink": {
+    "context": "Link",
+    "opening": "Opening message…",
+    "title": "Message link"
+  },
+  "push": {
+    "channelMessages": "Messages"
+  },
+  "search": {
+    "channels": "Channels",
+    "hint": "Type at least two characters to search groups, channels, people, and messages.",
+    "messages": "Messages",
+    "placeholder": "Search everything…",
+    "resultCount_one": "{{count}} result",
+    "resultCount_other": "{{count}} results",
+    "typePrompt": "Type…"
+  },
+  "self": {
+    "blocked": {
+      "blockedOn": "blocked {{date}}",
+      "title": "Blocked",
+      "unblock": "Unblock",
+      "unblockFailed": "Couldn't unblock."
+    },
+    "changeEmail": {
+      "confirm": "Confirm",
+      "enterCodeIntro": "Enter the code we sent to {{email}}.",
+      "enterEmailIntro": "Enter the new email. We'll send a 6-digit code to confirm you own it.",
+      "title": "Change email",
+      "useDifferentEmail": "Use a different email"
+    },
+    "deleteAccount": {
+      "consequences": "This permanently deletes your Pollis account. You are removed from every group and conversation, your devices are unregistered, and your encrypted data on this phone is wiped. Other members keep their own copies of past messages, but nothing sent after deletion can ever be read with your keys.",
+      "contextPath": "{{parent}} · {{child}}",
+      "failed": "Couldn't delete the account. Nothing was changed — try again.",
+      "irreversible": "This cannot be undone. There is no grace period and no recovery.",
+      "submit": "Delete account permanently",
+      "title": "Delete account"
+    },
+    "hub": {
+      "preferencesSub": "Theme, density, behavior",
+      "savedSub": "Bookmarked messages",
+      "securitySub": "Keys, devices, sign out",
+      "signingOut": "Signing out…",
+      "userSettingsSub": "Display name, handle, email"
+    },
+    "identityHeading": "Identity",
+    "preferences": {
+      "accentA11y": "Accent {{name}}",
+      "accentHeading": "Accent",
+      "behavior": {
+        "markVerifiedPeers": "Mark verified peers with ◆",
+        "reduceMotion": "Reduce motion",
+        "showInlineTimestamps": "Show inline timestamps",
+        "showMemberAvatars": "Show member avatars"
+      },
+      "density": {
+        "comfortable": "Comfortable",
+        "compact": "Compact"
+      },
+      "densityHeading": "Density",
+      "notificationsOffSettings": "Off — enable in system Settings",
+      "notificationsOffTap": "Off — tap to enable",
+      "notificationsOn": "On — new messages will notify you",
+      "readReceiptsSub": "Reciprocal — turning this off also hides others' receipts from you",
+      "swatch": {
+        "amber": "Amber",
+        "citron": "Citron",
+        "glass": "Glass",
+        "lilac": "Lilac",
+        "mint": "Mint",
+        "rust": "Rust"
+      },
+      "theme": {
+        "coal": "Coal",
+        "paper": "Paper",
+        "system": "System"
+      },
+      "themeHeading": "Theme"
+    },
+    "saved": {
+      "empty": "No saved messages. Use the long-press action on a message to save it.",
+      "openA11y": "Open saved message",
+      "savedAgo": "saved {{time}} ago",
+      "unsave": "Unsave"
+    },
+    "security": {
+      "approve": "Approve",
+      "approveA11y": "Approve enrollment",
+      "autoLockA11y": "Auto-lock {{label}}",
+      "autoLockDescription": "Lock Pollis behind your device PIN after a period of inactivity. This setting stays on this phone.",
+      "current": "Current",
+      "daysAgo_one": "{{count}}d ago",
+      "daysAgo_other": "{{count}}d ago",
+      "deleteAccountSub": "Permanently delete your account and wipe this device",
+      "deviceSub": "paired {{paired}} · last seen {{lastSeen}}",
+      "enrollmentFailed": "Couldn't process the enrollment request.",
+      "eventsEmpty": "No security events yet. Device pairings, revocations, and identity resets will show up here.",
+      "hoursAgo_one": "{{count}}h ago",
+      "hoursAgo_other": "{{count}}h ago",
+      "identityDescription": "Your public identity key. Peers you talk to can compare this against what their device sees to verify it's really you.",
+      "identityMissing": "No identity key published from this device yet.",
+      "justNow": "just now",
+      "lockNow": "Lock now",
+      "lockNowSub": "Require your PIN to reopen Pollis",
+      "minutesAgo_one": "{{count}}m ago",
+      "minutesAgo_other": "{{count}}m ago",
+      "pairHeading": "Pair new device",
+      "pairHint": "Confirm this code matches what's shown on the other device, then approve.",
+      "pairIntro": "A new device wants to pair with your account.",
+      "recoveryDescription": "Recovery key and device PIN management aren't wired on mobile yet. To set up a new device, sign in with your email — Pollis walks you through enrollment.",
+      "recoveryHeading": "Recovery",
+      "reject": "Reject",
+      "rejectA11y": "Reject enrollment",
+      "safetyHeading": "Safety",
+      "showOlderA11y": "Show older events",
+      "thisDevice": "{{name}} · this device"
+    },
+    "title": "Self",
+    "userSettings": {
+      "avatarHint": "Derived from your handle's first two characters.",
+      "displayName": "Display name",
+      "handle": "Handle",
+      "handleHint": "Other members can find and DM you with @handle."
+    }
+  },
+  "tabs": {
+    "direct": "Direct",
+    "groups": "Groups",
+    "search": "Search",
+    "self": "Self"
+  },
+  "thread": {
+    "sendFailed": "Couldn't send reply."
+  },
+  "timeAgo": {
+    "now": "now"
+  },
+  "ui": {
+    "imageUnavailable": "Image unavailable",
+    "selectConversation": "Select a conversation"
+  },
+  "user": {
+    "blockUser": "Block user",
+    "compareHint": "Compare these digits in person or over an out-of-band channel. Matching numbers prove you're talking to the same key the server published for this user.",
+    "computing": "Computing…",
+    "fallbackHandle": "user",
+    "keyChanged": "Key changed since you last verified — re-verify in person.",
+    "message": "Message",
+    "opening": "Opening…",
+    "safetyActionsHeading": "Safety actions",
+    "safetyNumberFailed": "Couldn't fetch safety number.",
+    "selfNote": "This is you. Edit your handle and display name in <link>Self → User settings</link>.",
+    "title": "User",
+    "unblockUser": "Unblock user",
+    "verified": "◆ Verified"
+  }
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -18,10 +19,12 @@ import {
   useRecoverWithSecretKey,
   type EnrollmentHandle,
 } from "../../hooks/queries";
+import { upper } from "../../i18n";
 
 type Mode = "chooser" | "polling" | "recovery";
 
 export default function Enrollment() {
+  const { t } = useTranslation("mobile");
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("chooser");
   const [handle, setHandle] = useState<EnrollmentHandle | null>(null);
@@ -41,14 +44,15 @@ export default function Enrollment() {
     if (status.data?.status === "approved") {
       finalize.mutate(undefined, {
         onSuccess: () => router.replace("/(auth)/pin"),
-        onError: (e) => setError((e as Error).message || "Couldn't finalize."),
+        onError: (e) =>
+          setError((e as Error).message || t("auth.enrollment.finalizeFailed")),
       });
     }
     if (status.data?.status === "rejected") {
-      setError("The other device rejected this request.");
+      setError(t("auth.enrollment.rejected"));
     }
     if (status.data?.status === "expired") {
-      setError("Request expired. Start again.");
+      setError(t("auth.enrollment.expired"));
     }
     // finalize is a stable mutation ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -61,7 +65,8 @@ export default function Enrollment() {
         setHandle(h);
         setMode("polling");
       },
-      onError: (e) => setError((e as Error).message || "Couldn't start enrollment."),
+      onError: (e) =>
+        setError((e as Error).message || t("auth:enroll.startFailed")),
     });
   };
 
@@ -72,22 +77,28 @@ export default function Enrollment() {
     }
     recover.mutate(secretKey.trim(), {
       onSuccess: () => router.replace("/(auth)/pin"),
-      onError: (e) => setError((e as Error).message || "Couldn't recover with that key."),
+      onError: (e) =>
+        setError((e as Error).message || t("auth:recover.failed")),
     });
   };
 
   return (
     <Screen testID="screen-auth-enrollment" centered>
-      <Crumb segs={[{ label: "AUTH" }, { label: "Pair device", leaf: true }]} />
+      <Crumb
+        segs={[
+          { label: upper(t("auth.crumb.auth")) },
+          { label: t("auth.crumb.pairDevice"), leaf: true },
+        ]}
+      />
       <Body>
         <View style={{ paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
           <View style={{ gap: 8 }}>
             <Text style={[ty.h1, { color: semantic.ink }]}>
               {mode === "polling"
-                ? "Approve on your other device"
+                ? t("auth.enrollment.pollingTitle")
                 : mode === "recovery"
-                  ? "Enter recovery key"
-                  : "Pair this device"}
+                  ? t("auth.enrollment.recoveryTitle")
+                  : t("auth.enrollment.chooserTitle")}
             </Text>
             <Text
               style={{
@@ -98,10 +109,10 @@ export default function Enrollment() {
               }}
             >
               {mode === "polling"
-                ? "On a device that's already signed in, open Self → Security and approve the request with the code below."
+                ? t("auth.enrollment.pollingIntro")
                 : mode === "recovery"
-                  ? "Paste the recovery key you saved when you first signed up. It looks like a long string of letters and numbers."
-                  : "This device doesn't have your keys yet. Choose how to get them onto it."}
+                  ? t("auth.enrollment.recoveryIntro")
+                  : t("auth.enrollment.chooserIntro")}
             </Text>
           </View>
 
@@ -116,7 +127,11 @@ export default function Enrollment() {
                 disabled={start.isPending}
                 icon={<Icon.device color="#0a0907" />}
               >
-                {start.isPending ? "STARTING…" : "APPROVE FROM ANOTHER DEVICE"}
+                {upper(
+                  start.isPending
+                    ? t("auth.enrollment.starting")
+                    : t("auth:enroll.approveFromDevice"),
+                )}
               </Button>
               <Button
                 testID="btn-enroll-recovery"
@@ -125,7 +140,7 @@ export default function Enrollment() {
                 onPress={() => setMode("recovery")}
                 icon={<Icon.key color={semantic.ink} />}
               >
-                USE RECOVERY KEY
+                {upper(t("auth.enrollment.useRecoveryKey"))}
               </Button>
             </View>
           ) : null}
@@ -143,7 +158,7 @@ export default function Enrollment() {
                 }}
               >
                 <Text style={[ty.label, { marginBottom: 6 }]}>
-                  VERIFICATION CODE
+                  {upper(t("auth.enrollment.verificationCode"))}
                 </Text>
                 <Text
                   style={{
@@ -164,17 +179,19 @@ export default function Enrollment() {
                   textAlign: "center",
                 }}
               >
-                Waiting for approval…
+                {t("auth.enrollment.waiting")}
               </Text>
             </View>
           ) : null}
 
           {mode === "recovery" ? (
             <View style={{ gap: 10, paddingTop: 6 }}>
-              <Text style={ty.label}>RECOVERY KEY</Text>
+              <Text style={ty.label}>
+                {upper(t("auth.enrollment.recoveryKeyLabel"))}
+              </Text>
               <Field
                 testID="input-recovery-key"
-                accessibilityLabel="Recovery key"
+                accessibilityLabel={t("auth.enrollment.recoveryKeyLabel")}
                 amber
                 value={secretKey}
                 onChangeText={setSecretKey}
@@ -206,7 +223,11 @@ export default function Enrollment() {
             disabled={!secretKey.trim() || recover.isPending}
             iconRight={<Icon.arrowRight color="#0a0907" />}
           >
-            {recover.isPending ? "RECOVERING…" : "RECOVER"}
+            {upper(
+              recover.isPending
+                ? t("auth:recover.recovering")
+                : t("auth.enrollment.recover"),
+            )}
           </Button>
           <Button
             testID="btn-enroll-back"
@@ -214,7 +235,7 @@ export default function Enrollment() {
             full
             onPress={() => setMode("chooser")}
           >
-            Back
+            {t("common:actions.back")}
           </Button>
         </BottomAction>
       ) : mode === "polling" ? (
@@ -228,7 +249,7 @@ export default function Enrollment() {
               setMode("chooser");
             }}
           >
-            Cancel
+            {t("common:actions.cancel")}
           </Button>
         </BottomAction>
       ) : null}

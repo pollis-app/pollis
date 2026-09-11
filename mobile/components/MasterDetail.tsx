@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { View, Text } from "react-native";
+import { useTranslation } from "react-i18next";
 import { semantic, type as ty, layout } from "../theme/tokens";
 
 // Two-pane master-detail primitives for the regular (iPad) layout — issue #622.
@@ -8,6 +9,7 @@ import { semantic, type as ty, layout } from "../theme/tokens";
 
 // Right-pane empty state — shown when nothing is selected yet.
 export function DetailPlaceholder() {
+  const { t } = useTranslation("mobile");
   return (
     <View
       style={{
@@ -24,7 +26,7 @@ export function DetailPlaceholder() {
           color: semantic.mute,
         }}
       >
-        Select a conversation
+        {t("ui.selectConversation")}
       </Text>
     </View>
   );

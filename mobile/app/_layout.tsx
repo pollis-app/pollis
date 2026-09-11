@@ -12,6 +12,7 @@ import {
   Sora_700Bold,
 } from "@expo-google-fonts/sora";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { useObserver } from "mobx-react-lite";
 import { palette } from "../theme/tokens";
 import { ThemeProvider } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
@@ -19,16 +20,25 @@ import { initializeNativeBridge } from "../lib/native";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import { useInboxRealtime } from "../hooks/useInboxRealtime";
 import { AutoLockProvider } from "../lib/autolock";
+import { adoptUserLanguage, hydrateLanguage } from "../i18n";
+import { appStore } from "../stores/appStore";
 
 SplashScreen.preventAutoHideAsync();
 
 // App-level signed-in services, mounted under the providers so they have a
 // QueryClient + router and only run after the bridge is ready. Each hook is a
 // no-op until a user is signed in: push installs notification listeners; inbox
-// realtime keeps the groups/DM lists live while foregrounded.
+// realtime keeps the groups/DM lists live while foregrounded; the language
+// re-resolves so a user's own stored choice wins over the pre-auth screens'.
 function SignedInServicesGate() {
   usePushNotifications();
   useInboxRealtime();
+  const userId = useObserver(() => appStore.currentUser?.id ?? null);
+  useEffect(() => {
+    if (userId) {
+      void adoptUserLanguage(userId);
+    }
+  }, [userId]);
   return null;
 }
 
@@ -41,6 +51,13 @@ export default function RootLayout() {
   });
   const [bridgeReady, setBridgeReady] = useState(false);
   const [bridgeError, setBridgeError] = useState<Error | null>(null);
+  const [languageReady, setLanguageReady] = useState(false);
+
+  // The stored language is read asynchronously; holding the splash for it is
+  // what keeps a Spanish user from seeing one English frame on every launch.
+  useEffect(() => {
+    hydrateLanguage().finally(() => setLanguageReady(true));
+  }, []);
 
   useEffect(() => {
     initializeNativeBridge({
@@ -61,12 +78,12 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (loaded && bridgeReady) {
+    if (loaded && bridgeReady && languageReady) {
       SplashScreen.hideAsync();
     }
-  }, [loaded, bridgeReady]);
+  }, [loaded, bridgeReady, languageReady]);
 
-  if (!loaded || !bridgeReady) {
+  if (!loaded || !bridgeReady || !languageReady) {
     return null;
   }
 

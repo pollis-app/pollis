@@ -1,7 +1,9 @@
 import { Text, Pressable } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
 import { SheetOverlay } from "./SheetOverlay";
+import { upper } from "../../i18n";
 
 function MenuItem({
   icon,
@@ -57,19 +59,20 @@ export function ChannelMenuSheet({
   onGroupSettings?: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("mobile");
   return (
     <SheetOverlay onClose={onClose}>
       <MenuItem
         testID="btn-menu-info"
         icon={<Icon.info color={semantic.ink} />}
-        label="Conversation info"
+        label={t("nav:panel.ariaLabel")}
         onPress={onInfo}
       />
       {onGroupSettings ? (
         <MenuItem
           testID="btn-menu-group-settings"
           icon={<Icon.gear color={semantic.ink} />}
-          label="Group settings"
+          label={t("chat.groupSettings")}
           onPress={onGroupSettings}
         />
       ) : null}
@@ -77,13 +80,15 @@ export function ChannelMenuSheet({
         onPress={onClose}
         testID="btn-menu-cancel"
         accessibilityRole="button"
-        accessibilityLabel="Cancel"
+        accessibilityLabel={t("common:actions.cancel")}
         style={{
           paddingVertical: 14,
           alignItems: "center",
         }}
       >
-        <Text style={[ty.label, { color: semantic.mute }]}>CANCEL</Text>
+        <Text style={[ty.label, { color: semantic.mute }]}>
+          {upper(t("common:actions.cancel"))}
+        </Text>
       </Pressable>
     </SheetOverlay>
   );

@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { View, Text } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -22,6 +23,7 @@ import {
   previewText,
 } from "../../hooks/queries";
 import { timeAgoShort } from "../../lib/timeAgo";
+import { upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
@@ -29,6 +31,7 @@ import { TwoPane, DetailPlaceholder } from "../../components/MasterDetail";
 import { ChatView } from "../chat/[id]";
 
 function Groups() {
+  const { t } = useTranslation("channels");
   const router = useRouter();
   const { data: groups = [], isLoading, isError } = useUserGroupsWithChannels();
   const { data: invites = [] } = usePendingGroupInvites();
@@ -71,34 +74,41 @@ function Groups() {
   // compact save for the row onPress, which only skips the push on regular.
   const listColumn = (
     <>
-      <Crumb segs={[{ label: "GROUPS", leaf: true }]} end={String(totalChannels)} />
+      <Crumb
+        segs={[{ label: upper(t("nav:breadcrumb.groups")), leaf: true }]}
+        end={String(totalChannels)}
+      />
       <Body>
         {invites.length > 0 ? (
           <View>
-            <SectionTitle>PENDING INVITES</SectionTitle>
+            <SectionTitle>{upper(t("mobile:groups.pendingInvites"))}</SectionTitle>
             {invites.map((inv) => (
               <ListRow
                 key={inv.id}
                 testID={`row-invite-${inv.id}`}
                 glyph={<Icon.inbox color={semantic.accent} />}
                 name={inv.group_name}
-                sub={`from @${inv.inviter_username ?? "someone"}`}
+                sub={t("invites.invitedBy", {
+                  name: inv.inviter_username
+                    ? `@${inv.inviter_username}`
+                    : t("nav:statusBar.someone"),
+                })}
                 end={
                   <View style={{ flexDirection: "row", gap: 6 }}>
                     <Chip
                       testID={`btn-decline-invite-${inv.id}`}
-                      accessibilityLabel="Decline invite"
+                      accessibilityLabel={t("mobile:groups.declineInviteLabel")}
                       onPress={() => declineInvite.mutate(inv.id)}
                     >
-                      Decline
+                      {t("invites.decline")}
                     </Chip>
                     <Chip
                       testID={`btn-accept-invite-${inv.id}`}
-                      accessibilityLabel="Accept invite"
+                      accessibilityLabel={t("mobile:groups.acceptInviteLabel")}
                       variant="on"
                       onPress={() => acceptInvite.mutate(inv.id)}
                     >
-                      {acceptInvite.isPending ? "…" : "Accept"}
+                      {acceptInvite.isPending ? "…" : t("invites.accept")}
                     </Chip>
                   </View>
                 }
@@ -116,7 +126,7 @@ function Groups() {
               paddingTop: 12,
             }}
           >
-            Loading groups…
+            {t("mobile:groups.loading")}
           </Text>
         ) : null}
         {isError ? (
@@ -129,7 +139,7 @@ function Groups() {
               paddingTop: 12,
             }}
           >
-            Couldn't load groups.
+            {t("groups.loadFailed")}
           </Text>
         ) : null}
         {!isLoading && !isError && groups.length === 0 ? (
@@ -142,13 +152,13 @@ function Groups() {
               paddingTop: 12,
             }}
           >
-            No groups yet. Create one to get started.
+            {t("mobile:groups.empty")}
           </Text>
         ) : null}
         {groups.map((g) => (
           <View key={g.id}>
             <SectionTitle right={<Icon.fwd color={semantic.mute} />}>
-              {g.name.toUpperCase()}
+              {upper(g.name)}
             </SectionTitle>
             {g.channels.length === 0 ? (
               <Text
@@ -160,7 +170,7 @@ function Groups() {
                   paddingVertical: 6,
                 }}
               >
-                No channels.
+                {t("mobile:group.common.noChannels")}
               </Text>
             ) : null}
             {g.channels.map((c) => {
@@ -176,7 +186,12 @@ function Groups() {
                   name={c.name}
                   sub={
                     preview
-                      ? `${last?.sender_username ? `${last.sender_username}: ` : ""}${preview}`
+                      ? last?.sender_username
+                        ? t("chat:preview.withSender", {
+                            name: last.sender_username,
+                            text: preview,
+                          })
+                        : preview
                       : (c.description ?? undefined)
                   }
                   end={
@@ -227,7 +242,7 @@ function Groups() {
           icon={<Icon.plus color={semantic.ink} />}
           onPress={() => router.push("/group/new")}
         >
-          New Group
+          {t("groups.create")}
         </Button>
         <Button
           testID="btn-join-group"
@@ -236,7 +251,7 @@ function Groups() {
           icon={<Icon.search color={semantic.ink} />}
           onPress={() => router.push("/group/discover")}
         >
-          Join Group
+          {t("groups.find")}
         </Button>
       </BottomAction>
     </>

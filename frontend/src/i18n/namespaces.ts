@@ -24,6 +24,10 @@ export const NAMESPACES = [
   "vault",
   "errors",
   "arcade",
+  // Copy that exists only in the mobile app. It lives in this directory so the
+  // translators, `i18n-check` and the plural rules cover it like everything
+  // else; the desktop bundles it and never calls it.
+  "mobile",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

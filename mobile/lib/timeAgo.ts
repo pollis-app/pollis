@@ -1,6 +1,8 @@
 // Compact relative timestamp for conversation-list rows ("now", "5m", "2h",
 // "3d", then a short date). Mobile counterpart to desktop's `utils/timeAgo`,
-// shortened to fit a list row's trailing slot (no i18n layer on mobile yet).
+// shortened to fit a list row's trailing slot.
+
+import i18n, { activeLocale, upper } from "../i18n";
 
 export function timeAgoShort(input: string | number | Date): string {
   const d = input instanceof Date ? input : new Date(input);
@@ -10,21 +12,21 @@ export function timeAgoShort(input: string | number | Date): string {
   }
   const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
   if (diffSec < 60) {
-    return "now";
+    return i18n.t("mobile:timeAgo.now");
   }
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) {
-    return `${diffMin}m`;
+    return i18n.t("common:timeAgo.minutes", { count: diffMin });
   }
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) {
-    return `${diffHr}h`;
+    return i18n.t("common:timeAgo.hours", { count: diffHr });
   }
   const diffDay = Math.floor(diffHr / 24);
   if (diffDay < 7) {
-    return `${diffDay}d`;
+    return i18n.t("common:timeAgo.days", { count: diffDay });
   }
-  return d
-    .toLocaleDateString(undefined, { month: "short", day: "numeric" })
-    .toUpperCase();
+  return upper(
+    d.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" }),
+  );
 }

@@ -1,5 +1,6 @@
 import { View, Text } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -17,8 +18,10 @@ import {
   useRejectJoinRequest,
   useUserGroupsWithChannels,
 } from "../../hooks/queries";
+import { activeLocale, upper } from "../../i18n";
 
 export default function JoinRequests() {
+  const { t } = useTranslation("channels");
   const { groupId } = useLocalSearchParams<{ groupId?: string }>();
   const id = groupId ?? null;
   const { data: groups = [] } = useUserGroupsWithChannels();
@@ -31,14 +34,14 @@ export default function JoinRequests() {
     <Screen testID="screen-group-requests">
       <Crumb
         segs={[
-          { label: "GROUPS" },
-          { label: group?.name ?? "Group" },
-          { label: "Requests", leaf: true },
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: group?.name ?? t("mobile:group.common.fallbackName") },
+          { label: t("nav:breadcrumb.requests"), leaf: true },
         ]}
         end={String(requests.length)}
       />
       <Body>
-        <SectionTitle>PENDING REQUESTS</SectionTitle>
+        <SectionTitle>{upper(t("mobile:group.requests.pendingSection"))}</SectionTitle>
         {isLoading ? (
           <Text
             style={{
@@ -49,7 +52,7 @@ export default function JoinRequests() {
               paddingVertical: 12,
             }}
           >
-            Loading…
+            {t("common:states.loading")}
           </Text>
         ) : null}
         {!isLoading && requests.length === 0 ? (
@@ -62,7 +65,7 @@ export default function JoinRequests() {
               paddingVertical: 12,
             }}
           >
-            No pending requests.
+            {t("joinRequests.empty")}
           </Text>
         ) : null}
         {requests.map((r) => {
@@ -75,23 +78,25 @@ export default function JoinRequests() {
               glyph={<Avatar label={handle.slice(0, 2)} />}
               name={`@${handle}`}
               nameStyle={{ fontSize: 14 }}
-              sub={`requested ${new Date(r.created_at).toLocaleDateString()}`}
+              sub={t("mobile:group.requests.requested", {
+                date: new Date(r.created_at).toLocaleDateString(activeLocale()),
+              })}
               end={
                 <View style={{ flexDirection: "row", gap: 6 }}>
                   <Chip
                     testID={`btn-reject-${r.id}`}
-                    accessibilityLabel="Decline request"
+                    accessibilityLabel={t("mobile:group.requests.declineLabel")}
                     onPress={() => reject.mutate(r.id)}
                   >
-                    Decline
+                    {t("joinRequests.reject")}
                   </Chip>
                   <Chip
                     variant="on"
                     testID={`btn-approve-${r.id}`}
-                    accessibilityLabel="Approve request"
+                    accessibilityLabel={t("mobile:group.requests.approveLabel")}
                     onPress={() => approve.mutate(r.id)}
                   >
-                    {approve.isPending ? "…" : "Approve"}
+                    {approve.isPending ? "…" : t("joinRequests.approve")}
                   </Chip>
                 </View>
               }
@@ -109,11 +114,14 @@ export default function JoinRequests() {
             }}
           >
             {((approve.error ?? reject.error) as Error).message ||
-              "Couldn't process the request."}
+              t("mobile:group.requests.processFailed")}
           </Text>
         ) : null}
       </Body>
-      <Ctx cr={group?.name ?? "GROUP"} name="Join requests" />
+      <Ctx
+        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
+        name={t("group.joinRequests")}
+      />
     </Screen>
   );
 }

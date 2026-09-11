@@ -6,6 +6,7 @@
 import { useMemo } from "react";
 import { View, Text, useWindowDimensions } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -30,6 +31,7 @@ import {
 import { MediaImage } from "../../components/Media";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { upper } from "../../i18n";
 
 // Cap on grid tiles, matching desktop's MembersPanel (#826): each tile
 // resolves its own bytes through the media transport, so an unbounded grid
@@ -39,6 +41,7 @@ const MEDIA_LIMIT = 30;
 
 function ConversationInfo() {
   const router = useRouter();
+  const { t } = useTranslation("mobile");
   const params = useLocalSearchParams<{
     id?: string;
     kind?: string;
@@ -112,8 +115,10 @@ function ConversationInfo() {
     return out;
   }, [messagesData]);
 
-  const ctxLabel = kind === "dm" ? "DIRECT" : "CHANNEL";
-  const title = params.name ?? "Conversation";
+  const ctxLabel = upper(
+    kind === "dm" ? t("tabs.direct") : t("channels:channel.fallbackTitle"),
+  );
+  const title = params.name ?? t("conversationInfo.fallbackTitle");
   // Three-column grid: screen width minus the Body's horizontal padding and
   // the two inter-tile gaps.
   const tile = Math.floor((width - 18 * 2 - 6 * 2) / 3);
@@ -121,11 +126,20 @@ function ConversationInfo() {
   return (
     <Screen testID="screen-conversation-info">
       <Crumb
-        segs={[{ label: ctxLabel }, { label: "Info", leaf: true }]}
+        segs={[
+          { label: ctxLabel },
+          { label: t("conversationInfo.info"), leaf: true },
+        ]}
         end={roster.length > 0 ? String(roster.length) : undefined}
       />
       <Body>
-        <SectionTitle>{`MEMBERS${roster.length > 0 ? ` · ${roster.length}` : ""}`}</SectionTitle>
+        <SectionTitle>
+          {upper(
+            roster.length > 0
+              ? t("nav:members.count", { count: roster.length })
+              : t("channels:group.members"),
+          )}
+        </SectionTitle>
         {roster.length === 0 ? (
           <Text
             style={{
@@ -136,7 +150,7 @@ function ConversationInfo() {
               paddingVertical: 8,
             }}
           >
-            Loading…
+            {t("common:states.loading")}
           </Text>
         ) : null}
         {roster.map((m) => {
@@ -147,13 +161,17 @@ function ConversationInfo() {
               testID={`row-member-${m.userId}`}
               minHeight={54}
               glyph={<Avatar label={m.handle.slice(0, 2)} />}
-              name={`@${m.handle}${isMe ? " · you" : ""}`}
+              name={
+                isMe
+                  ? t("conversationInfo.memberSelf", { handle: m.handle })
+                  : `@${m.handle}`
+              }
               nameStyle={{ fontSize: 14 }}
               sub={
                 m.role === "owner"
-                  ? "Owner"
+                  ? t("conversationInfo.roleOwner")
                   : m.role === "admin"
-                    ? "Admin"
+                    ? t("conversationInfo.roleAdmin")
                     : undefined
               }
               onPress={
@@ -170,7 +188,7 @@ function ConversationInfo() {
           );
         })}
 
-        <SectionTitle>SHARED MEDIA</SectionTitle>
+        <SectionTitle>{upper(t("nav:media.heading"))}</SectionTitle>
         {attachments.length === 0 ? (
           <Text
             style={{
@@ -181,7 +199,7 @@ function ConversationInfo() {
               paddingVertical: 8,
             }}
           >
-            No media shared yet.
+            {t("nav:media.empty")}
           </Text>
         ) : (
           <View
@@ -203,7 +221,7 @@ function ConversationInfo() {
           </View>
         )}
       </Body>
-      <Ctx cr={ctxLabel} name={`${title} · Info`} />
+      <Ctx cr={ctxLabel} name={t("conversationInfo.ctxName", { title })} />
       <BottomAction>
         <Button
           full
@@ -212,7 +230,7 @@ function ConversationInfo() {
           onPress={() => router.back()}
           icon={<Icon.back color={semantic.ink} />}
         >
-          Back to conversation
+          {t("conversationInfo.backToConversation")}
         </Button>
       </BottomAction>
     </Screen>

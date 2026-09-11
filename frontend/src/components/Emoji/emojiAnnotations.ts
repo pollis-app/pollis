@@ -4,12 +4,14 @@
  * The generated table's `name` is the English Unicode name, so on its own the
  * picker only understood English queries even once its chrome was translated.
  * CLDR ships a per-locale name and keyword list for every emoji; the generator
- * vendors them (see `scripts/generate-emoji-data.py`) as one lazily-imported
- * module per locale under `annotations/`, and this module is the shape the
- * picker consumes them in.
+ * vendors them (see `scripts/generate-emoji-data.py`) as one module per locale
+ * under `annotations/`, and this module is the shape the picker consumes them
+ * in.
  *
  * Type-only imports on purpose, like `emojiShortcodeQuery.ts`: it keeps the
  * module out of the startup chunk and lets `node --test` load it directly.
+ * The mobile app carries a byte-identical copy (`scripts/i18n-check.mjs`
+ * fails when the two drift) — edit this one and copy it across.
  */
 
 import type { StandardEmoji } from "./emojiData";

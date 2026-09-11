@@ -1,5 +1,6 @@
 import { View, Text, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { Trans, useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -14,6 +15,7 @@ import {
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts } from "../../theme/tokens";
+import { upper } from "../../i18n";
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import {
@@ -35,6 +37,7 @@ interface RawProfile {
 }
 
 function UserProfile() {
+  const { t } = useTranslation("dms");
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const peerId = id ?? null;
@@ -65,7 +68,8 @@ function UserProfile() {
   const block = useBlockUser();
   const unblock = useUnblockUser();
 
-  const handle = profile.data?.username ?? peerId ?? "user";
+  const handle =
+    profile.data?.username ?? peerId ?? t("mobile:user.fallbackHandle");
   const display = profile.data?.preferred_name || handle;
   const avatarLabel = handle.slice(0, 2);
 
@@ -109,7 +113,12 @@ function UserProfile() {
 
   return (
     <Screen testID="screen-user">
-      <Crumb segs={[{ label: "USER" }, { label: display, leaf: true }]} />
+      <Crumb
+        segs={[
+          { label: upper(t("mobile:user.title")) },
+          { label: display, leaf: true },
+        ]}
+      />
       <Body>
         <View
           style={{
@@ -153,19 +162,23 @@ function UserProfile() {
                 color: semantic.mute,
               }}
             >
-              This is you. Edit your handle and display name in{" "}
-              <Text
-                onPress={() => router.push("/self/user-settings")}
-                style={{ color: semantic.accent }}
-              >
-                Self → User settings
-              </Text>
-              .
+              <Trans
+                t={t}
+                i18nKey="mobile:user.selfNote"
+                components={{
+                  link: (
+                    <Text
+                      onPress={() => router.push("/self/user-settings")}
+                      style={{ color: semantic.accent }}
+                    />
+                  ),
+                }}
+              />
             </Text>
           </View>
         ) : (
           <View>
-            <SectionTitle>SAFETY NUMBER</SectionTitle>
+            <SectionTitle>{upper(t("profile.safetyNumber"))}</SectionTitle>
             <View style={{ paddingHorizontal: 18 }}>
               {safety.isLoading ? (
                 <Text
@@ -175,7 +188,7 @@ function UserProfile() {
                     color: semantic.mute,
                   }}
                 >
-                  Computing…
+                  {t("mobile:user.computing")}
                 </Text>
               ) : safety.isError ? (
                 <Text
@@ -186,7 +199,7 @@ function UserProfile() {
                   }}
                 >
                   {(safety.error as Error).message ||
-                    "Couldn't fetch safety number."}
+                    t("mobile:user.safetyNumberFailed")}
                 </Text>
               ) : safety.data ? (
                 <Card
@@ -229,8 +242,8 @@ function UserProfile() {
                         {setVerified.isPending
                           ? "…"
                           : safety.data.verification === "verified"
-                            ? "◆ Verified"
-                            : "Mark verified"}
+                            ? t("mobile:user.verified")
+                            : t("profile.markVerified")}
                       </Chip>
                     </Pressable>
                     {safety.data.verification === "changed" ? (
@@ -242,8 +255,7 @@ function UserProfile() {
                           flex: 1,
                         }}
                       >
-                        Key changed since you last verified — re-verify in
-                        person.
+                        {t("mobile:user.keyChanged")}
                       </Text>
                     ) : null}
                   </View>
@@ -258,13 +270,11 @@ function UserProfile() {
                   lineHeight: 16,
                 }}
               >
-                Compare these digits in person or over an out-of-band
-                channel. Matching numbers prove you're talking to the same
-                key the server published for this user.
+                {t("mobile:user.compareHint")}
               </Text>
             </View>
 
-            <SectionTitle>SAFETY ACTIONS</SectionTitle>
+            <SectionTitle>{upper(t("mobile:user.safetyActionsHeading"))}</SectionTitle>
             <View style={{ paddingHorizontal: 18 }}>
               <Button
                 full
@@ -279,16 +289,16 @@ function UserProfile() {
                 disabled={block.isPending || unblock.isPending}
               >
                 {block.isPending || unblock.isPending
-                  ? "WORKING…"
+                  ? upper(t("mobile:common.working"))
                   : isBlocked
-                    ? "UNBLOCK USER"
-                    : "BLOCK USER"}
+                    ? upper(t("mobile:user.unblockUser"))
+                    : upper(t("mobile:user.blockUser"))}
               </Button>
             </View>
           </View>
         )}
       </Body>
-      <Ctx cr="USER" name={display} />
+      <Ctx cr={upper(t("mobile:user.title"))} name={display} />
       {!isSelf ? (
         <BottomAction>
           <Button
@@ -299,7 +309,9 @@ function UserProfile() {
             disabled={createDM.isPending}
             iconRight={<Icon.send color="#0a0907" />}
           >
-            {createDM.isPending ? "OPENING…" : "MESSAGE"}
+            {createDM.isPending
+              ? upper(t("mobile:user.opening"))
+              : upper(t("mobile:user.message"))}
           </Button>
         </BottomAction>
       ) : null}

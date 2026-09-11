@@ -1,0 +1,98 @@
+appId: com.pollis.mobile
+tags:
+  - parity
+---
+# LANGUAGE (#1074) — the mobile counterpart of e2e/i18n.spec.ts: switching
+# language changes rendered copy, the choice survives a relaunch, and picking
+# the RTL locale flips the layout on the next launch. Self-contained.
+#
+# Asserts on real translated copy (settings:language.heading in es / ar) rather
+# than a synthetic locale: mobile has no test-locale injection, and the shipped
+# catalogues carry this key in every language, so the assertion is stable.
+
+- runFlow: ../subflows/sign-in.yaml
+
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- assertVisible:
+    id: "screen-self-preferences"
+- scrollUntilVisible:
+    element:
+      id: "pref-language"
+    direction: DOWN
+- assertVisible:
+    text: "LANGUAGE"
+- takeScreenshot: i18n-01-english
+
+# Switch to Spanish: the heading re-renders in Spanish without a restart.
+- tapOn:
+    id: "chip-language-es"
+- assertVisible:
+    text: "IDIOMA"
+- takeScreenshot: i18n-02-spanish
+
+# The choice is device-local and survives a relaunch (no clearState here).
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-self"
+    timeout: 30000
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- scrollUntilVisible:
+    element:
+      id: "pref-language"
+    direction: DOWN
+- assertVisible:
+    text: "IDIOMA"
+- takeScreenshot: i18n-03-spanish-persisted
+
+# Arabic: copy flips immediately; the layout direction needs a relaunch, and
+# the screen says so.
+- tapOn:
+    id: "chip-language-ar"
+- assertVisible:
+    id: "pref-language-restart"
+- takeScreenshot: i18n-04-arabic-restart-pending
+- stopApp
+- launchApp
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-pin"
+    commands:
+      - runFlow: ../subflows/enter-pin.yaml
+- extendedWaitUntil:
+    visible:
+      id: "tab-self"
+    timeout: 30000
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-preferences"
+- scrollUntilVisible:
+    element:
+      id: "pref-language"
+    direction: DOWN
+# Mirrored now: the restart notice is gone and the back affordance sits on the
+# trailing (right) edge — the screenshot is what the visual evaluator checks.
+- assertNotVisible:
+    id: "pref-language-restart"
+- takeScreenshot: i18n-05-arabic-rtl
+
+# Leave the device in English for the flows that follow.
+- tapOn:
+    id: "chip-language-en"
+- assertVisible:
+    text: "LANGUAGE"

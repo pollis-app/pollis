@@ -14,10 +14,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { View, Text, Share } from "react-native";
+import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
 import { Card, Button } from "./ui";
 import { Icon } from "./icons";
 import { palette, semantic, type as ty } from "../theme/tokens";
+import { activeLocale, upper } from "../i18n";
 import type { CreatedInviteLink } from "../hooks/queries";
 
 type CopyState = "idle" | "copied" | "failed";
@@ -26,6 +28,7 @@ type CopyState = "idle" | "copied" | "failed";
 const COPY_FEEDBACK_MS = 2000;
 
 export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
+  const { t } = useTranslation("channels");
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -58,18 +61,22 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
 
   const bounds: string[] = [];
   if (link.max_uses != null) {
-    bounds.push(link.max_uses === 1 ? "1 use" : `${link.max_uses} uses`);
+    bounds.push(t("inviteLinks.maxUses", { count: link.max_uses }));
   }
   if (link.expires_at) {
-    bounds.push(`expires ${new Date(link.expires_at).toLocaleString()}`);
+    bounds.push(
+      t("inviteLinks.expiresOn", {
+        date: new Date(link.expires_at).toLocaleString(activeLocale()),
+      }),
+    );
   }
   const boundsLabel =
-    bounds.length > 0 ? bounds.join(" · ") : "No expiry · unlimited uses";
+    bounds.length > 0 ? bounds.join(" · ") : t("inviteLinks.unbounded");
 
   return (
     <Card style={{ gap: 10 }}>
       <Text style={[ty.label, { color: semantic.accent }]}>
-        LINK CREATED — COPY IT NOW
+        {upper(t("mobile:group.invite.linkCreated"))}
       </Text>
       <Text
         style={{
@@ -79,8 +86,7 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
           lineHeight: 16,
         }}
       >
-        This is the only time this link can be shown. Nobody — including you —
-        can view it again. To share it later, create a new one.
+        {t("mobile:group.invite.linkOnce")}
       </Text>
       <View
         style={{
@@ -122,10 +128,10 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
             }
           >
             {copyState === "copied"
-              ? "COPIED"
+              ? upper(t("inviteLinks.copied"))
               : copyState === "failed"
-                ? "COPY FAILED"
-                : "COPY"}
+                ? upper(t("inviteLinks.copyFailed"))
+                : upper(t("inviteLinks.copy"))}
           </Button>
         </View>
         <View style={{ flex: 1 }}>
@@ -135,7 +141,7 @@ export function CreatedInviteLinkCard({ link }: { link: CreatedInviteLink }) {
             onPress={onShare}
             icon={<Icon.share color={semantic.ink} />}
           >
-            SHARE
+            {upper(t("mobile:group.invite.share"))}
           </Button>
         </View>
       </View>

@@ -2,6 +2,8 @@
 // frontend/src/utils/urlRouting.ts — the wire format is
 // `pollis://m/<conversation_id>/<message_id>` on every platform.
 
+import i18n from "../i18n";
+
 const PERMALINK_PREFIX = "pollis://m/";
 
 // ULIDs today, but validated loosely on purpose: opaque, short, URL-safe.
@@ -37,5 +39,6 @@ export function parseMessagePermalink(
  * Desktop's exact non-oracle miss copy — a failed resolve renders this and
  * navigates nowhere, indistinguishable from a lookup error on purpose.
  */
-export const PERMALINK_MISS_COPY =
-  "You do not have this message on this device.";
+export function permalinkMissCopy(): string {
+  return i18n.t("saved:page.unresolved");
+}

@@ -40,6 +40,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useObserver } from "mobx-react-lite";
 import { invoke } from "./native";
 import { appStore } from "../stores/appStore";
+import i18n from "../i18n";
 
 /** Offered windows, mirroring desktop's `AUTO_LOCK_OPTIONS`. `null` = Off. */
 export const AUTO_LOCK_OPTIONS_MINUTES: readonly (number | null)[] = [
@@ -53,9 +54,9 @@ export const AUTO_LOCK_OPTIONS_MINUTES: readonly (number | null)[] = [
 /** Human label for a window value (Off / 1 min / …). */
 export function autoLockLabel(minutes: number | null): string {
   if (minutes === null) {
-    return "Off";
+    return i18n.t("settings:security.autoLockOff");
   }
-  return `${minutes} min`;
+  return i18n.t("settings:security.autoLockMinutes", { count: minutes });
 }
 
 const STORE_KEY = "pollis_auto_lock_minutes";

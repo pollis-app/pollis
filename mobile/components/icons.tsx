@@ -41,6 +41,7 @@ import {
   MessagesSquare,
   type LucideIcon,
 } from "lucide-react-native";
+import { I18nManager, View } from "react-native";
 import { semantic } from "../theme/tokens";
 
 type P = { size?: number; color?: string };
@@ -55,11 +56,28 @@ const wrap =
     />
   );
 
+// Yoga mirrors layout under RTL but never the glyph inside an icon, so an
+// icon that ENCODES direction ("back", "forward") is flipped here — and only
+// those. A magnifier or a bell means the same thing in both directions, and a
+// mirrored one would just be wrong (#1074, the same rule as desktop's
+// `.rtl-mirror`).
+const mirrored =
+  (C: LucideIcon, defaultSize = 14) =>
+  ({ size, color }: P) => (
+    <View style={I18nManager.isRTL ? { transform: [{ scaleX: -1 }] } : undefined}>
+      <C
+        size={size ?? defaultSize}
+        color={color ?? semantic.ink}
+        strokeWidth={1.2}
+      />
+    </View>
+  );
+
 export const Icon = {
-  back: wrap(ChevronLeft),
-  fwd: wrap(ChevronRight),
-  arrowLeft: wrap(ArrowLeft),
-  arrowRight: wrap(ArrowRight),
+  back: mirrored(ChevronLeft),
+  fwd: mirrored(ChevronRight),
+  arrowLeft: mirrored(ArrowLeft),
+  arrowRight: mirrored(ArrowRight),
   search: wrap(Search, 16),
   gear: wrap(Settings, 16),
   plus: wrap(Plus),

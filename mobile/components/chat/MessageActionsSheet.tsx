@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { View, Text, Pressable } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Icon } from "../icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
 import { SheetOverlay } from "./SheetOverlay";
+import { upper } from "../../i18n";
 import type { Message } from "../../hooks/queries";
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
@@ -99,6 +101,7 @@ export function MessageActionsSheet({
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const [textCopy, setTextCopy] = useState<CopyState>("idle");
   const [linkCopy, setLinkCopy] = useState<CopyState>("idle");
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -141,7 +144,7 @@ export function MessageActionsSheet({
             key={emoji}
             testID={`btn-react-${ei}`}
             accessibilityRole="button"
-            accessibilityLabel={`React ${emoji}`}
+            accessibilityLabel={t("mobile:chat.reactWith", { emoji })}
             onPress={() => onReact(emoji)}
             style={{
               width: 44,
@@ -159,7 +162,7 @@ export function MessageActionsSheet({
         <Pressable
           testID="btn-react-more"
           accessibilityRole="button"
-          accessibilityLabel="More reactions"
+          accessibilityLabel={t("reactions.add")}
           onPress={onOpenPicker}
           style={{
             width: 44,
@@ -178,7 +181,7 @@ export function MessageActionsSheet({
       <ActionButton
         testID="btn-reply-thread"
         icon={<Icon.thread color={semantic.ink} />}
-        label="Reply in thread"
+        label={t("actions.replyInThread")}
         onPress={onReplyInThread}
       />
       <ActionButton
@@ -188,7 +191,7 @@ export function MessageActionsSheet({
             color={isSaved ? semantic.accent : semantic.ink}
           />
         }
-        label={isSaved ? "Unsave message" : "Save message"}
+        label={isSaved ? t("actions.removeBookmark") : t("actions.save")}
         tone={isSaved ? "accent" : "default"}
         onPress={onToggleSave}
       />
@@ -207,10 +210,10 @@ export function MessageActionsSheet({
         }
         label={
           textCopy === "copied"
-            ? "Copied"
+            ? t("mobile:chat.copied")
             : textCopy === "failed"
-              ? "Couldn't copy"
-              : "Copy text"
+              ? t("mobile:chat.copyFailed")
+              : t("mobile:chat.copyText")
         }
         tone={
           textCopy === "copied"
@@ -237,10 +240,10 @@ export function MessageActionsSheet({
         }
         label={
           linkCopy === "copied"
-            ? "Link copied"
+            ? t("actions.copyLinkCopied")
             : linkCopy === "failed"
-              ? "Couldn't copy link"
-              : "Copy message link"
+              ? t("actions.copyLinkFailed")
+              : t("actions.copyLink")
         }
         tone={
           linkCopy === "copied"
@@ -259,7 +262,7 @@ export function MessageActionsSheet({
             onPress={onEdit}
             testID="btn-edit"
             accessibilityRole="button"
-            accessibilityLabel="Edit message"
+            accessibilityLabel={t("actions.edit")}
             style={{
               paddingVertical: 14,
               paddingHorizontal: 12,
@@ -279,14 +282,14 @@ export function MessageActionsSheet({
                 color: semantic.ink,
               }}
             >
-              Edit message
+              {t("actions.edit")}
             </Text>
           </Pressable>
           <Pressable
             onPress={onDelete}
             testID="btn-delete"
             accessibilityRole="button"
-            accessibilityLabel="Delete message"
+            accessibilityLabel={t("actions.delete")}
             style={{
               paddingVertical: 14,
               paddingHorizontal: 12,
@@ -306,7 +309,7 @@ export function MessageActionsSheet({
                 color: semantic.danger,
               }}
             >
-              Delete message
+              {t("actions.delete")}
             </Text>
           </Pressable>
         </>
@@ -316,13 +319,15 @@ export function MessageActionsSheet({
         onPress={onClose}
         testID="btn-action-cancel"
         accessibilityRole="button"
-        accessibilityLabel="Cancel"
+        accessibilityLabel={t("common:actions.cancel")}
         style={{
           paddingVertical: 14,
           alignItems: "center",
         }}
       >
-        <Text style={[ty.label, { color: semantic.mute }]}>CANCEL</Text>
+        <Text style={[ty.label, { color: semantic.mute }]}>
+          {upper(t("common:actions.cancel"))}
+        </Text>
       </Pressable>
     </SheetOverlay>
   );

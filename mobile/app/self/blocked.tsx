@@ -1,4 +1,5 @@
 import { View, Text } from "react-native";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -10,20 +11,25 @@ import {
   Ctx,
 } from "../../components/ui";
 import { semantic, type as ty } from "../../theme/tokens";
+import { activeLocale, upper } from "../../i18n";
 import { useBlockedUsers, useUnblockUser } from "../../hooks/queries";
 
 export default function Blocked() {
+  const { t } = useTranslation("dms");
   const { data: blocked = [], isLoading } = useBlockedUsers();
   const unblock = useUnblockUser();
 
   return (
     <Screen testID="screen-self-blocked" centered>
       <Crumb
-        segs={[{ label: "SELF" }, { label: "Blocked", leaf: true }]}
+        segs={[
+          { label: upper(t("mobile:self.title")) },
+          { label: t("mobile:self.blocked.title"), leaf: true },
+        ]}
         end={String(blocked.length)}
       />
       <Body>
-        <SectionTitle>BLOCKED USERS</SectionTitle>
+        <SectionTitle>{upper(t("blocked.pageTitle"))}</SectionTitle>
         {isLoading ? (
           <Text
             style={{
@@ -34,7 +40,7 @@ export default function Blocked() {
               paddingVertical: 12,
             }}
           >
-            Loading…
+            {t("common:states.loading")}
           </Text>
         ) : null}
         {!isLoading && blocked.length === 0 ? (
@@ -47,7 +53,7 @@ export default function Blocked() {
               paddingVertical: 12,
             }}
           >
-            You haven't blocked anyone.
+            {t("blocked.empty")}
           </Text>
         ) : null}
         {blocked.map((b) => {
@@ -60,14 +66,16 @@ export default function Blocked() {
               glyph={<Avatar label={handle.slice(0, 2)} />}
               name={`@${handle}`}
               nameStyle={{ fontSize: 14 }}
-              sub={`blocked ${new Date(b.created_at).toLocaleDateString()}`}
+              sub={t("mobile:self.blocked.blockedOn", {
+                date: new Date(b.created_at).toLocaleDateString(activeLocale()),
+              })}
               end={
                 <Chip
                   testID={`btn-unblock-${b.blocked_id}`}
-                  accessibilityLabel="Unblock"
+                  accessibilityLabel={t("mobile:self.blocked.unblock")}
                   onPress={() => unblock.mutate(b.blocked_id)}
                 >
-                  {unblock.isPending ? "…" : "Unblock"}
+                  {unblock.isPending ? "…" : t("mobile:self.blocked.unblock")}
                 </Chip>
               }
             />
@@ -83,11 +91,15 @@ export default function Blocked() {
               paddingTop: 6,
             }}
           >
-            {(unblock.error as Error).message || "Couldn't unblock."}
+            {(unblock.error as Error).message ||
+              t("mobile:self.blocked.unblockFailed")}
           </Text>
         ) : null}
       </Body>
-      <Ctx cr="SELF" name="Blocked" />
+      <Ctx
+        cr={upper(t("mobile:self.title"))}
+        name={t("mobile:self.blocked.title")}
+      />
     </Screen>
   );
 }

@@ -51,7 +51,16 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOCALES_DIR = join(ROOT, "frontend/src/i18n/locales");
-const SRC_DIR = join(ROOT, "frontend/src");
+// The two apps that call into the catalogues. Mobile reads the same files
+// (see mobile/metro.config.js), so its call sites are held to the same rule.
+const SRC_DIRS = [
+  join(ROOT, "frontend/src"),
+  join(ROOT, "mobile/app"),
+  join(ROOT, "mobile/components"),
+  join(ROOT, "mobile/hooks"),
+  join(ROOT, "mobile/lib"),
+  join(ROOT, "mobile/i18n"),
+];
 const BASE = "en";
 
 const PLURAL_SUFFIXES = ["zero", "one", "two", "few", "many", "other"];
@@ -320,7 +329,7 @@ function sourceFiles(dir, acc = []) {
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
     if (statSync(path).isDirectory()) {
-      if (entry !== "locales" && entry !== "__mocks__") {
+      if (entry !== "locales" && entry !== "__mocks__" && entry !== "node_modules") {
         sourceFiles(path, acc);
       }
     } else if (/\.(ts|tsx)$/.test(entry)) {
@@ -338,7 +347,7 @@ function resolves(key) {
 console.log("\ncall sites:");
 const unresolved = new Set();
 let callSites = 0;
-for (const file of sourceFiles(SRC_DIR)) {
+for (const file of SRC_DIRS.flatMap((dir) => sourceFiles(dir))) {
   const text = readFileSync(file, "utf8");
   const where = file.replace(ROOT + "/", "");
 
@@ -376,6 +385,52 @@ for (const file of sourceFiles(SRC_DIR)) {
 console.log(`  ${callSites} literal call sites checked`);
 for (const key of unresolved) {
   fail(`call site has no ${BASE} entry: ${key}`);
+}
+
+// 6. Mobile's static catalogue table matches the directory listing. Metro has
+// no glob, so mobile/i18n/resources.ts is generated; a locale or namespace
+// that landed here without regenerating it would render English on mobile.
+{
+  const { listCatalogues, render, OUTPUT_PATH } = await import(
+    "./mobile-i18n-resources.mjs"
+  );
+  let current = "";
+  try {
+    current = readFileSync(OUTPUT_PATH, "utf8");
+  } catch {
+    // Missing counts as stale.
+  }
+  if (current !== render(listCatalogues(LOCALES_DIR))) {
+    fail(
+      "mobile/i18n/resources.ts is stale — run `node scripts/mobile-i18n-resources.mjs`",
+    );
+  }
+}
+
+// 7. The emoji ranking/annotation modules mobile carries as copies match the
+// desktop originals. Mobile imports no frontend TypeScript (mobile/CLAUDE.md),
+// so these ~260 lines exist twice; the only permitted difference is where
+// `CustomEmoji` is imported from.
+{
+  const MIRRORED = ["emojiRank.ts", "emojiAnnotations.ts", "useEmojiAnnotations.ts"];
+  const normalise = (text) =>
+    text.replace(
+      /import type \{ CustomEmoji \} from "[^"]+";/,
+      'import type { CustomEmoji } from "<app>";',
+    );
+  for (const name of MIRRORED) {
+    const desktop = join(ROOT, "frontend/src/components/Emoji", name);
+    const mobile = join(ROOT, "mobile/components/emoji", name);
+    let same = false;
+    try {
+      same = normalise(readFileSync(desktop, "utf8")) === normalise(readFileSync(mobile, "utf8"));
+    } catch {
+      // A missing copy is a drift too.
+    }
+    if (!same) {
+      fail(`mobile/components/emoji/${name} has drifted from frontend/src/components/Emoji/${name} — edit the desktop one and copy it across`);
+    }
+  }
 }
 
 // Untranslated coverage, as a standing report rather than a gate.

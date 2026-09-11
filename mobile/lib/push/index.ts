@@ -15,6 +15,7 @@ import { Platform, Linking } from "react-native";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { invoke } from "../native";
+import i18n from "../../i18n";
 
 // Present foreground notifications as a banner / in the list, content-free
 // (no sound, no badge). This is pure config and safe at module load — it
@@ -38,7 +39,7 @@ async function ensureAndroidChannel(): Promise<void> {
     return;
   }
   await Notifications.setNotificationChannelAsync("default", {
-    name: "Messages",
+    name: i18n.t("mobile:push.channelMessages"),
     importance: Notifications.AndroidImportance.DEFAULT,
     // Content-free, in keeping with the privacy model — no custom sound.
     showBadge: false,

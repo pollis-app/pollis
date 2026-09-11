@@ -1,4 +1,5 @@
 import { View, Text, Pressable } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Avatar } from "../ui";
 import { semantic, type as ty } from "../../theme/tokens";
 import { MessageBodyInline } from "./MessageBody";
@@ -70,12 +71,13 @@ export function MessageRow({
   testID?: string;
   messageId?: string;
 }) {
+  const { t } = useTranslation("chat");
   return (
     <Pressable
       onLongPress={onLongPress}
       delayLongPress={350}
       testID={testID}
-      accessibilityLabel={text ? `${name}: ${text}` : name}
+      accessibilityLabel={text ? t("preview.withSender", { name, text }) : name}
       style={{
         flexDirection: "row",
         gap: 12,
@@ -105,7 +107,7 @@ export function MessageRow({
               color: semantic.mute,
             }}
           >
-            {pending ? "sending…" : time}
+            {pending ? t("status.sending") : time}
           </Text>
           <ReceiptIndicator
             receipts={receipt}
@@ -136,7 +138,7 @@ export function MessageRow({
                   color: semantic.mute,
                 }}
               >
-                {"  (edited)"}
+                {`  ${t("message.edited")}`}
               </Text>
             ) : null}
           </Text>
@@ -210,7 +212,7 @@ export function MessageRow({
             onPress={onOpenThread}
             testID={`btn-thread-${messageId ?? ""}`}
             accessibilityRole="button"
-            accessibilityLabel={`Open thread, ${threadCount} ${threadCount === 1 ? "reply" : "replies"}`}
+            accessibilityLabel={t("mobile:chat.openThread", { count: threadCount })}
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -226,7 +228,7 @@ export function MessageRow({
                 color: semantic.accent,
               }}
             >
-              {threadCount} {threadCount === 1 ? "reply" : "replies"} ›
+              {t("thread.replyCount", { count: threadCount })} ›
             </Text>
           </Pressable>
         ) : null}

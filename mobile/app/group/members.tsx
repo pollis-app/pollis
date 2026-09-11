@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -20,10 +21,12 @@ import {
   useUserGroupsWithChannels,
   sortMembersByRole,
 } from "../../hooks/queries";
+import { activeLocale, upper } from "../../i18n";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
 function Members() {
+  const { t } = useTranslation("channels");
   const router = useRouter();
   const { groupId } = useLocalSearchParams<{ groupId?: string }>();
   const id = groupId ?? null;
@@ -69,14 +72,14 @@ function Members() {
     <Screen testID="screen-group-members">
       <Crumb
         segs={[
-          { label: "GROUPS" },
-          { label: group?.name ?? "Group" },
-          { label: "Members", leaf: true },
+          { label: upper(t("nav:breadcrumb.groups")) },
+          { label: group?.name ?? t("mobile:group.common.fallbackName") },
+          { label: t("group.members"), leaf: true },
         ]}
         end={String(members.length || 0)}
       />
       <Body>
-        <SectionTitle>MEMBERS</SectionTitle>
+        <SectionTitle>{upper(t("group.members"))}</SectionTitle>
         {isLoading ? (
           <Text
             style={{
@@ -87,7 +90,7 @@ function Members() {
               paddingVertical: 12,
             }}
           >
-            Loading…
+            {t("common:states.loading")}
           </Text>
         ) : null}
         {sortedMembers.map((m) => {
@@ -112,15 +115,17 @@ function Members() {
                   }}
                 >
                   @{m.username ?? m.user_id.slice(0, 8)}
-                  {isMe ? " · you" : ""}
+                  {isMe ? ` ${t("members.self")}` : ""}
                 </Text>
               }
               sub={
                 isOwner
-                  ? "Owner"
+                  ? t("mobile:group.members.roleOwner")
                   : isAdmin
-                    ? "Admin"
-                    : `joined ${new Date(m.joined_at).toLocaleDateString()}`
+                    ? t("members.role.admin")
+                    : t("mobile:group.members.joined", {
+                        date: new Date(m.joined_at).toLocaleDateString(activeLocale()),
+                      })
               }
               onPress={
                 isMe
@@ -137,22 +142,30 @@ function Members() {
                     <Chip
                       variant={isAdmin ? "on" : "default"}
                       testID={`btn-toggle-role-${m.user_id}`}
-                      accessibilityLabel={isAdmin ? "Remove admin" : "Make admin"}
+                      accessibilityLabel={
+                        isAdmin
+                          ? t("mobile:group.members.removeAdmin")
+                          : t("mobile:group.members.makeAdmin")
+                      }
                       onPress={() => onToggleRole(m.user_id, m.role)}
                     >
-                      {setRole.isPending ? "…" : isAdmin ? "Admin" : "Make admin"}
+                      {setRole.isPending
+                        ? "…"
+                        : isAdmin
+                          ? t("members.adminToggle")
+                          : t("mobile:group.members.makeAdmin")}
                     </Chip>
                     <Chip
                       variant={armed ? "on" : "default"}
                       testID={`btn-remove-member-${m.user_id}`}
-                      accessibilityLabel="Remove member"
+                      accessibilityLabel={t("kickMember.pageTitle")}
                       onPress={() => onRemove(m.user_id)}
                     >
                       {removeMember.isPending && armed
                         ? "…"
                         : armed
-                          ? "Confirm"
-                          : "Remove"}
+                          ? t("mobile:group.common.confirm")
+                          : t("mobile:group.common.remove")}
                     </Chip>
                   </View>
                 ) : null
@@ -170,11 +183,14 @@ function Members() {
               paddingTop: 6,
             }}
           >
-            {(removeMember.error as Error).message || "Couldn't remove member."}
+            {(removeMember.error as Error).message || t("kickMember.removeFailed")}
           </Text>
         ) : null}
       </Body>
-      <Ctx cr={group?.name ?? "GROUP"} name="Members" />
+      <Ctx
+        cr={group?.name ?? upper(t("mobile:group.common.fallbackName"))}
+        name={t("group.members")}
+      />
     </Screen>
   );
 }

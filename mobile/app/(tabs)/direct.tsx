@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { View, Text } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import {
   Screen,
   Crumb,
@@ -28,9 +29,11 @@ import { observer } from "mobx-react-lite";
 import { useLayoutClass } from "../../hooks/useLayoutClass";
 import { TwoPane, DetailPlaceholder } from "../../components/MasterDetail";
 import { ChatView } from "../chat/[id]";
+import { upper } from "../../i18n";
 
 function Direct() {
   const router = useRouter();
+  const { t } = useTranslation("mobile");
   const { data: dms = [], isLoading, isError } = useDMChannels();
   const { data: requests = [] } = useDMRequests();
   const acceptRequest = useAcceptDMRequest();
@@ -70,13 +73,16 @@ function Direct() {
   // compact save for the row onPress, which only skips the push on regular.
   const listColumn = (
     <>
-      <Crumb segs={[{ label: "DIRECT", leaf: true }]} end={String(dms.length)} />
+      <Crumb
+        segs={[{ label: upper(t("tabs.direct")), leaf: true }]}
+        end={String(dms.length)}
+      />
       <Body>
         {requests.length > 0 ? (
           <View>
-            <SectionTitle>PENDING REQUESTS</SectionTitle>
+            <SectionTitle>{upper(t("dms:requests.pageTitle"))}</SectionTitle>
             {requests.map((d) => {
-              const handle = d.user2_identifier || "user";
+              const handle = d.user2_identifier || t("dms:profile.fallbackName");
               return (
                 <ListRow
                   key={d.id}
@@ -94,27 +100,27 @@ function Direct() {
                       @{handle}
                     </Text>
                   }
-                  sub="wants to message you"
+                  sub={t("direct.wantsToMessage")}
                   end={
                     <View style={{ flexDirection: "row", gap: 6 }}>
                       <Chip
                         testID={`btn-block-request-${d.id}`}
-                        accessibilityLabel="Block sender"
+                        accessibilityLabel={t("direct.blockSender")}
                         onPress={() => {
                           if (d.user2_id) {
                             blockUser.mutate(d.user2_id);
                           }
                         }}
                       >
-                        {blockUser.isPending ? "…" : "Block"}
+                        {blockUser.isPending ? "…" : t("nav:dmRequest.block")}
                       </Chip>
                       <Chip
                         testID={`btn-accept-request-${d.id}`}
-                        accessibilityLabel="Accept request"
+                        accessibilityLabel={t("direct.acceptRequest")}
                         variant="on"
                         onPress={() => acceptRequest.mutate(d.id)}
                       >
-                        {acceptRequest.isPending ? "…" : "Accept"}
+                        {acceptRequest.isPending ? "…" : t("nav:dmRequest.accept")}
                       </Chip>
                     </View>
                   }
@@ -133,7 +139,7 @@ function Direct() {
               paddingTop: 12,
             }}
           >
-            Loading conversations…
+            {t("direct.loading")}
           </Text>
         ) : null}
         {isError ? (
@@ -146,7 +152,7 @@ function Direct() {
               paddingTop: 12,
             }}
           >
-            Couldn't load conversations.
+            {t("direct.loadFailed")}
           </Text>
         ) : null}
         {!isLoading && !isError && dms.length === 0 ? (
@@ -159,11 +165,11 @@ function Direct() {
               paddingTop: 12,
             }}
           >
-            No direct messages yet.
+            {t("direct.empty")}
           </Text>
         ) : null}
         {dms.map((d) => {
-          const handle = d.user2_identifier || "user";
+          const handle = d.user2_identifier || t("dms:profile.fallbackName");
           const label = handle.slice(0, 2);
           const last = lastMessages[d.id];
           const preview = previewText(last);
@@ -232,7 +238,7 @@ function Direct() {
           icon={<Icon.plus color={semantic.ink} />}
           onPress={() => router.push("/dm/new")}
         >
-          NEW DIRECT MESSAGE
+          {upper(t("dms:list.newMessage"))}
         </Button>
       </BottomAction>
     </>
