@@ -10,8 +10,9 @@
 // Entries:              1581 (people 298, nature 149, food 128, activity 78, travel 214, objects 258, symbols 207, flags 249)
 // With shortcodes:      1574 entries, 1608 aliases
 //
-// Names come straight from `unicodedata.name()`, lowercased, and double as
-// the search keywords — there is deliberately no separate keyword field.
+// Names come straight from `unicodedata.name()`, lowercased, and are the
+// English search fallback. Localized names and keywords live in the per-locale
+// modules under `annotations/` (CLDR), which the picker loads on demand.
 // Categories approximate the CLDR groups; see the generator's docstring for
 // the exact ranges and the known approximation limits.
 //

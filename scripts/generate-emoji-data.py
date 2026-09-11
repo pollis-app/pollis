@@ -106,6 +106,38 @@ To refresh the vendored table against a newer gemoji release::
 then update the ``_version`` / ``_sha256`` fields by hand and re-run this
 script.
 
+Where the localized names and keywords come from
+------------------------------------------------
+``unicodedata.name()`` is English, so on its own the picker's search only works
+for English queries even after the picker chrome is localized (#901). The
+per-locale display name and search keywords come from **CLDR emoji
+annotations** — ``common/annotations/<lang>.xml`` (the ``tts`` entry is the
+name, the plain entry the ``|``-separated keywords) plus
+``common/annotationsDerived/<lang>.xml``, which is where CLDR files the flags.
+
+They are vendored, trimmed, in ``scripts/emoji-annotations.json`` for the same
+reasons the shortcodes are: the full CLDR files run to several MB per locale
+and cover thousands of sequences this table does not emit, while the trimmed
+JSON is static, diffable, and needs no install step. The JSON carries its own
+provenance (release tag, per-file sha256, licence) and is keyed
+``locale -> hyphen-joined uppercase codepoints -> [name, keyword, ...]``,
+lowercased, with U+FE0F stripped so the keys line up with the bare bases this
+file emits. Entries CLDR marks ``draft="provisional"`` / ``"unconfirmed"`` are
+skipped; ``contributed`` is kept.
+
+The locale set is read from ``frontend/src/i18n/languages.ts``, so adding a
+locale there and refreshing is the whole procedure::
+
+    python3 scripts/generate-emoji-data.py --refresh-annotations
+
+That mode is the ONLY one that touches the network (stdlib ``urllib``, pinned
+to ``CLDR_RELEASE``); a plain run stays offline and deterministic. Both modes
+then emit one ``frontend/src/components/Emoji/annotations/<lang>.ts`` per locale
+plus an ``index.ts`` whose loader dynamically imports them — each table is
+~50-90 KB and the picker only ever needs the active locale's and English's
+(#874's code-splitting rule). Mobile has no localization yet and gets no
+annotation modules.
+
 Known approximation limits
 --------------------------
 This is a good approximation of the official CLDR groups, not a reproduction
@@ -143,8 +175,14 @@ of them. Specifically:
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
+import re
+import sys
 import unicodedata
+import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 # Repository root, derived from this file's location (scripts/..).
@@ -160,6 +198,23 @@ MOBILE_OUTPUT_PATH = REPO_ROOT / "mobile" / "components" / "emoji" / "emojiData.
 # The vendored gemoji alias table. See "Where the shortcodes come from" above
 # for its provenance, licence and refresh recipe.
 SHORTCODES_PATH = REPO_ROOT / "scripts" / "emoji-shortcodes.json"
+
+# The vendored, trimmed CLDR annotation table. See "Where the localized names
+# and keywords come from" above.
+ANNOTATIONS_PATH = REPO_ROOT / "scripts" / "emoji-annotations.json"
+
+# One generated module per locale plus the loader index. The directory is
+# owned by this script: stale locale modules are removed on every run.
+ANNOTATIONS_DIR = REPO_ROOT / "frontend" / "src" / "components" / "Emoji" / "annotations"
+
+# The locale registry. `--refresh-annotations` reads its `code: "xx"` entries
+# so the annotation set can never drift from the languages the app ships.
+LANGUAGES_TS = REPO_ROOT / "frontend" / "src" / "i18n" / "languages.ts"
+
+CLDR_RELEASE = "release-48"
+CLDR_RAW_BASE = f"https://raw.githubusercontent.com/unicode-org/cldr/{CLDR_RELEASE}/common"
+CLDR_ANNOTATION_FILES = ("annotations", "annotationsDerived")
+CLDR_SKIPPED_DRAFTS = {"provisional", "unconfirmed"}
 
 # Category ids and their human-readable labels, in picker order.
 CATEGORY_LABELS: list[tuple[str, str]] = [
@@ -714,6 +769,199 @@ def build_entries() -> tuple[list[dict[str, object]], dict[str, int], str, str]:
     return entries, counts, source, shortcode_version
 
 
+def codepoint_key(char: str) -> str:
+    """The JSON key for a character: hyphen-joined uppercase hex, as gemoji."""
+    return "-".join(f"{ord(c):04X}" for c in char)
+
+
+def shipped_language_codes() -> list[str]:
+    """The `code: "xx"` entries of ``SHIPPED_LANGUAGES`` in languages.ts."""
+    source = LANGUAGES_TS.read_text(encoding="utf-8")
+    codes = re.findall(r'^\s*\{\s*code:\s*"([a-z]{2,3})"', source, flags=re.MULTILINE)
+    if not codes:
+        raise SystemExit(f"no `code:` entries found in {LANGUAGES_TS}")
+    return sorted(set(codes))
+
+
+def fetch_cldr_file(lang: str, kind: str) -> bytes:
+    url = f"{CLDR_RAW_BASE}/{kind}/{lang}.xml"
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return response.read()
+
+
+def parse_cldr_annotations(
+    payload: bytes, wanted: dict[str, str]
+) -> dict[str, tuple[str | None, list[str]]]:
+    """``key -> (tts name, keywords)`` for the wanted chars only.
+
+    ``wanted`` maps the bare character to its JSON key. CLDR already strips
+    U+FE0F from ``cp``, so the lookup is a plain dict hit.
+    """
+    out: dict[str, tuple[str | None, list[str]]] = {}
+    root = ET.fromstring(payload)
+    for node in root.iter("annotation"):
+        cp = node.get("cp", "")
+        key = wanted.get(cp)
+        if key is None:
+            continue
+        if node.get("draft") in CLDR_SKIPPED_DRAFTS:
+            continue
+        text = (node.text or "").strip().lower()
+        if not text:
+            continue
+        name, keywords = out.get(key, (None, []))
+        if node.get("type") == "tts":
+            name = text
+        else:
+            for keyword in text.split("|"):
+                keyword = keyword.strip()
+                if keyword and keyword not in keywords:
+                    keywords.append(keyword)
+        out[key] = (name, keywords)
+    return out
+
+
+def refresh_annotations(entries: list[dict[str, object]]) -> None:
+    """Download the CLDR files for every shipped locale and rewrite the JSON."""
+    wanted = {str(entry["char"]): codepoint_key(str(entry["char"])) for entry in entries}
+    locales: dict[str, dict[str, list[str]]] = {}
+    digests: dict[str, dict[str, str]] = {}
+    for lang in shipped_language_codes():
+        merged: dict[str, tuple[str | None, list[str]]] = {}
+        digests[lang] = {}
+        for kind in CLDR_ANNOTATION_FILES:
+            payload = fetch_cldr_file(lang, kind)
+            digests[lang][kind] = hashlib.sha256(payload).hexdigest()
+            for key, (name, keywords) in parse_cldr_annotations(payload, wanted).items():
+                prior_name, prior_keywords = merged.get(key, (None, []))
+                merged[key] = (
+                    name or prior_name,
+                    prior_keywords + [k for k in keywords if k not in prior_keywords],
+                )
+        table: dict[str, list[str]] = {}
+        for key in sorted(merged):
+            name, keywords = merged[key]
+            if name is None:
+                continue
+            # The name is searched on its own, so a keyword repeating it is
+            # dead weight in every emitted module.
+            table[key] = [name] + [k for k in keywords if k != name]
+        locales[lang] = table
+        print(f"annotations {lang}: {len(table)}/{len(entries)} entries", file=sys.stderr)
+
+    doc = {
+        "_source": "https://github.com/unicode-org/cldr — common/annotations/<lang>.xml + common/annotationsDerived/<lang>.xml (flags)",
+        "_release": CLDR_RELEASE,
+        "_licence": "Unicode-3.0 — Copyright © 1991-2025 Unicode, Inc.",
+        "_shape": "locale -> hyphen-joined uppercase codepoints of the base emoji (U+FE0F stripped) -> [name, keyword, ...], lowercased; only the codepoints emojiData.ts carries",
+        "_regenerate": "python3 scripts/generate-emoji-data.py --refresh-annotations (locales come from frontend/src/i18n/languages.ts)",
+        "_sha256": digests,
+        "locales": locales,
+    }
+    ANNOTATIONS_PATH.write_text(
+        json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def load_annotations() -> tuple[dict[str, dict[str, list[str]]], str]:
+    payload = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
+    return payload["locales"], str(payload["_release"])
+
+
+def annotation_header(release: str) -> list[str]:
+    return [
+        "// GENERATED FILE — DO NOT EDIT BY HAND.",
+        "//",
+        "// Produced by `scripts/generate-emoji-data.py` from the vendored CLDR emoji",
+        f"// annotations in scripts/emoji-annotations.json (CLDR {release}). To refresh",
+        "// the data, or after adding a locale to i18n/languages.ts:",
+        "//",
+        "//     python3 scripts/generate-emoji-data.py --refresh-annotations",
+        "//",
+    ]
+
+
+def render_annotation_module(
+    lang: str, table: dict[str, list[str]], release: str
+) -> str:
+    """One locale's `[char, name, keywords]` rows."""
+    lines = annotation_header(release)
+    lines.append(f"// Locale: {lang} — {len(table)} entries")
+    lines.append("")
+    lines.append('import type { EmojiAnnotationRow } from "./index";')
+    lines.append("")
+    lines.append("const ROWS: readonly EmojiAnnotationRow[] = [")
+    for key, values in table.items():
+        char = "".join(chr(int(part, 16)) for part in key.split("-"))
+        name, keywords = values[0], values[1:]
+        lines.append(
+            f"  [{ts_string(char)}, {ts_string(name)}, {ts_string('|'.join(keywords))}],"
+        )
+    lines.append("];")
+    lines.append("")
+    lines.append("export default ROWS;")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_annotation_index(langs: list[str], release: str) -> str:
+    lines = annotation_header(release)
+    lines.append("// Each locale is its own module behind a dynamic import: the picker needs the")
+    lines.append("// active locale's table and English's, never all of them.")
+    lines.append("")
+    lines.append("/** `[char, localized name, `|`-joined lowercase keywords]`. */")
+    lines.append("export type EmojiAnnotationRow = readonly [")
+    lines.append("  char: string,")
+    lines.append("  name: string,")
+    lines.append("  keywords: string,")
+    lines.append("];")
+    lines.append("")
+    lines.append("export const EMOJI_ANNOTATION_LOCALES: readonly string[] = [")
+    for lang in langs:
+        lines.append(f"  {ts_string(lang)},")
+    lines.append("];")
+    lines.append("")
+    lines.append("/** The rows for `locale`, or null when no table ships for it. */")
+    lines.append("export function loadEmojiAnnotationRows(")
+    lines.append("  locale: string,")
+    lines.append("): Promise<readonly EmojiAnnotationRow[]> | null {")
+    lines.append("  switch (locale) {")
+    for lang in langs:
+        lines.append(f"    case {ts_string(lang)}:")
+        lines.append(f'      return import("./{lang}").then((m) => m.default);')
+    lines.append("    default:")
+    lines.append("      return null;")
+    lines.append("  }")
+    lines.append("}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_annotations(entries: list[dict[str, object]]) -> dict[str, int]:
+    """Emit every locale module and the index; drop modules for gone locales."""
+    locales, release = load_annotations()
+    known = {codepoint_key(str(entry["char"])) for entry in entries}
+    langs = sorted(locales)
+    ANNOTATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    counts: dict[str, int] = {}
+    for lang in langs:
+        # A key the table no longer carries (a narrowed range) is dropped here
+        # rather than shipped as an orphan row.
+        table = {key: values for key, values in locales[lang].items() if key in known}
+        counts[lang] = len(table)
+        (ANNOTATIONS_DIR / f"{lang}.ts").write_text(
+            render_annotation_module(lang, table, release), encoding="utf-8"
+        )
+    (ANNOTATIONS_DIR / "index.ts").write_text(
+        render_annotation_index(langs, release), encoding="utf-8"
+    )
+    keep = {f"{lang}.ts" for lang in langs} | {"index.ts"}
+    for stale in ANNOTATIONS_DIR.glob("*.ts"):
+        if stale.name not in keep:
+            stale.unlink()
+    return counts
+
+
 def ts_string(value: str) -> str:
     """Quote a value as a double-quoted TypeScript string literal."""
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
@@ -745,8 +993,9 @@ def render(
     lines.append(f"// Entries:              {total} ({summary})")
     lines.append(f"// With shortcodes:      {with_shortcodes} entries, {alias_total} aliases")
     lines.append("//")
-    lines.append("// Names come straight from `unicodedata.name()`, lowercased, and double as")
-    lines.append("// the search keywords — there is deliberately no separate keyword field.")
+    lines.append("// Names come straight from `unicodedata.name()`, lowercased, and are the")
+    lines.append("// English search fallback. Localized names and keywords live in the per-locale")
+    lines.append("// modules under `annotations/` (CLDR), which the picker loads on demand.")
     lines.append("// Categories approximate the CLDR groups; see the generator's docstring for")
     lines.append("// the exact ranges and the known approximation limits.")
     lines.append("//")
@@ -859,11 +1108,22 @@ def render(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser.add_argument(
+        "--refresh-annotations",
+        action="store_true",
+        help="re-download the CLDR annotations for every shipped locale (network)",
+    )
+    args = parser.parse_args()
+
     entries, counts, source, shortcode_version = build_entries()
+    if args.refresh_annotations:
+        refresh_annotations(entries)
     rendered = render(entries, counts, source, shortcode_version)
     for out_path in (OUTPUT_PATH, MOBILE_OUTPUT_PATH):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(rendered, encoding="utf-8")
+    annotation_counts = write_annotations(entries)
 
     tonable_total = sum(1 for entry in entries if entry["tonable"])
     print(f"unicodedata {unicodedata.unidata_version}")
@@ -874,7 +1134,10 @@ def main() -> None:
     print(f"  {'skin-tone bases':<21} {tonable_total:>5}")
     alias_total = sum(len(entry["shortcodes"]) for entry in entries)
     print(f"  {'shortcode aliases':<21} {alias_total:>5}")
+    for lang, count in annotation_counts.items():
+        print(f"  {'annotations ' + lang:<21} {count:>5}")
     print(f"wrote {OUTPUT_PATH}")
+    print(f"wrote {ANNOTATIONS_DIR}/")
 
 
 if __name__ == "__main__":

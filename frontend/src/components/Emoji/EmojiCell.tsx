@@ -1,11 +1,14 @@
 import React from "react";
 import type { PickerEmoji } from "./emojiSearch";
 import { emojiDisplayChar, pickerEmojiId } from "./emojiSearch";
+import { emojiDisplayName, type EmojiAnnotationStack } from "./emojiAnnotations";
 import { CustomEmojiImage } from "./CustomEmojiImage";
 
 interface EmojiCellProps {
   item: PickerEmoji;
   toneIndex: number;
+  /** Localized names for the label; the Unicode name is the fallback. */
+  annotations: EmojiAnnotationStack;
   /** Position in the picker's flattened navigation order. */
   index: number;
   onSelect: (item: PickerEmoji) => void;
@@ -26,12 +29,15 @@ interface EmojiCellProps {
 export const EmojiCell: React.FC<EmojiCellProps> = ({
   item,
   toneIndex,
+  annotations,
   index,
   onSelect,
   onPreview,
 }) => {
   const label =
-    item.kind === "standard" ? item.emoji.name : `:${item.emoji.shortcode}:`;
+    item.kind === "standard"
+      ? emojiDisplayName(item.emoji, annotations)
+      : `:${item.emoji.shortcode}:`;
 
   return (
     <button

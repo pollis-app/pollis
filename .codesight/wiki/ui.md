@@ -523,6 +523,35 @@ itself imports nothing but a type, which is also what makes it unit-testable und
 **Skin-tone variants (`:wave::skin-tone-3:`) are out of scope.** Completions use the
 tone already stored by the picker; there is no tone syntax in the composer.
 
+### Picker search and labels are localized (#901)
+
+`emojiData.ts` carries only the English Unicode name, so until #901 a Spanish
+user got a translated picker where `corazón` found nothing. The per-locale names
+and keywords are **CLDR emoji annotations**, vendored by
+`scripts/generate-emoji-data.py --refresh-annotations` into
+`scripts/emoji-annotations.json` (trimmed to the 1,581 entries the table emits;
+flags come from CLDR's `annotationsDerived`) and emitted as one module per locale
+under `components/Emoji/annotations/`. Each is as large as the table itself, so
+the same #874 rule applies: `useEmojiAnnotations` dynamically imports **the active
+locale's table and English's**, never all of them, and caches the built maps for
+the session. Until they resolve the picker searches Unicode names alone — the
+pre-#901 behaviour, never a broken state.
+
+`emojiRank.ts` is the ranking, kept to type-only imports so
+`frontend/tests/emoji-search-i18n.test.ts` can drive it under `node --test`
+against the real generated tables. Tiers: exact **name** (Unicode, localized, or a
+custom shortcode), name prefix, exact **keyword**, keyword prefix, then any
+substring — names outrank keywords so "cat" surfaces 🐈 above the cat faces merely
+tagged with it. English stays in the stack under every locale, the same rule the
+page-keyword catalogues follow, so `heart` and `серце` both work for a Ukrainian
+user. Cell labels and the preview strip show the locale's CLDR name
+(`emojiDisplayName`) — "red heart" rather than "heavy black heart" in English too.
+
+Adding a locale to `i18n/languages.ts` and re-running the generator with
+`--refresh-annotations` is the whole procedure; the unit test fails if the two
+lists drift or a table stops covering the full set. Mobile has no localization
+yet and gets no annotation modules.
+
 ### The composer is a `contentEditable`, not a `<textarea>`
 
 `ui/RichTextInput` replaced the composer's textarea so that a custom emoji renders
@@ -614,11 +643,11 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 
 - **CustomEmojiImage** — props: contentHash, shortcode, sizeRem, className — `frontend/src/components/Emoji/CustomEmojiImage.tsx`
 - **EmojiCategoryRail** — props: entries, activeId, onJump — `frontend/src/components/Emoji/EmojiCategoryRail.tsx`
-- **EmojiCell** — props: item, toneIndex, index, onSelect, onPreview — `frontend/src/components/Emoji/EmojiCell.tsx`
+- **EmojiCell** — props: item, toneIndex, annotations, index, onSelect, onPreview — `frontend/src/components/Emoji/EmojiCell.tsx`
 - **EmojiDropZone** — props: onPick, onReject, disabled, children — `frontend/src/components/Emoji/EmojiDropZone.tsx`. The image-first half of the custom-emoji upload (Discord's model): drop a gif/image anywhere on the window or click to browse, and the file's PATH — never its bytes — goes to the caller. Registers as an *inline* drop target so `AppShell`'s full-window drop overlay stays out of the way and this zone lights up instead; a native drag never reaches the DOM, so "drag-over" is a window-level fact rather than a hover.
 - **EmojiPicker** — props: onSelect, onClose, closeOnSelect, className, maxHeight — `frontend/src/components/Emoji/EmojiPicker.tsx`
 - **EmojiPickerButton** — props: onSelect, closeOnSelect, placement, align, className, ariaLabel, buttonClassName, icon, iconSize, iconClassName, navAction, panelTestId, onOpenChange — `frontend/src/components/Emoji/EmojiPickerButton.tsx`. The trigger plus its anchored, non-modal panel. **`placement` is a preference, not an instruction** (#1028): the panel is a fixed `h-[24rem]`, and a side fixed at the call site is wrong exactly when the trigger nears the edge it opens toward — a short window, a large font setting (the panel is sized in `rem`, so it grows while the viewport does not), or a layout that rides the composer high. It then rendered off the top of the content region, which `AppShell` clips with `overflow: hidden`, making the missing part unreachable rather than merely off-screen. `pickerPlacement.ts` resolves the side from the trigger's measured rect: the preference wins whenever the panel fits there, the other side is taken when it does not, and only when neither fits is the panel clamped (`maxHeight`) to the roomier side, with a tie keeping the preference so nothing flaps. Re-measured on `resize` and on `scroll` (capturing, since scroll does not bubble) while open.
-- **EmojiSection** — props: id, title, items, toneIndex, baseIndex, onSelect, onPreview, scrollRoot — `frontend/src/components/Emoji/EmojiSection.tsx`
+- **EmojiSection** — props: id, title, items, toneIndex, annotations, baseIndex, onSelect, onPreview, scrollRoot — `frontend/src/components/Emoji/EmojiSection.tsx`
 - **EmojiText** — props: text, renderText, jumbo — `frontend/src/components/Emoji/EmojiText.tsx`
 - **SkinTonePicker** — props: toneIndex, onChange — `frontend/src/components/Emoji/SkinTonePicker.tsx`
 

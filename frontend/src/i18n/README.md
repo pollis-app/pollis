@@ -55,6 +55,18 @@ That one covers the design decisions; this one is the working checklist.
 4. **Check the plural forms.** See below — this is the step that gets skipped
    and it is the one that cannot be fixed later without a re-translation.
 
+5. **Fetch the emoji names and keywords.** The picker's search and labels come
+   from CLDR, not from a catalogue (#901):
+
+   ```bash
+   python3 scripts/generate-emoji-data.py --refresh-annotations
+   ```
+
+   It reads the locale list from `languages.ts`, so nothing else needs
+   pointing at the new code; commit `scripts/emoji-annotations.json` and the
+   new `components/Emoji/annotations/<code>.ts`.
+   `frontend/tests/emoji-search-i18n.test.ts` fails until you do.
+
 Nothing else needs editing. The selector, `supportedLngs`, the OS-locale probe
 and the resource loader all read from `SUPPORTED_LANGUAGES`.
 

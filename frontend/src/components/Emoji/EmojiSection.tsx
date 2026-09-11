@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { EmojiCell } from "./EmojiCell";
+import type { EmojiAnnotationStack } from "./emojiAnnotations";
 import type { PickerEmoji } from "./emojiSearch";
 import { pickerEmojiId } from "./emojiSearch";
 
@@ -12,6 +13,8 @@ interface EmojiSectionProps {
   title: string;
   items: readonly PickerEmoji[];
   toneIndex: number;
+  /** Localized names for the cell labels — see `useEmojiAnnotations`. */
+  annotations: EmojiAnnotationStack;
   /** Index of this section's FIRST cell in the picker's flat nav order. */
   baseIndex: number;
   onSelect: (item: PickerEmoji) => void;
@@ -38,6 +41,7 @@ export const EmojiSection: React.FC<EmojiSectionProps> = ({
   title,
   items,
   toneIndex,
+  annotations,
   baseIndex,
   onSelect,
   onPreview,
@@ -92,6 +96,7 @@ export const EmojiSection: React.FC<EmojiSectionProps> = ({
               key={pickerEmojiId(item)}
               item={item}
               toneIndex={toneIndex}
+              annotations={annotations}
               index={baseIndex + offset}
               onSelect={onSelect}
               onPreview={onPreview}

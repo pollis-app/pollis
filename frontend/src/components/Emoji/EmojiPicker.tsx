@@ -6,6 +6,8 @@ import { horizontalArrowStep } from "../../utils/direction";
 import { useUsableEmoji } from "../../hooks/queries/useEmoji";
 import { TextInput } from "../ui/TextInput";
 import { EMOJI_CATEGORIES, STANDARD_EMOJI } from "./emojiData";
+import { emojiDisplayName } from "./emojiAnnotations";
+import { useEmojiAnnotations } from "./useEmojiAnnotations";
 import type { PickerEmoji } from "./emojiSearch";
 import {
   emojiDisplayChar,
@@ -69,9 +71,10 @@ interface Section {
  */
 export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
   ({ onSelect, onClose, closeOnSelect = false, className = "", maxHeight }) => {
-    const { t } = useTranslation("emoji");
+    const { t, i18n } = useTranslation("emoji");
     const { currentUser } = appStore;
     const { data: customEmoji = [] } = useUsableEmoji(currentUser?.id ?? null);
+    const annotations = useEmojiAnnotations(i18n.language);
 
     const [query, setQuery] = useState("");
     const [toneIndex, setToneIndex] = useState(() => readSkinTone());
@@ -95,7 +98,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
           {
             id: "results",
             title: t("picker.resultsFor", { query: trimmed }),
-            items: searchEmoji(trimmed, customEmoji),
+            items: searchEmoji(trimmed, customEmoji, annotations),
           },
         ];
       }
@@ -136,7 +139,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
         });
       }
       return out;
-    }, [query, customEmoji, recentIds, t]);
+    }, [query, customEmoji, recentIds, annotations, t]);
 
     // Flat navigation order — the index each cell carries and what the arrow
     // keys step through.
@@ -302,6 +305,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
                 title={section.title}
                 items={section.items}
                 toneIndex={toneIndex}
+                annotations={annotations}
                 baseIndex={base}
                 onSelect={handleSelect}
                 onPreview={setPreview}
@@ -336,7 +340,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = observer(
                 )}
                 <span className="text-xs font-mono text-dim truncate">
                   {preview.kind === "standard"
-                    ? preview.emoji.name
+                    ? emojiDisplayName(preview.emoji, annotations)
                     : `:${preview.emoji.shortcode}:`}
                 </span>
               </>
