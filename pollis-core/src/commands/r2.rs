@@ -486,7 +486,11 @@ pub async fn upload_file(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<UploadResult> {
-    let put_url = presign_r2(state, "put", &key).await?;
+    // Every PUT declares its exact length now: the DS signs `content-length`
+    // into the URL, so R2 itself refuses a body of any other size. A presign
+    // with no length is permission to write an object of ANY size.
+    let put_url =
+        presign_r2_with_length(state, "put", &key, Some(data.len() as u64)).await?;
     let overlay = state.overlay_handle();
     r2_put_url(overlay.as_deref(), &put_url, data, &content_type).await?;
     let url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), key);
@@ -537,11 +541,19 @@ pub async fn upload_public_file(
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<UploadResult> {
+    if data.len() as u64 > pollis_api::broker::R2_PUBLIC_IMAGE_MAX_BYTES {
+        return Err(Error::Other(anyhow::anyhow!(
+            "image is {} bytes; the limit is {} bytes",
+            data.len(),
+            pollis_api::broker::R2_PUBLIC_IMAGE_MAX_BYTES
+        )));
+    }
     let hash = hex::encode(sha256_bytes(&data));
     let ext = ext_for_content_type(&content_type);
     let key = format!("{}/{hash}.{ext}", prefix.trim_matches('/'));
 
-    let put_url = presign_r2(state, "put", &key).await?;
+    let put_url =
+        presign_r2_with_length(state, "put", &key, Some(data.len() as u64)).await?;
     let overlay = state.overlay_handle();
     r2_put_url(overlay.as_deref(), &put_url, data, &content_type).await?;
     let url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), key);
@@ -754,6 +766,19 @@ async fn upload_plaintext(
 ) -> Result<MediaUploadResult> {
     let size_bytes = data.as_slice().len();
 
+    // Refuse an over-cap attachment HERE, before hashing and encrypting it.
+    // The DS refuses to sign a PUT above the same bound
+    // (`pollis_api::broker::R2_MEDIA_MAX_BYTES`, one constant shared by both
+    // ends), so without this check the user waits through a full encrypt to be
+    // told no by a 400 they cannot read. The ciphertext adds a 16-byte tag per
+    // 4 MiB chunk, which the cap has room for.
+    if size_bytes as u64 > pollis_api::broker::R2_MEDIA_MAX_BYTES {
+        return Err(Error::Other(anyhow::anyhow!(
+            "attachment is {size_bytes} bytes; the limit is {} bytes",
+            pollis_api::broker::R2_MEDIA_MAX_BYTES
+        )));
+    }
+
     // SHA-256 of plaintext — the dedup + key-derivation anchor.
     let hash_bytes = sha256_bytes(data.as_slice());
     let content_hash = hex::encode(hash_bytes);
@@ -810,7 +835,9 @@ async fn upload_plaintext(
         // of an upload for the entire duration of the transfer.
         data.release();
 
-        let put_url = presign_r2(state, "put", &r2_key).await?;
+        let put_url =
+            presign_r2_with_length(state, "put", &r2_key, Some(ciphertext.len() as u64))
+                .await?;
         let overlay = state.overlay_handle();
         r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
 
@@ -1341,14 +1368,15 @@ async fn presign_r2(
     presign_r2_with_length(state, operation, key, None).await
 }
 
-/// [`presign_r2`], optionally declaring the EXACT byte count a `put` will
-/// carry. When present the DS signs `content-length` into the URL, so R2 itself
-/// refuses a body of any other size.
+/// [`presign_r2`], declaring the EXACT byte count a `put` will carry. The DS
+/// signs `content-length` into the URL, so R2 itself refuses a body of any other
+/// size.
 ///
-/// Required for `emoji/…` puts (#848) — those objects are unencrypted, publicly
-/// fetchable and hard-capped, and a cap the client merely honours is not a cap.
-/// `None` reproduces the previous request byte for byte, which is why every
-/// media/avatar call site is untouched.
+/// REQUIRED on every `put`: the DS refuses to sign one without it. A cap the
+/// client merely honours is not a cap — the DS validates a size it is told, and
+/// only R2 ever counts the bytes, so the length has to be inside the signature.
+/// `None` remains valid for `get` and `delete`, where a signed length would just
+/// make the URL unusable.
 pub(crate) async fn presign_r2_with_length(
     state: &Arc<AppState>,
     operation: &str,

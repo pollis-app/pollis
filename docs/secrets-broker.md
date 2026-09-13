@@ -195,7 +195,8 @@ migration runner's credential.)
 Return a **SigV4 query-string presigned URL** for a GET (download), PUT
 (upload), or DELETE (attachment cleanup) against the configured R2 bucket.
 Requires an authenticated device (when auth is on, `gate` rejects an unsigned
-request with `401`). There is **no per-object authz** — see below.
+request with `401`). There is **no per-object READ authz** — see below — but a
+write is gated on the key, the size and the owner.
 
 Request:
 
@@ -209,10 +210,29 @@ Request:
 ```
 
 - `operation` (required) — `"get"`, `"put"`, or `"delete"`; anything else → `400`.
-- `key` (required) — the R2 object key within the bucket.
-- `content_type` (optional) — accepted for forward-compat; the presigned URL
-  signs only `host`, so the client sets Content-Type at upload time.
-- `user_id` (optional) — no-auth path only; unused beyond the auth gate.
+- `key` (required) — the R2 object key within the bucket, and it must be one of
+  the four families the product writes (`broker::parse_r2_key`):
+  `media/<hex64>.enc`, `emoji/<hex64>.<ext>`, `avatars/<user_id>/<hex64>.<ext>`,
+  `group-icons/<group_id>/<hex64>.<ext>`. The pre-content-addressing shapes
+  (`media/<hash>/<name>`, `avatars/<user_id>`, `group-icons/<id>/<ts>-<name>`)
+  still resolve for `get`/`delete` but can never be written again. Anything else
+  → `400`.
+- `content_type` (optional) — accepted for forward-compat; the presigned URL does
+  not sign it, so the client sets Content-Type at upload time.
+- `content_length` (**required for `put`**) — the exact byte count the upload
+  will carry. Signed into the URL, so R2 refuses a body of any other size. Bounds:
+  media `R2_MEDIA_MAX_BYTES`, emoji `EMOJI_MAX_BYTES`, avatar/group icon
+  `R2_PUBLIC_IMAGE_MAX_BYTES`. Out of range or absent → `400`.
+- `user_id` (optional) — no-auth path only; the acting identity there.
+
+A `put` or `delete` is additionally refused (`403`) when:
+
+- the key is under `avatars/<user_id>/` and the caller is not that user;
+- the key is under `group-icons/<group_id>/` and the caller is not an admin of
+  that group;
+- the key names a `media` or `emoji` object something still references (#690,
+  #848) — overwriting substitutes chosen bytes for every holder, deleting 404s it
+  for them.
 
 Response `200`:
 
@@ -224,14 +244,15 @@ Response `200`:
 }
 ```
 
-The URL is single-chunk, `UNSIGNED-PAYLOAD`, with `host` the only signed header,
-default lifetime 900 s. Path-style (`/<bucket>/<key>`).
+The URL is single-chunk, `UNSIGNED-PAYLOAD`, default lifetime 900 s, path-style
+(`/<bucket>/<key>`). Signed headers are `host` for `get`/`delete` and
+`content-length;host` for `put`.
 
 Env: `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` —
 all required, else `503`. `R2_REGION` defaults to `auto` (Cloudflare R2). The
 secret access key is never logged.
 
-## Why R2 presign needs no per-object authz
+## Why R2 presign needs no per-object READ authz
 
 Pollis media is **convergent-encrypted** (see pollis-core's `r2.rs`): the
 AES-256-GCM key is derived from `SHA-256(plaintext)`, and the
@@ -241,9 +262,18 @@ conversation binding. A presigned URL therefore only ever exposes
 who decrypted the message learns the content hash, and only the content hash
 derives the decryption key), **not** from the R2 ACL.
 
-So the presign gate exists solely to stop **anonymous internet access** to the
-bucket; it does not — and cannot meaningfully — enforce read authz per object.
-Requiring an authenticated device is the right and sufficient gate.
+So for `get` the presign gate exists solely to stop **anonymous internet
+access** to the bucket; it does not — and cannot meaningfully — enforce read
+authz per object. Requiring an authenticated device is the right and sufficient
+gate there.
+
+It is NOT sufficient for a write, and the argument above does not extend to one.
+A write is about integrity and about who pays for the bytes, neither of which
+convergent encryption says anything about: an authenticated device that can name
+any key, of any size, is free storage and an overwrite primitive. Hence the key
+allow-list, the mandatory signed `content_length`, the owner check on avatars and
+group icons, and the reference check on shared media/emoji objects, all listed
+under the endpoint above.
 
 ## Tests
 

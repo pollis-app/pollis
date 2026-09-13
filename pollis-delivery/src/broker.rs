@@ -1422,27 +1422,172 @@ pub async fn livekit_identities(
 /// Default presigned-URL lifetime, in seconds.
 const PRESIGN_EXPIRES_SECS: u64 = 900;
 
-/// The convergent content hash embedded in a media R2 key
-/// (`media/<content_hash>/<sanitized-filename>.enc`, see `pollis-core`'s
-/// `upload_media`). `None` for any key not of that shape — avatar/icon keys and
-/// anything else that carries no reference-counted attachment object, which the
-/// `delete` gate then lets through unchecked. Returns a borrow to avoid an
-/// allocation on the hot presign path.
-fn content_hash_from_key(key: &str) -> Option<&str> {
-    let rest = key.strip_prefix("media/")?;
-    let hash = rest.split('/').next()?;
-    if hash.is_empty() {
-        return None;
-    }
-    Some(hash)
+/// The longest key the bucket will ever be asked to sign.
+const R2_KEY_MAX_LEN: usize = 512;
+
+/// The object families the bucket holds. Nothing else is signable — see
+/// [`parse_r2_key`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum R2Family {
+    /// `media/<hex64>.enc` (and the legacy `media/<hex64>/<name>`) — convergent,
+    /// reference-counted attachment ciphertext.
+    Media,
+    /// `emoji/<hex64>.<ext>` — unencrypted custom-emoji images (#848).
+    Emoji,
+    /// `avatars/<user_id>/<hex64>.<ext>` (and the legacy `avatars/<user_id>`).
+    Avatar,
+    /// `group-icons/<group_id>/<hex64>.<ext>` (and legacy `group-icons/<id>/…`).
+    GroupIcon,
 }
 
-/// POST /v1/r2/presign — return a SigV4 presigned URL for a GET or PUT against
-/// the configured R2 bucket. Requires an authenticated device (when auth is
-/// enforced, [`gate`] rejects an unsigned request with 401). There is NO
-/// per-object conversation check — see the module docs: the bucket holds only
-/// convergently-encrypted ciphertext, so the gate exists to stop anonymous
-/// access, not to enforce read authz.
+/// A key the DS is willing to sign, decomposed into the facts the gates need.
+#[derive(Debug, Clone, Copy)]
+pub struct R2Key<'a> {
+    pub family: R2Family,
+    /// The user or group the prefix names, for the two owned families.
+    pub owner: Option<&'a str>,
+    /// The content hash this key names, for the two SHARED families — the value
+    /// the reference gate is asked about. Present for legacy shapes too: an old
+    /// object is every bit as shared as a new one, so it gets the same
+    /// protection.
+    pub content_hash: Option<&'a str>,
+    /// True when the key is CONTENT-ADDRESSED — its name is a 64-hex digest of
+    /// the bytes, which is what every key a current client writes looks like.
+    /// Only these are writable; a legacy mutable key stays readable forever and
+    /// writable never.
+    pub content_addressed: bool,
+}
+
+/// A lowercase 64-char hex digest, the shape every content-addressed key uses.
+fn is_hex64(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
+/// A filename's stem — `<stem>.<ext>`, or the whole name when it has no
+/// extension. For the content-addressed families the stem IS the hash.
+fn stem_of(name: &str) -> &str {
+    match name.rsplit_once('.') {
+        Some((stem, _ext)) => stem,
+        None => name,
+    }
+}
+
+/// Parse an R2 key into the family it belongs to, or `None` if the DS will not
+/// sign anything for it.
+///
+/// WHY AN ALLOW-LIST. The presign endpoint hands out a credential-free URL for
+/// whatever key it is given. With no restriction, an authenticated device could
+/// name any object in the bucket — including one belonging to a different
+/// product surface, a key with `..` in it, or a key it invented purely to park
+/// bytes under. The bucket holds exactly four families of object and every one
+/// of them is written by code in this repository, so the set of writable shapes
+/// is knowable and small; anything outside it is a request the product never
+/// makes.
+///
+/// Segment hygiene is part of the same job: no empty segment, no `.`/`..`, and
+/// a conservative character set, so a key can neither traverse nor smuggle a
+/// query string or a signed-header separator into the canonical request.
+pub fn parse_r2_key(key: &str) -> Option<R2Key<'_>> {
+    if key.is_empty() || key.len() > R2_KEY_MAX_LEN {
+        return None;
+    }
+    let segments: Vec<&str> = key.split('/').collect();
+    for segment in &segments {
+        if segment.is_empty() || *segment == "." || *segment == ".." {
+            return None;
+        }
+        if !segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'~'))
+        {
+            return None;
+        }
+    }
+    match segments.as_slice() {
+        // `media/<hex64>.enc` — today's shape.
+        ["media", name] => Some(R2Key {
+            family: R2Family::Media,
+            owner: None,
+            content_hash: Some(stem_of(name)),
+            content_addressed: is_hex64(stem_of(name)),
+        }),
+        // `media/<hex64>/<name>.enc` — pre-#762, when the filename rode along.
+        ["media", hash, ..] => Some(R2Key {
+            family: R2Family::Media,
+            owner: None,
+            content_hash: Some(hash),
+            content_addressed: false,
+        }),
+        ["emoji", name] => Some(R2Key {
+            family: R2Family::Emoji,
+            owner: None,
+            content_hash: Some(stem_of(name)),
+            content_addressed: is_hex64(stem_of(name)),
+        }),
+        // `avatars/<user_id>` is the legacy mutable key; the second segment is
+        // the content-addressed replacement (#874).
+        ["avatars", user_id] => Some(R2Key {
+            family: R2Family::Avatar,
+            owner: Some(user_id),
+            content_hash: None,
+            content_addressed: false,
+        }),
+        ["avatars", user_id, name] => Some(R2Key {
+            family: R2Family::Avatar,
+            owner: Some(user_id),
+            content_hash: None,
+            content_addressed: is_hex64(stem_of(name)),
+        }),
+        // `group-icons/<id>/<ts>-<name>` is the legacy two-part filename; a
+        // single content-addressed segment is the current one.
+        ["group-icons", group_id, rest @ ..] if !rest.is_empty() => Some(R2Key {
+            family: R2Family::GroupIcon,
+            owner: Some(group_id),
+            content_hash: None,
+            content_addressed: rest.len() == 1 && is_hex64(stem_of(rest[0])),
+        }),
+        _ => None,
+    }
+}
+
+/// The byte ceiling a PUT of this family may declare.
+fn put_max_bytes(family: R2Family) -> u64 {
+    match family {
+        R2Family::Media => R2_MEDIA_MAX_BYTES,
+        R2Family::Emoji => crate::emoji::EMOJI_MAX_BYTES,
+        R2Family::Avatar | R2Family::GroupIcon => R2_PUBLIC_IMAGE_MAX_BYTES,
+    }
+}
+
+/// POST /v1/r2/presign — return a SigV4 presigned URL for a GET, PUT or DELETE
+/// against the configured R2 bucket. Requires an authenticated device (when auth
+/// is enforced, [`gate_and_parse`] rejects an unsigned request with 401).
+///
+/// There is no per-object READ authz and there does not need to be — see the
+/// module docs: the bucket holds convergently-encrypted ciphertext plus public
+/// decoration, so a `get` presign discloses nothing a member did not already
+/// hold the key for. WRITES are a different question, and the gates are:
+///
+///   * **The key must be one the product writes** ([`parse_r2_key`]). An
+///     arbitrary key is an arbitrary object, and an arbitrary object is free
+///     storage on someone else's bucket.
+///   * **A PUT must be content-addressed.** A legacy mutable key stays readable
+///     but is never writable again: whoever can overwrite `avatars/<uid>`
+///     replaces that user's avatar for everyone, and nothing about the key says
+///     what the bytes should be.
+///   * **A PUT must declare its exact, bounded length.** Without a signed
+///     `content-length` the URL is permission to write an object of ANY size;
+///     the DS's own size checks at registration are then a promise the client
+///     makes about bytes only R2 ever sees. Signing the length moves the check
+///     to the one party that counts them.
+///   * **A PUT or DELETE of an owned object needs the owner.** Only a user may
+///     write or delete under their own `avatars/` prefix, and only an admin of
+///     the group under its `group-icons/` prefix.
+///   * **A PUT or DELETE of a shared object needs it unreferenced** (#690, #848)
+///     — the integrity rule the module docs set out, now reached for the
+///     `media/<hex64>.enc` key shape too, which the old hash extractor silently
+///     missed (it returned `"<hash>.enc"`, matching no stored content hash, so
+///     the gate never fired for any object written since #762).
 pub async fn r2_presign(
     State(state): State<AppState>,
     req: RawRequest,
@@ -1458,101 +1603,85 @@ pub async fn r2_presign(
         "delete" => "DELETE",
         _ => return Ok(bad_request("operation must be \"get\", \"put\", or \"delete\"")),
     };
-    if parsed.key.trim().is_empty() {
-        return Ok(bad_request("key required"));
-    }
+
+    let Some(object) = parse_r2_key(&parsed.key) else {
+        return Ok(bad_request("key is not an object this service stores"));
+    };
 
     let (endpoint, bucket, access_key, secret_key) = match state.broker.r2_ready() {
         Some(t) => t,
         None => return Ok(not_configured("r2")),
     };
 
-    // On the no-auth path there's no signed identity; the auth gate already
-    // enforced presence when `require_auth` is on. Resolve only to validate the
-    // no-auth body shape (and reject an empty/absent user_id there).
-    if let Err(resp) = resolve_user(&authed, parsed.user_id.as_deref()) {
-        return Ok(resp);
-    }
+    // The acting user: the verified signer when auth is on, the body's declared
+    // id when it is off (`resolve_user` rejects an empty/absent one there).
+    let actor = match resolve_user(&authed, parsed.user_id.as_deref()) {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
 
-    // Per-object INTEGRITY gate on delete (#690, see the module docs). The R2
-    // object is a global convergent dedup, so refuse to mint a `delete` for it
-    // while any message still references the hash — collecting it would 404 the
-    // attachment for every other conversation still holding it. `get`/`put` are
-    // never gated this way. A non-media key (no `media/<hash>/…` shape) has no
-    // reference to consult and passes through.
-    if http_method == "DELETE" {
-        if let Some(content_hash) = content_hash_from_key(&parsed.key) {
-            let conn = state.db.conn().await?;
-            if crate::messages::object_is_referenced(&conn, content_hash).await? {
-                return Ok(AuthRejection::Forbidden.into_response());
-            }
-        }
-    }
+    let writing = http_method == "PUT" || http_method == "DELETE";
 
-    // Per-object INTEGRITY gate on put: refuse to mint a `put` for a media
-    // object that is already referenced by a message.
-    //
-    // These objects are a global convergent dedup keyed on the content hash, so
-    // one `media/<hash>/…` key is shared by every conversation holding that
-    // attachment. An ungated `put` therefore let any authenticated user
-    // OVERWRITE anyone else's attachment — and because the AEAD key is derived
-    // from the hash (which every recipient knows), the replacement decrypts
-    // cleanly, so recipients rendered chosen plaintext as genuine.
-    //
-    // Refusing is safe precisely because the store is convergent: if the hash is
-    // already referenced the bytes are already there, so a legitimate uploader
-    // has nothing to write. Clients already skip re-upload on dedup hit.
-    // Belt-and-braces with the client-side check in `download_media`, which
-    // re-hashes after decrypting so a substitution is caught however it got in.
-    if http_method == "PUT" {
-        if let Some(content_hash) = content_hash_from_key(&parsed.key) {
-            let conn = state.db.conn().await?;
-            if crate::messages::object_is_referenced(&conn, content_hash).await? {
-                return Ok(AuthRejection::Forbidden.into_response());
-            }
-        }
-    }
-
-    // Custom-emoji objects (#848) get the SAME two integrity gates as media, on
-    // the same reasoning — one `emoji/<hash>.<ext>` blob is shared by every group
-    // that registered the hash, so overwriting or deleting it while a group still
-    // references it corrupts or 404s that group's emoji. The reference count is
-    // `emoji::object_is_referenced` (does ANY `group_emoji` row name this hash),
-    // exactly parallel to the attachment one.
-    //
-    // The emoji `put` gate carries extra weight the media one does not: these
-    // objects are UNENCRYPTED and served to anyone, so a successful overwrite
-    // would replace an image every member of every referencing group renders.
-    if let Some(content_hash) = crate::emoji::content_hash_from_emoji_key(&parsed.key) {
-        if http_method == "PUT" || http_method == "DELETE" {
-            let conn = state.db.conn().await?;
-            if crate::emoji::object_is_referenced(&conn, content_hash).await? {
-                return Ok(AuthRejection::Forbidden.into_response());
-            }
-        }
-        // A `put` for an emoji object MUST declare its exact size, and that size
-        // must be within the ceiling. Without this the bound is a client-side
-        // promise: the DS validates `size_bytes` at registration, but nothing
-        // stopped the actual PUT from carrying a gigabyte. Signing the length
-        // moves the check to R2, which is the only party that sees the bytes.
-        if http_method == "PUT" {
-            match parsed.content_length {
-                Some(n) if n > 0 && n <= crate::emoji::EMOJI_MAX_BYTES => {}
-                Some(_) => {
-                    return Ok(bad_request("emoji content_length out of range"));
-                }
-                None => {
-                    return Ok(bad_request("content_length required for emoji put"));
+    // ── Owned families: avatars belong to a user, icons to a group ───────────
+    if writing {
+        match (object.family, object.owner) {
+            (R2Family::Avatar, Some(user_id)) => {
+                if user_id != actor {
+                    return Ok(AuthRejection::Forbidden.into_response());
                 }
             }
+            (R2Family::GroupIcon, Some(group_id)) => {
+                let conn = state.db.conn().await?;
+                if !crate::groups::is_admin(&conn, group_id, &actor).await? {
+                    return Ok(AuthRejection::Forbidden.into_response());
+                }
+            }
+            _ => {}
         }
     }
 
-    // Only a PUT can meaningfully bind a body length; a signed `content-length`
-    // on GET/DELETE would just make the URL unusable.
-    let signed_content_length = match http_method {
-        "PUT" => parsed.content_length,
-        _ => None,
+    // ── Shared families: an object anybody still references is untouchable ───
+    //
+    // One `media/<hash>` blob backs every message carrying that file and one
+    // `emoji/<hash>` blob every group that registered it, across conversations
+    // and users. Overwriting one substitutes chosen bytes for everyone (and for
+    // media the AEAD key is derived from the hash every recipient already knows,
+    // so the substitution decrypts cleanly); deleting one 404s the attachment or
+    // emoji for everyone else.
+    if writing {
+        if let Some(content_hash) = object.content_hash {
+            let referenced = match object.family {
+                R2Family::Media => {
+                    let conn = state.db.conn().await?;
+                    crate::messages::object_is_referenced(&conn, content_hash).await?
+                }
+                R2Family::Emoji => {
+                    let conn = state.db.conn().await?;
+                    crate::emoji::object_is_referenced(&conn, content_hash).await?
+                }
+                R2Family::Avatar | R2Family::GroupIcon => false,
+            };
+            if referenced {
+                return Ok(AuthRejection::Forbidden.into_response());
+            }
+        }
+    }
+
+    // ── PUT: content-addressed, and exactly this many bytes ──────────────────
+    let signed_content_length = if http_method == "PUT" {
+        if !object.content_addressed {
+            return Ok(bad_request("a put must name a content-addressed key"));
+        }
+        let max = put_max_bytes(object.family);
+        match parsed.content_length {
+            Some(n) if n > 0 && n <= max => Some(n),
+            Some(_) => return Ok(bad_request("content_length out of range")),
+            None => return Ok(bad_request("content_length required for put")),
+        }
+    } else {
+        // Only a PUT can meaningfully bind a body length; a signed
+        // `content-length` on GET/DELETE would just make the URL unusable.
+        None
     };
 
     let url = presign_r2_url_bounded(

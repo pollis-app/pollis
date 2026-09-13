@@ -594,18 +594,33 @@ async fn an_emoji_put_presign_binds_the_exact_body_length() {
         "the length must be part of the SIGNATURE, not a hint: {url}"
     );
 
-    // Media presigns are untouched — no declared length, `host` alone signed,
-    // byte-identical to before this feature existed.
+    // A MEDIA put is bound the same way now. #848 signed the length only for
+    // emoji, on the reasoning that those objects are public and hard-capped; an
+    // unbounded presign is an unbounded object whatever the object is, so every
+    // put declares a length and every declared length is signed.
+    let media_key = format!("media/{}.enc", "d".repeat(64));
+    let (status, _) = presign(
+        &router,
+        serde_json::json!({ "operation": "put", "key": media_key, "user_id": "u1" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a media put with no declared length must be refused too"
+    );
     let (status, json) = presign(
         &router,
-        serde_json::json!({ "operation": "put", "key": "media/abc.enc", "user_id": "u1" }),
+        serde_json::json!({
+            "operation": "put", "key": media_key, "user_id": "u1", "content_length": 4096,
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(json["url"]
         .as_str()
         .unwrap()
-        .contains("X-Amz-SignedHeaders=host&"));
+        .contains("X-Amz-SignedHeaders=content-length%3Bhost"));
 }
 
 /// One emoji blob backs every group that registered its hash, and it is
