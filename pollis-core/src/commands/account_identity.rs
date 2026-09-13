@@ -412,8 +412,16 @@ pub async fn wipe_local_account_identity(state: &AppState, user_id: &str) -> Res
 /// Stores the new private key in the local OS keystore so the calling
 /// device immediately becomes a valid member of the reset identity.
 ///
-/// Writes a `security_event` row (`kind = 'identity_reset'`) so the
-/// user can see the reset in the Security settings page.
+/// The audit row (`security_event.kind = 'identity_rotated'`, metadata naming
+/// the credential the DS accepted) is written by the Delivery Service inside
+/// the rotation's own transaction — never by this client, which on the
+/// pre-enrollment path has no signing key to write one with anyway.
+///
+/// Credential semantics on the DS (`apply_rotate_identity`): a device-signed
+/// call is a plain rotation; a call carrying only the verified-OTP session —
+/// the pre-enrollment soft reset — is ALSO the `reset-recover` wipe, atomically,
+/// so an email OTP alone can never mint a key that inherits the account's
+/// memberships and other devices.
 ///
 /// Returns the new formatted Secret Key to show the user once.
 pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<String> {
@@ -513,23 +521,10 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
         );
     }
 
-    // 6. Record the reset in the security log. Best-effort only. Routed through
-    //    the DS (sole writer; #419 domains E+G).
-    let metadata = format!("new_identity_version={new_version}");
-    let body = pollis_api::account::SecurityEventBody {
-        kind: "identity_reset".to_string(),
-        device_id: None,
-        metadata: Some(metadata),
-        // The DS's no-auth fallback for the acting user
-        // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
-        // user and this must EQUAL it; auth off → this IS the actor, and a
-        // body without it is refused outright. Sending it never widens what
-        // the caller may do.
-        user_id: Some(user_id.to_string()),
-    };
-    if let Err(e) = crate::commands::mls::ds_post_ok(state, &body).await {
-        eprintln!("[reset] DS security-event failed (non-fatal): {e}");
-    }
+    // 6. The `identity_rotated` security event was appended by the DS inside
+    //    the rotation transaction above (credential kind recorded server-side),
+    //    so there is nothing for this client to write.
+    eprintln!("[reset] identity rotated to version {new_version} for {user_id}");
 
     Ok(secret_key_display)
 }

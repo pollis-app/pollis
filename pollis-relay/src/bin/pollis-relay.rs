@@ -5,7 +5,9 @@
 //! - `--config <path>`   / `POLLIS_RELAY_CONFIG`    — TOML file (see
 //!   [`pollis_relay::config`] for the format).
 //! - `--bind <addr>`     / `POLLIS_RELAY_BIND`       — UDP bind (default `0.0.0.0:9444`).
-//! - `--allow <a,b,...>` / `POLLIS_RELAY_ALLOWLIST`  — comma-separated host patterns.
+//! - `--allow <a,b,...>` / `POLLIS_RELAY_ALLOWLIST`  — comma-separated `host[:port]`
+//!   patterns (no port ⇒ 443 only; `:*` ⇒ any port). A malformed entry aborts
+//!   startup rather than silently matching nothing.
 //! - `--identity <path>` / `POLLIS_RELAY_IDENTITY`   — persisted QUIC identity key
 //!   (generated on first start; cert written to `<path>.crt`).
 //! - `--health-bind <addr>` / `POLLIS_RELAY_HEALTH_BIND` — TCP bind for the opt-in
@@ -85,10 +87,12 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| DEFAULT_BIND.to_string())
         .parse()?;
 
+    // A typo in the allowlist is a startup failure, not a node that quietly
+    // refuses one destination: an operator finds out at deploy, not from users.
     let allowlist = match arg_or_env(&args, "allow", "POLLIS_RELAY_ALLOWLIST") {
-        Some(s) => Allowlist::from_patterns(s.split(',').map(|p| p.trim().to_string())),
+        Some(s) => Allowlist::try_from_patterns(s.split(',').map(|p| p.trim().to_string()))?,
         None => match &file.allowlist {
-            Some(patterns) => Allowlist::from_patterns(patterns.iter().cloned()),
+            Some(patterns) => Allowlist::try_from_patterns(patterns.iter().cloned())?,
             None => {
                 tracing::warn!("no destination allowlist configured — relay will dial nothing");
                 Allowlist::default()
@@ -105,6 +109,12 @@ async fn main() -> anyhow::Result<()> {
     config.rate_limits = file.rate_limits();
     if let Some(max) = file.max_concurrent_connections {
         config.max_concurrent_connections = max;
+    }
+    if let Some(max) = file.max_connections_per_ip {
+        config.max_connections_per_ip = max;
+    }
+    if let Some(secs) = file.first_frame_timeout_secs {
+        config.first_frame_timeout = Duration::from_secs(secs.max(1));
     }
     if let Some(allow_extend) = file.allow_extend {
         config.allow_extend = allow_extend;

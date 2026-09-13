@@ -116,6 +116,17 @@ function describe(
         heading: t("security.eventIdentityResetHeading"),
         detail: t("security.eventIdentityResetDetail"),
       };
+    case "identity_rotated":
+      // Written by the Delivery Service inside the rotation transaction, not
+      // by a client. `credential=session` is the pre-enrollment soft reset
+      // (email code only — the DS also wiped memberships and other devices);
+      // `credential=signature` is a rotation from an enrolled device.
+      return {
+        heading: t("security.eventIdentityRotatedHeading"),
+        detail: event.metadata?.includes("credential=session")
+          ? t("security.eventIdentityRotatedDetailSession")
+          : t("security.eventIdentityRotatedDetailSignature"),
+      };
     case "secret_key_rotated":
       return {
         heading: t("security.eventSecretKeyRotatedHeading"),

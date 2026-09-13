@@ -125,6 +125,17 @@ function describeEvent(event: SecurityEvent): {
         heading: i18n.t("settings:security.eventIdentityResetHeading"),
         detail: i18n.t("settings:security.eventIdentityResetDetail"),
       };
+    case "identity_rotated":
+      // DS-authored, inside the rotation transaction. `credential=session` is
+      // the pre-enrollment soft reset (email code only — the DS also wiped
+      // memberships and other devices); `credential=signature` is a rotation
+      // from an enrolled device.
+      return {
+        heading: i18n.t("settings:security.eventIdentityRotatedHeading"),
+        detail: event.metadata?.includes("credential=session")
+          ? i18n.t("settings:security.eventIdentityRotatedDetailSession")
+          : i18n.t("settings:security.eventIdentityRotatedDetailSignature"),
+      };
     case "secret_key_rotated":
       return {
         heading: i18n.t("settings:security.eventSecretKeyRotatedHeading"),

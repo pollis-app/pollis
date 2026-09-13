@@ -12,11 +12,12 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 use crate::error::Result;
 use crate::state::AppState;
 
-use super::device::{load_or_create_device_signer, verify_added_devices, VerifyOutcome};
+use super::device::{load_or_create_device_signer, AddedLeaf, IdentityDirectory, LeafVerdict};
 use super::generation::{local_generation, mls_group_id, set_local_generation};
 use super::provider::{
     current_suite, load_stored_group, load_stored_group_at, make_credential,
-    parse_credential_user_id, signature_scheme, store_only, MlsProvider, PollisProvider,
+    parse_credential_device_id, parse_credential_user_id, signature_scheme, store_only,
+    MlsProvider, PollisProvider,
 };
 
 /// Test-harness rendezvous points inside the join and commit paths.
@@ -1420,10 +1421,11 @@ async fn process_one_generation<'h>(
         }
     }
 
-    // 2. Fetch pending commits, along with the add-metadata columns
-    //    (`added_user_id`, `added_device_ids`) so we can verify cross-signing
-    //    certs BEFORE calling `process_message` — and, since #987, the cert rows
-    //    themselves, so verification costs no round trip per add-carrying commit.
+    // 2. Fetch pending commits, and with them the cross-signing rows for every
+    //    user the batch's add-metadata HINTS at (#987), so verifying the leaves a
+    //    commit adds costs no round trip per add-carrying commit. The leaves
+    //    themselves are read off each commit's Add proposals after staging —
+    //    never off the hint columns, which the committer wrote.
     //
     //    Scoped to ONE lineage: commits of a different generation are encrypted
     //    under a different suite's key schedule and are not replayable here.
@@ -1463,9 +1465,6 @@ async fn process_one_generation<'h>(
         seq: i64,
         epoch: i64,
         commit_data: Vec<u8>,
-        added_user_id: Option<String>,
-        added_device_ids: Vec<String>,
-        sender_id: Option<String>,
     }
 
     // Three different reasons the batch can look short, all recovered the same
@@ -1501,41 +1500,29 @@ async fn process_one_generation<'h>(
 
     let mut pending: Vec<PendingCommit> = Vec::with_capacity(snapshot.commits.len());
     for row in &snapshot.commits {
-        let added_device_ids: Vec<String> = row
-            .added_device_ids
-            .as_deref()
-            .map(|s| {
-                s.split(',')
-                    .map(|x| x.trim().to_string())
-                    .filter(|x| !x.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
         pending.push(PendingCommit {
             seq: row.seq,
             epoch: row.epoch,
             commit_data: super::ds_reads::decode_b64("commit_data", &row.commit)?,
-            added_user_id: row.added_user_id.clone(),
-            added_device_ids,
-            // The DS column is NOT NULL, but sealed-sender commits carry the
-            // literal sender the submitter named; `Option` is kept so the
-            // self-add discrimination below reads exactly as it did.
-            sender_id: Some(row.sender_id.clone()).filter(|s| !s.is_empty()),
         });
     }
 
-    // Cross-signing cert rows for every add this batch carries, fetched with the
-    // batch rather than once per commit (#987 §5): a cold catch-up over K adds
-    // used to pay K sequential main-DB round trips interleaved with MLS work.
-    // The VERDICT is still computed here — `verify_added_devices` is a signature
-    // check over a chain rooted in the added user's own identity key, and the DS
-    // is outside the trust boundary.
-    let added_identities = snapshot.added_identities;
+    // Cross-signing rows for every user the batch's hints name, fetched with the
+    // batch rather than once per commit (#987 §5). INPUTS only: the verdict is a
+    // signature check over a chain rooted in the added user's own identity key,
+    // and the DS is outside the trust boundary. A user the hint omitted is simply
+    // absent, which verdicts `Unverifiable` — a committer can make its own
+    // honest add look suspicious by lying here, never make a rogue one pass.
+    let directory = IdentityDirectory::new(snapshot.added_identities);
 
-    // 3. Apply each commit in epoch order. For any commit carrying add
-    //    metadata, verify every added device's cross-signing cert
-    //    against the user's account_id_pub BEFORE touching the group
-    //    state.
+    // 3. Apply each commit in epoch order. Every leaf a commit ADDS — read off
+    //    the staged commit's own Add proposals — is checked against the added
+    //    user's account key; a leaf that is not certified is flagged and evicted
+    //    afterwards (see `report_uncertified_leaves`). The commit is still
+    //    merged: it won the epoch CAS and is canonical, so refusing it would
+    //    strand this device behind the group with no honest way back (the
+    //    ELECTRON-epoch-11 incident). Eviction is the append-only answer.
+    let mut flagged: Vec<(AddedLeaf, i64, String)> = Vec::new();
     let mut current_epoch = initial_epoch;
     let mut any_applied = false;
     // Set when a commit could not be applied and the lineage must be rebuilt
@@ -1588,86 +1575,6 @@ async fn process_one_generation<'h>(
             break;
         }
 
-        // ── Inbound cert verification ────────────────────────────
-        if let Some(ref added_user_id) = commit.added_user_id {
-            let identity = added_identities
-                .iter()
-                .find(|i| &i.user_id == added_user_id);
-            let outcome = match verify_added_devices(
-                identity,
-                added_user_id,
-                &commit.added_device_ids,
-            ) {
-                Ok(o) => o,
-                Err(e) => {
-                    eprintln!(
-                        "[mls] process_pending_commits: cert verification error for {mls_group_id}: {e} — treating as AbsentRetry"
-                    );
-                    VerifyOutcome::AbsentRetry
-                }
-            };
-
-            match outcome {
-                VerifyOutcome::Verified => {}
-                VerifyOutcome::Revoked => {
-                    // The added device failed verification (revoked tombstone
-                    // OR bad cert chain). We used to DELETE the commit row for a
-                    // self-add to free the UNIQUE(conversation_id, epoch) slot —
-                    // but that broke the append-only invariant the entire MLS
-                    // replay depends on. A commit that won the epoch CAS is
-                    // canonical and immutable: a member who had already applied
-                    // it advanced past it, while a laggard reading the log AFTER
-                    // the delete saw a permanent hole and wedged forever (prod
-                    // incident: ELECTRON group, epoch 11 — dan applied it, ants
-                    // wedged). Deleting a commit that any member may have applied
-                    // forks the group; it is never safe.
-                    //
-                    // So we APPLY it (self-add and third-party alike) to stay on
-                    // the one canonical branch. The revoked device is then
-                    // evicted the MLS-native, append-only way: `reconcile`
-                    // already drops leaves whose `user_device` row is revoked,
-                    // via a normal remove commit on a later epoch. The device is
-                    // present for at most one epoch before that eviction lands —
-                    // the bounded, consistent trade for never wedging anyone.
-                    eprintln!(
-                        "[mls] process_pending_commits: revoked add for {added_user_id} at epoch {} in {mls_group_id} — applying to stay in sync (reconcile will evict the device)",
-                        commit.epoch
-                    );
-                }
-                VerifyOutcome::AbsentRetry => {
-                    // Race / replication-lag: the added device's row hasn't
-                    // reached our view of Turso yet (issue #372). Do NOT
-                    // delete the commit row.
-                    //
-                    // Self-add: defer — the sender claims they're adding
-                    // themselves, but we can't see their row to confirm.
-                    // Stop processing here; next catch-up retries.
-                    //
-                    // Third-party add (admin/inviter adding someone else):
-                    // the sender already merged this on their side and
-                    // it's already in `mls_commit_log` past the epoch
-                    // CAS. Stalling would diverge us from the rest of the
-                    // group. Process the commit advisory — same fallback
-                    // the pre-#372 code took for any unverified third-
-                    // party add.
-                    let is_self_add = commit
-                        .sender_id
-                        .as_deref() == Some(added_user_id.as_str());
-                    if is_self_add {
-                        eprintln!(
-                            "[mls] process_pending_commits: deferring self-add seq {} epoch {} for {mls_group_id} — added device {added_user_id} not yet visible (issue #372)",
-                            commit.seq, commit.epoch
-                        );
-                        break;
-                    }
-                    eprintln!(
-                        "[mls] process_pending_commits: WARN third-party add for {added_user_id} at epoch {} in {mls_group_id} not yet verifiable — processing anyway",
-                        commit.epoch
-                    );
-                }
-            }
-        }
-
         let commit_data = commit.commit_data;
 
         // All MLS work is synchronous and scoped so nothing !Send crosses
@@ -1682,7 +1589,33 @@ async fn process_one_generation<'h>(
             let outcome =
                 apply_one_commit(&provider, mls_group_id, generation, commit.epoch, &commit_data);
             match outcome {
-                CommitApply::Applied => true,
+                CommitApply::Applied { adds } => {
+                    // Verify AFTER the merge and OFF the commit: a StagedCommit
+                    // cannot be dropped and re-processed later (its ratchet
+                    // generation is consumed), so there is no "defer" — only
+                    // verify-and-flag, with eviction as the remedy.
+                    for leaf in adds {
+                        let verdict = directory.leaf_verdict(
+                            &leaf.user_id,
+                            &leaf.device_id,
+                            &leaf.signature_key,
+                            leaf.scheme,
+                        );
+                        let reason = match verdict {
+                            LeafVerdict::Certified => continue,
+                            LeafVerdict::Unverifiable(why) => why.to_string(),
+                            LeafVerdict::Uncertified(why) => why,
+                        };
+                        eprintln!(
+                            "[mls] process_pending_commits: commit seq {} epoch {} in {mls_group_id} \
+                             added a leaf for {}:{} that is NOT cross-signed by that account ({reason}) \
+                             — applied to stay on the canonical branch; flagging for eviction",
+                            commit.seq, commit.epoch, leaf.user_id, leaf.device_id
+                        );
+                        flagged.push((leaf, commit.epoch, reason));
+                    }
+                    true
+                }
                 CommitApply::Recover(reason) => {
                     eprintln!(
                         "[mls] process_pending_commits: {mls_group_id} cannot advance past epoch {} ({reason:?}) — recovering rather than wedging (#680)",
@@ -1708,6 +1641,10 @@ async fn process_one_generation<'h>(
                 }
             }
         }
+    }
+
+    if !flagged.is_empty() {
+        report_uncertified_leaves(state, mls_group_id, user_id, flagged).await;
     }
 
     // Resolve any commit left DANGLING by an interrupted submit (a crash, or a
@@ -2021,8 +1958,9 @@ pub(super) enum RecoverReason {
 /// Outcome of applying one commit from the log — see [`apply_one_commit`].
 #[derive(Debug)]
 pub(super) enum CommitApply {
-    /// Merged; the local epoch advanced.
-    Applied,
+    /// Merged; the local epoch advanced. `adds` are the leaves the commit
+    /// admitted, read off its own Add proposals — the caller verifies them.
+    Applied { adds: Vec<AddedLeaf> },
     /// The local group cannot advance on this lineage and must be rebuilt. The
     /// reason is carried so the caller recovers (external-join) rather than
     /// treating the stop as "caught up". `apply_one_commit` has already deleted
@@ -2114,9 +2052,24 @@ where
         }
     };
 
+    // The leaves this commit adds, for the caller to verify. Read off the
+    // proposals openmls actually staged — the only description of the commit
+    // that a committer cannot decouple from what it did.
+    let mut adds: Vec<AddedLeaf> = Vec::new();
     match group.process_message(provider, protocol_msg) {
         Ok(processed) => match processed.into_content() {
             ProcessedMessageContent::StagedCommitMessage(staged) => {
+                for queued in staged.add_proposals() {
+                    let kp = queued.add_proposal().key_package();
+                    let leaf = kp.leaf_node();
+                    adds.push(AddedLeaf {
+                        user_id: parse_credential_user_id(leaf.credential()),
+                        device_id: parse_credential_device_id(leaf.credential())
+                            .unwrap_or_default(),
+                        signature_key: leaf.signature_key().as_slice().to_vec(),
+                        scheme: signature_scheme(kp.ciphersuite()),
+                    });
+                }
                 if let Err(e) = group.merge_staged_commit(provider, *staged) {
                     eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — recovering via external-join");
                     let _ = group.delete(provider.storage());
@@ -2192,7 +2145,83 @@ where
         }
     }
 
-    CommitApply::Applied
+    CommitApply::Applied { adds }
+}
+
+/// What a member does about leaves a replayed commit added that are NOT
+/// cross-signed by the account they claim (`LeafVerdict` ≠ `Certified`).
+///
+/// The commit has already been merged — it is canonical, and refusing it would
+/// only strand this device (see the replay loop). So: (1) write one
+/// `security_event` per leaf (`kind = "uncertified_mls_leaf"`) to this user's
+/// own audit log, which the Security settings page lists — the same surface a
+/// revoked or newly-enrolled device is reported on; (2) kick a detached
+/// reconcile, whose leaf gate (`reconcile_group_mls_core_staged`) removes any
+/// leaf that is POSITIVELY uncertified, append-only, with a normal remove
+/// commit. The reconcile re-reads the whole roster's cert material, so a leaf
+/// that was merely unverifiable here (a hint the committer left incomplete)
+/// and is in fact certified is kept — the eviction is self-correcting, and
+/// every honest member races to make the same removal, so at most one lands.
+///
+/// Residual: the rogue leaf holds the group's key schedule from the epoch it
+/// was added until the eviction commit lands — bounded by one honest member's
+/// reconcile, not by anything the attacker controls. Nothing evicts it sooner
+/// without breaking the append-only log every member replays.
+async fn report_uncertified_leaves(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+    flagged: Vec<(AddedLeaf, i64, String)>,
+) {
+    for (leaf, epoch, reason) in &flagged {
+        let ev = pollis_api::account::SecurityEventBody {
+            kind: "uncertified_mls_leaf".to_string(),
+            device_id: Some(leaf.device_id.clone()),
+            metadata: Some(format!(
+                "conversation={mls_group_id} user={} epoch={epoch} reason={reason}",
+                leaf.user_id
+            )),
+            // The DS's no-auth fallback for the acting user
+            // (`pollis_delivery::writes::resolve_actor`): auth on → the signed
+            // user and this must EQUAL it; auth off → this IS the actor.
+            user_id: Some(user_id.to_string()),
+        };
+        if let Err(e) = super::ds_client::ds_post_ok(state, &ev).await {
+            eprintln!(
+                "[mls] process_pending_commits: DS security-event for uncertified leaf failed (non-fatal): {e}"
+            );
+        }
+    }
+
+    // Detached: this runs under the per-conversation MLS lock, which reconcile
+    // re-acquires, so it cannot run inline. The spawned task waits its turn.
+    tokio::spawn(eviction_reconcile(
+        Arc::clone(state),
+        mls_group_id.to_string(),
+        user_id.to_string(),
+    ));
+}
+
+/// The detached eviction reconcile [`report_uncertified_leaves`] spawns.
+///
+/// Boxed and type-erased on purpose: reconcile runs the interleaved catch-up,
+/// which runs this replay, which spawns this — a cycle the compiler cannot
+/// prove `Send` through by inference. Erasing the future here is what breaks
+/// it; the body is otherwise a plain call.
+fn eviction_reconcile(
+    state: Arc<AppState>,
+    conversation_id: String,
+    user_id: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        if let Err(e) =
+            super::reconcile::reconcile_group_mls_impl(&state, &conversation_id, &user_id).await
+        {
+            eprintln!(
+                "[mls] process_pending_commits: eviction reconcile for {conversation_id} failed: {e}"
+            );
+        }
+    })
 }
 
 /// Read this device's current local MLS epoch for `mls_group_id` and report it to

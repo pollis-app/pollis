@@ -37,6 +37,7 @@ pub use provider::set_current_suite_override;
 pub use device::{
     ensure_device_cert, load_device_cert_pubs, load_device_pq_signing_key,
     load_or_create_device_signer, resign_stale_device_certs, stale_cert_candidates,
+    AddedLeaf, IdentityDirectory, LeafVerdict,
 };
 
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────
@@ -56,6 +57,10 @@ pub(crate) use ds_client::ds_livekit_identities;
 
 // ── Key packages ─────────────────────────────────────────────────────────────
 pub use key_packages::{ensure_mls_key_package, validate_key_package};
+// A KeyPackage that claims a `user:device` credential with a key the user never
+// certified — the flows suite's model of a DS substituting an attacker's package.
+#[cfg(feature = "test-harness")]
+pub use key_packages::forge_key_package_for;
 
 // ── Welcomes ─────────────────────────────────────────────────────────────────
 pub use welcomes::{
@@ -84,6 +89,10 @@ pub use reconcile::{
     reconcile_group_mls_core, reconcile_group_mls_core_staged, reconcile_group_mls_impl,
     ReconcileCommitData, ReconcileOutcome,
 };
+// Leaf cross-signing seams for the flows suite: play a pre-fix committer, and
+// read the local tree back to assert what was admitted or evicted.
+#[cfg(feature = "test-harness")]
+pub use reconcile::{local_tree_members, set_skip_committer_leaf_check};
 
 #[cfg(test)]
 mod tests;

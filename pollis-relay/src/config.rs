@@ -13,17 +13,35 @@
 //! bind = "0.0.0.0:9444"
 //!
 //! # Static destination allowlist — the closed-overlay guarantee (§1.2). Each
-//! # entry is an exact host, a "*.suffix" glob, or "*" (fully open; NOT v0).
-//! # Empty/omitted ⇒ the relay dials nothing (never fails open).
-//! allowlist = ["turso.io", "*.pollis.com", "api.pollis.com"]
+//! # entry is `host[:port]`: the host is an exact name, a "*.suffix" glob, or
+//! # "*" (any host; NOT v0), and the port is a number, "*" (any port), or
+//! # omitted — which means 443 and ONLY 443. A `Connect` must match both.
+//! # Empty/omitted ⇒ the relay dials nothing (never fails open). A malformed
+//! # entry aborts startup rather than silently matching nothing.
+//! allowlist = ["*.turso.io", "api.pollis.com", "api.pollis.com:8443"]
 //!
 //! # Path to the persisted QUIC identity keypair. Generated on first start if
 //! # absent (the DER cert is written alongside as "<path>.crt"). Default
 //! # "relay-identity.key" in the working directory.
 //! identity_path = "/var/lib/pollis-relay/identity.key"
 //!
-//! # Global cap on simultaneously-open QUIC connections. Default 4096.
+//! # Global cap on simultaneously-open QUIC connections whose handshake has
+//! # COMPLETED. Default 4096. Handshakes in flight are bounded separately by the
+//! # same number, so half-open connections can never evict established ones.
 //! max_concurrent_connections = 4096
+//!
+//! # Cap on simultaneously-open QUIC connections from ONE source IP, enforced at
+//! # accept after QUIC address validation (Retry). Default 32. Each circuit —
+//! # from a client, or from a previous relay extending into this node — rides
+//! # its own connection, so size this for the fan-in you expect from a single
+//! # address (a busy guard, a large NAT).
+//! max_connections_per_ip = 32
+//!
+//! # How long a freshly-opened stream may take to finish negotiating (opening
+//! # frame, handshake, anchor, terminal command) before it is refused. Default
+//! # 10. A stream that never sends its first frame otherwise parks a task and a
+//! # circuit slot forever.
+//! first_frame_timeout_secs = 10
 //!
 //! # Act as a MIDDLE HOP of a multi-hop circuit: honour `Extend` by dialing the
 //! # next relay (design §6.2). Default true. Set false to make this node
@@ -75,6 +93,10 @@ pub const DEFAULT_BIND: &str = "0.0.0.0:9444";
 pub const DEFAULT_IDENTITY_PATH: &str = "relay-identity.key";
 /// The default global concurrent-connection cap.
 pub const DEFAULT_MAX_CONCURRENT_CONNECTIONS: u32 = 4096;
+/// The default per-source-IP concurrent-connection cap.
+pub const DEFAULT_MAX_CONNECTIONS_PER_IP: u32 = 32;
+/// How long a stream may take to negotiate before it is refused, by default.
+pub const DEFAULT_FIRST_FRAME_TIMEOUT_SECS: u64 = 10;
 /// Where the signed relay revocation list is published by default. Matches the
 /// client-side `POLLIS_OVERLAY_REVOCATION_URL` default (`infra/relay-hydra`).
 pub const DEFAULT_REVOCATION_URL: &str = "https://relays.pollis.com/revocations.json";
@@ -88,6 +110,12 @@ pub struct RelayFileConfig {
     pub allowlist: Option<Vec<String>>,
     pub identity_path: Option<String>,
     pub max_concurrent_connections: Option<u32>,
+    /// Per-source-IP cap on open QUIC connections. `None` ⇒
+    /// [`DEFAULT_MAX_CONNECTIONS_PER_IP`].
+    pub max_connections_per_ip: Option<u32>,
+    /// Seconds a stream may take to negotiate before it is refused. `None` ⇒
+    /// [`DEFAULT_FIRST_FRAME_TIMEOUT_SECS`].
+    pub first_frame_timeout_secs: Option<u64>,
     /// Whether this node acts as a middle hop (honours `Extend`). `None` ⇒ the
     /// [`crate::server::RelayConfig`] default, which is `true`.
     pub allow_extend: Option<bool>,
@@ -176,6 +204,8 @@ mod tests {
             allowlist = ["turso.io", "*.pollis.com"]
             identity_path = "/tmp/id.key"
             max_concurrent_connections = 100
+            max_connections_per_ip = 7
+            first_frame_timeout_secs = 3
             allow_extend = false
             health_bind = "0.0.0.0:9445"
 
@@ -191,6 +221,8 @@ mod tests {
         );
         assert_eq!(cfg.identity_path.as_deref(), Some("/tmp/id.key"));
         assert_eq!(cfg.max_concurrent_connections, Some(100));
+        assert_eq!(cfg.max_connections_per_ip, Some(7));
+        assert_eq!(cfg.first_frame_timeout_secs, Some(3));
         assert_eq!(cfg.allow_extend, Some(false));
         assert_eq!(cfg.health_bind.as_deref(), Some("0.0.0.0:9445"));
 

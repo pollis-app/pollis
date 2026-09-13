@@ -97,20 +97,102 @@ pub async fn update_profile(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<UpdateProfileBody>(apply_update_profile(&conn, authed.as_deref(), &parsed).await?)
+    profile_outcome_response::<UpdateProfileBody>(
+        apply_update_profile(&conn, authed.as_deref(), &parsed).await?,
+    )
+}
+
+// ── Username shape ───────────────────────────────────────────────────────────
+
+/// Shortest username the DS accepts.
+pub const USERNAME_MIN_LEN: usize = 3;
+/// Longest username the DS accepts.
+pub const USERNAME_MAX_LEN: usize = 32;
+
+/// The one character class a username may be drawn from: `[a-z0-9_.-]`.
+///
+/// Conservative on purpose, and — the load-bearing part — WITHOUT `@`. Every
+/// "find a person by identifier" lookup (`groups::apply_create_invite`,
+/// `directory::user_by_identifier`, and through it the client's
+/// `search_user_by_username`) decides between the `email` and `username`
+/// columns by whether the identifier contains `@`. That dispatch is only sound
+/// if no username can ever contain one; otherwise an account whose username is
+/// `alice@corp.com` is what an admin's invite to Alice resolves to, and the
+/// MLS Add faithfully admits the squatter. The character rule is enforced here
+/// (400), and the `@` half of it again by the `users_username_no_at_*` triggers
+/// of migration `000021`, so the state is unrepresentable rather than merely
+/// refused at one door.
+///
+/// Mirrored client-side (`frontend/src/utils/username.ts`,
+/// `mobile/lib/username.ts`) so the form can explain the rule before the round
+/// trip; the DS check is the one that counts.
+pub fn is_username_char(c: char) -> bool {
+    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '-')
+}
+
+/// `^[a-z0-9_.-]{3,32}$`, spelled without a regex dependency.
+pub fn is_valid_username(s: &str) -> bool {
+    (USERNAME_MIN_LEN..=USERNAME_MAX_LEN).contains(&s.len()) && s.chars().all(is_username_char)
+}
+
+/// The message a rejected username is refused with; `pub` so the test that
+/// pins the refusal does not have to restate it.
+pub const USERNAME_INVALID: &str =
+    "username must be 3-32 characters of a-z, 0-9, '_', '.' or '-'";
+
+/// What the profile-domain `apply_*` fns decide. [`WriteOutcome`] plus one
+/// refusal it lacks: a body that is well-formed JSON but names an impossible
+/// value. That is the caller's mistake (400), not a permission problem, and
+/// answering 403 would send the user to an admin for a permission that does not
+/// exist. The `&'static str` means no caller input is ever echoed back.
+#[derive(Debug)]
+pub enum ProfileOutcome {
+    Ok,
+    Forbidden,
+    Invalid(&'static str),
+}
+
+pub(crate) fn profile_outcome_response<B>(outcome: ProfileOutcome) -> Result<Response, AppError>
+where
+    B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
+{
+    Ok(match outcome {
+        ProfileOutcome::Ok => crate::writes::ok_response::<B>(pollis_api::StatusOk::Ok),
+        ProfileOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
+        ProfileOutcome::Invalid(why) => bad_request(why),
+    })
 }
 
 /// COALESCE-UPDATE the user's own profile row. Authz: the actor may only edit
 /// their own `users` row (`user_id` bound to the authenticated user).
+///
+/// A `username` in the body must satisfy [`is_valid_username`] — with one
+/// carve-out. Both clients re-send the CURRENT username on every save, whatever
+/// field the user actually edited, and accounts created before the rule carry
+/// default names (`alice_7XK2`: the email's local part plus an upper-case ULID
+/// suffix) that do not satisfy it. So a username equal to the one already
+/// stored passes unvalidated: it introduces no new state. The carve-out never
+/// extends to `@`, because that is the half the resolvers depend on; a legacy
+/// row that somehow holds one is refused until it picks a real name (the
+/// `000021` trigger would refuse the write anyway — this check turns that 500
+/// into a 400 that says why).
 pub async fn apply_update_profile(
     conn: &Connection,
     authed: Option<&str>,
     body: &UpdateProfileBody,
-) -> anyhow::Result<WriteOutcome> {
+) -> anyhow::Result<ProfileOutcome> {
     let user = match resolve_actor(authed, Some(body.user_id.as_str())) {
         Ok(u) => u,
-        Err(o) => return Ok(o),
+        Err(_) => return Ok(ProfileOutcome::Forbidden),
     };
+    if let Some(username) = body.username.as_deref() {
+        let current = current_username(conn, &user).await?;
+        let unchanged = current.as_deref() == Some(username);
+        let grandfathered = unchanged && !username.contains('@');
+        if !grandfathered && !is_valid_username(username) {
+            return Ok(ProfileOutcome::Invalid(USERNAME_INVALID));
+        }
+    }
     conn.execute(
         "UPDATE users SET \
             username = COALESCE(?2, username), \
@@ -127,7 +209,20 @@ pub async fn apply_update_profile(
         ],
     )
     .await?;
-    Ok(WriteOutcome::Ok)
+    Ok(ProfileOutcome::Ok)
+}
+
+async fn current_username(conn: &Connection, user_id: &str) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT username FROM users WHERE id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(row.get(0)?),
+        None => Ok(None),
+    }
 }
 
 // ── POST /v1/profile/preferences ─────────────────────────────────────────────
@@ -183,29 +278,10 @@ const READ_CURSOR_BLOB_MAX_BYTES: usize = 256 * 1024;
 /// length is malformed rather than merely unusual.
 const READ_CURSOR_NONCE_LEN: usize = 12;
 
-/// The result of a read-cursor push. Wider than [`WriteOutcome`] for the same
-/// reason [`crate::emoji::EmojiOutcome`] is: a malformed envelope is the
-/// caller's mistake (400), not a permission problem, and answering 403 would
-/// send the user to an admin for a permission that does not exist.
-#[derive(Debug)]
-pub enum ReadCursorOutcome {
-    Ok,
-    Forbidden,
-    /// The blob envelope is malformed. `&'static str` so no caller input is ever
-    /// interpolated into what is echoed back.
-    Invalid(&'static str),
-}
-
-fn read_cursor_outcome_response<B>(outcome: ReadCursorOutcome) -> Result<Response, AppError>
-where
-    B: pollis_api::DsRequest<Response = pollis_api::StatusOk>,
-{
-    Ok(match outcome {
-        ReadCursorOutcome::Ok => crate::writes::ok_response::<B>(pollis_api::StatusOk::Ok),
-        ReadCursorOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
-        ReadCursorOutcome::Invalid(why) => bad_request(why),
-    })
-}
+/// The result of a read-cursor push — [`ProfileOutcome`] under the name the
+/// read-cursor tests and docs were written against. `Invalid` here means the
+/// blob envelope is malformed.
+pub type ReadCursorOutcome = ProfileOutcome;
 
 pub async fn save_read_cursors(
     State(state): State<AppState>,
@@ -216,7 +292,7 @@ pub async fn save_read_cursors(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    read_cursor_outcome_response::<SaveReadCursorsBody>(
+    profile_outcome_response::<SaveReadCursorsBody>(
         apply_save_read_cursors(&conn, authed.as_deref(), &parsed).await?,
     )
 }

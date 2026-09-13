@@ -953,11 +953,14 @@ async fn a_returning_device_reports_and_pins_again() {
 
         // Bob comes back and reports — a cursor still BEHIND the envelope (-200d).
         // The monotone guard keeps the max cursor, but `reported_at` jumps to now.
+        // RFC 3339, as a client writes it: the DS admits no other shape into
+        // `last_fetched_at` (`check_cursor_stamp`), so a SQLite-shaped stamp
+        // here would be refused and the assertion below would pass vacuously.
         let wm = WatermarkBody {
             conversation_id: "c1".into(),
             user_id: Some("bob".into()),
             device_id: "b1".into(),
-            last_fetched_at: past_datetime(&db, "-200 days").await,
+            last_fetched_at: rfc3339_from_now(-200 * 24 * 60),
         };
         apply_advance_watermark(&db.conn().await.unwrap(), None, &wm).await.unwrap();
 
@@ -1039,15 +1042,4 @@ async fn sweep_reports_identity_free_growth_metrics() {
         m.oldest_sent_at.is_some() && m.largest_conversation_oldest_sent_at.is_some(),
         "oldest timestamps are surfaced (a timestamp is not an identifier)"
     );
-}
-
-/// Read a `datetime('now', offset)` value back as a string, so a watermark body
-/// can carry a cursor at a known relative age in the DB's own clock/format.
-async fn past_datetime(db: &Db, offset: &str) -> String {
-    let conn = db.conn().await.unwrap();
-    let mut rows = conn
-        .query("SELECT datetime('now', ?1)", libsql::params![offset.to_string()])
-        .await
-        .unwrap();
-    rows.next().await.unwrap().unwrap().get::<String>(0).unwrap()
 }

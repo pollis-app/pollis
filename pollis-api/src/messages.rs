@@ -21,6 +21,13 @@ pub struct SendMessageBody {
     pub ciphertext: String,
     #[serde(default)]
     pub reply_to_id: Option<String>,
+    /// The envelope's delivery-cursor stamp, as the client wrote it
+    /// (`pollis_core::commands::messages::envelope_sent_at`). Stored verbatim
+    /// when admitted, and admitted ONLY as a canonical UTC RFC 3339 stamp no
+    /// further ahead of the DS clock than the request-signature window
+    /// (`pollis_delivery::messages::check_cursor_stamp`, → 400 otherwise): every
+    /// recipient adopts it as its fetch cursor and the GC floor reads it, so a
+    /// far-future value would black out the conversation for everyone.
     pub sent_at: String,
     /// Sealed sender flag (issue #331, `docs/metadata-minimization-design.md`
     /// §2). `1` → `sender_id` is a blinded sentinel; the true sender lives in the
@@ -69,6 +76,7 @@ pub struct EditMessageBody {
     #[serde(default)]
     pub sender_id: Option<String>,
     pub ciphertext: String,
+    /// See [`SendMessageBody::sent_at`] — bounded exactly like a send's.
     pub sent_at: String,
     /// See [`SendMessageBody::generation`] — an edit is sealed exactly like a
     /// message and is gated exactly like one.
@@ -127,11 +135,20 @@ pub struct ReactionBody {
 
 #[derive(Serialize, Deserialize)]
 pub struct WatermarkBody {
+    /// The actor must be a current member of this conversation (→ 403).
     pub conversation_id: String,
     /// No-auth fallback; when signed it must equal the authenticated user.
     #[serde(default)]
     pub user_id: Option<String>,
+    /// When signed it must equal the SIGNING device (→ 403); the row is keyed
+    /// on the verified device, never on this field alone.
     pub device_id: String,
+    /// The cursor: the highest envelope `sent_at` this device has handled.
+    /// Admitted only through `check_cursor_stamp` (canonical UTC RFC 3339,
+    /// within the signature window of the DS clock, → 400 otherwise) — the
+    /// upsert is monotone and never rewinds, so a far-future cursor would be a
+    /// permanent blackout for this device and, once every device reported one,
+    /// GC of the whole conversation.
     pub last_fetched_at: String,
 }
 

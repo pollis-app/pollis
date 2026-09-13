@@ -106,7 +106,9 @@ now reused rather than rebuilt.
 ### users
 - `id` TEXT PK
 - `email` TEXT NOT NULL UNIQUE
-- `username` TEXT
+- `username` TEXT NOT NULL UNIQUE — **may not contain `@`**, enforced by the
+  `users_username_no_at_insert` / `users_username_no_at_update` triggers of
+  migration `000021` (see below)
 - `phone` TEXT
 - `avatar_url` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
@@ -126,6 +128,37 @@ in-process harnesses:
 | writer | function | when |
 |---|---|---|
 | DS (authoritative, and the only one) | `pollis_delivery::otp::apply_verify_otp` | every sign-in |
+
+**`username` has a shape, and the shape is what makes identifier lookups sound.**
+Every "find a person by what the user typed" on the DS — `/v1/invites/create`,
+`/v1/directory/users` (behind the client's `search_user_by_username`) — goes
+through ONE function, `directory::user_by_identifier`, which matches an identifier
+containing `@` against `email` ONLY and anything else against `username` ONLY. It
+used to be `WHERE username = ?1 OR email = ?1`, first row wins, and SQLite's
+multi-index OR scans the `username` term first — so an account that had set its
+username to `alice@corp.com` was what an admin's invite to Alice resolved to, and
+the MLS Add admitted the squatter. The dispatch is only sound if no username can
+contain `@`, which three layers now guarantee:
+
+| layer | rule | where |
+|---|---|---|
+| DS chokepoint | `^[a-z0-9_.-]{3,32}$`, else 400 (`USERNAME_INVALID`) | `pollis_delivery::profile::is_valid_username`, applied by `apply_update_profile` |
+| DS minting | default names (`<email local part>_<ulid suffix>`) are lower-cased and squeezed into the same rule | `pollis_delivery::otp::default_username` |
+| schema | `@` refused on INSERT and UPDATE OF `username`, with no DS code in the path | migration `000021` (`users_username_no_at_*` triggers) |
+
+The schema layer refuses only `@` — the load-bearing half — so that the migration
+is **already satisfied** by every default name minted before it (the ULID suffix
+was upper-case Crockford base32; a local part cannot contain `@`). Those legacy
+names keep working: `apply_update_profile` validates a username only when it
+differs from the stored one, because both clients re-send the current username on
+every save and a rename-or-nothing rule would have locked such accounts out of
+editing their display name. The carve-out never covers `@`. Triggers rather than
+a CHECK because SQLite cannot `ALTER TABLE … ADD CHECK` without the 12-step rebuild.
+The clients mirror the rule (`frontend/src/utils/username.ts`,
+`mobile/lib/username.ts`) so the form can say why before the round trip; tests:
+`pollis-delivery/tests/username_shape.rs` (all three layers, plus the
+squatter-resolution regression), `frontend/tests/username.test.ts`,
+`mobile/tests/username.test.ts`.
 
 **There is exactly one writer since #910.** `pollis-core` used to carry a twin
 (`auth::resolve_or_create_user_by_email`, reached from the `#[cfg(debug_assertions)]`
@@ -259,6 +292,28 @@ the conversation's **floor** (`sent_at_after` / `TOMBSTONE_FLOOR` in
 `pollis-delivery/src/messages.rs`), so client/DS clock skew cannot reintroduce
 the same burial.
 
+**A client-chosen `sent_at` is bounded, never trusted (`check_cursor_stamp`).**
+The value stays client-chosen — the sender's own local `message.sent_at` carries
+the same stamp and cross-device read cursors (#844) compare against it, so a DS
+re-stamp would make one message sort differently on the sender's device than on
+everyone else's — but `/v1/messages/send` and `/v1/messages/edit` admit it only
+when it is a **canonical UTC RFC 3339** rendering (`…+00:00`, 0/3/6/9 fraction
+digits — exactly the set `envelope_sent_at` and `now_rfc3339` produce) **and no
+further ahead of the DS clock than the request-signature window**
+(`CURSOR_STAMP_SKEW_SECS` = `auth::REPLAY_WINDOW_SECS`, 300 s). Anything else is
+a `400` and nothing is stored. Before this bound one member posting
+`sent_at = "9999-…"` blacked out the conversation for every member: each
+recipient fetched it (it sorts above every cursor), reported a `9999-…`
+watermark, and `sent_at > cursor` matched nothing ever again; once every live
+device had reported, the next GC sweep deleted every envelope in the
+conversation, fetched or not. The honest client already meets the bound — its
+stamp is written before the request is signed, and a signature further ahead
+than the window is already refused. `Z` suffixes, non-zero offsets, SQLite's
+`YYYY-MM-DD HH:MM:SS` and truncated/padded fractions are refused as
+non-canonical because each sorts somewhere other than where its instant
+belongs. Pinned by `messages::cursor_stamp_tests` and
+`pollis-delivery/tests/cursor_poisoning.rs`.
+
 **The CLIENT side is correct as it stands, and must not be "fixed" to match
 (#875).** `chrono::Utc::now().to_rfc3339()` is `SecondsFormat::AutoSi`, which
 emits 0, 3, 6 or 9 fraction digits — it **omits** the fraction only when the
@@ -292,8 +347,11 @@ still clears the recipient's watermark). Any change to timestamp formatting on
 either side must keep all four green.
 
 That floor is the greater of `MAX(sent_at)` over `message_envelope` **and**
-`MAX(last_fetched_at)` over `conversation_watermark`, both scoped to the
-conversation (#692). The envelope side alone is not enough: envelope GC deletes
+`MAX(last_fetched_at)` over the conversation's **member-device roster** in
+`conversation_watermark` — the same `channel_member_device_rows!` /
+`dm_member_device_rows!` join the GC predicate aggregates over, both shapes
+UNIONed since the floor does not know which one the id is (#692; roster join
+added with the cursor bound). The envelope side alone is not enough: envelope GC deletes
 rows once every current member device has watermarked past them, and since the
 TTL arm's removal that deletion is purely watermark-gated — so a fully-collected
 conversation ends up with *no* envelopes, `MAX(sent_at)` goes NULL, and the stamp
@@ -303,8 +361,17 @@ cursor only moves forward, so an envelope at or below it is skipped permanently,
 not merely delayed) and the deleted message would stay readable on that device
 forever. `conversation_watermark` rows outlive envelope GC — they are only ever
 advanced, or deleted with the device itself — so they are the evidence the floor
-must also consult. Pinned by `messages::tombstone_floor_tests` and
-`pollis-delivery/tests/envelope_retention.rs` (Part F).
+must also consult. Only *roster* rows, though: a recipient is by definition a
+member device, and the unjoined `MAX` was an attack surface — with
+`/v1/watermarks/advance` then unauthorized beyond the user binding, any account
+could park `last_fetched_at = "9999-…"` under a victim conversation, the floor
+adopted it, and the next admin delete was stamped `9999-…000000001`; every
+device that applied that tombstone took it as its cursor and went dark, then GC
+collected the conversation. The endpoint is now membership-gated and the value
+bounded, and the floor ignores a stray row exactly as GC does. Pinned by
+`messages::tombstone_floor_tests` (including the non-member and DM-roster
+cases), `pollis-delivery/tests/envelope_retention.rs` (Part F) and
+`pollis-delivery/tests/cursor_poisoning.rs`.
 
 **Sealed sender (#331, #607).** Attribution is taken from the MLS credential inside
 the ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))
@@ -534,7 +601,9 @@ One row = "group `group_id` calls this object `:shortcode:`". The PK makes a sho
 - `last_fetched_at` TEXT NOT NULL _(the message cursor — how far the device has read)_
 - `reported_at` TEXT _(migration 000012, #720; server-stamped wall-clock time of the device's LAST report — the device-liveness signal, distinct from the message cursor. Nullable: pre-migration rows are NULL and treated as live)_
 
-**The two columns are in different text formats, deliberately (#908).** A text timestamp's format is decided by one thing: what it is compared against. `last_fetched_at` is compared lexically against `message_envelope.sent_at`, so it is **RFC 3339** — clients write it through `pollis_core::commands::messages::envelope_sent_at`, and the DS's own server-side seeds write it through `pollis_delivery::messages::seeded_watermark_cursor`. `reported_at` is compared against `datetime('now', ?)` in the `CLEANUP_*` predicate, so it stays in **SQLite's `YYYY-MM-DD HH:MM:SS`**. Until #908 the three seed paths (device registration, DM create / DM member-add, group join) wrote `datetime('now')` into *both*; because a space (0x20) sorts below a `T` (0x54), a seeded cursor compared as older than every RFC 3339 stamp sharing its calendar day — the opposite of the "this device has already consumed the backlog" the seed exists to assert. Fail-safe (over-pin, under-collect — envelopes were kept, never lost), but the seed did not do what its comment claimed. `seeded_watermark_cursor` is the DS-side counterpart to `envelope_sent_at`: one function owns the format so five call sites cannot each get it wrong.
+**Who may write a row, and what (`apply_advance_watermark`).** Both halves of the key are bound to the verified signature — `user_id` via `resolve_actor`, `device_id` must equal the signing device (`gate_identity_and_parse` → `verify_request_identity_cached`, the same gate `report_commit_since` uses) — and the user must be a current `is_member` of the conversation; otherwise `403`. The value is admitted only through `check_cursor_stamp` (canonical UTC RFC 3339, at most `CURSOR_STAMP_SKEW_SECS` ahead of the DS clock; otherwise `400`, row untouched). The upsert is monotone (`MAX`) and nothing ever rewinds a cursor, so a far-future value that got in was a permanent blackout for that device and — once every device held one — GC of the whole conversation; and without the membership gate any account could plant a row under any conversation id, which the tombstone floor (above) used to read. Pinned by `pollis-delivery/tests/cursor_poisoning.rs`.
+
+**The two columns are in different text formats, deliberately (#908).** A text timestamp's format is decided by one thing: what it is compared against. `last_fetched_at` is compared lexically against `message_envelope.sent_at`, so it is **RFC 3339** — clients write it through `pollis_core::commands::messages::envelope_sent_at`, and the DS's own server-side seeds write it through `pollis_delivery::messages::seeded_watermark_cursor`; `check_cursor_stamp` refuses any other shape at the endpoint. `reported_at` is compared against `datetime('now', ?)` in the `CLEANUP_*` predicate, so it stays in **SQLite's `YYYY-MM-DD HH:MM:SS`**. Until #908 the three seed paths (device registration, DM create / DM member-add, group join) wrote `datetime('now')` into *both*; because a space (0x20) sorts below a `T` (0x54), a seeded cursor compared as older than every RFC 3339 stamp sharing its calendar day — the opposite of the "this device has already consumed the backlog" the seed exists to assert. Fail-safe (over-pin, under-collect — envelopes were kept, never lost), but the seed did not do what its comment claimed. `seeded_watermark_cursor` is the DS-side counterpart to `envelope_sent_at`: one function owns the format so five call sites cannot each get it wrong.
 
 **Read as a BOUND value, never correlated (#1049).** `fetch_envelopes` in
 `pollis-delivery/src/directory.rs` serves every conversation in one query, so
@@ -593,7 +662,7 @@ that class of bug.
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
 - `mls_signature_pub` BLOB _(migration 13; the device's raw 32-byte **Ed25519** MLS leaf key — the one the retired classic suite's leaves signed with. No longer the DS request-auth credential since #668, and since #669 no live suite mints a leaf under it; still generated, still published, and still bound by the v2 cert, because `load_or_create_device_signer` is keyed by signature *scheme* and a group persisted under an older code point must stay readable.)_
-- `mls_signature_pub_pq` BLOB _(post-baseline 000011, #668; the device's raw 1312-byte **ML-DSA-44** MLS leaf key — the one `CS_PQ` leaves sign with, and the credential `X-Pollis-Signature` is verified against (`pollis-delivery/src/auth.rs`). A separate column and not an overload of `mls_signature_pub`: overwriting that one with a 1312-byte key would break auth for every already-shipped client the instant the migration ran. Nullable — NULL means the device predates #668; such a row is skipped by `resign_stale_device_certs`, treated as `AbsentRetry` by `verify_added_devices`, and self-heals on that device's next `ensure_device_cert`.)_
+- `mls_signature_pub_pq` BLOB _(post-baseline 000011, #668; the device's raw 1312-byte **ML-DSA-44** MLS leaf key — the one `CS_PQ` leaves sign with, and the credential `X-Pollis-Signature` is verified against (`pollis-delivery/src/auth.rs`). A separate column and not an overload of `mls_signature_pub`: overwriting that one with a 1312-byte key would break auth for every already-shipped client the instant the migration ran. Nullable — NULL means the device predates #668; such a row is skipped by `resign_stale_device_certs`, verdicts `Unverifiable` in `IdentityDirectory::leaf_verdict`, and self-heals on that device's next `ensure_device_cert`.)_
 - `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; **DEAD since #669** — retired in place, not dropped, because migrations must stay additive. Nothing writes it (`devices.rs::mark_pq_capable` and both `UPDATE user_device SET pq_capable = 1` statements are gone) and nothing reads it. Under #454 P2 the DS publish/replenish endpoints set it to 1 when a device published a hybrid KeyPackage pool — server-derived from what landed in `mls_key_package`, never a client UPDATE — and #454 P5 read it two ways: per-roster by `roster_is_fully_pq_capable`, and deployment-wide by `fleet_is_fully_pq_capable` (no row with `revoked_at IS NULL` and `last_seen` inside 90 days still at 0). Both had to pass before a group was born on or migrated to the hybrid suite. #669 retired the classic suite, so there is no classic-only device for the flag to distinguish; all three readers are deleted — see `.codesight/wiki/mls.md`.)_
 
 ### mls_key_package _(migration 3 + 11 + post-baseline 000010)_
@@ -612,8 +681,8 @@ that class of bug.
 - `sender_id` TEXT NOT NULL FK users
 - `commit_data` BLOB NOT NULL _(TLS-serialized MLS Commit)_
 - `created_at` TEXT NOT NULL DEFAULT now
-- `added_user_id` TEXT _(migration 14, NULL if no adds)_
-- `added_device_ids` TEXT _(migration 14, comma-separated)_
+- `added_user_id` TEXT _(migration 14, NULL if no adds; comma-separated — every distinct user the commit added, in add order. A **prefetch hint** the DS uses to fold cert rows into the commit batch, never what a replaying member verifies: it reads the added leaves off the commit's own Add proposals)_
+- `added_device_ids` TEXT _(migration 14, comma-separated; same hint status)_
 - `generation` INTEGER NOT NULL DEFAULT 0 _(commit-log-DB migration 000004, #454 P4 — the **suite generation**)_
 - UNIQUE INDEX `idx_mls_commit_conv_gen_epoch` on `(conversation_id, generation, epoch)` _(migration 000004, replacing `idx_mls_commit_conv_epoch`)_
 
@@ -799,8 +868,8 @@ independently.
 - `device_id` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
 - `metadata` TEXT
-- Written **only** through `POST /v1/security-events`, which attributes the row to the signer — a caller cannot forge an entry under another user. Read back by `list_security_events` for the Security settings page.
-- Kinds emitted today: `device_enrolled` (`metadata = via=approval,approver=<device>`), `device_rejected`, `device_revoked` (`metadata = name=<device name at revocation>`, #947), `identity_reset`, `secret_key_rotated`. An unknown kind renders as its raw wire string rather than being dropped, so a newer client's event is never invisible on an older one.
+- Client-reported kinds arrive **only** through `POST /v1/security-events`, which attributes the row to the signer — a caller cannot forge an entry under another user. Two kinds are **DS-authored** instead, written by the endpoint that performs the action so the client cannot omit them: `recovery_blob_fetched` (`POST /v1/read/recovery-blob`) and `identity_rotated` (`POST /v1/account/rotate-identity`, inside the rotation transaction; `metadata = credential=<session|signature|none>,new_identity_version=<n>`, `device_id` = the verified signing/session device). Read back by `list_security_events` for the Security settings page.
+- Kinds emitted today: `device_enrolled` (`metadata = via=approval,approver=<device>`), `device_rejected`, `device_revoked` (`metadata = name=<device name at revocation>`, #947), `identity_rotated`, `recovery_blob_fetched`, `secret_key_rotated`. `identity_reset` (client-written) is no longer emitted but is still rendered for rows inside the retention window. An unknown kind renders as its raw wire string rather than being dropped, so a newer client's event is never invisible on an older one.
 - All of these writes are best-effort by design: the state change they record has already committed, so failing the command on a flaky audit write would report a failure for something that did happen. `revoke_device` posts its event immediately after the tombstone lands and *before* the per-conversation MLS reconcile loop, so the trail does not depend on N commits succeeding — "did the revocation take effect?" is the question that flow produces, and it is asked under pressure.
 
 ### account_key_log _(migration 000005)_

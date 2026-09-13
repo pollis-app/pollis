@@ -122,12 +122,15 @@ impl RoutingPolicy {
         Arc::clone(&self.mode)
     }
 
+    // Routing is a per-HOST decision: which plane a destination belongs to does
+    // not depend on its port. The port is judged where it matters — by the
+    // relay's egress allowlist at the far end of the circuit.
     fn is_direct_host(&self, host: &str) -> bool {
-        self.direct_hosts.iter().any(|p| p.matches(host))
+        self.direct_hosts.iter().any(|p| p.matches_host(host))
     }
 
     fn is_overlay_host(&self, host: &str) -> bool {
-        self.overlay_hosts.iter().any(|p| p.matches(host))
+        self.overlay_hosts.iter().any(|p| p.matches_host(host))
     }
 
     /// Decide the intended route for `host`.

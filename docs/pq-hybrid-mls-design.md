@@ -646,8 +646,8 @@ add migrations, so the number is claimed when the work lands, not reserved here)
   request-auth credential, read as a raw 32-byte Ed25519 key by every already-shipped
   client — overwriting it with a 1312-byte ML-DSA key would have broken authentication for
   the whole fleet the instant the migration ran. NULL means "this device predates #668":
-  such a row is skipped by `resign_stale_device_certs`, treated as `AbsentRetry` by
-  `verify_added_devices`, and self-heals the next time that device runs
+  such a row is skipped by `resign_stale_device_certs`, verdicts `Unverifiable` in
+  `IdentityDirectory::leaf_verdict`, and self-heals the next time that device runs
   `ensure_device_cert`. The account-key transparency log (`account_key_log`,
   `000005_account_key_log.sql`) needed no migration either way — it records
   `account_id_pub` as an opaque blob, so the Ed25519 → ML-DSA-44 account key changes its
@@ -920,7 +920,7 @@ budget fails the run (§4.3).
 **S6 — External-join across suites.** A recovered device (Secret-Key path,
 `external_join_group`) joins a group that has migrated to hybrid. Assert it fetches the
 hybrid GroupInfo, external-commits into the hybrid group, and its cross-signing cert still
-verifies (`verify_added_devices`) — for #454 that confirmed the cert path was untouched by
+verifies (`IdentityDirectory::leaf_verdict`) — for #454 that confirmed the cert path was untouched by
 the KEM change; post-#668 it is the stronger assertion that the **v2** cert, which binds
 both the Ed25519 and the ML-DSA-44 leaf key in one ML-DSA-44 account-key signature,
 verifies the leaf key of whichever suite the device lands on (§2.4.3, §3.1).

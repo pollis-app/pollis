@@ -52,6 +52,24 @@ pub fn apply_local_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// `<data_dir>/pollis_<user_id>.db` — the ONLY way a user id becomes a database
+/// path, so the shape check cannot be skipped by one caller.
+///
+/// The `pollis_` prefix already stops an absolute or `..` id from resolving
+/// anywhere real (`pollis_/home/x.db` is a child of a directory that does not
+/// exist), but a path built from a server-chosen string is not something to
+/// leave to a prefix. The id is validated at the response chokepoint
+/// (`commands::auth::accept_server_user_id`); this is the same check at the
+/// join, so the two cannot drift apart.
+pub fn user_db_path(data_dir: &std::path::Path, user_id: &str) -> Result<std::path::PathBuf> {
+    if !crate::util::is_safe_id(user_id) {
+        return Err(Error::Other(anyhow::anyhow!(
+            "refusing to build a local database path for a malformed user_id"
+        )));
+    }
+    Ok(data_dir.join(format!("pollis_{user_id}.db")))
+}
+
 pub struct LocalDb {
     conn: Connection,
 }
@@ -63,7 +81,7 @@ impl LocalDb {
         crate::private_fs::create_dir_all(&data_dir)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create data dir: {e}")))?;
 
-        let db_path = data_dir.join(format!("pollis_{user_id}.db"));
+        let db_path = user_db_path(&data_dir, user_id)?;
         Self::open_at(&db_path, key)
     }
 

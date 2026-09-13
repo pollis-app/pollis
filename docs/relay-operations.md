@@ -126,13 +126,53 @@ the source IP and the authenticated `account_id_pub` (design §11.5):
 
 - new-circuit rate (per-minute token bucket) per IP and per account;
 - max concurrent circuits per IP and per account;
-- a global concurrent-connection cap.
+- a global cap on concurrent QUIC connections whose handshake has **completed**
+  (`max_concurrent_connections`; handshakes in flight are bounded separately
+  by the same number, so half-open connections can never evict live ones);
+- a per-source-IP cap on QUIC connections (`max_connections_per_ip`, default
+  32), enforced at accept.
 
 On breach the relay returns a clean `Rejected(RateLimited)` rather than dropping
 the stream. All limits are tunable from the config file; defaults are generous
 (the closed allowlist already removes open-proxy abuse). No external store — the
 counters are process-local, which keeps rate limiting itself off the metadata
 plane.
+
+**The per-IP limits apply to every stream, including one that arrives inside an
+onion layer from a previous hop.** The address of a layered stream is the
+previous relay's — *if* the sender is a relay. The opening `Layer` frame is
+unauthenticated and any client can send it (the relay's leaf cert is public in
+the directory, so anyone can complete the layer against it), and a node holds no
+directory to check the source against; exempting layered streams from the
+per-IP limits would therefore let a client escape them by prefixing one frame —
+and since production runs without account anchoring (§2), per-account limits
+alone bound nothing. The cost is that a guard's fan-in to one exit is bounded per
+IP as well: every circuit rides its own QUIC connection today (a client's, or a
+previous relay's extend leg), so size `max_connections_per_ip`,
+`max_concurrent_per_ip` and `new_circuits_per_min_per_ip` for the fan-in you
+expect from a single address — a busy guard, a large NAT — not for one user.
+
+### The unauthenticated surface
+
+What an attacker can do to a node **before** any handshake is bounded on its own:
+
+- **QUIC address validation.** Every new connection is answered with a Retry
+  first (RFC 9000 §8.1). A Retry is stateless and no larger than the Initial it
+  answers, so a spoofed source costs the node nothing and is never counted
+  against any cap. Cost: one extra round trip per connection.
+- **Post-handshake counting.** The global cap counts connections whose handshake
+  completed; Initials that never complete fill a separate bucket of the same
+  size and can never crowd out established connections.
+- **Per-IP connection cap** (`max_connections_per_ip`, above), enforced on the
+  validated address at accept.
+- **Negotiation deadline** (`first_frame_timeout_secs`, default 10). A stream
+  must finish negotiating — opening frame, handshake, optional anchor, terminal
+  command — within the deadline or it is refused with `BadRequest`, and any
+  circuit slot it was admitted to is released. A stream that opens and says
+  nothing no longer parks a task forever.
+- **Few streams per connection.** A connection may hold at most 4 bi-streams
+  (a client legitimately uses one per connection) and no uni-streams, instead of
+  quinn's default 100.
 
 ## 4. Deploy shape
 
@@ -380,6 +420,10 @@ bind = "0.0.0.0:9444"
 # The FOUR first-party destinations, resolved from THIS deployment's real
 # hostnames (prod shown; a dev pool uses api-dev.pollis.com etc.):
 #   Turso (metadata reads), the DS (writes), R2 (media/CDN), LiveKit (media SFU).
+# Each entry is `host[:port]`. No port means 443 and ONLY 443 — an
+# allowlisted host is one service, not every port on that machine. Write any
+# other port out (`host:8443`), or `host:*` for every port. A malformed entry
+# aborts startup.
 allowlist = [
   "*.turso.io",
   "api.pollis.com",
@@ -388,6 +432,15 @@ allowlist = [
 ]
 identity_path = "/var/lib/pollis-relay/identity.key"
 health_bind = "0.0.0.0:9445"
+
+# Connections: the global cap counts completed handshakes; the per-IP cap is
+# enforced at accept on the QUIC-validated source address. Every circuit rides
+# its own connection, so the per-IP cap also bounds circuits per address — size
+# it for a guard's fan-in or a large NAT, not for one user (see §3).
+max_concurrent_connections = 4096
+max_connections_per_ip = 32
+# A stream must finish negotiating within this many seconds or it is refused.
+first_frame_timeout_secs = 10
 
 # Act as a MIDDLE HOP of a multi-hop circuit — honour `Extend` by dialing the
 # next relay (wire v4, design §6.2). Default true. Set false to make this node

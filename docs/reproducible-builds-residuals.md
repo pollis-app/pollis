@@ -235,6 +235,18 @@ not link `libsql`, so there is nothing for a token to authenticate.)
   rebuilder's recipe — so the gap cannot silently reopen. Both directory values are
   public by construction (the key is the *verification* half; the private half never
   leaves the minting script), so publishing them in the recipe costs nothing.
+- **The recipe is also the ceiling of a build job's environment.** The same
+  checker refuses any `$GITHUB_ENV` export in a `build-*` job of
+  `desktop-release.yml` / `cli-release.yml` whose name is not an `option_env!` key
+  (or one of the determinism/signtool toolchain flags), and any `secrets.*` export
+  via `$GITHUB_ENV` in *any* job of those workflows. Whatever a build job exports
+  is an ordinary env var for every later step — each crate's `build.rs`,
+  proc-macros, pnpm lifecycle scripts, every third-party action — and the
+  account-wide R2 write key plus the LiveKit API secret sat there in every build
+  job with no consumer, having survived the #987 sweep of the same step. They are
+  gone; the R2 key is step-scoped `env:` on the `aws s3` upload steps of the
+  publish jobs, read straight from `secrets.*`. `scripts/test-check-build-recipe.sh`
+  re-adds each shape of the mistake and asserts the checker names it.
 - **Status: DEMONSTRATED, as of v1.8.4.** `rebuild-verify.yml` rebuilt the Linux
   AppImage payload from public source at `v1.8.4` and the result matched the payload
   hash in the transparency log, verified against the pinned ML-DSA-44 key:

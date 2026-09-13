@@ -303,6 +303,7 @@ pub async fn update_group(
             head_generation,
             head_epoch,
         } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
+        WriteOutcome::Invalid(msg) => Ok(crate::writes::bad_request(msg)),
         WriteOutcome::Ok => match crate::directory::group_row(&conn, &parsed.group_id).await? {
             Some(g) => Ok(crate::writes::ok_response::<UpdateGroupBody>(
                 UpdatedGroup::Ok {
@@ -547,6 +548,7 @@ pub async fn update_channel(
             head_generation,
             head_epoch,
         } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
+        WriteOutcome::Invalid(msg) => Ok(crate::writes::bad_request(msg)),
         WriteOutcome::Ok => match channel_row(&conn, &parsed.channel_id).await? {
             Some(c) => Ok(crate::writes::ok_response::<UpdateChannelBody>(c)),
             None => Err(AppError(anyhow::anyhow!(
@@ -821,19 +823,15 @@ pub async fn apply_create_invite(
         return Ok(InviteOutcome::Forbidden);
     }
 
-    // Resolve the identifier exactly as the client's lookup did: an exact match
-    // on username OR email.
-    let mut rows = conn
-        .query(
-            "SELECT id, username FROM users WHERE username = ?1 OR email = ?1",
-            libsql::params![body.invitee_identifier.clone()],
-        )
-        .await?;
-    let Some(row) = rows.next().await? else {
+    // Resolve the identifier through the ONE lookup the directory endpoint also
+    // uses: exact match on `email` when it contains an `@`, on `username`
+    // otherwise — never `username OR email`, whose first row a squatted
+    // username won (see `directory::user_by_identifier`).
+    let Some(invitee) = crate::directory::user_by_identifier(conn, &body.invitee_identifier).await?
+    else {
         return Ok(InviteOutcome::NoSuchUser);
     };
-    let invitee_id: String = row.get(0)?;
-    drop(rows);
+    let invitee_id = invitee.id;
 
     if invitee_id == inviter {
         return Ok(InviteOutcome::SelfInvite);
@@ -942,6 +940,7 @@ pub async fn accept_invite(
             head_generation,
             head_epoch,
         } => Ok(crate::writes::epoch_behind_response(head_generation, head_epoch)),
+        WriteOutcome::Invalid(msg) => Ok(crate::writes::bad_request(msg)),
         WriteOutcome::Ok => match group_id {
             Some(group_id) => Ok(crate::writes::ok_response::<AcceptInviteBody>(
                 AcceptedInvite::Ok { group_id },

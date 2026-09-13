@@ -364,6 +364,7 @@ endpoints! {
     Client   account_reads::DevicesBody          => "/v1/read/devices",                   account_reads::DevicesResponse;
     Client   account_reads::KeyPackagesBody      => "/v1/read/key-packages",              account_reads::KeyPackagesResponse;
     Client   account_reads::RegisteredDevicesBody => "/v1/read/registered-devices",       account_reads::RegisteredDevicesResponse;
+    Client   account_reads::RosterIdentitiesBody => "/v1/read/roster-identities",        account_reads::RosterIdentitiesResponse;
     Client   account_reads::EnrollmentRequestBody => "/v1/read/enrollment",               account_reads::EnrollmentRequestResponse;
     Client   account_reads::PendingEnrollmentsBody => "/v1/read/pending-enrollments",     account_reads::PendingEnrollmentsResponse;
     Client   account_reads::RecoveryBlobBody     => "/v1/read/recovery-blob",             account_reads::RecoveryBlobResponse;

@@ -39,8 +39,10 @@ on:
       # stops running.
       - ".github/workflows/**"
       # Reproducibility recipe inputs: the release build, the rebuilder, and the
-      # client's option_env! surface must stay in agreement.
+      # client's option_env! surface must stay in agreement — and no release build
+      # job may export anything beyond that recipe to $GITHUB_ENV.
       - ".github/workflows/desktop-release.yml"
+      - ".github/workflows/cli-release.yml"
       - ".github/workflows/rebuild-verify.yml"
       - "pollis-core/src/config.rs"
   push:
@@ -67,8 +69,10 @@ on:
       # stops running.
       - ".github/workflows/**"
       # Reproducibility recipe inputs: the release build, the rebuilder, and the
-      # client's option_env! surface must stay in agreement.
+      # client's option_env! surface must stay in agreement — and no release build
+      # job may export anything beyond that recipe to $GITHUB_ENV.
       - ".github/workflows/desktop-release.yml"
+      - ".github/workflows/cli-release.yml"
       - ".github/workflows/rebuild-verify.yml"
       - "pollis-core/src/config.rs"
 
@@ -112,6 +116,15 @@ jobs:
 
       - name: Build recipe drift (reproducibility)
         run: python3 ./scripts/check-build-recipe.py
+
+      # And that the same checker refuses a credential in a release build job's
+      # environment. The account-wide R2 write key and the LiveKit API secret sat
+      # in every build job's $GITHUB_ENV — readable by every build.rs, proc-macro,
+      # pnpm lifecycle script and third-party action — with no consumer in the job,
+      # and survived the #987 sweep of the very same step because nothing checked.
+      # Each case re-adds one such export and asserts the checker names it.
+      - name: Build-job environment carries only the recipe
+        run: ./scripts/test-check-build-recipe.sh
 
       # #945: the transparency log's pinned ML-DSA-44 key is hard-coded in nine
       # places across Rust, JS, JSON, Markdown and two workflows. Nothing checked

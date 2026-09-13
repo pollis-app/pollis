@@ -130,6 +130,9 @@ type RealtimeEvent =
     type: 'call_invite';
     call_id: string;
     room_name: string;
+    // The caller as ATTRIBUTED by pollis-core's dispatcher — the DS-stamped
+    // verified signer, or the publishing participant — never a field the
+    // calling client chose. A ring with no attributable caller never arrives.
     caller_id: string;
     caller_username: string;
   }

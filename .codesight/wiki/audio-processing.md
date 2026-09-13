@@ -90,7 +90,8 @@ speaking (plug a mic in mid-call) currently requires a rejoin —
 - `pollis-core/src/commands/voice_apm.rs` — `ApmStage`, `ApmConfig`, helpers (`run_capture`, `analyze_render`).
 - `pollis-core/src/commands/voice_denoiser.rs` — `DenoiserStage` wrapping `nnnoiseless::DenoiseState`. 48 kHz only.
 - `pollis-core/src/commands/voice/` — pipeline wiring: `start_mic_stream`, `start_speaker_stream`, `run_drain_task`, `run_mixer_task`, `ensure_playback`, `register_remote_track`. Backend commands `join_voice_channel` / `set_voice_audio_processing` / `set_voice_input_device` / `set_voice_output_device`.
-- `pollis-core/src/commands/voice_e2ee.rs` — derives the per-room shared symmetric key from the channel's MLS exporter secret (`MlsGroup::export_secret("pollis/voice/v1", epoch, 32)`), builds the `livekit::e2ee::E2eeOptions` passed into `Room::connect`, and rotates the live `KeyProvider` on MLS epoch advance.
+- `pollis-core/src/commands/voice_e2ee.rs` — derives the per-room shared symmetric key from the channel's MLS exporter secret (`MlsGroup::export_secret("pollis/voice/v1", epoch, 32)`), builds the `livekit::e2ee::E2eeOptions` passed into `Room::connect`, and on MLS epoch advance installs the new key in the epoch's ring slot and re-points every local sender `FrameCryptor` at it.
+- `pollis-core/src/commands/voice_key_ring.rs` — epoch → key-ring slot arithmetic (`voice_key_index`, `slot_reused_since`, `VOICE_KEY_RING_SIZE`, `VOICE_KEY_SLOT_GRACE_SECS`). Outside the media gate so it is unit-tested headless.
 - `frontend/src/hooks/queries/usePreferences.ts` — `ApmConfig`, `preferencesToApmConfig`, `APM_DEFAULTS`.
 - `frontend/src/pages/VoiceSettingsPage.tsx` — UI surface (mic boost slider, AGC switch + target slider, NS dropdown, AEC switch, Click Suppression switch). Mid-call changes push via `set_voice_audio_processing`.
 
@@ -110,14 +111,40 @@ SFU forwards ciphertext; no server (LiveKit, Pollis, or otherwise) can decrypt.
 - Channel → MLS-group resolution mirrors `messages::send_message`: a row in
   `channels` means a group channel (use `channels.group_id`); no row means a
   DM whose `conversation_id` IS the MLS group id.
-- Key index = `(epoch & 0x7FFFFFFF) as i32`. KeyProvider's 16-entry key ring
-  handles wrap; peers stay in sync because both compute the index from the
-  same epoch.
+- Key ring: libwebrtc keeps a 16-slot key ring per participant
+  (`KeyProviderOptions::key_ring_size`, passed explicitly as
+  `voice_key_ring::VOICE_KEY_RING_SIZE`). A sender encrypts with the slot its
+  `FrameCryptor::key_index` points at and writes that index into the frame
+  trailer; a receiver decrypts with whatever it holds in the slot the trailer
+  names. `set_shared_key(key, idx)` only *stores* a key — it never moves a
+  cryptor, and libwebrtc rejects any `idx >= 16` (the SDK wrapper drops the
+  `bool`, so `voice_e2ee::install_shared_key` reads the slot back to notice).
+- Key index = `voice_key_ring::voice_key_index(epoch)` = `epoch % 16`, always
+  inside the ring. Peers stay in sync because both compute the slot from the
+  same epoch; consecutive epochs occupy different slots so in-flight frames
+  from the previous epoch still decrypt. (The earlier `epoch & 0x7FFFFFFF`
+  derivation walked off the ring at epoch 16 and the install was silently
+  rejected.)
+- Join: `build_e2ee_options(key, idx)` installs the join key in slot `idx`
+  (and scrubs the slot-0 seed `with_shared_key` hardcodes when `idx != 0`);
+  `apply_sender_key_index` points the mic's cryptor at `idx` right after
+  publish. Every later local publish (screen share, camera) fires
+  `RoomEvent::LocalTrackPublished`, on which `sync_local_sender_key_index`
+  re-points the new cryptor — libwebrtc creates each one on slot 0.
 - Rotation: when `mls::process_pending_commits_inner` applies a commit (the
-  epoch advances), `voice_e2ee::on_mls_epoch_changed` re-derives the key and
-  calls `KeyProvider::set_shared_key(new_key, new_index)`. No reconnect; the
-  key ring keeps the previous key briefly so in-flight frames decrypt during
-  the changeover. Event-driven (no polling).
+  epoch advances), `voice_e2ee::on_mls_epoch_changed` re-derives the key,
+  installs it at the new epoch's slot, and calls `FrameCryptor::set_key_index`
+  on every LOCAL sender cryptor of the room (receivers follow the trailer).
+  No reconnect. The previous slot keeps the old key for
+  `VOICE_KEY_SLOT_GRACE_SECS` (10 s) so late frames and peers still applying
+  the commit decrypt, then is overwritten with random bytes so an ex-member
+  holding the old key cannot keep injecting frames under the old index.
+  Event-driven (no polling; the scrub is a one-shot delay per rotation).
+- Residual: two live epochs exactly 16 apart share a slot, so 16 commits
+  inside one 10 s grace window retire the older key early — a few dropped
+  frames, never plaintext exposure. `VoiceState.e2ee_key_index` records the
+  live slot; `voice_key_ring.rs` (compiled on every target) holds the slot
+  arithmetic and its unit tests.
 - Always on. There is no opt-out; the per-frame overhead is microseconds and
   "sometimes-on" is a footgun.
 - Compatibility: defaults match `livekit-client` JS (`LKFrameEncryptionKey`

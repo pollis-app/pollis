@@ -535,7 +535,13 @@ removes the per-call-`Client::new()` anti-pattern (connection-pool win for free)
     offline, zero-I/O property is unchanged; only the cert version and the field sizes moved. Plus:
     TOML config file, generated /
     persisted QUIC identity, graceful shutdown (drain on SIGTERM/SIGINT), and per-account / per-IP
-    rate + concurrency limits (`Rejected(RateLimited)`). Operational-separation commitment written up
+    rate + concurrency limits (`Rejected(RateLimited)`). The unauthenticated surface is bounded on
+    its own: QUIC Retry address validation on every connection, the global cap counted after the
+    handshake (half-open connections have a separate bound), a per-source-IP connection cap, a
+    negotiation deadline per stream, and at most 4 bi-streams per connection. Per-IP limits key on
+    the QUIC peer address for **every** stream, layered ones included — an opening `Layer` is
+    unauthenticated, so exempting it would be a one-frame bypass. The egress allowlist matches
+    `host:port` (a bare host means 443 only). Operational-separation commitment written up
     in **`docs/relay-operations.md`**. Bootstrap/OTP traffic (a device with no cert yet) cannot
     cert-authenticate and stays DIRECT — documented, mirrors the DS session-vs-device split.
   - **Slice 2b (landed) — the signed-directory client (#616, the hydra's client half).** The pool is

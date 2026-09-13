@@ -12,6 +12,7 @@ use serial_test::serial;
 #[serial]
 async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
     use pollis_lib::commands::voice_e2ee;
+    use pollis_core::commands::voice_key_ring::{voice_key_index, VOICE_KEY_RING_SIZE};
 
     wipe().await;
 
@@ -69,14 +70,24 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
     // We plumb in the same KeyProvider build_e2ee_options would have
     // produced at join time, plus the group id and the current epoch.
     let alice_kp = {
-        let opts = voice_e2ee::build_e2ee_options(key_at_epoch_n.clone());
+        let opts = voice_e2ee::build_e2ee_options(key_at_epoch_n.clone(), alice_idx);
         opts.key_provider.clone()
     };
+    // The join key must sit in the join epoch's own ring slot — the slot
+    // every sender cryptor is pointed at — not only in the slot-0 seed
+    // `with_shared_key` hardcodes.
+    assert_eq!(alice_idx, voice_key_index(epoch_n));
+    assert!(
+        alice_kp.get_shared_key(alice_idx).is_some(),
+        "join key must be installed at ring slot {alice_idx}"
+    );
+    assert_eq!(alice_kp.get_latest_key_index(), alice_idx);
     {
         let mut voice = alice.state.voice.lock().await;
         voice.e2ee_key_provider = Some(alice_kp.clone());
         voice.e2ee_mls_group_id = Some(resolved_mls_group.clone());
         voice.e2ee_epoch = epoch_n;
+        voice.e2ee_key_index = alice_idx;
     }
 
     // ── Add carol → epoch advances ───────────────────────────────────────
@@ -132,15 +143,51 @@ async fn voice_e2ee_keys_match_across_members_and_rotate_on_epoch() {
     );
 
     // ── Rotation hook fired on alice's VoiceState ────────────────────────
-    let (alice_voice_epoch, alice_voice_group) = {
+    let (alice_voice_epoch, alice_voice_group, alice_voice_idx) = {
         let voice = alice.state.voice.lock().await;
-        (voice.e2ee_epoch, voice.e2ee_mls_group_id.clone())
+        (
+            voice.e2ee_epoch,
+            voice.e2ee_mls_group_id.clone(),
+            voice.e2ee_key_index,
+        )
     };
     assert_eq!(
         alice_voice_epoch, alice_epoch2,
         "process_pending_commits should have advanced VoiceState.e2ee_epoch via on_mls_epoch_changed"
     );
     assert_eq!(alice_voice_group.as_deref(), Some(resolved_mls_group.as_str()));
+
+    // ── The rotation actually reached the key ring ───────────────────────
+    // The new epoch's slot is inside the ring (the old `epoch & 0x7FFF_FFFF`
+    // derivation walked off the 16-slot ring at epoch 16 and libwebrtc
+    // silently rejected the install), the new key is really installed there,
+    // and the slot every local sender cryptor is re-pointed at is that same
+    // slot — the sender-side half `with_shared_key`'s slot-0 seed never had.
+    assert_eq!(alice_idx2, voice_key_index(alice_epoch2));
+    assert!(
+        (0..VOICE_KEY_RING_SIZE).contains(&alice_idx2),
+        "ring slot {alice_idx2} must fit the {VOICE_KEY_RING_SIZE}-slot ring"
+    );
+    assert_ne!(
+        alice_idx2, alice_idx,
+        "consecutive epochs must occupy different ring slots so in-flight frames still decrypt"
+    );
+    assert_eq!(
+        alice_voice_idx, alice_idx2,
+        "VoiceState.e2ee_key_index must follow the rotation — it is what sender cryptors are pointed at"
+    );
+    assert!(
+        alice_kp.get_shared_key(alice_idx2).is_some(),
+        "rotated key must be installed at ring slot {alice_idx2}"
+    );
+    assert_eq!(
+        alice_kp.get_latest_key_index(),
+        alice_idx2,
+        "the provider's latest key index must move to the new epoch's slot"
+    );
+    // The previous epoch's key is still present for the grace window, so a
+    // peer that has not applied the commit yet keeps decrypting.
+    assert!(alice_kp.get_shared_key(alice_idx).is_some());
 
     // ── Negative control: bob did NOT have voice "armed" ─────────────────
     // His VoiceState should still report epoch 0 / no group, proving the

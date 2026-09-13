@@ -435,7 +435,7 @@ impl DeviceKeyCache {
 }
 
 const H_USER: &str = "x-pollis-user";
-const H_DEVICE: &str = "x-pollis-device";
+pub(crate) const H_DEVICE: &str = "x-pollis-device";
 const H_TIMESTAMP: &str = "x-pollis-timestamp";
 pub(crate) const H_SIGNATURE: &str = "x-pollis-signature";
 

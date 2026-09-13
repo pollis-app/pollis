@@ -75,8 +75,9 @@ use crate::state::AppState;
 use super::delivery::WelcomeOut;
 use super::group_state::{create_mls_group_in_suite, forget_local_mls_group_at};
 use super::provider::{current_suite, load_stored_group_at, PollisProvider};
+use super::device::IdentityDirectory;
 use super::reconcile::{
-    publish_staged_commit, stage_reconcile_commit,
+    load_pinned_identities, publish_staged_commit, stage_reconcile_commit,
     PublishOutcome,
 };
 
@@ -180,6 +181,9 @@ pub(super) async fn migrate_to_current_suite_if_due(
             .roster;
     let valid_devices =
         crate::commands::ds_reads::registered_devices(state, &roster_user_ids).await?;
+    // The same cross-signing gate reconcile applies: a device whose claimed
+    // KeyPackage is not the user's certified leaf is refused, not moved.
+    let identities = load_pinned_identities(state, &roster_user_ids, actor_user_id).await?;
     let roster_user_ids: std::collections::HashSet<String> =
         roster_user_ids.into_iter().collect();
     let targets: Vec<(String, String)> = valid_devices
@@ -222,6 +226,7 @@ pub(super) async fn migrate_to_current_suite_if_due(
             &kp_tuples,
             &roster_user_ids,
             &valid_devices,
+            &identities,
         )
     };
     // Every failure past the create must tear the successor down. A stored group
@@ -343,6 +348,7 @@ fn stage_successor_commit<C>(
     kp_tuples: &[(String, String, Vec<u8>)],
     roster_user_ids: &HashSet<String>,
     valid_devices: &HashSet<(String, String)>,
+    identities: &IdentityDirectory,
 ) -> Result<Option<StagedSuccessor>>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
@@ -370,6 +376,7 @@ where
         actor_user_id,
         actor_device_id,
         valid_devices,
+        identities,
     )?;
 
     match staged {

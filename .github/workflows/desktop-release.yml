@@ -87,7 +87,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           ./scripts/bump-version.sh "$VERSION"
 
-      - name: Load production secrets
+      - name: Load build recipe (public endpoints)
         run: |
           # #987: the client bakes NO database credential. TURSO_URL /
           # TURSO_RO_TOKEN / LOG_DB_URL / LOG_DB_TOKEN used to be injected here
@@ -96,16 +96,22 @@ jobs:
           # transport as the writes, and `pollis-core` no longer links libsql at
           # all. The secrets themselves stay in Doppler — the DS and the
           # migration runner still need them (see the migration steps below).
+          #
+          # ONLY the `option_env!` recipe is written to $GITHUB_ENV here, and
+          # every entry is a public endpoint URL or a public verification key.
+          # Anything in $GITHUB_ENV is an ordinary env var for EVERY later step
+          # of this job — each crate's build.rs and proc-macros, pnpm lifecycle
+          # scripts, and every third-party action — so a credential exported
+          # here is one a poisoned dependency can read and exfiltrate. The
+          # account-wide R2 write key and the LiveKit API secret used to be
+          # exported here with no consumer in the job; they now reach only the
+          # R2 upload steps of the release/provenance jobs, step-scoped straight
+          # from `secrets.*`. `scripts/check-build-recipe.py` fails CI on any
+          # build-job export outside the recipe (plus the toolchain flags).
           echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
-          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
           echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
-          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
-          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
-          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
-          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
           # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
           # public key. option_env! bakes them into the client so the pool is
           # reachable; the overlay stays OFF until a user opts in via Settings.
@@ -268,7 +274,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           ./scripts/bump-version.sh "$VERSION"
 
-      - name: Load production secrets
+      - name: Load build recipe (public endpoints)
         shell: bash
         run: |
           # #987: the client bakes NO database credential. TURSO_URL /
@@ -278,16 +284,22 @@ jobs:
           # transport as the writes, and `pollis-core` no longer links libsql at
           # all. The secrets themselves stay in Doppler — the DS and the
           # migration runner still need them (see the migration steps below).
+          #
+          # ONLY the `option_env!` recipe is written to $GITHUB_ENV here, and
+          # every entry is a public endpoint URL or a public verification key.
+          # Anything in $GITHUB_ENV is an ordinary env var for EVERY later step
+          # of this job — each crate's build.rs and proc-macros, pnpm lifecycle
+          # scripts, and every third-party action — so a credential exported
+          # here is one a poisoned dependency can read and exfiltrate. The
+          # account-wide R2 write key and the LiveKit API secret used to be
+          # exported here with no consumer in the job; they now reach only the
+          # R2 upload steps of the release/provenance jobs, step-scoped straight
+          # from `secrets.*`. `scripts/check-build-recipe.py` fails CI on any
+          # build-job export outside the recipe (plus the toolchain flags).
           echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
-          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
           echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
-          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
-          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
-          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
-          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
           # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
           # public key. option_env! bakes them into the client so the pool is
           # reachable; the overlay stays OFF until a user opts in via Settings.
@@ -670,7 +682,7 @@ jobs:
           python3 -m pip install --user 'meson>=1.3'
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Load production secrets
+      - name: Load build recipe (public endpoints)
         run: |
           # #987: the client bakes NO database credential. TURSO_URL /
           # TURSO_RO_TOKEN / LOG_DB_URL / LOG_DB_TOKEN used to be injected here
@@ -679,16 +691,22 @@ jobs:
           # transport as the writes, and `pollis-core` no longer links libsql at
           # all. The secrets themselves stay in Doppler — the DS and the
           # migration runner still need them (see the migration steps below).
+          #
+          # ONLY the `option_env!` recipe is written to $GITHUB_ENV here, and
+          # every entry is a public endpoint URL or a public verification key.
+          # Anything in $GITHUB_ENV is an ordinary env var for EVERY later step
+          # of this job — each crate's build.rs and proc-macros, pnpm lifecycle
+          # scripts, and every third-party action — so a credential exported
+          # here is one a poisoned dependency can read and exfiltrate. The
+          # account-wide R2 write key and the LiveKit API secret used to be
+          # exported here with no consumer in the job; they now reach only the
+          # R2 upload steps of the release/provenance jobs, step-scoped straight
+          # from `secrets.*`. `scripts/check-build-recipe.py` fails CI on any
+          # build-job export outside the recipe (plus the toolchain flags).
           echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
-          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
           echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
-          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
-          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
-          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
-          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
           # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
           # public key. option_env! bakes them into the client so the pool is
           # reachable; the overlay stays OFF until a user opts in via Settings.
@@ -934,18 +952,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Load production secrets
-        run: |
-          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
-          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
-          # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
-          # public key. option_env! bakes them into the client so the pool is
-          # reachable; the overlay stays OFF until a user opts in via Settings.
-          # Rotating the signing key requires a coordinated client rebuild (clients
-          # pin this key). Absent → the app builds fine and the overlay is inert.
-          echo "POLLIS_OVERLAY_DIRECTORY_URL=${{ secrets.POLLIS_OVERLAY_DIRECTORY_URL }}" >> $GITHUB_ENV
-          echo "POLLIS_OVERLAY_DIRECTORY_KEY=${{ secrets.POLLIS_OVERLAY_DIRECTORY_KEY }}" >> $GITHUB_ENV
+      # No secrets-loading step here: the R2 write key and account id are
+      # step-scoped `env:` on exactly the `aws s3` steps that upload, read
+      # straight from `secrets.*`. Written to $GITHUB_ENV they were visible to
+      # every other step in the job (artifact download, gh-release, the
+      # attest/cosign actions) that has no business holding them.
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -965,9 +976,10 @@ jobs:
             --content-type "text/plain" \
             --cache-control "no-cache"
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Upload installers to R2
         run: |
@@ -1001,9 +1013,10 @@ jobs:
             aws s3 cp "$tc" "s3://pollis/releases/${VERSION}/$(basename "$tc")" --endpoint-url "${ENDPOINT}" --content-type "application/json"
           done
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Upload updater bundles to R2
         run: |
@@ -1019,9 +1032,10 @@ jobs:
           find artifacts/pollis-linux -name "*.AppImage" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
           find artifacts/pollis-linux -name "*.sig" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # Tauri's updater resolves the configured endpoint URL with the
       # current binary's bundle_type before fetching, so each bundle type
@@ -1096,9 +1110,10 @@ jobs:
               --cache-control "no-cache"
           done
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Publish latest.json to R2
         run: |
@@ -1107,9 +1122,10 @@ jobs:
           echo "{\"version\":\"${VERSION}\",\"macos\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-macos.dmg\",\"windows\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-windows.exe\",\"linux\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.AppImage\",\"linux_deb\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.deb\",\"linux_rpm\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.rpm\"}" > latest.json
           aws s3 cp latest.json "s3://pollis/releases/latest.json" --endpoint-url "${ENDPOINT}" --content-type "application/json" --cache-control "no-cache"
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # Retention: keep only the newest KEEP version directories under
       # `releases/`. This is COUNT-based and runs only when a release ships — a
@@ -1188,9 +1204,10 @@ jobs:
             fi
           done
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # The pre-signature payload sidecars (WS3, #603/#704) ship as release assets
       # too, so the attest-release.yml backfill can fetch the pre-signature
@@ -1313,18 +1330,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Load production secrets
-        run: |
-          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
-          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
-          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
-          # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
-          # public key. option_env! bakes them into the client so the pool is
-          # reachable; the overlay stays OFF until a user opts in via Settings.
-          # Rotating the signing key requires a coordinated client rebuild (clients
-          # pin this key). Absent → the app builds fine and the overlay is inert.
-          echo "POLLIS_OVERLAY_DIRECTORY_URL=${{ secrets.POLLIS_OVERLAY_DIRECTORY_URL }}" >> $GITHUB_ENV
-          echo "POLLIS_OVERLAY_DIRECTORY_KEY=${{ secrets.POLLIS_OVERLAY_DIRECTORY_KEY }}" >> $GITHUB_ENV
+      # No secrets-loading step here: the R2 write key and account id are
+      # step-scoped `env:` on exactly the `aws s3` steps that upload, read
+      # straight from `secrets.*`. Written to $GITHUB_ENV they were visible to
+      # every other step in the job (artifact download, gh-release, the
+      # attest/cosign actions) that has no business holding them.
 
       # Same all-artifacts download the release / attest jobs use — the built +
       # signed installers and updater bundles under artifacts/pollis-{macos,
@@ -1451,9 +1461,10 @@ jobs:
               --endpoint-url "${ENDPOINT}" --content-type "application/x-pem-file"
           done
         env:
-          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
   # Binary transparency (issue #453, Phase 2). Compute payload+artifact hashes
   # for every shipped installer (scripts/attest-binaries.sh) and MERGE the

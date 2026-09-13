@@ -152,9 +152,10 @@ Renderer plumbing:
 | Attack | Detection | Action |
 |---|---|---|
 | Turso swaps a peer's `account_id_pub` | Next DM ingest OR next group reconcile via TOFU helper; permanently visible in the account-key transparency log (#330) | Pin refreshed, verified cleared, KeyChanged event surfaces inline banner; swap is absent from / accountable in the published log (`pollis-verify account`, `audit_peer_account_key`) |
-| Turso adds a rogue device under an existing user (account-key unchanged) | Cross-signing check on inbound MLS commit (`mls.rs`) | Logs warning; commit currently proceeds (advisory — known gap, see whitepaper §13.2) |
+| Turso adds a rogue device under an existing user (account-key unchanged), or substitutes an attacker's KeyPackage at claim time | Leaf cross-signing (`mls/device.rs::IdentityDirectory::leaf_verdict`) on the committer — every claimed KeyPackage's leaf key must be the device key the user's account certified — and on every replaying member, from the commit's own Add proposals | Committer refuses the add (package burnt, `refused_uncertified`); a leaf a rogue committer added anyway is recorded as an `uncertified_mls_leaf` security event and evicted by the next honest reconcile (see whitepaper §5.3 / §13.2 for the residual) |
 | Turso adds a rogue device under a *swapped* account-key | Both layers fire: TOFU detects the key swap; cross-sign detects the cert mismatch | Banner + warning |
 | Network MITM between two clients (no Turso write) | MLS cipher integrity (ChaCha20-Poly1305 AEAD) | Decryption fails — cannot impersonate anyone |
+| A user sets their username to a victim's email address so invites / DM-starts for that address resolve to them (MLS would then admit the squatter, since membership follows whatever id the DS hands back) | Prevented, not detected: the DS refuses any username outside `^[a-z0-9_.-]{3,32}$`, migration `000021` refuses `@` at the schema, and every identifier lookup matches `@`-shaped input against `email` only (`database.md` → users) | The state cannot be created; a legacy `@` username is unreachable by lookup and cannot be saved again |
 | Local DB tampering on attacker's own machine | Out of scope — that machine's user can do whatever they want to their own DB |
 
 ## Key transparency (verifiable logs)
@@ -225,6 +226,22 @@ tree can never stand in for another:
   `load_toolchain` **hard-fails** rather than defaulting — a silent default is what
   let 26 releases publish a false recipe with green runs. The existing leaves are
   **not** backfilled: the tree is append-only by design.
+
+  **The build-job environment is the recipe and nothing else.** Every value the
+  client bakes via `option_env!` (`pollis-core/src/config.rs`) is a public URL or
+  verification key, and those are the only names a `build-*` job of
+  `desktop-release.yml` / `cli-release.yml` may write to `$GITHUB_ENV` — whatever
+  a build job exports is readable by every crate `build.rs`, proc-macro, pnpm
+  lifecycle script and third-party action that runs after it. The account-wide R2
+  write key (which writes `cdn.pollis.com`: `install.sh`, `latest.json`, the
+  installers) and the LiveKit API secret used to be exported into every build job
+  with no consumer there; they are gone, and the R2 key is step-scoped `env:` on
+  exactly the `aws s3` upload steps of the publish jobs, read straight from
+  `secrets.*`. `scripts/check-build-recipe.py` fails `scripts-check.yml` on any
+  build-job export outside the recipe (plus the determinism/signtool toolchain
+  flags) and on any `secrets.*` export via `$GITHUB_ENV` in any job of those two
+  workflows; `scripts/test-check-build-recipe.sh` re-creates each shape of the
+  mistake and asserts it is named.
 
   Two adjacent defects in the same class, also fixed: `attest-and-log` now requires
   `provenance` to have succeeded *and* proves each leaf's `provenance_uri` resolves
@@ -411,7 +428,23 @@ therefore accept **either** a device signature **or** a verified-OTP session
 user is bound from the session record, never re-derived from a client-supplied id.
 The `account_key_log` append is still CAS-guarded (one head per user, no fork/gap),
 so a reset produces a visible, accountable rotation in the account-key tenant
-above rather than a hidden key swap. Properties: `pollis-delivery/tests/reset_session.rs`.
+above rather than a hidden key swap.
+
+**A session-authenticated `rotate-identity` IS the reset.** The DS reads *which*
+credential the gate accepted (`gate_or_session_kind` → `GateCredential`) and, when it
+is a bare OTP session, runs the whole `reset-recover` wipe — group/DM membership,
+key packages, every `user_device` except the session's own — inside the rotation's
+transaction (`apply_rotate_identity` → `reset_recover_in_tx`), then purges the
+actor's Welcomes and any emptied conversations' commit-log state post-commit. An
+email OTP alone can therefore only ever produce a fresh identity that owns nothing;
+it cannot mint a key that inherits the account or leaves the victim's devices
+enrolled beside it. A device-signed rotation (an enrolled device holding the
+account key) stays a plain rotation, and the client's follow-up `reset-recover` is
+load-bearing there; on the session path that follow-up is an idempotent no-op. In
+both cases the DS appends its own `security_event` (`kind = identity_rotated`,
+`metadata = credential=<session|signature>,new_identity_version=<n>`, `device_id` =
+the verified device) in the same transaction — the client no longer writes an
+`identity_reset` row. Properties: `pollis-delivery/tests/reset_session.rs`.
 
 ## Roadmap
 

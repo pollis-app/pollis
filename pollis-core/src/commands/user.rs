@@ -161,6 +161,16 @@ async fn upsert_local_preferences(state: &Arc<AppState>, preferences_json: &str)
     }
 }
 
+/// Resolve ONE person from what the user typed — a username or an email.
+///
+/// The resolution is the DS's `directory::user_by_identifier` (`POST
+/// /v1/directory/users`): an identifier containing `@` is matched against
+/// `users.email` ONLY, anything else against `users.username` ONLY, and the DS
+/// refuses any username that contains an `@` (`profile::is_valid_username` +
+/// the `000021` triggers). So the one row the DS answers with is unambiguous;
+/// the `.next()` here is not "first of several candidates", it is the answer.
+/// It used to be `username = ?1 OR email = ?1`, whose first row an account
+/// that had set its username to the target's email address won.
 pub async fn search_user_by_username(
     username: String,
     state: &Arc<AppState>,
@@ -335,44 +345,65 @@ mod tests {
     }
 
     // ── search_user_by_username ────────────────────────────────────────────
+    //
+    // The lookup itself lives on the DS (`directory::user_by_identifier`); what
+    // these pin against the SHIPPED schema is the contract it relies on: an
+    // identifier goes to exactly one column, chosen by `@`, and the schema
+    // refuses the username that would make that choice ambiguous.
+
+    fn lookup(conn: &Connection, identifier: &str) -> Option<String> {
+        let column = if identifier.contains('@') { "email" } else { "username" };
+        conn.query_row(
+            &format!("SELECT id FROM users WHERE {column} = ?1"),
+            rusqlite::params![identifier],
+            |row| row.get(0),
+        )
+        .ok()
+    }
 
     #[test]
     fn search_by_username() {
         let conn = db();
         setup(&conn);
-
-        let id: String = conn.query_row(
-            "SELECT id FROM users WHERE username = ?1 OR email = ?1",
-            rusqlite::params!["bob"],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(id, "bob");
+        assert_eq!(lookup(&conn, "bob").as_deref(), Some("bob"));
     }
 
     #[test]
     fn search_by_email() {
         let conn = db();
         setup(&conn);
-
-        let id: String = conn.query_row(
-            "SELECT id FROM users WHERE username = ?1 OR email = ?1",
-            rusqlite::params!["alice@x.com"],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(id, "alice");
+        assert_eq!(lookup(&conn, "alice@x.com").as_deref(), Some("alice"));
     }
 
     #[test]
     fn search_no_match() {
         let conn = db();
         setup(&conn);
+        assert_eq!(lookup(&conn, "nobody"), None);
+        assert_eq!(lookup(&conn, "nobody@x.com"), None);
+    }
 
-        let result = conn.query_row(
-            "SELECT id FROM users WHERE username = ?1 OR email = ?1",
-            rusqlite::params!["nobody"],
-            |row| row.get::<_, String>(0),
+    /// The shipped schema (`000021`) makes an email-shaped username
+    /// unrepresentable, so no row can ever compete with `alice@x.com` for an
+    /// email-shaped identifier — the premise the `@` dispatch above rests on.
+    #[test]
+    fn username_with_at_sign_is_unrepresentable() {
+        let conn = db();
+        setup(&conn);
+
+        let inserted = conn.execute(
+            "INSERT INTO users (id, email, username) VALUES ('mallory', 'mallory@x.com', 'alice@x.com')",
+            [],
         );
-        assert!(result.is_err());
+        assert!(inserted.is_err(), "the schema must refuse an email-shaped username on INSERT");
+
+        let updated = conn.execute(
+            "UPDATE users SET username = 'alice@x.com' WHERE id = 'bob'",
+            [],
+        );
+        assert!(updated.is_err(), "the schema must refuse an email-shaped username on UPDATE");
+
+        assert_eq!(lookup(&conn, "alice@x.com").as_deref(), Some("alice"));
     }
 
     // ── preferences upsert ─────────────────────────────────────────────────

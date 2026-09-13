@@ -369,7 +369,8 @@
       "avatarHint": "Derived from your handle's first two characters.",
       "displayName": "Display name",
       "handle": "Handle",
-      "handleHint": "Other members can find and DM you with @handle."
+      "handleHint": "Other members can find and DM you with @handle.",
+      "handleInvalid": "Handles are 3–32 characters: lowercase letters, digits, '_', '.' or '-'."
     }
   },
   "tabs": {

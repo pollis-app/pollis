@@ -304,6 +304,36 @@ pub async fn registered_devices(
     ))
 }
 
+// ── POST /v1/read/roster-identities ──────────────────────────────────────────
+
+/// POST `/v1/read/roster-identities` — every roster user's `account_id_pub` and
+/// all of their `user_device` rows, revoked included.
+///
+/// The committer-side half of leaf cross-signing (`mls/device.rs::
+/// IdentityDirectory`). A missing user or row is simply absent, which the client
+/// reads as "unverifiable — refuse to add", never as "verified". Answers an
+/// ERROR rather than a short list on any failure, for the same reason
+/// `registered_devices` does: a silently short answer would refuse (or, for an
+/// existing leaf, evict) a live device.
+pub async fn roster_identities(
+    State(state): State<AppState>,
+    req: RawRequest,
+) -> Result<Response, AppError> {
+    let parsed: RosterIdentitiesBody = match serde_json::from_slice(&req.body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    if let Err(resp) = authed_user(&state, &req, None).await? {
+        return Ok(resp);
+    }
+
+    let conn = state.db.conn().await?;
+    let identities = crate::reads::roster_identities(&conn, &parsed.user_ids).await?;
+    Ok(ok_response::<RosterIdentitiesBody>(
+        RosterIdentitiesResponse { identities },
+    ))
+}
+
 /// Every NON-REVOKED `(user_id, device_id)` pair for a roster.
 ///
 /// `revoked_at IS NULL` is the load-bearing clause (#679): `revoke_device`

@@ -9,7 +9,7 @@ use serial_test::serial;
 ///
 /// Root cause it exercises: when B is re-added, the STAYING member A must catch
 /// up to that re-add commit via `process_pending_commits`, which runs
-/// cross-signing cert verification (`verify_added_devices`). That verification
+/// cross-signing cert verification (`IdentityDirectory::leaf_verdict`). That verification
 /// reads `users` / `user_device` / `account_key_log` — all MAIN-DB tables. The
 /// fix gave it a dedicated remote connection; before the fix it ran on
 /// the `log_db` connection, which in the two-DB harness has NO `users` table, so

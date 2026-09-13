@@ -449,11 +449,11 @@ async fn commit_at(
 /// names: the user's `account_id_pub` and the `user_device` rows for the devices
 /// those commits added.
 ///
-/// INPUTS ONLY. `verify_added_devices` — the loop that decides Verified /
-/// Revoked / AbsentRetry — stays on the client, because it is a signature check
+/// INPUTS ONLY. `IdentityDirectory::leaf_verdict` — the check that decides Certified /
+/// Unverifiable / Uncertified — stays on the client, because it is a signature check
 /// over a chain rooted in the user's own identity key and the DS is explicitly
 /// not trusted to evaluate it. A device with no row is simply absent from
-/// `devices`, which is how the client still reaches `AbsentRetry`.
+/// `devices`, which is how the client still reaches `Unverifiable`.
 async fn added_identities(
     main: &Connection,
     commits: &[pollis_api::commit::CommitWire],
@@ -461,9 +461,17 @@ async fn added_identities(
     // Group the added device ids by the user each add names. A user can appear
     // in several commits of one batch (a multi-device add is one commit per
     // device on some paths), so the ids accumulate rather than replace.
+    //
+    // `added_user_id` is a CSV too: one reconcile commit adds every missing
+    // device of every roster user at once (group creation with several
+    // invitees is the common case), and the committer names ALL of them so the
+    // replaying client can verify every leaf the commit adds. It used to name
+    // only the first, which left the other users' leaves unverifiable. The ids
+    // are a HINT about which rows to prefetch — the client derives the leaves
+    // it verifies from the commit's own Add proposals, never from these columns.
     let mut wanted: Vec<(String, Vec<String>)> = Vec::new();
     for c in commits {
-        let Some(user) = c.added_user_id.as_deref() else {
+        let Some(users) = c.added_user_id.as_deref() else {
             continue;
         };
         let ids: Vec<String> = c
@@ -474,15 +482,17 @@ async fn added_identities(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        match wanted.iter_mut().find(|(u, _)| u == user) {
-            Some((_, existing)) => {
-                for id in ids {
-                    if !existing.contains(&id) {
-                        existing.push(id);
+        for user in users.split(',').map(str::trim).filter(|u| !u.is_empty()) {
+            match wanted.iter_mut().find(|(u, _)| u == user) {
+                Some((_, existing)) => {
+                    for id in &ids {
+                        if !existing.contains(id) {
+                            existing.push(id.clone());
+                        }
                     }
                 }
+                None => wanted.push((user.to_string(), ids.clone())),
             }
-            None => wanted.push((user.to_string(), ids)),
         }
     }
 
@@ -494,6 +504,60 @@ async fn added_identities(
             user_id,
             account_id_pub,
             devices,
+        });
+    }
+    Ok(out)
+}
+
+/// The cross-signing inputs for a whole roster: each user's `account_id_pub`
+/// and EVERY `user_device` row they have, revoked rows included.
+///
+/// Serves `POST /v1/read/roster-identities`, the committer-side half of leaf
+/// cross-signing. Unlike [`added_identities`] it takes no device-id hint — the
+/// committer checks every leaf it is about to add or retain, so it needs the
+/// user's full device set. Revoked rows are kept because "revoked" is a verdict
+/// the client acts on and "absent" is not.
+pub async fn roster_identities(
+    main: &Connection,
+    user_ids: &[String],
+) -> Result<Vec<AddedIdentity>, AppError> {
+    let mut out = Vec::with_capacity(user_ids.len());
+    for user_id in user_ids {
+        let account_id_pub = account_id_pub(main, user_id).await?.as_deref().map(b64);
+        let devices = all_device_cert_rows(main, user_id).await?;
+        out.push(AddedIdentity {
+            user_id: user_id.clone(),
+            account_id_pub,
+            devices,
+        });
+    }
+    Ok(out)
+}
+
+/// Every `user_device` row of one user, revoked included, as cross-signing
+/// columns. The un-narrowed sibling of [`device_cert_rows`].
+async fn all_device_cert_rows(
+    main: &Connection,
+    user_id: &str,
+) -> anyhow::Result<Vec<DeviceCertRow>> {
+    let mut rows = main
+        .query(
+            "SELECT device_id, device_cert, cert_issued_at, cert_identity_version, \
+                    mls_signature_pub, revoked_at, mls_signature_pub_pq \
+             FROM user_device WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        out.push(DeviceCertRow {
+            device_id: row.get(0)?,
+            device_cert: row.get::<Option<Vec<u8>>>(1)?.as_deref().map(b64),
+            cert_issued_at: row.get::<Option<String>>(2)?,
+            cert_identity_version: row.get::<Option<i64>>(3)?,
+            mls_signature_pub: row.get::<Option<Vec<u8>>>(4)?.as_deref().map(b64),
+            revoked_at: row.get::<Option<String>>(5)?,
+            mls_signature_pub_pq: row.get::<Option<Vec<u8>>>(6)?.as_deref().map(b64),
         });
     }
     Ok(out)

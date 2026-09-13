@@ -212,6 +212,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "vault_message",
         include_str!("../migrations/000020_vault_message.sql"),
     ),
+    (
+        21,
+        "username_shape",
+        include_str!("../migrations/000021_username_shape.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

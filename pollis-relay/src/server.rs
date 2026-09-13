@@ -37,9 +37,12 @@
 //!
 //! A stream that opens with a `Layer` frame is one another relay is extending
 //! into us. We acknowledge, terminate the layer with our own leaf cert, and serve
-//! whatever is inside exactly as if it had arrived directly — the difference
-//! being that the peer address belongs to the previous relay, not to a client,
-//! so per-IP limits do not apply to it.
+//! whatever is inside exactly as if it had arrived directly. The peer address of
+//! such a stream belongs to the previous relay — *if* the sender really is one.
+//! An opening `Layer` is unauthenticated, any client can send it, and this node
+//! holds no directory to check the address against, so a layered stream is
+//! **keyed on that address for per-IP limits exactly like a direct one**.
+//! Exempting it would make one frame the way past every per-IP bound.
 //!
 //! The allowlist is enforced on `Connect` at whichever node receives it, which is
 //! by construction the last hop — so the closed-overlay guarantee (§1.2) holds
@@ -50,6 +53,15 @@
 //! Deployability (Slice 2a): a global concurrent-connection cap, in-memory rate
 //! limiting, and **graceful shutdown** (stop accepting, drain in-flight pipes to
 //! a bounded deadline, exit) via [`RelayServer::spawn_with_shutdown`].
+//!
+//! Unauthenticated surface (the part an attacker reaches before any handshake):
+//! every new connection is **address-validated** with a QUIC Retry before it
+//! costs this node anything, connections are bounded **per source IP** at
+//! accept, the global cap counts only connections whose handshake **completed**
+//! (half-open ones have their own, separate bound of the same size), a stream
+//! that has not finished negotiating within [`RelayConfig::first_frame_timeout`]
+//! is refused, and a connection may hold only a handful of streams — a client
+//! legitimately needs one.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -69,43 +81,58 @@ use crate::onion;
 use crate::park::{ParkedPeer, ParkedPeers, Tunnel};
 use crate::policy::{RelayIdentity, RevocationStore};
 use crate::proto::{self, ClientFrame, Command, Connect, Extend, Handshake, Park, RejectReason};
-use crate::ratelimit::{RateLimitConfig, RateLimiter};
+use crate::ratelimit::{ConnectionLimiter, RateLimitConfig, RateLimiter};
 use crate::stream::{DuplexStream, RelayStream};
 use crate::tls::{self, FingerprintPinnedVerifier, SelfSignedIdentity};
 
-/// A destination-host matcher. The allowlist is relay-side *policy*: the wire
-/// protocol carries an arbitrary host, and the relay decides what it will dial.
-#[derive(Debug, Clone)]
-pub enum HostPattern {
+/// The port half of an allowlist entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortPattern {
+    /// Exactly this port. An entry with no `:port` means [`DEFAULT_ALLOWED_PORT`].
+    Exact(u16),
+    /// Any port (`host:*`).
+    Any,
+}
+
+/// The port an allowlist entry means when it names none: HTTPS, which is the
+/// only port any first-party destination speaks. Anything else is written out.
+pub const DEFAULT_ALLOWED_PORT: u16 = 443;
+
+/// The host half of an allowlist entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HostMatcher {
     /// Exact host match (case-insensitive).
     Exact(String),
     /// Suffix match for a `*.example.com` glob — stored as `.example.com`.
     Suffix(String),
     /// Matches any host. Use only for a fully open relay (not first-party v0).
     Any,
+    /// Matches no host at all — what a malformed entry parses to, so that a
+    /// typo can only ever close a destination, never open one.
+    Nothing,
 }
 
-impl HostPattern {
-    /// Parse one allowlist entry: `*` → any, `*.foo` → suffix, else exact.
-    pub fn parse(s: &str) -> HostPattern {
+impl HostMatcher {
+    fn parse(s: &str) -> HostMatcher {
         if s == "*" {
-            HostPattern::Any
+            HostMatcher::Any
         } else if let Some(rest) = s.strip_prefix("*.") {
-            HostPattern::Suffix(format!(".{}", rest.to_ascii_lowercase()))
+            HostMatcher::Suffix(format!(".{}", rest.to_ascii_lowercase()))
         } else {
-            HostPattern::Exact(s.to_ascii_lowercase())
+            HostMatcher::Exact(s.to_ascii_lowercase())
         }
     }
 
-    pub(crate) fn matches(&self, host: &str) -> bool {
+    fn matches(&self, host: &str) -> bool {
         // `parse` already lowercased both stored forms, so an ASCII-insensitive
         // compare gives the same answer without lowercasing a fresh copy of the
         // host for every pattern in the list — this runs once per pattern per
         // `Connect`, and `Any` never looks at the host at all.
         match self {
-            HostPattern::Any => true,
-            HostPattern::Exact(h) => h.eq_ignore_ascii_case(host),
-            HostPattern::Suffix(suffix) => {
+            HostMatcher::Any => true,
+            HostMatcher::Nothing => false,
+            HostMatcher::Exact(h) => h.eq_ignore_ascii_case(host),
+            HostMatcher::Suffix(suffix) => {
                 let (host, suffix) = (host.as_bytes(), suffix.as_bytes());
                 host.len() >= suffix.len()
                     && host[host.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
@@ -114,12 +141,105 @@ impl HostPattern {
     }
 }
 
+/// A destination matcher: a host pattern **and** a port pattern. The allowlist
+/// is relay-side *policy*: the wire protocol carries an arbitrary `host:port`,
+/// and the relay decides what it will dial. A `Connect` has to match both halves
+/// — a host-only match would make every port of an allowlisted host reachable,
+/// which is a different (and much larger) set of services than the one the
+/// allowlist names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostPattern {
+    host: HostMatcher,
+    port: PortPattern,
+}
+
+impl HostPattern {
+    /// Parse one allowlist entry — `host[:port]`, where the host is exact, a
+    /// `*.suffix` glob, or `*`, and the port is a number, `*`, or omitted (⇒
+    /// [`DEFAULT_ALLOWED_PORT`]).
+    ///
+    /// Infallible for callers that cannot surface an error: a malformed entry
+    /// becomes a pattern that matches **nothing** (fail closed), and is logged.
+    /// The deployable bin uses [`HostPattern::try_parse`] so a typo aborts
+    /// startup instead.
+    pub fn parse(s: &str) -> HostPattern {
+        match HostPattern::try_parse(s) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("relay: ignoring malformed allowlist entry {s:?}: {e}");
+                HostPattern {
+                    host: HostMatcher::Nothing,
+                    port: PortPattern::Any,
+                }
+            }
+        }
+    }
+
+    /// [`HostPattern::parse`] that reports a malformed entry.
+    pub fn try_parse(s: &str) -> anyhow::Result<HostPattern> {
+        let s = s.trim();
+        if s.is_empty() {
+            anyhow::bail!("empty allowlist entry");
+        }
+        // The allowlist names hosts, never IPv6 literals, so the last colon can
+        // only be the port separator; more than one colon is not an entry.
+        let (host, port) = match s.rsplit_once(':') {
+            Some((host, port)) => {
+                if host.contains(':') {
+                    anyhow::bail!(
+                        "more than one ':' in {s:?} (IPv6 literals are not allowlist entries)"
+                    );
+                }
+                let port = if port == "*" {
+                    PortPattern::Any
+                } else {
+                    let n: u16 = port.parse().map_err(|_| {
+                        anyhow::anyhow!("port {port:?} in {s:?} is not a number 1-65535 or '*'")
+                    })?;
+                    if n == 0 {
+                        anyhow::bail!("port 0 in {s:?}");
+                    }
+                    PortPattern::Exact(n)
+                };
+                (host, port)
+            }
+            None => (s, PortPattern::Exact(DEFAULT_ALLOWED_PORT)),
+        };
+        if host.is_empty() {
+            anyhow::bail!("empty host in {s:?}");
+        }
+        Ok(HostPattern {
+            host: HostMatcher::parse(host),
+            port,
+        })
+    }
+
+    /// True if `host:port` is a destination this pattern permits.
+    pub(crate) fn matches(&self, host: &str, port: u16) -> bool {
+        let port_ok = match self.port {
+            PortPattern::Any => true,
+            PortPattern::Exact(p) => p == port,
+        };
+        port_ok && self.host.matches(host)
+    }
+
+    /// True if `host` matches the host half, whatever the port. This is the
+    /// **routing** question ("does this host belong to the overlay plane?"),
+    /// not the egress one — the shim decides where to send a connection by
+    /// host, and the relay at the far end decides whether to dial it by both.
+    pub(crate) fn matches_host(&self, host: &str) -> bool {
+        self.host.matches(host)
+    }
+}
+
 /// The relay's static destination allowlist.
 #[derive(Debug, Clone, Default)]
 pub struct Allowlist(Vec<HostPattern>);
 
 impl Allowlist {
-    /// Build from raw patterns (`turso.io`, `*.pollis.com`, `*`).
+    /// Build from raw patterns (`*.turso.io`, `api.pollis.com:443`, `*:*`). A
+    /// malformed entry matches nothing — see [`HostPattern::parse`]; use
+    /// [`Allowlist::try_from_patterns`] where an error can be surfaced.
     pub fn from_patterns<I, S>(patterns: I) -> Allowlist
     where
         I: IntoIterator<Item = S>,
@@ -128,9 +248,22 @@ impl Allowlist {
         Allowlist(patterns.into_iter().map(|p| HostPattern::parse(p.as_ref())).collect())
     }
 
-    /// True if `host` is permitted. An empty allowlist permits nothing.
-    pub fn permits(&self, host: &str) -> bool {
-        self.0.iter().any(|p| p.matches(host))
+    /// [`Allowlist::from_patterns`] that refuses a malformed entry.
+    pub fn try_from_patterns<I, S>(patterns: I) -> anyhow::Result<Allowlist>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        patterns
+            .into_iter()
+            .map(|p| HostPattern::try_parse(p.as_ref()))
+            .collect::<anyhow::Result<Vec<_>>>()
+            .map(Allowlist)
+    }
+
+    /// True if `host:port` is permitted. An empty allowlist permits nothing.
+    pub fn permits(&self, host: &str, port: u16) -> bool {
+        self.0.iter().any(|p| p.matches(host, port))
     }
 
     /// Consume into the raw patterns (used by the routing policy).
@@ -244,8 +377,20 @@ pub struct RelayConfig {
     pub resolve_overrides: HashMap<String, IpAddr>,
     /// In-memory abuse control (design §11.5).
     pub rate_limits: RateLimitConfig,
-    /// Global cap on simultaneously-open QUIC connections.
+    /// Global cap on simultaneously-open QUIC connections whose handshake has
+    /// completed. Handshakes in flight are bounded separately by the same
+    /// number, so a flood of half-open connections cannot evict live ones.
     pub max_concurrent_connections: u32,
+    /// Cap on simultaneously-open QUIC connections from one source IP, enforced
+    /// at accept — after QUIC address validation, before the handshake. Every
+    /// circuit rides its own connection today (a client's, or a previous
+    /// relay's extend leg), so this also bounds circuits per address.
+    pub max_connections_per_ip: u32,
+    /// How long a freshly-opened stream may take to finish negotiating — opening
+    /// frame, handshake, optional anchor, terminal command — before it is
+    /// refused. Bounds the tasks (and circuit slots) a peer can park by opening
+    /// streams and going quiet.
+    pub first_frame_timeout: Duration,
     /// Whether this node will act as a **middle hop** and honour `Extend` by
     /// dialing another relay (design §6.2). Default `true`.
     ///
@@ -297,6 +442,8 @@ impl RelayConfig {
             resolve_overrides: HashMap::new(),
             rate_limits: RateLimitConfig::default(),
             max_concurrent_connections: crate::config::DEFAULT_MAX_CONCURRENT_CONNECTIONS,
+            max_connections_per_ip: crate::config::DEFAULT_MAX_CONNECTIONS_PER_IP,
+            first_frame_timeout: Duration::from_secs(crate::config::DEFAULT_FIRST_FRAME_TIMEOUT_SECS),
             allow_extend: true,
             revocations: RevocationStore::unconfigured(),
             anchor: AnchorPolicy::Ignore,
@@ -317,6 +464,7 @@ struct RelayInner {
     allowlist: Allowlist,
     resolve_overrides: HashMap<String, IpAddr>,
     rate_limiter: Arc<RateLimiter>,
+    first_frame_timeout: Duration,
     stats: Arc<RelayStats>,
     allow_extend: bool,
     revocations: RevocationStore,
@@ -389,7 +537,18 @@ impl RelayServer {
         server_crypto.alpn_protocols = proto::SUPPORTED_ALPNS.iter().map(|a| a.to_vec()).collect();
 
         let quic_crypto = QuicServerConfig::try_from(server_crypto)?;
-        let server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
+        let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
+        let mut transport = quinn::TransportConfig::default();
+        // A client opens exactly one bi-stream per connection (one circuit); a
+        // previous relay's extend leg and a parking peer likewise. quinn's
+        // default of 100 would let one held connection park 100 negotiating
+        // tasks; a little slack over one is all a legitimate peer can use.
+        transport.max_concurrent_bidi_streams(quinn::VarInt::from_u32(
+            MAX_BIDI_STREAMS_PER_CONNECTION,
+        ));
+        // Nothing in this protocol is unidirectional.
+        transport.max_concurrent_uni_streams(quinn::VarInt::from_u32(0));
+        server_config.transport_config(Arc::new(transport));
 
         let layer_acceptor = onion::layer_acceptor(&config.identity)?;
 
@@ -400,6 +559,7 @@ impl RelayServer {
             allowlist: config.allowlist,
             resolve_overrides: config.resolve_overrides,
             rate_limiter: RateLimiter::new(config.rate_limits),
+            first_frame_timeout: config.first_frame_timeout,
             stats: config.stats,
             allow_extend: config.allow_extend,
             revocations: config.revocations,
@@ -411,7 +571,13 @@ impl RelayServer {
             extend_endpoint_v6: OnceCell::new(),
         });
         let max_conns = config.max_concurrent_connections.max(1) as u64;
+        // Established connections and handshakes in flight are counted apart:
+        // the first is what `max_concurrent_connections` promises, the second
+        // is bounded by the same number so a flood of Initials that never
+        // complete can fill its own bucket but never the established one.
         let live_conns = Arc::new(AtomicU64::new(0));
+        let handshaking = Arc::new(AtomicU64::new(0));
+        let conn_limiter = ConnectionLimiter::new(config.max_connections_per_ip);
 
         let handle = tokio::spawn(async move {
             tokio::pin!(shutdown);
@@ -425,19 +591,58 @@ impl RelayServer {
                         let Some(incoming) = incoming else {
                             break;
                         };
-                        // Global concurrent-connection cap: shed load cleanly.
-                        if live_conns.load(Ordering::Relaxed) >= max_conns {
+                        // Address validation first (RFC 9000 §8.1): a Retry is
+                        // stateless and no larger than the Initial it answers,
+                        // so a spoofed source costs this node nothing and is
+                        // never counted anywhere below. Every cap after this
+                        // line keys on an address the sender has proved it can
+                        // receive at.
+                        if !incoming.remote_address_validated() {
+                            if let Err(e) = incoming.retry() {
+                                e.into_incoming().refuse();
+                            }
+                            continue;
+                        }
+                        let ip = incoming.remote_address().ip();
+                        // Shed load cleanly: at either global cap, refuse rather
+                        // than handshake for nothing.
+                        if handshaking.load(Ordering::Relaxed) >= max_conns
+                            || live_conns.load(Ordering::Relaxed) >= max_conns
+                        {
                             incoming.refuse();
                             continue;
                         }
-                        live_conns.fetch_add(1, Ordering::Relaxed);
+                        // Per-IP cap. The slot is held for the connection's whole
+                        // life — handshake included — and freed when the task
+                        // ends, however it ends.
+                        let Some(slot) = conn_limiter.acquire(ip) else {
+                            incoming.refuse();
+                            continue;
+                        };
+                        handshaking.fetch_add(1, Ordering::Relaxed);
                         let inner = inner.clone();
                         let live = live_conns.clone();
+                        let pending = handshaking.clone();
                         tokio::spawn(async move {
-                            match incoming.await {
-                                Ok(connection) => handle_connection(connection, inner).await,
-                                Err(e) => tracing::debug!("relay: connection setup failed: {e}"),
+                            let _slot = slot;
+                            let connection = match incoming.await {
+                                Ok(connection) => connection,
+                                Err(e) => {
+                                    pending.fetch_sub(1, Ordering::Relaxed);
+                                    tracing::debug!("relay: connection setup failed: {e}");
+                                    return;
+                                }
+                            };
+                            pending.fetch_sub(1, Ordering::Relaxed);
+                            // Handshake done: this is the connection the global
+                            // cap is about. Re-check it here, because the
+                            // pre-check above raced other handshakes finishing.
+                            if live.fetch_add(1, Ordering::Relaxed) >= max_conns {
+                                live.fetch_sub(1, Ordering::Relaxed);
+                                connection.close(0u32.into(), b"relay at capacity");
+                                return;
                             }
+                            handle_connection(connection, inner).await;
                             live.fetch_sub(1, Ordering::Relaxed);
                         });
                     }
@@ -456,18 +661,58 @@ impl RelayServer {
     }
 }
 
-/// What a stream that arrived **straight off this node's QUIC endpoint** brings
-/// with it: the transport address it came from, and the connection it belongs
-/// to.
+/// Where a stream came from, as far as this node can know.
 ///
-/// A stream that arrived inside an onion layer has neither, and gets `None` —
-/// which is what makes two rules structural rather than remembered. Per-IP rate
-/// limits cannot key on a previous relay's address because there is no address
-/// to key on, and a `Park` cannot be smuggled through a layer because parking
-/// needs the connection handle that only a direct arrival has.
-struct DirectOrigin {
+/// `ip` is the address of the QUIC peer that carried it — the client for a
+/// direct stream, the previous relay (or whoever *claims* to be one, since an
+/// opening `Layer` is unauthenticated) for a layered one. Every stream has one,
+/// and every admission keys on it: there is no way to reach the rate limiter
+/// without an address, so no stream escapes the per-IP bounds by the frame it
+/// opens with.
+///
+/// `connection` is the QUIC connection itself, and only a stream straight off
+/// this node's endpoint has it. A layered stream gets `None` — which is what
+/// makes "a `Park` cannot be smuggled through a layer" structural rather than
+/// remembered: parking needs the connection handle, and there is none.
+struct StreamOrigin {
     ip: IpAddr,
-    connection: quinn::Connection,
+    connection: Option<quinn::Connection>,
+}
+
+impl StreamOrigin {
+    /// The same peer address, minus the connection: what a stream that came
+    /// through an onion layer on this connection is attributed to.
+    fn layered(&self) -> StreamOrigin {
+        StreamOrigin {
+            ip: self.ip,
+            connection: None,
+        }
+    }
+}
+
+/// How many bi-streams one connection may hold open at once. One is what a
+/// client, a previous relay's extend leg, or a parking peer uses; the rest is
+/// slack for a stream that is being torn down while its successor opens.
+const MAX_BIDI_STREAMS_PER_CONNECTION: u32 = 4;
+
+/// The instant by which a stream must have finished negotiating.
+type Deadline = tokio::time::Instant;
+
+/// Run one read of the negotiation under the stream's deadline. A timeout is
+/// reported as an I/O error, which every caller already treats as a malformed
+/// exchange — a stream that says nothing is refused the same way as one that
+/// says something wrong.
+async fn until<T, F>(deadline: Deadline, read: F) -> Result<T, proto::ProtoError>
+where
+    F: Future<Output = Result<T, proto::ProtoError>>,
+{
+    match tokio::time::timeout_at(deadline, read).await {
+        Ok(result) => result,
+        Err(_) => Err(proto::ProtoError::Io(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "stream did not finish negotiating in time",
+        ))),
+    }
 }
 
 async fn handle_connection(connection: quinn::Connection, inner: Arc<RelayInner>) {
@@ -478,12 +723,14 @@ async fn handle_connection(connection: quinn::Connection, inner: Arc<RelayInner>
     // Each target gets its own bi-stream; serve them until the peer goes away.
     while let Ok((send, recv)) = connection.accept_bi().await {
         let inner = inner.clone();
-        let origin = DirectOrigin {
+        let origin = StreamOrigin {
             ip: peer.ip(),
-            connection: connection.clone(),
+            connection: Some(connection.clone()),
         };
+        // The clock on negotiating starts the moment the stream exists.
+        let deadline = Deadline::now() + inner.first_frame_timeout;
         tokio::spawn(async move {
-            if let Err(e) = handle_quic_stream(send, recv, inner, origin).await {
+            if let Err(e) = handle_quic_stream(send, recv, inner, origin, deadline).await {
                 tracing::debug!("relay: stream ended: {e}");
             }
         });
@@ -491,17 +738,19 @@ async fn handle_connection(connection: quinn::Connection, inner: Arc<RelayInner>
 }
 
 /// Serve one bi-stream straight off the QUIC endpoint. This is the only place a
-/// `Layer` frame is legal: it means the peer is a relay extending a circuit into
-/// us, not a client.
+/// `Layer` frame is legal: it means the peer says it is a relay extending a
+/// circuit into us. It is not believed on that — the stream inside the layer is
+/// limited under this connection's address like any other.
 async fn handle_quic_stream(
     send: quinn::SendStream,
     recv: quinn::RecvStream,
     inner: Arc<RelayInner>,
-    origin: DirectOrigin,
+    origin: StreamOrigin,
+    deadline: Deadline,
 ) -> anyhow::Result<()> {
     let mut stream = RelayStream::new(send, recv, None, None);
 
-    let Ok(header) = proto::read_frame_header(&mut stream).await else {
+    let Ok(header) = until(deadline, proto::read_frame_header(&mut stream)).await else {
         let version = proto::MIN_PROTOCOL_VERSION;
         reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
         return Ok(());
@@ -514,22 +763,30 @@ async fn handle_quic_stream(
             // the client, which is still waiting on that relay's own Ok — then
             // peel the layer and serve what's inside.
             proto::write_response(&mut stream, Ok(()), header.version).await?;
-            let layered = match inner.layer_acceptor.accept(stream).await {
-                Ok(s) => s,
-                Err(e) => {
+            // The layer's TLS handshake is part of negotiating, so it runs
+            // under the same deadline as every frame.
+            let accept = inner.layer_acceptor.accept(stream);
+            let layered = match tokio::time::timeout_at(deadline, accept).await {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => {
                     tracing::debug!("relay: onion layer handshake failed: {e}");
                     // Counted but not answered: the `Ok` above has already gone
                     // out on this stream, so there is no second verdict to send.
                     inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
                     return Ok(());
                 }
+                Err(_) => {
+                    tracing::debug!("relay: onion layer handshake timed out");
+                    inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+                    return Ok(());
+                }
             };
-            // The peer address here belongs to the previous relay, so it is not
-            // a client identifier and per-IP limits must not key on it.
-            serve_layered_stream(layered, inner).await
+            // Whoever sent the `Layer` is on the far end of this connection, and
+            // what is inside it is limited under that address.
+            serve_layered_stream(layered, inner, origin.layered(), deadline).await
         }
         proto::MSG_HANDSHAKE => {
-            read_handshake_and_serve(stream, inner, Some(origin), header.version).await
+            read_handshake_and_serve(stream, inner, origin, header.version, deadline).await
         }
         other => {
             reject(
@@ -546,29 +803,32 @@ async fn handle_quic_stream(
 }
 
 /// Read the handshake body a caller has already committed to, then serve what
-/// follows it. `origin` is `Some` only for a stream straight off this node's
-/// QUIC endpoint; a layered one has no client IP to attribute.
+/// follows it. `origin.connection` is `Some` only for a stream straight off this
+/// node's QUIC endpoint; a layered one carries the address but not the handle.
 async fn read_handshake_and_serve<S: DuplexStream>(
     mut stream: S,
     inner: Arc<RelayInner>,
-    origin: Option<DirectOrigin>,
+    origin: StreamOrigin,
     version: u8,
+    deadline: Deadline,
 ) -> anyhow::Result<()> {
-    let Ok(handshake) = proto::read_handshake_body(&mut stream).await else {
+    let Ok(handshake) = until(deadline, proto::read_handshake_body(&mut stream)).await else {
         reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
         return Ok(());
     };
-    serve_authenticated(stream, inner, origin, handshake, version).await
+    serve_authenticated(stream, inner, origin, handshake, version, deadline).await
 }
 
 /// Serve a stream that arrived inside an onion layer. Identical to the direct
-/// path except that there is no client IP to limit on, and a `Layer` is no
+/// path except that it cannot park (no connection handle) and a `Layer` is no
 /// longer accepted (layers are announced hop-to-hop, never nested in-band).
 async fn serve_layered_stream<S: DuplexStream>(
     mut stream: S,
     inner: Arc<RelayInner>,
+    origin: StreamOrigin,
+    deadline: Deadline,
 ) -> anyhow::Result<()> {
-    let Ok(header) = proto::read_frame_header(&mut stream).await else {
+    let Ok(header) = until(deadline, proto::read_frame_header(&mut stream)).await else {
         let version = proto::MIN_PROTOCOL_VERSION;
         reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
         return Ok(());
@@ -583,7 +843,7 @@ async fn serve_layered_stream<S: DuplexStream>(
         .await;
         return Ok(());
     }
-    read_handshake_and_serve(stream, inner, None, header.version).await
+    read_handshake_and_serve(stream, inner, origin, header.version, deadline).await
 }
 
 /// Count one refusal and tell the client why. Every rejection path does exactly
@@ -621,14 +881,16 @@ impl Drop for LiveCircuitGuard {
 }
 
 /// Verify the device-cert handshake, admit under the rate limits, then serve the
-/// single command that follows. `origin` is `Some` only when the stream came
-/// straight off this node's QUIC endpoint rather than through an onion layer.
+/// single command that follows. `origin.connection` is `Some` only when the
+/// stream came straight off this node's QUIC endpoint rather than through an
+/// onion layer; `origin.ip` is always the address the limits key on.
 async fn serve_authenticated<S: DuplexStream>(
     mut stream: S,
     inner: Arc<RelayInner>,
-    origin: Option<DirectOrigin>,
+    origin: StreamOrigin,
     handshake: Handshake,
     version: u8,
+    deadline: Deadline,
 ) -> anyhow::Result<()> {
     // 1. Handshake — reject on any auth failure, never fail open.
     let verified = match proto::verify_handshake(&handshake, proto::now_unix()) {
@@ -640,17 +902,13 @@ async fn serve_authenticated<S: DuplexStream>(
     };
     inner.stats.authorized.fetch_add(1, Ordering::Relaxed);
 
-    // 2. Rate / concurrency limits, keyed on the authenticated account and — for
-    //    a stream that came straight from a client — its source IP too (§11.5).
-    //    The guard frees the concurrency slots when this stream ends.
-    let admitted = match &origin {
-        Some(origin) => inner
-            .rate_limiter
-            .admit(origin.ip, verified.account_fingerprint),
-        None => inner
-            .rate_limiter
-            .admit_account_only(verified.account_fingerprint),
-    };
+    // 2. Rate / concurrency limits, keyed on the authenticated account AND the
+    //    address of the QUIC peer that carried this stream (§11.5) — a client's,
+    //    or the previous relay's for a layered stream. The guard frees the
+    //    concurrency slots when this stream ends.
+    let admitted = inner
+        .rate_limiter
+        .admit(origin.ip, verified.account_fingerprint);
     let Some(_circuit_guard) = admitted else {
         inner.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
         reject(&mut stream, &inner.stats, RejectReason::RateLimited, version).await;
@@ -666,7 +924,7 @@ async fn serve_authenticated<S: DuplexStream>(
     //    next relay) or a park (offer this connection as a middle hop).
     let mut anchored = false;
     let terminal = loop {
-        let Ok(frame) = proto::read_client_frame(&mut stream).await else {
+        let Ok(frame) = until(deadline, proto::read_client_frame(&mut stream)).await else {
             reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
             return Ok(());
         };
@@ -740,7 +998,7 @@ async fn serve_authenticated<S: DuplexStream>(
         Terminal::Park(park) => {
             // Parking needs the connection itself, so a stream that arrived
             // inside an onion layer cannot park: there is nothing to park.
-            let Some(origin) = origin else {
+            let Some(connection) = origin.connection else {
                 reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
                 return Ok(());
             };
@@ -748,7 +1006,7 @@ async fn serve_authenticated<S: DuplexStream>(
             // `Extend` is spliced into it, and each of those is counted where it
             // is served.
             drop(live);
-            serve_park(stream, inner, park, origin, version).await
+            serve_park(stream, inner, park, connection, version).await
         }
     }
 }
@@ -769,10 +1027,10 @@ async fn serve_park<S: DuplexStream>(
     mut stream: S,
     inner: Arc<RelayInner>,
     park: Park,
-    origin: DirectOrigin,
+    connection: quinn::Connection,
     version: u8,
 ) -> anyhow::Result<()> {
-    let Some(_registration) = inner.parked.park(park.relay_leaf_der, origin.connection) else {
+    let Some(_registration) = inner.parked.park(park.relay_leaf_der, connection) else {
         // Already parked here by a live connection — see `ParkedPeers::park` for
         // why the incumbent keeps it.
         reject(&mut stream, &inner.stats, RejectReason::BadRequest, version).await;
@@ -800,8 +1058,10 @@ async fn serve_connect<S: DuplexStream>(
     inner.stats.connects.fetch_add(1, Ordering::Relaxed);
 
     // Allowlist — the closed-overlay guarantee (design §1.2). It is enforced
-    // wherever the `Connect` lands, which is by construction the last hop.
-    if !inner.allowlist.permits(&connect.host) {
+    // wherever the `Connect` lands, which is by construction the last hop, and
+    // it binds host AND port: an allowlisted host is one service, not every
+    // service that happens to run on that machine.
+    if !inner.allowlist.permits(&connect.host, connect.port) {
         reject(&mut stream, &inner.stats, RejectReason::NotAllowed, version).await;
         return Ok(());
     }
@@ -1015,4 +1275,78 @@ async fn dial_target(connect: &Connect, overrides: &HashMap<String, IpAddr>) -> 
         return TcpStream::connect(SocketAddr::new(*ip, connect.port)).await;
     }
     TcpStream::connect((connect.host.as_str(), connect.port)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bare_host_permits_only_https() {
+        let list = Allowlist::from_patterns(["api.pollis.com"]);
+        assert!(list.permits("api.pollis.com", 443));
+        assert!(list.permits("API.pollis.com", 443), "host match is case-insensitive");
+        // The whole point: an allowlisted host is one service, not a machine.
+        assert!(!list.permits("api.pollis.com", 8443));
+        assert!(!list.permits("api.pollis.com", 80));
+        assert!(!list.permits("api.pollis.com", 5349));
+    }
+
+    #[test]
+    fn an_explicit_port_permits_exactly_that_port() {
+        let list = Allowlist::from_patterns(["api.pollis.com:8443"]);
+        assert!(list.permits("api.pollis.com", 8443));
+        assert!(!list.permits("api.pollis.com", 443));
+    }
+
+    #[test]
+    fn a_wildcard_port_permits_any_port() {
+        let list = Allowlist::from_patterns(["*.turso.io:*"]);
+        assert!(list.permits("db.turso.io", 443));
+        assert!(list.permits("db.turso.io", 1));
+        assert!(!list.permits("turso.io", 443), "suffix glob needs a subdomain");
+    }
+
+    #[test]
+    fn a_bare_star_is_any_host_on_https_only() {
+        let list = Allowlist::from_patterns(["*"]);
+        assert!(list.permits("anything.example", 443));
+        assert!(!list.permits("anything.example", 8080));
+        let open = Allowlist::from_patterns(["*:*"]);
+        assert!(open.permits("anything.example", 8080));
+    }
+
+    #[test]
+    fn a_malformed_entry_fails_closed_and_loudly() {
+        let bad_entries = [
+            "",
+            "api.pollis.com:",
+            "api.pollis.com:99999",
+            "api.pollis.com:0",
+            "api.pollis.com:https",
+            ":443",
+            "::1",
+        ];
+        for bad in bad_entries {
+            assert!(HostPattern::try_parse(bad).is_err(), "{bad:?} must be rejected");
+            assert!(Allowlist::try_from_patterns([bad]).is_err());
+            let list = Allowlist::from_patterns([bad]);
+            assert!(!list.permits("api.pollis.com", 443), "{bad:?} must permit nothing");
+            assert!(!list.permits("", 0), "{bad:?} must permit nothing, not even an empty host");
+        }
+    }
+
+    #[test]
+    fn routing_matches_on_host_alone() {
+        // The shim asks "is this an overlay host?" without a port; the entry's
+        // port restriction is the relay's business at the far end.
+        let pattern = HostPattern::parse("api.pollis.com:8443");
+        assert!(pattern.matches_host("api.pollis.com"));
+        assert!(!pattern.matches("api.pollis.com", 443));
+    }
+
+    #[test]
+    fn an_empty_allowlist_permits_nothing() {
+        assert!(!Allowlist::default().permits("api.pollis.com", 443));
+    }
 }

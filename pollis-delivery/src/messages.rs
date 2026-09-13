@@ -43,7 +43,11 @@
 //!   - reactions: the user is a member, and may only write/remove their OWN
 //!     reaction (`user_id` is bound to the authenticated user).
 //!   - watermark: the row is per `(conversation, user, device)`; the user may
-//!     only advance their own.
+//!     only advance their own — both halves of the key are bound to the signing
+//!     device, the user must be a current member, and the cursor value itself
+//!     is admitted only through [`check_cursor_stamp`] (as is every `sent_at`
+//!     a send or edit carries): canonical UTC RFC 3339, no further ahead of
+//!     the DS clock than the signature window already allows.
 //!   - envelope GC: the deletion *decision* is many-member correct regardless of
 //!     who triggers it — bounded by the MIN watermark over the whole current
 //!     member-device roster, and by device liveness (#720: a device silent past
@@ -75,6 +79,7 @@ use ulid::Ulid;
 use crate::error::AppError;
 use crate::writes::{
     gate_and_parse,
+    gate_identity_and_parse,
     is_member,
     outcome_response,
     resolve_actor,
@@ -446,6 +451,118 @@ pub(crate) fn seeded_watermark_cursor() -> String {
     now_rfc3339()
 }
 
+// ── Client-supplied cursor stamps are BOUNDED, not trusted ───────────────────
+//
+// `message_envelope.sent_at` and `conversation_watermark.last_fetched_at` are
+// both written from values the CLIENT chose, and both are load-bearing for
+// delivery: the fetch is `sent_at > last_fetched_at`, the watermark is monotone
+// (`MAX`) and never rewinds, and envelope GC deletes `sent_at <
+// MIN(last_fetched_at)`. Until this bound existed the DS stored either string
+// verbatim, so ONE member posting `sent_at = "9999-…"` was enough to black out a
+// conversation for everyone: every recipient fetched it (it sorts above every
+// cursor), reported a cursor of `9999-…`, and from then on `sent_at > cursor`
+// matched nothing — and once every live device had reported it, the next GC
+// sweep deleted every envelope in the conversation, fetched or not. The same
+// blackout was reachable from OUTSIDE the conversation through a forged
+// watermark row (see [`TOMBSTONE_FLOOR`]). Neither is one of the three losses
+// `CLAUDE.md` permits, and undoing either needed operator surgery on
+// `conversation_watermark`.
+//
+// The value stays client-chosen — the sender's own local copy carries the same
+// stamp, and cross-device read cursors compare against it (#844), so the DS
+// re-stamping it would make one message sort differently on the sender's device
+// than on everyone else's. What the DS enforces instead is that the value is
+// one it could have produced itself: a canonical UTC RFC 3339 stamp no further
+// ahead of the DS clock than the request-signature window already tolerates.
+// That is exactly the set of strings whose lexical order matches chronological
+// order across every writer of these columns (see [`now_rfc3339`]), and a
+// bound the honest client already meets — its `sent_at` is stamped BEFORE the
+// request is signed, and a signature more than [`CURSOR_STAMP_SKEW_SECS`]
+// ahead of the DS clock is already refused by `auth`.
+
+/// How far ahead of the DS clock a client-chosen `sent_at` /
+/// `last_fetched_at` may sit. The request-signature replay window
+/// ([`crate::auth::REPLAY_WINDOW_SECS`]): a client that could not sign inside
+/// it cannot post at all, so the bound costs an honest client nothing new.
+pub const CURSOR_STAMP_SKEW_SECS: i64 = crate::auth::REPLAY_WINDOW_SECS;
+
+/// Why a client-chosen cursor stamp was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StampRejection {
+    /// Not one of the canonical UTC RFC 3339 renderings (`…+00:00`, with 0, 3, 6
+    /// or 9 fraction digits) — which is the only shape whose lexical order is
+    /// chronological order against everything else in the column.
+    NotCanonical,
+    /// Parses, but denotes an instant more than [`CURSOR_STAMP_SKEW_SECS`] past
+    /// the DS clock.
+    InFuture,
+}
+
+/// The one admission check for a client-chosen `sent_at` or `last_fetched_at`
+/// (see the block comment above). `now` is injected so the boundary is testable
+/// at chosen instants; the handlers pass `chrono::Utc::now()`.
+///
+/// Canonical means: `value` parses as RFC 3339 with a UTC offset AND re-renders
+/// byte-for-byte as `chrono`'s UTC formatting at one of its four fraction widths
+/// — the set `pollis_core::commands::messages::envelope_sent_at` (`AutoSi`) and
+/// [`now_rfc3339`] (`Nanos`) between them produce. `Z` suffixes, non-zero
+/// offsets, lowercase `t`, a space separator, truncated or padded fractions,
+/// and SQLite's `YYYY-MM-DD HH:MM:SS` all fail it: each parses (or nearly does)
+/// yet sorts somewhere other than where its instant belongs.
+pub fn check_cursor_stamp(
+    value: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), StampRejection> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(value)
+        .map_err(|_| StampRejection::NotCanonical)?;
+    if parsed.offset().local_minus_utc() != 0 {
+        return Err(StampRejection::NotCanonical);
+    }
+    let utc = parsed.to_utc();
+    let canonical = [
+        chrono::SecondsFormat::Secs,
+        chrono::SecondsFormat::Millis,
+        chrono::SecondsFormat::Micros,
+        chrono::SecondsFormat::Nanos,
+    ]
+    .iter()
+    .any(|fmt| utc.to_rfc3339_opts(*fmt, false) == value);
+    if !canonical {
+        return Err(StampRejection::NotCanonical);
+    }
+    if utc > now + chrono::Duration::seconds(CURSOR_STAMP_SKEW_SECS) {
+        return Err(StampRejection::InFuture);
+    }
+    Ok(())
+}
+
+/// [`check_cursor_stamp`] at the DS clock, mapped to the `sent_at` refusals.
+fn admit_sent_at(value: &str) -> Result<(), WriteOutcome> {
+    match check_cursor_stamp(value, chrono::Utc::now()) {
+        Ok(()) => Ok(()),
+        Err(StampRejection::NotCanonical) => Err(WriteOutcome::Invalid(
+            "sent_at must be a canonical UTC RFC 3339 stamp",
+        )),
+        Err(StampRejection::InFuture) => Err(WriteOutcome::Invalid(
+            "sent_at is too far ahead of the server clock",
+        )),
+    }
+}
+
+/// [`check_cursor_stamp`] at the DS clock, mapped to the `last_fetched_at`
+/// refusals.
+fn admit_last_fetched_at(value: &str) -> Result<(), WriteOutcome> {
+    match check_cursor_stamp(value, chrono::Utc::now()) {
+        Ok(()) => Ok(()),
+        Err(StampRejection::NotCanonical) => Err(WriteOutcome::Invalid(
+            "last_fetched_at must be a canonical UTC RFC 3339 stamp",
+        )),
+        Err(StampRejection::InFuture) => Err(WriteOutcome::Invalid(
+            "last_fetched_at is too far ahead of the server clock",
+        )),
+    }
+}
+
 // ── The tombstone `sent_at` floor ────────────────────────────────────────────
 //
 // A DS-stamped tombstone is only ever fetched if it sorts strictly ABOVE the
@@ -471,6 +588,22 @@ pub(crate) fn seeded_watermark_cursor() -> String {
 //     (`apply_revoke_device`). They therefore SURVIVE the pruning that empties
 //     the envelope side.
 //
+//     This arm reads ONLY the rows of the real member-device roster — the same
+//     `channel_member_device_rows!` / `dm_member_device_rows!` join the GC
+//     predicate aggregates over (both shapes, since the floor does not know
+//     which one `?1` is; the wrong shape joins to nothing). A recipient is by
+//     definition a member device, so a watermark row outside the roster can
+//     never be a cursor the tombstone has to clear — and reading it anyway was
+//     an attack surface: `apply_advance_watermark` did not require membership,
+//     so any account could park `last_fetched_at = "9999-…"` under a victim
+//     conversation, the unjoined MAX adopted it, and the next admin delete was
+//     stamped `9999-…000000001`. Every device that applied that tombstone
+//     advanced its cursor into year 9999 and stopped receiving mail; once all
+//     of them had, GC deleted the conversation. The endpoint is now
+//     membership-gated and the value bounded (`check_cursor_stamp`), so such
+//     a row can no longer be written — and the roster join means one that
+//     somehow existed would still be ignored here, exactly as GC ignores it.
+//
 // #692: using only the envelope side meant that once GC had pruned a
 // conversation the floor went NULL, `sent_at_after` fell back to wall-clock
 // `now`, and the clock-skew dependency this guard exists to remove was back — a
@@ -486,12 +619,22 @@ pub(crate) fn seeded_watermark_cursor() -> String {
 // single round trip. The comparison is lexical in both SQL and Rust (see
 // [`now_rfc3339`] on why lexical order matches chronological order here), so the
 // two formulations agree.
-const TOMBSTONE_FLOOR: &str = "\
+const TOMBSTONE_FLOOR: &str = concat!(
+    "\
 SELECT MAX(v) FROM (
-    SELECT MAX(sent_at)         AS v FROM message_envelope       WHERE conversation_id = ?1
+    SELECT MAX(sent_at) AS v FROM message_envelope WHERE conversation_id = ?1
     UNION ALL
-    SELECT MAX(last_fetched_at) AS v FROM conversation_watermark WHERE conversation_id = ?1
-)";
+    SELECT MAX(cw.last_fetched_at) AS v
+       ",
+    channel_member_device_rows!(),
+    "
+    UNION ALL
+    SELECT MAX(cw.last_fetched_at) AS v
+       ",
+    dm_member_device_rows!(),
+    "
+)"
+);
 
 /// The greatest cursor value any recipient of `conversation_id` could already
 /// hold — see the [`TOMBSTONE_FLOOR`] block comment. `None` only when the
@@ -634,6 +777,11 @@ pub async fn apply_send_message(
     };
     if authed.is_some() && !is_member(conn, &body.conversation_id, &member_check_user).await? {
         return Ok(WriteOutcome::Forbidden);
+    }
+    // The stamp is the delivery cursor every recipient will adopt — bounded
+    // before it can touch the table (see `check_cursor_stamp`).
+    if let Err(refused) = admit_sent_at(&body.sent_at) {
+        return Ok(refused);
     }
     conn.execute(
         "INSERT INTO message_envelope \
@@ -829,6 +977,11 @@ pub async fn apply_edit_message(
     };
     if authed.is_some() && !is_member(conn, &body.conversation_id, &sender).await? {
         return Ok(WriteOutcome::Forbidden);
+    }
+    // Same bound as a send, and checked BEFORE the DELETE below: a refused edit
+    // must not have removed the author's pending edit on its way out.
+    if let Err(refused) = admit_sent_at(&body.sent_at) {
+        return Ok(refused);
     }
     let tx = conn.transaction().await?;
     tx.execute(
@@ -1068,16 +1221,32 @@ pub async fn advance_watermark(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    let (authed, parsed) = match gate_and_parse::<WatermarkBody>(&state, &req).await? {
+    // The identity gate, not the user gate: the row is keyed on the DEVICE, so
+    // the device half must come from the verified signature too.
+    let (authed, parsed) = match gate_identity_and_parse::<WatermarkBody>(&state, &req).await? {
         Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<WatermarkBody>(apply_advance_watermark(&conn, authed.as_deref(), &parsed).await?)
+    let identity = authed.as_ref().map(|(u, d)| (u.as_str(), d.as_str()));
+    outcome_response::<WatermarkBody>(apply_advance_watermark(&conn, identity, &parsed).await?)
 }
 
 /// Monotone UPSERT of a `(conversation, user, device)` watermark. Authz: the row
-/// belongs to the actor (`user_id` bound to the authenticated user).
+/// belongs to the actor — BOTH halves of the key are bound to the verified
+/// signature (`user_id` via [`resolve_actor`], `device_id` to the signing
+/// device) — and the actor is a current member of the conversation. The value
+/// itself is admitted only through [`check_cursor_stamp`]: a cursor is what
+/// every later fetch and the GC floor read, so a far-future or malformed one
+/// is refused rather than stored (see the block comment above that function
+/// for the blackout it prevents).
+///
+/// Membership is checked on the SIGNED user, on every call. Without it any
+/// account could write a row under any conversation id, and although GC joins
+/// the real roster, the tombstone floor used not to — which turned a stray row
+/// into a conversation-wide blackout after one admin delete. Rows for
+/// conversations the actor does not belong to are now unwritable, so the
+/// floor's roster join is defence in depth rather than the only defence.
 ///
 /// `reported_at` is server-stamped to `datetime('now')` on BOTH insert and
 /// update — this is the wall-clock "device liveness" signal the envelope-GC
@@ -1092,13 +1261,36 @@ pub async fn advance_watermark(
 /// device — conflating them would resurrect F3.
 pub async fn apply_advance_watermark(
     conn: &Connection,
-    authed: Option<&str>,
+    authed: Option<(&str, &str)>,
     body: &WatermarkBody,
 ) -> anyhow::Result<WriteOutcome> {
-    let user = match resolve_actor(authed, body.user_id.as_deref()) {
+    let user = match resolve_actor(authed.map(|(u, _)| u), body.user_id.as_deref()) {
         Ok(u) => u,
         Err(o) => return Ok(o),
     };
+    // The device half: the signing device when authenticated (a body naming a
+    // different device is a 403, mirroring `report_commit_since`), the body's
+    // on the no-auth path (empty → nothing to key the row on).
+    let device = match authed {
+        Some((_, d)) => {
+            if body.device_id != d {
+                return Ok(WriteOutcome::Forbidden);
+            }
+            d.to_string()
+        }
+        None => {
+            if body.device_id.is_empty() {
+                return Ok(WriteOutcome::Forbidden);
+            }
+            body.device_id.clone()
+        }
+    };
+    if authed.is_some() && !is_member(conn, &body.conversation_id, &user).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    if let Err(refused) = admit_last_fetched_at(&body.last_fetched_at) {
+        return Ok(refused);
+    }
     conn.execute(
         "INSERT INTO conversation_watermark \
              (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
@@ -1109,7 +1301,7 @@ pub async fn apply_advance_watermark(
         libsql::params![
             body.conversation_id.clone(),
             user,
-            body.device_id.clone(),
+            device,
             body.last_fetched_at.clone(),
         ],
     )
@@ -1715,6 +1907,10 @@ mod tombstone_floor_tests {
     use super::*;
 
 
+    /// A schema'd in-memory DB with the roster the floor's watermark arm joins
+    /// to: channel `c1` of group `g1`, members `alice` (device `a1`) and `bob`
+    /// (device `b1`). Only a member device's cursor can be one a tombstone has
+    /// to clear, so — like the GC predicate — the floor reads no others.
     async fn conn() -> Connection {
         let db = libsql::Builder::new_local(":memory:").build().await.unwrap();
         let conn = db.connect().unwrap();
@@ -1723,6 +1919,16 @@ mod tombstone_floor_tests {
         // inherit a constraint no deploy has (`Db::connect_local` does the same).
         conn.execute_batch("PRAGMA foreign_keys=OFF;").await.unwrap();
         pollis_schema::apply::single_db(&conn).await.expect("schema");
+        conn.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('c1', 'channel');
+             INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'chan');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice');
+             INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob');
+             INSERT INTO user_device (user_id, device_id) VALUES ('alice', 'a1');
+             INSERT INTO user_device (user_id, device_id) VALUES ('bob', 'b1');",
+        )
+        .await
+        .unwrap();
         conn
     }
 
@@ -1731,6 +1937,72 @@ mod tombstone_floor_tests {
     /// `sent_at` and — via ingest — in `last_fetched_at`.
     fn stamp(offset: chrono::Duration) -> String {
         (chrono::Utc::now() + offset).to_rfc3339()
+    }
+
+    /// **The tombstone-floor poisoning regression test.** A watermark row for
+    /// `c1` written by an account that is NOT a member (the pre-fix
+    /// `advance_watermark` let anyone write one) — and one under a member's
+    /// name but for a device that account does not have — carry a year-9999
+    /// cursor. Neither can be a recipient's cursor, so neither may raise the
+    /// floor: the tombstone must be stamped at plain `now`, not at
+    /// `9999-…000000001`, which every device that applied it would have adopted
+    /// as its cursor (a permanent blackout, then GC of the whole conversation).
+    ///
+    /// Against the unjoined `MAX(last_fetched_at)` this FAILS: the floor is the
+    /// poisoned value and `sent_at_after` rolls the tombstone into year 9999.
+    #[tokio::test]
+    async fn watermark_rows_outside_the_member_device_roster_do_not_floor_the_tombstone() {
+        let conn = conn().await;
+        let poison = "9999-12-31T23:59:59.000000000+00:00";
+        // A non-member's row for the victim conversation.
+        add_watermark(&conn, "c1", "mallory", "m1", poison).await;
+        // A member's user id, but a device the member does not have.
+        add_watermark(&conn, "c1", "alice", "not-alices-device", poison).await;
+        // The genuine roster's cursors, behind the DS clock.
+        let honest = stamp(chrono::Duration::minutes(-5));
+        add_watermark(&conn, "c1", "alice", "a1", &honest).await;
+        add_watermark(&conn, "c1", "bob", "b1", &honest).await;
+
+        let floor = tombstone_floor(&conn, "c1").await.unwrap();
+        assert_eq!(
+            floor.as_deref(),
+            Some(honest.as_str()),
+            "the floor must be the highest MEMBER-DEVICE cursor; a row outside the \
+             roster is not a recipient and must be ignored exactly as GC ignores it"
+        );
+
+        let now = now_rfc3339();
+        assert_eq!(
+            sent_at_after(now.clone(), floor),
+            now,
+            "with every real cursor behind the DS clock the tombstone keeps plain \
+             now — a poisoned non-member row must not push it into year 9999"
+        );
+    }
+
+    /// The DM shape of the same join: a `dm_channel_member` roster, a
+    /// non-member's poisoned row ignored, a member device's real cursor read.
+    #[tokio::test]
+    async fn the_dm_roster_floors_the_tombstone_and_ignores_outsiders() {
+        let conn = conn().await;
+        conn.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('dm1', 'dm');
+             INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'alice', 'alice');
+             INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'bob', 'alice');",
+        )
+        .await
+        .unwrap();
+        add_watermark(&conn, "dm1", "mallory", "m1", "9999-12-31T23:59:59.000000000+00:00").await;
+        let ahead = stamp(chrono::Duration::minutes(2));
+        add_watermark(&conn, "dm1", "bob", "b1", &ahead).await;
+
+        let floor = tombstone_floor(&conn, "dm1").await.unwrap();
+        assert_eq!(
+            floor.as_deref(),
+            Some(ahead.as_str()),
+            "a DM member device's cursor is read through the DM roster; the \
+             outsider's row is not"
+        );
     }
 
     async fn add_envelope(conn: &Connection, id: &str, conv: &str, sent_at: &str) {
@@ -3354,21 +3626,31 @@ mod admin_delete_visibility_tests {
         );
     }
 
+    /// A whole second in the DS's near future — far enough ahead that a test
+    /// running for a while stays "ahead" (so `sent_at_after` takes its floor
+    /// branch), yet inside the [`CURSOR_STAMP_SKEW_SECS`] window a client stamp
+    /// must sit within to be admitted at all.
+    fn base_second_ahead() -> i64 {
+        chrono::Utc::now().timestamp() + CURSOR_STAMP_SKEW_SECS / 2
+    }
+
     /// The headline: across every `sent_at` fraction width a client clock can
     /// emit — including the whole-second (`'+' < '.'`) shape and a stamp in the
     /// DS's FUTURE (client clock ahead) — carol always fetches the tombstone.
     #[tokio::test]
     async fn admin_tombstone_always_reaches_a_caught_up_recipient() {
-        // A fixed base second, then the fraction widths AutoSi produces (0/3/6/9
-        // digits) plus the max-nanos edge.
-        let base = 1_800_000_000;
+        // A base second ahead of the DS clock, then the fraction widths AutoSi
+        // produces (0/3/6/9 digits) plus the max-nanos edge.
+        let base = base_second_ahead();
         for nanos in [0u32, 1_000_000, 1_001_000, 1_001_001, 999_999_999] {
             assert_tombstone_reaches_carol(&client_stamp(base, nanos)).await;
         }
-        // Client clock running an hour AHEAD of the DS wall clock: the message —
-        // and so carol's watermark — sit in the DS's future. `sent_at_after`'s
-        // floor is what keeps the tombstone above them.
-        let ahead = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+        // Client clock running AHEAD of the DS wall clock (by as much as the
+        // stamp bound admits): the message — and so carol's watermark — sit in
+        // the DS's future. `sent_at_after`'s floor is what keeps the tombstone
+        // above them.
+        let ahead = (chrono::Utc::now() + chrono::Duration::seconds(CURSOR_STAMP_SKEW_SECS - 30))
+            .to_rfc3339();
         assert_tombstone_reaches_carol(&ahead).await;
     }
 
@@ -3405,7 +3687,7 @@ mod admin_delete_visibility_tests {
         let w = db.connect().expect("write conn");
         let carol = db.connect().expect("carol read conn");
 
-        let base = 1_800_000_000;
+        let base = base_second_ahead();
         let conv = "chan-general";
 
         // An existing message at `…:00.999999999` — the highest fraction there
@@ -3433,9 +3715,9 @@ mod admin_delete_visibility_tests {
         .expect("send");
 
         // Carol catches up and reports her watermark, then alice admin-deletes.
-        // Both stamps are in 2027, i.e. ahead of any real DS clock, so the delete
-        // takes `sent_at_after`'s floor branch and the tombstone is stamped
-        // exactly one nanosecond past the highest thing in the conversation.
+        // Both stamps are ahead of the DS clock, so the delete takes
+        // `sent_at_after`'s floor branch and the tombstone is stamped exactly one
+        // nanosecond past the highest thing in the conversation.
         assert_eq!(ingest_fetch(&carol, conv, "carol", "carol-dev").await.len(), 1);
         apply_advance_watermark(
             &w,
@@ -3479,9 +3761,13 @@ mod admin_delete_visibility_tests {
                 .expect("tombstone sent_at");
             rows.next().await.expect("row").expect("row").get(0).expect("sent_at")
         };
+        // The second after `base`, as `…T08:00:01` was when the base was fixed.
+        let next_second = client_stamp(base + 1, 0);
+        let next_second = next_second.trim_end_matches("+00:00");
         assert!(
-            cursor.starts_with("2027-01-15T08:00:01"),
-            "the floor guard must roll the tombstone into the next second, got {cursor}"
+            cursor.starts_with(next_second),
+            "the floor guard must roll the tombstone into the next second \
+             ({next_second}), got {cursor}"
         );
         apply_advance_watermark(
             &w,
@@ -3538,9 +3824,9 @@ mod admin_delete_visibility_tests {
         // the burial this whole scheme exists to prevent — and the reason
         // `pollis_core::commands::messages::envelope_sent_at` is a chokepoint
         // with `sent_at_never_truncates_a_real_fraction` guarding it.
-        let truncated = "2027-01-15T08:00:01+00:00";
+        let truncated = client_stamp(base + 1, 0);
         assert!(
-            truncated < cursor.as_str(),
+            truncated < cursor,
             "premise of the guard: a truncated stamp ({truncated}) sorts below the \
              tombstone ({cursor}) and would be lost"
         );
@@ -3993,5 +4279,111 @@ mod epoch_gate_tests {
         assert!(matches!(ok, WriteOutcome::Ok), "{ok:?}");
         assert!(!stored(&c, "m1").await);
         assert!(stored(&c, "m2").await);
+    }
+}
+
+#[cfg(test)]
+mod cursor_stamp_tests {
+    //! [`check_cursor_stamp`] — the admission rule for every client-chosen
+    //! `sent_at` / `last_fetched_at`. The invalid state it makes unrepresentable
+    //! is a stored cursor stamp that either sorts somewhere other than where its
+    //! instant belongs, or sits in the far future — the `9999-…` blackout.
+
+    use super::*;
+
+    fn at(secs: i64, nanos: u32) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(secs, nanos).expect("valid instant")
+    }
+
+    /// Every shape the two real writers produce is admitted: the client's
+    /// `AutoSi` at each fraction width, and the DS's own `Nanos`.
+    #[test]
+    fn admits_every_canonical_width_at_or_below_now() {
+        let now = at(1_800_000_000, 0);
+        for nanos in [0u32, 1_000_000, 1_001_000, 1_001_001, 999_999_999] {
+            let client = at(1_799_999_000, nanos).to_rfc3339();
+            assert_eq!(check_cursor_stamp(&client, now), Ok(()), "{client}");
+        }
+        let ds = at(1_799_999_000, 5).to_rfc3339_opts(chrono::SecondsFormat::Nanos, false);
+        assert_eq!(check_cursor_stamp(&ds, now), Ok(()), "{ds}");
+        // A zero-fraction instant rendered with explicit nanoseconds is also
+        // canonical (it is what `now_rfc3339` writes on a second boundary).
+        let ds_zero = at(1_799_999_000, 0).to_rfc3339_opts(chrono::SecondsFormat::Nanos, false);
+        assert_eq!(check_cursor_stamp(&ds_zero, now), Ok(()), "{ds_zero}");
+    }
+
+    /// The skew allowance is inclusive at the boundary and refuses one
+    /// nanosecond past it.
+    #[test]
+    fn the_future_bound_is_the_signature_window() {
+        let now = at(1_800_000_000, 0);
+        let at_bound = at(1_800_000_000 + CURSOR_STAMP_SKEW_SECS, 0).to_rfc3339();
+        assert_eq!(check_cursor_stamp(&at_bound, now), Ok(()));
+        let past_bound = at(1_800_000_000 + CURSOR_STAMP_SKEW_SECS, 1).to_rfc3339();
+        assert_eq!(
+            check_cursor_stamp(&past_bound, now),
+            Err(StampRejection::InFuture)
+        );
+    }
+
+    /// The attack value, and its close relatives.
+    #[test]
+    fn refuses_the_far_future() {
+        let now = at(1_800_000_000, 0);
+        for poison in [
+            "9999-12-31T23:59:59.000000000+00:00",
+            "9999-12-31T23:59:59+00:00",
+            "2100-01-01T00:00:00+00:00",
+        ] {
+            assert_eq!(
+                check_cursor_stamp(poison, now),
+                Err(StampRejection::InFuture),
+                "{poison}"
+            );
+        }
+    }
+
+    /// Strings that parse (or nearly parse) as a time but whose lexical position
+    /// is not their instant's — each would let a cursor sort away from where it
+    /// belongs. Includes a non-zero offset that denotes a PAST instant yet sorts
+    /// twelve hours into the future, which the chronological bound alone would
+    /// have admitted.
+    #[test]
+    fn refuses_every_non_canonical_shape() {
+        let now = at(1_800_000_000, 0);
+        let past = at(1_799_990_000, 123_000_000);
+        let shapes = [
+            // `Z` sorts above `.` and `+` within its second.
+            past.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            // A non-zero offset: instant in the past, string in the future.
+            past.with_timezone(&chrono::FixedOffset::east_opt(12 * 3600).unwrap()).to_rfc3339(),
+            // SQLite's own shape (the #908 seed bug): a space sorts below `T`.
+            past.format("%Y-%m-%d %H:%M:%S").to_string(),
+            // Lowercase separator.
+            past.to_rfc3339().replacen('T', "t", 1),
+            // A truncated fraction (the #692 shape) and a padded one.
+            format!("{}+00:00", past.format("%Y-%m-%dT%H:%M:%S.1")),
+            format!("{}+00:00", past.format("%Y-%m-%dT%H:%M:%S.1230")),
+            // Not a time at all.
+            String::new(),
+            "not-a-timestamp".to_string(),
+        ];
+        for shape in shapes {
+            assert_eq!(
+                check_cursor_stamp(&shape, now),
+                Err(StampRejection::NotCanonical),
+                "{shape:?}"
+            );
+        }
+    }
+
+    /// The two writers this rule guards agree with it on live values, so the
+    /// honest client is never refused.
+    #[test]
+    fn live_stamps_from_both_writers_are_admitted() {
+        let now = chrono::Utc::now();
+        assert_eq!(check_cursor_stamp(&now_rfc3339(), now), Ok(()));
+        assert_eq!(check_cursor_stamp(&seeded_watermark_cursor(), now), Ok(()));
+        assert_eq!(check_cursor_stamp(&chrono::Utc::now().to_rfc3339(), now), Ok(()));
     }
 }

@@ -142,6 +142,12 @@ pub fn device_revoked_payload() -> Value {
 /// query already returns — naming the requester in the status-bar alert is the
 /// point (issue #396). This is deliberately NOT subject to the §5 routing-only
 /// rule that governs shared-room broadcasts.
+///
+/// The value sent here is advisory only: the DS strips every identity key from
+/// a client payload and stamps the VERIFIED signer back in (`sender_id` +
+/// `sender_username`, from `users`) before fan-out, and the recipient's
+/// dispatcher reads only that stamp — so the name shown can never be one the
+/// sending client chose.
 pub fn dm_created_inbox_payload(conversation_id: &str, sender_username: Option<&str>) -> Value {
     json!({
         "type": "dm_created",
@@ -156,6 +162,10 @@ pub fn dm_created_inbox_payload(conversation_id: &str, sender_username: Option<&
 /// where (issue #396) — the same fields `get_pending_invites` returns. Distinct
 /// from [`membership_changed_payload`], which is the routing-only GROUP-ROOM
 /// broadcast and must never carry identity.
+///
+/// As with [`dm_created_inbox_payload`], both strings are advisory: the DS
+/// replaces `inviter_username` with the verified signer's username and
+/// `group_name` with the `groups` row the `group_id` names.
 pub fn group_invite_inbox_payload(
     group_id: &str,
     inviter_username: Option<&str>,

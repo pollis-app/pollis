@@ -443,9 +443,7 @@ pub async fn apply_verify_otp(
         }
         None => {
             let user_id = Ulid::new().to_string();
-            let suffix = &user_id[user_id.len().saturating_sub(4)..];
-            let email_prefix = email.split('@').next().unwrap_or("user");
-            let default_username = format!("{email_prefix}_{suffix}");
+            let default_username = default_username(email, &user_id);
             conn.execute(
                 "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
                 libsql::params![user_id.clone(), email.to_string(), default_username.clone()],
@@ -508,6 +506,44 @@ pub fn verify_otp_response(result: VerifyOtpResult) -> Response {
         )
             .into_response(),
     }
+}
+
+/// The username a brand-new account starts with: the email's local part, an
+/// underscore, and the last four characters of the account's ULID, squeezed
+/// into the shape `profile::is_valid_username` accepts.
+///
+/// The squeeze matters because the DS is the one issuing these, and a name it
+/// mints must pass the rule it enforces on `/v1/profile/update` — a user whose
+/// starting name is refused by their own profile form is a defect. So: the
+/// whole thing is lower-cased (a ULID suffix is upper-case Crockford base32),
+/// every character outside `[a-z0-9_.-]` in the local part becomes `_`
+/// (`alice+work` → `alice_work`), and the local part is cut so the total fits
+/// `USERNAME_MAX_LEN`. The suffix alone is `_xxxx` — five characters — so the
+/// minimum length holds even for an address with an empty local part, and
+/// because the local part cannot contain `@` the result never does either.
+///
+/// Uniqueness still rides on the ULID suffix; lower-casing it is a bijection
+/// on the Crockford alphabet, so it loses nothing.
+pub fn default_username(email: &str, user_id: &str) -> String {
+    let suffix = &user_id[user_id.len().saturating_sub(4)..];
+    let suffix = suffix.to_ascii_lowercase();
+    let room = crate::profile::USERNAME_MAX_LEN - 1 - suffix.len();
+    let local: String = email
+        .split('@')
+        .next()
+        .unwrap_or("user")
+        .chars()
+        .map(|c| {
+            let c = c.to_ascii_lowercase();
+            if crate::profile::is_username_char(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(room)
+        .collect();
+    format!("{local}_{suffix}")
 }
 
 // ── small response helpers ───────────────────────────────────────────────────
@@ -666,8 +702,8 @@ mod tests {
         assert_eq!(user_count(&conn).await, 1, "one address must never own two accounts");
     }
 
-    /// The default username contract the client mirrors: the email's local part,
-    /// an underscore, and the last four characters of the account's ULID. An
+    /// The default username contract: the email's local part, an underscore,
+    /// and the last four characters of the account's ULID, lower-cased. An
     /// address with no local part yields `"_<suffix>"` — `split('@')` returns an
     /// empty first segment, never `None`.
     #[tokio::test]
@@ -677,17 +713,53 @@ mod tests {
 
         match verify(&conn, &otp, &sessions, &cfg, "alice@x.com").await {
             VerifyOtpResult::Ok { user_id, username, .. } => {
-                assert_eq!(username, format!("alice_{}", &user_id[user_id.len() - 4..]));
+                assert_eq!(
+                    username,
+                    format!("alice_{}", &user_id[user_id.len() - 4..].to_ascii_lowercase())
+                );
             }
             _ => panic!("expected Ok"),
         }
 
         match verify(&conn, &otp, &sessions, &cfg, "@x.com").await {
             VerifyOtpResult::Ok { user_id, username, .. } => {
-                assert_eq!(username, format!("_{}", &user_id[user_id.len() - 4..]));
+                assert_eq!(
+                    username,
+                    format!("_{}", &user_id[user_id.len() - 4..].to_ascii_lowercase())
+                );
             }
             _ => panic!("expected Ok"),
         }
+    }
+
+    /// A minted default must pass the rule `/v1/profile/update` enforces —
+    /// otherwise the account's own starting name is refused by its own form.
+    /// Pins the three squeezes: case, character class, and length.
+    #[test]
+    fn a_default_username_always_satisfies_the_username_rule() {
+        use crate::profile::{is_valid_username, USERNAME_MAX_LEN};
+
+        let ulid = "01J8ZK2M4N6P8Q0R2S4T6V8WXY";
+        for email in [
+            "Alice.Smith@x.com",
+            "alice+work@gmail.com",
+            "ALICE@X.COM",
+            "a b@x.com",
+            "émile@x.fr",
+            "@x.com",
+            "x@x.com",
+            "an-extremely-long-local-part-that-runs-past-the-limit-by-a-mile@x.com",
+        ] {
+            let name = default_username(email, ulid);
+            assert!(
+                is_valid_username(&name),
+                "{email:?} produced {name:?}, which the profile rule refuses"
+            );
+            assert!(name.len() <= USERNAME_MAX_LEN, "{name:?} is over the cap");
+            assert!(name.ends_with("_8wxy"), "{name:?} lost its suffix");
+        }
+        assert_eq!(default_username("alice+work@gmail.com", ulid), "alice_work_8wxy");
+        assert_eq!(default_username("Alice.Smith@x.com", ulid), "alice.smith_8wxy");
     }
 
     /// A returning account reports whether it has published an identity key —

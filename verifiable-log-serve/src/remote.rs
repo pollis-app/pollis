@@ -860,7 +860,8 @@ mod overlay_proxy_tests {
     fn spawn_relay() -> (Arc<dyn CircuitFactory>, Arc<RelayStats>) {
         let mut config = RelayConfig::new(
             "127.0.0.1:0".parse().unwrap(),
-            Allowlist::from_patterns([ORIGIN_NAME]),
+            // The test origin listens on a random port; a bare host means 443.
+            Allowlist::from_patterns([format!("{ORIGIN_NAME}:*")]),
         )
         .unwrap();
         config

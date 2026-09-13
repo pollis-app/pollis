@@ -481,7 +481,10 @@ jobs:
       # (the client reads no R2 or LiveKit credential since #506, and no database
       # credential at all since #987). `scripts/check-build-recipe.py` fails CI
       # if the three lists — config.rs, desktop-release.yml, this one — ever
-      # disagree. Exported via $GITHUB_ENV behind an is-set guard because an
+      # disagree, and if a release build job exports anything BEYOND that list
+      # to $GITHUB_ENV (the list is public by construction; a build job's
+      # environment is readable by every build.rs and third-party action in
+      # it). Exported via $GITHUB_ENV behind an is-set guard because an
       # unset var must stay truly UNSET: a plain `env:` mapping of an undefined
       # var exports an EMPTY string, which option_env! bakes as Some("") —
       # different bytes from a release that left the var unset (None), e.g. an

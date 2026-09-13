@@ -128,7 +128,8 @@ fn healthy_revocations() -> pollis_relay::policy::RevocationStore {
 fn spawn_relay_with(allow: &[&str], overrides: &[(&str, IpAddr)], allow_extend: bool) -> TestRelay {
     let mut config = RelayConfig::new(
         "127.0.0.1:0".parse().unwrap(),
-        Allowlist::from_patterns(allow.iter().copied()),
+        // Test origins listen on random ports; a bare host would mean 443.
+        Allowlist::from_patterns(allow.iter().map(|h| format!("{h}:*"))),
     )
     .unwrap();
     for (host, ip) in overrides {

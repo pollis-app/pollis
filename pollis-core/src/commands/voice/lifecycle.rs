@@ -404,10 +404,10 @@ pub async fn join_voice_channel(
     )
     .await?;
     let e2ee_ms = e2ee_start.elapsed().as_millis() as u64;
-    let e2ee_options = voice_e2ee::build_e2ee_options(voice_key);
+    let e2ee_options = voice_e2ee::build_e2ee_options(voice_key, voice_key_index);
     let key_provider_for_state = e2ee_options.key_provider.clone();
     eprintln!(
-        "[voice] e2ee armed for {channel_id} (mls_group={voice_mls_group_id}, epoch={voice_epoch}, idx={voice_key_index})"
+        "[voice] e2ee armed for {channel_id} (mls_group={voice_mls_group_id}, epoch={voice_epoch}, ring slot={voice_key_index})"
     );
 
     let connect_started = Instant::now();
@@ -558,7 +558,13 @@ pub async fn join_voice_channel(
             .await
             .map_err(|e| anyhow::anyhow!("publish track: {e}"))?;
         first_publish_ms = publish_start.elapsed().as_millis() as u64;
-        eprintln!("[voice] track published");
+        // The mic's FrameCryptor was just created on ring slot 0; point it at
+        // the join epoch's slot before the first frame goes out. The room event
+        // loop repeats this for every later local publish (screen share,
+        // camera), but `voice.room` is not stored yet at this point, so the
+        // first track is handled here directly.
+        let moved = voice_e2ee::apply_sender_key_index(&room, voice_key_index);
+        eprintln!("[voice] track published ({moved} sender cryptor(s) on ring slot {voice_key_index})");
 
         // ── Mic frame task: rebuffer to exact 10ms, run APM, capture_frame ────
         // Speaking detection runs on the post-APM peak so the indicator follows
@@ -974,6 +980,11 @@ pub async fn join_voice_channel(
                 RoomEvent::ConnectionStateChanged(conn_state) => {
                     eprintln!("[voice] connection state: {conn_state:?}");
                 }
+                RoomEvent::LocalTrackPublished { .. } => {
+                    // Every new local publication gets a FrameCryptor born on
+                    // ring slot 0; move it onto the current epoch's slot.
+                    voice_e2ee::sync_local_sender_key_index(&state_for_room).await;
+                }
                 RoomEvent::ConnectionQualityChanged { quality, participant } => {
                     let quality_str = match quality {
                         ConnectionQuality::Excellent => "excellent",
@@ -1042,6 +1053,7 @@ pub async fn join_voice_channel(
     voice.e2ee_key_provider = Some(key_provider_for_state);
     voice.e2ee_mls_group_id = Some(voice_mls_group_id);
     voice.e2ee_epoch = voice_epoch;
+    voice.e2ee_key_index = voice_key_index;
     *voice.last_join_timings.lock().unwrap() = Some(timings);
 
     // Sync the freshly-created publication to the gate, now that the room
@@ -1147,6 +1159,7 @@ async fn release_voice_resources(
         voice.e2ee_key_provider = None;
         voice.e2ee_mls_group_id = None;
         voice.e2ee_epoch = 0;
+        voice.e2ee_key_index = 0;
 
         (voice.room.take(), input_stream, output_stream)
     }; // voice lock released here

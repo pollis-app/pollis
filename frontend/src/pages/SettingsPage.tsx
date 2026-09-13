@@ -13,6 +13,7 @@ import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { convertFileSrc, invoke } from "../bridge";
 import { EmptyState } from "../components/ui/EmptyState";
+import { isValidUsername } from "../utils/username";
 
 export const SettingsPage: React.FC = observer(() => {
   const { t } = useTranslation("settings");
@@ -28,6 +29,7 @@ export const SettingsPage: React.FC = observer(() => {
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [username, setUsername] = useState("");
+  const [usernameError, setUsernameError] = useState<string | null>(null);
   const [preferredName, setPreferredName] = useState("");
   const [email, setEmail] = useState("");
 
@@ -134,9 +136,19 @@ export const SettingsPage: React.FC = observer(() => {
 
   const handleSave = async () => {
     if (!currentUser) { return; }
+    const nextUsername = username.trim();
+    // The DS refuses a username outside its rule (`is_valid_username`) and
+    // passes an UNCHANGED one through, because default names that predate the
+    // rule must still be able to save a display name. Same carve-out here, so
+    // the form explains the refusal before the round trip rather than after.
+    if (nextUsername !== (userData?.username ?? "") && !isValidUsername(nextUsername)) {
+      setUsernameError(t("user.usernameInvalid"));
+      return;
+    }
+    setUsernameError(null);
     try {
       await updateProfileMutation.mutateAsync({
-        username: username.trim(),
+        username: nextUsername,
         preferredName: preferredName.trim() || undefined,
       });
       setSaveSuccess(true);
@@ -228,8 +240,12 @@ export const SettingsPage: React.FC = observer(() => {
                   <TextInput
                     label={t("user.usernameLabel")}
                     value={username}
-                    onChange={setUsername}
+                    onChange={(value) => {
+                      setUsername(value);
+                      setUsernameError(null);
+                    }}
                     placeholder={t("user.usernamePlaceholder")}
+                    error={usernameError ?? undefined}
                     id="settings-username"
                   />
                   <input data-testid="settings-username-input" type="hidden" value={username} readOnly />

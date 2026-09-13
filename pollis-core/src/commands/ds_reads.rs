@@ -386,6 +386,26 @@ pub(crate) async fn registered_devices(
         .collect())
 }
 
+/// Every roster user's `account_id_pub` and ALL of their `user_device` rows
+/// (revoked included) — the inputs to the committer-side leaf cross-signing
+/// check (`mls::device::IdentityDirectory`).
+///
+/// An ERROR rather than a short list on failure: this read decides which leaves
+/// a reconcile may add and which it evicts, and a truncated answer would refuse
+/// (or drop) live devices without failing loudly.
+pub(crate) async fn roster_identities(
+    state: &Arc<AppState>,
+    user_ids: &[String],
+) -> Result<Vec<pollis_api::reads::AddedIdentity>> {
+    if user_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let body = ar::RosterIdentitiesBody {
+        user_ids: user_ids.to_vec(),
+    };
+    Ok(ds_post_json(state, &body).await?.identities)
+}
+
 // ── Device enrollment, recovery, audit ───────────────────────────────────────
 
 /// One device-enrollment request, addressed by its id.

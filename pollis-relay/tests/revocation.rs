@@ -140,7 +140,8 @@ impl TestRelay {
 fn spawn_relay(allow: &[&str], revocations: RevocationStore) -> TestRelay {
     let mut config = RelayConfig::new(
         "127.0.0.1:0".parse().unwrap(),
-        Allowlist::from_patterns(allow.iter().copied()),
+        // Test origins listen on random ports; a bare host would mean 443.
+        Allowlist::from_patterns(allow.iter().map(|h| format!("{h}:*"))),
     )
     .unwrap();
     config.revocations = revocations;

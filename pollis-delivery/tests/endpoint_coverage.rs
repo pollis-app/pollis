@@ -114,7 +114,11 @@ fn the_endpoint_table_covers_the_whole_write_surface() {
         // `/v1/pins/pin`, `/v1/pins/unpin`, `/v1/read/pin-keystate`,
         // `/v1/read/pins`) and #107 the vault (`/v1/vault/save`,
         // `/v1/vault/delete`, `/v1/read/vault`).
-        104,
+        //
+        // 105 since leaf cross-signing moved onto the committer:
+        // `/v1/read/roster-identities` is the batched cert-material read a
+        // reconcile verifies every added and retained leaf against.
+        105,
         "the DS write surface changed — update this count deliberately, and make \
          sure the new endpoint is routed in BOTH pollis-delivery and the flows harness"
     );

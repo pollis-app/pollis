@@ -14,6 +14,7 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 
 use crate::state::AppState;
 
+use super::device::{IdentityDirectory, LeafVerdict};
 use super::generation::mls_group_id;
 use super::provider::{
     load_stored_group, parse_credential_device_id, parse_credential_user_id, signature_scheme,
@@ -385,6 +386,15 @@ pub struct ReconcileOutcome {
     /// messages until they run a client that publishes a pool in that suite, and
     /// downgrading the group to admit them is never an option.
     pub skipped_no_suite_kp: Vec<(String, String)>,
+    /// `(user_id, device_id, reason)` for every claimed KeyPackage the committer
+    /// REFUSED to turn into an Add because its leaf signature key is not the one
+    /// the claimed user's `account_id_pub` certified — or could not be shown to
+    /// be (`LeafVerdict::Unverifiable`). The KeyPackage is burnt (claimed and
+    /// discarded); the device is re-considered on the next reconcile once its
+    /// cert is publishable. This is the committer-side half of cross-signing:
+    /// a DS that substitutes an attacker's KeyPackage at claim time, or a
+    /// device whose cert the user never issued, never reaches `propose_adds`.
+    pub refused_uncertified: Vec<(String, String, String)>,
 }
 
 /// Raw bytes produced by a reconcile commit, needed for posting to Turso.
@@ -456,6 +466,15 @@ fn desired_set<'a>(
 /// post to Turso. On the returned `ReconcileOutcome`, `epoch_after` reflects
 /// the epoch the commit WILL produce when merged (i.e. `epoch_before + 1`
 /// when a commit is staged, equal to `epoch_before` on no-op).
+///
+/// `identities` is the roster's cross-signing material. When present, a leaf
+/// already in the tree whose signature key is **positively** not the key its
+/// user certified (`LeafVerdict::Uncertified` — revoked, bad cert, or a key that
+/// is not the certified one) is evicted, exactly as a revoked device is: it is
+/// how a rogue leaf grafted in by a malicious or legacy committer leaves the
+/// tree, append-only, on the next honest reconcile. `Unverifiable` leaves are
+/// retained — absence of a row is not evidence, and `None` (no material read)
+/// disables the gate like `valid_devices = None` does.
 // Each argument is a distinct piece of MLS state the caller already holds
 // separately; bundling them into a struct would only move the same list.
 #[allow(clippy::too_many_arguments)]
@@ -468,6 +487,7 @@ pub fn reconcile_group_mls_core_staged<C>(
     actor_user_id: &str,
     actor_device_id: &str,
     valid_devices: Option<&std::collections::HashSet<(String, String)>>,
+    identities: Option<&IdentityDirectory>,
 ) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
@@ -475,12 +495,32 @@ where
     use std::collections::{HashMap, HashSet};
 
     let epoch_before = group.epoch().as_u64();
+    let scheme = signature_scheme(group.ciphersuite());
 
     // 1. Actual state: walk the MLS tree.
+    //
+    //    A leaf whose signature key is positively NOT the key its user certified
+    //    is kept OUT of `actual` and queued for removal: excluding it from
+    //    `actual` is what lets the device's genuine KeyPackage (if one is
+    //    available) be added in the same commit, since the `(user, device)` key
+    //    then reads as "not in tree". Our own leaf is never judged — a committer
+    //    cannot remove itself, and its own cert is checked at publish time.
     let mut actual: HashMap<(String, String), LeafNodeIndex> = HashMap::new();
+    let mut uncertified: Vec<((String, String), LeafNodeIndex, String)> = Vec::new();
     for m in group.members() {
         let uid = parse_credential_user_id(&m.credential);
         let did = parse_credential_device_id(&m.credential).unwrap_or_default();
+        let is_self = uid == actor_user_id && did == actor_device_id;
+        if !is_self {
+            if let Some(dir) = identities {
+                if let LeafVerdict::Uncertified(reason) =
+                    dir.leaf_verdict(&uid, &did, m.signature_key.as_slice(), scheme)
+                {
+                    uncertified.push(((uid, did), m.index, reason));
+                    continue;
+                }
+            }
+        }
         actual.insert((uid, did), m.index);
     }
 
@@ -495,12 +535,19 @@ where
     // 3. Diff.
     let actual_keys: HashSet<(String, String)> = actual.keys().cloned().collect();
 
-    // Leaves in tree but not desired → remove
+    // Leaves in tree but not desired → remove, plus every uncertified leaf.
     let mut to_remove: Vec<((String, String), LeafNodeIndex)> = actual
         .iter()
         .filter(|(key, _)| !desired.contains(key))
         .map(|(key, &idx)| (key.clone(), idx))
         .collect();
+    for (key, idx, reason) in &uncertified {
+        eprintln!(
+            "[mls] reconcile: evicting uncertified leaf {}:{} — {reason}",
+            key.0, key.1
+        );
+        to_remove.push((key.clone(), *idx));
+    }
 
     // Devices desired but not in tree → add
     let to_add_keys: HashSet<(String, String)> = desired
@@ -644,6 +691,7 @@ pub fn reconcile_group_mls_core<C>(
     actor_user_id: &str,
     actor_device_id: &str,
     valid_devices: Option<&std::collections::HashSet<(String, String)>>,
+    identities: Option<&IdentityDirectory>,
 ) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
@@ -657,6 +705,7 @@ where
         actor_user_id,
         actor_device_id,
         valid_devices,
+        identities,
     )?;
 
     // If a commit was staged, merge it locally. No-op runs leave the group
@@ -692,6 +741,14 @@ where
 /// which is why it is `pub(super)`: standing up a successor is exactly "add the
 /// whole roster to an empty group", and a second copy of the KeyPackage
 /// validation — including the cross-suite refusal below — would drift.
+///
+/// `identities` is the roster's cross-signing material ([`load_pinned_identities`]).
+/// Every claimed KeyPackage's leaf must be [`LeafVerdict::Certified`] against it
+/// before it becomes an Add proposal: the leaf's signature key has to be the very
+/// device key the claimed user's `account_id_pub` certified. The DS hands us the
+/// KeyPackage and is untrusted, so a self-consistent KeyPackage (which is all
+/// `KeyPackageIn::validate` checks) proves only that *someone* holds the leaf's
+/// private key — this check proves that someone is the user's device.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn stage_reconcile_commit<C>(
     provider: &MlsProvider<'_, C>,
@@ -702,6 +759,7 @@ pub(super) fn stage_reconcile_commit<C>(
     actor_user_id: &str,
     actor_device_id: &str,
     valid_devices: &std::collections::HashSet<(String, String)>,
+    identities: &IdentityDirectory,
 ) -> crate::error::Result<Option<(ReconcileOutcome, Option<ReconcileCommitData>)>>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
@@ -737,6 +795,7 @@ where
 
     // Validate KPs.
     let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
+    let mut refused: Vec<(String, String, String)> = Vec::new();
     for (uid, did, kp_raw) in kp_tuples {
         let mut reader: &[u8] = kp_raw;
         let kp_in = match KeyPackageIn::tls_deserialize(&mut reader) {
@@ -770,6 +829,50 @@ where
             eprintln!("[mls] reconcile: credential user '{cred_user}' != '{uid}' for device {did}");
             continue;
         }
+        let cred_device = parse_credential_device_id(kp.leaf_node().credential()).unwrap_or_default();
+        if cred_device != *did {
+            eprintln!(
+                "[mls] reconcile: credential device '{cred_device}' != '{did}' for user {uid} — refusing"
+            );
+            continue;
+        }
+        // Cross-signing, committer side. The KeyPackage is self-consistent and
+        // names the right credential — now prove its leaf key is the device key
+        // this user's account key certified. Anything short of `Certified` is a
+        // refusal: `Uncertified` is an attacker's (or revoked) leaf, and
+        // `Unverifiable` means we cannot tell, which is not a basis for handing
+        // a leaf the group's key schedule.
+        let verdict = identities.leaf_verdict(
+            uid,
+            did,
+            kp.leaf_node().signature_key().as_slice(),
+            signature_scheme(kp.ciphersuite()),
+        );
+        let reason = match verdict {
+            LeafVerdict::Certified => None,
+            LeafVerdict::Unverifiable(why) => Some(why.to_string()),
+            LeafVerdict::Uncertified(why) => Some(why),
+        };
+        if let Some(reason) = reason {
+            // Test-harness only: the flows suite plays a legacy / malicious
+            // committer by switching this refusal off, so the INBOUND check can
+            // be exercised against a real rogue leaf. Never compiled into a
+            // shipping build.
+            #[cfg(feature = "test-harness")]
+            if committer_leaf_check_skipped() {
+                eprintln!(
+                    "[mls] reconcile: TEST HOOK — adding uncertified leaf {uid}:{did} ({reason})"
+                );
+                available_kps.push((uid.clone(), did.clone(), kp));
+                continue;
+            }
+            eprintln!(
+                "[mls] reconcile: REFUSING to add {uid}:{did} — leaf not cross-signed by the \
+                 claimed account: {reason}"
+            );
+            refused.push((uid.clone(), did.clone(), reason));
+            continue;
+        }
         available_kps.push((uid.clone(), did.clone(), kp));
     }
 
@@ -778,7 +881,7 @@ where
     // advancing the local epoch. The merge is deferred until after the
     // remote INSERTs succeed so a remote failure cannot leave the local
     // group ahead of the remote commit log.
-    reconcile_group_mls_core_staged(
+    let (mut outcome, data) = reconcile_group_mls_core_staged(
         provider,
         &signer,
         &mut group,
@@ -787,8 +890,112 @@ where
         actor_user_id,
         actor_device_id,
         Some(valid_devices),
-    )
-    .map(Some)
+        Some(identities),
+    )?;
+    outcome.refused_uncertified = refused;
+    Ok(Some((outcome, data)))
+}
+
+/// The roster's cross-signing material, with the account keys pinned locally.
+///
+/// One DS read (`/v1/read/roster-identities`), then two substitutions the DS
+/// cannot influence: the actor's own account key is replaced by the one in the
+/// device keystore, and any peer whose reported key differs from the local
+/// TOFU pin (`contact_verification`) has its key DROPPED, so every leaf of theirs
+/// verdicts `Unverifiable` and is refused. `batch_check_and_pin_account_keys`
+/// has just run, so an honest DS agrees with the pin; a disagreement here is a
+/// key swapped between two reads of the same reconcile.
+pub(super) async fn load_pinned_identities(
+    state: &Arc<AppState>,
+    roster_user_ids: &[String],
+    actor_user_id: &str,
+) -> crate::error::Result<IdentityDirectory> {
+    let rows = crate::commands::ds_reads::roster_identities(state, roster_user_ids).await?;
+    let mut dir = IdentityDirectory::new(rows);
+
+    // Our own root of trust is local. `load_account_id_key` fails only when this
+    // device holds no account identity, in which case it could not have
+    // certified any device either and the DS value is left to speak for itself.
+    if let Ok(key) = crate::commands::account_identity::load_account_id_key(state, actor_user_id).await {
+        use ml_dsa::Keypair as _;
+        dir.set_account_key(actor_user_id, Some(key.verifying_key().encode().to_vec()));
+    }
+
+    let pins: Vec<(String, Vec<u8>)> = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+        })?;
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT peer_user_id, account_id_pub FROM contact_verification")?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?)))?
+            .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+        rows
+    };
+    for (peer, pinned) in pins {
+        if peer == actor_user_id {
+            continue;
+        }
+        match dir.account_key(&peer) {
+            Some(reported) if reported == pinned => {}
+            Some(_) => {
+                eprintln!(
+                    "[mls] reconcile: account_id_pub for {peer} differs from the local pin — \
+                     treating every leaf of theirs as unverifiable this pass"
+                );
+                dir.set_account_key(&peer, None);
+            }
+            // Not on this roster, or the DS returned no key (already unverifiable).
+            None => {}
+        }
+    }
+    Ok(dir)
+}
+
+/// Test-harness only: when set, `stage_reconcile_commit` adds a KeyPackage whose
+/// leaf FAILS the cross-signing check, playing a malicious or pre-fix committer so
+/// the flows suite can prove the inbound side flags and evicts such a leaf.
+#[cfg(feature = "test-harness")]
+static SKIP_COMMITTER_LEAF_CHECK: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "test-harness")]
+fn committer_leaf_check_skipped() -> bool {
+    SKIP_COMMITTER_LEAF_CHECK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Test-harness only — see [`SKIP_COMMITTER_LEAF_CHECK`].
+#[cfg(feature = "test-harness")]
+pub fn set_skip_committer_leaf_check(skip: bool) {
+    SKIP_COMMITTER_LEAF_CHECK.store(skip, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Test-harness only: the `(user_id, device_id)` leaves of this device's local
+/// tree for `conversation_id`, so a test can assert what a reconcile admitted
+/// or evicted rather than infer it.
+#[cfg(feature = "test-harness")]
+pub async fn local_tree_members(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+) -> Vec<(String, String)> {
+    let guard = state.local_db.lock().await;
+    let Some(db) = guard.as_ref() else {
+        return Vec::new();
+    };
+    match load_stored_group(db.conn(), conversation_id) {
+        Some(group) => group
+            .members()
+            .map(|m| {
+                (
+                    parse_credential_user_id(&m.credential),
+                    parse_credential_device_id(&m.credential).unwrap_or_default(),
+                )
+            })
+            .collect(),
+        None => Vec::new(),
+    }
 }
 
 /// Async entry point: reads desired state from Turso, loads local MLS group,
@@ -884,6 +1091,13 @@ pub async fn reconcile_group_mls_impl(
     //     leaves whose device row was revoked even though the user is still
     //     a roster member (single-device revoke flow).
     let valid_devices = crate::commands::ds_reads::registered_devices(state, &ids).await?;
+
+    // 2c. The roster's cross-signing material, pinned against the local TOFU
+    //     table and our own keystore. Every KeyPackage claimed below must prove
+    //     its leaf key is the certified device key before it can be added, and
+    //     every leaf already in the tree that positively is NOT gets evicted.
+    //     An error, never a partial answer: this read decides who is admitted.
+    let identities = load_pinned_identities(state, &ids, &actor_user_id).await?;
 
     let actor_device_id = state
         .device_id
@@ -994,6 +1208,7 @@ pub async fn reconcile_group_mls_impl(
             &actor_user_id,
             &actor_device_id,
             &valid_devices,
+            &identities,
         )?
     };
     let (mut outcome, commit_data_opt) = match staged {
@@ -1014,22 +1229,30 @@ pub async fn reconcile_group_mls_impl(
     //    the local pending commit via `clear_pending_commit` so the next
     //    reconcile recomputes from scratch.
     if let Some(data) = commit_data_opt {
-        // Collect metadata about added devices so receivers can verify
-        // cross-signing certs before processing the commit.
+        // Name every added user and device beside the commit. This is a
+        // PREFETCH HINT: the DS folds these users' cert rows into the commit
+        // batch so replaying members verify the added leaves without a round
+        // trip. It is not what they verify — they read the leaves off the
+        // commit's own Add proposals — so an incomplete or NULL hint can only
+        // make an honest add look unverifiable, never make a rogue one look
+        // verified. Every distinct user, in add order (it used to be the first
+        // user only, which left a multi-user add's other leaves unverifiable).
         let (added_uid, added_dids): (Option<String>, Option<String>) = if outcome.added.is_empty() {
             (None, None)
         } else {
-            // All adds in one reconcile commit target devices of different
-            // users, so we record the first user and all device IDs. For
-            // single-user adds (the common case) this is exact.
-            let uid = outcome.added[0].0.clone();
+            let mut uids: Vec<&str> = Vec::new();
+            for (u, _) in &outcome.added {
+                if !uids.contains(&u.as_str()) {
+                    uids.push(u.as_str());
+                }
+            }
             let dids = outcome
                 .added
                 .iter()
                 .map(|(_, d)| d.as_str())
                 .collect::<Vec<_>>()
                 .join(",");
-            (Some(uid), Some(dids))
+            (Some(uids.join(",")), Some(dids))
         };
 
         // Try the remote INSERTs on a FRESH connection. The libsql hrana

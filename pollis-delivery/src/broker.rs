@@ -495,18 +495,251 @@ fn upstream_error(upstream: crate::util::Upstream, what: &str, e: &reqwest::Erro
 
 // ── POST /v1/livekit/send-data ────────────────────────────────────────────────
 //
-// Authz: an authenticated device is required (`gate`). Beyond that ANY room is
-// allowed — deliberately. The payloads are **content-free control nudges**
-// (new-message pings, call invites, membership-changed, enrollment approvals);
-// recipients always re-fetch through independently-authenticated, MLS-encrypted
-// paths, so a spoofed nudge costs at most an unnecessary refetch or a dismissable
-// ring. That is exactly the capability every client already had via the embedded
-// secret — requiring a signed device is strictly stronger. Per-room authz
-// (membership / inbox-target) is possible future hardening.
+// Authz: an authenticated device is required (`gate`), and the TARGET room must
+// be one the signer may reach (this endpoint used to admit any room):
+//
+//   - the signer's own inbox (`inbox-<signer>`) — always;
+//   - another user's inbox (`inbox-<peer>`) — only while the two share a
+//     conversation (a DM channel, a group, or a pending group invite from the
+//     signer to the peer) AND neither has blocked the other; `call_invite`
+//     additionally needs a relationship the peer consented to (an accepted DM or
+//     a shared group) so a bare DM request cannot ring a stranger's devices;
+//   - a conversation room — only for a current member (`is_member`).
+//
+// The payload's `type` must be one a CLIENT legitimately originates
+// ([`ClientPayloadKind`]); `enrollment_requested` is emitted by the DS itself
+// from `bootstrap::enrollment_request` and is refused here, so no client can
+// raise the account-takeover approval prompt on another device.
+//
+// Identity is never taken from the body. Every identity-bearing key a client
+// might send (`sender_id`, `caller_id`, `*_username`, …) is STRIPPED, and for
+// the private-inbox kinds that legitimately name their actor the DS stamps the
+// VERIFIED signer back in (`sender_id` + `sender_username`, resolved from
+// `users`), so a recipient's "Incoming call from X" can only ever name the
+// account that actually signed the request. Shared-room targets get nothing
+// stamped — §5 metadata minimization keeps those broadcasts routing-only.
+
+/// The control-payload types a client may fan out through `/v1/livekit/send-data`.
+///
+/// An allowlist rather than a denylist: a `type` the client has no business
+/// publishing — `enrollment_requested` most of all — is unrepresentable here and
+/// is refused before anything is signed. Mirrors the emitters in pollis-core
+/// (`commands/livekit/publish.rs`, `livekit_stub.rs`, `livekit_signalling.rs`,
+/// and the inline `json!` pings in `dm.rs` / `groups/*` / `messages/send.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientPayloadKind {
+    NewMessage,
+    EditedMessage,
+    DeletedMessage,
+    MembershipChanged,
+    RosterChanged,
+    JoinRequestsChanged,
+    MemberRoleChanged,
+    DmCreated,
+    AllMention,
+    UserMention,
+    DeviceRevoked,
+    CallInvite,
+    CallCanceled,
+}
+
+impl ClientPayloadKind {
+    /// Parse the payload's `type` discriminant. `None` for anything a client may
+    /// not publish — unknown strings and the DS-originated `enrollment_requested`
+    /// alike.
+    pub fn from_wire(kind: &str) -> Option<Self> {
+        Some(match kind {
+            "new_message" => Self::NewMessage,
+            "edited_message" => Self::EditedMessage,
+            "deleted_message" => Self::DeletedMessage,
+            "membership_changed" => Self::MembershipChanged,
+            "roster_changed" => Self::RosterChanged,
+            "join_requests_changed" => Self::JoinRequestsChanged,
+            "member_role_changed" => Self::MemberRoleChanged,
+            "dm_created" => Self::DmCreated,
+            "all_mention" => Self::AllMention,
+            "user_mention" => Self::UserMention,
+            "device_revoked" => Self::DeviceRevoked,
+            "call_invite" => Self::CallInvite,
+            "call_canceled" => Self::CallCanceled,
+            _ => return None,
+        })
+    }
+
+    /// The private-inbox pings whose recipient renders the actor's name (a DM
+    /// request, a group invite, an @mention, an incoming call). Only these get
+    /// the verified sender stamped in — everything else stays identity-free.
+    fn names_its_sender(self) -> bool {
+        matches!(
+            self,
+            Self::DmCreated
+                | Self::MembershipChanged
+                | Self::AllMention
+                | Self::UserMention
+                | Self::CallInvite
+        )
+    }
+
+    /// Whether reaching a PEER's inbox with this kind needs a relationship the
+    /// peer has consented to (an accepted DM or a shared group) rather than any
+    /// shared conversation. Ringing someone's devices is louder than a badge.
+    fn needs_established_relationship(self) -> bool {
+        matches!(self, Self::CallInvite)
+    }
+}
+
+/// Where a send-data request is addressed, classified from the logical room name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendTarget {
+    /// The signer's own `inbox-<signer>` room (every device of the same user).
+    OwnInbox,
+    /// Another user's `inbox-<peer>` room.
+    PeerInbox(String),
+    /// A conversation room (group / DM channel / channel id).
+    Conversation(String),
+}
+
+impl SendTarget {
+    pub fn classify(room: &str, user_id: &str) -> Self {
+        match room.strip_prefix("inbox-") {
+            Some(peer) if peer == user_id => Self::OwnInbox,
+            Some(peer) => Self::PeerInbox(peer.to_string()),
+            None => Self::Conversation(room.to_string()),
+        }
+    }
+
+    fn is_inbox(&self) -> bool {
+        matches!(self, Self::OwnInbox | Self::PeerInbox(_))
+    }
+}
+
+/// Every payload key that could carry an identity a recipient might render or
+/// act on. Stripped from EVERY client payload before fan-out, whatever the type,
+/// so a client cannot smuggle an actor under a legacy or unexpected key.
+const IDENTITY_KEYS: &[&str] = &[
+    "sender_id",
+    "sender_username",
+    "caller_id",
+    "caller_username",
+    "inviter_username",
+    "user_id",
+    "username",
+    "display_name",
+    "deleted_by",
+    "group_name",
+];
+
+/// The verified actor, as the DS will stamp it.
+pub struct StampedSender<'a> {
+    pub user_id: &'a str,
+    /// From `users.username`; `None` if the row is missing (degrades the alert
+    /// to a generic name, never to a client-chosen one).
+    pub username: Option<&'a str>,
+    /// `groups.name` for the `group_id` a `membership_changed` invite names.
+    pub group_name: Option<&'a str>,
+}
+
+/// Rewrite a client payload so nothing in it can misattribute the actor. Pure.
+///
+/// Strips [`IDENTITY_KEYS`]; then, only for a private-inbox target and a kind
+/// that names its sender, stamps the verified signer as `sender_id` /
+/// `sender_username` — plus the per-kind legacy keys shipped clients already
+/// read (`caller_id` / `caller_username` on `call_invite`, `inviter_username` /
+/// `group_name` on `membership_changed`), all with the SAME verified values, so
+/// an older renderer sees the true caller rather than nothing at all.
+pub fn sanitize_client_payload(
+    payload: &serde_json::Value,
+    kind: ClientPayloadKind,
+    target: &SendTarget,
+    sender: &StampedSender<'_>,
+) -> serde_json::Value {
+    let mut obj = payload.as_object().cloned().unwrap_or_default();
+    for key in IDENTITY_KEYS {
+        obj.remove(*key);
+    }
+    if target.is_inbox() && kind.names_its_sender() {
+        obj.insert("sender_id".into(), serde_json::Value::from(sender.user_id));
+        obj.insert("sender_username".into(), serde_json::Value::from(sender.username));
+        match kind {
+            ClientPayloadKind::CallInvite => {
+                obj.insert("caller_id".into(), serde_json::Value::from(sender.user_id));
+                obj.insert(
+                    "caller_username".into(),
+                    serde_json::Value::from(sender.username.unwrap_or(sender.user_id)),
+                );
+            }
+            ClientPayloadKind::MembershipChanged => {
+                obj.insert("inviter_username".into(), serde_json::Value::from(sender.username));
+                obj.insert("group_name".into(), serde_json::Value::from(sender.group_name));
+            }
+            _ => {}
+        }
+    }
+    serde_json::Value::Object(obj)
+}
+
+/// Whether `user_id` may push a control payload into `peer`'s inbox: the two
+/// must share a conversation and neither may have blocked the other. With
+/// `established`, only a DM the peer has accepted or a shared group counts — a
+/// pending DM request or a pending invite is not enough.
+async fn may_reach_inbox(
+    conn: &Connection,
+    user_id: &str,
+    peer: &str,
+    established: bool,
+) -> anyhow::Result<bool> {
+    if crate::profile::is_blocked_either_way(conn, user_id, peer).await? {
+        return Ok(false);
+    }
+    let sql = if established {
+        "SELECT 1 WHERE \
+            EXISTS (SELECT 1 FROM dm_channel_member me \
+                    JOIN dm_channel_member them ON them.dm_channel_id = me.dm_channel_id \
+                    WHERE me.user_id = ?1 AND them.user_id = ?2 \
+                      AND them.accepted_at IS NOT NULL) \
+         OR EXISTS (SELECT 1 FROM group_member me \
+                    JOIN group_member them ON them.group_id = me.group_id \
+                    WHERE me.user_id = ?1 AND them.user_id = ?2) \
+         LIMIT 1"
+    } else {
+        "SELECT 1 WHERE \
+            EXISTS (SELECT 1 FROM dm_channel_member me \
+                    JOIN dm_channel_member them ON them.dm_channel_id = me.dm_channel_id \
+                    WHERE me.user_id = ?1 AND them.user_id = ?2) \
+         OR EXISTS (SELECT 1 FROM group_member me \
+                    JOIN group_member them ON them.group_id = me.group_id \
+                    WHERE me.user_id = ?1 AND them.user_id = ?2) \
+         OR EXISTS (SELECT 1 FROM group_invite \
+                    WHERE inviter_id = ?1 AND invitee_id = ?2 AND status = 'pending') \
+         LIMIT 1"
+    };
+    let mut rows = conn
+        .query(sql, libsql::params![user_id.to_string(), peer.to_string()])
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
+/// `groups.name` for `group_id`, if the row exists. Bound, never interpolated.
+async fn lookup_group_name(conn: &Connection, group_id: &str) -> anyhow::Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT name FROM groups WHERE id = ?1",
+            libsql::params![group_id.to_string()],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => row.get::<String>(0).ok(),
+        None => None,
+    })
+}
 
 /// POST /v1/livekit/send-data — fan out a control payload to a LiveKit room via
 /// server-side `RoomService/SendData`. A 404 (room currently has no
 /// participants) is success, mirroring the client's fire-and-forget semantics.
+///
+/// Refuses (403) a target the signer may not reach and a payload `type` a client
+/// may not originate; strips and re-stamps identity before anything is signed.
+/// See the module comment above for the full rule.
 pub async fn livekit_send_data(
     State(state): State<AppState>,
     req: RawRequest,
@@ -519,18 +752,67 @@ pub async fn livekit_send_data(
     if parsed.room.trim().is_empty() {
         return Ok(bad_request("room required"));
     }
-    // Validate the no-auth body shape (identity is unused — SendData is a server
-    // action, not a participant action).
-    if let Err(resp) = resolve_user(&authed, parsed.user_id.as_deref()) {
-        return Ok(resp);
+    let kind = match parsed
+        .payload
+        .get("type")
+        .and_then(|v| v.as_str())
+        .and_then(ClientPayloadKind::from_wire)
+    {
+        Some(k) => k,
+        // Includes `enrollment_requested`: DS-originated, never client-publishable.
+        None => return Ok(AuthRejection::Forbidden.into_response()),
+    };
+    let user_id = match resolve_user(&authed, parsed.user_id.as_deref()) {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let target = SendTarget::classify(&parsed.room, &user_id);
+
+    let conn = state.db.conn().await?;
+    // Room authz — only on the signed path (mirrors `authorize_room`, which the
+    // other LiveKit handlers skip when auth is disabled). Checked BEFORE the
+    // secrets gate so a refused target is a 403 whether or not LiveKit is wired.
+    if authed.is_some() {
+        let allowed = match &target {
+            SendTarget::OwnInbox => true,
+            SendTarget::PeerInbox(peer) => {
+                may_reach_inbox(&conn, &user_id, peer, kind.needs_established_relationship())
+                    .await?
+            }
+            SendTarget::Conversation(room) => is_member(&conn, room, &user_id).await?,
+        };
+        if !allowed {
+            return Ok(AuthRejection::Forbidden.into_response());
+        }
     }
+
+    // Resolve the verified actor's display data server-side; the client's copy
+    // of these strings is discarded along with every other identity key.
+    let username = lookup_usernames(&conn, std::slice::from_ref(&user_id))
+        .await?
+        .remove(&user_id);
+    let group_name = match (kind, parsed.payload.get("group_id").and_then(|v| v.as_str())) {
+        (ClientPayloadKind::MembershipChanged, Some(gid)) => lookup_group_name(&conn, gid).await?,
+        _ => None,
+    };
+    drop(conn);
+    let payload = sanitize_client_payload(
+        &parsed.payload,
+        kind,
+        &target,
+        &StampedSender {
+            user_id: &user_id,
+            username: username.as_deref(),
+            group_name: group_name.as_deref(),
+        },
+    );
 
     // Preserve the explicit "not configured" response for the client endpoint;
     // the shared sender collapses a missing broker into a plain error string.
     if state.broker.livekit_ready().is_none() {
         return Ok(not_configured("livekit"));
     }
-    match room_send_data(&state, &parsed.room, &parsed.payload).await {
+    match room_send_data(&state, &parsed.room, &payload).await {
         Ok(()) => Ok(ok_response::<LivekitSendDataBody>(LivekitSendDataResponse { ok: true })),
         Err(e) => Ok(bad_gateway(e)),
     }

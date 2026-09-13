@@ -144,14 +144,58 @@ pub(crate) async fn gate_or_session(
     state: &AppState,
     req: &RawRequest,
 ) -> Result<Result<Authed, Response>, AppError> {
+    Ok(gate_or_session_kind(state, req).await?.map(|(authed, _)| authed))
+}
+
+/// WHICH credential [`gate_or_session`] accepted — for the one endpoint whose
+/// semantics depend on it. `/v1/account/rotate-identity` under a device
+/// signature is a plain key rotation; under a bare OTP session it is the
+/// pre-enrollment soft reset, and the DS then performs the membership/device
+/// wipe in the same transaction (see `account::apply_rotate_identity`). The
+/// two must be distinguishable at the gate, not inferred from the body.
+///
+/// The `device_id` in both authenticated variants is server-verified: for a
+/// signature it is the `X-Pollis-Device` the pubkey lookup was keyed on, for a
+/// session it is the device the OTP session was minted for.
+pub enum GateCredential {
+    /// `require_auth = false` — no credential exists on this deployment.
+    None,
+    /// A verified device signature (`gate`).
+    Signature { device_id: String },
+    /// A verified-OTP session (`X-Pollis-Session`).
+    Session { device_id: String },
+}
+
+/// [`gate_or_session`], also reporting which credential authenticated the
+/// request.
+pub(crate) async fn gate_or_session_kind(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(Authed, GateCredential), Response>, AppError> {
     if !state.require_auth {
-        return Ok(Ok(None));
+        return Ok(Ok((None, GateCredential::None)));
     }
     if req.headers.contains_key(auth::H_SIGNATURE) {
-        return gate(state, req).await;
+        return Ok(match gate(state, req).await? {
+            Ok(authed) => {
+                // Verified by `gate`: the signer's pubkey was looked up under
+                // exactly this `(device_id, user_id)`, so the header is bound.
+                let device_id = req
+                    .headers
+                    .get(auth::H_DEVICE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+                Ok((authed, GateCredential::Signature { device_id }))
+            }
+            Err(resp) => Err(resp),
+        });
     }
     match crate::session::verify_session(&req.headers, &state.sessions, crate::util::now_unix()) {
-        Ok(claims) => Ok(Ok(Some(claims.user_id))),
+        Ok(claims) => Ok(Ok((
+            Some(claims.user_id),
+            GateCredential::Session { device_id: claims.device_id },
+        ))),
         Err(rej) => Ok(Err(rej.into_response())),
     }
 }
@@ -195,7 +239,77 @@ pub(crate) async fn gate_or_session_and_parse<B>(
 where
     B: serde::de::DeserializeOwned,
 {
-    let authed = match gate_or_session(state, req).await? {
+    Ok(gate_or_session_kind_and_parse::<B>(state, req)
+        .await?
+        .map(|(authed, _, parsed)| (authed, parsed)))
+}
+
+/// [`gate_or_session_and_parse`] over [`gate_or_session_kind`] — same ordering
+/// guarantee (verify the raw bytes first, deserialize second), also reporting
+/// which credential authenticated the request.
+pub(crate) async fn gate_or_session_kind_and_parse<B>(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(Authed, GateCredential, B), Response>, AppError>
+where
+    B: serde::de::DeserializeOwned,
+{
+    let (authed, credential) = match gate_or_session_kind(state, req).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(Err(resp)),
+    };
+    Ok(match serde_json::from_slice(&req.body) {
+        Ok(parsed) => Ok((authed, credential, parsed)),
+        Err(_) => Err(bad_request("invalid body")),
+    })
+}
+
+/// The outcome of the identity gate: the authenticated `(user_id, device_id)`
+/// pair, or `None` on the no-auth path. Same contract as [`Authed`], with the
+/// DEVICE half kept.
+pub(crate) type AuthedIdentity = Option<(String, String)>;
+
+/// [`gate`] for the writes that key a row on the specific DEVICE, not just the
+/// user — the per-device delivery cursor (`/v1/watermarks/advance`). Same
+/// verification, same rejections; the only difference is that the verified
+/// `device_id` is returned instead of dropped, so the handler can bind the
+/// body's `device_id` to the signer the way `report_commit_since` does, rather
+/// than trusting an unauthenticated field.
+pub(crate) async fn gate_identity(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<AuthedIdentity, Response>, AppError> {
+    if !state.require_auth {
+        return Ok(Ok(None));
+    }
+    let conn = state.db.conn().await?;
+    match auth::verify_request_identity_cached(
+        &state.device_keys,
+        &conn,
+        &req.headers,
+        req.method.as_str(),
+        req.uri.path(),
+        &req.body,
+        crate::util::now_unix() as i64,
+    )
+    .await
+    {
+        Ok(identity) => Ok(Ok(Some(identity))),
+        Err(rej) => Ok(Err(rej.into_response())),
+    }
+}
+
+/// [`gate_and_parse`] over [`gate_identity`] — same ordering guarantee
+/// (signature over the raw bytes first, deserialize second), for the endpoints
+/// that need the device half of the identity.
+pub(crate) async fn gate_identity_and_parse<B>(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(AuthedIdentity, B), Response>, AppError>
+where
+    B: serde::de::DeserializeOwned,
+{
+    let authed = match gate_identity(state, req).await? {
         Ok(a) => a,
         Err(resp) => return Ok(Err(resp)),
     };
@@ -306,6 +420,12 @@ pub enum WriteOutcome {
         head_generation: i64,
         head_epoch: i64,
     },
+    /// The body is well-formed JSON but carries a value the DS refuses to store
+    /// (→ 400). Distinct from `Forbidden`: the caller is allowed to make the
+    /// write, the VALUE is not admissible — a `sent_at` or `last_fetched_at`
+    /// that is not a canonical UTC RFC 3339 stamp, or sits past the DS clock's
+    /// skew allowance (see `messages::check_cursor_stamp`).
+    Invalid(&'static str),
 }
 
 /// The 409 body for [`WriteOutcome::EpochBehind`].
@@ -322,7 +442,7 @@ pub(crate) fn epoch_behind_response(head_generation: i64, head_epoch: i64) -> Re
 }
 
 /// Map a [`WriteOutcome`] to the HTTP response (200 ok / 403 forbidden / 409
-/// epoch-behind).
+/// epoch-behind / 400 invalid).
 ///
 /// Generic over the endpoint's request type since #922, which is what ties this
 /// shared success body to a specific route: `B::Response` must be
@@ -342,6 +462,7 @@ where
             head_generation,
             head_epoch,
         } => epoch_behind_response(head_generation, head_epoch),
+        WriteOutcome::Invalid(msg) => bad_request(msg),
     })
 }
 
