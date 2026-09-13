@@ -139,11 +139,17 @@ else `503`. The secret is never logged.
 
 Fan out a **content-free** control payload (new-message ping, call invite,
 membership-changed, enrollment approval) to a room the caller isn't joined to,
-via server-side `RoomService/SendData`. Requires an authenticated device; any
-room is allowed (payloads are content-free routing nudges — recipients re-fetch
-through independently-authenticated MLS paths, so the worst a spoof does is force
-a refetch / dismissable ring; per-room authz is possible future hardening). Body
-`{ room, payload }`. A room with no participants (`404`) is success.
+via server-side `RoomService/SendData`. Requires an authenticated device, and
+the target is authorized against the signer: the signer's own inbox is always
+allowed; another user's inbox needs a shared DM / group / pending invite and no
+block either way (`call_invite` needs an accepted DM or a shared group); any
+other room needs current membership. `payload.type` must be one a client
+originates — `enrollment_requested` is DS-only and refused (`403`). Every
+identity key in the payload is stripped and, for the inbox kinds that name their
+actor, the **verified signer** is stamped in as `sender_id` / `sender_username`
+(plus the legacy per-kind keys), so a recipient can never be shown a caller the
+sending client chose. Body `{ room, payload }`. A room with no participants
+(`404`) is success.
 
 ### `POST /v1/livekit/participants`
 

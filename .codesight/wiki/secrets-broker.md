@@ -24,10 +24,49 @@ answers, like OTP with no Resend key).
 | Endpoint | Does | Env (all required, else `503`) |
 |----------|------|--------------------------------|
 | `POST /v1/livekit/token` | HS256 participant JWT; identity = an opaque **per-room participant pseudonym** derived from the **verified signer** + its device + `kind` (#836); no `name` claim; room authz (own `inbox-*` and `call-*` always ok, else membership) on the **logical** room, then the grant carries the **room pseudonym** (#828) | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` |
-| `POST /v1/livekit/send-data` | Server-side `RoomService/SendData` — signs an admin JWT + Twirp POSTs a content-free control payload to a room | same LiveKit env |
+| `POST /v1/livekit/send-data` | Server-side `RoomService/SendData` — signs an admin JWT + Twirp POSTs a content-free control payload to a room. **Target authz + sender stamping** (below): own inbox always; a peer's inbox only with a shared DM / group / pending invite and no block; a conversation room only as a member; `type` must be client-publishable (`enrollment_requested` is DS-only); identity keys stripped and the verified signer stamped in | same LiveKit env |
 | `POST /v1/livekit/participants` | Server-side `RoomService/ListParticipants` (voice roster); each identity **resolved back to its user + username** server-side (#836), internal and `view` participants filtered; membership-gated | same LiveKit env |
 | `POST /v1/livekit/identities` | Resolve opaque participant pseudonyms → `{user_id, name, kind}` for a room the caller may join (#836). The per-room key never leaves the DS | same LiveKit env |
 | `POST /v1/r2/presign` | SigV4 query-string presigned URL (GET/PUT/DELETE), path-style, `UNSIGNED-PAYLOAD`, `host`-only signed header | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_REGION` defaults `auto`) |
+
+### `send-data` targets are authorized and the sender is stamped
+
+`/v1/livekit/send-data` used to admit any room from any signed device and forward
+the client's JSON verbatim under the DS's room-admin token, while the client
+dispatcher trusted identity fields in that JSON (`caller_id`, `caller_username`,
+`inviter_username`, …). Any account could ring any user's devices "from" anyone,
+raise the enrollment-approval takeover on a stranger's screen, or storm an inbox
+with refetch nudges, blocks never consulted. Three rules now hold, all in
+`livekit_send_data` (`broker.rs`), checked before the secrets gate:
+
+- **Target** (`SendTarget`): `inbox-<signer>` is always allowed; `inbox-<peer>`
+  needs a shared DM channel, a shared group, or a pending `group_invite` from the
+  signer to the peer, and no `user_block` in either direction (`may_reach_inbox`);
+  `call_invite` needs a DM the peer has **accepted** or a shared group, so a bare
+  DM request cannot ring; any other room needs `is_member`. `call-*` rooms are not
+  send-data targets (calls are signalled through inboxes).
+- **Type** (`ClientPayloadKind`): an allowlist of what clients originate
+  (`new_message`, `edited_message`, `deleted_message`, `membership_changed`,
+  `roster_changed`, `join_requests_changed`, `member_role_changed`, `dm_created`,
+  `all_mention`, `user_mention`, `device_revoked`, `call_invite`, `call_canceled`).
+  `enrollment_requested` is emitted only by `bootstrap::enrollment_request` via
+  `room_send_data` directly and is refused from any client, as is any unknown type.
+- **Identity** (`sanitize_client_payload`, pure): every identity key is stripped
+  from every client payload. For an inbox target and a kind that names its actor
+  (`dm_created`, `membership_changed`, `all_mention`, `user_mention`,
+  `call_invite`) the DS stamps the verified signer as `sender_id` +
+  `sender_username` (resolved from `users`), and re-stamps the legacy per-kind keys
+  (`caller_id`/`caller_username`, `inviter_username`/`group_name` — the latter from
+  `groups`) with the same verified values so shipped renderers keep working.
+  Shared-room targets get nothing stamped (§5 stays routing-only).
+
+Client side, `dispatch_data` (`pollis-core/src/commands/livekit/mod.rs`) attributes
+these events from the publishing participant when there is one, or from the DS
+stamp when there is none (the DS's own `SendData`), and never from the body's
+own claims; `enrollment_requested` is honoured only with no participant.
+Tests: `pollis-delivery/tests/livekit_send_data.rs` (refusals never reach a
+recording fake LiveKit; allowed sends carry the stamped signer) and the
+`dispatch_data` unit tests in `livekit/mod.rs`.
 
 ### Room names are pseudonymous (#828)
 
