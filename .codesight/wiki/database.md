@@ -674,6 +674,28 @@ that class of bug.
 - `device_id` TEXT _(migration 11)_
 - `ciphersuite` INTEGER NOT NULL DEFAULT 1 _(post-baseline 000010; MLS code point. Still written and still queried after #669 — every package now carries `0x0052` (`CIPHERSUITE_PQ`), which is also what the DS assumes when a publish/claim request omits the field (it defaulted to the classic `1` before #669). A column and not derived-on-read because `key_package` is an opaque TLS blob the DS must not parse. Claims narrow on it: under #454 that kept the classic and hybrid pools disjoint, and it still keeps a package published under a retired code point from being served for a current group — see `pollis-delivery/src/devices.rs`. The SQL default of 1 is left as-is because migrations must stay additive; no live writer relies on it.)_
 
+
+### mls_key_package_claim _(post-baseline 000022)_
+- `id` TEXT PK _(ULID)_
+- `claimer_id` TEXT NOT NULL — the authenticated account that claimed
+- `target_user_id` TEXT NOT NULL — whose pool was drawn from
+- `target_device_id` TEXT — the device, when the claim named one
+- `claimed_at` TEXT NOT NULL DEFAULT now
+- INDEX `idx_kp_claim_pair` on `(claimer_id, target_user_id, claimed_at DESC)`; INDEX `idx_kp_claim_target` on `(target_user_id, target_device_id, claimed_at DESC)`
+
+The durable budget behind `POST /v1/key-packages/claim`, and the audit trail for
+"who drained this pool". A claim is a one-way flip of `mls_key_package.claimed`,
+so an unlimited claim loop empties a target's pool for good and a device with no
+unclaimed package cannot be added to any group — a stranger holding an arbitrary
+user out of every conversation they are invited to. Counting from the table
+rather than from process memory is the same reasoning as
+`group_invite_link_redemption` (#847): the DS restarts on every deploy, and a
+bound a rolling restart clears is not a bound. Only SUCCESSFUL claims are
+recorded — charging for a claim against an already-empty pool would let a
+target's own exhaustion lock out the honest adders retrying behind it. Nothing is
+recorded on the DS's no-auth path, which has no signed identity to attribute a
+claim to.
+
 ### mls_commit_log _(migration 3 + 14)_
 - `seq` INTEGER PK AUTOINCREMENT
 - `conversation_id` TEXT NOT NULL

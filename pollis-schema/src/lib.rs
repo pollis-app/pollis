@@ -222,6 +222,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "username_shape",
         include_str!("../migrations/000021_username_shape.sql"),
     ),
+    (
+        22,
+        "key_package_claim_audit",
+        include_str!("../migrations/000022_key_package_claim_audit.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element

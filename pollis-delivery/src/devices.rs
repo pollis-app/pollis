@@ -224,52 +224,71 @@ pub async fn apply_replenish_key_packages(
 
 // ── POST /v1/key-packages/claim ──────────────────────────────────────────────
 
-/// The result of a key-package claim: either a package was claimed (carries the
-/// hash-ref + TLS bytes the caller builds the MLS Add from), or the target has no
-/// unclaimed package available. The latter is a normal control-flow outcome (the
-/// add path skips that device), NOT an error — it maps to 404, distinct from a
-/// 500 DB failure.
+/// How far back the durable claim budget counts.
+const CLAIM_WINDOW_SECS: i64 = 3600;
+
+/// Claims one account may make against ONE other account's pool per
+/// [`CLAIM_WINDOW_SECS`].
+///
+/// Sized for the real add path: adding a user to a group claims one package per
+/// device they have, a handful at most, and a retried add repeats that. Sixty an
+/// hour covers a very device-heavy user being added to a dozen conversations by
+/// the same person; it is nowhere near a drain.
+const CLAIM_MAX_PER_PAIR: i64 = 60;
+
+/// Claims ALL accounts together may make against one target device's pool per
+/// [`CLAIM_WINDOW_SECS`]. The pair budget catches one attacker; this catches a
+/// handful of accounts splitting the work between them.
+///
+/// Above the pair budget by a wide margin, because this one is shared by every
+/// legitimate adder in the world: a popular account joining many groups at once
+/// genuinely does have many different people claiming its packages.
+const CLAIM_MAX_PER_TARGET: i64 = 300;
+
+/// The result of a key-package claim.
+///
+/// [`ClaimOutcome::NoKeyPackage`] is a normal control-flow outcome (the add path
+/// skips that device), NOT an error — it maps to 404, distinct from a 500 DB
+/// failure. The two refusals below are about the CALLER, not the pool, and are
+/// deliberately distinguishable from an empty pool: an honest adder needs to know
+/// whether to move on or to back off.
+#[derive(Debug)]
 pub enum ClaimOutcome {
     Claimed { ref_hash: String, key_package: Vec<u8> },
     NoKeyPackage,
+    /// The claimer may not draw from this target's pool at all (→ 403).
+    Forbidden,
+    /// The claimer is over a durable claim budget (→ 429).
+    RateLimited,
 }
 
 /// POST /v1/key-packages/claim — atomically claim one of a TARGET user's
 /// (optionally a specific device's) unclaimed key packages and return its bytes,
 /// so the caller can build the MLS Add commit that brings that device into the
 /// group.
-///
-/// Authz: ANY authenticated user may claim ANY target's package — claiming is the
-/// protocol mechanism for adding someone, so it is inherently cross-account and
-/// binds nothing from the body to the signer (the device signature on the request
-/// IS the claimer's identity; `gate` having returned is the whole authorization).
-/// On the no-auth test path the claim proceeds unauthenticated, mirroring the
-/// other write handlers.
-///
-/// (KP exhaustion — a hostile peer draining a target's pool by claiming
-/// repeatedly — is a known concern tracked for #419, but is deliberately NOT
-/// rate-limited here.)
 pub async fn claim_key_package(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    // The gate authenticates the claimer; its returned user_id is intentionally
-    // unused — any authenticated caller may claim.
-    if let Err(resp) = gate(&state, &req).await? {
-        return Ok(resp);
-    }
+    let claimer = match gate(&state, &req).await? {
+        Ok(c) => c,
+        Err(resp) => return Ok(resp),
+    };
     let parsed: ClaimKeyPackageBody = match serde_json::from_slice(&req.body) {
         Ok(b) => b,
         Err(_) => return Ok(bad_request("invalid body")),
     };
     let conn = state.db.conn().await?;
-    Ok(claim_outcome_response::<ClaimKeyPackageBody>(apply_claim_key_package(&conn, &parsed).await?))
+    Ok(claim_outcome_response::<ClaimKeyPackageBody>(
+        apply_claim_key_package(&conn, claimer.as_deref(), &parsed).await?,
+    ))
 }
 
 /// Map a [`ClaimOutcome`] to its HTTP response: 200 + `{ ref_hash, key_package }`
 /// (base64) on a claim, 404 + a typed error when the target has no unclaimed
-/// package. Shared by the production handler and the integration harness so both
-/// surface the same no-KP signal the client's control flow keys on.
+/// package, 403 when the claimer may not draw from that pool, 429 when it is over
+/// budget. Shared by the production handler and the integration harness so both
+/// surface the same signals the client's control flow keys on.
 pub fn claim_outcome_response<B>(outcome: ClaimOutcome) -> Response
 where
     B: pollis_api::DsRequest<Response = ClaimKeyPackageResponse>,
@@ -290,7 +309,69 @@ where
             axum::Json(serde_json::json!({ "error": "no_key_package" })),
         )
             .into_response(),
+        ClaimOutcome::Forbidden => crate::error::AuthRejection::Forbidden.into_response(),
+        ClaimOutcome::RateLimited => (
+            StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(serde_json::json!({ "error": "too_many_claims" })),
+        )
+            .into_response(),
     }
+}
+
+/// May `claimer` draw from `target`'s key-package pool at all?
+///
+/// Claiming is cross-account by construction — it is the mechanism for adding
+/// someone — so the gate cannot be "the target is you". What it CAN be is the
+/// product's own reachability rule, which is the same one `/v1/dm/create`
+/// applies: anybody may start a conversation with anybody they have not blocked
+/// and who has not blocked them. A shared conversation and a pending invite are
+/// both strictly inside that set, so the rule reduces to the block check — the
+/// one relationship state in which the two accounts have no business exchanging
+/// anything at all, and exactly the state in which draining a pool is pure
+/// harassment.
+///
+/// A claimer acting on its OWN account (adding its own second device) is always
+/// allowed; a user cannot block themselves, but saying so here means the
+/// self-add path does not depend on that.
+async fn may_claim_from(
+    conn: &Connection,
+    claimer: &str,
+    target: &str,
+) -> anyhow::Result<bool> {
+    if claimer == target {
+        return Ok(true);
+    }
+    Ok(!crate::profile::is_blocked_either_way(conn, claimer, target).await?)
+}
+
+/// Recent claims by `claimer` against `target`, and against that target device
+/// from everyone.
+async fn recent_claims(
+    conn: &Connection,
+    claimer: &str,
+    body: &ClaimKeyPackageBody,
+) -> anyhow::Result<(i64, i64)> {
+    let cutoff = format!("-{CLAIM_WINDOW_SECS} seconds");
+    let mut rows = conn
+        .query(
+            "SELECT \
+                 COUNT(*) FILTER (WHERE claimer_id = ?1), \
+                 COUNT(*) FILTER (WHERE ?3 IS NULL OR target_device_id = ?3) \
+             FROM mls_key_package_claim \
+             WHERE target_user_id = ?2 \
+               AND datetime(claimed_at) > datetime('now', ?4)",
+            libsql::params![
+                claimer.to_string(),
+                body.target_user_id.clone(),
+                body.target_device_id.clone(),
+                cutoff,
+            ],
+        )
+        .await?;
+    Ok(match rows.next().await? {
+        Some(row) => (row.get(0)?, row.get(1)?),
+        None => (0, 0),
+    })
 }
 
 /// Atomically claim one unclaimed key package for the target and return its
@@ -310,10 +391,42 @@ where
 /// same one-package pool can never both win — the first sets `claimed = 1`, the
 /// second's subquery no longer sees an unclaimed row and `RETURNING` yields zero
 /// rows (→ `NoKeyPackage`). Exactly one winner per row.
+///
+/// ## What `claimer` buys (#419's "KP exhaustion" note, now closed)
+///
+/// A claim is a ONE-WAY flip: the package is spent whether or not the claimer
+/// ever builds the Add. With no bound, one authenticated account could empty a
+/// target's pool in a loop, and a device with an empty pool cannot be added to
+/// any group until it replenishes — a stranger holding an arbitrary user out of
+/// every conversation they are invited to. So a claim now costs the claimer:
+///
+///   * it must be allowed to reach the target at all ([`may_claim_from`]);
+///   * it is counted against a DURABLE per-(claimer, target) budget and a wider
+///     per-target-device one, both read from `mls_key_package_claim` rather than
+///     memory, so a rolling deploy does not hand out a fresh allowance and every
+///     DS instance sees the same count (the #847 pattern);
+///   * and a SUCCESSFUL claim is recorded. Only successes count: a claim against
+///     an empty pool took nothing, and charging for it would let a target's own
+///     exhaustion lock out the honest adders retrying behind it.
+///
+/// `claimer` is `None` only on the DS's no-auth (dev/test) path, which has no
+/// signed identity to attribute a claim to and already trusts whoever asks; the
+/// budget is skipped there exactly as every other authz check is.
 pub async fn apply_claim_key_package(
     conn: &Connection,
+    claimer: Option<&str>,
     body: &ClaimKeyPackageBody,
 ) -> anyhow::Result<ClaimOutcome> {
+    if let Some(claimer) = claimer {
+        if !may_claim_from(conn, claimer, &body.target_user_id).await? {
+            return Ok(ClaimOutcome::Forbidden);
+        }
+        let (by_pair, by_target) = recent_claims(conn, claimer, body).await?;
+        if by_pair >= CLAIM_MAX_PER_PAIR || by_target >= CLAIM_MAX_PER_TARGET {
+            return Ok(ClaimOutcome::RateLimited);
+        }
+    }
+
     let suite = body.ciphersuite.unwrap_or(CIPHERSUITE_PQ);
     let mut rows = match &body.target_device_id {
         Some(device_id) => {
@@ -346,13 +459,35 @@ pub async fn apply_claim_key_package(
             .await?
         }
     };
-    match rows.next().await? {
-        Some(row) => Ok(ClaimOutcome::Claimed {
-            ref_hash: row.get::<String>(0)?,
-            key_package: row.get::<Vec<u8>>(1)?,
-        }),
-        None => Ok(ClaimOutcome::NoKeyPackage),
+    let claimed = match rows.next().await? {
+        Some(row) => Some((row.get::<String>(0)?, row.get::<Vec<u8>>(1)?)),
+        None => None,
+    };
+    drop(rows);
+
+    let Some((ref_hash, key_package)) = claimed else {
+        return Ok(ClaimOutcome::NoKeyPackage);
+    };
+
+    if let Some(claimer) = claimer {
+        conn.execute(
+            "INSERT INTO mls_key_package_claim \
+                 (id, claimer_id, target_user_id, target_device_id) \
+             VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![
+                ulid::Ulid::new().to_string(),
+                claimer.to_string(),
+                body.target_user_id.clone(),
+                body.target_device_id.clone(),
+            ],
+        )
+        .await?;
     }
+
+    Ok(ClaimOutcome::Claimed {
+        ref_hash,
+        key_package,
+    })
 }
 
 // ── POST /v1/devices/resign ──────────────────────────────────────────────────

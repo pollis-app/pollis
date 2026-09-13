@@ -136,17 +136,23 @@ async fn claim_returns_the_right_bytes_then_exhausts() {
     let conn = db.conn().await.unwrap();
 
     // Device-scoped claim returns the published bytes.
-    match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
+    match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, key_package } => {
             assert_eq!(ref_hash, "ref-a");
             assert_eq!(key_package, b"kp-bytes-a");
         }
         ClaimOutcome::NoKeyPackage => panic!("expected a claimed package"),
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
     }
 
     // The pool is now empty for that device → the next claim sees no package.
-    match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
+    match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::NoKeyPackage => {}
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
         ClaimOutcome::Claimed { .. } => panic!("a claimed package must not be re-claimable"),
     }
 }
@@ -161,12 +167,15 @@ async fn claim_is_oldest_first_and_device_scoped() {
     let conn = db.conn().await.unwrap();
 
     // Oldest unclaimed package for dev1 wins.
-    match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
+    match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, key_package } => {
             assert_eq!(ref_hash, "ref-old");
             assert_eq!(key_package, b"old");
         }
         ClaimOutcome::NoKeyPackage => panic!("expected the oldest dev1 package"),
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
     }
 
     // dev2's package is untouched by a dev1 claim — device scoping holds.
@@ -178,11 +187,14 @@ async fn claim_is_oldest_first_and_device_scoped() {
     // A user-scoped claim (no device) now picks the oldest remaining of ANY
     // device: ref-new and ref-d2 share a timestamp, so just assert it is one of
     // them and is non-empty.
-    match apply_claim_key_package(&conn, &user_scoped).await.unwrap() {
+    match apply_claim_key_package(&conn, Some("alice"), &user_scoped).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, .. } => {
             assert!(ref_hash == "ref-new" || ref_hash == "ref-d2", "got {ref_hash}");
         }
         ClaimOutcome::NoKeyPackage => panic!("expected a remaining package"),
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
     }
 }
 
@@ -205,7 +217,7 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
             // serializes writes server-side). The conditional UPDATE still
             // decides exactly one winner.
             conn.execute_batch("PRAGMA busy_timeout=10000;").await.unwrap();
-            apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap()
+            apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap()
         }));
     }
 
@@ -219,6 +231,9 @@ async fn concurrent_claims_of_one_package_yield_exactly_one_winner() {
                 claimed += 1;
             }
             ClaimOutcome::NoKeyPackage => none += 1,
+            other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+                panic!("the claim gate refused an unrelated test claim: {other:?}")
+            }
         }
     }
 
@@ -344,9 +359,12 @@ async fn publish_and_claim_without_a_suite_land_on_the_current_suite() {
     assert_eq!(stored_suite(&db, "ref-untagged").await, CIPHERSUITE_PQ);
 
     let conn = db.conn().await.unwrap();
-    match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
+    match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-untagged"),
         ClaimOutcome::NoKeyPackage => panic!("an untagged package must stay claimable"),
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
     }
 }
 
@@ -368,17 +386,20 @@ async fn rows_written_without_the_column_take_the_schema_default_not_the_current
     let conn = db.conn().await.unwrap();
     assert!(
         matches!(
-            apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap(),
+            apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap(),
             ClaimOutcome::NoKeyPackage
         ),
         "a defaulted row is not in the current suite and must not answer a current-suite claim"
     );
-    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
+    match apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
         .await
         .unwrap()
     {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-old"),
         ClaimOutcome::NoKeyPackage => panic!("a defaulted row must be claimable as the legacy suite"),
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
     }
 }
 
@@ -393,23 +414,29 @@ async fn claiming_the_current_suite_against_an_off_suite_pool_finds_nothing() {
     publish_one(&db, "bob", "dev1", "ref-legacy", Some(CIPHERSUITE_LEGACY)).await;
     let conn = db.conn().await.unwrap();
 
-    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_PQ))
+    match apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_PQ))
         .await
         .unwrap()
     {
         ClaimOutcome::NoKeyPackage => {}
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
         ClaimOutcome::Claimed { ref_hash, .. } => {
             panic!("a PQ claim must never be served an off-suite package (got {ref_hash})")
         }
     }
 
     // …and the off-suite package is untouched by that failed claim.
-    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
+    match apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
         .await
         .unwrap()
     {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-legacy"),
         ClaimOutcome::NoKeyPackage => panic!("the legacy package must still be claimable"),
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
     }
 }
 
@@ -427,30 +454,36 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
     let conn = db.conn().await.unwrap();
 
     // A suite-less claim means the current suite, so it must draw the PQ one.
-    match apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap() {
+    match apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap() {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-pq"),
         ClaimOutcome::NoKeyPackage => panic!("the PQ pool must serve a suite-less claim"),
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
     }
 
     // The legacy pool is untouched by it.
-    match apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
+    match apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
         .await
         .unwrap()
     {
         ClaimOutcome::Claimed { ref_hash, .. } => assert_eq!(ref_hash, "ref-legacy"),
         ClaimOutcome::NoKeyPackage => panic!("the legacy pool must be unaffected"),
+        other @ (ClaimOutcome::Forbidden | ClaimOutcome::RateLimited) => {
+            panic!("the claim gate refused an unrelated test claim: {other:?}")
+        }
     }
 
     // Both pools are now drained; neither claim resurrects the other's package.
     let conn = db.conn().await.unwrap();
     assert!(matches!(
-        apply_claim_key_package(&conn, &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
+        apply_claim_key_package(&conn, Some("alice"), &device_body_in_suite("bob", "dev1", CIPHERSUITE_LEGACY))
             .await
             .unwrap(),
         ClaimOutcome::NoKeyPackage
     ));
     assert!(matches!(
-        apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap(),
+        apply_claim_key_package(&conn, Some("alice"), &device_body("bob", "dev1")).await.unwrap(),
         ClaimOutcome::NoKeyPackage
     ));
 }
