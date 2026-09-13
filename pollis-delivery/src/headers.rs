@@ -7,7 +7,8 @@
 
 use axum::extract::Request;
 use axum::http::header::{
-    HeaderValue, CACHE_CONTROL, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+    HeaderValue, CACHE_CONTROL, REFERRER_POLICY, STRICT_TRANSPORT_SECURITY,
+    X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
 };
 use axum::middleware::Next;
 use axum::response::Response;
@@ -23,5 +24,19 @@ pub async fn security_headers(req: Request, next: Next) -> Response {
     h.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     h.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     h.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    // Pin the API to HTTPS for two years. The shipped clients build their URL
+    // from a hardcoded `https://` scheme, so this is not what protects them —
+    // it closes the gap for anything that reaches the DS through a browser or
+    // by hand, where a single plaintext request is enough to be stripped. The
+    // header is emitted unconditionally: TLS terminates at the edge, so the DS
+    // itself only ever sees plain HTTP from the Worker, and a UA ignores HSTS
+    // received over HTTP anyway. `includeSubDomains` scopes to `*.api…` only
+    // (the apex is a different host and is unaffected). `preload` is
+    // deliberately omitted — that is a separate, hard-to-reverse commitment
+    // that also requires the apex, so it should be an explicit decision.
+    h.insert(
+        STRICT_TRANSPORT_SECURITY,
+        HeaderValue::from_static("max-age=63072000; includeSubDomains"),
+    );
     resp
 }

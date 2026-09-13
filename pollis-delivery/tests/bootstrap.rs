@@ -227,6 +227,10 @@ async fn security_headers_on_every_response_including_429() {
         assert_eq!(h.get("x-content-type-options").unwrap(), "nosniff");
         assert_eq!(h.get("referrer-policy").unwrap(), "no-referrer");
         assert_eq!(h.get("x-frame-options").unwrap(), "DENY");
+        assert_eq!(
+            h.get("strict-transport-security").unwrap(),
+            "max-age=63072000; includeSubDomains"
+        );
     };
 
     // First request (200) carries the headers.
