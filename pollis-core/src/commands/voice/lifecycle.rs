@@ -980,6 +980,33 @@ pub async fn join_voice_channel(
                 RoomEvent::ConnectionStateChanged(conn_state) => {
                     eprintln!("[voice] connection state: {conn_state:?}");
                 }
+                // #1097: the per-participant frame-cryptor verdict. livekit
+                // reports `EncryptionState::{Ok, EncryptionFailed,
+                // DecryptionFailed, MissingKey, KeyRatcheted, InternalError}`
+                // and, until now, this event was dropped — which is why "the
+                // removed member can no longer decrypt" was a claim no test
+                // could make: the one signal that says so never left the room
+                // loop.
+                //
+                // `MissingKey` / `DecryptionFailed` against a REMAINING member's
+                // track is the observable half of voice forward secrecy: after a
+                // mid-call removal the senders move to the new epoch's ring slot
+                // and an ex-member, holding only the join-time key, lands here.
+                // So it is logged at the same level as a connection change
+                // rather than swallowed — an e2e can assert on it, and an
+                // operator reading a user's log can tell "silent because the key
+                // rotated" from "silent because the mic broke".
+                RoomEvent::E2eeStateChanged { participant, state } => {
+                    let (identity, _) = resolve_participant(
+                        &state_for_room,
+                        &logical_room,
+                        &participant.identity().to_string(),
+                    )
+                    .await;
+                    eprintln!(
+                        "[voice-e2ee] frame state for {identity}: {state:?}"
+                    );
+                }
                 RoomEvent::LocalTrackPublished { .. } => {
                     // Every new local publication gets a FrameCryptor born on
                     // ring slot 0; move it onto the current epoch's slot.
