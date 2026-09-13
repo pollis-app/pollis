@@ -1522,7 +1522,7 @@ async fn process_one_generation<'h>(
     //    merged: it won the epoch CAS and is canonical, so refusing it would
     //    strand this device behind the group with no honest way back (the
     //    ELECTRON-epoch-11 incident). Eviction is the append-only answer.
-    let mut flagged: Vec<(AddedLeaf, i64, String)> = Vec::new();
+    let mut flagged: Vec<(AddedLeaf, i64, String, FlagKind)> = Vec::new();
     let mut current_epoch = initial_epoch;
     let mut any_applied = false;
     // Set when a commit could not be applied and the lineage must be rebuilt
@@ -1601,18 +1601,23 @@ async fn process_one_generation<'h>(
                             &leaf.signature_key,
                             leaf.scheme,
                         );
-                        let reason = match verdict {
-                            LeafVerdict::Certified => continue,
-                            LeafVerdict::Unverifiable(why) => why.to_string(),
-                            LeafVerdict::Uncertified(why) => why,
+                        let Some((reason, kind)) = flag_for(verdict) else {
+                            continue;
+                        };
+                        // #1127: say which of the two this is. "Could not tell"
+                        // and "is not that account's key" read very differently
+                        // to whoever finds this in a log.
+                        let verdict_phrase = match kind {
+                            FlagKind::Uncertified => "is NOT cross-signed by that account",
+                            FlagKind::Unverifiable => "could not be verified against that account (yet)",
                         };
                         eprintln!(
                             "[mls] process_pending_commits: commit seq {} epoch {} in {mls_group_id} \
-                             added a leaf for {}:{} that is NOT cross-signed by that account ({reason}) \
+                             added a leaf for {}:{} that {verdict_phrase} ({reason}) \
                              — applied to stay on the canonical branch; flagging for eviction",
                             commit.seq, commit.epoch, leaf.user_id, leaf.device_id
                         );
-                        flagged.push((leaf, commit.epoch, reason));
+                        flagged.push((leaf, commit.epoch, reason, kind));
                     }
                     true
                 }
@@ -2148,12 +2153,55 @@ where
     CommitApply::Applied { adds }
 }
 
+/// Why a replayed add was flagged — and therefore whether the USER is told
+/// (#1127).
+///
+/// [`LeafVerdict`] has two non-`Certified` answers and they mean opposite
+/// things. `Uncertified` is evidence: the inputs were all present and the leaf
+/// is not the key that account certified. `Unverifiable` is the absence of
+/// evidence: a cert row that has not reached the snapshot yet, or a commit whose
+/// `added_user_id` hint did not name this user (#1080, where a multi-user add
+/// names only one). Both are worth an eviction reconcile — it re-reads the whole
+/// roster and keeps a leaf that turns out to be certified, so it is
+/// self-correcting — but only the first is worth a security alarm.
+///
+/// Telling a user their conversation's membership is compromised every time a
+/// teammate enrolls a device is how a real `Uncertified` event gets ignored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlagKind {
+    /// Positively not the claimed account's device.
+    Uncertified,
+    /// Could not be decided here.
+    Unverifiable,
+}
+
+impl FlagKind {
+    /// Whether this is worth a user-facing `security_event`.
+    fn alarms(self) -> bool {
+        matches!(self, FlagKind::Uncertified)
+    }
+}
+
+/// Classify a leaf verdict for the replay loop: `None` when the leaf is fine,
+/// otherwise the reason string and whether it is evidence. Pure, so the rule in
+/// #1127 is a thing tests can state rather than a branch buried in a loop.
+fn flag_for(verdict: LeafVerdict) -> Option<(String, FlagKind)> {
+    match verdict {
+        LeafVerdict::Certified => None,
+        LeafVerdict::Unverifiable(why) => Some((why.to_string(), FlagKind::Unverifiable)),
+        LeafVerdict::Uncertified(why) => Some((why, FlagKind::Uncertified)),
+    }
+}
+
 /// What a member does about leaves a replayed commit added that are NOT
 /// cross-signed by the account they claim (`LeafVerdict` ≠ `Certified`).
 ///
 /// The commit has already been merged — it is canonical, and refusing it would
 /// only strand this device (see the replay loop). So: (1) write one
-/// `security_event` per leaf (`kind = "uncertified_mls_leaf"`) to this user's
+/// `security_event` (`kind = "uncertified_mls_leaf"`) per leaf that is
+/// POSITIVELY uncertified — an `Unverifiable` one is skipped (#1127), since
+/// "the cert row has not reached me yet" is not evidence and the reconcile below
+/// self-corrects it — to this user's
 /// own audit log, which the Security settings page lists — the same surface a
 /// revoked or newly-enrolled device is reported on; (2) kick a detached
 /// reconcile, whose leaf gate (`reconcile_group_mls_core_staged`) removes any
@@ -2171,9 +2219,18 @@ async fn report_uncertified_leaves(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
-    flagged: Vec<(AddedLeaf, i64, String)>,
+    flagged: Vec<(AddedLeaf, i64, String, FlagKind)>,
 ) {
-    for (leaf, epoch, reason) in &flagged {
+    for (leaf, epoch, reason, kind) in &flagged {
+        // #1127: an `Unverifiable` leaf is not evidence of anything — the
+        // eviction reconcile below re-reads the roster and keeps it if it is in
+        // fact certified. Raising a user-facing alarm for it would mean a
+        // teammate enrolling a device reads as a compromise, and it would let a
+        // malicious committer manufacture alarms in other people's audit logs by
+        // simply omitting the hint.
+        if !kind.alarms() {
+            continue;
+        }
         let ev = pollis_api::account::SecurityEventBody {
             kind: "uncertified_mls_leaf".to_string(),
             device_id: Some(leaf.device_id.clone()),
@@ -2580,5 +2637,54 @@ mod group_info_heal_tests {
     fn a_successors_epoch_zero_is_ahead_of_the_retired_lineage() {
         assert!(group_info_is_stale(Some((0, 42)), (1, 0)));
         assert!(!group_info_is_stale(Some((1, 0)), (0, 42)));
+    }
+}
+
+#[cfg(test)]
+mod flag_kind_tests {
+    use super::{flag_for, FlagKind};
+    use crate::commands::mls::device::LeafVerdict;
+
+    #[test]
+    fn a_certified_leaf_is_not_flagged_at_all() {
+        assert!(flag_for(LeafVerdict::Certified).is_none());
+    }
+
+    /// #1127: the alarm is for evidence, and this is evidence — the inputs were
+    /// all present and the leaf is not the key that account certified.
+    #[test]
+    fn an_uncertified_leaf_alarms() {
+        let (reason, kind) =
+            flag_for(LeafVerdict::Uncertified("leaf key is not the certified key".into()))
+                .expect("must be flagged");
+        assert_eq!(kind, FlagKind::Uncertified);
+        assert!(kind.alarms(), "a positively uncertified leaf must reach the user");
+        assert!(reason.contains("certified key"), "the reason is carried through");
+    }
+
+    /// And this is the absence of evidence: a cert row that has not reached the
+    /// snapshot yet, or a commit whose `added_user_id` hint did not name this
+    /// user (#1080). Still flagged — the eviction reconcile re-reads the roster
+    /// and keeps it if it is in fact certified — but the user is not told their
+    /// membership is compromised.
+    #[test]
+    fn an_unverifiable_leaf_is_flagged_but_does_not_alarm() {
+        let (_, kind) = flag_for(LeafVerdict::Unverifiable("no device row"))
+            .expect("still flagged, so the reconcile still runs");
+        assert_eq!(kind, FlagKind::Unverifiable);
+        assert!(
+            !kind.alarms(),
+            "\"I could not tell yet\" must not be reported as a compromise — that is what \
+             trains people to ignore the real thing, and it would let a committer manufacture \
+             alarms in other people's audit logs by omitting the hint"
+        );
+    }
+
+    /// Exactly one verdict alarms. Stated so a third verdict added later has to
+    /// make this decision deliberately rather than inherit one.
+    #[test]
+    fn only_uncertified_alarms() {
+        assert!(FlagKind::Uncertified.alarms());
+        assert!(!FlagKind::Unverifiable.alarms());
     }
 }
