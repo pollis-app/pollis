@@ -26,7 +26,13 @@ every composite action under `.github/actions/`:
   * `docker://image` must carry an `@sha256:` digest for the same reason a tag does
     not count.
 
-Exit 0 = every action reference is immutable.
+The other half of pinning is bumping it. A pin nobody moves leaves the workflows on
+a known-vulnerable action forever, and the tempting fix for that is to unpin — so
+this also asserts `.github/dependabot.yml` still claims the `github-actions`
+ecosystem. Dependabot rewrites the SHA and its trailing comment together, which is
+why the comment is required above.
+
+Exit 0 = every action reference is immutable and something is bumping the pins.
 Exit 1 = a report of each mutable reference, by file and line.
 """
 
@@ -36,9 +42,12 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 ACTIONS = ROOT / ".github" / "actions"
+DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 
 # `- uses: X` or `uses: X`, with an optional quoted value and optional trailing comment.
 USES = re.compile(r"""^\s*(?:-\s+)?uses:\s*(['"]?)(?P<ref>[^\s'"#]+)\1\s*(?P<comment>#.*)?$""")
@@ -71,8 +80,33 @@ def check_line(ref: str, comment: str | None) -> str | None:
     return None
 
 
+def dependabot_failures() -> list[str]:
+    """The pins have to be bumped by something, or pinning turns into rotting."""
+    if not DEPENDABOT.is_file():
+        return [
+            ".github/dependabot.yml is missing — nothing bumps the SHA pins, so they "
+            "will sit on whatever version was current the day they were written"
+        ]
+    try:
+        doc = yaml.safe_load(DEPENDABOT.read_text())
+    except yaml.YAMLError as e:
+        return [f".github/dependabot.yml does not parse — GitHub would ignore it: {e}"]
+    if not isinstance(doc, dict):
+        return [".github/dependabot.yml: top level is not a mapping"]
+    updates = doc.get("updates") or []
+    ecosystems = {
+        u.get("package-ecosystem") for u in updates if isinstance(u, dict)
+    }
+    if "github-actions" not in ecosystems:
+        return [
+            ".github/dependabot.yml has no `github-actions` update entry — the action "
+            "pins would never be bumped"
+        ]
+    return []
+
+
 def main() -> int:
-    failures: list[str] = []
+    failures: list[str] = dependabot_failures()
     files = action_files()
     if not files:
         print(f"no workflows found under {WORKFLOWS}", file=sys.stderr)

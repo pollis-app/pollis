@@ -33,6 +33,7 @@ fresh_tree() {
   if [ -d "$repo/.github/actions" ]; then
     cp -R "$repo/.github/actions" "$t/.github/actions"
   fi
+  cp "$repo/.github/dependabot.yml" "$t/.github/dependabot.yml"
   echo "$t"
 }
 
@@ -145,10 +146,30 @@ open(path, "w").write(text.rstrip("\n") + "\n" + extra)
 PY
 expect_pass "$tree" "local, digest-pinned docker and quoted SHA-pinned refs are accepted"
 
-# ── 8. An empty tree is a failure, not a pass ────────────────────────────────
+# ── 8. Nothing bumps the pins ────────────────────────────────────────────────
+#
+# A pin nobody moves leaves us on a known-vulnerable action indefinitely, and the
+# obvious "fix" for that is to unpin. So the bump path is part of the invariant.
+tree="$(fresh_tree nodependabot)"
+rm "$tree/.github/dependabot.yml"
+expect_fail "$tree" "dependabot.yml is missing" "a tree with no dependabot config is refused"
+
+tree="$(fresh_tree wrongecosystem)"
+cat >"$tree/.github/dependabot.yml" <<'YML'
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+YML
+expect_fail "$tree" "no \`github-actions\` update entry" "a dependabot config that skips github-actions is refused"
+
+# ── 9. An empty tree is a failure, not a pass ────────────────────────────────
 tree="$work/empty"
 mkdir -p "$tree/scripts" "$tree/.github/workflows"
 cp "$repo/scripts/check-action-pins.py" "$tree/scripts/"
+cp "$repo/.github/dependabot.yml" "$tree/.github/dependabot.yml"
 expect_fail "$tree" "no workflows found" "a tree with no workflows cannot pass vacuously"
 
 echo

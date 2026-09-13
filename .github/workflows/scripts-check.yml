@@ -38,6 +38,10 @@ on:
       # Any workflow change: an invalid one is invisible until something silently
       # stops running.
       - ".github/workflows/**"
+      - ".github/actions/**"
+      # The bump path for the action SHA pins — check-action-pins.py fails
+      # without it.
+      - ".github/dependabot.yml"
       # Reproducibility recipe inputs: the release build, the rebuilder, and the
       # client's option_env! surface must stay in agreement — and no release build
       # job may export anything beyond that recipe to $GITHUB_ENV.
@@ -68,6 +72,10 @@ on:
       # Any workflow change: an invalid one is invisible until something silently
       # stops running.
       - ".github/workflows/**"
+      - ".github/actions/**"
+      # The bump path for the action SHA pins — check-action-pins.py fails
+      # without it.
+      - ".github/dependabot.yml"
       # Reproducibility recipe inputs: the release build, the rebuilder, and the
       # client's option_env! surface must stay in agreement — and no release build
       # job may export anything beyond that recipe to $GITHUB_ENV.

@@ -1,0 +1,37 @@
+# Keeps the SHA pins in .github/workflows/** and .github/actions/** moving.
+#
+# Every `uses:` is pinned to a full commit SHA (scripts/check-action-pins.py
+# enforces it) so a retagged upstream action cannot run inside our release jobs.
+# A pin nobody bumps is the other failure mode: the workflows would sit on a
+# vulnerable version of an action forever, and the fix for the pin would be to
+# unpin it. Dependabot rewrites the SHA *and* the trailing `# vX.Y.Z` comment
+# together, which is why that comment is mandatory.
+#
+# github-actions only — Rust and JS dependencies are governed by cargo-deny and
+# cargo-vet in supply-chain.yml against the committed lockfiles, and an
+# automatic lockfile bump would fight that review.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    # "/" is the whole repository for this ecosystem: .github/workflows/** plus
+    # the composite actions under .github/actions/**.
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    # One PR per action, so a compromised or broken bump is reverted on its own.
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+      - ci
+    groups:
+      # The first-party actions move together and are the least interesting to
+      # review one at a time.
+      actions-official:
+        patterns:
+          - "actions/*"
