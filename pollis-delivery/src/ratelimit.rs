@@ -75,6 +75,16 @@ pub struct RateLimitConfig {
     pub probe_max: u32,
     /// Probe window length, seconds.
     pub probe_window_secs: u64,
+    /// Max GET calls per IP per window. `/health` and `/version` are exempt (a
+    /// load balancer and the deploy tripwire poll them, and an unreachable
+    /// health check is an outage); everything else answered over GET is an
+    /// operator endpoint behind a bearer token, and a bearer token is a thing
+    /// that gets GUESSED. GETs used to be exempt wholesale, which was defensible
+    /// only while the one substantial GET was an open read; there is no longer
+    /// one of those.
+    pub get_max: u32,
+    /// GET window length, seconds.
+    pub get_window_secs: u64,
 }
 
 impl Default for RateLimitConfig {
@@ -103,13 +113,18 @@ impl Default for RateLimitConfig {
             // multi-account installs without resembling a search.
             probe_max: 60,
             probe_window_secs: 600,
+            // An operator scraper polls metrics on the order of once a minute
+            // and a human reads /v1/config by hand. 120 per 10 minutes is far
+            // above both and far below a token search.
+            get_max: 120,
+            get_window_secs: 600,
         }
     }
 }
 
 impl RateLimitConfig {
     /// Build from DS environment, falling back to [`Default`] per field. Every
-    /// tier is tunable: `RL_{REQUEST_OTP,VERIFY_OTP,WRITE,READ,PROBE,
+    /// tier is tunable: `RL_{REQUEST_OTP,VERIFY_OTP,WRITE,READ,PROBE,GET,
     /// INVITE_REDEEM}_{MAX,WINDOW_SECS}`.
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
@@ -124,6 +139,12 @@ impl RateLimitConfig {
         }
         if let Some(v) = env_parse::<u64>("RL_VERIFY_OTP_WINDOW_SECS") {
             cfg.verify_otp_window_secs = v;
+        }
+        if let Some(v) = env_parse::<u32>("RL_GET_MAX") {
+            cfg.get_max = v;
+        }
+        if let Some(v) = env_parse::<u64>("RL_GET_WINDOW_SECS") {
+            cfg.get_window_secs = v;
         }
         if let Some(v) = env_parse::<u32>("RL_WRITE_MAX") {
             cfg.write_max = v;
@@ -290,7 +311,17 @@ pub fn too_many_requests() -> Response {
 /// limits (the cheap-abuse surface); every other write gets a generous backstop.
 fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'static str, u32, u64)> {
     if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
-        return None;
+        // The liveness probes stay exempt: a rate-limited health check reads as
+        // an outage to whatever is watching it, and neither answer discloses
+        // anything worth grinding for.
+        if path == "/health" || path == "/version" {
+            return None;
+        }
+        // Everything else served over GET is operator surface gated by a static
+        // bearer token (`/v1/config`, `/v1/retention/metrics`). A static secret
+        // with no bound on attempts is a secret being guessed, so the GET verb
+        // gets a tier rather than a blanket exemption.
+        return Some(("get", cfg.get_max, cfg.get_window_secs));
     }
     match path {
         "/v1/auth/request-otp" => Some((
@@ -426,6 +457,26 @@ mod tests {
         assert_eq!(tier("/v1/welcomes/fetch"), Some("read"));
         assert_eq!(tier("/v1/directory/group-by-slug"), Some("probe"));
         assert_eq!(tier("/v1/auth/account-probe"), Some("probe"));
+    }
+
+    /// GETs are no longer exempt wholesale.
+    ///
+    /// The exemption was written when the one substantial GET was an open,
+    /// side-effect-free read of the commit log. That route is retired, and what
+    /// is left over GET is operator surface behind a STATIC bearer token — the
+    /// exact shape that needs an attempt bound. The two liveness probes stay
+    /// exempt, deliberately: throttling a health check manufactures an outage.
+    #[test]
+    fn get_routes_are_limited_except_the_liveness_probes() {
+        let cfg = RateLimitConfig::default();
+        let tier = |p: &str| classify(&Method::GET, p, &cfg).map(|(t, _, _)| t);
+        assert_eq!(tier("/health"), None);
+        assert_eq!(tier("/version"), None);
+        assert_eq!(tier("/v1/retention/metrics"), Some("get"));
+        assert_eq!(tier("/v1/config"), Some("get"));
+        // A path that no longer routes still gets a tier — the limiter runs
+        // before routing, so an enumeration sweep is bounded too.
+        assert_eq!(tier("/v1/commits/anything"), Some("get"));
     }
 
     /// The probe tier is tighter than the read tier, which is looser than the

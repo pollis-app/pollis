@@ -1,7 +1,7 @@
 //! Pollis MLS Delivery Service.
 //!
 //! The sole writer to the MLS control-plane tables. It serializes commits per
-//! conversation and serves the contiguous commit log. It sees only opaque
+//! conversation and serves the contiguous commit log to authenticated members. It sees only opaque
 //! blobs — never plaintext or group/private keys — so it cannot decrypt or
 //! forge a commit (RFC 9420 "Delivery Service" role). Clients keep all MLS
 //! crypto; they submit commits here instead of writing the DB directly, which
@@ -11,8 +11,11 @@
 //!
 //! Writes (`POST /v1/commits`) can be gated behind device-certificate-signature
 //! auth: the client signs each request with its Ed25519 device key and the DS
-//! verifies against the registered `user_device.mls_signature_pub`. Reads
-//! (`GET /v1/commits/:id`) and `/health` stay open.
+//! verifies against the registered `user_device.mls_signature_pub`. Only
+//! `/health`, `/version` and the two operator-token GETs
+//! (`/v1/config`, `/v1/retention/metrics`) are reachable without one — the last
+//! open control-plane READ, `GET /v1/commits/:id`, was retired in favour of the
+//! signed, membership-gated `POST /v1/mls/conversation-state` ([`reads`]).
 //!
 //! Enforcement is **ON by default** (#921). `POLLIS_DS_REQUIRE_AUTH` is an
 //! explicit *opt-out* — only `false`/`0`/`no`/`off` disables it, unset and
@@ -57,7 +60,7 @@ pub mod writes;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     middleware::{from_fn, from_fn_with_state},
     response::{IntoResponse, Response},
@@ -65,9 +68,8 @@ use axum::{
     Json, Router,
 };
 use pollis_api::DsRequest;
-use serde::Deserialize;
 
-use crate::commit::{CommitSinceReport, CommitsResponse, SubmitBody, SubmitResponse};
+use crate::commit::{CommitSinceReport, SubmitBody, SubmitResponse};
 use crate::db::Db;
 use crate::error::{AppError, AuthRejection};
 use crate::writes::RawRequest;
@@ -298,7 +300,6 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/config", get(effective_config))
         .route(<SubmitBody as DsRequest>::PATH, post(submit))
         .route(<CommitSinceReport as DsRequest>::PATH, post(report_commit_since))
-        .route("/v1/commits/:conversation_id", get(commits))
         .route(<writes::GroupInfoBody as DsRequest>::PATH, post(writes::group_info))
         .route(<writes::AckBody as DsRequest>::PATH, post(writes::welcomes_ack))
         .route(<writes::ResetBody as DsRequest>::PATH, post(writes::welcomes_reset))
@@ -715,50 +716,6 @@ async fn submit(State(state): State<AppState>, req: RawRequest) -> Result<Respon
     Ok((code, Json(outcome)).into_response())
 }
 
-#[derive(Deserialize)]
-struct Since {
-    #[serde(default)]
-    since: i64,
-    /// The suite generation being caught up on (#454 P4). Absent (a pre-hybrid
-    /// client) → 0, which is the lineage such a client is in, so its request and
-    /// the `head` it reads back are unchanged.
-    #[serde(default)]
-    generation: i64,
-}
-
-/// GET /v1/commits/:conversation_id?since=N[&generation=G] — the contiguous
-/// commit log of generation G (default 0) from epoch N (default 0) to that
-/// lineage's head. Reads are open (unauthenticated) and have NO side effects.
-///
-/// The catch-up high-water report that FEEDS the retention floor is a SEPARATE,
-/// AUTHENTICATED write — `POST /v1/commits/since` ([`report_commit_since`]).
-/// Recording it here off unsigned `user_id`/`device_id` query params (as this
-/// handler used to) let anyone raise the floor on behalf of any device, which —
-/// chained with an unclamped [`commit::prune_floor`] — was a remote,
-/// unauthenticated, per-conversation commit-log wipe (#681). Any stray
-/// `user_id`/`device_id` query params an older client still appends are simply
-/// ignored now; its report is dropped, which only ever leaves the floor MORE
-/// conservative (an unreported member disables Tier 1).
-async fn commits(
-    State(state): State<AppState>,
-    Path(conversation_id): Path<String>,
-    Query(q): Query<Since>,
-) -> Result<impl IntoResponse, AppError> {
-    let conn = state.log_db.conn().await?;
-
-    // `head` is the head of the lineage the caller ASKED for — that is what it
-    // must drain — while `head_generation` is how it learns a newer one exists.
-    let head = commit::head_epoch_in(&conn, &conversation_id, q.generation).await?;
-    let head_generation = commit::head_generation(&conn, &conversation_id).await?;
-    let commits = commit::fetch_commits(&conn, &conversation_id, q.generation, q.since).await?;
-    Ok(Json(CommitsResponse {
-        head,
-        generation: q.generation,
-        head_generation,
-        commits,
-    }))
-}
-
 /// POST /v1/commits/since — record the signing device's catch-up high-water and
 /// run the EVENT-DRIVEN retention prune (#539, I4). This is a WRITE: it raises
 /// the retention floor, so it is AUTHENTICATED as the device it claims to be,
@@ -767,8 +724,8 @@ async fn commits(
 ///
 /// The report is bound to the device by signature, so nobody can raise the floor
 /// on another device's behalf (#681). An unauthenticated report is REJECTED
-/// (401) rather than served: there is no read to protect on this endpoint (the
-/// open read is `GET /v1/commits`), and dropping the report only ever leaves the
+/// (401) rather than served: there is no read to protect on this endpoint, and
+/// dropping the report only ever leaves the
 /// floor conservative — a device we cannot authenticate stays UNREPORTED, which
 /// disables Tier 1 for the roster, so a rejected report can never WIDEN pruning.
 ///

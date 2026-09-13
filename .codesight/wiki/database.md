@@ -804,7 +804,7 @@ the floor. Lives on the commit-log DB; the DS is the sole writer.
 **Retention floor (I4, #539).** Without pruning, `mls_commit_log` grows with
 membership-churn × time. The DS (sole writer) prunes commits below a floor,
 event-driven on commit-append (`POST /v1/commits`) and on a device's catch-up
-report (`GET /v1/commits/:id?since=&user_id=&device_id=`) — never on a timer.
+report (device-signed `POST /v1/commits/since`) — never on a timer.
 Two tiers (`pollis_delivery::commit::prune_floor`, modelled in
 `specs/tla/Delivery.tla` Spec B):
 - **Tier 1 (zero loss):** floor = MIN applied epoch across all CURRENT member

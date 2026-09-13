@@ -471,6 +471,8 @@ async fn spawn_in_process_delivery(main: Arc<Db>, log: Arc<Db>) -> String {
             read_window_secs: 1,
             probe_max: 1_000_000,
             probe_window_secs: 1,
+            get_max: 1_000_000,
+            get_window_secs: 1,
         });
 
     // Only `/v1/commits` is served by the harness, for fault injection.

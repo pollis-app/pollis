@@ -126,19 +126,8 @@ pub struct CommitWire {
     pub created_at: String,
 }
 
-/// `GET /v1/commits/:conversation_id` — the contiguous log from the requested
-/// epoch to the head.
-///
-/// A GET, so it has no request body and therefore no row in the `ENDPOINTS`
-/// table; it lives here anyway so all of the commit wire types are one place.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CommitsResponse {
-    /// Head epoch WITHIN `generation` — what a pre-hybrid client already reads.
-    pub head: i64,
-    /// The generation the returned commits belong to (the one that was asked for).
-    pub generation: i64,
-    /// The conversation's newest lineage. `head_generation > generation` is how a
-    /// client learns it has been migrated off the suite it is still running.
-    pub head_generation: i64,
-    pub commits: Vec<CommitWire>,
-}
+// `CommitsResponse` — the body of the old unauthenticated
+// `GET /v1/commits/:conversation_id` — is gone with the route. The same three
+// answers (`head`, `head_generation`, the commit batch) are served by
+// `reads::ConversationState`, from one transaction, to a signed and
+// membership-gated caller.

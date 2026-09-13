@@ -463,10 +463,19 @@ async fn auth_off_accepts_unauthenticated_commit() {
     assert_eq!(status_of(router, req).await, StatusCode::OK);
 }
 
-// ── Reads stay open ───────────────────────────────────────────────────────────
+// ── No read is open ───────────────────────────────────────────────────────────
 
+/// `GET /v1/commits/:conversation_id` is GONE.
+///
+/// It was the last unauthenticated control-plane read, and it answered for any
+/// conversation id anybody could name: the whole commit history of a group, its
+/// head epoch and its lineage, to a stranger. Nothing in the product needed it —
+/// every client reads the control plane through the signed, membership-gated
+/// `POST /v1/mls/conversation-state`, which answers the same questions from one
+/// transaction — and being a GET it was invisible to `pollis_api::ENDPOINTS`, so
+/// the route-coverage test could not see it either.
 #[tokio::test(flavor = "multi_thread")]
-async fn reads_are_open_even_with_auth_on() {
+async fn the_open_commit_log_read_no_longer_exists() {
     let db = fresh_db().await;
     let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
     let req = Request::builder()
@@ -475,7 +484,29 @@ async fn reads_are_open_even_with_auth_on() {
         .body(Body::empty())
         .unwrap();
 
-    assert_eq!(status_of(router, req).await, StatusCode::OK);
+    assert_eq!(
+        status_of(router, req).await,
+        StatusCode::NOT_FOUND,
+        "an unauthenticated GET must not be able to read a conversation's commit log"
+    );
+}
+
+/// And the membership-gated replacement refuses an unsigned caller rather than
+/// serving it — the point is that the answer moved behind auth, not that one
+/// route disappeared.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_authed_replacement_refuses_an_unsigned_caller() {
+    let db = fresh_db().await;
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    let body = serde_json::json!({ "queries": [{ "conversation_id": "conv1" }] });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/mls/conversation-state")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+
+    assert_eq!(status_of(router, req).await, StatusCode::UNAUTHORIZED);
 }
 
 // ── Device-pubkey cache (#658) ────────────────────────────────────────────────

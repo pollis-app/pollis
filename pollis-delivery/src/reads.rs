@@ -249,10 +249,10 @@ pub async fn conversation_state(
 /// share it for the same reason from the other direction: the client treats a
 /// commit batch that skips an epoch as a permanent gap and deletes its MLS state.
 ///
-/// Deliberately NOT modelled on today's `GET /v1/commits/:conversation_id`
-/// handler, which runs three separate queries on a bare connection. That handler
-/// keeps its behaviour (old clients, operator debugging); extending its shape
-/// onto the hot join path is the bug this avoids.
+/// Deliberately NOT modelled on the retired `GET /v1/commits/:conversation_id`
+/// handler, which ran three separate queries on a bare connection — and served
+/// them to anybody who could name a conversation id. Extending that shape onto
+/// the hot join path is the bug this avoids; it is now the only shape there is.
 ///
 /// `pub` for `tests/conversation_snapshot.rs`, which asserts both properties
 /// above directly — the atomicity one under concurrency, where only a caller
