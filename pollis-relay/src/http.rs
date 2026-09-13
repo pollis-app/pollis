@@ -20,6 +20,26 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::shim::OverlayHandle;
 
+/// How long to wait for a connection to be established.
+///
+/// `reqwest`'s default for both of these is **no timeout at all**, which is why
+/// they are set here rather than left out: a host that completes the TCP
+/// handshake and then never answers — a black hole, a hung SFU-adjacent proxy, a
+/// relay that stopped forwarding — held a DS post or a media fetch open forever,
+/// and with the shared connection pool that stall is not confined to the one
+/// unlucky request.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long a single read may stall before the transfer is abandoned.
+///
+/// Deliberately an INACTIVITY deadline, not a total-request one
+/// (`ClientBuilder::timeout`): the same client fetches 100 MiB attachments, and
+/// a whole-request deadline generous enough for those on a slow link is too long
+/// to be a deadline at all. This bounds "the peer stopped sending", which is the
+/// failure being defended against, while a slow-but-progressing download runs to
+/// completion.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 static DIRECT_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 // Overlay mode is off-by-default and rare relative to the direct path, but
 // still needs to reuse its connection pool across calls when it IS on. Keyed
@@ -31,7 +51,9 @@ static OVERLAY_CLIENT: Mutex<Option<(SocketAddr, reqwest::Client)>> = Mutex::new
 /// over building the client directly when you need to customize TLS roots etc.;
 /// [`http_client`] is the zero-config entry point.
 pub fn http_client_builder(overlay: Option<&OverlayHandle>) -> reqwest::ClientBuilder {
-    let mut builder = reqwest::Client::builder();
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT);
     if let Some(handle) = overlay {
         // socks5h:// = proxy-side DNS: the hostname travels to the relay, not a
         // pre-resolved IP, so allowlisting and inner-TLS SNI both see the real
@@ -70,6 +92,63 @@ pub fn http_client(overlay: Option<&OverlayHandle>) -> reqwest::Client {
             *cached = Some((addr, client.clone()));
             client
         }
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The deadlines have to be long enough not to fire on a working peer and
+    /// short enough that a dead one is noticed. A future edit that zeroes or
+    /// balloons either is caught here rather than in production.
+    #[test]
+    fn the_deadlines_are_sane() {
+        assert!(CONNECT_TIMEOUT >= Duration::from_secs(5));
+        assert!(CONNECT_TIMEOUT <= Duration::from_secs(30));
+        assert!(READ_TIMEOUT >= Duration::from_secs(10));
+        assert!(READ_TIMEOUT <= Duration::from_secs(60));
+    }
+
+    /// The defect: `reqwest`'s default is NO timeout, so a peer that completes
+    /// the handshake and then never sends a byte held the caller forever — and,
+    /// because the client is shared, sat on the connection pool while it did.
+    ///
+    /// Against the pre-fix builder this test does not fail with a wrong error;
+    /// it never returns. The outer deadline is what turns that hang into a
+    /// reported failure.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_peer_that_answers_nothing_is_abandoned_rather_than_waited_on() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind black hole");
+        let addr = listener.local_addr().expect("local addr");
+        // Sockets are parked so nothing closes them and turns the hang into an
+        // EOF the client would report immediately.
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock);
+            }
+        });
+
+        let started = Instant::now();
+        let result = tokio::time::timeout(
+            READ_TIMEOUT + Duration::from_secs(30),
+            http_client(None).get(format!("http://{addr}/")).send(),
+        )
+        .await
+        .expect("the request must give up on a silent peer, not wait forever");
+        let elapsed = started.elapsed();
+
+        let err = result.expect_err("a peer that never answers cannot produce a response");
+        assert!(err.is_timeout(), "the request must end as a timeout; got {err}");
+        assert!(
+            elapsed >= READ_TIMEOUT,
+            "gave up after {elapsed:?}, before the configured deadline — a slow but \
+             working peer would be cut off too"
+        );
     }
 }
 

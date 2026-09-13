@@ -124,6 +124,39 @@ so "this path does not stat the whole cache" is assertable as a number rather
 than a stopwatch. Note that CLAUDE.md's no-periodic-polling rule rules out the
 obvious alternative: a timer is not the answer, cache mutation is.
 
+## A DS-chosen download URL is origin-checked and size-capped
+
+Every R2 access is a URL the **DS** picks (`POST /v1/r2/presign`) which the client
+then fetches unauthenticated. Two things about that were taken on trust:
+
+- **Where it points.** The presigned URL was used verbatim, so a compromised or
+  impersonated DS could aim a `get` at attacker-controlled bytes or a `put` at
+  an exfiltration endpoint. `commands::r2::PresignedUrl` is now the only thing
+  the request builders accept, and its only constructor checks the URL's origin
+  (`scheme://host[:port]`, userinfo discarded) against `config.r2_endpoint` and
+  `config.r2_public_url`. An unconfigured build allows nothing.
+- **How much it sends.** The body was read with `resp.bytes()` — fully resident —
+  and only then measured against the caller's ceiling, so a URL that streams
+  forever is an OOM kill that no downstream check ever reaches. `r2_get_url` now
+  takes the cap as an argument, streams with `chunk()`, and returns `Ok(None)`
+  the moment the cap would be exceeded, dropping the response mid-body. Caps:
+  `MEDIA_CACHE_MAX_FILE_BYTES` for public objects and `download_file`,
+  `EMOJI_MAX_BYTES` for emoji, `R2_MAX_DOWNLOAD_BYTES` (512 MiB) for attachment
+  ciphertext, which is buffered whole to be decrypted and re-hashed.
+
+The shared reqwest builder (`pollis_relay::http::http_client_builder`, which
+`pollis-core` re-exports) also carries a 10s `connect_timeout` and a 30s
+`read_timeout`. `reqwest`'s default is no timeout at all, so a peer that finished
+the handshake and then went silent held the caller — and a pooled connection —
+indefinitely. The read deadline is per-read inactivity rather than a whole-request
+one on purpose: the same client fetches 100 MiB attachments, and a total deadline
+generous enough for those over a slow link would not be a deadline.
+
+Tests: `commands::r2::tests` (origin refusals including userinfo/suffix/scheme
+tricks; a local stub that streams 64 MiB is abandoned at a 32 KiB cap, and a body
+under its cap still arrives whole) and `pollis_relay::http::deadline_tests` (a
+black-hole peer ends as a timeout instead of hanging).
+
 ## Zero-copy screenshare frame fan-out (#480)
 
 Decoded screenshare frames are fanned out to every connected WebView subscriber

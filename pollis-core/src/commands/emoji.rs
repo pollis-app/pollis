@@ -922,14 +922,16 @@ pub async fn download_verified_emoji(
 
     let get_url = r2::presign_r2_with_length(state, "get", &expected_key, None).await?;
     let overlay = state.overlay_handle();
-    let bytes = r2::r2_get_url(overlay.as_deref(), &get_url).await?;
-
-    if bytes.len() > EMOJI_MAX_BYTES {
+    // The ceiling is passed IN rather than checked on the result: an emoji is
+    // 48 KiB, and reading an unbounded body before measuring it hands whoever
+    // chose the URL a memory bomb the check would arrive too late to stop.
+    let Some(bytes) =
+        r2::r2_get_url(overlay.as_deref(), &get_url, EMOJI_MAX_BYTES as u64).await?
+    else {
         return Err(Error::Other(anyhow::anyhow!(
-            "emoji object {content_hash} is {} bytes, over the ceiling — refusing it",
-            bytes.len()
+            "emoji object {content_hash} is over the {EMOJI_MAX_BYTES}-byte ceiling — refusing it"
         )));
-    }
+    };
     let actual = sha256_hex(&bytes);
     if actual != content_hash {
         return Err(Error::Other(anyhow::anyhow!(

@@ -180,6 +180,10 @@ client-release problem. `ds_livekit_token` now resolves the precedence centrally
 **Client cutover: DONE for every embeddable secret (#393).** `pollis-core` holds
 no LiveKit or R2 secret:
 - **R2** — `commands/r2.rs`'s `presign_r2` presigns every get/put/delete via the DS.
+  The URL that comes back is DS-chosen, so the client re-checks it: `PresignedUrl`
+  is the only type the request builders take and its constructor requires the
+  configured R2 origin, and `r2_get_url` streams against a caller-supplied cap
+  rather than buffering whatever arrives (see `media-server.md`).
 - **LiveKit** — participant tokens via `ds_livekit_token`; SendData via
   `ds_livekit_send_data`; roster via `ds_livekit_participants`. `make_token` /
   `make_view_token` / `make_admin_token` and `livekit_api_key` / `livekit_api_secret`

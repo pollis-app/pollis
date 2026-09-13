@@ -101,13 +101,14 @@ fn livekit_token_claim_shape_and_signature() {
 /// short one costs nothing; an hour is a whole hour of re-entry.
 #[test]
 fn a_participant_token_expires_in_minutes_not_hours() {
+    let ttl = LIVEKIT_TOKEN_TTL_SECS;
     assert!(
-        LIVEKIT_TOKEN_TTL_SECS <= 15 * 60,
+        ttl <= 15 * 60,
         "a {LIVEKIT_TOKEN_TTL_SECS}s participant token leaves that long a window \
          for an ex-member to rejoin the room with a token minted before they lost access"
     );
     assert!(
-        LIVEKIT_TOKEN_TTL_SECS >= 5 * 60,
+        ttl >= 5 * 60,
         "a {LIVEKIT_TOKEN_TTL_SECS}s token is short enough that an ordinary \
          reconnect races its own expiry"
     );
