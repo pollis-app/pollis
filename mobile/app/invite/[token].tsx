@@ -17,7 +17,7 @@ interface UnlockStateSnapshot {
   last_active_user: string | null;
 }
 
-type Phase = "working" | "signedOut" | "locked" | "failed";
+type Phase = "working" | "confirm" | "joining" | "signedOut" | "locked" | "failed";
 
 // #847 (mobile) — where a shared invite link lands.
 //
@@ -27,6 +27,17 @@ type Phase = "working" | "signedOut" | "locked" | "failed";
 // screen). The desktop-rendered `https://pollis.com/invite/<token>` form needs
 // iOS universal links / Android app links (associated-domains + server files)
 // before it opens the app — deliberately not configured here.
+//
+// #1094: arriving here does NOT join anything. `pollis://invite/<token>` is
+// reachable by anyone who can put a link in front of the user — an SMS, another
+// app, a web page with an `<a href="pollis://…">` — and joining a group
+// discloses their username and device identity to every member of it. So this
+// screen resolves the session, then STOPS and asks. One tap must never be
+// enough. (Slack and Discord both confirm before joining.)
+//
+// Deliberately no group-name preview: resolving a token to group metadata
+// without redeeming would be a new oracle, and it is not what closes the hole —
+// the deliberate press is.
 //
 // On failure this renders ONE opaque message for every cause. The Delivery
 // Service deliberately cannot tell us whether a token was wrong, expired,
@@ -38,6 +49,7 @@ export default function InviteLanding() {
   const queryClient = useQueryClient();
   const { token } = useLocalSearchParams<{ token?: string }>();
   const [phase, setPhase] = useState<Phase>("working");
+  const [readyUserId, setReadyUserId] = useState<string | null>(null);
 
   // Cold-start arrival bypasses the boot router in app/index.tsx, so this
   // screen restores the session itself before redeeming. Runs once.
@@ -68,27 +80,48 @@ export default function InviteLanding() {
           }
           userId = profile.id;
         }
-        const result = await invoke<RedeemedInvite>(
-          "redeem_group_invite_link",
-          { token: trimmed, userId },
-        );
-        // The redeemer just crossed into a group they could not see before —
-        // invalidate broadly, like desktop's useRedeemGroupInviteLink.
-        queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
-        router.replace({
-          pathname: "/group/[id]",
-          params: { id: result.group_id },
-        });
+        setReadyUserId(userId);
+        setPhase("confirm");
       } catch (e) {
-        console.warn("[invite] redeem failed:", e);
+        console.warn("[invite] could not resolve the session:", e);
         setPhase("failed");
       }
     })();
-  }, [token, router, queryClient]);
+  }, [token]);
+
+  // The deliberate press. Only this redeems.
+  const join = async () => {
+    const trimmed = (token ?? "").trim();
+    if (!trimmed || !readyUserId) {
+      setPhase("failed");
+      return;
+    }
+    setPhase("joining");
+    try {
+      const result = await invoke<RedeemedInvite>(
+        "redeem_group_invite_link",
+        { token: trimmed, userId: readyUserId },
+      );
+      // The redeemer just crossed into a group they could not see before —
+      // invalidate broadly, like desktop's useRedeemGroupInviteLink.
+      queryClient.invalidateQueries({ queryKey: groupQueryKeys.all });
+      router.replace({
+        pathname: "/group/[id]",
+        params: { id: result.group_id },
+      });
+    } catch (e) {
+      console.warn("[invite] redeem failed:", e);
+      setPhase("failed");
+    }
+  };
 
   const message =
     phase === "working"
       ? t("mobile:invite.checking")
+      : phase === "confirm"
+        ? t("mobile:invite.confirm")
+        : phase === "joining"
+          ? t("mobile:invite.joining")
       : phase === "signedOut"
         ? t("mobile:invite.signedOut")
         : phase === "locked"
@@ -112,8 +145,21 @@ export default function InviteLanding() {
             alignItems: "center",
           }}
         >
-          {phase === "working" ? (
+          {phase === "working" || phase === "joining" ? (
             <ActivityIndicator color={semantic.accent} />
+          ) : null}
+          {phase === "confirm" ? (
+            <Text
+              testID="invite-confirm-title"
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 15,
+                color: semantic.ink,
+                textAlign: "center",
+              }}
+            >
+              {t("mobile:invite.confirmTitle")}
+            </Text>
           ) : null}
           <Text
             testID="invite-landing-message"
@@ -130,7 +176,18 @@ export default function InviteLanding() {
         </View>
       </Body>
       <Ctx cr="POLLIS" name={t("mobile:invite.groupInvite")} hideBack />
-      {phase !== "working" ? (
+      {phase === "confirm" ? (
+        <BottomAction>
+          <Button
+            full
+            testID="btn-invite-join"
+            variant="primary"
+            onPress={join}
+          >
+            {upper(t("mobile:invite.join"))}
+          </Button>
+        </BottomAction>
+      ) : phase === "working" || phase === "joining" ? null : (
         <BottomAction>
           <Button
             full
@@ -143,7 +200,7 @@ export default function InviteLanding() {
               : upper(t("mobile:invite.openPollis"))}
           </Button>
         </BottomAction>
-      ) : null}
+      )}
     </Screen>
   );
 }

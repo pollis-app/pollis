@@ -16,7 +16,7 @@ export const InviteLinkLandingPage: React.FC = () => {
 
   return (
     <PageShell title={t("joinByInvite.pageTitle")}>
-      <JoinByInvite initialToken={token} autoRedeem />
+      <JoinByInvite initialToken={token} />
     </PageShell>
   );
 };

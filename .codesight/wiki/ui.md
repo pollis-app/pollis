@@ -793,7 +793,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **InviteMember** — props: groupId, groupName — `frontend/src/pages/InviteMember.tsx`
 - **InviteMemberPage** — `frontend/src/pages/InviteMemberPage.tsx`
 - **InvitesPage** — `frontend/src/pages/InvitesPage.tsx`
-- **JoinByInvite** — props: initialToken, autoRedeem — `frontend/src/pages/JoinByInvite.tsx`
+- **JoinByInvite** — props: initialToken — `frontend/src/pages/JoinByInvite.tsx`
 - **JoinByInvitePage** — `frontend/src/pages/JoinByInvitePage.tsx`
 - **JoinRequests** — props: groupId, groupName — `frontend/src/pages/JoinRequests.tsx`
 - **JoinRequestsPage** — `frontend/src/pages/JoinRequestsPage.tsx`

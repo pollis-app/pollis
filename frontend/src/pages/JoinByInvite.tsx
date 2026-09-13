@@ -11,7 +11,6 @@ interface JoinByInviteProps {
   /** Prefilled when arriving from an /invite/$token deep link. */
   initialToken?: string;
   /** Auto-submit on mount — only for the deep-link landing. */
-  autoRedeem?: boolean;
 }
 
 /**
@@ -29,7 +28,6 @@ interface JoinByInviteProps {
  */
 export const JoinByInvite: React.FC<JoinByInviteProps> = ({
   initialToken = "",
-  autoRedeem = false,
 }) => {
   const { t } = useTranslation("channels");
   const skin = useSkin();
@@ -55,16 +53,11 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
     [navigate, redeemMutation]
   );
 
-  // Deep-link arrival: try immediately so the common case is a single click in
-  // the sender's chat app, not a paste. Runs once.
-  const autoRan = React.useRef(false);
-  React.useEffect(() => {
-    if (autoRedeem && initialToken && !autoRan.current) {
-      autoRan.current = true;
-      void handleRedeem(initialToken);
-    }
-  }, [autoRedeem, initialToken, handleRedeem]);
-
+  // #1094: a deep link must NOT redeem on arrival. Joining a group discloses
+  // your username and identity to everyone in it, so it takes a deliberate
+  // press — the token is pre-filled and the button is one click away, but the
+  // click is the point. (Slack and Discord both confirm before joining.)
+  //
   const isRefined = skin === "refined";
 
   const body = (
@@ -81,7 +74,7 @@ export const JoinByInvite: React.FC<JoinByInviteProps> = ({
         description={t("joinByInvite.tokenDescription")}
         disabled={redeemMutation.isPending}
         data-testid="invite-token-input"
-        autoFocus={!autoRedeem}
+        autoFocus
       />
 
       {error && (

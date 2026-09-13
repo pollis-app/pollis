@@ -228,6 +228,10 @@
   "invite": {
     "backToPollis": "Back to Pollis",
     "checking": "Checking your invite…",
+    "confirm": "Joining shares your username and device identity with everyone in this group. Only join a link you trust.",
+    "confirmTitle": "Join this group?",
+    "join": "Join group",
+    "joining": "Joining…",
     "failed": "This invite link can't be used. It may be invalid, expired, revoked, or already used up — ask for a new link.",
     "groupInvite": "Group invite",
     "locked": "Unlock Pollis first, then open the invite link again.",
