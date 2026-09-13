@@ -369,7 +369,8 @@
       "avatarHint": "Dérivé des deux premiers caractères de votre nom d'utilisateur.",
       "displayName": "Nom affiché",
       "handle": "Nom d'utilisateur",
-      "handleHint": "Les autres membres peuvent vous trouver et vous écrire avec @handle."
+      "handleHint": "Les autres membres peuvent vous trouver et vous écrire avec @handle.",
+      "handleInvalid": "Le nom d'utilisateur doit compter de 3 à 32 caractères : minuscules, chiffres, '_', '.' ou '-'."
     }
   },
   "tabs": {

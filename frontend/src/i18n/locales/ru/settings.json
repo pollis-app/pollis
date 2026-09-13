@@ -154,6 +154,7 @@
     "accountHeading": "Аккаунт",
     "usernameLabel": "Имя пользователя",
     "usernamePlaceholder": "username",
+    "usernameInvalid": "Имя пользователя — от 3 до 32 символов: строчные латинские буквы, цифры, '_', '.' или '-'.",
     "preferredNameLabel": "Отображаемое имя",
     "preferredNamePlaceholder": "Как вас называть",
     "saveFailed": "Не удалось сохранить",

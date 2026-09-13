@@ -145,6 +145,7 @@
     "accountHeading": "账户",
     "usernameLabel": "用户名",
     "usernamePlaceholder": "用户名",
+    "usernameInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。",
     "preferredNameLabel": "昵称",
     "preferredNamePlaceholder": "别人怎么称呼你",
     "saveFailed": "保存失败",

@@ -358,7 +358,8 @@
       "avatarHint": "由你用户名的前两个字符生成。",
       "displayName": "显示名称",
       "handle": "用户名",
-      "handleHint": "其他成员可以通过 @handle 找到你并发私信。"
+      "handleHint": "其他成员可以通过 @handle 找到你并发私信。",
+      "handleInvalid": "用户名为 3–32 个字符：小写字母、数字、'_'、'.' 或 '-'。"
     }
   },
   "tabs": {

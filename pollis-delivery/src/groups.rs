@@ -823,19 +823,15 @@ pub async fn apply_create_invite(
         return Ok(InviteOutcome::Forbidden);
     }
 
-    // Resolve the identifier exactly as the client's lookup did: an exact match
-    // on username OR email.
-    let mut rows = conn
-        .query(
-            "SELECT id, username FROM users WHERE username = ?1 OR email = ?1",
-            libsql::params![body.invitee_identifier.clone()],
-        )
-        .await?;
-    let Some(row) = rows.next().await? else {
+    // Resolve the identifier through the ONE lookup the directory endpoint also
+    // uses: exact match on `email` when it contains an `@`, on `username`
+    // otherwise — never `username OR email`, whose first row a squatted
+    // username won (see `directory::user_by_identifier`).
+    let Some(invitee) = crate::directory::user_by_identifier(conn, &body.invitee_identifier).await?
+    else {
         return Ok(InviteOutcome::NoSuchUser);
     };
-    let invitee_id: String = row.get(0)?;
-    drop(rows);
+    let invitee_id = invitee.id;
 
     if invitee_id == inviter {
         return Ok(InviteOutcome::SelfInvite);

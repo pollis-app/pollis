@@ -148,6 +148,7 @@
     "accountHeading": "Account",
     "usernameLabel": "Username",
     "usernamePlaceholder": "username",
+    "usernameInvalid": "Usernames are 3–32 characters: lowercase letters, digits, '_', '.' or '-'.",
     "preferredNameLabel": "Preferred name",
     "preferredNamePlaceholder": "What people call you",
     "saveFailed": "Failed to save",

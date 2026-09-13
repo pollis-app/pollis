@@ -369,7 +369,8 @@
       "avatarHint": "Se genera a partir de los dos primeros caracteres de tu nombre de usuario.",
       "displayName": "Nombre preferido",
       "handle": "Nombre de usuario",
-      "handleHint": "Los demás miembros pueden encontrarte y escribirte con @handle."
+      "handleHint": "Los demás miembros pueden encontrarte y escribirte con @handle.",
+      "handleInvalid": "El nombre de usuario debe tener entre 3 y 32 caracteres: minúsculas, dígitos, '_', '.' o '-'."
     }
   },
   "tabs": {

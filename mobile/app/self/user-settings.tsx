@@ -17,6 +17,7 @@ import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { upper } from "../../i18n";
 import { useUserProfile, useUpdateProfile } from "../../hooks/queries";
+import { isValidUsername } from "../../lib/username";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -46,12 +47,20 @@ function UserSettings() {
     (displayName !== (profile.preferred_name ?? "") ||
       handle !== (profile.username ?? ""));
 
+  // The DS refuses a username outside its rule (`is_valid_username`) and
+  // passes an UNCHANGED one through, because default names that predate the
+  // rule must still be able to save a display name. Same carve-out here, so
+  // the screen explains the refusal before the round trip rather than after.
+  const nextHandle = handle.trim();
+  const handleInvalid =
+    nextHandle !== (profile?.username ?? "") && !isValidUsername(nextHandle);
+
   const onSave = () => {
-    if (!handle.trim()) {
+    if (!nextHandle || handleInvalid) {
       return;
     }
     updateProfile.mutate({
-      username: handle.trim(),
+      username: nextHandle,
       preferredName: displayName.trim() || undefined,
     });
   };
@@ -143,6 +152,18 @@ function UserSettings() {
           >
             {t("mobile:self.userSettings.handleHint")}
           </Text>
+          {handleInvalid && nextHandle ? (
+            <Text
+              testID="text-handle-invalid"
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 11,
+                color: semantic.danger,
+              }}
+            >
+              {t("mobile:self.userSettings.handleInvalid")}
+            </Text>
+          ) : null}
         </View>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
           <Text style={ty.label}>{upper(t("user.emailLabel"))}</Text>
@@ -198,7 +219,7 @@ function UserSettings() {
           testID="btn-save"
           variant="primary"
           onPress={onSave}
-          disabled={!dirty || !handle.trim() || updateProfile.isPending}
+          disabled={!dirty || !nextHandle || handleInvalid || updateProfile.isPending}
           iconRight={<Icon.check color="#0a0907" />}
         >
           {updateProfile.isPending

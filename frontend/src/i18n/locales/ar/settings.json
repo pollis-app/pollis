@@ -160,6 +160,7 @@
     "accountHeading": "الحساب",
     "usernameLabel": "اسم المستخدم",
     "usernamePlaceholder": "username",
+    "usernameInvalid": "اسم المستخدم من 3 إلى 32 حرفًا: أحرف لاتينية صغيرة وأرقام و'_' و'.' و'-'.",
     "preferredNameLabel": "الاسم المفضل",
     "preferredNamePlaceholder": "الاسم الذي يناديك به الناس",
     "saveFailed": "تعذّر الحفظ",

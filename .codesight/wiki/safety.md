@@ -155,6 +155,7 @@ Renderer plumbing:
 | Turso adds a rogue device under an existing user (account-key unchanged) | Cross-signing check on inbound MLS commit (`mls.rs`) | Logs warning; commit currently proceeds (advisory — known gap, see whitepaper §13.2) |
 | Turso adds a rogue device under a *swapped* account-key | Both layers fire: TOFU detects the key swap; cross-sign detects the cert mismatch | Banner + warning |
 | Network MITM between two clients (no Turso write) | MLS cipher integrity (ChaCha20-Poly1305 AEAD) | Decryption fails — cannot impersonate anyone |
+| A user sets their username to a victim's email address so invites / DM-starts for that address resolve to them (MLS would then admit the squatter, since membership follows whatever id the DS hands back) | Prevented, not detected: the DS refuses any username outside `^[a-z0-9_.-]{3,32}$`, migration `000021` refuses `@` at the schema, and every identifier lookup matches `@`-shaped input against `email` only (`database.md` → users) | The state cannot be created; a legacy `@` username is unreachable by lookup and cannot be saved again |
 | Local DB tampering on attacker's own machine | Out of scope — that machine's user can do whatever they want to their own DB |
 
 ## Key transparency (verifiable logs)

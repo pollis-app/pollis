@@ -154,6 +154,7 @@
     "accountHeading": "Обліковий запис",
     "usernameLabel": "Ім'я користувача",
     "usernamePlaceholder": "ім'я користувача",
+    "usernameInvalid": "Ім'я користувача — від 3 до 32 символів: малі латинські літери, цифри, '_', '.' або '-'.",
     "preferredNameLabel": "Бажане ім'я",
     "preferredNamePlaceholder": "Як вас називають",
     "saveFailed": "Не вдалося зберегти",

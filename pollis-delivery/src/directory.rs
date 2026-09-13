@@ -1058,6 +1058,44 @@ pub async fn members(State(state): State<AppState>, req: RawRequest) -> Result<R
 
 // ── POST /v1/directory/users ─────────────────────────────────────────────────
 
+/// Resolve ONE person from a username-or-email identifier — the single lookup
+/// behind `/v1/directory/users` (and so the client's `search_user_by_username`)
+/// and `groups::apply_create_invite`.
+///
+/// The identifier is matched against exactly one column, chosen by shape: an
+/// `@` makes it an email and it is compared with `users.email` ONLY; without
+/// one it is compared with `users.username` ONLY. It used to be
+/// `WHERE username = ?1 OR email = ?1`, first row wins — and SQLite's
+/// multi-index OR scans the `username` term first, so an account that had set
+/// its username to `alice@corp.com` was what an invite or DM for Alice's
+/// address resolved to, whether or not Alice had an account yet. Dispatching on
+/// `@` removes the ambiguity outright; `profile::is_valid_username` and the
+/// `000021` triggers make sure no username can carry an `@` to begin with, so a
+/// username never competes for an email-shaped identifier and vice versa.
+///
+/// Matching is exact, as it always was — a lookup, not a search index.
+pub async fn user_by_identifier(
+    conn: &Connection,
+    identifier: &str,
+) -> anyhow::Result<Option<UserWire>> {
+    let column = if identifier.contains('@') { "email" } else { "username" };
+    let sql = format!(
+        "SELECT id, username, preferred_name, avatar_url FROM users WHERE {column} = ?1"
+    );
+    let mut rows = conn
+        .query(&sql, libsql::params![identifier.to_string()])
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(Some(UserWire {
+            id: row.get(0)?,
+            username: row.get(1)?,
+            preferred_name: row.get(2)?,
+            avatar_url: row.get(3)?,
+        })),
+        None => Ok(None),
+    }
+}
+
 /// POST `/v1/directory/users` — profile hydration and username/email lookup.
 ///
 /// The projection deliberately omits `phone`: nothing renders it, and it is the
@@ -1097,20 +1135,7 @@ pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Res
     }
 
     if let Some(identifier) = parsed.identifier.as_deref().filter(|s| !s.is_empty()) {
-        let mut rows = conn
-            .query(
-                "SELECT id, username, preferred_name, avatar_url \
-                 FROM users WHERE username = ?1 OR email = ?1",
-                libsql::params![identifier.to_string()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            let user = UserWire {
-                id: row.get(0)?,
-                username: row.get(1)?,
-                preferred_name: row.get(2)?,
-                avatar_url: row.get(3)?,
-            };
+        if let Some(user) = user_by_identifier(&conn, identifier).await? {
             if !out.iter().any(|u| u.id == user.id) {
                 out.push(user);
             }

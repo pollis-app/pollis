@@ -148,6 +148,7 @@
     "accountHeading": "Compte",
     "usernameLabel": "Nom d'utilisateur",
     "usernamePlaceholder": "nom d'utilisateur",
+    "usernameInvalid": "Le nom d'utilisateur doit compter de 3 à 32 caractères : minuscules, chiffres, '_', '.' ou '-'.",
     "preferredNameLabel": "Nom affiché",
     "preferredNamePlaceholder": "Comment les autres vous appellent",
     "saveFailed": "Échec de l'enregistrement",

@@ -106,7 +106,9 @@ now reused rather than rebuilt.
 ### users
 - `id` TEXT PK
 - `email` TEXT NOT NULL UNIQUE
-- `username` TEXT
+- `username` TEXT NOT NULL UNIQUE — **may not contain `@`**, enforced by the
+  `users_username_no_at_insert` / `users_username_no_at_update` triggers of
+  migration `000021` (see below)
 - `phone` TEXT
 - `avatar_url` TEXT
 - `created_at` TEXT NOT NULL DEFAULT now
@@ -126,6 +128,37 @@ in-process harnesses:
 | writer | function | when |
 |---|---|---|
 | DS (authoritative, and the only one) | `pollis_delivery::otp::apply_verify_otp` | every sign-in |
+
+**`username` has a shape, and the shape is what makes identifier lookups sound.**
+Every "find a person by what the user typed" on the DS — `/v1/invites/create`,
+`/v1/directory/users` (behind the client's `search_user_by_username`) — goes
+through ONE function, `directory::user_by_identifier`, which matches an identifier
+containing `@` against `email` ONLY and anything else against `username` ONLY. It
+used to be `WHERE username = ?1 OR email = ?1`, first row wins, and SQLite's
+multi-index OR scans the `username` term first — so an account that had set its
+username to `alice@corp.com` was what an admin's invite to Alice resolved to, and
+the MLS Add admitted the squatter. The dispatch is only sound if no username can
+contain `@`, which three layers now guarantee:
+
+| layer | rule | where |
+|---|---|---|
+| DS chokepoint | `^[a-z0-9_.-]{3,32}$`, else 400 (`USERNAME_INVALID`) | `pollis_delivery::profile::is_valid_username`, applied by `apply_update_profile` |
+| DS minting | default names (`<email local part>_<ulid suffix>`) are lower-cased and squeezed into the same rule | `pollis_delivery::otp::default_username` |
+| schema | `@` refused on INSERT and UPDATE OF `username`, with no DS code in the path | migration `000021` (`users_username_no_at_*` triggers) |
+
+The schema layer refuses only `@` — the load-bearing half — so that the migration
+is **already satisfied** by every default name minted before it (the ULID suffix
+was upper-case Crockford base32; a local part cannot contain `@`). Those legacy
+names keep working: `apply_update_profile` validates a username only when it
+differs from the stored one, because both clients re-send the current username on
+every save and a rename-or-nothing rule would have locked such accounts out of
+editing their display name. The carve-out never covers `@`. Triggers rather than
+a CHECK because SQLite cannot `ALTER TABLE … ADD CHECK` without the 12-step rebuild.
+The clients mirror the rule (`frontend/src/utils/username.ts`,
+`mobile/lib/username.ts`) so the form can say why before the round trip; tests:
+`pollis-delivery/tests/username_shape.rs` (all three layers, plus the
+squatter-resolution regression), `frontend/tests/username.test.ts`,
+`mobile/tests/username.test.ts`.
 
 **There is exactly one writer since #910.** `pollis-core` used to carry a twin
 (`auth::resolve_or_create_user_by_email`, reached from the `#[cfg(debug_assertions)]`
