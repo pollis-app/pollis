@@ -386,6 +386,16 @@ pub struct ReconcileOutcome {
     /// messages until they run a client that publishes a pool in that suite, and
     /// downgrading the group to admit them is never an option.
     pub skipped_no_suite_kp: Vec<(String, String)>,
+    /// The tree membership as it stood when the commit was staged — walked
+    /// INSIDE `stage_reconcile_commit`, immediately after its own
+    /// `merge_pending_commit` (#1084).
+    ///
+    /// The "before" for the join/leave banner cannot be the snapshot the caller
+    /// took at the top of its pass: staging resolves any pending commit first,
+    /// so by the time the diff is computed the tree may already have moved. A
+    /// banner derived from the stale snapshot misreports who joined and who
+    /// left. Empty on a no-op pass, where there is no banner to render.
+    pub tree_before: Vec<(String, String)>,
     /// `(user_id, device_id, reason)` for every claimed KeyPackage the committer
     /// REFUSED to turn into an Add because its leaf signature key is not the one
     /// the claimed user's `account_id_pub` certified — or could not be shown to
@@ -823,6 +833,19 @@ where
         .merge_pending_commit(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
 
+    // #1084: the tree as it ACTUALLY stands now that the pending commit is
+    // resolved. This — not the caller's pre-pass snapshot — is the "before" the
+    // join/leave banner has to diff against.
+    let tree_before: Vec<(String, String)> = group
+        .members()
+        .map(|m| {
+            (
+                parse_credential_user_id(&m.credential),
+                parse_credential_device_id(&m.credential).unwrap_or_default(),
+            )
+        })
+        .collect();
+
     // Validate KPs.
     let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
     let mut refused: Vec<(String, String, String)> = Vec::new();
@@ -923,6 +946,7 @@ where
         Some(identities),
     )?;
     outcome.refused_uncertified = refused;
+    outcome.tree_before = tree_before;
     Ok(Some((outcome, data)))
 }
 
@@ -1412,20 +1436,46 @@ pub async fn reconcile_group_mls_impl(
     {
         use std::collections::HashSet;
 
-        // Per-user device counts BEFORE this commit — derived from the
-        // `already_in_tree` snapshot captured at the top of this function.
+        // #1084: both sides of this diff are now TREE WALKS, not a snapshot plus
+        // arithmetic.
+        //
+        // The "before" is the walk `stage_reconcile_commit` took after resolving
+        // any pending commit — `already_in_tree`, captured at the top of this
+        // pass, is taken BEFORE staging and staging's own pre-merge can move the
+        // tree out from under it. The "after" is a fresh walk of the merged
+        // group rather than `already_in_tree` with `added`/`removed` applied,
+        // because that arithmetic inherits every error in the "before" and
+        // silently disagrees with the tree whenever the pre-merge did anything.
+        //
+        // A banner is cosmetic; a WRONG banner tells a member somebody joined or
+        // left when they did not. So if the fresh walk is unavailable, nothing is
+        // emitted rather than a guess.
         let prior_user_ids: HashSet<&String> =
-            already_in_tree.iter().map(|(uid, _)| uid).collect();
+            outcome.tree_before.iter().map(|(uid, _)| uid).collect();
 
-        // Per-user device counts AFTER this commit. Start from
-        // `already_in_tree`, drop removed pairs, add added pairs.
-        let mut post_tree: HashSet<(String, String)> = already_in_tree.clone();
-        for pair in &outcome.removed {
-            post_tree.remove(pair);
-        }
-        for pair in &outcome.added {
-            post_tree.insert(pair.clone());
-        }
+        let post_tree: Option<Vec<(String, String)>> = {
+            let guard = state.local_db.lock().await;
+            guard.as_ref().and_then(|db| {
+                load_stored_group(db.conn(), &conversation_id).map(|group| {
+                    group
+                        .members()
+                        .map(|m| {
+                            (
+                                parse_credential_user_id(&m.credential),
+                                parse_credential_device_id(&m.credential).unwrap_or_default(),
+                            )
+                        })
+                        .collect()
+                })
+            })
+        };
+        let Some(post_tree) = post_tree else {
+            eprintln!(
+                "[reconcile] {conversation_id}: no post-commit tree walk available — \
+                 skipping the roster banner rather than reporting a guessed diff"
+            );
+            return Ok(outcome);
+        };
         let post_user_ids: HashSet<&String> =
             post_tree.iter().map(|(uid, _)| uid).collect();
 

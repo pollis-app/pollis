@@ -3018,3 +3018,82 @@ fn measure_decrypt_statement_count() {
     let (reads2, writes2) = crate::signal::mls_storage::counters::since(before);
     println!("PER-CALL : reads={reads2} writes={writes2} => per-message reads={:.1} time={percall_ms:.2}ms", reads2 as f64 / N as f64);
 }
+
+/// #1084: the join/leave banner's "before" must be the tree as it stands when
+/// the commit is staged, not the snapshot the pass took before staging.
+///
+/// `stage_reconcile_commit` resolves any pending commit first. A committer that
+/// staged an add and never adopted it (the #411 lost-response state) therefore
+/// has a tree that MOVES during staging — so the caller's pre-pass snapshot is
+/// already wrong by the time the diff is computed, and a banner derived from it
+/// reports the wrong people joining or leaving.
+///
+/// `tree_before` is walked inside staging, after that merge, which is what makes
+/// the banner's "before" true.
+#[test]
+fn tree_before_reflects_the_pre_merge_not_the_pre_pass_snapshot() {
+    let conv = "01JT1084TREEBEFOREWALK0000";
+    let (alice_db, bob_db, carol_db) = (make_db(), make_db(), make_db());
+    create_group(&alice_db, conv, "alice");
+    let bob_kp = gen_key_package(&bob_db, "bob");
+    let (_c1, welcome1) = add_member_to_group(&alice_db, conv, &bob_kp);
+    join_via_welcome(&bob_db, &welcome1);
+
+    // The pre-pass snapshot a caller would take right now: alice + bob. Carol is
+    // NOT in it.
+    let snapshot: std::collections::HashSet<(String, String)> = load_local_group(&alice_db, conv)
+        .unwrap()
+        .members()
+        .map(|m| {
+            (
+                super::provider::parse_credential_user_id(&m.credential),
+                super::provider::parse_credential_device_id(&m.credential).unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert!(
+        !snapshot.iter().any(|(uid, _)| uid == "carol"),
+        "precondition: carol is absent from the pre-pass snapshot"
+    );
+
+    // Alice stages adding carol and does NOT merge — a pending commit that will
+    // be resolved by the next staging attempt.
+    let carol_kp = gen_key_package(&carol_db, "carol");
+    let (_own_commit, _welcome2) = stage_add_without_merge(&alice_db, conv, &carol_kp);
+    assert!(
+        load_local_group(&alice_db, conv).unwrap().pending_commit().is_some(),
+        "precondition: alice holds a pending commit"
+    );
+
+    // Now run a reconcile staging pass. Its first act is to merge that pending
+    // commit, so carol joins the tree before any diff is computed.
+    let roster: std::collections::HashSet<String> =
+        ["alice", "bob", "carol"].iter().map(|s| s.to_string()).collect();
+    // The snapshot must name the devices the tree ACTUALLY holds, or the diff
+    // would want to evict everyone (including self, which MLS refuses).
+    let valid: std::collections::HashSet<(String, String)> = roster
+        .iter()
+        .map(|u| (u.clone(), test_device_id(u)))
+        .collect();
+    let provider = PollisProvider::new(&alice_db);
+    let staged = super::reconcile::stage_reconcile_commit(
+        &provider,
+        conv,
+        0,
+        &[],
+        &roster,
+        "alice",
+        &test_device_id("alice"),
+        &valid,
+        &super::device::IdentityDirectory::new(Vec::new()),
+    )
+    .expect("staging must not error");
+
+    let outcome = staged.expect("a staging attempt was made").0;
+    assert!(
+        outcome.tree_before.iter().any(|(uid, _)| uid == "carol"),
+        "tree_before must include carol — it is walked AFTER the pending commit is \
+         merged, unlike the pre-pass snapshot; got {:?}",
+        outcome.tree_before
+    );
+}

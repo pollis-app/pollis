@@ -62,6 +62,9 @@ The remote DB is the source of truth for MLS state. Staging the commit locally, 
 
 See commit `83df6ef` for the rationale; breaking this ordering re-introduces the 9-user churn flake.
 
+
+**Roster banner (#1084).** The inline "X joined / X left" banner diffs TWO TREE WALKS, never a snapshot plus arithmetic. The "before" is `ReconcileOutcome::tree_before`, walked inside `stage_reconcile_commit` immediately after it resolves any pending commit — the snapshot the pass takes at its start is captured BEFORE staging, and staging's own pre-merge can move the tree out from under it (the #411 lost-response state is exactly that). The "after" is a fresh `load_stored_group` walk of the merged group rather than the "before" with `added`/`removed` applied, because that arithmetic inherits every error in the "before". A banner is cosmetic but a WRONG banner tells a member somebody joined or left when they did not, so if the fresh walk is unavailable nothing is emitted.
+
 ## How Other Devices Catch Up
 
 When device A commits a membership change:
