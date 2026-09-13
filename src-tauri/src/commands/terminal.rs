@@ -20,14 +20,14 @@ pub async fn terminal_open(rows: u16, cols: u16, on_output: tauri::ipc::Channel<
 /// Security settings page and by the terminal pane before it tries to attach.
 #[tauri::command]
 pub async fn get_terminal_enabled() -> Result<bool> {
-    Ok(pollis_core::commands::terminal_gate::get_terminal_enabled().await?)
+    pollis_core::commands::terminal_gate::get_terminal_enabled().await
 }
 
 /// Flip the device-local terminal switch. The renderer may set it; it cannot
 /// bypass it — `terminal_open` reads the persisted value, not an IPC argument.
 #[tauri::command]
 pub async fn set_terminal_enabled(enabled: bool) -> Result<()> {
-    Ok(pollis_core::commands::terminal_gate::set_terminal_enabled(enabled).await?)
+    pollis_core::commands::terminal_gate::set_terminal_enabled(enabled).await
 }
 
 #[tauri::command]
