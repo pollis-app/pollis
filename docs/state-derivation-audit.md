@@ -2,9 +2,6 @@
 
 How to run: ask an agent to "run the state-derivation audit in docs/state-derivation-audit.md" (or to re-verify the epic "State-derivation audit: MLS / membership / session state"). The agent follows this file verbatim, reads the code, and produces a report only. Tracking epic: GitHub issue #1078. Baseline from the first run: `docs/state-derivation-audit-baseline-2026-09-13.md`.
 
-
-# State-derivation audit
-
 A repeatable, read-only scan of every stateful structure that represents group,
 membership, or session state (or a view derived from it), classifying each as
 pure-derived, wrongly-incremental, or legitimately-incremental, and checking
