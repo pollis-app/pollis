@@ -348,7 +348,38 @@ async fn authorize_room(
         return Ok(true);
     }
     let conn = state.db.conn().await?;
-    Ok(is_member(&conn, room, user_id).await?)
+    if !is_member(&conn, room, user_id).await? {
+        return Ok(false);
+    }
+    // A block does not delete the DM's membership rows — it resets the
+    // blocker's `accepted_at` — so membership alone would keep handing the
+    // blocked user a token for the room they were just evicted from, and the
+    // eviction would undo itself on their next reconnect. Refusing the token is
+    // what makes it stick. One-directional, like the block: the blocker keeps
+    // their own access.
+    Ok(!dm_peer_blocked(&conn, room, user_id).await?)
+}
+
+/// True when another member of the DM `room` has blocked `user_id`.
+///
+/// Answers `false` for anything that is not a DM — a group room matches no
+/// `dm_channel_member` row — so the group and channel paths are unaffected.
+async fn dm_peer_blocked(
+    conn: &Connection,
+    room: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM dm_channel_member peer \
+               JOIN user_block b \
+                 ON b.blocker_id = peer.user_id AND b.blocked_id = ?2 \
+              WHERE peer.dm_channel_id = ?1 AND peer.user_id <> ?2 \
+              LIMIT 1",
+            libsql::params![room.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// Sign an HS256 LiveKit JWT. `can_publish_data` is `false` for the `view`
@@ -374,7 +405,7 @@ pub fn sign_livekit_token(
         sub: identity.to_string(),
         iat: now,
         nbf: now,
-        exp: now + 3600,
+        exp: now + LIVEKIT_TOKEN_TTL_SECS,
         name: String::new(),
         video: VideoGrants {
             room: room.to_string(),
@@ -877,6 +908,292 @@ pub async fn room_send_data(
         )),
         Err(e) => Err(format!("SendData: {e}")),
     }
+}
+
+// ── 1c. RoomService/RemoveParticipant — evicting who lost access ─────────────
+//
+// A LiveKit token is checked ONCE, when the participant joins. Nothing about
+// losing access afterwards reaches the SFU on its own: a member removed from a
+// group, one who left, a blocked user, or a revoked device all keep the realtime
+// connection they already hold until they happen to disconnect. Refusing them a
+// NEW token (which `authorize_room` already does) does not close a session that
+// is already open — only `RoomService/RemoveParticipant` does.
+//
+// Two halves make an eviction complete, and both live here so no call site can
+// implement half of it:
+//
+//   - the TTL ([`LIVEKIT_TOKEN_TTL_SECS`]) bounds how long a *stale* token stays
+//     usable, i.e. how long a client that reconnects can re-enter a room it has
+//     since lost. `realtime.rs` re-mints on every reconnect, so shortening it
+//     costs a client nothing;
+//   - the kick below ends the session that is open RIGHT NOW.
+//
+// The identity handed to LiveKit is the per-room pseudonym (#836), derived from
+// `(room, user, device, kind)` — so evicting a user means evicting every one of
+// their devices in every capability, which is what [`participant_identities`]
+// enumerates.
+
+/// Realtime/voice participant token lifetime, in seconds.
+///
+/// Deliberately short (15 min, was 1 h). Membership is checked only when the
+/// token is MINTED, so the TTL is exactly the window in which a token issued
+/// before a removal can still be redeemed at the SFU. The client re-mints on
+/// every reconnect (`pollis-core` `commands/livekit/realtime.rs`), and LiveKit
+/// validates the token at join rather than continuously, so a live connection is
+/// never dropped by this expiring — shortening it costs an established session
+/// nothing and only narrows the re-entry window.
+pub const LIVEKIT_TOKEN_TTL_SECS: u64 = 15 * 60;
+
+/// Evict one participant identity from one LiveKit room via server-side
+/// `RoomService/RemoveParticipant`.
+///
+/// A 404 is success: LiveKit answers that way when the room does not exist or
+/// the identity is not in it, which for an eviction is the desired end state —
+/// and the common case, since most of a user's `(device, kind)` identities are
+/// not connected at any given moment.
+pub async fn room_remove_participant(
+    state: &AppState,
+    room: &str,
+    identity: &str,
+) -> Result<(), String> {
+    let (api_key, api_secret, url) = state
+        .broker
+        .livekit_ready()
+        .ok_or_else(|| "livekit not configured".to_string())?;
+
+    // #828: LiveKit is addressed by the room pseudonym here for the same reason
+    // `room_send_data` maps at the chokepoint — the logical name never leaves
+    // the DS.
+    let wire_room = crate::room_id::room_pseudonym(api_secret, room);
+    let token = sign_livekit_admin_token(api_key, api_secret, &wire_room, crate::util::now_unix())
+        .map_err(|e| format!("sign admin token: {e}"))?;
+    let endpoint = format!(
+        "{}/twirp/livekit.RoomService/RemoveParticipant",
+        twirp_base(url)
+    );
+
+    let sent = crate::util::http_post(crate::util::Upstream::LiveKit, &endpoint)
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "room": wire_room, "identity": identity }))
+        .send()
+        .await;
+
+    match sent {
+        Ok(r) if r.status().is_success() || r.status() == StatusCode::NOT_FOUND => Ok(()),
+        Ok(r) => {
+            let status = r.status();
+            let text = r.text().await.unwrap_or_default();
+            Err(format!("RemoveParticipant {status}: {text}"))
+        }
+        Err(e) if e.is_timeout() => Err(format!(
+            "RemoveParticipant: livekit timed out after {}s",
+            crate::util::Upstream::LiveKit.timeout().as_secs()
+        )),
+        Err(e) => Err(format!("RemoveParticipant: {e}")),
+    }
+}
+
+/// Every LiveKit identity `user_id` can be holding in `logical_room`.
+///
+/// One per `(device, kind)` pair, because that is exactly what
+/// [`crate::participant_id::participant_pseudonym`] keys on: a user connected
+/// from two devices is two participants, and a device in a voice channel is a
+/// different participant from the same device's realtime connection. Missing one
+/// of them leaves that session live, so this enumeration is the whole
+/// correctness of an eviction.
+///
+/// Takes the devices explicitly rather than reading them, because the two
+/// callers want different sets: losing membership evicts EVERY device the user
+/// has, while revoking one device must leave that user's other sessions alone.
+pub fn participant_identities(
+    api_secret: &str,
+    logical_room: &str,
+    user_id: &str,
+    device_ids: &[String],
+) -> Vec<String> {
+    use crate::participant_id::ParticipantKind;
+
+    let mut out = Vec::with_capacity(device_ids.len() * 3);
+    for device in device_ids {
+        for kind in [
+            ParticipantKind::Realtime,
+            ParticipantKind::Voice,
+            ParticipantKind::View,
+        ] {
+            out.push(crate::participant_id::participant_pseudonym(
+                api_secret,
+                logical_room,
+                user_id,
+                device,
+                kind,
+            ));
+        }
+    }
+    out
+}
+
+/// The device ids registered to `user_id`, revoked ones included.
+///
+/// Revoked devices are deliberately in: a revocation is one of the events that
+/// MUST evict, and the tombstone is written before the eviction runs, so
+/// filtering on `revoked_at IS NULL` would skip the very device being kicked.
+pub async fn user_device_ids(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT device_id FROM user_device WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        if let Ok(id) = row.get::<String>(0) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
+/// The realtime rooms that belong to a group: the group's own room (one MLS
+/// group per group, and the realtime connection is keyed on it) plus every
+/// channel in it, because a voice/screenshare participant joins the CHANNEL as
+/// the room (`commands/voice/lifecycle.rs`). Evicting only the group room would
+/// leave an ex-member sitting in the voice channel.
+pub async fn group_rooms(conn: &Connection, group_id: &str) -> anyhow::Result<Vec<String>> {
+    let mut out = vec![group_id.to_string()];
+    let mut rows = conn
+        .query(
+            "SELECT id FROM channels WHERE group_id = ?1",
+            libsql::params![group_id.to_string()],
+        )
+        .await?;
+    while let Some(row) = rows.next().await? {
+        if let Ok(id) = row.get::<String>(0) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
+/// The DM rooms `a` and `b` share. A block costs the blocked user their place
+/// in exactly these rooms (see [`dm_peer_blocked`]).
+pub async fn shared_dm_rooms(
+    conn: &Connection,
+    a: &str,
+    b: &str,
+) -> anyhow::Result<Vec<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT me.dm_channel_id FROM dm_channel_member me \
+               JOIN dm_channel_member them ON them.dm_channel_id = me.dm_channel_id \
+              WHERE me.user_id = ?1 AND them.user_id = ?2",
+            libsql::params![a.to_string(), b.to_string()],
+        )
+        .await?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await? {
+        if let Ok(id) = row.get::<String>(0) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
+/// Every room `user_id` may currently be connected to: their own inbox, each
+/// group they are in, each channel of those groups, and each DM.
+///
+/// `call-<ulid>` rooms are deliberately absent — they have no membership row at
+/// all (the ULID is the capability) and nothing in the DB can enumerate them.
+pub async fn user_rooms(conn: &Connection, user_id: &str) -> anyhow::Result<Vec<String>> {
+    let mut out = vec![format!("inbox-{user_id}")];
+    let mut rows = conn
+        .query(
+            "SELECT group_id FROM group_member WHERE user_id = ?1 \
+             UNION SELECT c.id FROM channels c \
+                     JOIN group_member gm ON gm.group_id = c.group_id \
+                    WHERE gm.user_id = ?1 \
+             UNION SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    while let Some(row) = rows.next().await? {
+        if let Ok(id) = row.get::<String>(0) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
+/// Kick `user_id` out of every room in `rooms` — every device, every capability.
+///
+/// This is the membership-loss eviction (removed, left, blocked): the user has
+/// no business in the room from any device, so every device they own is kicked,
+/// plus the legacy no-device identity (`participant_pseudonym` accepts `""`, and
+/// a client old enough to hold one is exactly the client that will not notice
+/// being un-authorized).
+pub async fn evict_user_from_rooms(state: &AppState, rooms: &[String], user_id: &str) {
+    let mut device_ids = match state.db.conn().await {
+        Ok(conn) => user_device_ids(&conn, user_id).await.unwrap_or_default(),
+        Err(e) => {
+            tracing::warn!("eviction device lookup failed: {e}");
+            Vec::new()
+        }
+    };
+    device_ids.push(String::new());
+    evict_identities(state, rooms, user_id, &device_ids).await;
+}
+
+/// Kick ONE device of `user_id` out of every room in `rooms`, leaving that
+/// user's other sessions connected. The revoked-device case: the account keeps
+/// its access, this device does not.
+pub async fn evict_device_from_rooms(
+    state: &AppState,
+    rooms: &[String],
+    user_id: &str,
+    device_id: &str,
+) {
+    evict_identities(state, rooms, user_id, &[device_id.to_string()]).await;
+}
+
+/// Fire-and-forget in the same sense as [`room_send_data`]: a LiveKit that is
+/// down or unconfigured must not fail the write that already committed — the
+/// user IS removed either way, and the stale session then dies at its next
+/// reconnect, when [`authorize_room`] refuses it a token. Failures are logged,
+/// never returned.
+///
+/// The calls run CONCURRENTLY and are awaited before the handler answers. There
+/// are `3 × devices` of them per room and each carries the 5s LiveKit deadline,
+/// so running them in sequence would put a stalled SFU on the critical path of a
+/// `POST /v1/members/remove` for a minute; concurrently the worst case is one
+/// deadline.
+async fn evict_identities(
+    state: &AppState,
+    rooms: &[String],
+    user_id: &str,
+    device_ids: &[String],
+) {
+    let Some((_, api_secret, _)) = state.broker.livekit_ready() else {
+        return;
+    };
+    if rooms.is_empty() || device_ids.is_empty() {
+        return;
+    }
+
+    let mut tasks = tokio::task::JoinSet::new();
+    for room in rooms {
+        for identity in participant_identities(api_secret, room, user_id, device_ids) {
+            let state = state.clone();
+            let room = room.clone();
+            tasks.spawn(async move {
+                if let Err(e) = room_remove_participant(&state, &room, &identity).await {
+                    // The identity is a pseudonym and the room is logical, so
+                    // this names what failed without logging either in a form
+                    // that links a user to a conversation.
+                    tracing::warn!("RemoveParticipant failed: {e}");
+                }
+            });
+        }
+    }
+    while tasks.join_next().await.is_some() {}
 }
 
 // ── POST /v1/livekit/participants ─────────────────────────────────────────────

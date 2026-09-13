@@ -249,11 +249,20 @@ pub async fn connect_rooms(
                                 }
                             }
 
-                            // Re-read the URL on every reconnect, not just the
-                            // first connect: a reconnect is exactly when the DS
-                            // may hand us a different server (failover, or a
-                            // regional move), and reusing the original address
-                            // would pin us to a server that may be draining.
+                            // Re-mint the token and re-read the URL on every
+                            // reconnect, not just the first connect: a reconnect
+                            // is exactly when the DS may hand us a different
+                            // server (failover, or a regional move), and reusing
+                            // the original address would pin us to a server that
+                            // may be draining.
+                            //
+                            // Re-minting is also what lets the DS keep the
+                            // participant token short-lived (15 min — see
+                            // `broker::LIVEKIT_TOKEN_TTL_SECS`): membership is
+                            // re-checked at every mint, so the TTL bounds how
+                            // long a client that has since lost access can
+                            // re-enter the room. Caching the first token here
+                            // would re-open exactly that window.
                             let (token, reconnect_url) = match crate::commands::mls::ds_livekit_token(&app_state_task, &room_id_owned, "realtime").await {
                                 Ok(pair) => pair,
                                 Err(e) => {

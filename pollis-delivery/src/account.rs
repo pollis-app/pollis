@@ -522,6 +522,13 @@ pub async fn revoke_device(
         if matches!(outcome, WriteOutcome::Ok) {
             let log_conn = state.log_db.conn().await?;
             crate::teardown::purge_device_log_rows(&log_conn, &owner, &parsed.device_id).await?;
+            // A revoked device fails the signature gate from here on, so it can
+            // never mint another LiveKit token — but the SFU checks a token only
+            // at JOIN, so the realtime and voice sessions it already holds would
+            // outlive the revocation. Kick exactly this device's identities; the
+            // account's other devices keep theirs.
+            let rooms = crate::broker::user_rooms(&conn, &owner).await?;
+            crate::broker::evict_device_from_rooms(&state, &rooms, &owner, &parsed.device_id).await;
         }
     }
     match outcome {

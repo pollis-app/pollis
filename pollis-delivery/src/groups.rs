@@ -420,11 +420,22 @@ pub async fn leave_group(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
+    // Read the rooms BEFORE the leave: an empty group is torn down by the call
+    // below, taking its `channels` rows — and with them the only record of which
+    // voice rooms the leaver has to be evicted from — with it.
+    let rooms = crate::broker::group_rooms(&conn, &parsed.group_id).await?;
     let (outcome, dead_conversations) =
         apply_leave_group(&conn, authed.as_deref(), &parsed).await?;
     if matches!(outcome, WriteOutcome::Ok) && !dead_conversations.is_empty() {
         let log_conn = state.log_db.conn().await?;
         crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
+    }
+    // Same reason as `remove_member`: leaving deletes the membership row, not
+    // the LiveKit session that row authorized.
+    if matches!(outcome, WriteOutcome::Ok) {
+        if let Some(user) = authed.clone().or_else(|| parsed.user_id.clone()) {
+            crate::broker::evict_user_from_rooms(&state, &rooms, &user).await;
+        }
     }
     outcome_response::<LeaveGroupBody>(outcome)
 }
@@ -686,7 +697,15 @@ pub async fn remove_member(
         Err(resp) => return Ok(resp),
     };
     let conn = state.db.conn().await?;
-    outcome_response::<RemoveMemberBody>(apply_remove_member(&conn, authed.as_deref(), &parsed).await?)
+    let outcome = apply_remove_member(&conn, authed.as_deref(), &parsed).await?;
+    // The removal only takes effect on the SFU if someone tells it (#18): a
+    // LiveKit token is checked at JOIN, so an ex-member's open realtime/voice
+    // connection survives the row deletion until they happen to disconnect.
+    if matches!(outcome, WriteOutcome::Ok) {
+        let rooms = crate::broker::group_rooms(&conn, &parsed.group_id).await?;
+        crate::broker::evict_user_from_rooms(&state, &rooms, &parsed.user_id).await;
+    }
+    outcome_response::<RemoveMemberBody>(outcome)
 }
 
 /// Remove a member. Authz: the actor removes themselves (leave) OR is a

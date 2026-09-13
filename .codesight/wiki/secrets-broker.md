@@ -23,7 +23,7 @@ answers, like OTP with no Resend key).
 
 | Endpoint | Does | Env (all required, else `503`) |
 |----------|------|--------------------------------|
-| `POST /v1/livekit/token` | HS256 participant JWT; identity = an opaque **per-room participant pseudonym** derived from the **verified signer** + its device + `kind` (#836); no `name` claim; room authz (own `inbox-*` and `call-*` always ok, else membership) on the **logical** room, then the grant carries the **room pseudonym** (#828) | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` |
+| `POST /v1/livekit/token` | HS256 participant JWT; identity = an opaque **per-room participant pseudonym** derived from the **verified signer** + its device + `kind` (#836); no `name` claim; room authz (own `inbox-*` and `call-*` always ok, else membership **and no block from a DM peer**) on the **logical** room, then the grant carries the **room pseudonym** (#828); 15-min TTL | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` |
 | `POST /v1/livekit/send-data` | Server-side `RoomService/SendData` — signs an admin JWT + Twirp POSTs a content-free control payload to a room. **Target authz + sender stamping** (below): own inbox always; a peer's inbox only with a shared DM / group / pending invite and no block; a conversation room only as a member; `type` must be client-publishable (`enrollment_requested` is DS-only); identity keys stripped and the verified signer stamped in | same LiveKit env |
 | `POST /v1/livekit/participants` | Server-side `RoomService/ListParticipants` (voice roster); each identity **resolved back to its user + username** server-side (#836), internal and `view` participants filtered; membership-gated | same LiveKit env |
 | `POST /v1/livekit/identities` | Resolve opaque participant pseudonyms → `{user_id, name, kind}` for a room the caller may join (#836). The per-room key never leaves the DS | same LiveKit env |
@@ -67,6 +67,45 @@ own claims; `enrollment_requested` is honoured only with no participant.
 Tests: `pollis-delivery/tests/livekit_send_data.rs` (refusals never reach a
 recording fake LiveKit; allowed sends carry the stamped signer) and the
 `dispatch_data` unit tests in `livekit/mod.rs`.
+
+### Losing access ends the session you already hold
+
+A LiveKit token is verified **once, at join**. A membership row deleted afterwards
+reaches the SFU not at all, so a removed member, a leaver, a blocked peer and a
+revoked device all used to keep the realtime/voice connection they were already
+holding — presence, typing, control nudges, the voice room — until they chose to
+disconnect. Two halves close that, both in `broker.rs`:
+
+- **The kick.** `room_remove_participant` is the `RoomService/RemoveParticipant`
+  sibling of `room_send_data` (same admin JWT, same Twirp base, same
+  404-is-success rule). `evict_user_from_rooms` / `evict_device_from_rooms` fan it
+  out over `participant_identities` — one identity per `(device, kind)`, since the
+  pseudonym is keyed on both, plus the legacy empty-device identity for the
+  user-level case. Concurrent (`JoinSet`) and awaited before the handler answers;
+  failures are logged, never returned, exactly like a nudge.
+- **The TTL.** `LIVEKIT_TOKEN_TTL_SECS` = 15 min (was 1 h) bounds how long a token
+  minted *before* the loss can still be redeemed. `realtime.rs` re-mints on every
+  reconnect and LiveKit only checks at join, so a live session never notices.
+
+Call sites, and the room sets they evict from:
+
+| Event | Rooms |
+|-------|-------|
+| `POST /v1/members/remove` | `group_rooms` — the group room **and every channel in it** (voice joins the *channel* as the room) |
+| `POST /v1/groups/leave` | `group_rooms`, read **before** the leave (an emptied group is torn down, taking its `channels` rows) |
+| `POST /v1/blocks/add` | `shared_dm_rooms(blocker, blocked)` — the blocked user only |
+| `POST /v1/devices/revoke` | `user_rooms(owner)` — inbox, groups, their channels, DMs — for **that device only** |
+
+A block deletes no membership row, so the eviction alone would be undone by the
+blocked client's next reconnect. `authorize_room` therefore also refuses a token
+to a user another member of that DM has blocked (`dm_peer_blocked`) —
+one-directional, like the block itself: the blocker keeps their own access.
+`call-<ulid>` rooms are not evictable: no membership row exists to enumerate them.
+
+Tests: `pollis-delivery/tests/livekit_eviction.rs` (a recording fake
+`RemoveParticipant` Twirp endpoint; per-room, per-device, per-kind assertions,
+plus "a forbidden removal evicts nobody" and the blocked-peer token refusal) and
+`a_participant_token_expires_in_minutes_not_hours` in `tests/broker.rs`.
 
 ### Room names are pseudonymous (#828)
 
