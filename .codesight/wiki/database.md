@@ -883,6 +883,7 @@ independently.
 - `created_at` TEXT NOT NULL DEFAULT now
 - `expires_at` TEXT NOT NULL
 - `approved_by_device_id` TEXT
+- `id` is the CLIENT's `request_id`, so a duplicate submit is an ordinary retry rather than a fault. `POST /v1/auth/enrollment-request` inserts `OR IGNORE` and then resolves the conflict by READING the winning row: the same session's own id is idempotent (200), anybody else's is a typed 409 `request_id_taken`. It is never an overwrite — the row carries the `verification_code` the approving device compares against, so letting a second caller replace it in place is how an approval gets steered onto the wrong device. (A bare INSERT here surfaced the UNIQUE violation as a 500.)
 
 ### security_event _(migration 13)_
 - `id` TEXT PK

@@ -20,7 +20,6 @@
 //!
 //! Every test below fails against the pre-fix handler.
 
-use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
