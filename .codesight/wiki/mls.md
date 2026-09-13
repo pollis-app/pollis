@@ -331,7 +331,7 @@ races, and duplicate deliveries. All are additive to the flows above.
   new-message seals) until some unrelated membership change re-runs reconcile — a
   forward-secrecy gap. The cold-launch/reconnect sweep now runs a backstop
   (`mls/sweep.rs`) after catching each group up: a cheap local-tree-vs-roster
-  pre-check (`local_tree_has_stale_leaf`, two SELECTs + a local MLS load) and, only
+  pre-check (`local_tree_has_stale_leaf`, two SELECTs + a local MLS load; its decision comes from `sweep::has_stale_leaf`, which asks `reconcile::desired_set` rather than restating the removal rule — the two were separate copies of one rule, and `desired_set` has grown conditions twice (#679's `valid_devices` gating, then the cross-signing verdict), so the next one would have silently left this precheck predicting the wrong thing (#1083)) and, only
   if a stale leaf remains, a `reconcile_group_mls_impl` retry that actually prunes
   it. Steady state (tree already matches roster) costs only the pre-check.
 - **Welcome dedupe + idempotent resubmit (P2).** A `UNIQUE (conversation_id,

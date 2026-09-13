@@ -465,7 +465,7 @@ pub(super) fn snapshot_includes_actor(
     valid_devices.contains(&(actor_user_id.to_string(), actor_device_id.to_string()))
 }
 
-fn desired_set<'a>(
+pub(super) fn desired_set<'a>(
     kp_keys: &[(String, String)],
     tree_members: impl Iterator<Item = &'a (String, String)>,
     roster_user_ids: &std::collections::HashSet<String>,

@@ -247,6 +247,35 @@ async fn reconcile_backstop(
 /// `reconcile_group_mls_impl`'s roster + `valid_devices` derivation exactly, so
 /// it flags precisely the leaves reconcile would drop and never misses a pending
 /// eviction.
+/// Does the local tree hold a leaf that reconcile would remove?
+///
+/// Derived FROM [`reconcile::desired_set`] rather than restating its rule. This
+/// used to be a hand-written predicate — "the user left the roster OR the device
+/// row is gone" — which is what `desired_set` computes today, but only by
+/// coincidence: they were two copies of one rule with nothing keeping them in
+/// step. `desired_set` has already grown conditions twice (#679 gating the
+/// KeyPackage half on `valid_devices`, then the cross-signing verdict), and the
+/// next one would have silently left this precheck predicting the wrong thing —
+/// either skipping an eviction the sweep exists to retry, or waking a reconcile
+/// on every cold launch for a leaf reconcile means to keep.
+///
+/// `kp_keys` is empty on purpose: the question is only "which leaves already in
+/// the tree does reconcile still want", i.e. the retention half. An add is not
+/// staleness.
+fn has_stale_leaf(
+    tree_members: &[(String, String)],
+    roster: &HashSet<String>,
+    valid_devices: &HashSet<(String, String)>,
+) -> bool {
+    let desired = super::reconcile::desired_set(
+        &[],
+        tree_members.iter(),
+        roster,
+        Some(valid_devices),
+    );
+    tree_members.iter().any(|key| !desired.contains(key))
+}
+
 async fn local_tree_has_stale_leaf(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -300,10 +329,73 @@ async fn local_tree_has_stale_leaf(
     )
     .await?;
 
-    // 4. A leaf is stale iff its user left the roster OR its device row is gone —
-    //    exactly the leaves reconcile would remove. Any such leaf means a
-    //    remove/eviction commit was dropped and must be retried.
-    Ok(tree_members
-        .iter()
-        .any(|(uid, did)| !roster.contains(uid) || !valid_devices.contains(&(uid.clone(), did.clone()))))
+    // 4. A leaf is stale iff reconcile would remove it — see [`has_stale_leaf`].
+    Ok(has_stale_leaf(&tree_members, &roster, &valid_devices))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_stale_leaf;
+    use std::collections::HashSet;
+
+    fn key(u: &str, d: &str) -> (String, String) {
+        (u.to_string(), d.to_string())
+    }
+    fn roster(users: &[&str]) -> HashSet<String> {
+        users.iter().map(|u| u.to_string()).collect()
+    }
+    fn valid(pairs: &[(&str, &str)]) -> HashSet<(String, String)> {
+        pairs.iter().map(|(u, d)| key(u, d)).collect()
+    }
+
+    #[test]
+    fn a_settled_tree_has_nothing_stale() {
+        assert!(!has_stale_leaf(
+            &[key("alice", "a1"), key("bob", "b1")],
+            &roster(&["alice", "bob"]),
+            &valid(&[("alice", "a1"), ("bob", "b1")]),
+        ));
+    }
+
+    /// The dropped-remove case the sweep exists to retry.
+    #[test]
+    fn a_leaf_whose_user_left_the_roster_is_stale() {
+        assert!(has_stale_leaf(
+            &[key("alice", "a1"), key("bob", "b1")],
+            &roster(&["alice"]),
+            &valid(&[("alice", "a1")]),
+        ));
+    }
+
+    /// #1083 names this case specifically: single-device revocation must be seen
+    /// as stale WITHOUT the live sibling being dragged in with it — otherwise
+    /// revoking one device would look like logging the user out everywhere.
+    #[test]
+    fn a_revoked_device_is_stale_but_its_live_sibling_is_not() {
+        let tree = [key("alice", "a1"), key("alice", "a2")];
+        let roster = roster(&["alice"]);
+
+        assert!(
+            has_stale_leaf(&tree, &roster, &valid(&[("alice", "a1")])),
+            "the revoked a2 must register as stale"
+        );
+        // And with both live, nothing is stale — the sibling alone is not a reason.
+        assert!(!has_stale_leaf(
+            &tree,
+            &roster,
+            &valid(&[("alice", "a1"), ("alice", "a2")])
+        ));
+    }
+
+    /// The precheck must agree with `desired_set` about the committer's own leaf,
+    /// which holds no KeyPackage (it consumed one creating the group). Treating
+    /// that as stale would make every cold launch wake a pointless reconcile.
+    #[test]
+    fn a_retained_leaf_without_a_key_package_is_not_stale() {
+        assert!(!has_stale_leaf(
+            &[key("alice", "a1")],
+            &roster(&["alice"]),
+            &valid(&[("alice", "a1")]),
+        ));
+    }
 }
