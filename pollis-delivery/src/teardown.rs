@@ -54,6 +54,7 @@ use libsql::Connection;
 /// `tests/teardown.rs` asserts exactly that against the live schema.
 pub const USER_PURGED_TABLES: &[&str] = &[
     "account_recovery",
+    "directory_lookup_budget",
     "attachment_ref",
     "conversation_watermark",
     "device_enrollment_request",
@@ -244,6 +245,12 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     // Reactions this user made on anyone's messages. They carry the reacting
     // user in the clear, so they are removable and must be removed.
     conn.execute("DELETE FROM message_reaction WHERE user_id = ?1", uid()).await?;
+
+    // The directory-lookup budget (#1089) is per-user bookkeeping with nothing
+    // to preserve: a recreated account gets a new `user_id`, so keeping the row
+    // would bound nobody and only leave a residue of how much this person
+    // searched.
+    conn.execute("DELETE FROM directory_lookup_budget WHERE user_id = ?1", uid()).await?;
 
     // Membership and the social graph.
     conn.execute("DELETE FROM group_member WHERE user_id = ?1", uid()).await?;

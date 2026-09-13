@@ -1016,6 +1016,28 @@ See [Local message retention](#local-message-retention) below.
 - `preferences` TEXT NOT NULL DEFAULT '{}' _(single row, local mirror of remote)_
 - `updated_at` TEXT NOT NULL DEFAULT now
 
+### directory_lookup_budget _(#1089)_
+
+`(user_id, day)` → `lookups`. One small row per active user per UTC day, charged
+by `directory::charge_identifier_lookup` every time `/v1/directory/users`
+resolves an `identifier` (a username **or an email**) to an account.
+
+The endpoint is otherwise an email→identity oracle for any account holder: feed
+it addresses and it answers which have Pollis accounts and under what name. The
+per-IP middleware tier sheds floods but an attacker rotates IPs, so the bound
+that binds is keyed on the authenticated user and read from the database —
+restart-proof and shared across container instances, the same reasoning
+`groups::apply_redeem_invite_link` writes down for redemption. Cap is
+`IDENTIFIER_LOOKUPS_PER_DAY` (50): a handful for a human, years of work for a
+mailing list.
+
+Charged **before** the decision, so a refused attempt still costs — otherwise
+the cap resets on every 429. Bulk hydration by `user_ids` is NOT charged: those
+ids are already known to the caller and a cold launch legitimately issues many.
+Records no identifier and no result, deliberately — bounding the oracle must not
+build a log of who looked up whom. Purged on account deletion
+(`teardown::purge_user_rows`).
+
 ### read_cursor _(#844)_
 - `conversation_id` TEXT PK
 - `last_read_at` TEXT NOT NULL

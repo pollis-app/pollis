@@ -1096,6 +1096,48 @@ pub async fn user_by_identifier(
     }
 }
 
+/// Identifier lookups allowed per user per UTC day (#1089).
+///
+/// Sized for humans: you look up the handful of people you are trying to reach.
+/// An attacker gets 50 addresses a day per account they control, which turns a
+/// mailing list into a multi-year job instead of an afternoon.
+pub const IDENTIFIER_LOOKUPS_PER_DAY: i64 = 50;
+
+/// Charge one identifier lookup against `user`'s daily budget and report whether
+/// it may proceed.
+///
+/// Keyed on the authenticated user and read from the database, not memory: the
+/// per-IP middleware tier sheds floods but an attacker rotates IPs, so a
+/// restart-proof, instance-shared bound is the one that binds here. Same
+/// reasoning `groups::apply_redeem_invite_link` writes down for redemption.
+///
+/// Charges BEFORE deciding, so a refused attempt still costs — otherwise the cap
+/// is a speed bump that resets on every 429.
+///
+/// `pub` so the tests drive the budget directly against a local DB, as the
+/// `apply_*` writes elsewhere are.
+pub async fn charge_identifier_lookup(conn: &Connection, user: &str) -> anyhow::Result<bool> {
+    conn.execute(
+        "INSERT INTO directory_lookup_budget (user_id, day, lookups) \
+           VALUES (?1, strftime('%Y-%m-%d','now'), 1) \
+         ON CONFLICT(user_id, day) DO UPDATE SET lookups = lookups + 1",
+        libsql::params![user.to_string()],
+    )
+    .await?;
+    let mut rows = conn
+        .query(
+            "SELECT lookups FROM directory_lookup_budget \
+             WHERE user_id = ?1 AND day = strftime('%Y-%m-%d','now')",
+            libsql::params![user.to_string()],
+        )
+        .await?;
+    let used: i64 = match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => 0,
+    };
+    Ok(used <= IDENTIFIER_LOOKUPS_PER_DAY)
+}
+
 /// POST `/v1/directory/users` — profile hydration and username/email lookup.
 ///
 /// The projection deliberately omits `phone`: nothing renders it, and it is the
@@ -1135,6 +1177,13 @@ pub async fn users(State(state): State<AppState>, req: RawRequest) -> Result<Res
     }
 
     if let Some(identifier) = parsed.identifier.as_deref().filter(|s| !s.is_empty()) {
+        // #1089: resolving an identifier — a username or an EMAIL — to an
+        // account is the enumeration surface on this endpoint. Bulk hydration by
+        // `user_ids` is not: those ids are already known to the caller. So the
+        // budget is charged only here, and only the lookup is refused.
+        if !charge_identifier_lookup(&conn, &who).await? {
+            return Ok(crate::ratelimit::too_many_requests());
+        }
         if let Some(user) = user_by_identifier(&conn, identifier).await? {
             if !out.iter().any(|u| u.id == user.id) {
                 out.push(user);

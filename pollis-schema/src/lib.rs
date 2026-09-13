@@ -227,6 +227,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "key_package_claim_audit",
         include_str!("../migrations/000022_key_package_claim_audit.sql"),
     ),
+    (
+        23,
+        "directory_lookup_budget",
+        include_str!("../migrations/000023_directory_lookup_budget.sql"),
+    ),
 ];
 
 /// Every script for the MAIN DB, in apply order (baseline first). One element
