@@ -2150,8 +2150,7 @@ mod server_user_id_is_not_a_path {
 
         let err = verify_otp(&state, "alice@example.com".to_string(), "123456".to_string())
             .await
-            .err()
-            .expect("a path-like user_id must be refused");
+            .expect_err("a path-like user_id must be refused");
         assert!(
             err.to_string().contains("malformed user_id"),
             "refused for the wrong reason: {err}"
@@ -2184,8 +2183,7 @@ mod server_user_id_is_not_a_path {
 
         let err = verify_otp(&state, "alice@example.com".to_string(), "123456".to_string())
             .await
-            .err()
-            .expect("the fake DS serves no establish-identity, so bootstrap fails");
+            .expect_err("the fake DS serves no establish-identity, so bootstrap fails");
         assert!(
             !err.to_string().contains("malformed user_id"),
             "a plain id was refused as malformed: {err}"
