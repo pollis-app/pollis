@@ -82,9 +82,15 @@ pollis-capture-proto = { path = "../pollis-capture-proto" }
 
 # default-features off so a headless build drops wry. The five tauri default
 # features (wry, compression, common-controls-v6, dynamic-acl, x11) are moved
-# into `native-shell`; the three extras below stay unconditional (protocol-asset
-# / tray-icon / image-png compile without wry and are used by the shims + tray).
-tauri = { version = "2", default-features = false, features = ["protocol-asset", "tray-icon", "image-png"] }
+# into `native-shell`; the two extras below stay unconditional (tray-icon /
+# image-png compile without wry and are used by the shims + tray).
+#
+# `protocol-asset` is deliberately absent. The asset protocol is a second,
+# separately-scoped way to read an arbitrary native path out of the webview, and
+# it bypasses `crate::pathscope` entirely; `assetProtocol.enable` is false in
+# `tauri.conf.json` and tauri-build fails the build if the feature and the
+# config disagree, so the two can never drift apart.
+tauri = { version = "2", default-features = false, features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"

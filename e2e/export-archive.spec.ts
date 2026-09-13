@@ -182,7 +182,7 @@ for (const skin of SKINS) {
 
       // Give a wrongly-eager implementation the chance to fire.
       await expect(page.getByTestId("export-archive-button")).toBeEnabled();
-      expect(await invokeCount(page, "plugin:dialog|save")).toBe(1);
+      expect(await invokeCount(page, "pick_save_path")).toBe(1);
       expect(await invokeCount(page, "export_archive")).toBe(0);
       await expect(page.getByTestId("export-archive-button-done")).toHaveCount(0);
       await expect(page.getByTestId("export-archive-button-error")).toHaveCount(0);

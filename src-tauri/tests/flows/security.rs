@@ -811,3 +811,91 @@ async fn message_delete_works_when_ds_auth_is_disabled() {
         "the impersonating delete must not have removed anything"
     );
 }
+
+/// The four path-taking commands only accept paths a human chose.
+///
+/// `upload_media`, `upload_group_emoji`, `export_archive` and
+/// `fetch_export_attachments` each take a filesystem path straight off the IPC
+/// and then read or write it with the app's full authority. Before
+/// `src-tauri/src/pathscope.rs` nothing checked where the string came from, so
+/// one `invoke` from anything executing inside the webview read `~/.ssh/id_rsa`
+/// and uploaded it, or wrote a plaintext archive of the whole account wherever
+/// it liked.
+///
+/// The harness's client is a freshly-built app with an EMPTY path scope, which
+/// is exactly the state a real app is in before the user opens a picker. So the
+/// first half below is the regression: every one of the four must refuse. The
+/// second half is the thing the guard must not break — once the scope records a
+/// path (which only the Rust-side pickers and the OS drag-drop handler can do),
+/// the same call gets past the gate and fails for an ordinary reason instead.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn path_taking_commands_refuse_a_path_the_user_never_chose() {
+    wipe().await;
+
+    let client = TestClient::new().await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let secret_path = dir.path().join("id_rsa");
+    std::fs::write(&secret_path, b"-----BEGIN OPENSSH PRIVATE KEY-----").expect("write");
+    let secret = secret_path.to_string_lossy().into_owned();
+    let elsewhere = dir.path().join("anywhere.json").to_string_lossy().into_owned();
+    let files_dir = dir.path().to_string_lossy().into_owned();
+
+    let refusals = [
+        (
+            "upload_media",
+            json!({
+                "path": secret,
+                "filename": "id_rsa",
+                "contentType": "application/octet-stream"
+            }),
+        ),
+        (
+            "upload_group_emoji",
+            json!({ "groupId": "g", "shortcode": "sneaky", "path": secret }),
+        ),
+        (
+            "export_archive",
+            json!({ "path": elsewhere, "conversationId": null }),
+        ),
+        (
+            "fetch_export_attachments",
+            json!({ "filesDir": files_dir, "attachments": [] }),
+        ),
+    ];
+
+    for (cmd, args) in &refusals {
+        let err = client
+            .invoke_try(cmd, args.clone())
+            .await
+            .expect_err("must refuse a path nobody picked");
+        assert!(
+            err.contains("not chosen in a file dialog"),
+            "{cmd} must be refused BY THE PATH SCOPE, not incidentally by something \
+             else downstream; got: {err}"
+        );
+    }
+
+    // The other side of the invariant: a recorded path gets through the gate.
+    // Only this process can record one — `pick_open_paths` / `pick_save_path`
+    // and the DragDrop handler — which is why the test reaches for the managed
+    // state directly rather than through a command.
+    let scope = tauri::Manager::state::<pollis_lib::pathscope::PathScope>(&client.webview);
+    scope.remember_file(&secret_path);
+
+    let err = client
+        .invoke_try(
+            "upload_media",
+            json!({
+                "path": secret,
+                "filename": "id_rsa",
+                "contentType": "application/octet-stream"
+            }),
+        )
+        .await
+        .expect_err("this client is not signed in, so the upload still cannot complete");
+    assert!(
+        !err.contains("not chosen in a file dialog"),
+        "a path the user DID choose must get past the gate; got: {err}"
+    );
+}

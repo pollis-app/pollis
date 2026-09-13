@@ -11,7 +11,7 @@
  *  - `bridge/dialog.ts`         — dialogOpen / dialogSave
  *  - `bridge/fs.ts`             — writeFile / readFile / stat
  *  - `bridge/shell.ts`          — shellOpen
- *  - `bridge/app.ts`            — getVersion / relaunch / exit / convertFileSrc
+ *  - `bridge/app.ts`            — getVersion / relaunch / exit
  *  - `bridge/notifications.ts`  — isPermissionGranted / requestPermission /
  *                                 sendNotification
  *  - `bridge/clipboard.ts`      — readClipboardFiles / readClipboardImage /
@@ -69,7 +69,7 @@ export { writeFile, readFile, stat, type FileInfo } from "./bridge/fs";
 export { shellOpen } from "./bridge/shell";
 
 // App / path / process.
-export { getVersion, relaunch, exit, convertFileSrc } from "./bridge/app";
+export { getVersion, relaunch, exit } from "./bridge/app";
 
 // Notifications.
 export {

@@ -196,6 +196,13 @@ export const SecurityPage: React.FC = observer(() => {
   const [revokeMediaOnExit, setRevokeMediaOnExit] = useState<boolean>(false);
   const [confirmingRevoke, setConfirmingRevoke] = useState<boolean>(false);
 
+  // The in-app terminal (#282) spawns the user's login shell, so it is off
+  // until someone here turns it on. The authority is Rust's
+  // `device-settings.json`, not this state — `terminal_open` reads the file and
+  // refuses regardless of what the renderer believes. This is the switch, not
+  // the lock.
+  const [terminalEnabled, setTerminalEnabled] = useState<boolean>(false);
+
   // Idle auto-lock (#851). Device-local, like font size and the call ringtone:
   // it describes where this machine physically sits, so it deliberately does
   // not sync. Seeded from localStorage once the active user is known.
@@ -205,6 +212,14 @@ export const SecurityPage: React.FC = observer(() => {
   useEffect(() => {
     setAutoLockMinutes(loadDeviceAutoLockMinutes(currentUser?.id));
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    void invoke<boolean>("get_terminal_enabled")
+      // Coerced, not trusted: a build without the command answers `null`, and
+      // anything that is not literally `true` means the shell stays off.
+      .then((enabled) => setTerminalEnabled(enabled === true))
+      .catch(() => setTerminalEnabled(false));
+  }, []);
 
   // `AUTO_LOCK_OPTIONS` lives in `utils/autoLock.ts` — module-level data, so
   // its `label` can't be translated there without freezing the language at
@@ -253,6 +268,15 @@ export const SecurityPage: React.FC = observer(() => {
       cancelled = true;
     };
   }, []);
+
+  const handleTerminalEnabled = (val: boolean) => {
+    setTerminalEnabled(val);
+    void invoke("set_terminal_enabled", { enabled: val }).catch((err) => {
+      console.warn("[terminal] set_terminal_enabled failed:", err);
+      // Snap back: the file is the truth, and it did not change.
+      setTerminalEnabled(!val);
+    });
+  };
 
   const handleRevokeMediaOnExit = (val: boolean) => {
     setRevokeMediaOnExit(val);
@@ -807,6 +831,27 @@ export const SecurityPage: React.FC = observer(() => {
               {isWindows && t("security.mediaNoteWindows")}
               {!isMac && !isLinux && !isWindows && t("security.mediaNoteOther")}
             </p>
+          </section>
+
+          {/* The in-app terminal. A shell is the single most powerful thing
+              this process can be asked to do, so it ships off and the switch
+              lives here rather than in Preferences — it is a capability grant,
+              not a comfort setting. */}
+          <section className="flex flex-col gap-4 mb-12" data-testid="terminal-section">
+            <h2 className={sectionHeaderClass}>
+              {t("security.terminalHeading")}
+            </h2>
+            <div className="flex flex-col gap-1.5">
+              <Switch
+                id="pref-terminal-enabled"
+                label={t("security.terminalEnabledLabel")}
+                checked={terminalEnabled}
+                onChange={handleTerminalEnabled}
+              />
+              <p className="text-xs font-mono text-muted">
+                {t("security.terminalEnabledDescription")}
+              </p>
+            </div>
           </section>
 
           {/* Your data (#856) — the exit that is not delete_account. Strictly

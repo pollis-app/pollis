@@ -499,9 +499,44 @@ Invariant: **`deafened ⇒ self_muted`** — the gate's fields are private and u
 - `get_public_file_url(key)` → URL — resolves a public object to a loopback media-server URL, caching the bytes on disk encrypted at rest under the same content-addressed scheme attachments and custom emoji use. The key IS the expected digest, so the integrity check is free and mandatory (these objects are stored unencrypted). Returns `""` — the same sentinel `get_media_url` uses — for a LEGACY key that carries no digest, or when the media server isn't up; the frontend falls back to `download_file` for those.
 - ~~`presign_upload(key, content_type)`~~ — **does not exist** under that name as of 2026-08-03 (#714). Presigning is server-side: the DS secrets broker mints URLs via `POST /v1/r2/presign` (see `delete_r2_object` below and `docs/secrets-broker.md`).
 - `get_media_url(r2_key, content_hash, content_type)` → URL — builds the loopback media-server URL (`http://127.0.0.1:<port>/<token>/<hash>`) for a cached item; errors if the server isn't started or there is no active unlock. See `pollis-core/src/media_server.rs`.
-- `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso. `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here.
+- `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso. `path` is a file the **user** already has (picker selection, OS drag-and-drop); nothing in the app ever writes a file in order to have a path to pass here. **The shim enforces that** — see "Path-taking commands are scoped to what the user picked" below.
 - `upload_media_staged(staged_id, filename, content_type)` — the same upload for bytes with no path: a paste, or a drop the webview surfaced as a `File`. Reads them from the in-memory staging registry (`commands/staging.rs`) and releases them **only on success**, so a failed upload is a retry rather than a lost paste.
 - Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) used by `delete_message` to purge orphaned attachments. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
+
+### Path-taking commands are scoped to what the user picked
+
+Four commands take a filesystem path as an IPC argument — `upload_media`,
+`upload_group_emoji`, `export_archive`, `fetch_export_attachments` — and act on
+it with the app process's full authority. They are the only four, and each one's
+`#[tauri::command]` shim in `src-tauri/src/commands/` calls
+`PathScope::require` before forwarding to `pollis-core`. A path that is not in
+the scope is refused with *"that location was not chosen in a file dialog on
+this device"*, and nothing is read or written.
+
+`src-tauri/src/pathscope.rs` owns the registry. It is **written only from inside
+the process**, which is the whole point — a "register this path for me" command
+would be one a compromised renderer calls with `~/.ssh/id_rsa`:
+
+| writer | when |
+| --- | --- |
+| `commands::pathscope::pick_open_paths` | the OS open/folder picker, driven from Rust |
+| `commands::pathscope::pick_save_path` | the OS save panel, driven from Rust |
+| `pathscope::remember_dropped` | the `DragDrop` window event in `run()`, with the paths the OS put in it |
+
+The renderer's `bridge/dialog.ts` calls the two `pick_*` commands; `dialog:*` is
+no longer in `src-tauri/capabilities/default.json`, so `plugin:dialog|open` is
+unreachable from the webview and there is no way to obtain a path Rust did not
+witness. Directories are stored as prefixes (an export's sidecar `files/` lives
+under the folder the user chose) and `..` is collapsed lexically before the
+prefix test, so a picked directory cannot be walked out of. A save target is
+stored as given rather than canonicalized, because it does not exist yet —
+which is why Tauri's own `fs::Scope` could not be used for this.
+
+Mobile is exempt: it reaches the same `pollis-core` implementations through the
+uniffi bridge, where the OS app sandbox already bounds what a path can name.
+
+`tests/flows/security.rs::path_taking_commands_refuse_a_path_the_user_never_chose`
+drives all four through the real IPC pipeline with an empty scope.
 
 ## staging (`commands/staging.rs`)
 In-memory custody of attachment bytes that arrive through the webview with no filesystem path (#1000). The renderer used to manufacture one by writing the raw file into the OS temp directory as `pollis-<ts>-<original filename>`; nothing ever deleted it, so the plaintext of every file a user had ever pasted stayed there under its own name. There is no file now — bytes go into a process-global registry keyed by an opaque id, bounded by `STAGED_MAX_TOTAL_BYTES` (512 MiB, which refuses rather than evicting), and released on upload success, on removal, on composer unmount, and wholesale by `lock` / `logout` / `wipe_local_data`.
@@ -561,6 +596,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`messages`** — `add_reaction`, `delete_message`, `edit_message`, `get_channel_messages`, `get_dm_messages`, `get_message_retention`, `get_reactions`, `get_unread_counts`, `ingest_channel_envelopes`, `ingest_dm_envelopes`, `list_messages`, `list_thread_summaries`, `mark_conversation_read`, `read_channel_messages`, `read_dm_messages`, `read_last_messages`, `read_messages_after`, `read_messages_around`, `read_thread_messages`, `rebuild_search_index`, `remove_reaction`, `run_message_eviction`, `search_messages`, `send_message`, `set_message_retention`, `sync_read_cursors`
 - **`mls`** — `catch_up_all_mls_groups`, `poll_mls_welcomes`, `process_pending_commits`
 - **`overlay`** — `get_overlay_mode`, `set_overlay_mode`
+- **`pathscope`** — `pick_open_paths`, `pick_save_path`
 - **`pin`** — `get_unlock_state`, `lock`, `set_pin`, `unlock`
 - **`pinned_messages`** — `list_pinned_messages`, `pin_message`, `unpin_message`
 - **`r2`** — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
@@ -569,7 +605,7 @@ sed -n '/generate_handler!\[/,/^\s*\]) *$/p' src-tauri/src/lib.rs
 - **`safety`** — `get_safety_number`, `list_peer_verifications`, `set_contact_verified`
 - **`screenshare`** — `cancel_screen_share_picker`, `enumerate_screen_sources`, `screenshare_ws_url`, `start_screen_share`, `stop_screen_share`, `subscribe_screen_share_events`, `subscribe_screen_share_frames`
 - **`sfx`** — `play_sfx`, `start_ring`, `stop_ring`
-- **`terminal`** — `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
+- **`terminal`** — `get_terminal_enabled`, `set_terminal_enabled`, `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
 - **`transparency`** — `audit_peer_account_key`, `self_audit_account_key`, `verify_own_build`
 - **`tray`** — `tray_set_close_to_tray`, `tray_set_enabled`, `tray_set_unread`, `tray_set_voice_state`
 - **`update`** — `is_update_required`, `mark_update_required`
@@ -636,6 +672,8 @@ than hand-edit.
 
 **`r2`** (8) — `download_file`, `download_media`, `get_media_url`, `get_public_file_url`, `upload_file`, `upload_media`, `upload_media_staged`, `upload_public_file`
 
+**`pathscope`** (2) — `pick_open_paths`, `pick_save_path`
+
 **`staging`** (2) — `discard_staged_attachment`, `stage_attachment`
 
 **`update`** (2) — `is_update_required`, `mark_update_required`
@@ -652,7 +690,7 @@ than hand-edit.
 
 **`sfx`** (3) — `play_sfx`, `start_ring`, `stop_ring`
 
-**`terminal`** (5) — `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
+**`terminal`** (7) — `get_terminal_enabled`, `set_terminal_enabled`, `terminal_ack`, `terminal_close`, `terminal_open`, `terminal_resize`, `terminal_write`
 
 
 _Back to [index.md](./index.md)_

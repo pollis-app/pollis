@@ -21,7 +21,6 @@
     "core:window:allow-set-icon",
     "core:image:allow-from-bytes",
     "shell:allow-open",
-    "dialog:default",
     "fs:default",
     "fs:allow-temp-write",
     "notification:default",

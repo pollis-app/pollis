@@ -811,7 +811,7 @@ wire text onto that attribute on every change; `e2e/lib/harness.js` grows
 - **SavedPage** — `frontend/src/pages/SavedPage.tsx`
 - **SearchGroupPage** — `frontend/src/pages/SearchGroupPage.tsx`
 - **SearchPage** — `frontend/src/pages/Search.tsx`
-- **SecurityPage** — `frontend/src/pages/SecurityPage.tsx`
+- **SecurityPage** — `frontend/src/pages/SecurityPage.tsx`. Also carries the **Terminal** switch: the in-app terminal pane spawns the user's login shell, so it ships OFF and this is where it is turned on. The switch only writes the preference — the authority is Rust's device-local `device-settings.json` (`pollis-core/src/commands/terminal_gate.rs`), which `terminal_open` reads on every call, so a renderer that never touched this page still cannot start a shell. Absent or unparseable file reads as off. Desktop only — mobile has no terminal pane.
 - **SettingsHubPage** — `frontend/src/pages/SettingsHub.tsx`
 - **SettingsPage** — `frontend/src/pages/SettingsPage.tsx`
 - **StartDM** — props: onSuccess — `frontend/src/pages/StartDM.tsx`

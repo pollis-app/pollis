@@ -5,6 +5,9 @@ pub use pollis_core::keystore;
 pub use pollis_core::state;
 pub mod sink;
 pub mod commands;
+// The registry of paths a human actually chose, and the gate the path-taking
+// command shims call before they touch one.
+pub mod pathscope;
 // The system tray is built from Wry-typed handles (TrayIcon<Wry>, Menu<Wry>);
 // only compiled with the native shell.
 #[cfg(feature = "native-shell")]
@@ -448,6 +451,12 @@ pub fn run() {
             // exists for.
             commands::autolock::install_auto_lock_sink(tray_handle.clone());
 
+            // The registry of paths a human actually chose (`pathscope`).
+            // Written only from inside this process — the Rust-driven file
+            // pickers and the DragDrop window event below — and read by the
+            // four command shims that take a path off the IPC.
+            tray_handle.manage(crate::pathscope::PathScope::default());
+
             // Holds the "revoke media permissions on quit" preference so the
             // ExitRequested hook can read it synchronously at shutdown.
             tray_handle.manage(commands::media_permissions::MediaPermissionsState::default());
@@ -687,6 +696,10 @@ pub fn run() {
             commands::sfx::play_sfx,
             commands::sfx::start_ring,
             commands::sfx::stop_ring,
+            commands::pathscope::pick_open_paths,
+            commands::pathscope::pick_save_path,
+            commands::terminal::get_terminal_enabled,
+            commands::terminal::set_terminal_enabled,
             commands::terminal::terminal_open,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
@@ -705,6 +718,29 @@ pub fn run() {
         .on_window_event(|_window, _event| {
             #[cfg(target_os = "macos")]
             hide_on_close(_window, _event);
+            // A drop is the other consent gesture that legitimately names a
+            // path (the picker is the first). The paths come from the OS in
+            // the event itself, so recording them here — rather than trusting
+            // the renderer to report what it was handed — is what keeps
+            // `pathscope` a set only a human can grow.
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = _event {
+                let app = _window.app_handle();
+                if let Some(scope) = app.try_state::<crate::pathscope::PathScope>() {
+                    crate::pathscope::remember_dropped(&scope, paths);
+                }
+                // The fs plugin keeps a second, separate runtime allowlist, and
+                // the renderer reads a dropped image through it to build the
+                // pre-send preview. Grant it here for the same paths.
+                if let Some(fs) = tauri_plugin_fs::FsExt::try_fs_scope(app) {
+                    for path in paths {
+                        let _ = if path.is_dir() {
+                            fs.allow_directory(path, true)
+                        } else {
+                            fs.allow_file(path)
+                        };
+                    }
+                }
+            }
             if let tauri::WindowEvent::Focused(true) = _event {
                 // Bounded local history: evict messages past the device-local
                 // retention window on focus. This one is bounded by the

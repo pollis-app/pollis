@@ -81,6 +81,10 @@ pub mod terminal;
 #[cfg(target_os = "windows")]
 #[path = "terminal_windows.rs"]
 pub mod terminal;
+// The device-local switch `terminal_open` consults. Not behind the same cfg as
+// the PTY backend: the settings command that reads and writes the flag has to
+// exist wherever the settings UI does.
+pub mod terminal_gate;
 pub mod update;
 #[cfg(feature = "media")]
 pub mod camera;

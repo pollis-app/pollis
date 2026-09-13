@@ -938,10 +938,24 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'plugin:notification|is_permission_granted':
       return false;
 
-    // The OS save picker (`@tauri-apps/plugin-dialog` → `save()`), which the
-    // export's button opens before anything is written.
-    case 'plugin:dialog|save':
+    // The in-app terminal's device-local switch. Off, as a fresh install is —
+    // see pollis-core/src/commands/terminal_gate.rs.
+    case 'get_terminal_enabled':
+      return false;
+    case 'set_terminal_enabled':
+      return null;
+
+    // The OS save picker, which the export's button opens before anything is
+    // written. Driven from Rust now (`pick_save_path`) so the chosen path is
+    // recorded in the path scope before the renderer ever sees it — see
+    // `src-tauri/src/pathscope.rs`.
+    case 'pick_save_path':
       return store.exportSavePath;
+
+    // The OS open picker. Nothing in the browser suite drives it yet; answering
+    // with an empty list is "the user cancelled", which every call site handles.
+    case 'pick_open_paths':
+      return [];
 
     // On-device export (#856): the same summary shape
     // `pollis-core/src/commands/export.rs` returns. The browser holds no media

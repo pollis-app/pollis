@@ -157,6 +157,11 @@ pub async fn terminal_open(
     on_output: Arc<dyn RawSink>,
     state: &Arc<AppState>,
 ) -> Result<String> {
+    // Before anything else: this device has to have said yes. Off is the
+    // default and the fail-safe, so a fresh install, a corrupt settings file
+    // and a hostile renderer all land in the same place — no shell.
+    crate::commands::terminal_gate::require_terminal_enabled()?;
+
     let winsize = Winsize {
         ws_row: rows,
         ws_col: cols,

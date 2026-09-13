@@ -20,6 +20,9 @@ pub mod media_permissions;
 pub mod messages;
 pub mod mls;
 pub mod overlay;
+// The renderer's only file-dialog route: drives the OS picker from Rust and
+// records the result in `crate::pathscope` before handing it back.
+pub mod pathscope;
 pub mod pin;
 pub mod pinned_messages;
 pub mod r2;
