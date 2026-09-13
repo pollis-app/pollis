@@ -470,7 +470,7 @@ pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<
     let mut attachments_written = 0usize;
     let mut attachments_missing = Vec::new();
     if !distinct.is_empty() {
-        std::fs::create_dir_all(&files_dir)
+        crate::private_fs::create_dir_all(&files_dir)
             .map_err(|e| Error::Other(anyhow::anyhow!("could not create {}: {e}", files_dir.display())))?;
     }
     for att in &distinct {
@@ -492,7 +492,7 @@ pub fn write_archive(path: &Path, archive: &Archive, cached: Option<CachedBytes<
 
     let part = path.with_file_name(format!("{file_name}.part"));
     let result = (|| -> std::io::Result<()> {
-        let file = std::fs::File::create(&part)?;
+        let file = crate::private_fs::create_file(&part)?;
         let mut writer = std::io::BufWriter::new(file);
         serde_json::to_writer_pretty(&mut writer, archive)?;
         writer.write_all(b"\n")?;
@@ -545,7 +545,7 @@ fn write_cached_attachment(cached: &CachedBytes<'_>, files_dir: &Path, att: &Arc
     if hex::encode(Sha256::digest(&plaintext)) != att.content_hash {
         return false;
     }
-    std::fs::write(files_dir.join(&att.file), plaintext).is_ok()
+    crate::private_fs::write(&files_dir.join(&att.file), plaintext).is_ok()
 }
 
 // ── Bundling (mobile) ─────────────────────────────────────────────────────
@@ -566,7 +566,7 @@ pub fn bundle_archive(archive_path: &Path) -> Result<PathBuf> {
     let files_dir = files_dir_for(archive_path);
     let zip_path = archive_path.with_extension("zip");
     let result = (|| -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let out = std::fs::File::create(&zip_path)?;
+        let out = crate::private_fs::create_file(&zip_path)?;
         let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(out));
         let opts = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
@@ -968,6 +968,57 @@ mod tests {
         for banned in ["ds_client", "ds_post", "ds_reads", "reqwest", "presign", "r2_get_url", "download_media", "get_media_url", "libsql"] {
             assert!(!body.contains(banned), "export.rs must stay device-local; found `{banned}`");
         }
+    }
+
+    /// #1093: an export is the one artefact that holds full plaintext history
+    /// and every attachment, written wherever the user pointed the picker —
+    /// often a shared-machine directory. Every write here must go through
+    /// `private_fs` (0600/0700), never the process umask. Scanning the source
+    /// rather than the output is what keeps the NEXT write site honest.
+    #[test]
+    fn export_never_writes_outside_private_fs() {
+        for (name, src) in [
+            ("export.rs", include_str!("export.rs")),
+            ("export_fetch.rs", include_str!("export_fetch.rs")),
+        ] {
+            let body = src.split("#[cfg(test)]").next().unwrap();
+            for banned in [
+                "std::fs::write",
+                "std::fs::File::create",
+                "std::fs::create_dir_all",
+                "tokio::fs::write",
+                "OpenOptions",
+            ] {
+                assert!(
+                    !body.contains(banned),
+                    "{name} must write through private_fs; found `{banned}`"
+                );
+            }
+        }
+    }
+
+    /// And the behaviour the scan is standing in for: the archive is owner-only
+    /// on a platform that says so by mode. `#[cfg(unix)]` because the mode
+    /// accessor itself is unix-only — a runtime guard would still leave the
+    /// `PermissionsExt` import to fail the Windows build.
+    #[cfg(unix)]
+    #[test]
+    fn a_written_archive_is_owner_only() {
+        if !crate::private_fs::owner_only_is_enforced_by_mode() {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let db = db();
+        seed_fixture(db.conn());
+        let archive = build_archive(db.conn(), "me", ArchiveScope::Account).unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let path = out.path().join("archive.json");
+        write_archive(&path, &archive, None).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            crate::private_fs::FILE_MODE,
+            "the export archive must be 0600, not umask"
+        );
     }
 
     /// The other half of the constraint: no re-import path. A reader for this

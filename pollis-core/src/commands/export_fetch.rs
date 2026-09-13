@@ -73,7 +73,7 @@ where
             bad.file
         )));
     }
-    std::fs::create_dir_all(files_dir)
+    crate::private_fs::create_dir_all(files_dir)
         .map_err(|e| Error::Other(anyhow::anyhow!("could not create {}: {e}", files_dir.display())))?;
 
     let mut fetched = 0usize;
@@ -100,7 +100,7 @@ where
                     });
                     continue;
                 }
-                match std::fs::write(&target, bytes) {
+                match crate::private_fs::write(&target, bytes) {
                     Ok(()) => fetched += 1,
                     Err(e) => failed.push(FetchFailure {
                         content_hash: att.content_hash.clone(),

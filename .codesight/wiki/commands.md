@@ -305,6 +305,12 @@ a JSON file to a path the user picked in the OS save dialog. **Strictly device-l
 own test scans its source for the network helpers (`ds_client`, `ds_post`, `ds_reads`,
 `reqwest`, `presign`, `r2::`) so that stays true.
 
+Every write goes through `private_fs` (0600 files, 0700 directories), never the process
+umask (#1093) — an export is the one artefact holding full plaintext history and every
+attachment, and it lands wherever the picker pointed, often a shared-machine directory.
+A second source scan bans `std::fs::write` / `File::create` / `create_dir_all` in
+`export.rs` and `export_fetch.rs` so the next write site cannot regress it.
+
 - `export_archive(path, conversation_id?)` → `ExportSummary` — `conversation_id`
   narrows to one conversation; `null` is the full account archive (which also carries
   the Vault). `path` must be absolute (a dialog result); the file is written to a
