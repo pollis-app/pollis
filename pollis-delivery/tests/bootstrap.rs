@@ -882,3 +882,148 @@ async fn a_duplicate_enrollment_request_is_not_a_500() {
         "the verification code an approver compares against must never be rewritten"
     );
 }
+
+/// #1092: a device that has only registered is a GHOST — it proved it holds an
+/// OTP session, nothing more. A sibling still has to approve it, and it may
+/// never publish a cert at all. Seeding its watermarks at register-device meant
+/// such a device pinned envelope retention for the whole #720 staleness window,
+/// holding other members' mail on a device that never enrolled.
+///
+/// Watermarks are therefore seeded at the cert-publish PIVOT. Both halves are
+/// asserted here through the real endpoints.
+#[tokio::test]
+async fn watermarks_are_seeded_at_cert_publish_not_at_register() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+
+    let device_id = "dev-ghost";
+    let v = login(&state, "alice@example.com", device_id).await;
+    let user_id = v["user_id"].as_str().unwrap().to_string();
+    let token = v["session_token"].as_str().unwrap().to_string();
+
+    // Put the account in a conversation, so there is something to seed.
+    {
+        let conn = db.conn().await.unwrap();
+        conn.execute_batch(
+            "INSERT INTO conversation (id, kind) VALUES ('g1','group');\
+             INSERT INTO groups (id, name, owner_id) VALUES ('g1','G','u');\
+             INSERT INTO conversation (id, kind) VALUES ('c1','channel');\
+             INSERT INTO channels (id, group_id, name) VALUES ('c1','g1','general');",
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', ?1, 'member')",
+            libsql::params![user_id.clone()],
+        )
+        .await
+        .unwrap();
+    }
+
+    let account = gen_key();
+    let (s, _) = send(
+        &state,
+        "/v1/auth/establish-identity",
+        serde_json::json!({
+            "account_id_pub": b64(&pub_of(&account)),
+            "salt": b64(&[1u8; 32]),
+            "nonce": b64(&[2u8; 12]),
+            "wrapped_key": b64(&[3u8; 48]),
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (s, _) = send(
+        &state,
+        "/v1/auth/register-device",
+        serde_json::json!({ "device_id": device_id, "device_name": "Ghost" }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "register-device should succeed");
+
+    async fn watermark_count(db: &Db, device_id: &str) -> i64 {
+        let conn = db.conn().await.unwrap();
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM conversation_watermark WHERE device_id = ?1",
+                libsql::params![device_id.to_string()],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    }
+
+    assert_eq!(
+        watermark_count(&db, device_id).await,
+        0,
+        "a registered-but-unenrolled device must pin nothing"
+    );
+
+    // The pivot: publish a valid cert.
+    let (mls_pub, mls_pub_pq) = device_pubs();
+    let issued_at: u64 = 1_700_000_000;
+    let cert = sign_cert(&account, device_id, &mls_pub, &mls_pub_pq, 1, issued_at);
+    let (s, _) = send(
+        &state,
+        "/v1/auth/publish-device-cert",
+        serde_json::json!({
+            "device_id": device_id,
+            "device_cert": b64(&cert),
+            "cert_issued_at": issued_at as i64,
+            "cert_identity_version": 1,
+            "mls_signature_pub": b64(&mls_pub),
+            "mls_signature_pub_pq": b64(&mls_pub_pq),
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "publish-device-cert should succeed");
+
+    assert_eq!(
+        watermark_count(&db, device_id).await,
+        1,
+        "once enrolled, the device pins its conversations"
+    );
+}
+
+/// #1092, second half: `device_id` is the primary key of `user_device`, so a
+/// colliding id may belong to another account. The upsert's conflict branch is
+/// bound to the owner, so a session holder cannot reach into a stranger's row —
+/// bumping its `last_seen` would keep a dormant device of theirs pinning
+/// retention.
+#[tokio::test]
+async fn registering_cannot_touch_another_users_device_row() {
+    let db = fresh_db().await;
+    let conn = db.conn().await.unwrap();
+    conn.execute_batch(
+        "INSERT INTO users (id, email, username) VALUES ('victim','v@x','victim');\
+         INSERT INTO users (id, email, username) VALUES ('mallory','m@x','mallory');\
+         INSERT INTO user_device (device_id, user_id, device_name, last_seen) \
+           VALUES ('shared-dev','victim','Victim laptop','2020-01-01 00:00:00');",
+    )
+    .await
+    .unwrap();
+
+    // Mallory registers the same device id.
+    pollis_delivery::bootstrap::apply_register_device(&conn, "mallory", "shared-dev", "Mallory")
+        .await
+        .expect("the upsert must not error, it must simply not apply");
+
+    let mut rows = conn
+        .query(
+            "SELECT user_id, device_name, last_seen FROM user_device WHERE device_id = 'shared-dev'",
+            (),
+        )
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    let owner: String = row.get(0).unwrap();
+    let name: String = row.get(1).unwrap();
+    let last_seen: String = row.get(2).unwrap();
+    assert_eq!(owner, "victim", "ownership must not move");
+    assert_eq!(name, "Victim laptop", "the name must not be overwritten");
+    assert_eq!(last_seen, "2020-01-01 00:00:00", "last_seen must not be bumped");
+}

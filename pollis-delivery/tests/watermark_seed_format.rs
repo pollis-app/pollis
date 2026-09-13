@@ -103,7 +103,7 @@ async fn seeded_cursor(conn: &Connection) -> String {
     rows.next()
         .await
         .expect("row result")
-        .expect("register_device seeds a watermark for every channel the user is in")
+        .expect("seeding writes a watermark for every channel the user is in")
         .get::<String>(0)
         .expect("text cursor")
 }
@@ -118,9 +118,15 @@ async fn a_seeded_cursor_outsorts_an_envelope_from_earlier_the_same_day() {
     let conn = db.conn().await.expect("checkout");
     let envelope_sent_at = seed_channel_with_an_envelope_from_earlier_today(&conn).await;
 
+    // The real flow is two writes: register-device creates the row, and cert
+    // publish is what seeds the watermarks (#1092). Drive both, so this models a
+    // device that actually finished enrolling.
     pollis_delivery::bootstrap::apply_register_device(&conn, "alice", "dev-new", "New")
         .await
         .expect("register device");
+    pollis_delivery::bootstrap::seed_conversation_watermarks(&conn, "alice", "dev-new")
+        .await
+        .expect("seed watermarks");
 
     let cursor = seeded_cursor(&conn).await;
     assert!(
@@ -150,9 +156,15 @@ async fn a_freshly_registered_device_stops_pinning_the_backlog() {
     let conn = db.conn().await.expect("checkout");
     seed_channel_with_an_envelope_from_earlier_today(&conn).await;
 
+    // The real flow is two writes: register-device creates the row, and cert
+    // publish is what seeds the watermarks (#1092). Drive both, so this models a
+    // device that actually finished enrolling.
     pollis_delivery::bootstrap::apply_register_device(&conn, "alice", "dev-new", "New")
         .await
         .expect("register device");
+    pollis_delivery::bootstrap::seed_conversation_watermarks(&conn, "alice", "dev-new")
+        .await
+        .expect("seed watermarks");
 
     pollis_delivery::messages::sweep_envelope_gc(&conn, "-12 months")
         .await

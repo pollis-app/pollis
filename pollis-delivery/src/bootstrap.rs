@@ -211,40 +211,61 @@ pub async fn register_device(
     }
 }
 
-/// INSERT the device row (COALESCE-preserving any existing name) + seed
-/// conversation watermarks, bound to the session's `user_id`. Extracted from the
-/// handler so the in-process integration harness drives the identical writes
-/// against the shared main DB.
+/// INSERT the device row (COALESCE-preserving any existing name), bound to the
+/// session's `user_id`. Extracted from the handler so the in-process integration
+/// harness drives the identical write against the shared main DB.
+///
+/// #1092: this deliberately does NOT seed conversation watermarks. A device that
+/// registers has only proved it holds an OTP session — a sibling still has to
+/// approve it, and it may never publish a cert at all. Seeding here made such a
+/// never-enrolled ghost pin envelope retention for the whole #720 staleness
+/// window. Seeding now happens at [`apply_publish_device_cert`], the pivot where
+/// the device becomes real.
 pub async fn apply_register_device(
     conn: &libsql::Connection,
     user_id: &str,
     device_id: &str,
     device_name: &str,
 ) -> anyhow::Result<()> {
-    let tx = conn.transaction().await?;
-
-    tx.execute(
+    // `device_id` is the primary key, so a colliding id may belong to ANOTHER
+    // account. Without the `WHERE`, any session holder could bump `last_seen` on
+    // a stranger's device row — enough to keep a dormant device of theirs
+    // pinning retention (#1092). Binding the conflict branch to the owner makes
+    // the upsert a no-op against someone else's row instead.
+    conn.execute(
         "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
          ON CONFLICT(device_id) DO UPDATE SET \
             last_seen = datetime('now'), \
-            device_name = COALESCE(user_device.device_name, excluded.device_name)",
+            device_name = COALESCE(user_device.device_name, excluded.device_name) \
+         WHERE user_device.user_id = excluded.user_id",
         libsql::params![device_id.to_string(), user_id.to_string(), device_name.to_string()],
     )
     .await?;
+    Ok(())
+}
 
-    // Seed watermark rows for every conversation the user already belongs to so a
-    // new device doesn't retroactively block envelope cleanup. INSERT OR IGNORE —
-    // mirrors auth.rs. `reported_at = datetime('now')` marks the device LIVE as of
-    // join: it pins for the #720 staleness window from here, then — if it never
-    // opens the app again — stops pinning. Seeding it (not NULL) is what makes the
-    // dormancy bound actually bite for a device that installs, joins and vanishes.
-    //
-    // The two timestamps are deliberately in different formats: the cursor is
-    // bound from `seeded_watermark_cursor` (RFC 3339, because it is compared
-    // against `message_envelope.sent_at`), `reported_at` stays `datetime('now')`
-    // (because it is compared against `datetime('now', ?)`). See #908.
+/// Seed watermark rows for every conversation `user_id` already belongs to, so a
+/// newly enrolled device does not retroactively block envelope cleanup.
+///
+/// `INSERT OR IGNORE` — mirrors auth.rs. `reported_at = datetime('now')` marks
+/// the device LIVE as of enrollment: it pins for the #720 staleness window from
+/// here, then — if it never opens the app again — stops pinning. Seeding it (not
+/// NULL) is what makes the dormancy bound actually bite for a device that
+/// installs, joins and vanishes.
+///
+/// The two timestamps are deliberately in different formats: the cursor is bound
+/// from `seeded_watermark_cursor` (RFC 3339, because it is compared against
+/// `message_envelope.sent_at`), `reported_at` stays `datetime('now')` (because it
+/// is compared against `datetime('now', ?)`). See #908.
+///
+/// Called at cert publish, not at register — see [`apply_register_device`].
+pub async fn seed_conversation_watermarks(
+    conn: &libsql::Connection,
+    user_id: &str,
+    device_id: &str,
+) -> anyhow::Result<()> {
     let cursor = crate::messages::seeded_watermark_cursor();
-    tx.execute(
+    conn.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
             (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
          SELECT c.id, ?1, ?2, ?3, datetime('now') \
@@ -253,7 +274,7 @@ pub async fn apply_register_device(
         libsql::params![user_id.to_string(), device_id.to_string(), cursor.clone()],
     )
     .await?;
-    tx.execute(
+    conn.execute(
         "INSERT OR IGNORE INTO conversation_watermark \
             (conversation_id, user_id, device_id, last_fetched_at, reported_at) \
          SELECT dcm.dm_channel_id, ?1, ?2, ?3, datetime('now') \
@@ -261,8 +282,6 @@ pub async fn apply_register_device(
         libsql::params![user_id.to_string(), device_id.to_string(), cursor],
     )
     .await?;
-
-    tx.commit().await?;
     Ok(())
 }
 
@@ -467,6 +486,12 @@ pub async fn apply_publish_device_cert(
         // The device row isn't the actor's (or doesn't exist) — register first.
         return Ok(PublishCertOutcome::DeviceNotRegistered);
     }
+
+    // #1092: THIS is where a device becomes real, so this is where it starts
+    // pinning envelope retention. Doing it at register-device meant a device that
+    // never got approved — or never came back — still held mail for the whole
+    // staleness window.
+    seed_conversation_watermarks(conn, user_id, device_id).await?;
 
     Ok(PublishCertOutcome::Applied)
 }
