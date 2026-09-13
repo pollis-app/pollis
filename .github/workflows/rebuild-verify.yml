@@ -104,11 +104,11 @@ jobs:
        startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
 
-      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
 
       # Build pollis-verify FROM THE TAG'S OWN SOURCE (no prebuilt binary to
       # trust) so the verifier code is itself part of what is being verified.
@@ -242,7 +242,7 @@ jobs:
       # artifact for auditors) so the reproduction verdict is asserted against
       # exactly the report that passed inclusion verification above.
       - name: Upload transparency-log report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-report
           if-no-files-found: error
@@ -273,11 +273,11 @@ jobs:
       # bit-identity.
       runner_image: ${{ steps.helper_image.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
 
-      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
 
       - name: Install PipeWire build dependencies
         run: |
@@ -336,7 +336,7 @@ jobs:
       # placed AFTER every build step in this job, so an extra directory in the
       # workspace cannot be an input to anything that gets compiled.
       - name: Check out the rebuilder's own tooling (#944)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: .rebuild-tools
 
@@ -362,7 +362,7 @@ jobs:
           echo "capture helper rebuilt on ${image}"
 
       - name: Upload screen-capture helper
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pollis-capture-linux
           if-no-files-found: error
@@ -385,18 +385,18 @@ jobs:
     # Reproducibility is per-target: the reproducer must match the OS image.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: "pnpm"
 
-      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
 
       # Mirror the release's "Stamp version from git tag" (desktop-release.yml,
       # scripts/bump-version.sh): the committed Cargo.toml / package.json /
@@ -443,7 +443,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download screen-capture helper
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: pollis-capture-linux
           path: src-tauri/binaries
@@ -594,7 +594,7 @@ jobs:
       # the verdict below is computed against a report that already passed
       # inclusion verification.
       - name: Download verified transparency-log report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-report
 
@@ -610,7 +610,7 @@ jobs:
       # sourced from the WORKSPACE on purpose — that one has to be the tag's, so
       # the reproducer hashes the payload exactly as the release did.
       - name: Check out the rebuilder's own tooling (#944)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: .rebuild-tools
 

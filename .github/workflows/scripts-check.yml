@@ -90,7 +90,7 @@ jobs:
   shell-scripts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # #760: prove every DS config value actually traverses all five links to the
       # running container. Three of five were silently missing for
@@ -116,6 +116,17 @@ jobs:
 
       - name: Build recipe drift (reproducibility)
         run: python3 ./scripts/check-build-recipe.py
+
+      # Every third-party action is pinned to a full commit SHA: a `@v4` tag is a
+      # mutable pointer, and whoever moves it runs code in our release jobs with
+      # the signing identities and the cdn.pollis.com write key (the tj-actions
+      # retag, CVE-2025-30066, is the shape of it). Pins only stay pinned if the
+      # next copy-pasted `@v4` goes red here, and the self-test proves it does.
+      - name: Third-party actions are SHA-pinned
+        run: python3 ./scripts/check-action-pins.py
+
+      - name: Action-pin check catches each mutable shape
+        run: ./scripts/test-check-action-pins.sh
 
       # And that the same checker refuses a credential in a release build job's
       # environment. The account-wide R2 write key and the LiveKit API secret sat

@@ -167,8 +167,11 @@ text = open(path).read()
 m = re.search(rf"^  {re.escape(job)}:$(.*?)(?=^  [a-z][a-z0-9_-]*:$|\Z)", text, re.S | re.M)
 assert m, f"job {job} not found"
 block = m.group(1)
-anchor = "      - uses: actions/checkout@v4\n"
-i = block.index(anchor) + len(anchor)
+# The checkout step is SHA-pinned with a trailing version comment, so match the
+# action name rather than a literal ref that dependabot rewrites.
+anchor = re.search(r"^      - uses: actions/checkout@\S+.*\n", block, re.M)
+assert anchor, "checkout step not found"
+i = anchor.end()
 step = (
     "\n      - name: Load production secrets\n"
     "        run: |\n"

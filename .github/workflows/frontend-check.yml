@@ -22,16 +22,16 @@ jobs:
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       # cache: "pnpm" caches the pnpm content-addressable store keyed on
       # pnpm-lock.yaml, so warm runs skip nearly all downloads.
       # 22, not 20: the unit-test step below runs TypeScript directly on the
       # built-in runner, and native type stripping is a 22.18+ feature. On 20
       # `node --test` cannot parse a `.ts` file at all.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: "pnpm"

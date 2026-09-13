@@ -79,7 +79,7 @@ jobs:
       - name: Detect non-exempt changes (PRs only)
         id: filter
         if: ${{ github.event_name == 'pull_request' }}
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
         with:
           predicate-quantifier: 'every'
           filters: |
@@ -145,7 +145,7 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Reclaim ~20-30 GB of preinstalled toolchains we don't use, so linking the
       # large native test binary can't exhaust the runner's disk/tmpfs (the other
@@ -165,11 +165,11 @@ jobs:
       # stable's new lints cannot turn an untouched PR red on their own) and
       # makes the gate test what actually ships. Bump in lockstep with
       # rust-toolchain.toml and the desktop-release refs.
-      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
         with:
           components: clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
             .
@@ -362,7 +362,7 @@ jobs:
       # upload a stale/empty log.
       - name: Upload marathon failure artifact
         if: ${{ failure() && steps.marathon.outcome == 'failure' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: marathon-failing-op-sequence
           path: |
@@ -408,13 +408,13 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # The PINNED toolchain, like every other Rust job here: a gate that tests
       # on a different rustc than the release builds with is not a gate.
-      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: macos-at-rest
           # Only `main` WRITES the cache; PR branches restore from it. The repo
