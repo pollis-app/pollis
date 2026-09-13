@@ -17,11 +17,13 @@
 //! be an existence oracle (`/v1/messages/lookup`), the refusal is deliberately
 //! indistinguishable from absence.
 //!
-//! **`user_groups` / `user_dms` are never read.** They are the #532 directory
-//! index, reverted by #540, and now hold a one-time backfill minus deletions. The
-//! DS still DELETEs from them and never inserts, so an endpoint reading them
-//! would serve a confidently wrong sidebar. Everything here derives from
-//! `group_member` / `dm_channel_member`.
+//! **`user_groups` / `user_dms` are retired (#1085).** They were the #532
+//! directory index, reverted by #540, and for a long time held a one-time
+//! backfill minus deletions — never inserted into, never read, only deleted
+//! from, so an endpoint reading them would have served a confidently wrong
+//! sidebar. Migration 000025 empties them and the DS no longer names them at
+//! all; `tests/retired_directory_mirror.rs` fails if any SQL here starts to.
+//! Everything in this module derives from `group_member` / `dm_channel_member`.
 
 use axum::{
     extract::State,

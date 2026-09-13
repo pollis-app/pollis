@@ -82,8 +82,6 @@ pub const USER_PURGED_TABLES: &[&str] = &[
     "security_event",
     "user_block",
     "user_device",
-    "user_dms",
-    "user_groups",
     "user_preferences",
     "users",
     "vault_attachment_ref",
@@ -114,14 +112,29 @@ pub const CONVERSATION_PURGED_TABLES: &[&str] = &[
     "mls_welcome",
     "pin_keystate",
     "pinned_message",
-    "user_dms",
-    "user_groups",
 ];
 
 /// Tables that deliberately survive an account deletion, and why. Read by
 /// `tests/teardown.rs`, which fails on any table that is neither
 /// purged nor listed here — the list is a decision record, not a suppression.
 pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
+    (
+        "user_groups",
+        "Retired (#1085). Migration 000009 created this sidebar index (#532) and \
+         backfilled it once; #540 reverted the feature and nothing has written to it \
+         since — the DS never INSERTed, never READ it, and only ever DELETEd from it \
+         here. Migration 000025 empties it, and \
+         `no_ds_sql_names_the_retired_directory_mirror` forbids any SQL in this crate \
+         naming it, so there is nothing left to purge. Not DROPped yet: a rolling \
+         deploy still has older instances running the DELETEs this PR removes, and \
+         pulling the table out from under them would fail account deletion. The DROP \
+         belongs in a later release.",
+    ),
+    (
+        "user_dms",
+        "Retired (#1085) — same story as `user_groups`, same migration, same DROP \
+         deferral.",
+    ),
     (
         "account_key_log",
         "Append-only account-key transparency log (migration 000005). Its rows are \
@@ -177,6 +190,16 @@ pub const EXEMPT_FROM_USER_PURGE: &[(&str, &str)] = &[
 /// Tables that deliberately survive a conversation (group / channel / DM)
 /// teardown, and why.
 pub const EXEMPT_FROM_CONVERSATION_PURGE: &[(&str, &str)] = &[
+    (
+        "user_groups",
+        "Retired (#1085) — emptied by migration 000025, written by nothing, and no \
+         SQL in this crate may name it. See EXEMPT_FROM_USER_PURGE for the full \
+         story and why the DROP is deferred.",
+    ),
+    (
+        "user_dms",
+        "Retired (#1085) — see EXEMPT_FROM_USER_PURGE.",
+    ),
     (
         "conversation",
         "Append-only id registry (migration 000016) — see EXEMPT_FROM_USER_PURGE.",
@@ -329,8 +352,6 @@ pub async fn purge_user_rows(conn: &Connection, user_id: &str) -> anyhow::Result
     // Derived directory index (migration 000009). Nothing reads it today, which
     // is exactly why it would have gone on holding a deleted user's membership
     // graph indefinitely.
-    conn.execute("DELETE FROM user_groups WHERE user_id = ?1", uid()).await?;
-    conn.execute("DELETE FROM user_dms WHERE user_id = ?1", uid()).await?;
 
     // Rows that SURVIVE but still point at this user by id.
     hand_over_dangling_pointers(conn, user_id).await?;
@@ -492,7 +513,6 @@ pub async fn purge_group(conn: &Connection, group_id: &str) -> anyhow::Result<Ve
     conn.execute("DELETE FROM group_invite WHERE group_id = ?1", gid()).await?;
     conn.execute("DELETE FROM group_join_request WHERE group_id = ?1", gid()).await?;
     conn.execute("DELETE FROM group_member WHERE group_id = ?1", gid()).await?;
-    conn.execute("DELETE FROM user_groups WHERE group_id = ?1", gid()).await?;
 
     // The group's pin key (#99) — keyed by the MLS conversation id, which for
     // a group is the group id itself (channels' pin rows went with
@@ -512,7 +532,6 @@ pub async fn purge_dm_channel(conn: &Connection, dm_channel_id: &str) -> anyhow:
 
     purge_conversation_rows(conn, dm_channel_id).await?;
     conn.execute("DELETE FROM dm_channel_member WHERE dm_channel_id = ?1", did()).await?;
-    conn.execute("DELETE FROM user_dms WHERE dm_channel_id = ?1", did()).await?;
     conn.execute("DELETE FROM dm_channel WHERE id = ?1", did()).await?;
     Ok(())
 }

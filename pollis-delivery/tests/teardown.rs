@@ -58,8 +58,6 @@ const USER_COLUMNS: &[(&str, &str)] = &[
     ("user_block", "blocker_id"),
     ("user_block", "blocked_id"),
     ("user_device", "user_id"),
-    ("user_dms", "user_id"),
-    ("user_groups", "user_id"),
     ("user_preferences", "user_id"),
     ("users", "id"),
 ];
@@ -73,7 +71,6 @@ const GROUP_COLUMNS: &[(&str, &str)] = &[
     ("group_join_request", "group_id"),
     ("group_member", "group_id"),
     ("groups", "id"),
-    ("user_groups", "group_id"),
 ];
 
 async fn conn() -> Connection {
@@ -169,9 +166,6 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     exec(c, &format!(
         "INSERT INTO group_member (group_id, user_id, role) VALUES ('{gid}', '{u}', 'admin')"
     )).await;
-    exec(c, &format!(
-        "INSERT INTO user_groups (user_id, group_id, group_name) VALUES ('{u}', '{gid}', 'G')"
-    )).await;
     exec(c, &format!("INSERT INTO conversation (id, kind) VALUES ('{cid}', 'channel')")).await;
     exec(c, &format!(
         "INSERT INTO channels (id, group_id, name) VALUES ('{cid}', '{gid}', 'general')"
@@ -245,9 +239,6 @@ async fn seed_user(c: &Connection, u: &str, peer: &str, solo: bool) {
     exec(c, &format!(
         "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) \
          VALUES ('{dm}', '{u}', '{u}')"
-    )).await;
-    exec(c, &format!(
-        "INSERT INTO user_dms (user_id, dm_channel_id, created_by) VALUES ('{u}', '{dm}', '{u}')"
     )).await;
 
     if !solo {
@@ -477,7 +468,6 @@ async fn account_deletion_tears_down_a_dm_it_empties() {
 
     assert_eq!(count(&c, "dm_channel").await, 0, "emptied DM must be removed");
     assert_eq!(count(&c, "dm_channel_member").await, 0);
-    assert_eq!(count(&c, "user_dms").await, 0);
 }
 
 /// Identity reset sheds membership and devices but is NOT deletion — the account

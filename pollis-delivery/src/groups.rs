@@ -475,12 +475,6 @@ pub async fn apply_leave_group(
         libsql::params![body.group_id.clone(), user.clone()],
     )
     .await?;
-    // The leaver's own group-scoped rows go with them; other members' rows stay.
-    tx.execute(
-        "DELETE FROM user_groups WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![body.group_id.clone(), user.clone()],
-    )
-    .await?;
     // Existence, not a tally: the only question is whether the group is now
     // empty, and `LIMIT 1` stops at the first surviving member instead of
     // counting every one of them inside the transaction.
@@ -739,14 +733,6 @@ pub async fn apply_remove_member(
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![body.group_id.clone(), body.user_id.clone()],
-    )
-    .await?;
-    // The directory-index row for exactly this (user, group) pair goes with the
-    // membership it mirrors. Scoped to both ids, so it cannot reach another
-    // member's row or another group's.
-    tx.execute(
-        "DELETE FROM user_groups WHERE group_id = ?1 AND user_id = ?2",
         libsql::params![body.group_id.clone(), body.user_id.clone()],
     )
     .await?;

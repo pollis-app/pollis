@@ -1,0 +1,22 @@
+-- #1085: retire the `user_groups` / `user_dms` directory mirror.
+--
+-- Migration 000009 created these as a denormalized sidebar index (#532) and
+-- backfilled them once. #540 reverted the feature, and nothing has written to
+-- them since: the DS never INSERTed, never READ them (see the note at the top of
+-- `directory.rs`), and only ever DELETEd from them on teardown. What was left was
+-- a one-time backfill minus deletions — a table that could only ever drift
+-- further from `group_member` / `dm_channel_member`, and would have served a
+-- confidently wrong sidebar to any endpoint that started reading it.
+--
+-- This empties them. It does NOT drop them: a rolling deploy still has older DS
+-- instances executing `DELETE FROM user_groups` during teardown, and dropping
+-- the table out from under those would fail account deletion. The DROP belongs
+-- in a later release once no running DS names them — which the accompanying
+-- `no_ds_sql_names_the_retired_directory_mirror` test now keeps true.
+--
+-- Emptying rather than waiting also settles the privacy question: the backfill
+-- held `(user_id, group_id, group_name)` for accounts that have since been
+-- deleted, and once the DS stops purging on teardown those rows would linger
+-- until the DROP. They go now.
+DELETE FROM user_groups;
+DELETE FROM user_dms;

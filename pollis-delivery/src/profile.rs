@@ -851,13 +851,6 @@ pub async fn apply_remove_dm_member(
         libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
     )
     .await?;
-    // The directory-index row mirrors exactly this (user, channel) membership.
-    // Scoped to both ids, so it cannot reach another member's row.
-    tx.execute(
-        "DELETE FROM user_dms WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
-    )
-    .await?;
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
@@ -912,13 +905,6 @@ pub async fn apply_leave_dm(
     tx.execute(
         "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
         libsql::params![body.dm_channel_id.clone(), user.clone()],
-    )
-    .await?;
-    // The leaver's own directory-index row goes with their membership; the other
-    // members' rows are untouched.
-    tx.execute(
-        "DELETE FROM user_dms WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![body.dm_channel_id.clone(), user],
     )
     .await?;
     // If no members remain, clean up the channel and all associated data.

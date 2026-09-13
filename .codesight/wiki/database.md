@@ -926,8 +926,12 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 
 The payload's `conversationId`/`kind` disclosure to Expo/APNs/FCM is tracked separately in #1122 — it needs an opaque handle and a client-protocol change.
 
-### user_groups / user_dms _(migration 000009 — created, then unused)_
-Backfilled-then-stale, unread tables. Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned), and the maintenance + reads were reverted — but the migration is append-only history and the tables were already applied to prod/dev/test, so they remain **unreferenced**. Note they are not empty: the migration backfills them from current membership at the bottom of the file, so they hold a frozen snapshot of the roster as of the moment it was applied — stale, and misleading if anyone assumes otherwise. No code writes or reads them. Left in place; a future tightening migration can `DROP` them if desired. They **are** now cleared by account/group teardown — that frozen snapshot is real membership metadata about real users, so it has to go when they do.
+### user_groups / user_dms _(migration 000009 — created, then retired #1085)_
+**Empty and unreferenced.** Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned) and the maintenance + reads were reverted, leaving a frozen backfill of the roster as of the moment the migration ran — never inserted into, never read, only deleted from. That is the worst shape a table can have: it could only drift further from `group_member` / `dm_channel_member`, so anything that started reading it would have served a confidently wrong sidebar while looking authoritative.
+
+Retired by #1085. Migration `000025` empties them (the frozen snapshot was real membership metadata about real users, and once the DS stops purging on teardown it would otherwise linger), and the DS no longer names them anywhere — the eight DELETE sites in `teardown.rs`, `groups.rs` and `profile.rs` are gone. `pollis-delivery/tests/retired_directory_mirror.rs` fails if any SQL in the crate starts naming them again, keyed on SQL keyword adjacency so the exemption prose does not trip it. Both tables are listed in `EXEMPT_FROM_USER_PURGE` and `EXEMPT_FROM_CONVERSATION_PURGE` with that reason, so the teardown-accounting guards stay satisfied.
+
+**Not dropped yet, deliberately.** A rolling deploy still has older DS instances executing the removed DELETEs; dropping the tables out from under them would fail account and group deletion. The `DROP` belongs in a later release once no running DS names them.
 
 ---
 
