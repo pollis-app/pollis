@@ -428,7 +428,23 @@ therefore accept **either** a device signature **or** a verified-OTP session
 user is bound from the session record, never re-derived from a client-supplied id.
 The `account_key_log` append is still CAS-guarded (one head per user, no fork/gap),
 so a reset produces a visible, accountable rotation in the account-key tenant
-above rather than a hidden key swap. Properties: `pollis-delivery/tests/reset_session.rs`.
+above rather than a hidden key swap.
+
+**A session-authenticated `rotate-identity` IS the reset.** The DS reads *which*
+credential the gate accepted (`gate_or_session_kind` → `GateCredential`) and, when it
+is a bare OTP session, runs the whole `reset-recover` wipe — group/DM membership,
+key packages, every `user_device` except the session's own — inside the rotation's
+transaction (`apply_rotate_identity` → `reset_recover_in_tx`), then purges the
+actor's Welcomes and any emptied conversations' commit-log state post-commit. An
+email OTP alone can therefore only ever produce a fresh identity that owns nothing;
+it cannot mint a key that inherits the account or leaves the victim's devices
+enrolled beside it. A device-signed rotation (an enrolled device holding the
+account key) stays a plain rotation, and the client's follow-up `reset-recover` is
+load-bearing there; on the session path that follow-up is an idempotent no-op. In
+both cases the DS appends its own `security_event` (`kind = identity_rotated`,
+`metadata = credential=<session|signature>,new_identity_version=<n>`, `device_id` =
+the verified device) in the same transaction — the client no longer writes an
+`identity_reset` row. Properties: `pollis-delivery/tests/reset_session.rs`.
 
 ## Roadmap
 

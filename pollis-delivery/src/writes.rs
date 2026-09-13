@@ -144,14 +144,58 @@ pub(crate) async fn gate_or_session(
     state: &AppState,
     req: &RawRequest,
 ) -> Result<Result<Authed, Response>, AppError> {
+    Ok(gate_or_session_kind(state, req).await?.map(|(authed, _)| authed))
+}
+
+/// WHICH credential [`gate_or_session`] accepted — for the one endpoint whose
+/// semantics depend on it. `/v1/account/rotate-identity` under a device
+/// signature is a plain key rotation; under a bare OTP session it is the
+/// pre-enrollment soft reset, and the DS then performs the membership/device
+/// wipe in the same transaction (see `account::apply_rotate_identity`). The
+/// two must be distinguishable at the gate, not inferred from the body.
+///
+/// The `device_id` in both authenticated variants is server-verified: for a
+/// signature it is the `X-Pollis-Device` the pubkey lookup was keyed on, for a
+/// session it is the device the OTP session was minted for.
+pub enum GateCredential {
+    /// `require_auth = false` — no credential exists on this deployment.
+    None,
+    /// A verified device signature (`gate`).
+    Signature { device_id: String },
+    /// A verified-OTP session (`X-Pollis-Session`).
+    Session { device_id: String },
+}
+
+/// [`gate_or_session`], also reporting which credential authenticated the
+/// request.
+pub(crate) async fn gate_or_session_kind(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(Authed, GateCredential), Response>, AppError> {
     if !state.require_auth {
-        return Ok(Ok(None));
+        return Ok(Ok((None, GateCredential::None)));
     }
     if req.headers.contains_key(auth::H_SIGNATURE) {
-        return gate(state, req).await;
+        return Ok(match gate(state, req).await? {
+            Ok(authed) => {
+                // Verified by `gate`: the signer's pubkey was looked up under
+                // exactly this `(device_id, user_id)`, so the header is bound.
+                let device_id = req
+                    .headers
+                    .get(auth::H_DEVICE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+                Ok((authed, GateCredential::Signature { device_id }))
+            }
+            Err(resp) => Err(resp),
+        });
     }
     match crate::session::verify_session(&req.headers, &state.sessions, crate::util::now_unix()) {
-        Ok(claims) => Ok(Ok(Some(claims.user_id))),
+        Ok(claims) => Ok(Ok((
+            Some(claims.user_id),
+            GateCredential::Session { device_id: claims.device_id },
+        ))),
         Err(rej) => Ok(Err(rej.into_response())),
     }
 }
@@ -195,12 +239,27 @@ pub(crate) async fn gate_or_session_and_parse<B>(
 where
     B: serde::de::DeserializeOwned,
 {
-    let authed = match gate_or_session(state, req).await? {
+    Ok(gate_or_session_kind_and_parse::<B>(state, req)
+        .await?
+        .map(|(authed, _, parsed)| (authed, parsed)))
+}
+
+/// [`gate_or_session_and_parse`] over [`gate_or_session_kind`] — same ordering
+/// guarantee (verify the raw bytes first, deserialize second), also reporting
+/// which credential authenticated the request.
+pub(crate) async fn gate_or_session_kind_and_parse<B>(
+    state: &AppState,
+    req: &RawRequest,
+) -> Result<Result<(Authed, GateCredential, B), Response>, AppError>
+where
+    B: serde::de::DeserializeOwned,
+{
+    let (authed, credential) = match gate_or_session_kind(state, req).await? {
         Ok(a) => a,
         Err(resp) => return Ok(Err(resp)),
     };
     Ok(match serde_json::from_slice(&req.body) {
-        Ok(parsed) => Ok((authed, parsed)),
+        Ok(parsed) => Ok((authed, credential, parsed)),
         Err(_) => Err(bad_request("invalid body")),
     })
 }

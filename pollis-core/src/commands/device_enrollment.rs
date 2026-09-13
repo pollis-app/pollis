@@ -816,10 +816,15 @@ pub async fn reset_identity_and_recover(
         // handoff, the group/DM membership + key-package deletes, and the
         // other-device orphaning all commit together or not at all — a
         // half-cleaned account is a corrupt state. Credential: an enrolled
-        // caller (reset from a signed-in session) device-signs; the primary
-        // caller — a PRE-ENROLLMENT device on the login gate, which has no
-        // signing key and no open local DB — authenticates with the
-        // verified-OTP bootstrap session instead (the DS's `gate_or_session`).
+        // caller (reset from a signed-in session) device-signs, and for it this
+        // call IS the wipe. The primary caller — a PRE-ENROLLMENT device on the
+        // login gate, which has no signing key and no open local DB —
+        // authenticates with the verified-OTP session instead, and for it the
+        // DS has ALREADY run this exact wipe inside the `rotate-identity`
+        // transaction above (a session-authenticated rotation is the reset, by
+        // construction — `pollis_delivery::account::apply_rotate_identity`);
+        // this call is then an idempotent no-op that keeps the two paths
+        // symmetric rather than something the reset depends on.
         let body = pollis_api::account::ResetRecoverBody {
             current_device_id,
             // The DS's no-auth fallback for the acting user

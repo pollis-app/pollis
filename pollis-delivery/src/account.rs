@@ -38,6 +38,20 @@
 //! the login gate, which has no signing key; its authorization has always been
 //! the email OTP (see `tests/reset_session.rs` for the properties).
 //!
+//! **A session-authenticated rotation IS the soft reset.** An email OTP alone
+//! may only ever buy the "catastrophic, observable nuke" the whitepaper concedes
+//! (§11.5): a fresh identity that owns NOTHING. So when `rotate-identity` is
+//! authenticated by a bare session, [`apply_rotate_identity`] runs the
+//! `reset-recover` wipe (membership removal, key-package drop, other-device
+//! revocation — keeping only the session's own device) in the SAME transaction
+//! as the key rotation. There is no server state in which a session-minted key
+//! sits on an account that still holds its memberships and devices; a client
+//! cannot "forget" to call `reset-recover`. A device-signed rotation (an enrolled
+//! device, holding the account key) stays a plain rotation. Either way the DS
+//! appends its own `security_event` (`identity_rotated`, recording the
+//! credential kind) inside that transaction — the audit row is not entrusted to
+//! the client.
+//!
 //! ## The two hard requirements
 //!
 //! 1. **`account_key_log` CAS.** `account_key_log` is an append-only, seq-ordered
@@ -100,8 +114,10 @@ use crate::writes::{
     gate,
     gate_and_parse,
     gate_or_session_and_parse,
+    gate_or_session_kind_and_parse,
     outcome_response,
     resolve_actor,
+    GateCredential,
     RawRequest,
     WriteOutcome,
 };
@@ -134,24 +150,43 @@ pub enum RotateOutcome {
 /// POST /v1/account/rotate-identity — rotate a user's account identity key,
 /// CAS-guarded so two concurrent rotations can never fork the account-key
 /// transparency log. The `account_key_log` append, the `users.identity_version`
-/// bump, and the `account_recovery` rewrap are ONE atomic transaction.
+/// bump, the `account_recovery` rewrap, the DS-authored `security_event` and —
+/// when the credential is a bare OTP session — the `reset-recover` wipe are ONE
+/// atomic transaction (see the module docs).
 pub async fn rotate_identity(
     State(state): State<AppState>,
     req: RawRequest,
 ) -> Result<Response, AppError> {
-    let (authed, parsed) = match gate_or_session_and_parse::<RotateIdentityBody>(&state, &req).await? {
-        Ok(v) => v,
-        Err(resp) => return Ok(resp),
-    };
+    let (authed, credential, parsed) =
+        match gate_or_session_kind_and_parse::<RotateIdentityBody>(&state, &req).await? {
+            Ok(v) => v,
+            Err(resp) => return Ok(resp),
+        };
     let conn = state.db.conn().await?;
-    let outcome = apply_rotate_identity(&conn, authed.as_deref(), &parsed).await?;
+    let (outcome, dead_conversations) =
+        apply_rotate_identity(&conn, authed.as_deref(), &parsed, &credential).await?;
     // Rotation does not itself rewrite `mls_signature_pub_pq`, but it changes the
     // account key every device cert chains to and is immediately followed by
     // `/v1/devices/resign` and (for a recovering device) a fresh cert publish.
     // Evicting the user here means the auth path re-reads once and can never
-    // serve a key from before the rotation (#658).
-    if let Ok(owner) = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()) {
-        state.device_keys.invalidate_user(&owner);
+    // serve a key from before the rotation (#658). Under a session the wipe also
+    // dropped every other device, which the same eviction covers.
+    let owner = resolve_actor(authed.as_deref(), parsed.user_id.as_deref()).ok();
+    if let Some(owner) = owner.as_deref() {
+        state.device_keys.invalidate_user(owner);
+    }
+    // The log-DB half of a session reset, after the main transaction committed:
+    // the MLS state of conversations the wipe emptied, and the actor's pending
+    // Welcomes (addressed to an identity that no longer exists). Mirrors
+    // `reset_recover` + `/v1/welcomes/purge`.
+    if let (RotateOutcome::Applied { .. }, GateCredential::Session { .. }, Some(owner)) =
+        (&outcome, &credential, owner.as_deref())
+    {
+        let log_conn = state.log_db.conn().await?;
+        if !dead_conversations.is_empty() {
+            crate::teardown::purge_conversation_log(&log_conn, &dead_conversations).await?;
+        }
+        crate::writes::purge_welcomes(&log_conn, owner).await?;
     }
     rotate_outcome_response::<RotateIdentityBody>(outcome)
 }
@@ -193,14 +228,28 @@ where
 /// `affected == 0` → `Conflict`, transaction rolled back. The `ON CONFLICT DO
 /// NOTHING` is the backstop the `UNIQUE (user_id, identity_version)` index
 /// enforces. No fork, no gap, append-only.
+///
+/// `credential` decides what the rotation MEANS. [`GateCredential::Session`] is
+/// the pre-enrollment soft reset: the [`reset_recover_in_tx`] wipe (memberships,
+/// key packages, every device but the session's own) runs inside this same
+/// transaction, so an OTP alone can never mint a key that inherits the account.
+/// [`GateCredential::Signature`] (an enrolled device holding the account key) and
+/// [`GateCredential::None`] (auth disabled) rotate only. In every case a
+/// DS-authored `security_event` of kind `identity_rotated` — `metadata =
+/// credential=<session|signature|none>,new_identity_version=<n>` — lands in the
+/// transaction; the client is not trusted to write the audit row.
+///
+/// Returns the conversation ids the session wipe destroyed (empty otherwise),
+/// for the caller's post-commit commit-log purge.
 pub async fn apply_rotate_identity(
     conn: &Connection,
     authed: Option<&str>,
     body: &RotateIdentityBody,
-) -> anyhow::Result<RotateOutcome> {
+    credential: &GateCredential,
+) -> anyhow::Result<(RotateOutcome, Vec<String>)> {
     let actor = match resolve_actor(authed, body.user_id.as_deref()) {
         Ok(a) => a,
-        Err(_) => return Ok(RotateOutcome::Forbidden),
+        Err(_) => return Ok((RotateOutcome::Forbidden, Vec::new())),
     };
     let pub_bytes = b64_decode(&body.account_id_pub)?;
     let salt = b64_decode(&body.salt)?;
@@ -233,7 +282,7 @@ pub async fn apply_rotate_identity(
         // the client re-reads and retries; nothing was written.
         let head = current_key_log_head(&tx, &actor).await?;
         drop(tx);
-        return Ok(RotateOutcome::Conflict { head_version: head });
+        return Ok((RotateOutcome::Conflict { head_version: head }, Vec::new()));
     }
 
     // Won the version. Bump the live identity + rewrap the recovery blob, both
@@ -254,12 +303,36 @@ pub async fn apply_rotate_identity(
              nonce = excluded.nonce, \
              wrapped_key = excluded.wrapped_key, \
              updated_at = datetime('now')",
-        libsql::params![actor, new_version, salt, nonce, wrapped],
+        libsql::params![actor.clone(), new_version, salt, nonce, wrapped],
+    )
+    .await?;
+
+    // The credential decides the rest of the transaction — see the fn docs.
+    let (credential_label, device_id, dead_conversations) = match credential {
+        GateCredential::Session { device_id } => {
+            let dead = reset_recover_in_tx(&tx, &actor, Some(device_id.as_str())).await?;
+            ("session", Some(device_id.clone()), dead)
+        }
+        GateCredential::Signature { device_id } => {
+            ("signature", Some(device_id.clone()), Vec::new())
+        }
+        GateCredential::None => ("none", None, Vec::new()),
+    };
+
+    tx.execute(
+        "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
+         VALUES (?1, ?2, 'identity_rotated', ?3, ?4)",
+        libsql::params![
+            ulid::Ulid::new().to_string(),
+            actor,
+            device_id,
+            format!("credential={credential_label},new_identity_version={new_version}"),
+        ],
     )
     .await?;
 
     tx.commit().await?;
-    Ok(RotateOutcome::Applied { new_version })
+    Ok((RotateOutcome::Applied { new_version }, dead_conversations))
 }
 
 /// The current head of a user's `account_key_log` = `MAX(identity_version)` (0
@@ -667,6 +740,29 @@ pub async fn apply_reset_recover(
         Err(o) => return Ok((o, Vec::new())),
     };
     let tx = conn.transaction().await?;
+    let dead_conversations =
+        reset_recover_in_tx(&tx, &actor, body.current_device_id.as_deref()).await?;
+    tx.commit().await?;
+    Ok((WriteOutcome::Ok, dead_conversations))
+}
+
+/// The statements of an identity-reset wipe, run on an OPEN transaction the
+/// caller commits. Shared by [`apply_reset_recover`] (the standalone endpoint,
+/// load-bearing for a device-signed reset) and [`apply_rotate_identity`] (which
+/// runs it inside the rotation's own transaction whenever the credential is a
+/// bare OTP session). Idempotent: on an already-wiped account every statement
+/// affects zero rows, which is what lets the client keep calling
+/// `reset-recover` after a session rotation that has already done the work.
+///
+/// `current_device_id` is the `user_device` row to KEEP (it re-enrolls under
+/// the new identity); `None` drops them all. Returns the conversation ids the
+/// wipe destroyed, for the caller's post-commit commit-log purge.
+async fn reset_recover_in_tx(
+    tx: &Connection,
+    actor: &str,
+    current_device_id: Option<&str>,
+) -> anyhow::Result<Vec<String>> {
+    let actor = actor.to_string();
 
     // Note the actor's DMs before their membership rows go — see
     // `apply_delete_account` for why this has to happen first.
@@ -683,7 +779,7 @@ pub async fn apply_reset_recover(
         }
     }
 
-    let mut dead_conversations = handoff_group_ownership(&tx, &actor).await?;
+    let mut dead_conversations = handoff_group_ownership(tx, &actor).await?;
 
     tx.execute(
         "DELETE FROM group_member WHERE user_id = ?1",
@@ -703,11 +799,11 @@ pub async fn apply_reset_recover(
 
     // Orphan the actor's OTHER devices; keep the current one (it re-enrolls under
     // the new identity). `None` → drop them all.
-    match &body.current_device_id {
+    match current_device_id {
         Some(dev) => {
             tx.execute(
                 "DELETE FROM user_device WHERE user_id = ?1 AND device_id != ?2",
-                libsql::params![actor.clone(), dev.clone()],
+                libsql::params![actor.clone(), dev.to_string()],
             )
             .await?;
         }
@@ -722,11 +818,11 @@ pub async fn apply_reset_recover(
 
     // Per-device cursors belong to devices that no longer exist. Keyed on the
     // surviving device so the kept one's cursor is preserved.
-    match &body.current_device_id {
+    match current_device_id {
         Some(dev) => {
             tx.execute(
                 "DELETE FROM conversation_watermark WHERE user_id = ?1 AND device_id != ?2",
-                libsql::params![actor.clone(), dev.clone()],
+                libsql::params![actor.clone(), dev.to_string()],
             )
             .await?;
         }
@@ -754,13 +850,12 @@ pub async fn apply_reset_recover(
             }
         };
         if remaining == 0 {
-            crate::teardown::purge_dm_channel(&tx, dm_id).await?;
+            crate::teardown::purge_dm_channel(tx, dm_id).await?;
             dead_conversations.push(dm_id.clone());
         }
     }
 
-    tx.commit().await?;
-    Ok((WriteOutcome::Ok, dead_conversations))
+    Ok(dead_conversations)
 }
 
 // ── POST /v1/account/delete ──────────────────────────────────────────────────
