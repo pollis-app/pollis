@@ -186,6 +186,25 @@ pub(super) async fn migrate_to_current_suite_if_due(
     let identities = load_pinned_identities(state, &roster_user_ids, actor_user_id).await?;
     let roster_user_ids: std::collections::HashSet<String> =
         roster_user_ids.into_iter().collect();
+
+    // #1082: `targets` below is built from `valid_devices` with our own device
+    // filtered OUT, so a snapshot that omits us is invisible here — it just
+    // yields a short target list and migrates a subset of the roster. Refuse it
+    // for the same reason reconcile does, and defer to the next pass.
+    if !super::reconcile::snapshot_includes_actor(
+        &roster_user_ids,
+        &valid_devices,
+        actor_user_id,
+        &actor_device_id,
+    ) {
+        eprintln!(
+            "[mls] migrate: refusing {conversation_id}: registered_devices snapshot \
+             ({} device(s)) omits this device — deferring rather than migrating a subset",
+            valid_devices.len()
+        );
+        return Ok(false);
+    }
+
     let targets: Vec<(String, String)> = valid_devices
         .iter()
         .filter(|(uid, did)| !(uid == actor_user_id && did == &actor_device_id))

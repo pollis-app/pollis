@@ -435,6 +435,36 @@ pub struct ReconcileCommitData {
 /// deliberately a distinct state from an empty set (which means "no device is
 /// valid — remove everything") so a caller that cannot read `user_device` degrades
 /// to the old roster-only behaviour instead of silently emptying the group.
+/// #1082: a `registered_devices` snapshot that omits the actor itself cannot be
+/// trusted to decide who gets evicted.
+///
+/// The actor runs this pass as a member of the roster, so its own
+/// `(user_id, device_id)` MUST appear in any correct snapshot. If it does not —
+/// a truncated answer, a spoofed one, or a read that raced a teardown — then the
+/// snapshot is indistinguishable from "every device was revoked", and
+/// [`desired_set`] would evict every leaf except the actor's own (which survives
+/// only via `skipped_self_removal`). That is mass revocation driven by a single
+/// bad read. Refusing the pass leaves the tree exactly as it was; the next
+/// reconcile with a good snapshot does the real work.
+///
+/// Two states deliberately do NOT gate, mirroring the `None`-vs-empty
+/// distinction [`desired_set`] already draws:
+/// * an EMPTY roster — a conversation with nobody in it is a legitimate
+///   teardown state, and there is no membership left to protect;
+/// * an unknown `actor_device_id` — we cannot evaluate our own presence, so we
+///   must not turn "cannot tell" into "abort everything".
+pub(super) fn snapshot_includes_actor(
+    roster_user_ids: &std::collections::HashSet<String>,
+    valid_devices: &std::collections::HashSet<(String, String)>,
+    actor_user_id: &str,
+    actor_device_id: &str,
+) -> bool {
+    if roster_user_ids.is_empty() || actor_device_id.is_empty() {
+        return true;
+    }
+    valid_devices.contains(&(actor_user_id.to_string(), actor_device_id.to_string()))
+}
+
 fn desired_set<'a>(
     kp_keys: &[(String, String)],
     tree_members: impl Iterator<Item = &'a (String, String)>,
@@ -1106,6 +1136,18 @@ pub async fn reconcile_group_mls_impl(
         .clone()
         .unwrap_or_default();
 
+    // 2d. #1082: refuse the pass if the snapshot that decides evictions does not
+    //     even contain us. See `snapshot_includes_actor`.
+    if !snapshot_includes_actor(&roster_user_ids, &valid_devices, &actor_user_id, &actor_device_id) {
+        eprintln!(
+            "[reconcile] refusing pass for {conversation_id}: registered_devices snapshot \
+             ({} device(s)) omits this device — not evicting a {}-member roster on it",
+            valid_devices.len(),
+            roster_user_ids.len()
+        );
+        return Ok(ReconcileOutcome::default());
+    }
+
     // 3. Peek at the current tree to learn which devices are already members.
     //    This lets us skip claiming KPs for devices that don't need to be added,
     //    avoiding unnecessary KP exhaustion on repeated reconciles.
@@ -1565,6 +1607,76 @@ mod tests {
             got.contains(&key("bob", "b1")),
             "a live roster device with a KP must be desired (the add path); got {got:?}"
         );
+    }
+
+    // ── #1082: the self-presence gate on the eviction snapshot ──────────────
+
+    /// The consequence the gate exists to prevent, stated as a test: an empty
+    /// `valid_devices` against a live roster makes `desired_set` want NOBODY, so
+    /// the pass would evict every leaf in the tree. This is what a truncated or
+    /// spoofed `registered_devices` answer looks like from inside reconcile.
+    #[test]
+    fn an_empty_snapshot_would_evict_the_whole_roster() {
+        let tree = [key("alice", "a1"), key("bob", "b1")];
+
+        let got = desired_set(&[], tree.iter(), &roster(&["alice", "bob"]), Some(&valid(&[])));
+
+        assert!(
+            got.is_empty(),
+            "an empty snapshot desires nobody — this is the mass eviction #1082 gates; got {got:?}"
+        );
+    }
+
+    /// So that input is refused before it can be acted on.
+    #[test]
+    fn a_snapshot_that_omits_the_actor_is_refused() {
+        assert!(
+            !snapshot_includes_actor(
+                &roster(&["alice", "bob"]),
+                &valid(&[]),
+                "alice",
+                "a1",
+            ),
+            "an empty snapshot for a live roster must not be trusted"
+        );
+        // Partial is refused for the same reason: our own row is missing, so the
+        // answer is short, not authoritative.
+        assert!(
+            !snapshot_includes_actor(
+                &roster(&["alice", "bob"]),
+                &valid(&[("bob", "b1")]),
+                "alice",
+                "a1",
+            ),
+            "a snapshot missing the actor is a short answer, not a revocation"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_containing_the_actor_is_trusted() {
+        assert!(snapshot_includes_actor(
+            &roster(&["alice", "bob"]),
+            &valid(&[("alice", "a1"), ("bob", "b1")]),
+            "alice",
+            "a1",
+        ));
+        // A genuine single-device revocation still gets through: bob's b1 is gone
+        // from the snapshot, we are present, so the eviction is real work.
+        assert!(snapshot_includes_actor(
+            &roster(&["alice", "bob"]),
+            &valid(&[("alice", "a1")]),
+            "alice",
+            "a1",
+        ));
+    }
+
+    /// The two states that deliberately do not gate.
+    #[test]
+    fn the_gate_does_not_fire_when_it_cannot_judge() {
+        // Empty roster: legitimate teardown, nothing left to protect.
+        assert!(snapshot_includes_actor(&roster(&[]), &valid(&[]), "alice", "a1"));
+        // Unknown own device id: "cannot tell" must not become "abort".
+        assert!(snapshot_includes_actor(&roster(&["alice"]), &valid(&[]), "alice", ""));
     }
 
     /// A user may hold several devices and have only one revoked. The live
