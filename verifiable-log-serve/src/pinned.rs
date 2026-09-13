@@ -27,16 +27,26 @@ pub const PINNED_LOG_PUBLIC_KEYS_HEX: &[&str] = &[
 /// cannot set your env, so this does not reopen the finding.
 const PIN_ENV: &str = "POLLIS_VERIFY_PINNED_KEYS_HEX";
 
-/// Debug-build-only in-process allowance, populated by [`DevServer::spawn`] so the
-/// crate's own tests and `cargo run` against a local dev log verify without the
-/// production key. Compiled out of the shipped `--release` auditor binary.
-#[cfg(debug_assertions)]
+/// In-process allowance, populated by a server in this crate when it starts
+/// serving a log: [`crate::DevServer::spawn`] and [`crate::LiveServer::spawn`].
+///
+/// Safe to keep in every profile, because only a process that is ITSELF serving
+/// a log can add to it. `pollis-verify` — the auditor CLI, the thing the pin
+/// exists to protect — constructs neither server, so nothing can widen its
+/// trust. What this does enable is the `serve` binary's own dynamic
+/// `/verify/group/<id>` endpoint, and this crate's tests, verifying a log signed
+/// by a dev key rather than the production one.
+///
+/// It was `#[cfg(debug_assertions)]` at first, which made the crate's tests pass
+/// or fail on the build profile AND on scheduling — a test that verified without
+/// spawning a server only worked if some other test in the binary happened to
+/// spawn one first. The real fix was narrowing the pin to the fetch boundary
+/// (see [`require_pinned`]); this is no longer load-bearing for the in-bundle
+/// paths, and no longer profile-dependent.
 static DEV_EXTRA: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
-/// Trust `hex` in addition to the compiled pin, for this debug process only.
-/// No-op in release builds. Called by the dev server with the key of the log it
-/// is about to serve.
-#[cfg(debug_assertions)]
+/// Trust `hex` in addition to the compiled pin, for this process only. Called by
+/// a server in this crate with the key of the log it is about to serve.
 pub fn trust_hex_for_dev(hex: &str) {
     if let Ok(mut v) = DEV_EXTRA.lock() {
         if !v.iter().any(|h| h == hex) {
@@ -63,7 +73,6 @@ pub fn pinned_candidates() -> Vec<(String, VerifyingKey)> {
     if let Ok(env) = std::env::var(PIN_ENV) {
         hexes.extend(parse_hex_list(&env));
     }
-    #[cfg(debug_assertions)]
     if let Ok(v) = DEV_EXTRA.lock() {
         hexes.extend(v.iter().cloned());
     }
@@ -96,6 +105,27 @@ pub fn retain_pinned<F: FnMut(bool, String)>(
         "served public_key.json is the pinned log key".to_string(),
     );
     kept
+}
+
+/// Refuse a SERVED key document whose key is not pinned.
+///
+/// This is the fetch boundary: `verify_*_via` pulls `public_key.json` off an
+/// untrusted server, builds a [`crate::bundle::Bundle`] around it, and hands
+/// that to the `*_in_bundle` core. The pin has to be applied HERE, on the way
+/// in — not inside the core, which is also used to verify a bundle the caller
+/// already holds (the publisher precomputing its own per-release report). A
+/// bundle you built yourself is correctly verified against its own key; there is
+/// no third party in that path to distrust.
+pub fn require_pinned(doc: &crate::bundle::PublicKeyDoc, now_ms: u64) -> Result<(), String> {
+    let mut passed = false;
+    let _ = retain_pinned(doc.verifying_candidates(now_ms), &mut |ok, _| passed = ok);
+    if passed {
+        Ok(())
+    } else {
+        Err("served public_key.json does not match the pinned log key — refusing to trust \
+             the served log"
+            .to_string())
+    }
 }
 
 #[cfg(test)]

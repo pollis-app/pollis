@@ -154,6 +154,12 @@ pub fn verify_release_via(
     // Prerequisites, all under the binaries subtree.
     let pk_doc: PublicKeyDoc =
         fetch_json(&agent, &format!("{base}/v1/binaries/public_key.json"))?;
+    // H-1: the pin belongs HERE, at the fetch boundary — this document came off
+    // an untrusted server. The `*_in_bundle` core below is deliberately NOT
+    // gated: it also verifies a bundle the caller already holds (the publisher
+    // precomputing its own report), where the bundle's own key is the right
+    // anchor and there is no third party to distrust.
+    crate::pinned::require_pinned(&pk_doc, now_ms()).map_err(crate::error::ServeError::BadBundle)?;
     let sth: Sth = fetch_json(&agent, &format!("{base}/v1/binaries/sth/latest.json"))?;
     let entries: Vec<Entry> = fetch_json(&agent, &format!("{base}/v1/binaries/entries.json"))?;
 
@@ -232,14 +238,6 @@ pub fn verify_release_in_bundle_at(
     //    here even though the same key signed it: the context, not the key,
     //    separates the trees. Expiry is applied here, not trusted from the server.
     let candidates = bundle.key_candidates(now_ms);
-    // H-1: keep only pinned keys; a served-but-unpinned key is equivocation.
-    let candidates = crate::pinned::retain_pinned(candidates, &mut |ok, _label| {
-        if !ok {
-            violations.push(
-                "served public key does not match the pinned log key — refusing to trust the served log".to_string(),
-            );
-        }
-    });
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
     let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
         Some(sth) => (

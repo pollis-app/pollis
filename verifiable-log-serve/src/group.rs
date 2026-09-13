@@ -129,6 +129,12 @@ pub fn verify_group_via(
     // Prerequisites: the published key, the latest signed head, and the full
     // ordered entry list. Without these there is nothing to verify.
     let pk_doc: PublicKeyDoc = fetch_json(&agent, &format!("{base}/v1/public_key.json"))?;
+    // H-1: the pin belongs HERE, at the fetch boundary — this document came off
+    // an untrusted server. The `*_in_bundle` core below is deliberately NOT
+    // gated: it also verifies a bundle the caller already holds (the publisher
+    // precomputing its own report), where the bundle's own key is the right
+    // anchor and there is no third party to distrust.
+    crate::pinned::require_pinned(&pk_doc, now_ms()).map_err(crate::error::ServeError::BadBundle)?;
     let sth: Sth = fetch_json(&agent, &format!("{base}/v1/sth/latest.json"))?;
     let entries: Vec<Entry> = fetch_json(&agent, &format!("{base}/v1/entries.json"))?;
 
@@ -241,14 +247,6 @@ pub fn verify_group_in_bundle_at(
     //    applied here (not trusted from the server), so a retired key stops being
     //    accepted on schedule.
     let candidates = bundle.key_candidates(now_ms);
-    // H-1: keep only pinned keys; a served-but-unpinned key is equivocation.
-    let candidates = crate::pinned::retain_pinned(candidates, &mut |ok, _label| {
-        if !ok {
-            violations.push(
-                "served public key does not match the pinned log key — refusing to trust the served log".to_string(),
-            );
-        }
-    });
     let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
     let (sth_tree_size, root_hex, sth_sig_ok) = match latest {
         Some(sth) => (
